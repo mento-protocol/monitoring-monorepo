@@ -16,7 +16,7 @@
  */
 
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -34,6 +34,26 @@ import {
   probeDirs,
   runProbeShell,
 } from "./check-sentry-suites-in-ci-gate-extract.mjs";
+
+test("probe cleanup is owned by a live detached Bash group leader", () => {
+  const source = readFileSync(
+    join(import.meta.dirname, "check-sentry-suites-in-ci-gate-extract.mjs"),
+    "utf8",
+  );
+  assert.doesNotMatch(
+    source,
+    /process\.kill\s*\(/,
+    "Node must not signal a reaped numeric pid or process-group id",
+  );
+  assert.match(source, /kill -KILL -- "-\$\$"/);
+  assert.match(source, /: > "\$timeout_marker"/);
+  assert.match(source, /> "\$completion_marker"/);
+  assert.match(
+    runProbeShell.toString(),
+    /stdio:\s*inheritGateMarkerStdio\(options\.stdio\)/,
+    "probe spawns must retain the quality gate marker descriptors",
+  );
+});
 
 test("the gate-function extractor ends the function where bash ends it", () => {
   // Control: on the shape the gate has today the old rule was right, so any
@@ -243,6 +263,11 @@ test("a probe that outruns its deadline is killed outright, never asked to stop"
         "SIGKILL",
         `bash ${version} was signalled ${result.signal}, which a probe can ignore`,
       );
+      assert.equal(
+        result.status,
+        null,
+        `bash ${version} timeout was reported as target exit ${result.status}`,
+      );
     }
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -285,6 +310,82 @@ test("the deadline holds even when the probe leaves a descendant behind", () => 
         );
       }
     }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the live-leader deadline kills a descendant before it can act", () => {
+  const root = mkdtempSync(join(tmpdir(), "gate-probe-descendant-proof-"));
+  try {
+    const dirs = probeDirs(root);
+    const leak = join(root, "descendant-survived");
+    const result = runProbeShell(
+      "/bin/bash",
+      [
+        "-c",
+        '( /bin/sleep 2; printf survived > "$1" ) &\nwhile :; do :; done',
+        "deadline-descendant",
+        leak,
+      ],
+      { dirs, timeout: 500 },
+    );
+    assert.equal(result.error?.code, "ETIMEDOUT");
+    assert.equal(result.signal, "SIGKILL");
+
+    // If the background child escaped the group kill, it writes after two
+    // seconds. Wait past that point and prove the side effect never happens.
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2_200);
+    assert.equal(
+      existsSync(leak),
+      false,
+      "the timed-out probe left a descendant running after its leader died",
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("normal probe completion settles descendants and preserves target status", () => {
+  const root = mkdtempSync(join(tmpdir(), "gate-probe-completion-proof-"));
+  try {
+    const dirs = probeDirs(root);
+    const leak = join(root, "descendant-survived");
+    const result = runProbeShell(
+      "/bin/bash",
+      [
+        "-c",
+        '( /bin/sleep 2; printf survived > "$1" ) &\nexit 7',
+        "completion-descendant",
+        leak,
+      ],
+      { dirs, timeout: 5_000 },
+    );
+    assert.equal(result.error, undefined);
+    assert.equal(result.status, 7);
+    assert.equal(result.signal, null);
+
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2_200);
+    assert.equal(
+      existsSync(leak),
+      false,
+      "a normally completed probe left a descendant running",
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("probe target signals use documented Bash status semantics", () => {
+  const root = mkdtempSync(join(tmpdir(), "gate-probe-signal-status-"));
+  try {
+    const result = runProbeShell("/bin/bash", ["-c", "kill -TERM $$"], {
+      dirs: probeDirs(root),
+      timeout: 5_000,
+    });
+    assert.equal(result.error, undefined);
+    assert.equal(result.status, 143);
+    assert.equal(result.signal, null);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

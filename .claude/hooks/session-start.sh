@@ -57,8 +57,18 @@ fi
 # repo is sometimes checked out with mode 0644 (e.g. when pushed via the
 # GitHub Contents API instead of `git push`).
 #
-# Redirect the setup script's stdout to stderr so Claude Code does not pull
-# 10–20K tokens of pnpm install / codegen / Playwright output into the model
-# session context. Setup progress still surfaces in the SessionStart hook log;
-# only the final exit code matters to the agent.
-exec bash "$SETUP_SCRIPT" >&2
+# Redirect the setup script's combined output to stderr so Claude Code does
+# not pull 10–20K tokens of pnpm install / codegen / Playwright output into
+# the model session context. Only the final exit code matters to the agent.
+# Also tee that same combined output to a gitignored log file so a failed
+# bootstrap leaves a diagnosable trace on disk (previously the output only
+# ever reached the ephemeral SessionStart hook log). The tee target is stderr
+# only, never stdout, so the keep-out-of-context property is unchanged; the
+# log file is overwritten each run since only the current session's startup
+# is actionable. `set -o pipefail` (from the top of this script) makes this
+# line's own exit status the setup script's exit status, not tee's, so a
+# failed bootstrap still fails the hook exactly as `exec` did before.
+LOG_DIR="$REPO_ROOT/.claude/logs"
+mkdir -p "$LOG_DIR"
+LOG_FILE="$LOG_DIR/web-setup.log"
+bash "$SETUP_SCRIPT" 2>&1 | tee "$LOG_FILE" >&2

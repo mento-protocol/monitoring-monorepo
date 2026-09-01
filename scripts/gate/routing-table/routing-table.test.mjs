@@ -43,9 +43,11 @@ const read = (relative) => readFileSync(`${REPO}${relative}`, "utf8");
 const GROUP_ORDER = [
   "documentation-surface",
   "documentation-contracts",
+  "review-eval-contracts",
   "upstash-mcp-transport",
   "manifests-and-package-manager",
   "shell-syntax",
+  "babysit-repo-hook",
   "vitest-configuration",
   "tree",
   "terraform-root",

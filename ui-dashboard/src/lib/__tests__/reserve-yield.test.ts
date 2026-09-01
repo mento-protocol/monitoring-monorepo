@@ -9,6 +9,10 @@ import {
   parseSkySavingsRateApyPercent,
   parseSkySavingsRateSsrApyPercent,
 } from "../reserve-yield";
+import {
+  applyStethYieldLedgerResult,
+  fetchStethYieldLedger,
+} from "../reserve-yield-steth";
 
 const SKY_SSR_RAY = BigInt("1000000001121484774769253326");
 const SKY_SSR_RPC_RESULT =
@@ -112,8 +116,10 @@ describe("reserve yield parsing and math", () => {
     const extracted = extractReserveYieldHoldings(RESERVE_PAYLOAD);
 
     expect(extracted.malformedCount).toBe(0);
+    expect(extracted.reserveCurrentHoldingsClassificationFailed).toBe(false);
     expect(extracted.trackedAssetCount).toBe(3);
     expect(extracted.susdsAssetCount).toBe(1);
+    expect(extracted.hasUnindexedSusdsHolding).toBe(false);
     expect(extracted.holdings).toHaveLength(4);
     expect(extracted.holdings[0]).toMatchObject({
       assetSymbol: "sUSDS",
@@ -184,6 +190,367 @@ describe("reserve yield parsing and math", () => {
     });
   });
 
+  it("fails sUSDS coverage when a potentially nonzero raw source is dropped", () => {
+    const extracted = extractReserveYieldHoldings({
+      collateral: {
+        assets: [
+          {
+            symbol: "sUSDS",
+            chain: "ethereum",
+            balance: "2001",
+            usd_value: 2201,
+            sources: [
+              {
+                type: "wallet",
+                label: "Tracked Safe",
+                identifier: TRACKED_SUSDS_WALLET,
+                balance: "2000",
+                usd_value: 2200,
+              },
+              {
+                type: "wallet",
+                label: "Unpriced Safe",
+                identifier: "0x0000000000000000000000000000000000000001",
+                balance: "unknown",
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(extracted.holdings).toHaveLength(1);
+    expect(extracted.malformedCount).toBe(1);
+    expect(extracted.hasUnindexedSusdsHolding).toBe(true);
+  });
+
+  it("allows a proven-zero extra sUSDS source beside indexed exposure", () => {
+    const extracted = extractReserveYieldHoldings({
+      collateral: {
+        assets: [
+          {
+            symbol: "sUSDS",
+            chain: "ethereum",
+            balance: "2000",
+            usd_value: 2200,
+            sources: [
+              {
+                type: "wallet",
+                label: "Tracked Safe",
+                identifier: TRACKED_SUSDS_WALLET,
+                balance: "2000",
+                usd_value: 2200,
+              },
+              {
+                type: "wallet",
+                label: "Unused Safe",
+                identifier: "0x0000000000000000000000000000000000000001",
+                balance: "0",
+                usd_value: 0,
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(extracted.malformedCount).toBe(0);
+    expect(extracted.hasUnindexedSusdsHolding).toBe(false);
+  });
+
+  it("fails sUSDS coverage before duplicate unindexed sources aggregate to zero", () => {
+    const extracted = extractReserveYieldHoldings({
+      collateral: {
+        assets: [
+          {
+            symbol: "sUSDS",
+            chain: "ethereum",
+            balance: "0",
+            usd_value: 0,
+            sources: [
+              {
+                type: "wallet",
+                label: "Unindexed Safe",
+                identifier: "0x0000000000000000000000000000000000000001",
+                balance: "1",
+                usd_value: 1,
+              },
+              {
+                type: "wallet",
+                label: "Unindexed Safe",
+                identifier: "0x0000000000000000000000000000000000000001",
+                balance: "-1",
+                usd_value: -1,
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(extracted.holdings).toHaveLength(1);
+    expect(extracted.holdings[0]).toMatchObject({
+      balance: 0,
+      principalUsd: 0,
+    });
+    expect(extracted.hasUnindexedSusdsHolding).toBe(true);
+  });
+
+  it("fails sUSDS coverage when a positive asset has only zero sources", () => {
+    const positiveAsset = extractReserveYieldHoldings({
+      collateral: {
+        assets: [
+          {
+            symbol: "sUSDS",
+            chain: "ethereum",
+            balance: "1",
+            usd_value: 1,
+            sources: [{ balance: "0", usd_value: 0 }],
+          },
+        ],
+      },
+    });
+    const zeroAsset = extractReserveYieldHoldings({
+      collateral: {
+        assets: [
+          {
+            symbol: "sUSDS",
+            chain: "ethereum",
+            balance: "0",
+            usd_value: 0,
+            sources: [{ balance: "0", usd_value: 0 }],
+          },
+        ],
+      },
+    });
+
+    expect(positiveAsset.hasUnindexedSusdsHolding).toBe(true);
+    expect(zeroAsset.hasUnindexedSusdsHolding).toBe(false);
+  });
+
+  it.each([
+    ["negative", -1],
+    ["non-finite", Number.POSITIVE_INFINITY],
+  ])("fails closed on %s tracked-asset aggregates", (_label, value) => {
+    const susds = extractReserveYieldHoldings({
+      collateral: {
+        assets: [
+          {
+            symbol: "sUSDS",
+            chain: "ethereum",
+            balance: value,
+            usd_value: value,
+            sources: [],
+          },
+        ],
+      },
+    });
+    const steth = extractReserveYieldHoldings({
+      collateral: {
+        assets: [
+          {
+            symbol: "stETH",
+            chain: "ethereum",
+            balance: value,
+            usd_value: value,
+            sources: [],
+          },
+        ],
+      },
+    });
+
+    expect(susds.susdsSnapshotSourceRequired).toBe(true);
+    expect(susds.hasUnindexedSusdsHolding).toBe(true);
+    expect(steth.stethSnapshotSourceRequired).toBe(true);
+    expect(steth.hasIncompleteStethSourceCoverage).toBe(true);
+  });
+
+  it.each([
+    ["token balance", { balance: "50", usd_value: 112 }],
+    ["USD value", { balance: "100", usd_value: 56 }],
+  ])(
+    "fails sUSDS coverage when indexed sources cover only part of the asset %s",
+    (_dimension, sourceExposure) => {
+      const extracted = extractReserveYieldHoldings({
+        collateral: {
+          assets: [
+            {
+              symbol: "sUSDS",
+              chain: "ethereum",
+              balance: "100",
+              usd_value: 112,
+              sources: [
+                {
+                  type: "wallet",
+                  label: "Tracked Safe",
+                  identifier: TRACKED_SUSDS_WALLET,
+                  ...sourceExposure,
+                },
+              ],
+            },
+          ],
+        },
+      });
+
+      expect(extracted.holdings).toHaveLength(1);
+      expect(extracted.hasUnindexedSusdsHolding).toBe(true);
+    },
+  );
+
+  it("accepts exact and floating-point-equivalent sUSDS source coverage", () => {
+    const exact = extractReserveYieldHoldings(RESERVE_PAYLOAD);
+    const rounded = extractReserveYieldHoldings({
+      collateral: {
+        assets: [
+          {
+            symbol: "sUSDS",
+            chain: "ethereum",
+            balance: 0.8,
+            usd_value: 0.8,
+            sources: [
+              {
+                type: "wallet",
+                label: "Tracked Safe",
+                identifier: TRACKED_SUSDS_WALLET,
+                balance: "0.1",
+                usd_value: 0.1,
+              },
+              {
+                type: "wallet",
+                label: "Tracked Safe",
+                identifier: TRACKED_SUSDS_WALLET,
+                balance: "0.7",
+                usd_value: 0.7,
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(exact.hasUnindexedSusdsHolding).toBe(false);
+    expect(rounded.hasUnindexedSusdsHolding).toBe(false);
+  });
+
+  it("does not let an indexed zero holding hide a positive sUSDS asset", () => {
+    const extracted = extractReserveYieldHoldings({
+      collateral: {
+        assets: [
+          {
+            symbol: "sUSDS",
+            chain: "ethereum",
+            balance: "1",
+            usd_value: 1,
+            sources: [
+              {
+                identifier: TRACKED_SUSDS_WALLET,
+                balance: "0",
+                usd_value: "unknown",
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(extracted.holdings).toHaveLength(1);
+    expect(extracted.holdings[0]).toMatchObject({
+      identifier: TRACKED_SUSDS_WALLET,
+      balance: 0,
+      principalUsd: 0,
+    });
+    expect(extracted.hasUnindexedSusdsHolding).toBe(true);
+  });
+
+  it("does not use malformed stETH sources as sUSDS coverage evidence", () => {
+    const extracted = extractReserveYieldHoldings({
+      collateral: {
+        assets: [
+          RESERVE_PAYLOAD.collateral.assets[1],
+          {
+            symbol: "stETH",
+            chain: "ethereum",
+            balance: "1",
+            usd_value: 2_000,
+            sources: [{ balance: "unknown", usd_value: "unknown" }],
+          },
+        ],
+      },
+    });
+
+    expect(extracted.malformedCount).toBeGreaterThan(0);
+    expect(extracted.hasUnindexedSusdsHolding).toBe(false);
+  });
+
+  it.each([
+    {},
+    { collateral: {} },
+    { collateral: { assets: null } },
+    { collateral: { assets: {} } },
+  ])(
+    "fails holdings classification for a malformed reserve shape",
+    (payload) => {
+      const extracted = extractReserveYieldHoldings(payload);
+
+      expect(extracted.holdings).toEqual([]);
+      expect(extracted.malformedCount).toBe(0);
+      expect(extracted.reserveCurrentHoldingsClassificationFailed).toBe(true);
+    },
+  );
+
+  it("fails current holdings classification for unclassifiable asset rows", () => {
+    const extracted = extractReserveYieldHoldings({
+      collateral: { assets: [null, {}, { symbol: 123 }] },
+    });
+
+    expect(extracted.holdings).toEqual([]);
+    expect(extracted.malformedCount).toBe(3);
+    expect(extracted.reserveCurrentHoldingsClassificationFailed).toBe(true);
+  });
+
+  it("accepts an empty sources array for a tracked asset", () => {
+    const extracted = extractReserveYieldHoldings({
+      collateral: {
+        assets: [
+          {
+            symbol: "sUSDS",
+            chain: "ethereum",
+            balance: "100",
+            usd_value: 110,
+            sources: [],
+          },
+        ],
+      },
+    });
+
+    expect(extracted.holdings).toHaveLength(1);
+    expect(extracted.malformedCount).toBe(0);
+    expect(extracted.susdsAssetCount).toBe(1);
+  });
+
+  it.each([
+    ["object", {}],
+    ["null", null],
+  ])("marks a provided %s sources value as malformed", (_label, sources) => {
+    const extracted = extractReserveYieldHoldings({
+      collateral: {
+        assets: [
+          {
+            symbol: "sUSDS",
+            chain: "ethereum",
+            balance: "100",
+            usd_value: 110,
+            sources,
+          },
+        ],
+      },
+    });
+
+    expect(extracted.holdings).toHaveLength(1);
+    expect(extracted.malformedCount).toBe(1);
+    expect(extracted.susdsAssetCount).toBe(1);
+  });
+
   it("prices stETH sources from USD values instead of token balances", () => {
     const extracted = extractReserveYieldHoldings({
       collateral: {
@@ -232,6 +599,154 @@ describe("reserve yield parsing and math", () => {
     });
   });
 
+  it("preserves incomplete stETH source coverage without rejecting explicit-zero extras", () => {
+    const asset = {
+      symbol: "stETH",
+      chain: "ethereum",
+      balance: "1",
+      usd_value: 2_000,
+      sources: [
+        {
+          type: "wallet",
+          label: "Reserve Safe",
+          identifier: TRACKED_SUSDS_WALLET,
+          balance: "1",
+          usd_value: 2_000,
+        },
+      ],
+    };
+    const incomplete = extractReserveYieldHoldings({
+      collateral: {
+        assets: [
+          {
+            ...asset,
+            sources: [
+              ...asset.sources,
+              {
+                type: "wallet",
+                label: "Unpriced source",
+                identifier: "0x0000000000000000000000000000000000000001",
+                balance: "unknown",
+                usd_value: "unknown",
+              },
+            ],
+          },
+        ],
+      },
+    });
+    const explicitZeroExtra = extractReserveYieldHoldings({
+      collateral: {
+        assets: [
+          {
+            ...asset,
+            sources: [
+              ...asset.sources,
+              {
+                type: "wallet",
+                label: "Zero source",
+                identifier: "0x0000000000000000000000000000000000000001",
+                balance: "0",
+                usd_value: 0,
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(incomplete.holdings).toHaveLength(1);
+    expect(incomplete.stethSnapshotSourceRequired).toBe(true);
+    expect(incomplete.hasIncompleteStethSourceCoverage).toBe(true);
+    expect(explicitZeroExtra.hasIncompleteStethSourceCoverage).toBe(false);
+  });
+
+  it("fails stETH coverage when indexed sources cover only part of the asset aggregate", () => {
+    const extracted = extractReserveYieldHoldings({
+      collateral: {
+        assets: [
+          {
+            symbol: "stETH",
+            chain: "ethereum",
+            balance: "2",
+            usd_value: 4_000,
+            sources: [
+              {
+                type: "wallet",
+                label: "Reserve Safe",
+                identifier: TRACKED_SUSDS_WALLET,
+                balance: "1",
+                usd_value: 2_000,
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(extracted.holdings).toHaveLength(1);
+    expect(extracted.hasIncompleteStethSourceCoverage).toBe(true);
+  });
+
+  it("accepts complete stETH sources with derived or explicit-zero values", () => {
+    const extracted = extractReserveYieldHoldings({
+      collateral: {
+        assets: [
+          {
+            symbol: "stETH",
+            chain: "ethereum",
+            balance: "2",
+            usd_value: 4_000,
+            sources: [
+              {
+                type: "wallet",
+                label: "Reserve Safe",
+                identifier: TRACKED_SUSDS_WALLET,
+                usd_value: 4_000,
+              },
+              {
+                type: "wallet",
+                label: "Zero source",
+                identifier: "0x0000000000000000000000000000000000000001",
+                balance: "0",
+                usd_value: 0,
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(extracted.holdings[0]).toMatchObject({
+      balance: 2,
+      principalUsd: 4_000,
+    });
+    expect(extracted.hasIncompleteStethSourceCoverage).toBe(false);
+  });
+
+  it("keeps the stETH asset fallback while failing closed on absent sources", () => {
+    const extracted = extractReserveYieldHoldings({
+      collateral: {
+        assets: [
+          {
+            symbol: "stETH",
+            chain: "ethereum",
+            balance: "2",
+            usd_value: 4_000,
+            sources: [],
+          },
+        ],
+      },
+    });
+
+    expect(extracted.holdings).toHaveLength(1);
+    expect(extracted.holdings[0]).toMatchObject({
+      sourceType: "asset",
+      balance: 2,
+      principalUsd: 4_000,
+    });
+    expect(extracted.hasIncompleteStethSourceCoverage).toBe(true);
+  });
+
   it("derives stETH source token balances from asset totals", () => {
     const extracted = extractReserveYieldHoldings({
       collateral: {
@@ -264,6 +779,7 @@ describe("reserve yield parsing and math", () => {
       principalUsd: 168_000,
     });
     expect(extracted.holdings[0]?.balance).toBeCloseTo(100, 12);
+    expect(extracted.hasIncompleteStethSourceCoverage).toBe(true);
   });
 
   it("derives stETH balances after balance-only sources consume asset principal", () => {
@@ -508,6 +1024,7 @@ describe("reserve yield parsing and math", () => {
 
     expect(extracted.holdings).toEqual([]);
     expect(extracted.malformedCount).toBe(2);
+    expect(extracted.reserveCurrentHoldingsClassificationFailed).toBe(false);
   });
 
   it("does not treat sUSDS source shares as dollars when USD values are missing", () => {
@@ -533,6 +1050,28 @@ describe("reserve yield parsing and math", () => {
 
     expect(extracted.holdings).toEqual([]);
     expect(extracted.malformedCount).toBe(2);
+    expect(extracted.reserveCurrentHoldingsClassificationFailed).toBe(false);
+    expect(extracted.susdsSnapshotSourceRequired).toBe(true);
+    expect(extracted.hasUnindexedSusdsHolding).toBe(true);
+  });
+
+  it("does not require an sUSDS snapshot source for explicit zero exposure", () => {
+    const extracted = extractReserveYieldHoldings({
+      collateral: {
+        assets: [
+          {
+            symbol: "sUSDS",
+            chain: "ethereum",
+            balance: "0",
+            usd_value: 0,
+            sources: [],
+          },
+        ],
+      },
+    });
+
+    expect(extracted.reserveCurrentHoldingsClassificationFailed).toBe(false);
+    expect(extracted.susdsSnapshotSourceRequired).toBe(false);
   });
 
   it("uses the yield-bearing asset row when no source rows are available", () => {
@@ -556,6 +1095,9 @@ describe("reserve yield parsing and math", () => {
       sourceType: "asset",
       principalUsd: 42,
     });
+    expect(extracted.malformedCount).toBe(0);
+    expect(extracted.susdsSnapshotSourceRequired).toBe(true);
+    expect(extracted.hasUnindexedSusdsHolding).toBe(true);
   });
 
   it("parses the latest valid FEDFUNDS CSV observation", () => {
@@ -628,6 +1170,231 @@ describe("reserve yield parsing and math", () => {
         meta: LIDO_STETH_APR_RESPONSE.meta,
       }),
     ).toThrow("valid APR");
+  });
+
+  it("does not join Ethereum stETH actuals to the same tracked wallet on Polygon", () => {
+    const wallet = "0xd0697f70e79476195b742d5afab14be50f98cc1e";
+    const holding = {
+      id: "polygon-steth-reserve-safe",
+      assetSymbol: "stETH",
+      chain: "polygon",
+      sourceType: "wallet",
+      sourceLabel: "Reserve Safe",
+      identifier: wallet,
+      custodianType: "cold",
+      balance: 1,
+      hasTokenBalance: true,
+      principalUsd: 2_000,
+      earnedYieldUsd: null,
+      apyPercent: null,
+      yieldModel: "Yield source pending",
+      dailyRunRateUsd: null,
+      next30dUsd: null,
+      next365dUsd: null,
+      annualRunRateUsd: null,
+    };
+
+    const result = applyStethYieldLedgerResult(
+      [holding],
+      {
+        status: "fulfilled",
+        value: {
+          entries: [
+            {
+              wallet,
+              earnedYieldAmount: BigInt("1000000000000000000"),
+              realizedYieldAmount: BigInt(0),
+              unrealizedYieldAmount: BigInt("1000000000000000000"),
+              asOf: "2026-06-12T00:00:00.000Z",
+            },
+          ],
+          error: null,
+        },
+      },
+      true,
+      true,
+    );
+
+    expect(result.earnedYieldUsd).toBeNull();
+    expect(result.holdings[0]?.earnedYieldUsd).toBeNull();
+    expect(result.earnedYieldError).toContain("indexed only for Ethereum");
+  });
+
+  it("ignores stETH ledger rows for an untracked wallet", async () => {
+    vi.stubEnv("NEXT_PUBLIC_HASURA_URL", "https://hasura.example/v1/graphql");
+    const fetchImpl = vi.fn().mockResolvedValue(
+      Response.json({
+        data: {
+          StethYieldDailySnapshot: [
+            {
+              id: "1-steth-wallet-1780444800",
+              chainId: 1,
+              token: "0xae7ab96520de3a18e5e111b5eaab095312d7fe84",
+              timestamp: "1780444800",
+              realizedYieldAmount: "0",
+              unrealizedYieldAmount: "1",
+              totalEarnedYieldAmount: "1",
+              sampledAtTimestamp: "1780444800",
+              wallet: "0x0000000000000000000000000000000000000002",
+            },
+          ],
+        },
+      }),
+    );
+
+    try {
+      await expect(fetchStethYieldLedger(fetchImpl)).resolves.toEqual({
+        entries: [],
+        error:
+          "stETH earned-yield actuals pending: no indexed wallet snapshot rows yet.",
+      });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it.each([
+    ["chain", { chainId: 137 }],
+    ["token", { token: "0x0000000000000000000000000000000000000001" }],
+  ])(
+    "does not fall back to an older stETH row when the newest tracked-wallet %s is invalid",
+    async (_label, newestOverrides) => {
+      vi.stubEnv("NEXT_PUBLIC_HASURA_URL", "https://hasura.example/v1/graphql");
+      const wallet = "0xd0697f70e79476195b742d5afab14be50f98cc1e";
+      const validRow = {
+        id: "1-steth-wallet-1780358400",
+        chainId: 1,
+        token: "0xae7ab96520de3a18e5e111b5eaab095312d7fe84",
+        wallet,
+        timestamp: "1780358400",
+        realizedYieldAmount: "0",
+        unrealizedYieldAmount: "1",
+        totalEarnedYieldAmount: "1",
+        sampledAtTimestamp: "1780358400",
+      };
+      const fetchImpl = vi.fn().mockResolvedValue(
+        Response.json({
+          data: {
+            StethYieldDailySnapshot: [
+              {
+                ...validRow,
+                id: "1-steth-wallet-1780444800",
+                timestamp: "1780444800",
+                sampledAtTimestamp: "1780444800",
+                ...newestOverrides,
+              },
+              validRow,
+            ],
+          },
+        }),
+      );
+
+      try {
+        await expect(fetchStethYieldLedger(fetchImpl)).rejects.toThrow(
+          "newest row for tracked wallet",
+        );
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    },
+  );
+
+  it("rejects the full stETH ledger when one tracked wallet has an invalid newest identity", async () => {
+    vi.stubEnv("NEXT_PUBLIC_HASURA_URL", "https://hasura.example/v1/graphql");
+    const reserveWallet = "0xd0697f70e79476195b742d5afab14be50f98cc1e";
+    const opsWallet = "0xd3d2e5c5af667da817b2d752d86c8f40c22137e1";
+    const validReserveRow = {
+      id: "1-steth-reserve-1780444800",
+      chainId: 1,
+      token: "0xae7ab96520de3a18e5e111b5eaab095312d7fe84",
+      wallet: reserveWallet,
+      timestamp: "1780444800",
+      realizedYieldAmount: "0",
+      unrealizedYieldAmount: "1",
+      totalEarnedYieldAmount: "1",
+      sampledAtTimestamp: "1780444800",
+    };
+    const olderValidOpsRow = {
+      ...validReserveRow,
+      id: "1-steth-ops-1780358400",
+      wallet: opsWallet,
+      timestamp: "1780358400",
+      sampledAtTimestamp: "1780358400",
+    };
+    const fetchImpl = vi.fn().mockResolvedValue(
+      Response.json({
+        data: {
+          StethYieldDailySnapshot: [
+            validReserveRow,
+            {
+              ...olderValidOpsRow,
+              id: "1-steth-ops-1780444800",
+              chainId: 137,
+              timestamp: "1780444800",
+              sampledAtTimestamp: "1780444800",
+            },
+            olderValidOpsRow,
+          ],
+        },
+      }),
+    );
+
+    try {
+      await expect(fetchStethYieldLedger(fetchImpl)).rejects.toThrow(
+        `newest row for tracked wallet ${opsWallet} had an invalid chain or token`,
+      );
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("ignores an unrelated newer wallet without blocking a tracked stETH row", async () => {
+    vi.stubEnv("NEXT_PUBLIC_HASURA_URL", "https://hasura.example/v1/graphql");
+    const trackedWallet = "0xd0697f70e79476195b742d5afab14be50f98cc1e";
+    const validRow = {
+      id: "1-steth-wallet-1780358400",
+      chainId: 1,
+      token: "0xae7ab96520de3a18e5e111b5eaab095312d7fe84",
+      wallet: trackedWallet,
+      timestamp: "1780358400",
+      realizedYieldAmount: "0",
+      unrealizedYieldAmount: "1",
+      totalEarnedYieldAmount: "1",
+      sampledAtTimestamp: "1780358400",
+    };
+    const fetchImpl = vi.fn().mockResolvedValue(
+      Response.json({
+        data: {
+          StethYieldDailySnapshot: [
+            {
+              ...validRow,
+              id: "1-steth-unrelated-1780444800",
+              wallet: "0x0000000000000000000000000000000000000002",
+              timestamp: "1780444800",
+              sampledAtTimestamp: "1780444800",
+            },
+            validRow,
+          ],
+        },
+      }),
+    );
+
+    try {
+      await expect(fetchStethYieldLedger(fetchImpl)).resolves.toEqual({
+        entries: [
+          {
+            wallet: trackedWallet,
+            earnedYieldAmount: BigInt(1),
+            realizedYieldAmount: BigInt(0),
+            unrealizedYieldAmount: BigInt(1),
+            asOf: "2026-06-02T00:00:00.000Z",
+          },
+        ],
+        error: null,
+      });
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("applies the provider APY formula", () => {

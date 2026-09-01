@@ -1,0 +1,373 @@
+---
+title: Staged replacement of the mandatory local gate with existing CI
+status: active
+owner: eng
+canonical: true
+last_verified: 2026-08-31
+scope: ci/process
+date: 2026-08
+doc_type: adr
+review_interval_days: 90
+garden_lane: adrs-architecture
+---
+
+# ADR 0078 — staged replacement of the mandatory local gate with existing CI
+
+**Status:** Accepted (Aug 2026). The migration is in force. The current gate
+stays mandatory until the approved cutover stage completes.
+[ADR 0007](0007-agent-quality-gate-and-merge-oracle.md) remains active for the
+hosted two-projection all-clear and Codex approval gate. This ADR supersedes
+only its mandatory-local-gate target state.
+
+**Scope:** ci/process
+
+## Context
+
+The local quality gate combines path routing, validation, process cleanup,
+cross-worktree scheduling, result reuse, and crash recovery. The raw Phase 0
+manifest records 101,595 counted control-plane lines at the terminal pre-M1
+source. Recent local runs spent more time waiting for shared capacity than
+running mapped commands. The system protects real shared resources, but its
+mandatory push path now slows local and hosted development.
+
+The repository already has fixed GitHub Actions jobs, path filters, a
+fail-closed `CI / ci` aggregate, automated review, two readiness projections,
+and exact-head human merge consent. Replacing those controls with a new remote
+execution platform would add another policy and operations surface.
+
+The repository has one active human maintainer. A required second approval for
+every control-plane change would stop routine delivery. This decision therefore
+targets accidental regressions and a trusted contributor model. It does not
+claim to stop a malicious repository administrator, a compromised GitHub
+runner, or a maintainer who uses the ruleset bypass deliberately.
+
+## Decision
+
+### Reuse and harden the existing CI fan-out
+
+Keep the fixed jobs in `.github/workflows/ci.yml`. Keep `CI / ci` as the stable
+required aggregate. Add contract tests for exact job membership, conditional
+skips, filters, and fail-closed aggregate results. Unknown paths and
+control-plane changes must select all conditional jobs. Do not add a dynamic
+task graph, custom scheduler, verdict cache, signing service, GitHub App, or
+cloud project.
+
+Pull request validation must become read-only and secretless before it becomes
+the sole source-regression authority. A pull request job must not save any
+cache. It may restore only disposable setup data written by protected `main`.
+A cache hit must never skip a required command or generated-output comparison.
+Credential use must run outside candidate-code execution, or a later human
+decision must accept and document the exact remaining exposure.
+
+The Phase 0 audit found `checks: write`, Codecov tokens, implicit setup-node
+cache saves, and direct `actions/cache` saves in pull request jobs. M2 removes
+the unused write grants and PR cache saves. The positive Sentry contract
+remains: its built-in gate runs before install, with `contents: read`, no
+secret, and no earlier candidate code.
+
+### Apply the M2 pull request trust boundary
+
+Candidate CI jobs use read-only repository permissions. The package jobs no
+longer have `checks: write`. Schema diff, Terraform plan, and Lighthouse stop
+mutating pull request comments. They publish bounded job summaries instead.
+Claude auto-review receives the workflow-scoped GitHub token explicitly and no
+longer receives `id-token: write`. Candidate checkouts do not persist Git
+credentials.
+
+Four credential exposures remain because isolating them would add an artifact
+handoff, publisher workflow, broker, or external service:
+
+- A same-repository PR can run candidate commands before Codecov receives
+  `CODECOV_TOKEN`. The token can forge advisory Codecov uploads. It cannot
+  write repository content or satisfy a required ruleset context. The upload
+  step skips `sentry-autofix/*`. GitHub withholds the repository secret from
+  forks and Dependabot.
+- Terraform PR plans execute candidate HCL with a read-only GCP plan identity.
+  That identity can read cleartext Terraform state. It cannot apply changes.
+- Lighthouse passes the Vercel preview bypass value to candidate configuration
+  and scripts in its trusted-preview lane. Lighthouse records resolved request
+  headers in raw reports. Those reports stay on the ephemeral runner and are
+  excluded from artifacts and public storage.
+- Claude sends candidate text to the external reviewer. Its workflow-scoped
+  token can write PR feedback.
+
+The Codecov token is absent on forks and Dependabot, and its step skips
+`sentry-autofix/*`. Terraform, Lighthouse, and automatic Claude review exclude
+all three contexts. An `OWNER` or `MEMBER` can explicitly invoke on-demand
+Claude review on otherwise excluded content. On 2026-08-30, the human operator
+accepted that invocation boundary and the four automatic exposures exactly as
+listed above. The repository accepts them under the trusted-contributor model
+to retain useful PR checks without adding another control platform. Any wider
+permission, credential, context, or invocation path requires a new decision.
+
+M2 also found that the prior Lighthouse temporary-public-storage path could
+publish raw reports that contained the Vercel bypass request header. Treat the
+current project token as disclosed. M2 keeps raw reports on the runner and
+uploads only header-free diagnostics. The operator approved M2 publication
+before rotation on 2026-08-30. This accepts that an unknown token holder can
+bypass Vercel deployment authentication and selected edge protections for all
+project deployments until revocation. The token does not grant Vercel or
+GitHub mutation authority. Rotate it through the documented Terraform toggle
+path; this approval does not authorize either apply. See Vercel's
+[Protection Bypass for Automation contract](https://vercel.com/docs/deployment-protection/methods-to-bypass-deployment-protection/protection-bypass-automation).
+
+Pull request jobs disable setup-node's implicit package-manager cache. They use
+nonfatal `actions/cache/restore` steps in the `trusted-main-v1-*` namespace.
+Only protected-main push jobs use `actions/cache/save`. Install, lint,
+typecheck, test, build, browser setup, and code generation commands still run
+after every restore. M2 removes the Envio generated-output cache because its
+hit path skipped required code generation.
+
+Each setup restore has a fixed target and a fixed required command. An empty
+`cache-hit` output causes the workflow to remove only that target before the
+required command runs. This handles a miss and a failed partial extraction.
+A prefix-key hit returns `false`; the workflow keeps that complete restore and
+still runs the required command.
+
+The pnpm action separates its executable home from its dependency store. It
+keeps the executable in `~/pnpm-home` and caches `~/pnpm-store`. Root and
+package-local CI installs select the cache target explicitly. Miss cleanup
+cannot remove pnpm's own files.
+
+The M2 structural checker follows local reusable workflows from every direct
+pull request trigger. It inventories every pull request job with write
+permission or credential access. Each entry pins its permission map, exact
+credential bindings, environment, forwarded secrets, and reusable target. The
+checker also scans every workflow and local action for cache saves. It pins the
+exact cleanup and required-command sequence for each retained setup cache. A
+workflow change fails until a reviewer updates this closed inventory and its
+mutation tests.
+
+The M2 pull request can prove a cold miss in the new namespace. A protected-
+main save and a later PR hit cannot exist before this change reaches `main`.
+Record both as post-merge evidence for #2124. A missing or corrupt cache must
+remain a cold-run condition, not a validation failure or a skipped command.
+
+### Apply the M3 fixed CI contract
+
+M3 keeps the fixed jobs and the stable `CI / ci` context. A closed-world
+fallback selects every conditional job for an unknown path, a control-plane
+path, or an incomplete pull request file list. It does not add a planner,
+dynamic matrix, or second routing format.
+
+The pinned `dorny/paths-filter` action emits a documented count for each
+filter. The `routed` filter reuses the functional filters through YAML aliases.
+The fallback compares the `all` count with the `routed` and `ordinary` counts.
+The workflow does not export changed-file lists.
+
+The `pnpm ci:contract:test` command checks fixed job membership, conditional
+filters, pull request and `main` concurrency, aggregate failure states, and the
+M2 permission and cache boundary. The unconditional `Production infrastructure
+contract` job runs it on every pull request and `main` push.
+
+M3 adds the two confirmed gate-only gaps to existing required jobs. The
+`scripts` job runs the ADR reminder and its tests. The `ui` job runs the normal
+production build and bundle-size limit. The separate Infra validation and
+bundle-size workflows duplicate required coverage. Lighthouse, PR Description,
+duplication, and schema diff remain reviewed advisory exceptions with their
+current triggers.
+
+### Keep local checks bounded and non-authoritative
+
+After cutover, pre-commit runs staged formatting only. Pre-push starts no
+repository validation, fetch, lock, or wait. The `/ship` workflow selects
+direct package commands from named change triggers and records each result as
+`passed`, `failed`, or `not run: <reason>`. It runs the selected author checks
+before first publication and after a material fix, not on every commit.
+
+Dashboard React or client changes require the React Doctor diff command.
+Changed routes or interactions also require the documented build and browser
+verification. Indexer schema, configuration, ABI, entry-point, handler-
+reachability, and dashboard GraphQL consumer changes require their applicable
+code generation. Other workspace packages use their direct lint, typecheck,
+and test commands when those scripts exist.
+
+These local results shorten feedback. Required CI remains merge authority. A
+manual push can omit author checks, but it cannot omit required CI.
+
+### Audit selection with a distinct no-skip lane
+
+The no-skip audit is a protected default-branch `workflow_dispatch` entry
+point. Its input identifies one pull request, an immutable source SHA, and an
+immutable base SHA. It verifies that the pull request still names those SHAs,
+normalizes pull-request-only semantics, and runs every deterministic CI job.
+It excludes deployment, apply, publication, live-provider, and other
+credentialed effects. It publishes a distinct non-required result. It must not
+publish a candidate-head pull request check. GitHub binds the protected-branch
+dispatch run to the protected-branch `GITHUB_SHA`, not the candidate input SHA.
+GitHub documents this default-ref binding in the
+[`workflow_dispatch` event reference](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflow_dispatch).
+The workflow uses a distinct run and display name. Its run ID and recorded
+immutable inputs are operational shadow evidence. They cannot satisfy pull
+request readiness.
+
+The audit uses existing GitHub Actions jobs. It adds no status writer, custom
+reporter, app, personal access token, task service, or result database. Phase 0
+records a 41.18-runner-minute cold planning estimate from comparable retained
+runs. It is not an upper bound or an observed current all-cache-miss run. Before
+shadow execution, run every current deterministic job at immutable trusted SHAs
+with cache reads and writes disabled. Stop if that proof breaches the approved
+ceiling. A scheduled run uses the same deterministic no-skip coverage after
+this proof passes.
+
+The Phase 0 cost baseline selects one `CI` workflow run for each of ten
+immutable pull request heads. It counts every non-skipped job execution and
+selected setup step across all 13 attempts. This includes `Sentry suites` and
+the `ci` aggregate inside the `CI` workflow. It excludes the separate `Code
+Quality` workflow and the external `Vercel` and `Vercel Preview Comments`
+results. The included jobs use the recorded Blacksmith runner labels and
+GitHub-hosted `ubuntu-latest`. The metric is elapsed Actions job time for the
+selected workflow, not total pull-request spend or provider-billed minutes. It
+also excludes successful jobs copied into a rerun payload when their start time
+precedes that attempt's creation time.
+
+### Use staged evidence and separate approvals
+
+The migration has these gates:
+
+1. Inventory every current safeguard and record the Phase 0 baseline.
+2. Remove pull request credential and cache-write authority.
+3. Add fixed CI selection and aggregate contracts.
+4. Compare path-gated CI with no-skip CI on at least 10 distinct pull requests
+   over at least 7 calendar days.
+5. Require explicit human approval before removing the mandatory local gate.
+   A separate human-approved administration step applies any ruleset change.
+6. Observe at least 10 distinct merged pull requests over at least 7 calendar
+   days after cutover.
+7. Require separate human approval before deleting the legacy implementation.
+
+Shadow execution also needs a human-approved spend ceiling and stop condition.
+A selection omission, false success, or accepted cost breach stops the rollout.
+
+### Preserve mixed-worktree and process-safety obligations
+
+The legacy coordinator keeps `run.lock` while old and new worktrees coexist.
+Do not use `--no-lock`, clear live coordinator state, repurpose its state root,
+or let new work run beside an older gate that owns the legacy lock.
+
+Issue #2042 closed as completed on 2026-08-29 through PR #2131 at terminal
+commit `e0346ec4756f9577bcbb1e13e06566ccc507e9e4`. The earlier provisional
+snapshot at `8e2965a6ffbd92bcc0c2793a6892754e4c674a6b` remains historical evidence
+only. The #2042 terminal commit has a ten-file, 12,543-line shared closure for
+Darwin process identity, coherent lineage, autoreview provenance, and Sentry
+process identity. Retain that closure and its tests. PR #2134 advances the
+terminal pre-M1 source to `a5692c4570d7fe33255c2ce863d7f79264a9ddb0`. It
+changes gate-specific drain recovery and adds 46 gate-specific whole-file
+lines. It changes none of the retained shared files. Before cutover, relocation,
+or deletion, issues #2127 and #2128 must re-audit the shared consumers at the
+#2042 terminal commit and the gate-specific candidates through the current
+pre-M1 source. Gate-only coordinator, routing, prewarm, and Trunk wrapper or
+check components remain deferred retirement candidates.
+
+The process contract never signals a bare PID or process-group ID without a
+matching non-reusable identity. It settles coherent lineage before release and
+fails closed on unsupported self-daemonization. A Trunk daemon must be contained
+or classified as a bounded trusted external service. Sentry may signal a
+detached group only while its verified leader is alive. It must not use the PID
+or process-group ID after that leader is reaped.
+
+### Keep the replacement smaller than the removed system
+
+The migration adds no service, GitHub App, cloud project, database, queue,
+daemon, signer, dynamic DAG, verdict cache, artifact protocol, cross-worktree
+lock, socket, lease, journal, or global port owner. It may add at most one thin
+orchestration script below 300 non-test lines. No new replacement file can
+exceed 500 lines. Replacement-specific tests must stay below twice the new
+implementation size.
+
+The raw manifest counts every `scripts/gate/**` file and each dedicated
+canonical gate document as a whole file. This keeps the full gate-rooted before
+surface even when another consumer must retain a file. It also counts other
+gate references and the full pre-push hook. At terminal pre-M1 source
+`a5692c4570d7fe33255c2ce863d7f79264a9ddb0`, the manifest records 223 files and
+101,595 counted lines. This includes 95,815 whole-file implementation and test
+lines, 4,952 whole-file dedicated-document lines, and 828 other
+shared-reference and hook lines. The retained shared closure contributes 12,543
+whole-file lines. The wholly retained package-script pin checker contributes
+another 159 lines. Subtracting both leaves 83,113 lines as an upper-bound
+deletion candidate.
+
+This upper bound is not the final gate-specific deletion denominator. The gate
+test suite mixes retained package-policy coverage with gate-only tests. The
+routing-table family mixes retained workflow-pin and generated-drift behavior
+with deferred local routing. Issues #2127 and #2128 must allocate or migrate
+these retained components and publish the reviewed final denominator.
+Replacement additions must be smaller than the gate-specific code they replace
+at each cutover stage. Final retirement must remove at least 80% of the final
+denominator.
+
+M2 records its full changed control-plane surface from protected-main baseline
+`ccef910fa6fc267751681176ffdeef01daf90b40` in a frozen additive complexity
+receipt. The receipt contains M2 and its #2161 correction. It excludes the
+unrelated #2145 and #2159 review-eval artifacts and records that derivation.
+This historical #2124 evidence does not change after M2 closes. Later phases
+record phase-scoped evidence instead of extending it. The permanent checker
+continues to enforce the structural trust boundary.
+
+## Rollback
+
+Before legacy deletion, restore the recorded ruleset first and revert the
+cutover commit. The retained gate runtime then resumes the mandatory hook.
+
+After legacy deletion, first revert the retirement commit. Restore the gate
+runtime, coordinator, aliases, tests, and mixed-version lock behavior before
+re-enabling the hook by reverting the cutover commit. Never restore the hook
+while its runtime is absent. Never clear coordinator state during rollback.
+
+A false success stops merges through the normal human ruleset administration
+path. Add a regression fixture, correct the inventory or CI contract, and
+repeat shadow evidence for the affected risk class. Do not bypass a required
+check to regain throughput.
+
+## Alternatives considered
+
+### Keep the mandatory local gate
+
+Rejected as the target state. It preserves current controls, but it keeps
+cross-worktree waiting and retains the large scheduling and recovery system.
+
+### Replace the gate with a dedicated verification platform
+
+Rejected. A protected planner, remote executor, attestor, result store, and
+custom merge authority address a stronger threat model than this repository
+has accepted. They would add infrastructure and operational failure modes.
+
+### Run every deterministic job on every pull request
+
+Rejected as the routine path. It is simple but spends runner time on unrelated
+packages. The fixed affected fan-out plus an independent no-skip audit gives a
+measurable omission check at lower routine cost.
+
+### Add a path-aware pre-push replacement
+
+Rejected. Correct selection would require base resolution, cross-package
+routing, generated-file rules, timeouts, and shared-resource behavior. That
+would recreate the local gate.
+
+## Consequences
+
+- M1 inventory and M2 authority hardening do not change required contexts,
+  path filters, hooks, rulesets, or local gate behavior.
+- Required CI, review, readiness, merge consent, deployment proof, Terraform
+  approval, and secret ownership remain separate controls.
+- Local author feedback becomes faster after cutover, but a developer can first
+  discover an omitted local check in CI.
+- Filter and aggregate correctness become explicit tested contracts.
+- A trusted administrator can still weaken candidate-controlled workflow code
+  and use the existing bypass. This is an accepted threat-model limit.
+- Legacy deletion waits for two evidence windows and its own approval.
+
+## Evidence
+
+- [Simple Verification System Plan](../PLAN-progressive-verification-graph.md)
+- [Phase 0 evidence](../notes/verification-redesign-phase-0-evidence.md)
+- [Safeguard inventory](../metrics/verification-redesign-safeguards.jsonl)
+- [Control-plane before manifest](../metrics/verification-redesign-control-plane-before.json)
+- [M2 additive complexity manifest](../metrics/verification-redesign-m2-complexity.json)
+- [M3 additive complexity manifest](../metrics/verification-redesign-m3-complexity.json)
+- Issues #2006, #2032, #2042, #2094, #2122, #2123, #2124, and #2125
+- ADRs [0007](0007-agent-quality-gate-and-merge-oracle.md),
+  [0069](0069-gate-routing-table-as-data.md),
+  [0072](0072-md-only-docs-checks-job.md),
+  [0075](0075-pr-merge.md), and
+  [0076](0076-fair-quality-gate-coordinator.md)

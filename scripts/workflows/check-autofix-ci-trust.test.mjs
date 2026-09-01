@@ -156,6 +156,37 @@ test("pull_request_target is always refused", () => {
   );
 });
 
+test("a workflow_run merge writer needs the upstream autofix exclusion", () => {
+  const writeJob = [
+    "on:",
+    "  workflow_run:",
+    "    workflows: [Dependabot auto-merge candidate]",
+    "    types: [completed]",
+    "jobs:",
+    "  auto-merge:",
+    "    runs-on: ubuntu-latest",
+    "    permissions:",
+    "      contents: write",
+    "    env:",
+    "      GH_TOKEN: ${{ github.token }}",
+    "    steps:",
+    "      - run: gh pr merge --auto 1",
+  ];
+  assert(
+    !evaluateWorkflow(writeJob.join("\n")).ok,
+    "unguarded workflow_run writer refused",
+  );
+  writeJob.splice(
+    7,
+    0,
+    "    if: ${{ !startsWith(github.event.workflow_run.head_branch, 'sentry-autofix/') }}",
+  );
+  assert(
+    evaluateWorkflow(writeJob.join("\n")).ok,
+    "guarded workflow_run writer accepted",
+  );
+});
+
 // ── trigger detection across every shape (parser-resolved) ───────────────────
 
 test("pull_request trigger detected in scalar/list/mapping forms", () => {

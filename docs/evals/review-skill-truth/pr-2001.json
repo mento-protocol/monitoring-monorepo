@@ -1,0 +1,43 @@
+{
+ "pr": 2001,
+ "title": "fix(dashboard): ignore zero-exposure stETH history rows",
+ "base": "main",
+ "base_sha": "d23602614e19904cdc6a6ce880dd89989c748661",
+ "first_head": "61c802c1b241fa64899f8751007830bac3df4c9d",
+ "last_head": "6d2648dbe319920ebf991181826acb40dc456030",
+ "commits": 3,
+ "reviewers": [
+  "chatgpt-codex-connector[bot]",
+  "claude[bot]"
+ ],
+ "findings": [
+  {
+   "id": 3830423746,
+   "author": "claude[bot]",
+   "path": "ui-dashboard/src/lib/canonical-revenue/daily-series.ts",
+   "line": 119,
+   "severity": "P1",
+   "title": "[P1] Returning 0 unconditionally here fabricates a large negative revenue spike on a real full-withdrawal day, instead of the intended \"$0 row.\"",
+   "acted_on": true,
+   "declined": false,
+   "body": "[P1] Returning `0` unconditionally here fabricates a large negative revenue spike on a real full-withdrawal day, instead of the intended \"$0 row.\"\n\nDownstream in `buildRevenueBuckets` (lines ~194-205), `baselineUsd` falls back to `previousReserveTotalsBySource.get(sourceKey)` whenever a prior snapshot exists for this wallet \u2014 including a real, nonzero, *priced* total from the day before. Since this function now returns `0` for the current (zero-exposure) row regardless of history, `dailyYieldUsd = totalYieldUsd(0) - baselineUsd(previousTotalUsd)` becomes a fabricated negative number equal to the wallet's entire prior cumulative yield, silently injected into that day's bucket.\n\nThis isn't hypothetical: `totalEarnedYieldAmount` is **not** monotonic. The indexer recomputes it fresh each snapshot as `realizedYieldAmount + unrealizedYieldAmount` (`indexer-envio/src/handlers/steth/dailySnapshots.ts:218`), and `unrealizedYieldAmount = positiveDelta(balance, principal)` floors to `0` whenever `balance <= principal` (`shared.ts:70-72`). A full withdrawal drives `balanceAmount`, `principalAmount`, and (absent a realized-yield event) `totalEarnedYieldAmount`/`dailyEarnedYieldAmount` all to exact `\"0\"` \u2014 satisfying `isZeroExposureStethSnapshot` the very day after a real nonzero total.\n\nBefore this PR, that row hit `totalYieldUsd === null` and the loop just `continue`d (skipping the day, marking history unpriced) \u2014 not ideal, but not actively wrong. Now it actively corrupts that day's bucket.\n\nSuggested fix: when a row is zero-exposure, treat that day's contribution as exactly `0` instead of diffing against a stale nonzero `previousTotalUsd` \u2014 e.g. reset `previousReserveTotalsBySource` to `0` for this `sourceKey` and add `0` to the bucket directly, bypassing the `totalYieldUsd - baselineUsd` diff for zero-exposure rows specifically. Please also add a regression test where an actively-priced wallet transitions to a zero-exposure row (full withdrawal) \u2014 the new \"keeps mixed active and zero-exposure stETH wallet history complete\" test only covers an always-dormant wallet, not this transition."
+  },
+  {
+   "id": 3830513980,
+   "author": "chatgpt-codex-connector[bot]",
+   "path": "ui-dashboard/src/lib/canonical-revenue/daily-series.ts",
+   "line": 190,
+   "severity": "P1",
+   "title": "Subtract prior yield when a zero row empties a wallet",
+   "acted_on": true,
+   "declined": false,
+   "body": "**<sub><sub>![P1 Badge](https://img.shields.io/badge/P1-orange?style=flat)</sub></sub>  Subtract prior yield when a zero row empties a wallet**\n\nWhen a yielding tracked wallet transfers its entire balance to another tracked wallet, `recordTransfer` moves the balance and principal, so the sender's next snapshot can have all four checked fields at zero while the recipient inherits the unrealized yield. This branch records zero instead of the sender's `0 - previousTotalUsd` delta, while the recipient records a positive delta for the same yield; if the sender is later funded again so its history has a current price, canonical revenue double-counts the transferred yield. Preserve the negative prior-total delta for an established source, and treat the row as zero revenue only when no prior total exists.\n\nUseful? React with \ud83d\udc4d\u00a0/ \ud83d\udc4e."
+  }
+ ],
+ "counts": {
+  "total": 2,
+  "acted_on": 2,
+  "declined": 0,
+  "P1": 2
+ }
+}

@@ -23,8 +23,8 @@ Authority: canonical
 
 - [`.agents/roles/standards-enforcer.md`](../.agents/roles/standards-enforcer.md)
 - [`.agents/roles/verifier.md`](../.agents/roles/verifier.md)
-- [`.agents/skills/babysit-pr/cloud-watch-loop.md`](../.agents/skills/babysit-pr/cloud-watch-loop.md)
 - [`.agents/skills/babysit-pr/SKILL.md`](../.agents/skills/babysit-pr/SKILL.md)
+- [`.agents/skills/backlog-sweep/SKILL.md`](../.agents/skills/backlog-sweep/SKILL.md)
 - [`.agents/skills/deploy-indexer/SKILL.md`](../.agents/skills/deploy-indexer/SKILL.md)
 - [`.agents/skills/doc-garden/SKILL.md`](../.agents/skills/doc-garden/SKILL.md)
 - [`.agents/skills/envio/performance.md`](../.agents/skills/envio/performance.md)
@@ -38,6 +38,7 @@ Authority: canonical
 - [`.agents/skills/forensic-report/SKILL.md`](../.agents/skills/forensic-report/SKILL.md)
 - [`.agents/skills/forensic-report/template.md`](../.agents/skills/forensic-report/template.md)
 - [`.agents/skills/monorepo-import/SKILL.md`](../.agents/skills/monorepo-import/SKILL.md)
+- [`.agents/skills/rank-backlog/SKILL.md`](../.agents/skills/rank-backlog/SKILL.md)
 - [`.agents/skills/ship/SKILL.md`](../.agents/skills/ship/SKILL.md)
 - [`aegis/AGENTS.md`](../aegis/AGENTS.md)
 - [`AGENTS.md`](../AGENTS.md)
@@ -77,8 +78,11 @@ Authority: canonical
 - [`alerts/rules/README.md`](../alerts/rules/README.md)
 - [`docs/deployment.md`](deployment.md)
 - [`docs/evals/documentation-navigation.md`](evals/documentation-navigation.md)
+- [`docs/evals/review-skill.md`](evals/review-skill.md)
 - [`docs/notes/agent-issue-workflow.md`](notes/agent-issue-workflow.md)
 - [`docs/notes/agent-quality-gate-mechanics.md`](notes/agent-quality-gate-mechanics.md)
+- [`docs/notes/backlog-ranking.md`](notes/backlog-ranking.md)
+- [`docs/notes/backlog-sweep.md`](notes/backlog-sweep.md)
 - [`docs/notes/codex-agent-skills.md`](notes/codex-agent-skills.md)
 - [`docs/notes/codex-cloud-setup.md`](notes/codex-cloud-setup.md)
 - [`docs/notes/cross-protocol-context.md`](notes/cross-protocol-context.md)
@@ -197,6 +201,17 @@ Authority: canonical
 - [`docs/adr/0068-sentry-fixture-authoring-policy.md`](adr/0068-sentry-fixture-authoring-policy.md) — Adversarial fixtures are authored to scan clean; no value or line registry
 - [`docs/adr/0069-gate-routing-table-as-data.md`](adr/0069-gate-routing-table-as-data.md) — The quality gate's routing table is data, compiled by the repo's own bash-case translator
 - [`docs/adr/0070-sentry-requeue-settlement-sentinel.md`](adr/0070-sentry-requeue-settlement-sentinel.md) — A withheld terminal label serializes the Sentry archive settlement against the triage re-queue
+- [`docs/adr/0071-susds-launch-aligned-daily-sampler.md`](adr/0071-susds-launch-aligned-daily-sampler.md) — sUSDS actuals use a launch-aligned bounded daily sampler
+- [`docs/adr/0072-md-only-docs-checks-job.md`](adr/0072-md-only-docs-checks-job.md) — The Markdown globs route to a small docs-checks CI job instead of the scripts job
+- [`docs/adr/0073-guardrail-prose-pinned-in-ci.md`](adr/0073-guardrail-prose-pinned-in-ci.md) — Normative guardrail sentences are pinned in CI, and scripts are not
+- [`docs/adr/0074-trove-ledger-parallel-append-only-entity.md`](adr/0074-trove-ledger-parallel-append-only-entity.md) — TroveLedgerEvent is a parallel append-only entity, not a widened TroveOperationEvent
+- [`docs/adr/0075-pr-merge.md`](adr/0075-pr-merge.md) — One sanctioned operator merge path
+- [`docs/adr/0076-fair-quality-gate-coordinator.md`](adr/0076-fair-quality-gate-coordinator.md) — Fair local quality-gate coordination across worktrees
+- [`docs/adr/0077-operator-triggered-backlog-sweep.md`](adr/0077-operator-triggered-backlog-sweep.md) — Operator-triggered backlog sweep with isolated workers
+- [`docs/adr/0078-staged-verification-redesign.md`](adr/0078-staged-verification-redesign.md) — Staged replacement of the mandatory local gate with existing CI
+- [`docs/adr/0079-sealed-exact-file-patch-secret-suppression.md`](adr/0079-sealed-exact-file-patch-secret-suppression.md) — Autoreview permits only sealed exact-file-patch secret suppression
+- [`docs/adr/0081-narrow-dependabot-auto-merge-exception.md`](adr/0081-narrow-dependabot-auto-merge-exception.md) — Narrow Dependabot auto-merge exception
+- [`docs/adr/0082-persistent-issue-board-mutation-mutex.md`](adr/0082-persistent-issue-board-mutation-mutex.md) — Persistent Issue-Board Mutation Mutex
 
 Authority: non-canonical
 
@@ -239,4 +254,7 @@ Authority: non-canonical
 - [`docs/notes/react-compiler-annotation-pilot.md`](notes/react-compiler-annotation-pilot.md) (archived)
 - [`docs/notes/terraform-cicd-hardening-decisions-2026-05.md`](notes/terraform-cicd-hardening-decisions-2026-05.md) (archived)
 - [`docs/notes/ui-dashboard-performance-plan.md`](notes/ui-dashboard-performance-plan.md) (archived)
+- [`docs/notes/verification-redesign-phase-0-evidence.md`](notes/verification-redesign-phase-0-evidence.md)
 - [`docs/PLAN-ai-review-process.md`](PLAN-ai-review-process.md) (archived)
+- [`docs/PLAN-progressive-verification-graph.md`](PLAN-progressive-verification-graph.md)
+- [`docs/PLAN-trove-history-page.md`](PLAN-trove-history-page.md)

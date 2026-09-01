@@ -1,0 +1,92 @@
+{
+  "cell_id": "pr-1999-pipeline-draw1",
+  "pr": 1999,
+  "condition": "pipeline",
+  "draw": 1,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": "gpt-5.6-sol@high",
+  "claims": [
+    "`terraform test` fails — the required PR gate cannot pass: `alerts/rules/peg-rule-definitions.tftest.hcl:68-69` assertion requires `peg_slack_title` to contain `$alert.Annotations.summary` and `$alert.Annotations.resolved_summary`, but `peg-message-templates.tf:13-17` removed both; the Terraform sibling test was not updated",
+    "A recovered rule shows \"Monitoring failed\" forever — `peg-alert-events.ts:105-115`, `route.ts:43-56`: the `Error → Pending` row is neither fetched by `errorStateHistoryUrl` nor classified (`transitionKind` returns `null` when `current` is `Pending`), so the error cycle opened at `Normal → Error` never closes and `pairStateTransitions:356` flushes it as a permanently-unresolved event",
+    "Incidents that start from an Error lose \"lasted X\" on resolution — `peg-alert-events.ts:320-321` (with `:109-110`): `cycleKey` routes any kind starting with `\"error\"` to the `error` cycle, so `Error → Alerting` never opens the alert cycle and the later `Alerting → Normal` falls through to `unpairedCleared` and is emitted with no duration",
+    "Two supplementary queries are now hard dependencies of the whole panel — `route.ts:63-83`: four upstream calls inside a `Promise.all` that rejects on first failure, so if the new error-history queries fail or time out the entire seven-day peg alert history disappears; it should fail open",
+    "Source-less rules are attributed to a \"Price source\" that doesn't exist — `peg-alert-events.ts:230`: `evaluationCause` always calls `pegAlertSourceName`, which returns the literal `\"Price source\"` for an empty source (`peg-alert-copy.ts:47-49`), rendering \"Grafana could not evaluate the Price source Peg rule\" for the seven rules with `source = \"\"`",
+    "Canonical note now contradicts the code — `docs/notes/peg-monitoring.md:118` says \"Slack titles use the severity icon plus that summary\" but the summary is gone; `:132-133` says the backend \"does not read Pending or canceled transitions\" but it now reads Error transitions too",
+    "Monitoring-failure entries compete for the four visible slots — `route.ts:22`: `PEG_ALERTS_MAX_EVENTS = 4` and each error cycle emits two events, so one flapping datasource fills half the panel and two fill it entirely, pushing real peg breaches out of view",
+    "Response byte cap is now per-request — `route.ts:80`: `PEG_ALERTS_MAX_STATE_RESPONSE_BYTES` (4 MiB) is enforced inside the per-URL map, so a single `GET` can buffer up to 16 MiB instead of 8 MiB",
+    "Icon-only Slack title: the attachment title is what Slack shows in mobile push notifications and channel previews, so a page now previews as `🚨` with no cause — a real on-call ergonomics trade"
+  ],
+  "matched_ids": [
+    3830366234,
+    3830366243,
+    3830366247,
+    3830366556,
+    3830371325,
+    3830416461
+  ],
+  "judge_reasoning": {
+    "3830366234": "Review finding #1 names peg-rule-definitions.tftest.hcl:68-69 requiring summary/resolved_summary against the now icon-only title, and confirms the terraform test failure — same defect.",
+    "3830366243": "Review follow-up #6 flags docs/notes/peg-monitoring.md:118 saying Slack titles use icon plus summary, now contradicted by the icon-only title — same runbook/copy-contract drift.",
+    "3830366247": "Review finding #2 states errorStateHistoryUrl only fetches current=Error and previous=Error&current=Normal and that transitionKind returns null for Pending, so Error→Pending recovery is missed — same defect.",
+    "3830366547": "Review #3 describes the opposite direction (Error→Alerting routed to the error lane losing 'lasted X' duration); it never identifies that after Alerting→Error→Normal the earlier raised stays open showing an active breach.",
+    "3830366556": "Review finding #2 explicitly shows the error cycle opened at Normal→Error never closing when recovery goes through Pending, leaving a permanently unresolved 'Grafana could not evaluate' row — same defect.",
+    "3830371307": "The review never examines the alert-rules-lint.test.mjs marker-slice extraction or the unscoped link assertions; it only notes the .mjs mirror was updated.",
+    "3830371325": "Review #3 targets the same error-recovered-alerting pairing site (cycleKey/pairStateTransitions), naming that it closes the error cycle without opening the alert cycle so the later clear is unpaired.",
+    "3830416461": "Review follow-up #5 identifies evaluationCause calling pegAlertSourceName on an empty source, yielding 'Price source' for rules with no source — same defect."
+  },
+  "novel": {
+    "claims": 9,
+    "novelReal": 4,
+    "novelWrong": 0,
+    "novelVague": 1,
+    "restatedKnown": 4,
+    "alreadyMatched": 6,
+    "verdicts": {
+      "1": {
+        "class": "known",
+        "why": "peg-rule-definitions.tftest.hcl:67-69 does require Annotations.summary/resolved_summary in peg_slack_title, which peg-message-templates.tf now omits — this is the known 'Update the stale Terraform title assertion' item"
+      },
+      "2": {
+        "class": "known",
+        "why": "transitionKind (peg-alert-events.ts:105-115) returns null for previous=Error/current=Pending and errorStateHistoryUrl only asks for Error/Normal — this is the known ':114 Include recoveries that resume in Pending' / ':116 Pending recovery orphans error cycle' pair"
+      },
+      "3": {
+        "class": "real",
+        "why": "traced pairStateTransitions: cycleKey:321 sends error-recovered-alerting to the 'error' cycle, so Normal→Error→Alerting→Normal never opens an 'alert' cycle; the later cleared row hits unpairedCleared:346 and is flushed at :355 with raised undefined, so phraseTransition:270 omits 'lasted X' (distinct from the known Alerting→Error→Normal 'breach stays active' case)"
+      },
+      "4": {
+        "class": "real",
+        "why": "route.ts:63-83 + :109-112 — fetchJson now issues 2 URLs each inside Promise.all, and both Promise.all layers reject on first failure, so a failing/timing-out Error-history query 502/504s the whole seven-day panel instead of degrading"
+      },
+      "5": {
+        "class": "known",
+        "why": "evaluationCause:230 always uses pegAlertSourceName, which returns 'Price source' for empty source (peg-alert-copy.ts:47-49) — this is the known ':230 Label source-less evaluation failures by rule'"
+      },
+      "6": {
+        "class": "known",
+        "why": "docs/notes/peg-monitoring.md:119 still says 'Slack titles use the severity icon plus that summary' and is untouched by the diff — this is the known 'Keep the Peg runbook aligned with the new title'"
+      },
+      "7": {
+        "class": "real",
+        "why": "route.ts:22 PEG_ALERTS_MAX_EVENTS=4 and pairStateTransitions:350-351 pushes two events per closed error cycle, sorted purely by recency in combinePegAlertEvents:413-416, so evaluation-failure pairs displace real breaches with no prioritization"
+      },
+      "8": {
+        "class": "real",
+        "why": "grafana-read.ts:54-76 bounds each response individually and route.ts now runs 4 concurrent fetches (2 per fetchJson) each with the 4 MiB cap, so peak buffered bytes per GET goes from 8 MiB to 16 MiB"
+      },
+      "9": {
+        "class": "vague",
+        "why": "the template change to an icon-only title is verified (peg-message-templates.tf:13-17), but the claim asserts external Slack preview behavior and self-labels it a deliberate 'trade' with no concrete defect or fix"
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 1352,
+  "usd": 3.552565500000001,
+  "scoring_usd": 1.427584
+}

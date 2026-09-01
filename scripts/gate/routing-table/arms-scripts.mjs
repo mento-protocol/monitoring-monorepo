@@ -23,6 +23,24 @@
 export const SCRIPT_ARMS = [
   {
     patterns: [
+      "scripts/gate/darwin-process-identity.c",
+      "scripts/gate/darwin-process-identity-runtime.inc.c",
+    ],
+    effects: [
+      { surface: "scripts" },
+      {
+        command: "pnpm agent:quality-gate:test",
+        reason: "quality-gate process containment changed",
+      },
+      {
+        why: "Autoreview materializes and compiles both native identity sources as part of its trusted Darwin containment runtime.",
+        command: "pnpm agent:autoreview:test",
+        reason: "autoreview Darwin containment runtime changed",
+      },
+    ],
+  },
+  {
+    patterns: [
       "docs/*",
       "README.md",
       "AGENTS.md",
@@ -201,6 +219,21 @@ export const SCRIPT_ARMS = [
           },
           {
             patterns: [
+              "scripts/gate/quality-gate-coordinator.sh",
+              "scripts/gate/quality-gate-coordinator-support.sh",
+              "scripts/gate/darwin-process-lineage.sh",
+              "scripts/gate/trunk-check-once.sh",
+              "scripts/gate/trunk-check-once.test.sh",
+            ],
+            effects: [
+              {
+                command: "pnpm agent:quality-gate:test",
+                reason: "quality-gate coordinator changed",
+              },
+            ],
+          },
+          {
+            patterns: [
               "scripts/agent-autoreview.sh",
               "scripts/agent-autoreview.test.sh",
             ],
@@ -208,6 +241,12 @@ export const SCRIPT_ARMS = [
               {
                 command: "pnpm agent:autoreview:test",
                 reason: "agent autoreview adapter changed",
+              },
+              {
+                why: "merge-pr.test.mjs parses `running_inside_codex_sandbox()` out of this file and fails when the merge wrapper's AUTOMATION_ENV_MARKERS no longer covers every marker it reads. Without this effect the drift guard never runs on the edit that causes the drift.",
+                command: "pnpm pr:merge:test",
+                reason:
+                  "autoreview holds the Codex-session detector the merge wrapper mirrors",
               },
             ],
           },
@@ -308,6 +347,23 @@ export const SCRIPT_ARMS = [
       {
         why: "The manifest the self-run Sentry-suite gate reconciles against (#1779, ADR 0062). A .json edit reaches no other scripts/ arm, so claim the surface here; the repo-specific block below routes the two gate commands for this file along with every manifest-owned suite.",
         surface: "scripts",
+      },
+    ],
+  },
+  {
+    patterns: ["scripts/repo-health/guardrail-prose.json"],
+    effects: [
+      {
+        why: "The pin list check-guardrail-prose.mjs reads. Like the Sentry manifest above, a .json under scripts/ reaches no module arm — those key off `.mjs` — and would otherwise fall through to the bare `scripts/*` catch-all with no commands at all. Editing a pin IS the deliberate rule change this check exists to surface, so it has to run the checker against the edited list.",
+        surface: "scripts",
+      },
+      {
+        command: "node scripts/repo-health/check-guardrail-prose.test.mjs",
+        reason: "guardrail prose pin list changed",
+      },
+      {
+        command: "node scripts/repo-health/check-guardrail-prose.mjs",
+        reason: "guardrail prose pin list changed",
       },
     ],
   },

@@ -3,7 +3,7 @@ title: Deployment Guide
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-13
+last_verified: 2026-08-26
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -66,6 +66,8 @@ pnpm deploy:indexer:logs "$COMMIT" --errors-only --since 2h
 pnpm deploy:indexer:perf "$COMMIT"
 pnpm deploy:indexer:verify "$COMMIT"
 pnpm deploy:indexer:promote "$COMMIT"
+# After the full five-minute propagation window:
+pnpm deploy:indexer:verify "$COMMIT" --prod
 ```
 
 Promotion authority depends on the request. For a monitor-only or babysit
@@ -82,6 +84,46 @@ UI-verification path. Do not infer promotion approval from a request to
 monitor, preload, or report readiness; an explicitly authorized end-to-end
 production deploy is a separate case.
 
+### Deployment Cleanup Inventory
+
+Before deleting an Envio deployment to free a slot, list every live deployment.
+Record its exact id, resolved commit when available, production status, creation
+time, per-chain sync state, canonical `main` or `envio` reachability, and role.
+Use target, current production, rollback candidate, obsolete non-prod, or
+unknown as the role. Record the subtype and deletion reason separately for an
+obsolete non-prod deployment. Envio registry data does not prove who triggered
+a deployment or which branch created it. Attribute either only from matching
+GitHub evidence.
+
+Before the initial classification, verify that `origin` is the canonical
+`mento-protocol/monitoring-monorepo` remote and refresh both reachability refs:
+
+```bash
+git fetch origin \
+  "refs/heads/main:refs/remotes/origin/main" \
+  "+refs/heads/envio:refs/remotes/origin/envio"
+```
+
+The forced `envio` refspec is required because the deploy workflow
+force-updates that branch. Stop if `origin` is not canonical or either ref
+cannot refresh. Use the freshly fetched refs for classification.
+
+Retain the current production deployment, the active target, each known-good
+rollback candidate, and every deployment with unresolved provenance. Group the
+remaining obsolete non-prod deployments. Ask once for approval to delete one
+exact bounded set, with the id, classification, and deletion reason for each
+deployment.
+Immediately before starting the approved deletion batch, repeat the two-ref
+canonical fetch, then re-fetch the full registry and the status of every live
+deployment. Reclassify every deployment. Stop without deleting if either ref
+cannot refresh. Stop and request new approval if any change affects an id,
+production status, classification-relevant sync state, reachability, role, or
+retained set. During the batch, repeat this full canonical-ref, registry, and
+status check before each later deletion. Treat the absence of ids already
+deleted in this batch as the only expected inventory change. Stop and request
+new approval for any other difference. Delete only the remaining exact approved
+ids while the fresh state matches the expected batch state.
+
 ### Force Retrigger Without Code Changes
 
 If Envio gets stuck or you need to retrigger without a code change:
@@ -94,19 +136,23 @@ pnpm deploy:indexer --yes
 
 ### After Redeployment Checklist
 
-1. Wait for the deployed commit to register and catch up to the chain head (`pnpm deploy:indexer:status "$COMMIT" --watch --compact` for low-noise agent output, `pnpm deploy:indexer:status "$COMMIT" --watch` for the full terminal table, or [envio.dev/app](https://envio.dev/app)).
+1. Wait for the deployed commit to register and catch up to the chain head (`pnpm deploy:indexer:status "$COMMIT" --watch --compact` for low-noise agent output, `pnpm deploy:indexer:status "$COMMIT" --watch` for the full terminal table, or [envio.dev/app](https://envio.dev/app)). For a long sync, compare timestamped status samples. Report each chain's processed height, head height, remaining gap, net gap-closure rate, rough gap ETA, and whether fetch or processing is behind. Treat a zero gap as a gap ETA of zero for that sample. It does not establish sync completion. A stable or growing positive gap on an incomplete chain blocks completion and makes the overall gap ETA unknown. Otherwise, report the incomplete chain with the largest credible gap ETA as the limiting chain. When no incomplete chain has a positive gap, report an overall gap ETA of zero. Continue waiting until every chain has a non-empty `timestamp_caught_up_to_head_or_endblock`; the status wrapper's terminal `caught_up` state uses the same signal. Send short updates at the runtime's required cadence and this full quantitative summary at least every five minutes. Compare against a prior successful production run only when recorded evidence exists for the same chain and comparable configuration.
 2. Inspect build logs and explicitly marked runtime errors with commit-scoped commands (`pnpm deploy:indexer:logs "$COMMIT" --build` and `pnpm deploy:indexer:logs "$COMMIT" --errors-only --since 2h`). Use `--level warn` separately when warnings are relevant; Envio can carry them as stdout records. Error-only inspection owns Envio's 100-record limit and fails closed when the page is full; narrow `--since` and retry until the result is complete.
 3. Capture a combined status/metrics/log snapshot for comparison (`pnpm deploy:indexer:perf "$COMMIT"`).
-4. Verify sync, metrics, endpoint resolution, core rows, and fail-closed Polygon replay semantics (`pnpm deploy:indexer:verify "$COMMIT"`). The verifier reads `indexer-envio/config/replay-integrity.json` from that exact commit, so a pre-invariant replay cannot pass merely because later rows look healthy. A caught-up status alone is only `SYNCED_PENDING_DATA_VERIFY`.
+4. Verify sync, metrics, endpoint resolution, core rows, sUSDS post-launch sampler progress/freshness, and fail-closed Polygon replay semantics (`pnpm deploy:indexer:verify "$COMMIT"`). The verifier reads `indexer-envio/schema.graphql` from the exact deployment commit. It uses `SusdsYieldLaunchBaseline` as the sUSDS sampler capability marker. When the marker exists, the verifier requires the exact immutable launch row and the daily snapshot probe. A target schema with `SusdsYieldSamplerProgress` must prove post-launch freshness from that heartbeat-only row, so a recent movement cannot hide a stalled sampler. An older schema without the progress entity can use the latest daily row only when the exact target `indexer-envio/src/handlers/susdsEvents.ts` is readable and has no event-time snapshot writer. A legacy rollback schema without the launch marker omits all sampler-only probes and checks. An unreadable or inconsistent target schema or legacy handler fails closed and retains all strict sampler requirements. The sUSDS sampler rejects a lag of 600 blocks or more and samples older than 24 hours. The baseline check prevents a recent legacy daily row from passing without the launch-aligned sampler on deployments that implement the baseline contract. The verifier also reads `indexer-envio/config/replay-integrity.json` from that exact commit, so a pre-invariant replay cannot pass merely because later rows look healthy. A caught-up status alone is only `SYNCED_PENDING_DATA_VERIFY`.
 5. Capture the current production commit for rollback, then promote the same caught-up, semantically verified commit (`pnpm deploy:indexer:promote "$COMMIT"`) and confirm its `prod_status=prod`. The `deploy-indexer` skill owns the exact prefix-safe query and guarded rollback command.
 6. Wait the full five-minute static-endpoint propagation window.
-7. Trigger a Vercel redeploy only if dashboard code or GraphQL fields changed and the dashboard has not already deployed from `main`.
-8. Verify monitoring.mento.org in the browser, including the affected pages and console errors. A bare successful promote is not rollout closeout.
+7. Verify that the promoted commit and its semantic data are available through the repo-configured static production endpoint (`pnpm deploy:indexer:verify "$COMMIT" --prod`). In `--prod` mode, the verifier probes `https://indexer.hyperindex.xyz/2f3dd15/v1/graphql` directly. It does not use registry endpoint metadata or resolve a per-deployment URL. It compares the static response's built-in per-chain `_meta.readyAt` and `startBlock` values with the target deployment status. This fails closed when the static route still serves the prior deployment, even when both deployments return the same custom rows. The built-in identity query also works for a legacy rollback schema. This check is separate from the pre-promotion candidate check.
+8. Trigger a Vercel redeploy only if dashboard code or GraphQL fields changed and the dashboard has not already deployed from `main`. Wait for that deployment before the application checks.
+9. For an sUSDS sampler or reserve-yield change, use an authorized same-origin browser session to fetch `/api/reserve-yield?closeout=<short-commit>` with `cache: "no-store"`. The query value marks the target in browser and network logs and gives it a distinct shared HTTP cache key; the route does not read it. Always require HTTP 200, `earnedYieldError: null`, `susdsYieldSignalUnavailable: false`, `reserveCurrentHoldingsClassificationFailed: false`, a boolean `susdsSnapshotSourceRequired`, and `hasUnindexedSusdsHolding: false`. Treat `susdsSnapshotSourceRequired: true` as current sUSDS exposure that exists or cannot be ruled out. A positive finite sUSDS holding must not pair with `susdsSnapshotSourceRequired: false`. If the current source signal is true or a nonzero historical sUSDS earned signal exists, require finite `susdsEarnedYieldUsd` and a valid `susdsEarnedYieldAsOf`. Do not use aggregate `earnedYieldAsOf` for this proof because stETH can supply it independently. If the current source signal is true, also require an sUSDS holding with finite `earnedYieldUsd`; this requirement fails closed when malformed sUSDS exposure produces no usable holding. A clean state without either signal may return `susdsEarnedYieldUsd: null` or finite zero and does not require an sUSDS holding or `susdsEarnedYieldAsOf`.
+10. Verify monitoring.mento.org in the browser, including the affected pages and console errors. For an sUSDS sampler change with a true current source signal or a nonzero historical signal, verify `/revenue` shows sUSDS actuals without pending, unavailable, or stale labels. In a clean state without either signal, verify that absent sUSDS history does not add one of those labels; do not require a current sUSDS actual. A bare successful promote is not rollout closeout.
 
 Reserve-yield actuals deploy through the primary `mento` Envio project. The
-Ethereum sUSDS handlers in `config.multichain.mainnet.yaml` are event-only, and
-stETH adds a launch-aligned sub-daily wallet balance sampler. The historical sUSDS
-onBlock heartbeat is not part of the hosted path.
+Ethereum sUSDS handlers in `config.multichain.mainnet.yaml` use sparse token
+events plus a launch-aligned 600-block daily sampler. Events refresh the current
+daily row, while the sampler alone advances its progress row. stETH uses a
+launch-aligned sub-daily wallet balance sampler. The historical every-block
+sUSDS heartbeat is not part of the hosted path.
 
 To check whether Envio's persistent effect cache is active for a deployment:
 
@@ -151,11 +197,14 @@ commit:
      last-good SHA to be in `origin/envio` history, refuses to push while Envio
      already has 3 live deployments, then force-pushes the last-good SHA to the
      `envio` branch and prints the resync-then-promote checklist. Budget
-     10-30+ minutes for the from-genesis resync. If Envio is at capacity,
-     delete a stale non-prod deployment first
+     10-30+ minutes for the from-genesis resync. If Envio is at capacity, apply
+     [Deployment Cleanup Inventory](#deployment-cleanup-inventory) before
+     deleting an approved non-prod deployment
      ([envio.dev/app](https://envio.dev/app/mento-protocol/mento)).
 
-3. Verify [monitoring.mento.org](https://monitoring.mento.org) loads data.
+3. Wait the full five-minute propagation window. Run
+   `pnpm deploy:indexer:verify <last-good-sha> --prod`, then verify the affected
+   production API, dashboard page, and browser console.
 
 4. Roll forward later by promoting the fixed deployment:
    `pnpm deploy:indexer:promote <fixed-sha>`.
@@ -378,6 +427,12 @@ protection must reject untrusted code, and operators must not manually deploy
 autofix branches. See [ADR 0019](adr/0019-vercel-path-aware-deploys.md).
 
 The project is named `monitoring-dashboard` and lives at [monitoring.mento.org](https://monitoring.mento.org).
+
+After a merged change that can affect dynamic route metadata or an Open Graph
+image deploys, including a change to a route dependency, run the
+[dynamic social-preview verification](notes/dashboard-verification.md#dynamic-social-preview-verification)
+against the production origin. A successful Vercel deployment does not prove
+that the production metadata, image, cache policy, or Slack unfurl is correct.
 
 ### Infrastructure (Terraform)
 

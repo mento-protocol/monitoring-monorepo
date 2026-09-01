@@ -3,15 +3,8 @@ name: Schema Diff — Advisory
 on:
   pull_request:
     branches: [main]
-    # NO workflow-level `paths:` filter — intentionally runs on every PR.
-    # This workflow posts a sticky PR comment AND has a "Clear stale
-    # schema-diff comment" step that deletes it when the schema reverts to
-    # base. A workflow-level `paths:` filter would skip the whole run on a
-    # revert PR (schema back to base → no longer in the diff), leaving the
-    # stale "breaking change" comment stranded. So the run/skip decision must
-    # stay in-job (the `filter` + `decide` steps below), where the cleanup
-    # path can still execute. The wasted boot on non-schema PRs is the price
-    # of guaranteed sticky-comment cleanup.
+    # Keep the workflow-level trigger unchanged in M2. Routing stays in-job.
+    # Results now use the job summary. This workflow does not mutate PR comments.
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -22,59 +15,30 @@ permissions:
 
 jobs:
   schema-diff:
-    # Always runs (required-status safe — no `paths:` filter at workflow
-    # level). The `filter` step is `continue-on-error: true`, and the
-    # `decide` step computes whether to run the diff.
-    #
-    # Decision matrix (`decide` outputs):
-    #   run=true,  read_only=false → same-repo PR + schema changed (or filter failed)
-    #                                → run diff + post sticky comment
-    #   run=false, read_only=false → same-repo PR + schema unchanged
-    #                                → skip diff + clear stale sticky comment
-    #   run=false, read_only=true  → fork or Dependabot PR
-    #                                → skip diff + skip sticky comment (token is
-    #                                  read-only; both posting AND deleting a PR
-    #                                  comment requires write permission)
-    #
-    # Advisory only — exit code is always 0.
+    # Advisory only. Fork and Dependabot PRs report a skip reason. A failed
+    # path filter runs the schema diff fail-closed.
     name: GraphQL schema diff
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     timeout-minutes: 5
-    # `pull-requests: write` is required to post the sticky PR comment.
-    # `pull-requests: read` is required by `dorny/paths-filter` in PR mode.
-    # Fork PRs and Dependabot get a read-only token even when write is declared;
-    # the `decide` step sets read_only=true for those cases so both the post
-    # and the delete sticky-comment steps are skipped.
     permissions:
       contents: read
-      pull-requests: write
+      pull-requests: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # Need full history to `git show` the base-ref schema.
           fetch-depth: 0
-          # The sticky-comment action authenticates via the API token it is
-          # handed directly; the write-scoped GITHUB_TOKEN must not persist into
-          # .git/config, where PR-head code (incl. a machine-authored autofix
-          # diff) could read it. autofix CI-trust boundary — see
-          # check-autofix-ci-trust.mjs, issue #1460.
           persist-credentials: false
       - id: filter
-        # `continue-on-error: true` keeps a failed path-detection step from
-        # failing the job; the `decide` step below interprets a missing/failed
-        # filter as "run the full gate" (fail-closed).
+        # A failed filter must run the full check, not skip it.
         continue-on-error: true
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
           filters: |
-            # schema.graphql is the primary input for this job. The workflow
-            # file, the diff script, and the graphql package are also included
-            # so that changes to the checker itself trigger a self-test run
-            # (same pattern as the other required-status gates).
             schema:
               - indexer-envio/schema.graphql
               - .github/workflows/schema-diff.yml
               - scripts/schema-diff.mjs
+              - scripts/schema-diff.test.mjs
               - package.json
               - pnpm-lock.yaml
               - pnpm-workspace.yaml
@@ -90,47 +54,35 @@ jobs:
           BASE_REPO: ${{ github.repository }}
           PR_ACTOR: ${{ github.actor }}
         run: |
-          # Fork PRs and Dependabot get a read-only token even when the job
-          # declares pull-requests: write.  Both posting AND deleting a sticky
-          # PR comment require write permission, so all comment steps must be
-          # skipped for these contexts.  Set read_only=true so the caller can
-          # distinguish "token unavailable" from "schema unchanged".
           if [[ "$PR_ACTOR" == "dependabot[bot]" ]]; then
-            echo "run=false"       >> "$GITHUB_OUTPUT"
-            echo "read_only=true"  >> "$GITHUB_OUTPUT"
-            echo "PR from dependabot[bot] — read-only token, skipping schema-diff PR comment."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "reason=Dependabot pull requests do not run schema diff." >> "$GITHUB_OUTPUT"
           elif [[ -n "$PR_HEAD_REPO" && "$PR_HEAD_REPO" != "$BASE_REPO" ]]; then
-            echo "run=false"       >> "$GITHUB_OUTPUT"
-            echo "read_only=true"  >> "$GITHUB_OUTPUT"
-            echo "PR from fork '$PR_HEAD_REPO' — read-only token, skipping schema-diff PR comment."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "reason=Fork pull requests do not run schema diff." >> "$GITHUB_OUTPUT"
           elif [[ "$FILTER_OUTCOME" != "success" ]]; then
-            echo "run=true"        >> "$GITHUB_OUTPUT"
-            echo "read_only=false" >> "$GITHUB_OUTPUT"
-            echo "Path-filter outcome is '$FILTER_OUTCOME' (expected 'success') — failing closed, running schema diff."
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "Path-filter outcome is '$FILTER_OUTCOME'; running schema diff fail-closed."
           elif [[ "$SCHEMA_CHANGED" == "true" ]]; then
-            echo "run=true"        >> "$GITHUB_OUTPUT"
-            echo "read_only=false" >> "$GITHUB_OUTPUT"
-            echo "schema.graphql changed — running schema diff."
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "Schema inputs changed; running schema diff."
           else
-            echo "run=false"       >> "$GITHUB_OUTPUT"
-            echo "read_only=false" >> "$GITHUB_OUTPUT"
-            echo "schema.graphql unchanged — skipping schema diff."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "reason=Schema inputs did not change." >> "$GITHUB_OUTPUT"
           fi
       - uses: ./.github/actions/pnpm-install
         if: steps.decide.outputs.run == 'true'
+      - name: Test schema diff input handling
+        if: steps.decide.outputs.run == 'true'
+        run: node --test scripts/schema-diff.test.mjs
       - name: Export base schema
         if: steps.decide.outputs.run == 'true'
         env:
           BASE_REF: ${{ github.base_ref }}
-        run: |
-          git show "origin/${BASE_REF}:indexer-envio/schema.graphql" > /tmp/schema-base.graphql
+        run: git show "origin/${BASE_REF}:indexer-envio/schema.graphql" > /tmp/schema-base.graphql
       - name: Run schema diff
         if: steps.decide.outputs.run == 'true'
-        # Advisory: always exits 0. The diff output is the signal.
-        # If schema-diff.mjs fails (e.g. an unrecognised Envio directive makes
-        # the parser throw), capture the error into the output file so the
-        # sticky PR comment surfaces a diagnostic rather than posting an empty
-        # comment with no signal.
+        # Parser failures stay advisory and become the visible result.
         run: |
           if ! node scripts/schema-diff.mjs /tmp/schema-base.graphql indexer-envio/schema.graphql \
               > /tmp/schema-diff-output.md 2>/tmp/schema-diff-stderr.txt; then
@@ -145,21 +97,39 @@ jobs:
             } > /tmp/schema-diff-output.md
           fi
           cat /tmp/schema-diff-output.md
-      - name: Post sticky PR comment
-        if: steps.decide.outputs.run == 'true'
-        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
-        with:
-          header: schema-diff
-          path: /tmp/schema-diff-output.md
-      - name: Clear stale schema-diff comment
-        # Only runs for same-repo PRs where the schema is unchanged (run=false,
-        # read_only=false). Fork/Dependabot PRs also set run=false but have a
-        # read-only token — deleting a PR comment requires write permission, so
-        # they must not reach this step.
-        if: >-
-          steps.decide.outputs.run == 'false' &&
-          steps.decide.outputs.read_only == 'false'
-        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
-        with:
-          header: schema-diff
-          delete: true
+      - name: Publish schema diff summary
+        if: always()
+        env:
+          SHOULD_RUN: ${{ steps.decide.outputs.run }}
+          SKIP_REASON: ${{ steps.decide.outputs.reason }}
+        run: |
+          if [[ "$SHOULD_RUN" != "true" ]]; then
+            {
+              echo "## GraphQL Schema Diff"
+              echo ""
+              echo "${SKIP_REASON:-Schema-diff routing did not produce a decision; check the job log.}"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          if [[ ! -s /tmp/schema-diff-output.md ]]; then
+            {
+              echo "## GraphQL Schema Diff"
+              echo ""
+              echo "> **Advisory:** Schema diff did not produce output; check the job log."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          readonly max_summary_bytes=60000
+          body_bytes="$(wc -c < /tmp/schema-diff-output.md)"
+          if (( body_bytes > max_summary_bytes )); then
+            head -c "$max_summary_bytes" /tmp/schema-diff-output.md >> "$GITHUB_STEP_SUMMARY"
+            {
+              echo ""
+              echo ""
+              echo "> **Advisory:** Output truncated at ${max_summary_bytes} bytes; use the job log for the full diff."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            cat /tmp/schema-diff-output.md >> "$GITHUB_STEP_SUMMARY"
+          fi

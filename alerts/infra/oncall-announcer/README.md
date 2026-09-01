@@ -19,7 +19,7 @@ Slack.
 4. Reconciles the `@support-engineer` Slack usergroup to exactly one member on
    every run.
 
-The default schedule checks at 10:05 and 10:20 every Sunday in
+The default schedule checks at 10:05 and 10:20 every Monday in
 `Europe/Berlin`, shortly after the observed 10:00 weekly handover. State dedupe
 prevents duplicate Slack messages when the rotation has not changed, and the
 stable Slack `client_msg_id` lets Cloud Scheduler retries dedupe an accepted

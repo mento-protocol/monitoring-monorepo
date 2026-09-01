@@ -42,6 +42,13 @@ fi
 
 echo "🚀 Promoting deployment $COMMIT to production..."
 pnpm exec envio-cloud deployment promote "$ENVIO_INDEXER" "$COMMIT" "$ENVIO_ORG" "$@"
+VERIFY_COMMIT="$COMMIT"
+if RESOLVED_FULL_COMMIT=$(git rev-parse --verify "$COMMIT^{commit}" 2>/dev/null); then
+  VERIFY_COMMIT="$RESOLVED_FULL_COMMIT"
+fi
 echo ""
 echo "✅ Deployment $COMMIT is now production."
-echo "   Verify: https://monitoring.mento.org"
+echo "   Wait the full 5-minute propagation window, then run:"
+echo "      pnpm deploy:indexer:verify $VERIFY_COMMIT --prod"
+echo "   Then follow .agents/skills/deploy-indexer/SKILL.md Phase 7 for the"
+echo "   affected production API, dashboard page, and browser console."

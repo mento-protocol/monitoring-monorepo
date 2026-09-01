@@ -1,12 +1,12 @@
-<!-- agent-context: title="Mento v3 Envio HyperIndex Indexer" status=active owner=eng canonical=true last_verified=2026-07-24 doc_type=reference scope=indexer-envio review_interval_days=90 garden_lane=package-readmes-reference -->
+<!-- agent-context: title="Mento v3 Envio HyperIndex Indexer" status=active owner=eng canonical=true last_verified=2026-08-23 doc_type=reference scope=indexer-envio review_interval_days=90 garden_lane=package-readmes-reference -->
 
 # Mento v3 Envio HyperIndex Indexer
 
 Multichain Envio HyperIndex indexer for Mento v3 — Ethereum reserve-yield (1),
 Celo Mainnet (42220), Monad Mainnet (143), and Polygon Mainnet (137). Tracks FPMM pool activity,
-oracle health, trading limits, rebalancer liveness, event-driven sUSDS reserve
-yield, and stETH reserve yield with a sub-daily wallet balance sampler that
-writes daily snapshots. The historical sUSDS `onBlock` heartbeat is
+oracle health, trading limits, rebalancer liveness, sUSDS reserve yield with a
+launch-aligned bounded daily sampler, and stETH reserve yield with a sub-daily
+wallet balance sampler. The historical every-block sUSDS heartbeat is
 intentionally excluded from the hosted path.
 
 ## What It Does
@@ -39,24 +39,24 @@ event list; the table highlights the main monitoring surfaces.
 
 The schema is the source of truth for the complete entity list.
 
-| Entity group            | Description                                                                                                                                                                     |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Pool state              | `Pool`, `DeviationThresholdBreach`, `OracleSnapshot`, `OracleFeedState`, `OracleExpiryState`, `TradingLimit`                                                                    |
-| Pool strategies         | `PoolLiquidityStrategy` (authoritative active many-to-many registry; `Pool.rebalancerAddress` is compatibility-only)                                                            |
-| Pool activity           | `SwapEvent`, `LiquidityEvent`, `ReserveUpdate`, `RebalanceEvent`, `LiquidityPosition`, `FactoryDeployment`                                                                      |
-| Pool rollups            | `PoolSnapshot`, `PoolDailySnapshot`, `PoolDailyVolumeSnapshot`, `PoolDailyFeeSnapshot`                                                                                          |
-| Protocol fees           | `ProtocolFeeTransfer`                                                                                                                                                           |
-| Legacy v2 / Broker      | `BrokerSwapEvent`, `BrokerDailySnapshot`, `BrokerExchangeDailySnapshot`, `BrokerTraderDailySnapshot`                                                                            |
-| Broker aggregators      | `BrokerAggregatorDailySnapshot`, `BrokerAggregatorTraderDayMarker`, `BrokerVolumeWindowSnapshot`                                                                                |
-| BiPoolManager           | `BiPoolExchange`, `BucketUpdate`                                                                                                                                                |
-| VirtualPools            | `VirtualPoolLifecycle`                                                                                                                                                          |
-| Open Liquidity Strategy | `OlsPool`, `OlsLiquidityEvent`, `OlsLifecycleEvent`                                                                                                                             |
-| Circuit breakers        | `Breaker`, `BreakerConfig`, `BreakerTripEvent`, `RateFeedDependency`                                                                                                            |
-| Bridge flows            | `BridgeTransfer`, `BridgeAttestation`, `BridgeDailySnapshot`, `BridgeBridger`, `WormholeNttManager`, `WormholeTransferDetail`, `WormholeDestPending`, `WormholeTransferPending` |
-| Volume and participants | `TraderDailySnapshot`, `TraderPoolDailySnapshot`, `AggregatorDailySnapshot`, `VolumeWindowSnapshot`                                                                             |
-| Liquity / CDP           | Instance, collateral, trove, stability-pool, reserve-trove, and daily-snapshot entities                                                                                         |
-| Stable supply           | Token supply, custody state, and daily-snapshot entities                                                                                                                        |
-| Reserve yield           | Ethereum sUSDS/stETH movement, cost-basis, position, summary, and daily-snapshot entities; stETH also records `StethWalletLaunchBaseline` for the balance sampler               |
+| Entity group            | Description                                                                                                                                                                             |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Pool state              | `Pool`, `DeviationThresholdBreach`, `OracleSnapshot`, `OracleFeedState`, `OracleExpiryState`, `TradingLimit`                                                                            |
+| Pool strategies         | `PoolLiquidityStrategy` (authoritative active many-to-many registry; `Pool.rebalancerAddress` is compatibility-only)                                                                    |
+| Pool activity           | `SwapEvent`, `LiquidityEvent`, `ReserveUpdate`, `RebalanceEvent`, `LiquidityPosition`, `FactoryDeployment`                                                                              |
+| Pool rollups            | `PoolSnapshot`, `PoolDailySnapshot`, `PoolDailyVolumeSnapshot`, `PoolDailyFeeSnapshot`                                                                                                  |
+| Protocol fees           | `ProtocolFeeTransfer`                                                                                                                                                                   |
+| Legacy v2 / Broker      | `BrokerSwapEvent`, `BrokerDailySnapshot`, `BrokerExchangeDailySnapshot`, `BrokerTraderDailySnapshot`                                                                                    |
+| Broker aggregators      | `BrokerAggregatorDailySnapshot`, `BrokerAggregatorTraderDayMarker`, `BrokerVolumeWindowSnapshot`                                                                                        |
+| BiPoolManager           | `BiPoolExchange`, `BucketUpdate`                                                                                                                                                        |
+| VirtualPools            | `VirtualPoolLifecycle`                                                                                                                                                                  |
+| Open Liquidity Strategy | `OlsPool`, `OlsLiquidityEvent`, `OlsLifecycleEvent`                                                                                                                                     |
+| Circuit breakers        | `Breaker`, `BreakerConfig`, `BreakerTripEvent`, `RateFeedDependency`                                                                                                                    |
+| Bridge flows            | `BridgeTransfer`, `BridgeAttestation`, `BridgeDailySnapshot`, `BridgeBridger`, `WormholeNttManager`, `WormholeTransferDetail`, `WormholeDestPending`, `WormholeTransferPending`         |
+| Volume and participants | `TraderDailySnapshot`, `TraderPoolDailySnapshot`, `AggregatorDailySnapshot`, `VolumeWindowSnapshot`                                                                                     |
+| Liquity / CDP           | Instance, collateral, trove, stability-pool, reserve-trove, and daily-snapshot entities                                                                                                 |
+| Stable supply           | Token supply, custody state, and daily-snapshot entities                                                                                                                                |
+| Reserve yield           | Ethereum sUSDS/stETH movement, cost-basis, position, summary, and daily-snapshot entities; sUSDS records heartbeat-only sampler progress; both tokens record immutable launch baselines |
 
 ### Pool ID Format
 
@@ -275,53 +275,42 @@ pnpm deploy:indexer:logs "$COMMIT" --errors-only --since 2h
 pnpm deploy:indexer:perf "$COMMIT"
 pnpm deploy:indexer:verify "$COMMIT"
 pnpm deploy:indexer:promote "$COMMIT"
+# After the full five-minute propagation window:
+pnpm deploy:indexer:verify "$COMMIT" --prod
 ```
 
 A caught-up watcher exit is `SYNCED_PENDING_DATA_VERIFY`, not promotion
-readiness. The verifier must pass the canonical Polygon FPMM feed/expiry,
-oracle-anchor, snapshot-cursor, and health-counter checks before promotion.
-It also reads `config/replay-integrity.json` from the deployed commit. That
+readiness. The verifier checks sync and core rows, plus sUSDS post-launch
+sampler progress/freshness and the exact immutable sUSDS launch baseline,
+before the canonical Polygon FPMM feed/expiry, oracle-anchor, snapshot-cursor,
+and health-counter checks. It also reads
+`config/replay-integrity.json` from the deployed commit. That
 versioned marker is the commit-scoped proof that the candidate was replayed by
 code enforcing the current oracle-freshness invariant; a candidate whose
 commit lacks the required version is never promotion-compatible even if later
 rows look healthy. Bump a marker only in the same change as the new replay
 invariant and its handler-level regression tests.
+After the production verifier passes, follow the `deploy-indexer` skill's
+Phase 7 checks for the affected production API, dashboard page, and browser
+console. Promotion alone does not complete the rollout.
 
 Replay-integrity v3 replaces traffic-scaled exact `medianTimestamp` reads with
-a persisted, event-sourced `OracleFeedState`. On the first tracked
-`OracleReported` or `OracleReportRemoved`, processing performs one
-exact-boundary `getTimestamps` bootstrap and obtains raw/effective expiry
-configuration from that same boundary. It validates the
-reporter/timestamp arrays, computes SortedOracles' upper median, then applies
-`OracleReported` upserts and `OracleReportRemoved` deletions in block/log order.
-`MedianUpdated` consumes that state but does not renew freshness itself. When
-no currently referencing pool row predates the initialization block, exact
-block-close state absorbs that block's logs so a report before deployment or
-feed self-heal cannot be stranded outside a parent snapshot; later blocks use
-log order. `OracleExpiryState` stores raw global/token and effective expiry at
-the same bootstrap boundary, then applies both expiry events by block/log
-cursor. A zero token value derives the persisted global fallback without a
-block-close RPC inside the event, and never-tracked feeds create no state.
-Missing or malformed bootstrap data fails before entity writes. This is a
+a persisted, event-sourced `OracleFeedState` plus `OracleExpiryState`. The
+bootstrap boundary, ordered apply rules, zero-token expiry fallback, and
+fail-before-write conditions are owned by
+[ADR 0046](../docs/adr/0046-event-sourced-oracle-freshness.md). This is a
 full-replay boundary: v1 and v2 candidates are incompatible with v3 even when
 their final pool rows happen to look healthy.
 
 The inherited replay-integrity v2 requirement still applies: effect eligibility
-must be derived independently in both Envio passes. Never carry preload
-decisions in any module-scoped mutable marker because hosted preload and
-processing workers, and restarted processes, do not share that memory. The
-code-health invariant follows every `onEvent`, `onBlock`, and
-`contractRegister` callback plus imported helpers. It rejects direct and
-symbol-propagated assignment, update, deletion, object/record write, and native
-collection/array mutator forms for top-level bindings, including primitive,
-object, array, native-collection, and factory-result state. Returned module-
-state aliases and custom receiver methods that mutate through `this` remain a
-manual-review requirement tracked in
-[#1462](https://github.com/mento-protocol/monitoring-monorepo/issues/1462).
-Narrow processing-only exceptions require an adjacent `phase-state-exempt`
-reason and tracking issue at each mutation. Rebuildable optimization caches
-whose loss can only repeat authoritative/idempotent work use an adjacent
-`phase-state-cache` reason at each write.
+must be derived independently in both Envio passes, because hosted preload and
+processing workers, and restarted processes, do not share memory. The blocking
+code-health invariant over handler callbacks and imported helpers, its
+`phase-state-exempt` and `phase-state-cache` call-site escape hatches, and the
+manual-review gap tracked in
+[#1462](https://github.com/mento-protocol/monitoring-monorepo/issues/1462) are
+owned by
+[`indexer-handler-invariants.md`](../docs/pr-checklists/indexer-handler-invariants.md#rpc-cache-and-freshness).
 
 The `mento` project on Envio Cloud watches this branch. Envio registers
 deployments under the short commit hash, and the registration can lag the Git

@@ -19,8 +19,10 @@ import {
 const ARKHAM_BASE = "https://api.arkm.com";
 const REQUEST_TIMEOUT_MS = 10_000;
 
-// Pacing for the standard rate-limit bucket (20 req/s). 60ms spacing leaves
-// ~16 req/s sustained — comfortably under the limit even with clock jitter.
+// Pacing for the standard rate-limit bucket (100 req/s as of 2026-08). 60ms
+// spacing leaves ~16 req/s sustained — well under the limit even with clock
+// jitter, and the trial's Intel Label quota, not throughput, is the binding
+// constraint on a bulk sweep.
 const REQ_SPACING_MS = 60;
 
 // Confidence floor for ML-attributed addresses. Below this, treat predictions
@@ -45,12 +47,27 @@ type ArkhamLabel = {
   chainType: string;
 };
 
+/**
+ * Legacy tag shape. Arkham stopped returning `tags` on enriched responses in
+ * 2026-08 — `populatedTags` replaced it. Kept as an optional read so a
+ * re-added field is picked up without another code change.
+ */
 type ArkhamTag = {
   id: string;
   name: string;
   slug: string;
   type?: string;
   description?: string;
+};
+
+/**
+ * Current tag shape (2026-08). `id` is the stable machine identifier and is
+ * the equivalent of the legacy `tags[].slug`; `label` is display text.
+ */
+type ArkhamPopulatedTag = {
+  id: string;
+  label?: string;
+  rank?: number;
 };
 
 type ArkhamEntityPrediction = {
@@ -68,6 +85,7 @@ export type ArkhamEnrichedAddress = {
   isUserAddress: boolean | null;
   contract: boolean | null;
   tags?: ArkhamTag[];
+  populatedTags?: ArkhamPopulatedTag[];
   entityPredictions?: ArkhamEntityPrediction[];
   clusterIds?: string[];
 };
@@ -176,6 +194,25 @@ export function hasUsableLabel(data: ArkhamMultiChainResponse): boolean {
 }
 
 /**
+ * Union the tag identifiers one per-chain entry carries into `into`.
+ *
+ * Arkham returns `populatedTags[].id` today; `tags[].slug` is the field it
+ * replaced in 2026-08. Both are read so the tag set is correct whichever
+ * shape the response carries.
+ */
+function addChainTags(
+  perChain: ArkhamEnrichedAddress,
+  into: Set<string>,
+): void {
+  for (const t of perChain.populatedTags ?? []) {
+    if (t.id) into.add(t.id);
+  }
+  for (const t of perChain.tags ?? []) {
+    if (t.slug) into.add(t.slug);
+  }
+}
+
+/**
  * Map an Arkham response onto our `AddressEntry` schema.
  *
  * Returns `null` when nothing is worth persisting (caller should skip the
@@ -188,30 +225,7 @@ export function toAddressEntry(
 ): AddressEntry | null {
   if (!hasUsableLabel(data)) return null;
 
-  // EVM addresses are chain-agnostic, so the same `arkhamEntity`/`arkhamLabel`
-  // typically appears on every covered chain. Pick the strongest signal once;
-  // union tags across all chains.
-  let label: string | undefined;
-  let entity: ArkhamEntity | null = null;
-  let topPrediction: ArkhamEntityPrediction | undefined;
-  const tagSet = new Set<string>();
-
-  for (const perChain of Object.values(data)) {
-    const trimmed = perChain.arkhamLabel?.name?.trim();
-    if (!label && trimmed) label = trimmed;
-    if (!entity && perChain.arkhamEntity?.name?.trim())
-      entity = perChain.arkhamEntity;
-    if (entity?.type) tagSet.add(entity.type);
-    for (const t of perChain.tags ?? []) {
-      if (t.slug) tagSet.add(t.slug);
-    }
-    for (const p of perChain.entityPredictions ?? []) {
-      if (p.confidence < HIGH_CONFIDENCE) continue;
-      if (!topPrediction || p.confidence > topPrediction.confidence) {
-        topPrediction = p;
-      }
-    }
-  }
+  const { label, entity, topPrediction, tagSet } = resolveArkhamSignal(data);
 
   // Prefer the curated label, then entity name, then the predicted entity ID.
   const name = label || entity?.name?.trim() || topPrediction?.entityId || "";
@@ -236,7 +250,7 @@ export function toAddressEntry(
 
 /**
  * Process a batch of addresses against Arkham, paced for the standard
- * 20 req/s rate limit.
+ * rate-limit bucket.
  *
  * Stops early on auth errors (misconfiguration — no point continuing).
  * Slows down on rate-limit errors (back off + retry once). Other errors are
@@ -319,6 +333,57 @@ export async function enrichBatch(
 }
 
 /**
+ * Pick the highest-confidence entity prediction between `current` and a
+ * per-chain prediction list, ignoring anything below `HIGH_CONFIDENCE`.
+ */
+function pickBetterPrediction(
+  current: ArkhamEntityPrediction | undefined,
+  predictions: ArkhamEntityPrediction[] | undefined,
+): ArkhamEntityPrediction | undefined {
+  let best = current;
+  for (const p of predictions ?? []) {
+    if (p.confidence < HIGH_CONFIDENCE) continue;
+    if (!best || p.confidence > best.confidence) best = p;
+  }
+  return best;
+}
+
+/**
+ * Reduce a multi-chain Arkham response to one signal set: the strongest
+ * curated label/entity found on any chain, the highest-confidence ML
+ * prediction across all chains, and the union of tag identifiers.
+ *
+ * EVM addresses are chain-agnostic, so the same `arkhamEntity`/`arkhamLabel`
+ * typically appears on every covered chain — pick the strongest signal once.
+ */
+function resolveArkhamSignal(data: ArkhamMultiChainResponse): {
+  label: string | undefined;
+  entity: ArkhamEntity | null;
+  topPrediction: ArkhamEntityPrediction | undefined;
+  tagSet: Set<string>;
+} {
+  let label: string | undefined;
+  let entity: ArkhamEntity | null = null;
+  let topPrediction: ArkhamEntityPrediction | undefined;
+  const tagSet = new Set<string>();
+
+  for (const perChain of Object.values(data)) {
+    const trimmed = perChain.arkhamLabel?.name?.trim();
+    if (!label && trimmed) label = trimmed;
+    if (!entity && perChain.arkhamEntity?.name?.trim())
+      entity = perChain.arkhamEntity;
+    if (entity?.type) tagSet.add(entity.type);
+    addChainTags(perChain, tagSet);
+    topPrediction = pickBetterPrediction(
+      topPrediction,
+      perChain.entityPredictions,
+    );
+  }
+
+  return { label, entity, topPrediction, tagSet };
+}
+
+/**
  * In refresh mode, merge a fresh Arkham result into an existing Arkham-sourced
  * entry. Lets Arkham update `name` and add new tags, but preserves user-edited
  * `notes` (unless they're our auto-generated prediction note) and `isPublic`.
@@ -336,8 +401,13 @@ export function mergeRefreshEntry(
   if (!existing || !isArkhamSourced(existing)) return fresh;
 
   const isAutoNote = existing.notes?.startsWith("Arkham prediction (");
+  // Existing tags first: `existing.tags` can carry curated forensic tags
+  // (e.g. tier2's ctp:/type: prefixes) ahead of a bulk Arkham tag dump. Now
+  // that populatedTags can fill the 20-tag cap on its own (see arkham.ts's
+  // addChainTags), putting `fresh` first would let a routine refresh
+  // silently evict that curated content once sanitizeEntry truncates.
   const tags = withoutArkhamTags(
-    Array.from(new Set([...fresh.tags, ...existing.tags])),
+    Array.from(new Set([...existing.tags, ...fresh.tags])),
   );
 
   return sanitizeEntry({

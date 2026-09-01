@@ -27,17 +27,18 @@ record; what is live is the table, the engine, and the checks in section 5.
 
 ## Context
 
-`scripts/agent-quality-gate.sh` is 6,100 lines and the largest file in the
-repository. It is the subject of
+`scripts/agent-quality-gate.sh` was 6,100 lines and the largest file in the
+repository when this decision began. It was the subject of
 [issue 1498](https://github.com/mento-protocol/monitoring-monorepo/issues/1498)
 and the one hard-cap row [ADR 0065](0065-scripts-file-size-watchlist-scope.md)
 deliberately refuses to exempt, on the ground that its split is expensive rather
-than architecturally forbidden.
+than architecturally forbidden. D5c later removed the routing arms and exposed
+the residual process-control and execution layers governed by this decision.
 
 It is not one thing. The largest single region is routing: one `while IFS= read
 -r path` loop over the changed set, holding **13 top-level `case` statements**,
-**55 `case` statements** counting the nested ones, **240 arms**, **825 pattern
-occurrences** (757 distinct), **29 effect verbs**, six inline guards, two global
+**55 `case` statements** counting the nested ones, **240 arms**, **829 pattern
+occurrences** (761 distinct), **29 effect verbs**, six inline guards, two global
 flag mutations, and two pattern sets the gate computes from the tree at run
 time. That is a table written as control flow.
 
@@ -53,7 +54,7 @@ written that way:
 2. **First-arm-wins ordering.** A new arm for `scripts/<dir>/deploy-*.sh` must
    sit above the widened pair or it never runs. The constraint lives in a
    comment.
-3. **Literal freshness.** 617 distinct arm patterns name an exact path. A path
+3. **Literal freshness.** 619 distinct arm patterns name an exact path. A path
    that is deleted or moved leaves an arm that simply never matches. No check
    reds. This is the same failure class P0 fixed in
    `check-deploy-root-anchors.test.mjs`, which printed "All 0 deploy scripts…"
@@ -308,7 +309,7 @@ side that can change them and one of them is also in the required `ci` job:
   `implementation_signature()` pins, split into `pins.test.mjs` when D5c took
   `routing-table.test.mjs` to the 1,000-line cap.
 - `node --test scripts/gate/mapping/engine.test.mjs` — dedupe and
-  first-reason-wins, the alias pairs, prepend, bucket order, the four post-passes
+  first-reason-wins, the alias pairs, prepend, bucket order, the five post-passes
   and the root-manifest classifier.
 
 **One residual, deliberately kept.** The gate still runs the routing-sensitive
@@ -447,7 +448,7 @@ gate is not a trust root.
   With the guard gone there is nothing for it to drive, so it went with the arms.
 - **The engine's behaviour is pinned by its own tests.**
   `scripts/gate/mapping/engine.test.mjs` covers dedupe and first-reason-wins, the
-  alias pairs, prepend, bucket order, the four post-passes including the 15/16
+  alias pairs, prepend, bucket order, the five post-passes including the 15/16
   scoped-test threshold and every disqualifier, and the root-manifest
   classifier's four classes. It was written at D5b precisely so that D5c would
   not delete the only thing pinning those rules in the same commit that removes
@@ -518,11 +519,12 @@ gate is not a trust root.
   its owned paths. Other changed-path classes keep their prior plan, except that
   the autoreview-core source class now receives the checklist and both gate
   suites by design.
-- **Issue 1498 is not satisfied as written.** Its acceptance criteria name sourced
+- **Issue 1498's original split is rejected.** Its acceptance criteria named sourced
   `scripts/lib/gate-*.sh` helpers for the watchdog, stamps and executor —
-  exactly the layers this decision keeps in bash. The criteria are rewritten
-  rather than quietly satisfied: ADR 0065 cites 1498 by number as the reason the
-  gate is not exempt, so the two records must stay consistent.
+  exactly the residual layers this decision keeps together in bash. Moving
+  those crash boundaries across files would provide no schema, test oracle, or
+  checkable invariant. The issue now reconciles ADR 0065 with this rejection
+  and needs no permanent ownership role for the measured row.
 - **`check-sentry-suites-in-ci-gate-extract.mjs` outlived the check it was
   written for.** Its `runProbeShell`, `probeDirs` and `bashFunctionSource` backed
   the classifier probe; D5c made that probe an import, and what keeps the module
@@ -570,4 +572,4 @@ gate is not a trust root.
   `scripts/gate/routing-table/pattern-oracle.test.mjs`, which is the standing
   proof rather than a one-off measurement.
 - Deferred-track queue: <https://github.com/mento-protocol/monitoring-monorepo/issues/1877>
-- Gate-split owner: <https://github.com/mento-protocol/monitoring-monorepo/issues/1498>
+- Reconciled gate-split record: <https://github.com/mento-protocol/monitoring-monorepo/issues/1498>

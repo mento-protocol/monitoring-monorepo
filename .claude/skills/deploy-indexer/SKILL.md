@@ -1,11 +1,11 @@
 ---
 name: deploy-indexer
-description: Agent-native Envio indexer deploy orchestrator. Pushes the current branch HEAD to the `envio` branch, watches build and sync, verifies deployment health, optionally promotes to prod, waits for endpoint switchover, and verifies monitoring.mento.org. Use `--no-promote` to pre-load a feature branch's indexer changes ahead of merging. Triggers on "deploy indexer", "ship indexer", "push to envio", "pre-deploy indexer", or `/deploy-indexer`. Do NOT use for code-only PR ships — use `/ship` for that.
+description: Agent-native Envio indexer deploy orchestrator. Pushes the current branch HEAD to the `envio` branch, watches build and sync, verifies deployment health, optionally promotes to prod, waits for endpoint switchover, verifies the production endpoint and affected API, and verifies monitoring.mento.org. Use `--no-promote` to pre-load a feature branch's indexer changes ahead of merging. Triggers on "deploy indexer", "ship indexer", "push to envio", "pre-deploy indexer", or `/deploy-indexer`. Do NOT use for code-only PR ships — use `/ship` for that.
 title: Deploy Indexer Skill
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-22
+last_verified: 2026-08-26
 doc_type: skill
 scope: repo-wide
 review_interval_days: 90
@@ -16,7 +16,8 @@ garden_lane: agent-entry-points
 
 Push a commit to the `envio` branch, watch the build + re-index, verify
 deployment health, optionally promote an explicitly authorized production
-deploy, wait for the static URL to flip, then verify the dashboard. Read
+deploy, wait for the static URL to flip, verify the promoted production
+endpoint and affected application API, then verify the dashboard. Read
 `docs/deployment.md` first; it owns the canonical deploy and rollback policy.
 
 The target commit is `HEAD` of the current working directory; `pnpm
@@ -52,10 +53,15 @@ In parallel:
   exactly `mento-protocol/monitoring-monorepo` before trusting it:
   ```bash
   gh repo view "$(git remote get-url "$CANONICAL_REMOTE")" --json nameWithOwner --jq .nameWithOwner
-  git fetch "$CANONICAL_REMOTE" main:refs/remotes/"$CANONICAL_REMOTE"/main
+  git fetch "$CANONICAL_REMOTE" \
+    "refs/heads/main:refs/remotes/$CANONICAL_REMOTE/main" \
+    "+refs/heads/envio:refs/remotes/$CANONICAL_REMOTE/envio"
   ```
-  Capture that fetched ref as `CANONICAL_MAIN_REF`. Stop if no verified remote
-  exists. In any Claude cloud session skip the `gh repo view` check — the
+  Capture those fetched refs as `CANONICAL_MAIN_REF` and
+  `CANONICAL_ENVIO_REF`. The forced `envio` refspec is required because the
+  deploy wrapper force-updates that branch. Stop if no verified remote exists
+  or either ref cannot refresh. In any Claude cloud session skip the
+  `gh repo view` check — the
   remote is the credential-proxy URL, which gh cannot map to a repository
   even when the capability gate passes
   ([`docs/notes/github-tooling-surfaces.md`](../../../docs/notes/github-tooling-surfaces.md));
@@ -77,8 +83,9 @@ In parallel:
   ```bash
   pnpm exec envio-cloud indexer get mento mento-protocol -o json
   ```
-  At the current three-deployment limit, retain prod and remove—or ask the user
-  to remove—an obsolete non-prod deployment before creating another.
+  At the current three-deployment limit, a full registry blocks a new
+  deployment. Do not select a deletion from the count alone. Classify the
+  inventory after resolving the target commit below.
 - In normal mode, `git rev-parse HEAD` supplies the full `TARGET_COMMIT`. In
   resume mode, resolve the supplied commit to a full SHA and compare its
   `indexer-envio/` tree with the freshly fetched canonical main ref:
@@ -89,6 +96,31 @@ In parallel:
   the current `main` commit through the normal full pipeline.
   Skip Phase 1 in resume mode; Phase 2 must still reconfirm that the registered
   candidate is caught up before Phase 3.
+- If the registry is full, or any deletion is under consideration, inventory
+  every live deployment before requesting or performing cleanup. Repeat the
+  two-ref canonical fetch above immediately before the initial classification
+  and use those fresh refs. Stop if either ref cannot refresh. Record the stored
+  deployment id, resolved commit when available, `prod_status`, creation time,
+  per-chain sync state, canonical `main` or `envio` reachability, and its role
+  as target, current production, rollback candidate, obsolete non-prod, or
+  unknown. Record the subtype and deletion reason separately for an obsolete
+  non-prod deployment. Envio registry data does not identify the deploying
+  actor or source branch. Attribute either only when GitHub commit, ref, or
+  timeline evidence proves it. Retain the production deployment, the target,
+  every known-good rollback candidate, and every deployment with unresolved
+  provenance. Group the remaining obsolete non-prod deployments and request one
+  explicit approval that lists each exact deployment id, classification, and
+  deletion reason. Immediately before starting the approved deletion batch,
+  repeat the two-ref canonical fetch, then re-fetch the full registry and the
+  status of every live deployment. Reclassify every deployment. Stop without
+  deleting if either ref cannot refresh. Stop and request new approval if any
+  change affects an id, production status, classification-relevant sync state,
+  reachability, role, or retained set. During the batch, repeat the two-ref
+  canonical fetch and the full registry and status check before each later
+  deletion. Treat the absence of ids already deleted in this batch as the only
+  expected inventory change. Stop and request new approval for any other
+  difference. Delete only the remaining exact approved ids while the fresh
+  state matches the expected batch state.
 - Use `git rev-parse --short=7 "$TARGET_COMMIT"` only as `TARGET_DISPLAY`:
   seven is a minimum, not a guaranteed output width. The wrappers resolve full
   SHAs against Envio's stored commit prefix; raw queries must test whether the
@@ -108,12 +140,13 @@ explicit end-to-end production deploy request does.
   proceed only when its `indexer-envio/` tree matches canonical protected
   `main`; removals/renames still require the approved compatibility or cutover
   plan.
-- `--no-verify` — skip Phase 6 browser/UI verification, so the deploy and the
-  endpoint-propagation wait can complete unattended.
+- `--no-verify` — skip Phase 7 application API and browser/UI verification.
+  Phase 6 still proves that the static production endpoint serves the promoted
+  commit. The resulting deploy lacks application closeout proof.
 - `--resume-preload <commit>` — after merge, reuse an already-synced candidate
   whose `indexer-envio/` tree exactly matches freshly fetched canonical `main`.
   Skip the push, reconfirm sync, then execute every remaining gate in Phases
-  3–6. This flag does not itself authorize promotion; the request must
+  3–7. This flag does not itself authorize promotion; the request must
   explicitly authorize the end-to-end production continuation.
 
 ## Phase 1 — Push to `envio`
@@ -145,12 +178,12 @@ up to chain head. They fail for different reasons and want different responses.
 Normal registration completes 2-3 min after the `envio` push. If the deployment
 hasn't appeared in Envio's API by ~5 min, check the active deployment count
 first. **Three live deployments means Envio has no room to create another
-deployment**; delete, or ask the user to delete, an obsolete non-prod deployment
-before pushing a fresh SHA. If there are fewer than three deployments, then
-treat the miss as an Envio-side webhook/build problem (their app missed the push
-event, their build queue is jammed, or — the silent failure mode —
-`pnpm deploy:indexer` no-op'd because the deploy branch was already at HEAD).
-Waiting longer rarely recovers; investigate now.
+deployment**. Reuse the Phase 0 inventory. Delete only an explicitly approved
+obsolete non-prod deployment before pushing a fresh SHA. If there are fewer
+than three deployments, then treat the miss as an Envio-side webhook/build
+problem (their app missed the push event, their build queue is jammed, or — the
+silent failure mode — `pnpm deploy:indexer` no-op'd because the deploy branch
+was already at HEAD). Waiting longer rarely recovers; investigate now.
 
 Run the registration probe in the **foreground** with a tight ceiling:
 
@@ -175,6 +208,26 @@ report caught-up.
 Watch sync in the active rollout/session and do not leave a background process
 running when you finish. The wrapper has no 90-minute sync timeout; the agent or
 monitor must enforce that wall-clock ceiling and interrupt the watch.
+
+Capture the first per-chain status sample when registration succeeds. For a
+longer-than-normal sync, derive a quantitative update from later samples. For
+each chain, report processed height, head height, remaining gap, gap change,
+net gap-closure rate, and rough gap ETA. Treat a zero gap as a gap ETA of zero
+for that sample. It does not establish sync completion. A stable or growing
+positive gap on an incomplete chain has no finite ETA. Such a chain blocks
+completion and makes the overall gap ETA unknown. Otherwise, the limiting chain
+is the incomplete chain with the largest credible gap ETA. When no incomplete
+chain has a positive gap, report an overall gap ETA of zero. Continue waiting
+until every chain has a non-empty
+`timestamp_caught_up_to_head_or_endblock`; the wrapper's terminal `caught_up`
+state uses the same signal. When present, use
+`latest_fetched_block_number` to distinguish a fetch backlog from a processing
+backlog, but do not claim a root cause without runtime metrics or logs. Send
+short updates at the runtime's required progress cadence. Include this full
+quantitative summary at least every five minutes and on material state changes.
+Compare with a prior successful production run only when timestamped evidence
+exists for the same chain and comparable configuration; otherwise state that no
+valid baseline is available.
 
 The Envio Cloud deployment id is the short Git commit hash (for example
 `b92ff93b`). Once the deployment is registered, this id stays stable.
@@ -234,17 +287,25 @@ dashboard(s), not just the source branch:
 - **Pure backfill/no schema contract change:** continue after confirming the
   deployment is caught up; verify the affected dashboard pages after promote.
 
+The `--no-promote` path stops before this verifier and all later phases,
+including Phase 7.
+
 Run the narrow deployment verifier before promoting:
 
 ```bash
 pnpm deploy:indexer:verify <TARGET_COMMIT>
 ```
 
-This combines status, metrics, endpoint, core-row, and Polygon replay checks.
+This combines status, metrics, endpoint, core-row, sUSDS post-launch sampler
+progress/freshness, and Polygon replay checks.
 Do not promote on any failure. `--allow-syncing` is diagnostic only and never
 waives data or replay-semantic failures. A missing replay marker or tainted
 historical RPC replay requires a fresh deployment; `docs/deployment.md` owns
-the exact verifier contract.
+the exact verifier contract. The verifier reads `indexer-envio/schema.graphql`
+at the exact deployment commit and uses `SusdsYieldLaunchBaseline` as the
+sUSDS sampler capability marker. A legacy rollback schema without the marker
+skips all sampler-only probes and checks. An unreadable or uninspectable target
+schema fails closed and retains the strict sampler requirements.
 
 ## Phase 4 — Promote
 
@@ -266,7 +327,7 @@ that no rollback target was captured instead of guessing.
 
 Promote only when the request explicitly authorized the end-to-end production
 deploy. Otherwise stop after verification and ask for approval to continue
-this skill through Phases 4–6; do not surface the wrapper as a standalone
+this skill through Phases 4–7; do not surface the wrapper as a standalone
 shortcut. Once authorized, run:
 
 ```bash
@@ -305,13 +366,90 @@ add new GraphQL fields, not that the routing hasn't flipped. If you have a
 strong signal in this PR's diff (a new entity / field in `schema.graphql`),
 you MAY query for it as a probe; otherwise just wait 5 min and move on.
 
-## Phase 6 — Verify the UI
+## Phase 6 — Verify the promoted production endpoint
+
+After the propagation wait, verify the target through the static production
+endpoint:
+
+```bash
+pnpm deploy:indexer:verify <TARGET_COMMIT> --prod
+```
+
+This second verifier run is separate from the candidate check in Phase 3. It
+requires the target commit to be `prod` and runs the same semantic probes
+against the repo-configured static production GraphQL endpoint
+`https://indexer.hyperindex.xyz/2f3dd15/v1/graphql`. In `--prod` mode, the
+verifier does not use registry endpoint metadata or the per-deployment endpoint
+resolver. It also compares the static endpoint's built-in per-chain
+`_meta.readyAt` and `startBlock` values with the target deployment status. This
+identity check proves that a schema-compatible change or backfill has switched;
+shared semantic rows alone do not. Missing, invalid, or mismatched identity
+rows fail closed. Stop if it cannot query the static endpoint or any probe
+fails. The built-in `_meta` query does not depend on the target's custom schema,
+so it also covers legacy rollback deployments.
 
 If `--no-verify` was passed, stop here and print the final summary.
 
-Otherwise verify with chrome-devtools MCP directly, following the browser
-verification protocol in `AGENTS.md`. Use the target URL plus a focus hint for
-the data the new deployment touches:
+## Phase 7 — Verify the production API and UI
+
+Verify with chrome-devtools MCP directly, following the browser verification
+protocol in `AGENTS.md`. Open `https://monitoring.mento.org` in an authorized
+session. Use `evaluate_script` first for a focused application API check.
+
+For an sUSDS sampler or reserve-yield change, fetch
+`/api/reserve-yield?closeout=<TARGET_DISPLAY>` with `cache: "no-store"` from
+the production origin. The `closeout` value is a target-scoped browser and
+network-log marker. It also gives the request a distinct shared HTTP cache key.
+The route does not read it or scope the response.
+
+Always require all of these conditions:
+
+- the response status is 200;
+- `earnedYieldError` is `null`;
+- `susdsYieldSignalUnavailable` is `false`;
+- `reserveCurrentHoldingsClassificationFailed` is `false`;
+- `susdsSnapshotSourceRequired` is a boolean.
+- `hasUnindexedSusdsHolding` is `false`.
+
+Use `susdsSnapshotSourceRequired` as the fail-closed current sUSDS source
+signal. A value of `true` means that current exposure exists or cannot be
+ruled out. Confirm it with `holdings`: a positive finite sUSDS `balance` or
+`principalUsd` must not appear when the signal is `false`. Also inspect
+`susdsEarnedYieldUsd` for a nonzero finite historical signal.
+
+When either the current source signal or a nonzero historical signal exists,
+require `susdsEarnedYieldUsd` to be finite and `susdsEarnedYieldAsOf` to be a
+valid timestamp. Do not use the aggregate `earnedYieldAsOf` as sUSDS evidence;
+stETH can supply that timestamp independently. When the current source signal
+is `true`, also require an sUSDS
+holding whose `earnedYieldUsd` is finite. This fails closed when a malformed
+nonzero sUSDS asset sets `susdsSnapshotSourceRequired: true` but produces no
+usable holding. When neither signal exists, accept
+`susdsEarnedYieldUsd` as `null` or finite zero and do not require an sUSDS
+holding or `susdsEarnedYieldAsOf`.
+
+Return the checked fields, `reserveCurrentHoldingsClassificationFailed`,
+`susdsSnapshotSourceRequired`, `hasUnindexedSusdsHolding`,
+`susdsEarnedYieldAsOf`, and the two derived signal-presence booleans as
+evidence. Treat a field required by the applicable
+signal branch as missing or non-finite, a positive sUSDS holding with a false
+current source signal, `hasUnindexedSusdsHolding` as missing or true, an
+unexpected signal state, a non-null `earnedYieldError`, or a non-200 response
+as a failed production verification. Do not fail solely because
+`holdingsError` is non-null when classification succeeds and the sUSDS source,
+holding, and indexed-wallet coverage checks pass. Return that error as
+evidence. Do not fail a clean state because its optional sUSDS fields are
+absent.
+
+For an sUSDS sampler change with a true current source signal or a nonzero
+historical signal, also verify that `/revenue` renders sUSDS reserve actuals
+without pending, unavailable, or stale labels. When neither signal exists,
+verify that the absent sUSDS history does not add one of those labels; do not
+require a current sUSDS actual.
+
+Then navigate to the affected page and run the targeted UI checks. List console
+messages of type `error` after navigation. Use the target URL plus a focus hint
+for the data the new deployment touches:
 
 - The target URL: `https://monitoring.mento.org`
 - A focus hint pointing at the data the new deployment touches. Examples:
@@ -330,18 +468,20 @@ whether to roll back. Don't auto-rollback — promote-to-prior is destructive.
 - **Deployed commit:** `<TARGET_COMMIT>`
 - **Build + sync:** time-to-caught-up (mm:ss), per-chain final blocks
 - **Performance snapshot:** `pnpm deploy:indexer:perf <TARGET_COMMIT>` captured status/metrics/log highlights
-- **Deployment verify:** `pnpm deploy:indexer:verify <TARGET_COMMIT>` passed before promotion
+- **Candidate verify:** `pnpm deploy:indexer:verify <TARGET_COMMIT>` passed before promotion
 - **Promote:** ✅ / ❌ (and `PREVIOUS_PROD_COMMIT` captured in Phase 4, for rollback reference)
 - **Endpoint propagation wait:** 5 min completed
-- **UI verify:** pages checked + console errors found (✅ if none)
+- **Production verify:** `pnpm deploy:indexer:verify <TARGET_COMMIT> --prod` passed after propagation
+- **Production API verify:** endpoint + fields checked, or explicitly skipped by `--no-verify`
+- **UI verify:** pages checked + console errors found, or explicitly skipped by `--no-verify`
 - **Rollback command (paste-ready):** `pnpm deploy:indexer:rollback <PREVIOUS_PROD_COMMIT>` — or "(none captured)" if `PREVIOUS_PROD_COMMIT` was empty.
 
 ## Idempotency
 
 For a commit already in prod, the wrapper accepts the registered no-op push and
-the status watch returns immediately. Still run deployment verification, the
-five-minute propagation wait, and UI verification; those checks are the value
-of the rerun.
+the status watch returns immediately. Still run candidate verification, the
+five-minute propagation wait, production verification, and application checks;
+those checks are the value of the rerun.
 
 ## Common pre-merge workflow
 
@@ -362,7 +502,7 @@ of the rerun.
 - **Never manually force-push** to `main` or any tracked branch. The `pnpm deploy:indexer` script's `--force-with-lease` push to `envio` is the one sanctioned exception (and `envio` is a deploy-trigger ref, not a tracking branch); any other force-push is off-limits.
 - **Never auto-rollback.** Promote-to-prior is the user's call.
 - **Never bypass the babysit phase** — don't promote based on a single status snapshot.
-- **Never bypass the deployment verifier** — run `pnpm deploy:indexer:verify <TARGET_COMMIT>` after sync and before promote.
+- **Never bypass either deployment verifier** — run `pnpm deploy:indexer:verify <TARGET_COMMIT>` before promotion and `pnpm deploy:indexer:verify <TARGET_COMMIT> --prod` after propagation.
 - **Always wait the full 5 min** for static-endpoint propagation before verifying — bypassing produces flaky verify results.
 - **Pass the full target SHA explicitly** to status and verification steps — don't rely on "latest", since a concurrent deploy by someone else could shift it.
 - **Don't open a PR** as part of deployment verification. This skill is a

@@ -13,6 +13,7 @@
  *
  * Usage:
  *   node scripts/schema-diff.mjs <base-schema-path> <head-schema-path>
+ *   git show <base-schema-ref> | node scripts/schema-diff.mjs - <head-schema-path>
  *
  * Exit codes:
  *   0  — always (advisory mode; the summary is the signal, not the exit code)
@@ -45,11 +46,29 @@ if (!baseFile || !headFile) {
   process.exit(1);
 }
 
-function loadSchema(path) {
+if (baseFile === "-" && headFile === "-") {
+  console.error("Only one schema input can read from stdin.");
+  process.exit(1);
+}
+
+function readSchemaInput(path) {
   try {
-    return buildSchema(ENVIO_STUBS + readFileSync(path, "utf8"));
+    const sdl = readFileSync(path === "-" ? 0 : path, "utf8");
+    if (sdl.trim() === "") throw new Error("schema input is empty");
+    return sdl;
   } catch (err) {
-    console.error(`Failed to parse schema at ${path}: ${err.message}`);
+    const source = path === "-" ? "stdin" : path;
+    console.error(`Failed to read schema from ${source}: ${err.message}`);
+    process.exit(1);
+  }
+}
+
+function loadSchema(path, sdl) {
+  try {
+    return buildSchema(sdl);
+  } catch (err) {
+    const source = path === "-" ? "stdin" : path;
+    console.error(`Failed to parse schema at ${source}: ${err.message}`);
     process.exit(1);
   }
 }
@@ -217,11 +236,10 @@ function findDirectiveArgChanges(baseSdl, headSdl) {
   return changes;
 }
 
-const base = loadSchema(baseFile);
-const head = loadSchema(headFile);
-
-const baseSdl = ENVIO_STUBS + readFileSync(baseFile, "utf8");
-const headSdl = ENVIO_STUBS + readFileSync(headFile, "utf8");
+const baseSdl = ENVIO_STUBS + readSchemaInput(baseFile);
+const headSdl = ENVIO_STUBS + readSchemaInput(headFile);
+const base = loadSchema(baseFile, baseSdl);
+const head = loadSchema(headFile, headSdl);
 
 const breaking = findBreakingChanges(base, head);
 const dangerous = findDangerousChanges(base, head);

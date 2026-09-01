@@ -1,0 +1,70 @@
+{
+  "cell_id": "pr-1995-pipeline-draw2",
+  "pr": 1995,
+  "condition": "pipeline",
+  "draw": 2,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": "gpt-5.6-sol@high",
+  "claims": [
+    "The focus guard misses every `--no-lock` gate run — the self-test can report green having run 1 of 11 families (`scripts/agent-quality-gate.test.sh:601`): the guard only refuses a set `GATE_TEST_FOCUS` when `AGENT_QUALITY_GATE_LOCK_HELD` or `GITHUB_ACTIONS` is set, but `--no-lock` and `AGENT_QUALITY_GATE_LOCK=0` never export `AGENT_QUALITY_GATE_LOCK_HELD`",
+    "Stale prose claim at `scripts/agent-quality-gate.test.sh:595-597` — \"so every command a real gate run spawns carries it\" — asserts a guarantee that doesn't hold today and should be corrected",
+    "Stale prose claim at `docs/notes/agent-quality-gate-mechanics.md:1144-1146` — \"(any command a real gate run spawns) … so an exported focus cannot shrink the gate's self-test\" — asserts a guarantee that doesn't hold today",
+    "`docs/notes/agent-quality-gate-mechanics.md:1141`'s \"`pnpm agent:quality-gate:test` … run in that mode\" is only true when the focus is unset",
+    "None of the new control flow is covered by the suite it lives in — `verify_gate_family_partition` (`scripts/agent-quality-gate.test.sh:485`) and `dispatch_gate_test_families` (`:566`) are load-bearing but nothing pins them; a coverage gap",
+    "The doc's usage examples (`docs/notes/agent-quality-gate-mechanics.md:1119-1120`) use a `GATE_TEST_FOCUS=… bash scripts/…` form that the agent allowlist entries at `.claude/settings.json:31-32` don't prefix-match, so an agent following the doc prompts every time (and adding entries also means updating `scripts/context/check-settings-contract.mjs:74-75`)"
+  ],
+  "matched_ids": [
+    3830042123
+  ],
+  "judge_reasoning": {
+    "3829986398": "No mention of output_file being unset under set -u in the abort trap; the review's trap discussion is about ERR trap arming semantics, a different issue.",
+    "3829986403": "No mention that multiple dispatch_gate_test_families calls pass validation and would run families twice.",
+    "3830003055": "No mention that zero dispatch calls pass the partition check, leaving the suite silently running nothing.",
+    "3830042123": "Finding 1 is exactly this: the focus guard misses --no-lock / AGENT_QUALITY_GATE_LOCK=0 runs because AGENT_QUALITY_GATE_LOCK_HELD is never exported, letting a focused subset answer for the full gate.",
+    "3830042128": "No mention of the hard-coded self-test path fallback or the scripts path-pin inventory.",
+    "3830695396": "Review flags doc lines 1144-1146 only as stale consequences of finding 1; it never raises the 'is set' vs 'is non-empty' imprecision or the 'reds the suite' wording."
+  },
+  "novel": {
+    "claims": 6,
+    "novelReal": 1,
+    "novelWrong": 0,
+    "novelVague": 1,
+    "restatedKnown": 4,
+    "alreadyMatched": 1,
+    "verdicts": {
+      "1": {
+        "class": "known",
+        "why": "Confirmed the --no-lock path (agent-quality-gate.sh:1601 early return before the line-1143 export) bypasses the guard, but this is the known 'Reject focus during lock-free gate runs' at test.sh:628"
+      },
+      "2": {
+        "class": "known",
+        "why": "The comment at test.sh:595-597 is inaccurate only because of the same lock-free guard hole; fixing that known defect fixes this prose"
+      },
+      "3": {
+        "class": "known",
+        "why": "docs:1144-1146 restates the same guard guarantee that the known lock-free hole breaks; same root cause, no separate defect"
+      },
+      "4": {
+        "class": "known",
+        "why": "docs:1141's claim fails for exactly the lock-free/local-focus case that the known guard defect covers"
+      },
+      "5": {
+        "class": "vague",
+        "why": "Verified no test asserts verify_gate_family_partition/dispatch behavior, but the claim names no concrete failure — a blanket 'add tests' note"
+      },
+      "6": {
+        "class": "real",
+        "why": "settings.json:31-32 are `Bash(bash scripts/agent-quality-gate.test.sh:*)` with no env-prefixed variant (cf. the existing `Bash(ESLINT_BASELINE_MAIN=* node *)`), so the doc's `GATE_TEST_FOCUS=… bash …` examples at docs:1119-1120 do not prefix-match"
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 2069,
+  "usd": 4.080297499999999,
+  "scoring_usd": 1.0682885
+}

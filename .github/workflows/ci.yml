@@ -63,9 +63,11 @@ jobs:
       terraform: ${{ steps.filter.outputs.terraform }}
       codeHealth: ${{ steps.filter.outputs.codeHealth }}
       rootScripts: ${{ steps.filter.outputs.rootScripts }}
+      docs: ${{ steps.filter.outputs.docs }}
       autoreviewSuite: ${{ steps.filter.outputs.autoreviewSuite }}
       autoreviewRootRuntime: ${{ steps.filter.outputs.autoreviewRootRuntime }}
       versionSkew: ${{ steps.filter.outputs.versionSkew }}
+      forceAll: ${{ steps.filter.outputs.controlPlane == 'true' || steps.filter.outputs.all_count != steps.filter.outputs.routed_count || steps.filter.outputs.all_count != steps.filter.outputs.ordinary_count || (github.event_name == 'pull_request' && github.event.pull_request.changed_files >= 3000) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -78,7 +80,7 @@ jobs:
             # wrapper. Any change to it needs to re-run every package's lint
             # so a broken wrapper can't merge silently — see PR-423 codex
             # finding (Run package lint when the lint gate changes).
-            shared:
+            shared: &shared
               - shared-config/**
               - scripts/eslint-baseline-diff.mjs
               - pnpm-lock.yaml
@@ -89,7 +91,7 @@ jobs:
               - .github/workflows/ci.yml
               - .github/actions/pnpm-install/**
               - .github/actions/resolve-eslint-baseline/**
-            ui:
+            ui: &ui
               - ui-dashboard/**
               - shared-config/**
               # GraphQL contract test validates dashboard queries against the
@@ -113,7 +115,7 @@ jobs:
             # shared-config originals (the indexer builds outside the pnpm
             # workspace — see indexer-envio/src/healthScore.ts). The indexer
             # does NOT import shared-config at runtime.
-            indexer:
+            indexer: &indexer
               - indexer-envio/**
               - shared-config/**
               - scripts/eslint-baseline-diff.mjs
@@ -125,7 +127,7 @@ jobs:
               - .github/workflows/ci.yml
               - .github/actions/pnpm-install/**
               - .github/actions/resolve-eslint-baseline/**
-            bridge:
+            bridge: &bridge
               - metrics-bridge/**
               - shared-config/**
               # GraphQL contract test validates bridge queries against the
@@ -144,7 +146,7 @@ jobs:
               - .github/workflows/ci.yml
               - .github/actions/pnpm-install/**
               - .github/actions/resolve-eslint-baseline/**
-            integrationProbes:
+            integrationProbes: &integrationProbes
               - integration-probes/**
               - shared-config/**
               - scripts/eslint-baseline-diff.mjs
@@ -157,7 +159,7 @@ jobs:
               - .github/workflows/integration-probes.yml
               - .github/actions/pnpm-install/**
               - .github/actions/resolve-eslint-baseline/**
-            aegis:
+            aegis: &aegis
               - aegis/**
               - scripts/eslint-baseline-diff.mjs
               - pnpm-lock.yaml
@@ -170,7 +172,7 @@ jobs:
               - .github/workflows/aegis-app-engine.yml
               - .github/actions/pnpm-install/**
               - .github/actions/resolve-eslint-baseline/**
-            terraform:
+            terraform: &terraform
               # Coarse admission only. `scripts/tf-stacks.mjs` classifies the
               # exact stacks after this job starts. Keep this list equal to
               # terraform.stacks.json `workflowAdmissionPatterns`; `pnpm
@@ -183,7 +185,7 @@ jobs:
               - scripts/**
               - .github/workflows/**
               - terraform.stacks.json
-            alerts:
+            alerts: &alerts
               - alerts/infra/onchain-event-handler/**
               - alerts/infra/oncall-announcer/**
               - alerts/infra/scripts/**
@@ -208,7 +210,7 @@ jobs:
             # Governance Watchdog Cloud Function. Deploys as a standalone
             # source root (package-local pnpm-lock.yaml), so its quality job
             # installs from that lockfile like the alerts functions.
-            govWatchdog:
+            govWatchdog: &govWatchdog
               - governance-watchdog/**
               - scripts/eslint-baseline-diff.mjs
               - pnpm-lock.yaml
@@ -223,7 +225,7 @@ jobs:
             # package filters false → the cross-package `deps` job would skip
             # → blocking architecture rule changes ship unvalidated. This
             # filter fires the `deps` job whenever the policy itself moves.
-            codeHealth:
+            codeHealth: &codeHealth
               - .dependency-cruiser.cjs
               - "*/knip.json"
               - .github/workflows/ci.yml
@@ -234,7 +236,7 @@ jobs:
             # imports, and syntax issues in build/quality scripts can't
             # merge unnoticed — see PR-423 codex finding (Keep root scripts
             # under ESLint).
-            rootScripts:
+            rootScripts: &rootScripts
               # `scripts/**` matches every path under scripts/ at any depth,
               # including the extensionless directory symlinks the extension
               # globs below miss. The extension globs stay to document the
@@ -256,6 +258,19 @@ jobs:
               # this entry the whole scripts job skips and the pin never runs.
               - .coderabbit.yaml
               - docs/evals/documentation-navigation-*.json
+              # Two lines, because the frozen review-skill inputs are both flat
+              # files and directories. dorny/paths-filter matches with
+              # picomatch, where neither `*` nor a `**` glued to a prefix
+              # crosses a path separator: `review-skill*` alone matches
+              # `review-skill.md` and nothing under `review-skill-truth/`, so a
+              # PR editing only a frozen truth file left `rootScripts` false
+              # and the required `ci` sentinel let the `scripts` job skip. The
+              # `*/**` form is the one that reaches inside those directories.
+              # (review-eval-freshness.yml can write `review-skill**` because
+              # a workflow `paths:` trigger uses GitHub's own glob syntax,
+              # where `**` does cross separators. Different engine.)
+              - docs/evals/review-skill*
+              - docs/evals/review-skill*/**
               - .lighthouserc.cjs
               - "**/vitest.hermetic-setup.ts"
               - "**/vitest.config.ts"
@@ -304,29 +319,59 @@ jobs:
               # job's baseline-diff semantic suite must re-run when the
               # producing action changes.
               - .github/actions/resolve-eslint-baseline/**
-              # Documentation catalog + context-check inputs. The catalog
-              # covers every tracked Markdown file (except runtime mirrors),
-              # while the context checker discovers canonical files and
-              # validates SessionEnd hooks + skill parity. Markdown changes
-              # therefore run this cheap root-scripts job regardless of path.
-              - "*.md"
-              - "**/*.md"
-              # Skill parity and hook checks also consume non-Markdown assets
-              # under the runtime-specific directories.
+              # Skill parity and hook checks consume non-Markdown assets
+              # under the runtime-specific directories. The two Markdown globs
+              # that used to sit here now live in the `docs` filter below
+              # (ADR 0072): a Markdown-only diff runs the small `docs-checks`
+              # job, which carries nine of the eleven checks in this job that
+              # read the Markdown corpus — the two left behind fail only when a
+              # carried check fails. Markdown that arrives alongside any path
+              # above still sets both filters, and both jobs run — including a
+              # Markdown-only edit under `.agents/**` or `.claude/skills/**`,
+              # which those globs still route here for their non-Markdown
+              # contents.
               - ".agents/**"
               - ".claude/skills/**"
               - .claude/settings.json
               - .codex/config.toml
               - .codex/hooks.json
+            # Markdown corpus, plus the two non-Markdown inputs the
+            # `docs-checks` job itself is built from. The Markdown globs are
+            # the ones relocated out of `rootScripts` above, byte-identical, so
+            # they match exactly what they matched there: `**/*.md` covers
+            # documents in dot-directories such as `.github/`, and
+            # dorny/paths-filter reports added, modified, renamed and deleted
+            # files alike, so a removed or renamed document still fires the
+            # job. ci.yml holds the job definition and pnpm-install is the
+            # composite its steps run on: without those two entries a PR that
+            # edits the job — its fetch-depth, its permissions, a step command
+            # — would set only `rootScripts`, and the edited job would ship
+            # without ever having run. Every other filter in this file lists
+            # ci.yml for that same reason. Beyond those two, keep this filter
+            # to Markdown: any other non-Markdown input belongs in the filter
+            # of the job that consumes it.
+            docs: &docs
+              - "*.md"
+              - "**/*.md"
+              - .github/workflows/ci.yml
+              - .github/actions/pnpm-install/**
             # The adversarial autoreview suite is intentionally isolated from
             # the broader root-scripts job: it is expensive, path-specific,
             # and runs sequentially in CI for deterministic fixture/process
             # cleanup. The local quality gate may orchestrate the same complete
             # family set in parallel.
-            autoreviewSuite:
+            autoreviewSuite: &autoreviewSuite
               - scripts/agent-autoreview.sh
               - scripts/agent-autoreview.mjs
               - scripts/agent-autoreview-core.mjs
+              - scripts/agent-autoreview-secret-suppressions.json
+              - scripts/gate/darwin-process-identity.c
+              - scripts/gate/darwin-process-identity-runtime.inc.c
+              - scripts/gate/darwin-process-identity-helper.mjs
+              - scripts/gate/darwin-process-lineage-model.mjs
+              - scripts/gate/darwin-process-lineage-state.mjs
+              - scripts/gate/darwin-process-lineage.mjs
+              - scripts/gate/mapped-command-process-identity.mjs
               - scripts/agent-autoreview-core.test.mjs
               - scripts/agent-autoreview-target-guard.test.mjs
               - scripts/agent-autoreview.test.sh
@@ -337,16 +382,17 @@ jobs:
             # Focused x64 Blacksmith proof for the Linux/root Node trust path.
             # Keep this separate from the broader scripts job so a regression
             # cannot skip unrelated root suites and does not need pnpm install.
-            autoreviewRootRuntime:
+            autoreviewRootRuntime: &autoreviewRootRuntime
               - scripts/agent-autoreview.sh
               - scripts/agent-autoreview*.mjs
+              - scripts/agent-autoreview-secret-suppressions.json
               - .node-version
               - .github/workflows/ci.yml
             # Dependency manifest and pnpm catalog/lifecycle policy drift.
             # This runs independently of package quality jobs so a manifest-only
             # PR cannot satisfy the required `ci` sentinel while bypassing the
             # catalog-vs-literal version invariant.
-            versionSkew:
+            versionSkew: &versionSkew
               - package.json
               - "**/package.json"
               - pnpm-workspace.yaml
@@ -360,17 +406,64 @@ jobs:
               - scripts/supply-chain/version-skew-check.test.mjs
               - .github/workflows/ci.yml
               - .github/actions/pnpm-install/**
+            # Closed-world fallback for the existing fixed fan-out. `routed`
+            # reuses the live filters through YAML aliases. `ordinary` names
+            # the stable product and documentation namespaces where affected
+            # selection is allowed. A path outside either set selects every
+            # conditional job. This catches a new top-level service even when
+            # its README also matches the broad documentation filter.
+            routed:
+              - *shared
+              - *ui
+              - *indexer
+              - *bridge
+              - *integrationProbes
+              - *aegis
+              - *terraform
+              - *alerts
+              - *govWatchdog
+              - *codeHealth
+              - *rootScripts
+              - *docs
+              - *autoreviewSuite
+              - *autoreviewRootRuntime
+              - *versionSkew
+            ordinary:
+              - "*.md"
+              - aegis/**
+              - alerts/**
+              - docs/**
+              - governance-watchdog/**
+              - indexer-envio/**
+              - integration-probes/**
+              - metrics-bridge/**
+              - terraform/**
+              - ui-dashboard/**
+            # Package-manager and package-local toolchain files inside an
+            # ordinary namespace can change how required checks execute.
+            # Select the full fixed set for those control-plane inputs.
+            controlPlane:
+              - "**/package.json"
+              - "**/pnpm-lock.yaml"
+              - "**/pnpm-workspace.yaml"
+              - "**/.npmrc"
+              - "**/tsconfig*.json"
+              - "**/eslint.config.*"
+              - "**/vitest*.{js,cjs,mjs,ts,cts,mts}"
+              - "**/knip.json"
+              - "**/react-doctor.config.json"
+            all:
+              - "**"
       - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
         if: always()
 
   shared:
     name: Quality Checks (shared-config)
     needs: changes
-    if: needs.changes.outputs.shared == 'true'
+    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.shared == 'true'
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     permissions:
-      checks: write
       contents: read
       actions: read
     steps:
@@ -406,11 +499,10 @@ jobs:
   ui:
     name: Quality Checks (ui-dashboard)
     needs: changes
-    if: needs.changes.outputs.ui == 'true'
+    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.ui == 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 25
     permissions:
-      checks: write
       contents: read
       actions: read
     steps:
@@ -470,7 +562,13 @@ jobs:
           fi
       - name: Test with coverage
         run: pnpm --filter @mento-protocol/ui-dashboard test:coverage
-      - name: Cache Playwright Chromium
+      - name: Production build and bundle-size budget
+        # The browser suite builds `.next-fixture`. This target builds the
+        # production `.next` output and then checks the committed size budget.
+        run: VERCEL_DEPLOYMENT_ID=ci pnpm exec turbo run size-limit --filter=@mento-protocol/ui-dashboard --cache=local:rw
+      - name: Restore Playwright Chromium
+        id: playwright-cache
+        continue-on-error: true
         # `playwright install chromium` re-downloads ~130 MB on every run
         # otherwise (~84s of uncached CI time). The cache key hashes BOTH
         # `ui-dashboard/package.json` (the version range, e.g. `^1.60.0`)
@@ -478,21 +576,18 @@ jobs:
         # Keying on package.json alone misses lockfile-only
         # `@playwright/test` updates within the caret range — in that case
         # the key would stay constant while the Chromium revision Playwright
-        # wants flips, so every run restores the stale cache, the install
-        # step re-downloads, but actions/cache won't re-save under the
-        # already-hit key, so the next run re-downloads again indefinitely.
-        # Hashing the lockfile makes the key flip on any real Playwright
-        # version bump. Mirrors the proven step in lighthouse.yml.
+        # wants flips. Hashing the lockfile makes the key flip on any real
+        # Playwright version bump. Mirrors the restore step in lighthouse.yml.
         #
         # `runner.arch` is in the key so a runner-architecture change (e.g.
         # an ARM migration) can never restore another arch's Chromium —
         # binaries are arch-specific, and `playwright install` validates
         # version, not architecture, so a cross-arch restore would pass
         # validation and then die with an exec-format error.
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-chromium-${{ runner.arch }}-${{ hashFiles('ui-dashboard/package.json', 'pnpm-lock.yaml') }}
+          key: trusted-main-v1-playwright-chromium-${{ runner.arch }}-${{ hashFiles('ui-dashboard/package.json', 'pnpm-lock.yaml') }}
           # `restore-keys` lets an unrelated lockfile or `package.json`
           # edit still reuse the most recent chromium cache instead of
           # triggering a ~130 MB fresh download. `playwright install` then
@@ -500,9 +595,20 @@ jobs:
           # (no-op on match, re-download only on a real Playwright version
           # bump). `--with-deps` still installs OS libraries (fast).
           restore-keys: |
-            playwright-chromium-${{ runner.arch }}-
+            trusted-main-v1-playwright-chromium-${{ runner.arch }}-
+      - name: Clear incomplete Playwright restore
+        if: steps.playwright-cache.outputs.cache-hit == ''
+        run: >-
+          node -e 'const { rmSync } = require("node:fs"); const { homedir } = require("node:os"); const { join } = require("node:path"); rmSync(join(homedir(), ".cache", "ms-playwright"), { force: true, recursive: true });'
       - name: Install Playwright Chromium
         run: pnpm --filter @mento-protocol/ui-dashboard exec playwright install --with-deps chromium
+      - name: Save Playwright Chromium
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.playwright-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: trusted-main-v1-playwright-chromium-${{ runner.arch }}-${{ hashFiles('ui-dashboard/package.json', 'pnpm-lock.yaml') }}
       - name: Browser interaction tests
         run: pnpm --filter @mento-protocol/ui-dashboard test:browser
       - name: Upload snapshot diffs on failure
@@ -525,11 +631,10 @@ jobs:
   indexer:
     name: Quality Checks (indexer-envio)
     needs: changes
-    if: needs.changes.outputs.indexer == 'true'
+    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.indexer == 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
     permissions:
-      checks: write
       contents: read
       actions: read
     # Job-level env so it's visible to both typecheck and tests. Tests import
@@ -544,21 +649,6 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/pnpm-install
-      # Envio codegen output is deterministic on (envio version, config*.yaml,
-      # schema.graphql, abis). v3 emits to `.envio/types.d.ts`, which the
-      # tracked `envio-env.d.ts` triple-slash references — both `tsc` and
-      # vitest depend on it being present. Cache the .envio/ dir keyed on
-      # those inputs so PRs that don't touch indexer configs skip the 2-3
-      # minute codegen pass entirely. src/** is intentionally NOT in the key
-      # — handler code doesn't affect codegen output, and including it would
-      # invalidate the cache on every indexer PR (the common case), defeating
-      # the cache.
-      - name: Cache Envio .envio/
-        id: cache-generated
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: indexer-envio/.envio
-          key: envio-generated-v3-${{ runner.os }}-${{ hashFiles('indexer-envio/config*.yaml', 'indexer-envio/schema.graphql', 'indexer-envio/package.json', 'indexer-envio/abis/**', 'indexer-envio/scripts/**') }}
       - name: Validate YAML address drift
         # Every hex address in config*.yaml must resolve to either
         # @mento-protocol/contracts, indexer-envio/config/nttAddresses.json,
@@ -572,7 +662,6 @@ jobs:
         # Run codegen against every config file to catch schema/config drift
         # early. config.multichain.mainnet.yaml is run last — its output is
         # used by typecheck + tests below.
-        if: steps.cache-generated.outputs.cache-hit != 'true'
         run: |
           pnpm --filter @mento-protocol/indexer-envio codegen --config config.multichain.testnet.yaml
           pnpm --filter @mento-protocol/indexer-envio codegen --config config.multichain.mainnet.yaml
@@ -611,11 +700,10 @@ jobs:
   bridge:
     name: Quality Checks (metrics-bridge)
     needs: changes
-    if: needs.changes.outputs.bridge == 'true'
+    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.bridge == 'true'
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     permissions:
-      checks: write
       contents: read
       actions: read
     steps:
@@ -658,11 +746,10 @@ jobs:
   integration-probes:
     name: Quality Checks (integration-probes)
     needs: changes
-    if: needs.changes.outputs.integrationProbes == 'true'
+    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.integrationProbes == 'true'
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     permissions:
-      checks: write
       contents: read
       actions: read
     steps:
@@ -696,11 +783,10 @@ jobs:
   alerts:
     name: Quality Checks (alerts Cloud Functions)
     needs: changes
-    if: needs.changes.outputs.alerts == 'true'
+    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.alerts == 'true'
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     permissions:
-      checks: write
       contents: read
       actions: read
     steps:
@@ -713,12 +799,12 @@ jobs:
       # handler checks so CI exercises the same dependency graph that deploys.
       - name: Install handler deploy dependencies
         working-directory: alerts/infra/onchain-event-handler
-        run: pnpm install --frozen-lockfile --ignore-scripts --lockfile-dir .
+        run: pnpm install --frozen-lockfile --ignore-scripts --lockfile-dir . --store-dir ~/pnpm-store
       # Same package-local install for the on-call announcer Cloud Function
       # source root.
       - name: Install on-call announcer deploy dependencies
         working-directory: alerts/infra/oncall-announcer
-        run: pnpm install --frozen-lockfile --ignore-scripts --lockfile-dir .
+        run: pnpm install --frozen-lockfile --ignore-scripts --lockfile-dir . --store-dir ~/pnpm-store
       - name: Typecheck (onchain-event-handler)
         working-directory: alerts/infra/onchain-event-handler
         run: pnpm run typecheck
@@ -790,11 +876,10 @@ jobs:
   gov-watchdog:
     name: Quality Checks (governance-watchdog)
     needs: changes
-    if: needs.changes.outputs.govWatchdog == 'true'
+    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.govWatchdog == 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 10
     permissions:
-      checks: write
       contents: read
       actions: read
     steps:
@@ -807,7 +892,7 @@ jobs:
       # exercises the same dependency graph that deploys.
       - name: Install deploy dependencies
         working-directory: governance-watchdog
-        run: pnpm install --frozen-lockfile --ignore-scripts --lockfile-dir .
+        run: pnpm install --frozen-lockfile --ignore-scripts --lockfile-dir . --store-dir ~/pnpm-store
       - name: Typecheck
         working-directory: governance-watchdog
         run: pnpm run typecheck
@@ -853,7 +938,7 @@ jobs:
   terraform:
     name: Terraform Validate (registry)
     needs: changes
-    if: needs.changes.outputs.terraform == 'true'
+    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.terraform == 'true'
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     timeout-minutes: 10
     permissions:
@@ -912,11 +997,10 @@ jobs:
   aegis:
     name: Quality Checks (aegis)
     needs: changes
-    if: needs.changes.outputs.aegis == 'true'
+    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.aegis == 'true'
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 15
     permissions:
-      checks: write
       contents: read
       actions: read
     env:
@@ -964,16 +1048,15 @@ jobs:
   scripts:
     name: Lint + test root scripts
     needs: changes
-    if: needs.changes.outputs.rootScripts == 'true'
+    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.rootScripts == 'true'
     runs-on: blacksmith-2vcpu-ubuntu-2404
-    # The expanded exact-identity lock suite reached 14m45s on this runner
-    # after earlier job setup. The prior 15-minute cap cancelled it before
+    # The quality-gate routing regression suite reached 24m37s on this runner
+    # after earlier job setup. The prior 25-minute cap cancelled it before
     # later steps could run. The waits bind real queue, cleanup, and no-signal
-    # guarantees, so keep a bounded 10-minute margin for completion and runner
-    # variance instead of weakening those assertions.
-    timeout-minutes: 25
+    # guarantees, so keep a bounded 15-minute margin for the remaining steps
+    # and runner variance instead of weakening those assertions.
+    timeout-minutes: 40
     permissions:
-      checks: write
       contents: read
       actions: read
     steps:
@@ -1019,6 +1102,11 @@ jobs:
         # the required `ci` sentinel path so config-only regressions cannot
         # merge behind the advisory Lighthouse workflow.
         run: node scripts/lighthouse-config.test.mjs
+      - name: Fixed CI structural contract
+        # This path-gated witness catches accidental removal of the full
+        # contract command from the unconditional job below. Workflow changes
+        # always admit the scripts job.
+        run: node scripts/workflows/check-ci-contract.mjs
       - name: Agent quality-gate routing regression suite
         # Verifies the path-to-command mapping in scripts/agent-quality-gate.sh.
         # Without this in CI, a routing regression only fails locally (pre-push)
@@ -1052,6 +1140,17 @@ jobs:
         run: node scripts/repo-health/check-hermetic-vitest-setup.mjs
       - name: Hermetic Vitest setup consistency suite
         run: node scripts/repo-health/check-hermetic-vitest-setup.test.mjs
+      # The prose check itself moved to the unconditional `guardrail-prose` job
+      # above: this job is path-gated on `rootScripts` and allowed to skip, so a
+      # PR editing only AGENTS.md or the operating card never reached it.
+      # The suite stays here as well, and only the suite. It carries the
+      # assertion that pins `guardrail-prose`'s own CI wiring, which would be
+      # deleted by the same edit that deletes that job if the job were its only
+      # host. `rootScripts` includes `.github/workflows/**`, so any edit able to
+      # remove that job admits this one and reds here. Each job is the other's
+      # witness; the duplicate sub-second run is what that costs.
+      - name: Guardrail prose pin suite
+        run: node scripts/repo-health/check-guardrail-prose.test.mjs
       - name: Deviation threshold drift suite
         run: node scripts/alerts/check-deviation-threshold-drift.test.mjs
       - name: Agent context checker unit tests
@@ -1078,6 +1177,10 @@ jobs:
         run: pnpm docs:audit --dry-run
       - name: Documentation garden issue automation tests
         run: pnpm docs:garden:test
+      - name: ADR reminder
+        run: pnpm adr:check
+      - name: ADR reminder suite
+        run: pnpm adr:check:test
       - name: Documentation navigation evaluation tests
         run: pnpm docs:navigation-eval:test
       - name: Documentation navigation fixture contract
@@ -1087,6 +1190,12 @@ jobs:
           pnpm docs:navigation-eval -- --validate
           docs/evals/documentation-navigation-baseline.json
           --fixtures docs/evals/documentation-navigation-baseline-fixtures.json
+      - name: Review skill evaluation tests
+        run: pnpm review:eval:test
+      - name: Review skill fixture contract
+        run: pnpm review:eval -- --check-fixtures --offline
+      - name: Review skill committed ledger
+        run: pnpm review:eval -- --check-ledger --require-base --revalidate-appended
       - name: Agent context budget tests
         run: pnpm agent:context-budget:test
       - name: Enforce agent context budgets
@@ -1111,8 +1220,8 @@ jobs:
         run: pnpm alerts:rules:lint:test
       - name: Terraform output sanitizer fixture suite
         # Fixture coverage for scripts/sanitize-terraform-output.sh, the sole
-        # redaction layer before terraform plan/apply output reaches public
-        # GitHub issue bodies and PR sticky comments.
+        # redaction layer before Terraform plan/apply output reaches workflow
+        # logs, job summaries, Slack, or GitHub issues.
         run: pnpm sanitize:test
       - name: Notifier coverage unit tests
         # Behavioral coverage of scripts/workflows/check-notifier-coverage.mjs:
@@ -1128,8 +1237,8 @@ jobs:
         run: node scripts/workflows/check-notifier-coverage.mjs
       - name: Autofix CI trust unit tests
         # Behavioral coverage of scripts/workflows/check-autofix-ci-trust.mjs
-        # (trigger/secret detectors, pull_request_target refusal, guard +
-        # annotation acceptance).
+        # (trigger/secret detectors, unconditional pull_request_target refusal,
+        # workflow_run guards, and guard/annotation acceptance).
         run: node scripts/workflows/check-autofix-ci-trust.test.mjs
       - name: Autofix CI trust assertion
         # Machine-authored sentry-autofix/* PRs pass every fork/dependabot
@@ -1138,6 +1247,12 @@ jobs:
         # secrets are unreachable from PR-head code. Issue #1388 — an
         # activation gate for the autofix leg.
         run: node scripts/workflows/check-autofix-ci-trust.mjs
+      - name: PR validation boundary suite
+        # Pins the M2 read-only permission, secret ordering, restore-only cache,
+        # main-only save, required-command, schema-summary, and Dependabot
+        # execution contracts. The one-time complexity receipt stays outside
+        # routine CI so later repository work does not inherit an M2 baseline.
+        run: node scripts/workflows/check-pr-validation-boundary.test.mjs
       - name: Platform settings drift unit tests
         # Behavioral coverage of
         # scripts/workflows/check-workflow-permissions-drift.mjs — the decision
@@ -1178,10 +1293,167 @@ jobs:
       - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
         if: always()
 
+  guardrail-prose:
+    name: Guardrail prose pins
+    # Unconditional by design (no `if:`), like production-infra-contract and
+    # sentry-suites below. These two commands ran as steps of the path-gated
+    # `scripts` job until review found the hole: that job admits on
+    # `rootScripts` (`scripts/**`) and sits in the `ci` sentinel's
+    # `allowed-skips`, so the exact diff this check exists to catch — one that
+    # edits only AGENTS.md, CLAUDE.md or the operating card and drops a pinned
+    # sentence — skipped the job while the required sentinel stayed green. A
+    # guardrail absent precisely when it is needed is worse than none, and the
+    # Sentry suites were moved out of that same job for the same reason.
+    #
+    # The checker and its suite import only `node:` builtins, so this job is a
+    # checkout, a Node, and two sub-second commands — no `pnpm install`.
+    # `check-guardrail-prose.test.mjs` also asserts this job's own wiring: that
+    # it exists, carries no `if:`, runs both commands, and reaches `ci` without
+    # an allowed-skip. Move or rename it and that suite reds. That assertion
+    # would vanish with the job it protects if this were its only host, so the
+    # path-gated `scripts` job runs the suite a second time: `rootScripts`
+    # includes `.github/workflows/**`, so the very edit that deletes this job
+    # admits that job and reds there instead. The two hosts pin each other.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - name: Guardrail prose pins
+        run: node scripts/repo-health/check-guardrail-prose.mjs
+      - name: Guardrail prose pin suite
+        run: node scripts/repo-health/check-guardrail-prose.test.mjs
+      - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
+        if: always()
+
+  docs-checks:
+    name: Documentation corpus checks
+    needs: changes
+    # ADR 0072. The nine checks below are the ones in the `scripts` job above
+    # whose outcome a Markdown-only diff can change. Six read the live tracked
+    # Markdown tree through `git ls-files`; two are unit suites that look like
+    # fixture tests but assert against the real tree as well
+    # (agent:context-budget:test pins the ten AGENTS.md routes,
+    # docs:navigation-eval:test picks the cheapest route by live document
+    # bytes); and the gate routing-table suite asserts that the 23 Markdown
+    # paths its table names still exist.
+    # Three suites stay in `scripts` because they cannot be affected by a
+    # Markdown edit at all: docs:audit:test, docs:garden:test and
+    # check-agent-context.test.mjs build their fixtures in a temporary
+    # repository or stub their inputs.
+    # Two more read this checkout and stay in `scripts` anyway, for a reason
+    # worth writing down:
+    #   - docs:index:test has one live-tree case that builds the inventory
+    #     over the tracked Markdown tree and asserts inventory.errors is
+    #     empty. That is a strict subset of `pnpm docs:index --check` below,
+    #     which fails on errors OR warnings OR broken links, and a deleted or
+    #     non-regular runtime document is rejected by the runtime registry
+    #     that both carried checks import. No Markdown-only diff fails it while
+    #     everything in this job stays green.
+    #   - agent:quality-gate:test pins the targeted-Trunk branch on the
+    #     tracked file docs/deployment.md, which flips to `--all` once that
+    #     path leaves the worktree. docs/deployment.md is also one of the
+    #     routing table's staleness subjects, so the gate routing-table step
+    #     below fails first on the rename or delete that would break it. That
+    #     coupling is transitive, not structural: drop docs/deployment.md from
+    #     the routing table and this suite loses its cover.
+    # Splitting these out lets a Markdown-only PR finish in
+    # minutes instead of waiting on the long-running scripts job. Each `run:`
+    # string here
+    # is byte-identical to its counterpart in `scripts`, and the steps are NOT
+    # removed from there: a change to the documentation tooling must still run
+    # them against the corpus. A mixed diff runs both jobs and pays for one
+    # duplicate pass, which is the accepted cost of the split.
+    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.docs == 'true'
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # Baseline validation reads source blobs from its claimed pre-baseline
+          # commit so results remain reproducible after later doc changes. That
+          # commit is over a thousand commits behind main, so the default
+          # shallow checkout would not hold the object and `git show` would
+          # fail outright rather than degrade.
+          fetch-depth: 0
+      - name: Validate trusted package-script pins
+        # The `scripts` job runs this first for two reasons that apply here
+        # unchanged: `pnpm install` below executes the root lifecycle hooks,
+        # and every step after it invokes a trusted `pnpm` alias
+        # (`agent:context-*`, `docs:*`). Validating first rejects an
+        # unsanctioned `postinstall` before install would run it, and a drifted
+        # alias command before it executes. This job needs its own copy — on a
+        # Markdown-only diff the `scripts` job no longer runs at all.
+        # check-sentry-suites-in-ci.test.mjs pins this ordering for this job by
+        # name, exactly as it does for `scripts`, so moving pnpm-install or an
+        # alias above this step fails required CI.
+        run: node scripts/check-agent-quality-gate-package-scripts.mjs
+      - uses: ./.github/actions/pnpm-install
+      - name: Agent context checker
+        # Discovers canonical files from the tracked tree, so an added, renamed
+        # or removed document changes which files it validates.
+        run: pnpm agent:context-check
+      - name: Documentation catalog drift and link check
+        run: pnpm docs:index --check
+      - name: Agent context budget tests
+        # Not a pure fixture suite: its last case builds the report from
+        # trackedInstructionFiles(repoRoot) against this checkout and pins the
+        # route list to the ten AGENTS.md directories that exist today. Adding
+        # docs/AGENTS.md or deleting alerts/AGENTS.md is a Markdown-only diff
+        # that fails it, and the --strict run below would not catch that: it
+        # only enforces byte caps.
+        run: pnpm agent:context-budget:test
+      - name: Enforce agent context budgets
+        # Corpus-dependent for AGENTS.md and AGENTS.override.md specifically:
+        # it measures their byte sizes per file and per route.
+        run: pnpm agent:context-budget --strict
+      - name: Documentation audit planner dry run
+        run: pnpm docs:audit --dry-run
+      - name: Documentation navigation evaluation tests
+        # Also not a pure fixture suite: it loads the live inventory and
+        # asserts which accepted route is cheapest in real document bytes, so a
+        # content-only edit that grows one document past another flips it. The
+        # --check-fixtures run below only rejects paths missing from the
+        # inventory, so it would not catch that.
+        run: pnpm docs:navigation-eval:test
+      - name: Documentation navigation fixture contract
+        run: pnpm docs:navigation-eval -- --check-fixtures
+      - name: Documentation navigation committed baseline
+        run: >-
+          pnpm docs:navigation-eval -- --validate
+          docs/evals/documentation-navigation-baseline.json
+          --fixtures docs/evals/documentation-navigation-baseline-fixtures.json
+      - name: Gate routing-table suite
+        # ADR 0069's table names 799 repository paths, 23 of them Markdown:
+        # eleven of the twelve docs/pr-checklists/*.md (all but
+        # review-prompt-exclusions.md), README.md, AGENTS.md, BACKLOG.md,
+        # SPEC.md, two ADRs and more. Its staleness check asserts each still
+        # exists, so renaming or deleting one of those documents is a
+        # Markdown-only diff that breaks the gate. Without this step here, such
+        # a PR would merge green and leave the gate pointing reviewers at a
+        # document that is not there. This is one of the two non-documentation
+        # steps of `scripts` that read the Markdown corpus; it also covers the
+        # other one, agent:quality-gate:test, whose docs/deployment.md
+        # assertion depends on a path this staleness check already names.
+        run: pnpm gate:routing-table:test
+      - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
+        if: always()
+
   production-infra-contract:
     name: Production infrastructure contract
-    # This required job is deliberately unconditional: tf:test validates
-    # deployment and production-infrastructure contracts for every candidate.
+    # This required job is deliberately unconditional. It validates production
+    # infrastructure and the repo-wide issue-board proof for every candidate.
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
     permissions:
@@ -1191,9 +1463,22 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Validate trusted package-script pins
+        # Runs before pnpm-install because the install executes PR-authored
+        # lifecycle hooks. It also pins the tf:test and issue:board:test aliases
+        # before this required job trusts them.
+        run: node scripts/check-agent-quality-gate-package-scripts.mjs
       - uses: ./.github/actions/pnpm-install
+        with:
+          write-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
       - name: Terraform production infrastructure contract
         run: pnpm tf:test
+      - name: Issue board owner-mutation confinement contract
+        if: ${{ !cancelled() }}
+        run: pnpm issue:board:test
+      - name: Fixed CI contract
+        if: ${{ !cancelled() }}
+        run: pnpm ci:contract:test
       - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
         if: always()
 
@@ -1228,6 +1513,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
+          package-manager-cache: false
       - name: Run and assert the Sentry suites
         run: /usr/bin/env -u NODE_OPTIONS -u NODE_PATH node scripts/sentry/gate/sentry-suite-gate.mjs
       # Steps 4-5 run AFTER the gate, and only after it. The install's composite
@@ -1249,7 +1535,7 @@ jobs:
   autoreview-suite:
     name: Autoreview adversarial suite
     needs: changes
-    if: needs.changes.outputs.autoreviewSuite == 'true'
+    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.autoreviewSuite == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     permissions:
@@ -1281,7 +1567,7 @@ jobs:
   autoreview-root-runtime:
     name: Autoreview root-runtime trust
     needs: changes
-    if: needs.changes.outputs.autoreviewRootRuntime == 'true'
+    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.autoreviewRootRuntime == 'true'
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
     permissions:
@@ -1294,6 +1580,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
+          package-manager-cache: false
       - name: Exercise Blacksmith toolcache Node as root
         shell: bash
         run: |
@@ -1326,11 +1613,10 @@ jobs:
   version-skew:
     name: Version skew
     needs: changes
-    if: needs.changes.outputs.versionSkew == 'true'
+    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.versionSkew == 'true'
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
     permissions:
-      checks: write
       contents: read
       actions: read
     steps:
@@ -1356,11 +1642,10 @@ jobs:
     # workspace edit to recheck the architecture. Also fires on `codeHealth`
     # (dep-cruiser config + knip configs) so a PR that only edits the
     # rule file is validated against the codebase before merge.
-    if: needs.changes.outputs.shared == 'true' || needs.changes.outputs.ui == 'true' || needs.changes.outputs.indexer == 'true' || needs.changes.outputs.bridge == 'true' || needs.changes.outputs.integrationProbes == 'true' || needs.changes.outputs.aegis == 'true' || needs.changes.outputs.codeHealth == 'true'
+    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.shared == 'true' || needs.changes.outputs.ui == 'true' || needs.changes.outputs.indexer == 'true' || needs.changes.outputs.bridge == 'true' || needs.changes.outputs.integrationProbes == 'true' || needs.changes.outputs.aegis == 'true' || needs.changes.outputs.codeHealth == 'true'
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
     permissions:
-      checks: write
       contents: read
       actions: read
     steps:
@@ -1389,6 +1674,8 @@ jobs:
         terraform,
         deps,
         scripts,
+        docs-checks,
+        guardrail-prose,
         production-infra-contract,
         sentry-suites,
         autoreview-suite,
@@ -1402,9 +1689,9 @@ jobs:
       contents: read
       actions: read
     steps:
-      - uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe # v1.2.2
+      - uses: re-actors/alls-green@b5b5b37504aa4183270bd3d855c52a67f212be35 # v1.3.0
         with:
           jobs: ${{ toJSON(needs) }}
-          allowed-skips: shared,ui,indexer,bridge,integration-probes,aegis,alerts,gov-watchdog,terraform,deps,scripts,autoreview-suite,autoreview-root-runtime,version-skew
+          allowed-skips: shared,ui,indexer,bridge,integration-probes,aegis,alerts,gov-watchdog,terraform,deps,scripts,docs-checks,autoreview-suite,autoreview-root-runtime,version-skew
       - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
         if: always()

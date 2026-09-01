@@ -155,7 +155,7 @@ MSG
 verify_origin_git_auth() {
   local remote_url
   remote_url="$(git remote get-url origin)"
-  if [[ "$remote_url" != https://github.com/* && "$remote_url" != git@github.com:* ]]; then
+  if [[ "$remote_url" != https://github.com/* && "$remote_url" != git@github.com:* && "$remote_url" != ssh://git@github.com/* ]]; then
     echo "==> Skipping GitHub auth probe for non-GitHub origin: ${remote_url}"
     return 0
   fi
@@ -173,6 +173,77 @@ or has working SSH credentials.
 MSG
   return 1
 }
+
+verify_github_api_capabilities() {
+  local remote_url
+  local repository
+  remote_url="$(git remote get-url origin)"
+  if [[ "$remote_url" != https://github.com/* && "$remote_url" != git@github.com:* && "$remote_url" != ssh://git@github.com/* ]]; then
+    echo "==> Skipping GitHub API probes for non-GitHub origin: ${remote_url}"
+    return 0
+  fi
+
+  repository="${remote_url#https://github.com/}"
+  repository="${repository#git@github.com:}"
+  repository="${repository#ssh://git@github.com/}"
+  repository="${repository%.git}"
+
+  echo "==> Verifying GitHub repository API access"
+  gh api "repos/${repository}" >/dev/null
+
+  echo "==> Verifying GitHub pull-request API read access"
+  gh api "repos/${repository}/pulls?state=open&per_page=1" >/dev/null
+}
+
+verify_origin_write_access() (
+  local remote_url
+  local probe_branch
+  local probe_ref
+  local probe_suffix
+  local cleanup_eligible=false
+  remote_url="$(git remote get-url origin)"
+  if [[ "$remote_url" != https://github.com/* && "$remote_url" != git@github.com:* && "$remote_url" != ssh://git@github.com/* ]]; then
+    echo "==> Skipping GitHub write probe for non-GitHub origin: ${remote_url}"
+    return 0
+  fi
+
+  probe_suffix="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+  probe_branch="codex-cloud-write-probe-${probe_suffix}"
+  probe_ref="refs/heads/${probe_branch}"
+
+  # Invoked indirectly by the EXIT trap below.
+  # shellcheck disable=SC2329
+  cleanup_probe_ref() {
+    if [[ "$cleanup_eligible" == "true" ]]; then
+      git push origin --delete "$probe_branch" >/dev/null 2>&1 ||
+        echo "warning: could not remove temporary GitHub write probe ${probe_branch}." >&2
+    fi
+  }
+  trap cleanup_probe_ref EXIT
+
+  # A dry run suppresses the ref update, so it cannot prove that the remote
+  # accepts branch creation. Use a collision-resistant ref and remove it here.
+  echo "==> Verifying git can create and delete a temporary branch on origin"
+  # The server may create the ref even when the client loses the success
+  # response. Make cleanup eligible before the push so the EXIT trap also
+  # covers that ambiguous failure.
+  cleanup_eligible=true
+  if ! git push origin "HEAD:${probe_ref}" >/dev/null; then
+    cat >&2 <<'MSG'
+error: GitHub authentication can read this repository but cannot create a
+temporary branch. Give the Codex Cloud GH_TOKEN/GITHUB_TOKEN repository
+Contents read/write permission, then start a fresh session. Pull request and
+ship flows cannot publish commits with a read-only token.
+MSG
+    return 1
+  fi
+
+  if ! git push origin --delete "$probe_branch" >/dev/null; then
+    echo "error: GitHub authentication created the temporary write probe but could not delete it: ${probe_branch}" >&2
+    return 1
+  fi
+  cleanup_eligible=false
+)
 
 append_no_proxy_host() {
   local host="$1"
@@ -479,6 +550,16 @@ MSG
   return 1
 }
 
+install_playwright_host_dependencies() {
+  if is_disabled "${CODEX_CLOUD_INSTALL_PLAYWRIGHT_DEPS:-true}"; then
+    echo "==> Skipping Playwright host dependencies because CODEX_CLOUD_INSTALL_PLAYWRIGHT_DEPS=${CODEX_CLOUD_INSTALL_PLAYWRIGHT_DEPS}"
+    return 0
+  fi
+
+  echo "==> Installing Playwright Chromium and Linux host dependencies"
+  pnpm --filter @mento-protocol/ui-dashboard exec playwright install --with-deps chromium
+}
+
 # The offline installer suite sources these functions without running setup.
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
   return 0
@@ -495,6 +576,8 @@ configure_github_git_auth
 
 codex_cloud_ensure_origin_remote
 verify_origin_git_auth
+verify_github_api_capabilities
+verify_origin_write_access
 ensure_origin_main_ref
 
 echo "==> Configuring repository git hooks"
@@ -519,6 +602,8 @@ CI=true pnpm install --frozen-lockfile
 
 echo "==> Verifying dashboard dependency resolution"
 pnpm --filter @mento-protocol/ui-dashboard exec node -e "require.resolve('@sentry/nextjs/package.json')"
+
+install_playwright_host_dependencies
 
 echo "==> Running Envio codegen"
 # Drop any stale type facade first: a reused/cached checkout may already carry

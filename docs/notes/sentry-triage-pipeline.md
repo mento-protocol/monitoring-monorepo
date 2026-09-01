@@ -3,7 +3,7 @@ title: Sentry Triage Pipeline
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-23
+last_verified: 2026-08-28
 scope: ci/process
 doc_type: runbook
 review_interval_days: 90
@@ -585,9 +585,10 @@ read-only `sentry-triage-tools` directory under `$RUNNER_TEMP`, and the agent's
 source and fails if the staging list stops matching it, so the attack cannot
 move one file over. `scripts/sentry/broker/sentry-mcp-broker.mjs` and
 `scripts/sentry/broker/sentry-mcp-probe.mjs` are staged alongside it even though
-no grant names either: the rule for this job is that it executes nothing from
-the agent-writable checkout, and a rule with an ordering caveat is one refactor
-away from being wrong. The agent job's checkout also sets
+no grant names either. The probe's canonical
+`scripts/gate/mapped-command-process-identity.mjs` dependency is staged in the
+same read-only directory. The rule for this job is that it executes nothing from
+the agent-writable checkout. The agent job's checkout also sets
 `persist-credentials: false`, matching the autofix agent job.
 
 **The agent job ends with the agent.** Immutable copies alone would not be
@@ -636,7 +637,7 @@ shell. The fix removes the credential instead. See
 `CLAUDE_CODE_OAUTH_TOKEN` is the remaining credential in the agent's Bash, and
 it stays there: `claude-code-action` places it in that process env itself
 (`base-action/src/parse-sdk-options.ts` spreads the whole `process.env` into the
-CLI subprocess, deleting only the OIDC request vars), and the pinned v1.0.183
+CLI subprocess, deleting only the OIDC request vars), and the pinned v1.0.194
 offers no per-step or first-class MCP env forwarding to move it. Accepted with
 its bounding: it is inference-only, so worst case is
 inference-quota abuse, not repo or queue compromise, and any use lands in an

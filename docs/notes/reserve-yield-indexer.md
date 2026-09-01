@@ -3,7 +3,7 @@ title: Reserve-Yield Indexer Topology
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-22
+last_verified: 2026-08-24
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -31,13 +31,17 @@ sUSDS/stETH event suites with reserve-yield event tests enabled.
 - Ethereum reserve-yield indexing shares the existing production Envio project
   and GraphQL endpoint.
 - The primary entry point registers sparse sUSDS/stETH token events plus the
-  launch-aligned stETH sub-daily wallet balance sampler from
-  [`ADR 0034`](../adr/0034-steth-wallet-daily-sampler.md).
-- The primary entry point does not register the historical sUSDS `onBlock`
+  launch-aligned sUSDS and stETH samplers from [`ADR 0071`](../adr/0071-susds-launch-aligned-daily-sampler.md)
+  and [`ADR 0034`](../adr/0034-steth-wallet-daily-sampler.md).
+- The primary entry point does not register the historical every-block sUSDS
   heartbeat.
-- sUSDS event handlers write movement rows, summary rows, and daily snapshots
-  only when real `Transfer`, `Deposit`, or `Withdraw` logs for tracked reserve
-  wallets are processed.
+- sUSDS event handlers write movement and summary rows for tracked reserve
+  wallets. They also refresh the current daily row when prior history exists,
+  which preserves event-time yield at UTC-day boundaries. The bounded sampler
+  writes the same deterministic daily row and captures quiet-period share-price
+  growth.
+- Only a successful 600-block heartbeat updates
+  `SusdsYieldSamplerProgress`. Event-time refreshes do not update it.
 - stETH daily snapshots are keyed by chain, wallet, and day, baseline at the
   final Ethereum block before `2026-03-03T00:00:00Z`, and skipped as a batch
   when any required historical wallet `balanceOf` read is unavailable. The
@@ -47,19 +51,22 @@ sUSDS/stETH event suites with reserve-yield event tests enabled.
 ## Why This Avoids The Hosted Replay Stall Class
 
 The failed hosted experiments stalled at Envio v3 synthetic `onBlock` batch
-boundaries (`5000`/`15000` synthetic items). The hosted entry point excludes the
-historical sUSDS heartbeat entirely, so the indexer backfills real Ethereum logs
-for the configured sUSDS/stETH contracts plus one sub-daily stETH wallet
-balance sampler. That keeps the replay work bounded enough to share the existing
-hosted project instead of paying for an additional Envio deployment.
+boundaries (`5000`/`15000` synthetic items). The hosted entry point excludes
+the historical every-block sUSDS heartbeat and uses 600-block sUSDS/stETH
+samplers. That keeps replay work bounded enough to share the existing hosted
+project instead of paying for an additional Envio deployment.
 
 ## Degraded Behavior
 
 - If the shared endpoint, schema, or summary rows are missing, the revenue page keeps
   forecast rows visible and labels earned-yield actuals as pending/unavailable.
-- If `StethYieldDailySnapshot` is missing, stale, or incomplete for a tracked
-  current stETH wallet, the revenue page keeps stETH principal and forecast
-  visible while labeling stETH earned-yield actuals as pending/unavailable.
+- If the `StethYieldDailySnapshot` query fails, the revenue page marks reserve
+  actuals unavailable even when current stETH exposure is zero. A failed query
+  cannot distinguish a never-held wallet from a wallet that earned yield and
+  later exited. A successful empty query with proven-zero current exposure
+  remains available. Missing, stale, or incomplete snapshots for a tracked
+  current wallet also keep principal and forecast visible while actuals remain
+  unavailable.
 - If daily snapshots exist but stop advancing, the revenue page marks reserve
   history stale after the latest snapshot day and renders later reserve actuals
   as `N/A`.
@@ -103,9 +110,16 @@ For each tracked wallet, query every indexed wallet position (`from`, `to`,
 `ENVIO_START_BLOCK_ETHEREUM_RESERVE_YIELD` or the config default to the minimum
 hit across all tracked wallets and contracts.
 
-stETH launch actuals also require the launch-baseline block from ADR 0034. The
-checked-in baseline is Ethereum block `24573203`; re-check it before changing
-the launch timestamp or start-block assumptions.
+sUSDS and stETH launch actuals require launch-baseline rows at the final
+pre-launch Ethereum block. The checked-in baseline is block `24573203`; sUSDS
+uses its pre-launch share price with the v3 launch-day timestamp, and both
+samplers use the bounded 600-block cadence. Re-check the block before changing
+the launch timestamp or start-block assumptions. A zero-only sUSDS launch row
+remains the revenue delta baseline, and historical rows remain in actual
+revenue. The dashboard excludes that aggregate from freshness when the current
+API returns a clean null-or-zero yield state and the classification, coverage,
+source, and signal fields prove no current exposure. Historical rows alone do
+not reactivate freshness.
 
 Example `cast` shape for one wallet/topic pair:
 
@@ -151,16 +165,54 @@ changes or if an absence proof is needed for a future audit.
 
 ## Hosted Promotion Gate
 
-Do not promote a hosted reindex with Ethereum reserve-yield enabled until:
+Before promoting a hosted reindex with Ethereum reserve-yield enabled, require:
 
 1. `pnpm --filter @mento-protocol/indexer-envio indexer:reserve-yield:test` passes.
 2. A fresh hosted deployment starts from an unsynced state.
 3. The deployment advances beyond the old stall boundaries and catches
    up to head.
 4. `pnpm deploy:indexer:verify <commit>` returns synced chain status plus
-   non-empty `Pool`, sUSDS, and stETH GraphQL probe rows.
-5. The dashboard `/revenue` page shows restored reserve actuals from the
-   shared endpoint and continues to label stale/partial data correctly.
+   non-empty `Pool`, sUSDS, and stETH GraphQL probe rows. It reads the target
+   commit schema and uses `SusdsYieldLaunchBaseline` as the sampler capability
+   marker. When the marker exists, it requires the exact immutable
+   `1-susds-launch` row and a post-launch `SusdsYieldDailySnapshot`. A target
+   schema with `SusdsYieldSamplerProgress` proves heartbeat freshness from that
+   row. An older schema can use the daily row only when the exact target
+   `susdsEvents.ts` is readable and has no event-time refresh path. A legacy
+   rollback schema without the launch marker omits all sampler-only probes and
+   checks. An unreadable or inconsistent schema or legacy handler fails closed
+   and retains the strict sampler requirements.
+
+After promotion:
+
+5. Wait the full five-minute static-endpoint propagation window.
+6. `pnpm deploy:indexer:verify <commit> --prod` passes against the static
+   production endpoint and requires that exact commit to be production.
+7. An authorized same-origin request to production
+   `/api/reserve-yield?closeout=<short-commit>` with `cache: "no-store"`
+   returns HTTP 200. The query value marks the target in browser and network
+   logs and gives it a distinct shared HTTP cache key; the route does not read
+   it. `earnedYieldError` must be `null`, and
+   `susdsYieldSignalUnavailable` must be `false`,
+   `reserveCurrentHoldingsClassificationFailed` must be `false`, and
+   `susdsSnapshotSourceRequired` must be a boolean.
+   `hasUnindexedSusdsHolding` must be `false`. Treat
+   `susdsSnapshotSourceRequired: true` as current sUSDS exposure that exists or
+   cannot be ruled out. A positive finite sUSDS holding must not pair with a
+   false signal. A true current source signal or a nonzero historical earned
+   signal requires finite `susdsEarnedYieldUsd` and a valid
+   `susdsEarnedYieldAsOf`. The aggregate `earnedYieldAsOf` is not sUSDS
+   evidence because stETH can supply it independently. A true current source
+   signal also requires an sUSDS holding with finite
+   `earnedYieldUsd`, so malformed sUSDS exposure without a usable holding fails
+   closeout. A clean state without either signal may return
+   `susdsEarnedYieldUsd: null` or finite zero and does not require an sUSDS
+   holding or `susdsEarnedYieldAsOf`.
+8. If a true current sUSDS source signal or a nonzero historical signal exists, the
+   dashboard `/revenue` page shows sUSDS reserve actuals without a pending,
+   unavailable, or stale label. In a clean state without either signal, absent
+   sUSDS history does not add one of those labels and no current sUSDS actual is
+   required. The browser console has no errors.
 
 The manual proof that motivated this gate was completed for deployment
 `6bed96e` on 2026-07-03 after adding an archive-capable `ENVIO_RPC_URL_1` in

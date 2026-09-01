@@ -3,7 +3,7 @@ title: Review Prompt Exclusions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-26
+last_verified: 2026-08-30
 doc_type: checklist
 scope: repo-wide
 review_interval_days: 90
@@ -69,7 +69,7 @@ flag the concrete regression and cite the evidence.
   docs that agents actually read.
 - Do not treat weekly or advisory gates as per-PR blockers unless the workflow is
   branch-protection-required for the PR. Examples include mutation testing,
-  duplication reports, and schema-diff comments when their check status is
+  duplication reports, and schema-diff job summaries when their check status is
   advisory.
 
 ## Repo-Specific False Positives

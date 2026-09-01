@@ -20,7 +20,7 @@ const expectedScripts = {
   // must hash. The gate schedules it and so does the required `ci` job, which
   // makes it exactly the alias a PR weakening the routing would want to repoint.
   "gate:routing-table:test":
-    "node --test scripts/gate/routing-table/*.test.mjs",
+    'node --test "scripts/gate/routing-table/*.test.mjs"',
   "agent:prewarm": "node scripts/gate/agent-prewarm.mjs",
   "agent:prewarm:test": "node scripts/gate/agent-prewarm.test.mjs",
   "agent:review-materiality": "node scripts/pr/review-materiality.mjs",
@@ -39,6 +39,8 @@ const expectedScripts = {
   "docs:navigation-eval": "node scripts/docs/docs-navigation-eval.mjs",
   "docs:navigation-eval:test":
     "node scripts/docs/docs-navigation-eval.test.mjs",
+  "ci:contract:test":
+    "node scripts/workflows/check-ci-contract.mjs && node --test scripts/workflows/check-ci-contract.test.mjs scripts/workflows/check-pr-validation-boundary.test.mjs scripts/workflows/check-workflow-permissions-drift.test.mjs",
   "adr:check": "node scripts/pr/check-adr-reminder.mjs",
   "adr:check:test": "node scripts/pr/check-adr-reminder.test.mjs",
   "agent:autoreview": "./scripts/agent-autoreview.sh",
@@ -80,6 +82,12 @@ const expectedScripts = {
   "pr:feedback-state:test": "node scripts/pr/pr-feedback-state.test.mjs",
   "pr:ready-state": "node scripts/pr/pr-ready-state.mjs",
   "pr:ready-state:test": "node scripts/pr/pr-ready-state.test.mjs",
+  // The only sanctioned merge path. Repointing this alias at a bare
+  // `gh pr merge` would strip the interactive-human refusal, the ready-state
+  // check, and the consent record in one line, so the alias is pinned with the
+  // other trust-bearing ones.
+  "pr:merge": "node scripts/pr/merge-pr.mjs",
+  "pr:merge:test": "node scripts/pr/merge-pr.test.mjs",
   // The .coderabbit.yaml allowlist pin (ADR 0066). CodeRabbit reads that config
   // from the PR's own source branch, so the suite that pins it is exactly the
   // command a weakening PR would want to drift.

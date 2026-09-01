@@ -52,7 +52,10 @@ create, replace, or revoke those keys.
 
 Without a stack, `pnpm tf validate` validates every registered stack. It formats
 tracked and non-ignored untracked Terraform, then runs backend-free init and
-validate. Gitignored operator `*.tfvars` stay outside that source check.
+validate. On Darwin, it applies the [immutable provider trust and cache
+rules](notes/agent-quality-gate-mechanics.md). Land trust updates through
+reviewed `main` and CI. Then refresh `origin/main` and rerun the gate. Gitignored
+operator `*.tfvars` stay outside the source check.
 
 For stacks with `ci.apply == "push-main-production-infra-environment"`, local
 apply requires a clean `main` at `origin/main` unless the operator deliberately

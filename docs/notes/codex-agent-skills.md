@@ -3,7 +3,7 @@ title: Codex Agent Skills
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-10
+last_verified: 2026-08-26
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -63,13 +63,58 @@ separate.
 ## Claude global-store shadowing
 
 In a Claude Code session, a user-global skill wins over a repo skill with the
-same name, so personal `ship` or `babysit-pr` implementations shadow the repo
-copies when present. That is accepted: the repo copies stay canonical for
-Codex and for the cloud capability-gate adaptations, whose binding rules also
-live in [`github-tooling-surfaces.md`](github-tooling-surfaces.md), so a
-shadowed Claude session loses no rule. Do not resolve the collision by
-renaming either side; the running session's skill listing, not this note, is
-the runtime truth for which copy loaded.
+same name. `ship` and `babysit-pr` are not merged with the repo copies — the
+repo files are not read at all, so those two are Codex-facing only. A skill
+whose name does not collide loads normally alongside the personal set.
+
+A shadowed session loses no rule **because no rule lives only in those two
+files**. Repo-specific rules reach every surface through three routes, and any
+new rule must take one of them:
+
+1. **Repo docs.** `CLAUDE.md` loads in every session and routes to
+   [`pr-operating-card.md`](pr-operating-card.md) and its authorities; the
+   personal `ship` skill reads repo instructions first and prefers them.
+2. **The babysit hook.** `.claude/babysit-pr.sh` is discovered by path
+   convention and sourced by whichever babysit skill ran, so it gates both. It
+   owns the `pr:ready-state` gate and the fork-head refusal.
+3. **A non-colliding skill name**, for work that needs its own entry point.
+
+Do not resolve the collision by renaming `ship` or `babysit-pr`; the running
+session's skill listing, not this note, is the runtime truth for which copy
+loaded. Verify with a headless probe that exits non-zero when the assumption
+breaks, rather than one whose prose has to be read:
+
+```bash
+set -o pipefail  # otherwise only the parser's status is seen and a failed CLI call reads as a bad skill set
+claude -p "List every skill named exactly 'ship' or 'babysit-pr'. Reply with only a JSON array of the names, no prose." \
+  --model opus --output-format json |
+  python3 -c 'import sys,json,re; r=json.load(sys.stdin).get("result","");m=re.search(r"\[.*\]",r,re.S);n=sorted(json.loads(m.group(0)) if m else []);print(n);sys.exit(0 if n==["babysit-pr","ship"] else 1)'
+```
+
+Exit 0 means one skill resolved per name, as expected. A non-zero exit means the
+collision behaviour changed and the routing above needs rechecking.
+
+**This checks the name set, not which copy won**, and that limit is real rather
+than an oversight: the CLI reports resolved skill names, not the file behind
+each. If precedence ever flipped so the repo copy won, the probe would still exit 0. Asking the model whether its skill contains some repo-only phrase does not
+close the gap either — it answers by reading the file from disk and reports
+`yes` regardless of which copy actually loaded, which was verified rather than
+assumed.
+
+So treat the exit code as a check on the _collision_, not on the _winner_. The
+winner is observable only by consequence: if a session in this repo starts
+following a rule that exists solely in the repo copy, precedence has changed and
+this note is wrong. That is why no rule may live solely in those two files —
+the routing above is designed so the answer stops mattering.
+
+**That invariant is checked, not assumed.** It was false when first written: a
+local Codex review found `never tag chatgpt-codex-connector directly` living
+only in the skill files, and a follow-up grep found the draft-suppression rule
+in the same state. Both now live in the operating card. Before adding a bullet to
+either skill's `What this repo adds`, grep its core assertion across `CLAUDE.md`,
+`AGENTS.md`, `docs/` and `scripts/` — a keyword heuristic is not enough, because
+a bullet whose surrounding words appear elsewhere reads as covered while its
+actual rule is not.
 
 ## Codex Cloud routing
 
@@ -98,6 +143,25 @@ The `doc-garden` skill uses the same exact-mirror contract. It turns a generated
 bounded packet into evidence-backed dispositions, guarded semantic edits,
 link/catalog repair, and normal PR closeout. The cadence and queue contract live
 in [`documentation-gardening.md`](documentation-gardening.md).
+
+The `rank-backlog` skill uses the same exact-mirror contract. It scores the open
+issue backlog in one pass, writes a dated receipt under gitignored `.rankings/`,
+and recommends one issue to work next. It stops at the recommendation; claiming
+stays with the operator. The receipt format and the exclusion-ledger contract
+live in [`backlog-ranking.md`](backlog-ranking.md).
+
+The `backlog-sweep` skill uses the same exact-mirror contract. It is the
+operator-triggered batch on top of that ranking: it picks the eligible top N
+from a receipt, claims each issue by number, and hands each to its own worker
+that ships a ready-for-review PR. Which surface runs those workers is the
+runtime's to decide — Codex uses whatever parallel-execution surface it
+provides. With none, the session works the batch sequentially and takes both
+roles itself: the orchestrator's no-edit, no-gate, no-ship prohibitions exist to
+keep concurrent workers out of each other's trees, so they do not bind when
+there is exactly one actor. The isolated checkout per issue, the duties, and the
+report contract hold either way. It never merges — it stops at READY and prints the operator's
+`pnpm pr:merge` commands. The loop, eligibility rules, boundaries, and report
+contract live in [`backlog-sweep.md`](backlog-sweep.md).
 
 The `.agents/skills/` ↔ `.claude/skills/` mirror is enforced, not just
 documented: `scripts/repo-health/check-skills-mirror.mjs` byte-compares the two

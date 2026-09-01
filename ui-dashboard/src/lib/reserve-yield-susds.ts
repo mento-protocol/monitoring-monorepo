@@ -2,7 +2,6 @@ import { weiToUsd } from "@/lib/format";
 // Lives in queries/reserve-yield.ts so the GraphQL contract test covers it.
 import { SUSDS_YIELD_SUMMARY_QUERY } from "@/lib/queries/reserve-yield";
 import {
-  asArray,
   bigintField,
   errorMessage,
   fetchGraphql,
@@ -18,24 +17,15 @@ import {
   type SusdsYieldLedgerResult,
   type SusdsYieldState,
 } from "@/lib/reserve-yield-types";
+import {
+  hasUnindexedSusdsHolding,
+  isIndexedSusdsHolding,
+} from "@/lib/reserve-yield-susds-coverage";
 
 const SUSDS_YIELD_SUMMARY_ID = "1-susds";
-const TRACKED_SUSDS_WALLET_IDENTIFIERS = new Set([
-  "0xd0697f70e79476195b742d5afab14be50f98cc1e",
-  "0xd3d2e5c5af667da817b2d752d86c8f40c22137e1",
-]);
 
 function isSusdsHolding(holding: ReserveYieldHolding): boolean {
   return holding.assetSymbol.toUpperCase() === FORECASTABLE_SUSDS_SYMBOL;
-}
-
-function isIndexedSusdsHolding(holding: ReserveYieldHolding): boolean {
-  const identifier = holding.identifier?.toLowerCase() ?? null;
-  return (
-    isSusdsHolding(holding) &&
-    identifier !== null &&
-    TRACKED_SUSDS_WALLET_IDENTIFIERS.has(identifier)
-  );
 }
 
 function currentSusdsPrincipalUsd(holdings: ReserveYieldHolding[]): number {
@@ -50,12 +40,6 @@ function currentIndexedSusdsPrincipalUsd(
   return holdings
     .filter(isIndexedSusdsHolding)
     .reduce((sum, holding) => sum + holding.principalUsd, 0);
-}
-
-function hasUnindexedSusdsHolding(holdings: ReserveYieldHolding[]): boolean {
-  return holdings.some(
-    (holding) => isSusdsHolding(holding) && !isIndexedSusdsHolding(holding),
-  );
 }
 
 function applySusdsYieldLedger(
@@ -131,15 +115,23 @@ function parseSusdsYieldLedger(payload: unknown): SusdsYieldLedgerResult {
         : "GraphQL error";
     throw new Error(message);
   }
-  const data = isRecord(payload.data) ? payload.data : null;
-  const rows = data ? asArray(data.SusdsYieldSummary) : [];
-  const row = rows.find(isRecord);
-  if (!row) {
+  if (!isRecord(payload.data)) {
+    throw new Error("Hasura response data was not an object");
+  }
+  const rows = payload.data.SusdsYieldSummary;
+  if (!Array.isArray(rows)) {
+    throw new Error("SusdsYieldSummary was not an array");
+  }
+  if (rows.length === 0) {
     return {
       ledger: null,
       error: "sUSDS earned-yield ledger pending: no indexed summary row yet.",
     };
   }
+  if (!rows.every(isRecord)) {
+    throw new Error("SusdsYieldSummary contained a malformed row");
+  }
+  const row = rows[0]!;
 
   const earnedYieldWei = bigintField(
     row.totalEarnedYieldUsdWei,
@@ -202,6 +194,7 @@ export function applySusdsYieldLedgerResult(
   if (result.status === "rejected") {
     return {
       ...emptyState,
+      signalUnavailable: true,
       earnedYieldError: shouldSurfaceLedgerError
         ? errorMessage("sUSDS earned-yield ledger", result.reason)
         : null,
@@ -212,6 +205,7 @@ export function applySusdsYieldLedgerResult(
   if (rawLedger === null) {
     return {
       ...emptyState,
+      signalUnavailable: false,
       earnedYieldError: shouldSurfaceLedgerError ? error : null,
     };
   }
@@ -228,5 +222,6 @@ export function applySusdsYieldLedgerResult(
     unrealizedYieldUsd: ledger.unrealizedYieldUsd,
     earnedYieldAsOf: ledger.asOf,
     earnedYieldError: joinErrors(warning),
+    signalUnavailable: false,
   };
 }

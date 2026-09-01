@@ -21,6 +21,78 @@
  */
 export const AGENT_MODULE_ARMS = [
   {
+    patterns: [
+      "scripts/gate/quality-gate-coordinator*.mjs",
+      "scripts/gate/agent-quality-gate-scheduler*.mjs",
+      "scripts/gate/agent-quality-gate-fixture-processes.mjs",
+      "scripts/gate/darwin-broker-launch-preflight*.mjs",
+    ],
+    effects: [
+      {
+        command: "pnpm agent:quality-gate:test",
+        reason: "quality-gate coordinator changed",
+      },
+    ],
+  },
+  {
+    why: "Autoreview imports the Darwin lineage modules and materializes the identity helper as part of its trusted runtime. These shared sources must exercise both consumers.",
+    patterns: [
+      "scripts/gate/darwin-process-identity-helper.mjs",
+      "scripts/gate/darwin-process-lineage-model.mjs",
+      "scripts/gate/darwin-process-lineage-state.mjs",
+      "scripts/gate/darwin-process-lineage.mjs",
+    ],
+    effects: [
+      {
+        command: "pnpm agent:quality-gate:test",
+        reason: "quality-gate process containment changed",
+      },
+      {
+        command: "pnpm agent:autoreview:test",
+        reason: "autoreview Darwin containment runtime changed",
+      },
+    ],
+  },
+  {
+    patterns: [
+      "scripts/gate/darwin-process-identity.test.mjs",
+      "scripts/gate/darwin-process-lineage.test.mjs",
+    ],
+    effects: [
+      {
+        command: "pnpm agent:quality-gate:test",
+        reason: "quality-gate process containment changed",
+      },
+    ],
+  },
+  {
+    why: "The marker helper is shared by the gate, autoreview, the Sentry probe, and the CI gate extractor. A change must exercise every spawn surface and the routing oracle.",
+    patterns: ["scripts/gate/mapped-command-process-identity*.mjs"],
+    effects: [
+      {
+        command: "pnpm agent:quality-gate:test",
+        reason: "mapped-command marker inheritance changed",
+      },
+      {
+        command: "pnpm agent:autoreview:test",
+        reason: "mapped-command marker inheritance changed",
+      },
+      {
+        command: "pnpm sentry:broker:test",
+        reason: "mapped-command marker inheritance changed",
+      },
+      {
+        command:
+          "node scripts/sentry/ci-wiring/check-sentry-suites-in-ci.test.mjs",
+        reason: "mapped-command marker inheritance changed",
+      },
+      {
+        command: "pnpm gate:routing-table:test",
+        reason: "mapped-command marker inheritance changed",
+      },
+    ],
+  },
+  {
     patterns: ["scripts/check-agent-quality-gate-package-scripts.mjs"],
     effects: [
       {
@@ -72,6 +144,7 @@ export const AGENT_MODULE_ARMS = [
   {
     patterns: [
       "scripts/agent-autoreview.mjs",
+      "scripts/agent-autoreview-secret-suppressions.json",
       "scripts/agent-autoreview-core.test.mjs",
       "scripts/agent-autoreview-target-guard.test.mjs",
     ],
@@ -149,6 +222,22 @@ export const AGENT_MODULE_ARMS = [
       {
         command: "node --test scripts/repo-health/file-size-watchlist.test.mjs",
         reason: "file-size watchlist automation changed",
+      },
+    ],
+  },
+  {
+    patterns: [
+      "scripts/repo-health/check-guardrail-prose.mjs",
+      "scripts/repo-health/check-guardrail-prose.test.mjs",
+    ],
+    effects: [
+      {
+        command: "node scripts/repo-health/check-guardrail-prose.test.mjs",
+        reason: "guardrail prose checker changed",
+      },
+      {
+        command: "node scripts/repo-health/check-guardrail-prose.mjs",
+        reason: "guardrail prose checker changed",
       },
     ],
   },
@@ -264,7 +353,7 @@ export const AGENT_MODULE_ARMS = [
     patterns: ["scripts/lib/gh-issue-lifecycle.mjs"],
     effects: [
       {
-        why: "The `gh` runner, pagination guard, Documentation Garden workflow authorization, label bootstrap, and queue-state arbitration behind both scheduled issue automations, plus the narrowed local Sentry projection label ensure. Each consumer suite must run here.",
+        why: "The `gh` runner, pagination guard, Documentation Garden workflow authorization, label bootstrap, and queue-state arbitration behind all three scheduled issue automations, plus the narrowed local Sentry projection label ensure. Each consumer suite must run here.",
         command: "pnpm docs:garden:test",
         reason: "shared GitHub issue lifecycle module changed",
       },
@@ -274,6 +363,14 @@ export const AGENT_MODULE_ARMS = [
       },
       {
         command: "pnpm sentry:project:test",
+        reason: "shared GitHub issue lifecycle module changed",
+      },
+      {
+        command: "pnpm issue:board:test",
+        reason: "shared GitHub issue lifecycle module changed",
+      },
+      {
+        command: "pnpm review:eval:test",
         reason: "shared GitHub issue lifecycle module changed",
       },
     ],
@@ -348,7 +445,7 @@ export const AGENT_MODULE_ARMS = [
     ],
   },
   {
-    why: "The Node mapping engine (ADR 0069). This IS the routing: the gate builds its plan from the engine and executes it, so a change here changes what every gate run does. D5c retired the bash `case` arms, the in-gate byte comparison and the parity harness together (issue 2020), which leaves `engine.test.mjs` as the only thing pinning the verbs, the four post-passes and the root-manifest classifier. The arm also carries the gate self-test and the prewarm contract: both parse the stdout this module produces.",
+    why: "The Node mapping engine (ADR 0069). This IS the routing: the gate builds its plan from the engine and executes it, so a change here changes what every gate run does. D5c retired the bash `case` arms, the in-gate byte comparison and the parity harness together (issue 2020), which leaves `engine.test.mjs` as the only thing pinning the verbs, the five post-passes and the root-manifest classifier. The arm also carries the gate self-test and the prewarm contract: both parse the stdout this module produces.",
     patterns: ["scripts/gate/mapping.mjs", "scripts/gate/mapping/*.mjs"],
     effects: [
       {
@@ -409,13 +506,19 @@ export const AGENT_MODULE_ARMS = [
       "scripts/pr/issue-board-backfill.mjs",
       "scripts/pr/issue-board-cli.mjs",
       "scripts/pr/issue-board-commands.mjs",
+      "scripts/pr/issue-board-lock.mjs",
+      "scripts/pr/issue-board-ownership.mjs",
       "scripts/pr/issue-board-projects.mjs",
+      "scripts/pr/issue-board-release.mjs",
       "scripts/pr/issue-board-state.mjs",
+      "scripts/pr/issue-board-sync.mjs",
+      "scripts/pr/issue-board-sync-lock.mjs",
+      "scripts/pr/issue-board-transactions.mjs",
       "scripts/pr/issue-board-transport.mjs",
     ],
     effects: [
       {
-        why: "agent-issue-board.mjs is the entry point over six layers (cli, transport, state, projects, backfill, commands). The one suite covers the pure state machine through the entry's re-exports, so every layer routes to it.",
+        why: "agent-issue-board.mjs is the entry point over twelve layers (cli, transport, state, projects, ownership snapshots, backfill, persistent issue lock, claim transactions, release transactions, commands, sync lock tracking, sync). The one suite covers the state machine and transaction seams through the entry's re-exports, so every layer routes to it.",
         command: "pnpm issue:board:test",
         reason: "agent issue board helper changed",
       },

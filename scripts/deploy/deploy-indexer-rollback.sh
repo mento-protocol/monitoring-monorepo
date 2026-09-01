@@ -115,7 +115,10 @@ echo ""
 
 if (( DEPLOYMENT_COUNT >= ENVIO_MAX_DEPLOYMENTS )); then
   echo "Envio already has $DEPLOYMENT_COUNT live deployments."
-  echo "Delete a stale non-prod deployment first, then rerun rollback before pushing:"
+  echo "Run the Deployment Cleanup Inventory in docs/deployment.md."
+  echo "Obtain exact-ID approval. Before each deletion, refresh canonical main and envio refs."
+  echo "Then re-fetch the registry and deployment statuses, and reclassify every live deployment."
+  echo "After approved cleanup, rerun rollback before pushing:"
   echo "  https://envio.dev/app/$ENVIO_ORG/$ENVIO_INDEXER"
   exit 1
 fi
@@ -193,5 +196,8 @@ echo ""
 echo "  4. If verification passes, promote back to prod:"
 echo "     pnpm deploy:indexer:promote $FULL_SHA"
 echo ""
-echo "  5. Verify the dashboard:"
-echo "     https://monitoring.mento.org"
+echo "  5. Wait 5 minutes, then verify the static production endpoint:"
+echo "     pnpm deploy:indexer:verify $FULL_SHA --prod"
+echo ""
+echo "  6. Verify the affected production API, dashboard page, and browser console:"
+echo "     Follow .agents/skills/deploy-indexer/SKILL.md Phase 7"

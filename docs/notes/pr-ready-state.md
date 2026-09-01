@@ -3,7 +3,7 @@ title: PR Ready State
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-21
+last_verified: 2026-08-26
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -23,7 +23,7 @@ must have a clean feedback ledger and the subsequent current-head
 context or post replies, but they must preserve that two-projection contract.
 
 The probe shells out to gh, so it cannot run in Claude cloud sessions whose
-proxy blocks gh's API paths; a variant passing the REST + GraphQL +
+proxy blocks GraphQL and where gh is not reliably available; a variant passing the REST + GraphQL +
 `--slurp` capability gate runs it as written, passing `--repo <owner/name>`
 since gh cannot infer the repo from the proxy remote. Blocked sessions use
 the MCP emulation documented in
@@ -136,8 +136,17 @@ suppresses ordinary duplicate posts for the same head. GitHub's issue-comment
 API has no conditional-create operation, so the marker is a detection and
 best-effort suppression mechanism rather than an atomic claim. The CodeRabbit
 check and review remain advisory: report a pending or rate-limited result as
-optional lag. If a requested review finishes while the PR is still under watch,
-rerun `pr:feedback-state` and handle its findings before all-clear.
+optional lag. The rate limit is a shared quota, not a per-PR allowance.
+[ADR 0066](../adr/0066-coderabbit-replaces-bugbot-third-reviewer.md) records
+the two tiers: the free OSS tier meters per repository on a star-scaled 1–10
+reviews/hour, and a paid seat meters per developer identity across every PR
+that identity opened. This org runs a paid Pro+ seat, so the ceiling is the
+identity's, currently about 4 reviews/hour at this repo's review volume.
+Either way, watching several PRs at once draws down one allowance, so a
+re-request inside the window queues or no-ops on whichever PR reaches the
+limit first — do not tight-loop `@coderabbitai review` posts waiting for a
+faster turnaround. If a requested review finishes while the PR is still under
+watch, rerun `pr:feedback-state` and handle its findings before all-clear.
 
 Some non-required workflows still post feedback that becomes a repo-policy
 blocker after the required status surface is green. Their workflow status stays
@@ -314,6 +323,13 @@ Expected top-level fields:
       "unresolvedCount": 0
     }
   },
+  "requiredChecks": [
+    {
+      "name": "ci",
+      "state": "pass",
+      "required": true
+    }
+  ],
   "requiredStatusContexts": [
     {
       "context": "ci",
@@ -347,6 +363,15 @@ Field expectations:
   `name`, `state`, `required: true`, and a URL when GitHub provides one.
 - `optional.items[]`: advisory signals worth reporting separately. Every item
   needs `kind`, `name`, `state`, and `required: false`.
+- `requiredChecks[]`: the required subset of the status checks, the set
+  `required.blockers[]` derives from. Each item has `name`, `required: true`,
+  and a `classifyCheck()` `state` — `pass`, `fail`, `pending`, or `skipped`
+  (a `NEUTRAL`/`SKIPPED` conclusion), so consumers tolerate all four. Count
+  required checks
+  from this field, never by filtering `statusChecks`: that grouping describes
+  every check the PR has and carries no `required` flag at all, so a filter on
+  one is a permanent zero. `pnpm pr:merge` reports its briefing counts from
+  here.
 - `gates`: named repo-policy gates that are not obvious from raw check status.
   Each gate should say whether it is required for readiness.
 - `readinessOverrides[]`: active human break-glass overrides that affected a
@@ -397,8 +422,14 @@ Field expectations:
    near twice the baseline, and do not pause solely for cycle count before five
    review-triggered patch cycles are complete. Pause for reclassification before
    starting a sixth.
-3. Run `pnpm agent:quality-gate --run` once for the batch; it owns test
-   execution.
+3. Before invoking the gate, ensure that no direct validation, dashboard server,
+   or browser suite outside the coordinator is active on the same machine.
+   Concurrent `--run` gates from other worktrees can continue through the
+   coordinator. They share weighted machine capacity. From invocation until
+   this gate exits, do not start uncoordinated work there. Use same-machine spare
+   workers only for read-only work. Run `pnpm agent:quality-gate --run` once for
+   the batch. Run validation outside the coordinator from a fully hydrated
+   checkout on another machine.
 4. For non-trivial behavioral, workflow, security, data-flow, or UI batches,
    run `pnpm agent:autoreview` as a structured source-review closeout at the
    batch boundary rather than as an inner loop. Verify accepted findings before

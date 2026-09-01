@@ -3,7 +3,7 @@ title: CI Workflow Gates Checklist
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-20
+last_verified: 2026-08-31
 doc_type: checklist
 scope: ci/process
 review_interval_days: 90
@@ -53,11 +53,36 @@ advisory schema-diff workflow in the PR UI.
 
 - [ ] **Ruleset-required** workflows MUST NOT use `paths:` / `paths-ignore:` filters — they must run on every PR. If you want path-conditional work, run every PR but skip the expensive job inside via `if:` checks (or `paths-filter`-style gating that reports a green check on no-op).
 - [ ] Registry-backed Terraform routing uses the broad `workflowAdmissionPatterns` list in `terraform.stacks.json`. Keep the required CI workflow unfiltered at workflow level. Its internal `terraform` filter and the Infra push/pull-request filters copy that list. Do not enumerate stack-specific paths in those filters. `pnpm tf:test` enforces exact equality and proves that the boundary subsumes every `changedPathPatterns` entry.
-- [ ] **Advisory** workflows (everything _not_ in the ruleset list above) SHOULD use a workflow-level `paths:` filter so they don't boot a runner on irrelevant PRs. A skipped advisory check is simply absent — it cannot leave a _required_ check pending. This is a deliberate CI-cost control; see `lighthouse.yml`, `size-limit.yml`, and `supply-chain.yml` for the pattern (the workflow-level `paths:` mirrors the in-job `filter` step, which is kept as a fail-closed backstop). **Exception:** a workflow that posts a sticky PR comment AND clears it on revert (e.g. `schema-diff.yml`) must stay unfiltered — a `paths:` skip on a revert PR strands the stale comment because the cleanup step never runs. Keep run/skip in-job there.
+- [ ] **Advisory** workflows (everything _not_ in the ruleset list above) SHOULD use a workflow-level `paths:` filter so they don't boot a runner on irrelevant PRs. A skipped advisory check is simply absent — it cannot leave a _required_ check pending. This is a deliberate CI-cost control; see `lighthouse.yml`, `size-limit.yml`, and `supply-chain.yml` for the pattern. `schema-diff.yml` is a reviewed exception. It keeps its every-PR trigger so every pull request gets a visible job summary. Its in-job classifier skips irrelevant work and runs the schema diff when path detection fails.
 - [ ] **Scheduled advisory** workflows SHOULD state the detection/rebuild SLO they serve and use the slowest cadence that satisfies it. Backstop monitors for multi-hour/day failure modes should prefer daily or similarly low cadence unless there is an explicit operator page-time requirement; do not default to every 15 minutes just because the check is cheap.
 - [ ] If you make an advisory workflow required, add it to the ruleset **and** remove its `paths:` filter in the same change.
 
 > ⚠️ The ruleset and these docs have drifted before: several advisory gates were written as if required (run-on-every-PR, no `paths:`) when the ruleset never enforced them. When you add or "promote" a check, update both the ruleset and this list.
+
+### Fixed fan-out contract
+
+Run `pnpm ci:contract:test` after a change to `ci.yml`, its fixed job set, or
+the pull request validation boundary. The unconditional `Production
+infrastructure contract` job runs the same command on every pull request and
+`main` push.
+
+The command checks these contracts without defining a second runtime router:
+
+- The reviewed fixed jobs, `ci.needs`, conditional jobs, and `allowed-skips`
+  have exact set equality.
+- Every functional filter has positive, negative, rename, and deletion
+  fixtures. Separate unknown-path and control-plane fixtures prove that those
+  paths select every conditional job.
+- The pinned path-filter action emits one documented count per filter. Keep the
+  `all`, `routed`, and `ordinary` count comparison aligned with the functional
+  filter aliases. Do not export changed-file lists.
+- Pull request runs cancel stale heads. Each `main` SHA uses a distinct,
+  non-cancelling concurrency group.
+- Failed, cancelled, missing, unexpected, and disallowed skipped results fail
+  the aggregate and name each invalid job.
+- The existing pull request validation-boundary suite remains part of this
+  command. It pins permissions, credential access, cache restores, cache saves,
+  cleanup, and required-command ordering.
 
 ## 2. Branch enforcement on `workflow_dispatch`
 
@@ -88,16 +113,21 @@ action is SHA-pinned.
 Canonical good example: the workflow-level `concurrency` block in
 `.github/workflows/metrics-bridge.yml`.
 
-## 5. Caching keys
+## 5. Cache trust and keys
 
-A cache key that misses an input silently serves stale build artifacts.
+A cache crosses commit and workflow boundaries. Treat restore authority, save
+authority, and key inputs as separate controls.
 
-- [ ] If the workflow runs codegen (e.g. `pnpm indexer:codegen`, `pnpm dashboard:codegen`), the cache key or committed-output verification MUST include the codegen scripts and every config/schema file that codegen reads (e.g. `config.multichain.mainnet.yaml`, `config.multichain.testnet.yaml`, `schema.graphql`, `scripts/run-envio-with-env.mjs`, `ui-dashboard/scripts/generate-graphql-types.mjs`, `scripts/envio-schema-stubs.graphql`). If the output is committed, verify with `git status --porcelain -- <path>` rather than `git diff` alone so missing generated files fail as untracked output.
+- [ ] Every PR-reachable `actions/setup-node` step MUST set `package-manager-cache: false`. Its implicit cache post-step can save data. Use explicit split restore and save actions instead.
+- [ ] Pull request jobs MAY restore disposable setup caches with `actions/cache/restore`. The restore must use a `trusted-main-v1-*` namespace populated by protected `main` and set `continue-on-error: true`. If `cache-hit` is empty, remove only the fixed cache target before the required setup command. This clears a miss or failed partial extraction. Keep a complete prefix-key restore, whose `cache-hit` output is `false`, and still run the command. Pull request jobs MUST NOT use `actions/cache` or `actions/cache/save`.
+- [ ] A cache save MUST use `actions/cache/save`, use the same `trusted-main-v1-*` namespace, and require both `github.event_name == 'push'` and `github.ref == 'refs/heads/main'`. Keep saves nonfatal. A caller input alone never authorizes a save.
+- [ ] A cache hit MUST NOT skip install, lint, typecheck, test, build, code generation, or generated-output comparison. Caches accelerate setup only. Every required command runs on every invocation.
+- [ ] If the workflow runs codegen (e.g. `pnpm indexer:codegen`, `pnpm dashboard:codegen`), execute it on every invocation. Include every codegen input in any disposable setup-cache key. This includes scripts, config, schemas, and ABIs. If output is committed, verify it with `git status --porcelain -- <path>` so untracked generated files fail too.
 - [ ] Lockfile (`pnpm-lock.yaml`) is necessary but NOT sufficient — codegen output depends on more than dep versions
 - [ ] pnpm patch files under `patches/**` are package-manager inputs. Patch-only PRs MUST trigger frozen install and package quality paths, because `pnpm-lock.yaml` records patch hashes and a stale or missing patch hash fails frozen install.
-- [ ] For caches of **external binaries whose version is resolved transitively** (Playwright Chromium under `~/.cache/ms-playwright`, Cypress browsers under `~/.cache/Cypress`, etc.), the cache key MUST include `pnpm-lock.yaml`, NOT just `package.json`. A caret-range dep (`@playwright/test: ^1.60.0`) lets a lockfile-only update flip the resolved Playwright version — and thus the Chromium revision it wants — without changing `package.json`'s hash. Result: every CI run restores the stale cache, the install step re-downloads (~130 MB for Chromium), but `actions/cache` won't re-save under the already-hit key, so the download repeats indefinitely until something forces a `package.json` change. Caught on PR #633 (`.github/workflows/lighthouse.yml` Playwright Chromium cache step). Pair with a `restore-keys:` fallback so unrelated lockfile churn still benefits from a near-match cache.
+- [ ] For caches of **external binaries whose version is resolved transitively** (Playwright Chromium under `~/.cache/ms-playwright`, Cypress browsers under `~/.cache/Cypress`, etc.), the cache key MUST include `pnpm-lock.yaml`, not only `package.json`. A lockfile-only dependency update can change the required binary revision. Use a same-namespace `restore-keys:` fallback for near matches. The protected-main save then writes the exact new key after setup completes.
 
-- [ ] If a cache stores **architecture-specific binaries** (Playwright Chromium, trunk's `~/.cache/trunk` tool dir), the key MUST include `${{ runner.arch }}` — installers typically validate version, not architecture, so a cross-arch restore passes validation and dies at exec time (`Exec format error`, or trunk's `execve failed: Text file busy` from re-downloading over restored binaries; seen on PR #821). Text-only caches (e.g. envio codegen's `.envio/types.d.ts`) deliberately do NOT take an arch component — adding one just orphans the warm cache (PR #822 review).
+- [ ] If a cache stores **architecture-specific binaries** (Playwright Chromium, trunk's `~/.cache/trunk` tool dir), the key MUST include `${{ runner.arch }}`. Installers can validate a version but miss an architecture mismatch. A cross-architecture restore then fails at execution. A text-only cache does not need an architecture component, but it must still use the trusted namespace and must never replace a required command.
 
 ## 6. Fail-closed audit / security workflows
 
@@ -116,18 +146,80 @@ Audit workflows that "tolerate transient errors" become attack surface — an at
 
 Dependabot is scoped to the `github-actions` ecosystem (`.github/dependabot.yml`). npm is handled by pnpm with `minimumReleaseAge: 4320` in `pnpm-workspace.yaml`; GitHub-issued security advisories on `pnpm-lock.yaml` still come through as Dependabot PRs without an `npm` entry.
 
-PRs are grouped + cooldown-throttled and pass through a tiered auto-merge gate (`.github/workflows/dependabot-auto-merge.yml`):
+Dependabot groups routine updates. One exact group can auto-merge through
+`.github/workflows/dependabot-auto-merge.yml`.
 
-- **Patch / minor** → auto-merge once required CI checks pass (CI / Vercel / Code Quality / Vercel Preview Comments). Cursor Bugbot's risk summary is advisory.
-- **Major** → human review required. The two recurring failure modes are (a) action input/output signature breaks not caught by CI, (b) ESM-only migrations that quietly skip dependents. `@codex review` is the on-demand second opinion.
-- **Maintainer changes** (the action's upstream maintainer set changed) → held for manual review regardless of tier. Supply-chain signal.
-- **Security advisories** (any tier including major) → bypass Dependabot cooldown so CVE patches flow fast; major-tier security PRs still require human merge.
-- **Any `anthropics/*` or `dependabot/*` action** → never auto-merged (glob covers future renames + sibling actions). Self-loop: claude-code-action is the auto-reviewer, dependabot/fetch-metadata is what classifies update-type for the auto-merge workflow — a regression in either ships unreviewed and breaks the gate that would catch follow-ups.
+- **GitHub-owned `actions/*` patch / minor in `actions-minor-patch`:**
+  auto-merge after required checks pass.
+- **Third-party GitHub Actions:** require a human merge. This includes
+  load-bearing gates such as `re-actors/alls-green` and credential actions
+  such as `google-github-actions/auth`.
+- **Major:** require human review and a human merge. Check action input/output
+  changes and ESM-only migrations that can skip dependents. Use `@codex review`
+  for a second opinion.
+- **Maintainer changes:** require a human merge at every tier.
+- **Security advisories:** bypass cooldown and stay outside the named routine
+  group. Require a human merge.
+- **`actions/create-github-app-token`:** require a human merge. This action can
+  mint GitHub App installation tokens. Keep credential tooling outside the lane
+  so it cannot change an authentication boundary by itself.
+- **`anthropics/*`:** require a human merge. These actions participate in the
+  review boundary and remain separate from other third-party groups.
+- **`dependabot/*`:** require a human merge. `dependabot/fetch-metadata`
+  classifies this auto-merge lane, so it cannot update itself through the lane.
+  Dependabot-owned actions remain separate from other third-party groups.
+- **Every non-GitHub-Actions ecosystem:** require a human merge.
 
-Cooldown default in `dependabot.yml`: `default-days: 7`. Per-semver-tier cooldown (`semver-major-days` etc.) is NOT supported for the github-actions ecosystem — only `default-days` is honored, so all tiers share the same delay. Cooldown does NOT apply to security updates (GitHub-enforced). Because auto-merge handles the click, the 7-day delay on routine bumps costs zero friction.
+All version-update tiers use `default-days: 7`; the `github-actions` ecosystem
+has no per-tier cooldown. GitHub skips cooldown for security updates. Requiring
+the exact `actions-minor-patch` dependency group and `actions/*` publisher
+boundary keep those immediate security updates outside auto-merge.
 
-- [ ] If you add a new external review integration — GitHub App or Action — that's load-bearing for review/merge gating (Cursor Bugbot, Codex, Claude, CodeRabbit), add it to the auto-merge exclusion list with the same self-loop rationale
-- [ ] If you add a new `package-ecosystem` to `dependabot.yml`, decide whether it inherits the same auto-merge policy or needs a separate rule — npm in particular has a larger transitive blast radius than github-actions
+The lane has two pinned workflows. The `pull_request` classifier has read-only
+permissions. It verifies the event and pinned Dependabot metadata. The
+default-branch `workflow_run` writer treats completion as an untrusted signal.
+It re-reads the exact workflow and run, first-attempt job and step results,
+current PR and head, the complete issue-event close history, the current PR
+body's exact `Maintainer changes` marker, every commit, every changed file, and
+the base's merge queue. It requires one open same-repository PR, no prior
+`closed` or `reopened` event, verified Dependabot-authored commits, and only
+modified top-level workflow YAML. A recorded close remains a durable human veto
+after the same PR and head are reopened. Dependabot must open a new PR before
+the update can enter this lane again. The writer always rejects changes to
+either trust workflow. It waits for every required check and verifies a
+non-empty passing required-only projection. It then repeats the complete
+workflow, run, job, PR, head, maintainer-change body, close-history, commit,
+file, and queue proof. The issue-event read is the final authoritative read.
+The final write is a synchronous REST merge with the exact head SHA and squash
+method. It cannot enqueue, create an auto-merge request, or pin issue-event
+history. A close and reopen inside the remaining request window is a residual
+race. Neither workflow checks out or executes PR code. The writer does not read
+upstream outputs, artifacts, or caches. `pnpm tf:test` pins both parsed workflow
+shapes. The autofix trust checker rejects every `pull_request_target` workflow.
+
+Before changing the classifier policy or successful job shape, drain every
+in-flight run from the prior classifier version or add an explicit runtime
+version binding. The writer uses the stable workflow ID and path. Those values
+alone do not distinguish old classifier source from new classifier source.
+
+The automatic `GITHUB_TOKEN` merge does not emit this repository's `push`
+workflows. Required PR checks are the final automated evidence for this narrow
+lane. The writer refuses if `main` has a merge queue. The final REST endpoint
+has no enqueue behavior, so a queue activated after the last read cannot turn
+the write into deferred queue state. A future queue rollout must still keep
+this lane disabled until a reviewed design defines its queue behavior. The
+repository accepts the built-in token's residual risk for this bounded routine
+group. `GH_READ_TOKEN` and `FINAL_MERGE_TOKEN` both resolve to `github.token` by
+design. Keep the variables separate so tests can prove that all evidence reads
+use the read seam and only the synchronous exact-head REST request uses the
+final-write seam. Issue #2091 was closed as not planned. This lane will not add a
+`merge-operators` Team, credential broker, dedicated merge App, protected merge
+Environment, or controlled lifecycle ruleset.
+
+- [ ] If you add a new external review integration — GitHub App or Action — that is load-bearing for review or merge gating, keep its updates outside routine groups when an isolated review improves the self-update boundary
+- [ ] If you add a new `package-ecosystem` to `dependabot.yml`, keep it on the
+      human path unless a separate reviewed decision defines its exact lane.
+      npm has a larger transitive blast radius than GitHub Actions.
 
 ## 8. Runner architecture (ARM vs x64)
 
@@ -185,9 +277,18 @@ closed.
       `mento-protocol/monitoring-monorepo/.github/workflows/…@ref`), whose
       callee may bind a credential the caller cannot see. All need the same
       guard or annotation
-- [ ] Never introduce `pull_request_target` — the checker refuses it outright
+- [ ] Do not introduce `pull_request_target`. The checker refuses every use.
+      Use an unprivileged PR classifier and a default-branch writer only after
+      a separate reviewed decision defines the full boundary.
 - [ ] Checkouts in jobs that execute PR-head code set `persist-credentials: false` (the checkout token in `.git/config` is readable by any test/build the PR controls)
 - [ ] `node scripts/workflows/check-autofix-ci-trust.mjs` must pass after the change
+- [ ] `node scripts/workflows/check-pr-validation-boundary.test.mjs` must pass
+      after a permission, cache, Codecov, schema-diff, or Dependabot workflow
+      change. It pins the closed write and credential job inventories, exact
+      permission maps, credential bindings, environments, forwarded secrets,
+      and reusable targets. It follows local reusable workflows. It scans
+      every cache save. It also pins each retained restore, targeted cleanup,
+      and required command.
 
 ## 11. Lessons already paid for
 

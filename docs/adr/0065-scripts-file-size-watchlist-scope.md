@@ -3,7 +3,7 @@ title: scripts/ is inside the file-size watchlist, with named-mechanism exemptio
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-23
+last_verified: 2026-08-27
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -51,11 +51,9 @@ reports when a file there regrows.
 ## Decision
 
 `scripts/` is a watchlist scope at any depth. Its extensions mirror what the
-root ESLint config lints — `.mjs`, `.js`, `.cjs` — plus `.sh`; only `.mjs` and
-`.sh` exist there today, and the other two are listed so a first `.cjs` lands
-inside the scope rather than beside it. The reporter's standing exclusion for
-generated trees still applies first; `scripts/` has no generated tree today, so
-nothing is lost to it.
+root ESLint config lints — `.mjs`, `.js`, `.cjs` — plus `.sh` and native `.c`
+sources. The reporter's standing exclusion for generated trees still applies
+first; `scripts/` has no generated tree today, so nothing is lost to it.
 
 **Tests are excluded, as in every scope but Aegis.** Package configs set
 `max-lines: off` for tests, and `scripts/` tests inherit that rule rather than a
@@ -93,18 +91,18 @@ change could extend. Both make extending them a change to how the autoreview
 wrapper proves its own integrity, and this repository does not make that change
 to satisfy a line count.
 
-| File                                                | Mechanism                                                                                                                                                                                                                                                                                                    |
-| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `agent-autoreview.sh`                               | `verify_current_wrapper_matches_ref` hashes the wrapper's own blob against the frozen-HEAD snapshot before an explicit branch or commit review. A sourced sibling falls outside the identity that check proves, so moving bulk out weakens the property rather than preserving it.                           |
-| `agent-autoreview.mjs`, `agent-autoreview-core.mjs` | The wrapper materializes exactly these two helper names under a 2 MB aggregate cap, from six literal lists — `helper_paths`, two `runtime_paths` arrays, an `lstat` loop, an ACL loop, and a Perl `@names` copy list that assigns each name its own file mode. Admitting a third rewrites that materializer. |
+| File                                                | Mechanism                                                                                                                                                                                                                                                                                                                                                                                                      |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agent-autoreview.sh`                               | `verify_current_wrapper_matches_ref` hashes the wrapper's own blob against the frozen-HEAD snapshot before an explicit branch or commit review. A sourced sibling falls outside the identity that check proves, so moving bulk out weakens the property rather than preserving it.                                                                                                                             |
+| `agent-autoreview.mjs`, `agent-autoreview-core.mjs` | The wrapper materializes the entry point, core, sealed exact-patch suppression JSON, Darwin identity sources and lineage modules, and `gate/mapped-command-process-identity.mjs` under a 2 MB aggregate cap. Explicit trust lists, private nested directories, no-follow copies, file modes, and protected-ref blob checks attest the complete runtime. Splitting either large helper changes that trust root. |
 
 **Nothing whose split is merely expensive is exempt.** `agent-quality-gate.sh`
-is the largest example and stays in the report: it is the entire subject of
-[issue 1498](https://github.com/mento-protocol/monitoring-monorepo/issues/1498),
-which decomposes it into sourced helper modules, so exempting it would suppress
-exactly the row that already has an owner. `pr-ready-state{,-core}.mjs` sit
-behind `materialize_feedback_runtime`'s two basename lists, required and
-optional, which already prove themselves extensible.
+is the largest example and stays measured at the hard cap without an exemption.
+Its residual process-control and execution layers are deliberate: [ADR
+0069](0069-gate-routing-table-as-data.md) rejected splitting them without a
+schema, test oracle, or checkable invariant. `pr-ready-state{,-core}.mjs` sit
+behind `materialize_feedback_runtime`'s two basename lists, required and optional,
+which already prove themselves extensible.
 `pr-feedback-state-claude.mjs` and `pr-ready-state-review-signals.mjs` are
 version-split optional entries, so coherent snapshots from before either split
 still work. The D3 move (issue 1877) added a location resolver under both lists
@@ -120,7 +118,8 @@ three ways it rots. The exempt path set is spelled out in the test, and the test
 also asserts this file records each path, so adding or dropping an entry reds
 until this record moves with it. Each exempted file must still exist and still
 be above the watch threshold, so one that shrank or moved reds. And the wrapper
-must still carry all six two-name lists and the 2 MB cap the reason cites. A
+must still carry all ten non-shell runtime entries in each trust list and the
+2 MB cap the reason cites. A
 further test proves the suppression is the exemption's work, not the scope's, by
 scanning identical content at an exempt path and at a plain sibling.
 
@@ -163,7 +162,7 @@ that nothing holds in place.
   three, all at hard or near-hard.
 - Two `scripts/` files join that queue: `agent-quality-gate.sh` and
   `sentry-triage-archive.mjs`. Both are over the hard cap with nothing holding
-  them, and the first already has an issue.
+  them.
 - **The gate's row shrank by 45% at D5c, and the residual is the process-control
   layer by design.** Projected here at `2e3df696` as ~3,519 raw / ~2,266 rough
   from a 6,163-raw file; measured after D5c landed, the gate is **3,327 raw /
@@ -177,9 +176,9 @@ that nothing holds in place.
   because their safety argument rests on `mkdir`/`link` atomicity,
   `ps -o lstart=`, Bash 3.2 job-control PGIDs and `/proc`, with no oracle for a
   rewrite. It stays in the report, still over the 1,000-line hard cap, and
-  stated rather than exempted;
-  [issue 1498](https://github.com/mento-protocol/monitoring-monorepo/issues/1498)
-  stays open as its owner.
+  stated rather than exempted. ADR 0069 is the row's justification. The monthly
+  scheduler continues to surface the row as actionable; that recurring
+  visibility is deliberate and needs no permanent single-row issue owner.
 - Thirty further `scripts/` files sit between the watch threshold and the
   hard cap. They are recorded and delta-tracked, and any that grows by more than
   100 raw lines becomes actionable on its own. The 2026-08-23 refresh produced

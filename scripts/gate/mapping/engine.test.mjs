@@ -34,16 +34,19 @@ import { fileURLToPath } from "node:url";
 
 import { bashFunctionSource } from "../../sentry/ci-wiring/check-sentry-suites-in-ci-gate-extract.mjs";
 
+import { ROUTING_PLAN } from "../routing-table/index.mjs";
 import { Facts } from "./facts.mjs";
 import { BUCKETS, Plan, commandDedupeKey } from "./plan.mjs";
 import {
   addTrunkCheckCommand,
+  addWorkspaceConfigBuild,
   applyScopedTestCommands,
   compactTurboQualityCommands,
   scopedIsNonSourcePath,
   scopedTestInfraChanged,
   sortCodegenCommands,
 } from "./post-passes.mjs";
+import { routeChangedPaths } from "./route.mjs";
 import * as verbs from "./verbs.mjs";
 
 /** The subset of Facts the post-passes and verbs actually consult. */
@@ -81,10 +84,11 @@ test("dedupe keeps the FIRST reason, not the last", () => {
   assert.equal(reasonOf(plan, "pnpm lint"), "first reason");
 });
 
-test("the two alias pairs share one dedupe key", () => {
+test("the alias pairs share one dedupe key", () => {
   for (const [alias, direct] of [
     ["pnpm agent:quality-gate:test", "bash scripts/agent-quality-gate.test.sh"],
     ["pnpm agent:autoreview:test", "bash scripts/agent-autoreview.test.sh"],
+    ["pnpm tf:test", "node scripts/tf-stacks.test.mjs"],
   ]) {
     assert.equal(
       commandDedupeKey(alias),
@@ -279,6 +283,42 @@ test("the root tooling bundle schedules the whole suite list", () => {
   assert.ok(commands.includes("node scripts/pr/pr-ready-state.test.mjs"));
 });
 
+test("Darwin runtime files shared with autoreview route both regression suites", () => {
+  const sharedRuntimePaths = [
+    "scripts/gate/darwin-process-identity.c",
+    "scripts/gate/darwin-process-identity-runtime.inc.c",
+    "scripts/gate/darwin-process-identity-helper.mjs",
+    "scripts/gate/darwin-process-lineage-model.mjs",
+    "scripts/gate/darwin-process-lineage-state.mjs",
+    "scripts/gate/darwin-process-lineage.mjs",
+  ];
+
+  for (const changedPath of sharedRuntimePaths) {
+    const plan = new Plan();
+    routeChangedPaths(
+      ROUTING_PLAN,
+      [changedPath],
+      stubFacts({ isRealTree: false, presentPaths: [changedPath] }),
+      {
+        plan,
+        routeLockfileChange: () => {
+          throw new Error("unexpected lockfile route");
+        },
+      },
+    );
+    const commands = commandsOf(plan);
+    for (const expected of [
+      "pnpm agent:quality-gate:test",
+      "pnpm agent:autoreview:test",
+    ]) {
+      assert.ok(
+        commands.includes(expected),
+        `${changedPath} does not route ${expected}: ${JSON.stringify(commands)}`,
+      );
+    }
+  }
+});
+
 // ── Post-pass 1: Trunk ─────────────────────────────────────────────────────
 
 test("a path that no longer exists forces a full-repo Trunk scan", () => {
@@ -288,9 +328,9 @@ test("a path that no longer exists forces a full-repo Trunk scan", () => {
     ["deleted/file.ts"],
     stubFacts({ presentPaths: [] }),
   );
-  assert.deepEqual(commandsOf(plan), ["./tools/trunk check --all"]);
+  assert.deepEqual(commandsOf(plan), ["./tools/trunk check --ci --all"]);
   assert.equal(
-    reasonOf(plan, "./tools/trunk check --all"),
+    reasonOf(plan, "./tools/trunk check --ci --all"),
     "changed paths require full-repo Trunk checks",
   );
 });
@@ -299,7 +339,9 @@ test("existing ordinary paths get a targeted Trunk scan", () => {
   const plan = new Plan();
   const paths = ["a/one.ts", "b/two.ts"];
   addTrunkCheckCommand(plan, paths, stubFacts({ presentPaths: paths }));
-  assert.deepEqual(commandsOf(plan), ["./tools/trunk check a/one.ts b/two.ts"]);
+  assert.deepEqual(commandsOf(plan), [
+    "./tools/trunk check --ci a/one.ts b/two.ts",
+  ]);
 });
 
 test("a config path in the full-scan list forces full even when it exists", () => {
@@ -316,7 +358,7 @@ test("a config path in the full-scan list forces full even when it exists", () =
     addTrunkCheckCommand(plan, [path], stubFacts({ presentPaths: [path] }));
     assert.deepEqual(
       commandsOf(plan),
-      ["./tools/trunk check --all"],
+      ["./tools/trunk check --ci --all"],
       `${path} governs the whole repo, so a targeted scan would lint only itself`,
     );
   }
@@ -328,7 +370,7 @@ test("a .shellcheckrc edit adds a repo-wide ShellCheck-only pass, ahead of the r
   addTrunkCheckCommand(plan, paths, stubFacts({ presentPaths: paths }));
   assert.equal(
     commandsOf(plan)[0],
-    "./tools/trunk check --all --filter=shellcheck",
+    "./tools/trunk check --ci --all --filter=shellcheck",
     "prepended last, so it must end up first",
   );
 });
@@ -339,7 +381,7 @@ test("Trunk is prepended, so it runs before commands added earlier", () => {
   const paths = ["a/one.ts"];
   addTrunkCheckCommand(plan, paths, stubFacts({ presentPaths: paths }));
   assert.deepEqual(commandsOf(plan), [
-    "./tools/trunk check a/one.ts",
+    "./tools/trunk check --ci a/one.ts",
     "pnpm lint",
   ]);
 });
@@ -376,7 +418,60 @@ test("an unrecognised codegen command keeps its position after the known ones", 
   ]);
 });
 
-// ── Post-pass 3: Turbo compaction ──────────────────────────────────────────
+// ── Post-pass 3: workspace dependency setup ────────────────────────────────
+
+test("full and reduced config-consumer plans build shared-config exactly once", () => {
+  const consumers = [
+    "@mento-protocol/ui-dashboard",
+    "@mento-protocol/metrics-bridge",
+    "@mento-protocol/integration-probes",
+  ];
+  const builders = [
+    verbs.addPackageQualityCommands,
+    verbs.addPackageVitestTypecheckCommands,
+  ];
+  for (const packageName of consumers) {
+    for (const buildPlan of builders) {
+      const plan = new Plan();
+      buildPlan(plan, packageName, "consumer changed");
+      addWorkspaceConfigBuild(plan);
+      addWorkspaceConfigBuild(plan);
+      assert.equal(
+        commandsOf(plan).filter(
+          (command) => command === "pnpm --filter @mento-protocol/config build",
+        ).length,
+        1,
+        `${buildPlan.name} for ${packageName} must schedule one config build`,
+      );
+    }
+  }
+});
+
+test("peg registry checks build shared-config before loading its exports", () => {
+  for (const command of [
+    "node scripts/alerts/check-peg-registry-integrity.mjs",
+    "node scripts/alerts/check-peg-registry-integrity.test.mjs",
+  ]) {
+    const plan = new Plan();
+    plan.addCommand(command, "registry changed");
+    addWorkspaceConfigBuild(plan);
+    assert.ok(
+      commandsOf(plan).includes("pnpm --filter @mento-protocol/config build"),
+      `${command} must receive the config setup prerequisite`,
+    );
+  }
+});
+
+test("a plan with no config consumer does not build shared-config", () => {
+  const plan = new Plan();
+  verbs.addAegisQualityCommands(plan, "aegis changed");
+  addWorkspaceConfigBuild(plan);
+  assert.ok(
+    !commandsOf(plan).includes("pnpm --filter @mento-protocol/config build"),
+  );
+});
+
+// ── Post-pass 4: Turbo compaction ──────────────────────────────────────────
 
 test("same-task Turbo commands coalesce into one invocation", () => {
   const plan = new Plan();
@@ -446,7 +541,7 @@ test("a non-Turbo command is left exactly as it was", () => {
   assert.deepEqual(commandsOf(plan), ["pnpm code-health:deps"]);
 });
 
-// ── Post-pass 4: scoped tests ──────────────────────────────────────────────
+// ── Post-pass 5: scoped tests ──────────────────────────────────────────────
 
 const COVERAGE = "pnpm --filter @mento-protocol/ui-dashboard test:coverage";
 const scopedPlan = () => {

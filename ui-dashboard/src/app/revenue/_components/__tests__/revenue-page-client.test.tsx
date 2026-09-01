@@ -81,7 +81,7 @@ function reserveSnapshot(
   return {
     id: `1-susds-${timestamp}`,
     chainId: 1,
-    token: "0xsusds",
+    token: "0xa3931d71877c0e7a3148cb7eb4463524fec27fbd",
     timestamp: String(timestamp),
     currentShares: "0",
     costBasisUsdWei: "0",
@@ -118,6 +118,9 @@ const RESERVE_YIELD: ReserveYieldResponse = {
   principalUsd: 4_700,
   forecastPrincipalUsd: 4_700,
   earnedYieldUsd: 439.4,
+  susdsYieldSignalUnavailable: false,
+  susdsSnapshotSourceRequired: true,
+  hasUnindexedSusdsHolding: false,
   realizedYieldUsd: 275.58,
   unrealizedYieldUsd: 163.82,
   earnedYieldAsOf: "2026-06-03T10:41:11.000Z",
@@ -175,6 +178,7 @@ const RESERVE_YIELD: ReserveYieldResponse = {
   next365dUsd: 3_650,
   annualRunRateUsd: 3_650,
   forecastUnavailableSymbols: [],
+  reserveCurrentHoldingsClassificationFailed: false,
   holdingsError: null,
   rateError: null,
   earnedYieldError: null,
@@ -267,9 +271,13 @@ function renderRevenue({
   reserveYield = RESERVE_YIELD,
   reserveRows = [],
   reserveHistoryUnavailable = false,
+  stethHistoryFailed = false,
+  hasStethSnapshotSource = false,
   protocolFeesLoading = false,
   reserveYieldLoading = false,
   reserveYieldError = false,
+  reserveCurrentHoldingsClassificationFailed = false,
+  hasUnindexedSusdsHolding = false,
   reserveHistoryLoading = false,
 }: {
   networkData?: NetworkData[];
@@ -285,9 +293,13 @@ function renderRevenue({
   reserveYield?: ReserveYieldResponse | null;
   reserveRows?: SusdsYieldDailySnapshotRow[];
   reserveHistoryUnavailable?: boolean;
+  stethHistoryFailed?: boolean;
+  hasStethSnapshotSource?: boolean;
   protocolFeesLoading?: boolean;
   reserveYieldLoading?: boolean;
   reserveYieldError?: boolean;
+  reserveCurrentHoldingsClassificationFailed?: boolean;
+  hasUnindexedSusdsHolding?: boolean;
   reserveHistoryLoading?: boolean;
 } = {}) {
   mockUseProtocolFees.mockReturnValue({
@@ -308,6 +320,8 @@ function renderRevenue({
     data: reserveYield,
     isLoading: reserveYieldLoading,
     hasError: reserveYieldError,
+    reserveCurrentHoldingsClassificationFailed,
+    hasUnindexedSusdsHolding,
   });
   mockUseReserveYieldHistory.mockReturnValue({
     rows: reserveRows,
@@ -315,6 +329,8 @@ function renderRevenue({
     hasError: false,
     unavailable: reserveHistoryUnavailable,
     truncated: false,
+    stethHistoryFailed,
+    hasStethSnapshotSource,
   });
   return renderToStaticMarkup(<RevenuePageClient />);
 }
@@ -568,15 +584,71 @@ describe("RevenuePageClient canonical revenue layout", () => {
       reserveHistoryUnavailable: true,
     });
 
-    expect(html).toContain("Reserve earned-yield history is not indexed yet.");
+    expect(html).toContain(
+      "Reserve sUSDS earned-yield actuals unavailable: no SusdsYieldDailySnapshot source exists for current sUSDS holdings or earned signal.",
+    );
     expect(capturedProps.chart?.partialReasons).toContain(
-      "Reserve earned-yield history is not indexed yet.",
+      "Reserve sUSDS earned-yield actuals unavailable: no SusdsYieldDailySnapshot source exists for current sUSDS holdings or earned signal.",
     );
     const reserveActual = capturedProps.chart?.series.reduce(
       (sum, point) => sum + (point.reserveYieldUsd ?? 0),
       0,
     );
     expect(reserveActual).toBe(0);
+  });
+
+  it("renders the sUSDS signal-unavailable reason through the revenue page", () => {
+    const reason =
+      "Reserve sUSDS earned-yield actuals unavailable: the current sUSDS yield signal is unavailable and no SusdsYieldDailySnapshot source exists.";
+    const html = renderRevenue({
+      reserveYield: {
+        ...RESERVE_YIELD,
+        earnedYieldUsd: 25,
+        susdsYieldSignalUnavailable: true,
+        holdings: [STETH_HOLDING],
+      },
+      reserveRows: [],
+    });
+
+    expect(html).toContain(reason);
+    expect(capturedProps.chart?.partialReasons).toContain(reason);
+    expect(streamCardHtml(html, "Reserve Yield")).toContain("N/A");
+  });
+
+  it("renders incomplete current sUSDS snapshot coverage through the revenue page", () => {
+    const reason =
+      "Reserve sUSDS earned-yield actuals unavailable: indexed snapshots do not cover all current sUSDS sources.";
+    const html = renderRevenue({
+      reserveYield: {
+        ...RESERVE_YIELD,
+        hasUnindexedSusdsHolding: true,
+      },
+      reserveRows: [reserveSnapshot(currentDayTimestamp(), 45)],
+      hasUnindexedSusdsHolding: true,
+    });
+
+    expect(html).toContain(reason);
+    expect(capturedProps.chart?.partialReasons).toContain(reason);
+    expect(streamCardHtml(html, "Reserve Yield")).toContain("N/A");
+  });
+
+  it("renders current stETH actuals unavailable when its history source fails", () => {
+    const reason =
+      "Reserve stETH earned-yield actuals unavailable: StethYieldDailySnapshot history failed to load.";
+    const html = renderRevenue({
+      reserveYield: {
+        ...RESERVE_YIELD,
+        stethSnapshotSourceRequired: true,
+        holdings: [...RESERVE_YIELD.holdings, STETH_HOLDING],
+      },
+      reserveRows: [reserveSnapshot(currentDayTimestamp(), 0)],
+      stethHistoryFailed: true,
+      hasStethSnapshotSource: false,
+    });
+
+    expect(html).toContain(reason);
+    expect(capturedProps.chart?.partialReasons).toContain(reason);
+    expect(streamCardHtml(html, "Reserve Yield")).toContain("N/A");
   });
 
   it("shows available actual revenue in period headlines when reserve history is stale", () => {

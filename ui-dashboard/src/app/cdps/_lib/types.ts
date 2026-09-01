@@ -102,6 +102,10 @@ export type CdpTroveOpenStatus = (typeof CDP_TROVE_OPEN_STATUSES)[number];
 
 // Row cap on the list-page trove fetch used for the borrower count.
 // Per-row payload is minimal (id + collateralId + status) so 500 is generous
+// CDP markets are deployed on Celo mainnet only; every CDP surface gates
+// its queries on this chain id.
+export const CELO_MAINNET_CHAIN_ID = 42220;
+
 // for today's population; the count tile prefixes `≥` when the cap is hit.
 export const CDP_TROVES_LIST_LIMIT = 500;
 // Hosted Envio/Hasura caps a single query branch at 1000 rows. The detail

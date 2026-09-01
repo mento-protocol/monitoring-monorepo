@@ -49,9 +49,9 @@ const FALLBACK = [
   "#94a3b8",
 ];
 
-// Internal — `tokenColorForSource` is the only callsite today. If a
-// future caller wants a single-symbol lookup (no source split), re-export.
-function tokenColor(symbol: string): string {
+// Single-symbol lookup (no source split) — used directly where a series is
+// keyed by token symbol alone, e.g. the trove history chart's debt panel.
+export function tokenColor(symbol: string): string {
   const hit = PALETTE[symbol];
   if (hit) return hit;
   let hash = 0;

@@ -14,7 +14,7 @@ import {
 const gateOutput = `Agent quality gate
 
 Mapped safe local commands:
-- ./tools/trunk check ui-dashboard/src/app/page.tsx (changed existing paths should pass targeted Trunk checks)
+- ./tools/trunk check --ci ui-dashboard/src/app/page.tsx (changed existing paths should pass targeted Trunk checks)
 - pnpm indexer:codegen (indexer-envio changed)
 - pnpm exec turbo run lint --filter=@mento-protocol/ui-dashboard --filter=@mento-protocol/metrics-bridge --cache=local:rw (ui-dashboard changed; metrics-bridge changed)
 - TF_DATA_DIR=terraform/.terraform-agent-gate terraform -chdir=terraform validate -no-color (Terraform changed)
@@ -54,7 +54,7 @@ assert.deepEqual(
   extractTurboPrewarmCommands(`Agent quality gate
 
 Mapped safe local commands:
-- ./tools/trunk check docs/deployment.md (changed existing paths should pass targeted Trunk checks)
+- ./tools/trunk check --ci docs/deployment.md (changed existing paths should pass targeted Trunk checks)
 
 Dry run only.
 `),

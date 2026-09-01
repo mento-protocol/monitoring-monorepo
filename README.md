@@ -2,7 +2,7 @@
 
 Real-time monitoring infrastructure for Mento v3 on-chain pools — a multichain [Envio HyperIndex](https://docs.envio.dev/) indexer paired with a Next.js 16 + Plotly.js dashboard.
 
-<!-- agent-context: title="Mento Monitoring Monorepo" status=active owner=eng canonical=true last_verified=2026-08-20 doc_type=reference scope=repo-wide review_interval_days=90 garden_lane=package-readmes-reference -->
+<!-- agent-context: title="Mento Monitoring Monorepo" status=active owner=eng canonical=true last_verified=2026-08-28 doc_type=reference scope=repo-wide review_interval_days=90 garden_lane=package-readmes-reference -->
 
 **Live dashboard:** [monitoring.mento.org](https://monitoring.mento.org)
 
@@ -39,7 +39,7 @@ Real-time monitoring infrastructure for Mento v3 on-chain pools — a multichain
                                           Grafana Alloy / Cloud
 ```
 
-`config.multichain.mainnet.yaml` configures a single Envio project (`mento`) for Celo Mainnet (42220), Monad Mainnet (143), Polygon Mainnet (137), and Ethereum reserve-yield events (1). Polygon is live at the static production endpoint after completing the normal deploy, sync verification, promotion, and producer checks. Pool IDs are namespaced as `{chainId}-{address}` to prevent cross-chain collisions. Ethereum reserve-yield indexing is event-only; the historical sUSDS onBlock heartbeat is not registered in the hosted indexer.
+`config.multichain.mainnet.yaml` configures a single Envio project (`mento`) for Celo Mainnet (42220), Monad Mainnet (143), Polygon Mainnet (137), and Ethereum reserve-yield events (1). Polygon is live at the static production endpoint after completing the normal deploy, sync verification, promotion, and producer checks. Pool IDs are namespaced as `{chainId}-{address}` to prevent cross-chain collisions. Ethereum reserve-yield indexing includes events plus a bounded sUSDS daily sampler every 600 Ethereum blocks from the v3 launch boundary; the historical every-block sUSDS heartbeat remains excluded from the hosted indexer.
 
 `metrics-bridge` retains its indexed Hasura poller and owns an isolated peg
 lifecycle. When the protected policy artifact is configured, that loop combines
@@ -59,15 +59,15 @@ current decision package.
 
 ## Networks
 
-| Network       | Chain ID | Status                                                                |
-| ------------- | -------- | --------------------------------------------------------------------- |
-| Celo Mainnet  | 42220    | Live in the production multichain indexer                             |
-| Monad Mainnet | 143      | Live in the production multichain indexer                             |
-| Polygon       | 137      | Live in the production multichain indexer                             |
-| Ethereum      | 1        | Live in the production multichain indexer — reserve-yield events only |
-| Celo Sepolia  | 11142220 | Hosted dashboard support is opt-in via testnet env vars               |
-| Monad Testnet | 10143    | Hosted dashboard support is opt-in via testnet env vars               |
-| Polygon Amoy  | 80002    | Hosted dashboard support is opt-in via testnet env vars               |
+| Network       | Chain ID | Status                                                                              |
+| ------------- | -------- | ----------------------------------------------------------------------------------- |
+| Celo Mainnet  | 42220    | Live in the production multichain indexer                                           |
+| Monad Mainnet | 143      | Live in the production multichain indexer                                           |
+| Polygon       | 137      | Live in the production multichain indexer                                           |
+| Ethereum      | 1        | Live in the production multichain indexer — reserve-yield events + bounded samplers |
+| Celo Sepolia  | 11142220 | Hosted dashboard support is opt-in via testnet env vars                             |
+| Monad Testnet | 10143    | Hosted dashboard support is opt-in via testnet env vars                             |
+| Polygon Amoy  | 80002    | Hosted dashboard support is opt-in via testnet env vars                             |
 
 The canonical Polygon contract, dashboard, alert-condition, deferral, and
 production-cutover matrix is
@@ -80,6 +80,9 @@ production-cutover matrix is
 - Node.js 24 LTS
 - [pnpm](https://pnpm.io/) 11.x
 - Docker (for local indexer dev — runs Postgres + Hasura)
+- On macOS, the Xcode Command Line Tools. Install them with
+  `xcode-select --install`. The quality gate uses their selected macOS SDK and
+  Clang toolchain for exact Darwin process identity.
 
 ### Install
 
@@ -312,15 +315,27 @@ pnpm deploy:indexer:logs "$COMMIT" --errors-only --since 2h
 pnpm deploy:indexer:perf "$COMMIT"
 pnpm deploy:indexer:verify "$COMMIT"
 pnpm deploy:indexer:promote "$COMMIT"
+# After the full five-minute propagation window:
+pnpm deploy:indexer:verify "$COMMIT" --prod
 ```
 
 The status watcher only proves a deployment caught up. Promotion additionally
-requires `deploy:indexer:verify` to pass core-row and Polygon replay semantics;
-`--allow-syncing` never waives those data-integrity checks.
+requires `deploy:indexer:verify` to pass core rows, sUSDS post-launch sampler
+progress/freshness, Polygon replay semantics, and the exact immutable sUSDS
+launch baseline when the target commit schema declares it. The verifier reads
+the target schema from that exact commit and uses the baseline entity as the
+sUSDS sampler capability marker. New schemas prove heartbeat freshness through
+`SusdsYieldSamplerProgress`; an older schema can use the latest daily row only
+when its exact sUSDS handler has no event-time snapshot writer. A legacy rollback
+schema without the launch marker skips all sampler-only probes and checks. An
+unreadable or inconsistent target schema or legacy handler fails closed and
+retains the strict sampler requirements.
+`--allow-syncing` never waives the remaining data-integrity checks.
 
 For an agent-operated production rollout, use the repo's `/deploy-indexer`
 skill: it also captures the prior production commit, confirms promotion, waits
-for endpoint propagation, and verifies the dashboard in the browser. After a
+for endpoint propagation, verifies the static production endpoint and affected
+application API, and then verifies the dashboard and browser console. After a
 pre-merge `/deploy-indexer --no-promote`, finish a tree-matching candidate with
 an explicitly authorized `/deploy-indexer --resume-preload <commit>`; do not
 use the bare promote command as a shortcut.

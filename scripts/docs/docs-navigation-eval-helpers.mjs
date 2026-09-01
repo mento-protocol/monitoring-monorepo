@@ -115,7 +115,7 @@ export function navigationContextFloor(suite, inventory) {
 export function validateFixtureSuite(
   suite,
   inventory,
-  { requireHeadroomReserve = true } = {},
+  { requireHeadroomReserve = true, enforceHeadroomReserve = true } = {},
 ) {
   const errors = [];
   const records = inventoryMap(inventory);
@@ -331,6 +331,7 @@ export function validateFixtureSuite(
       );
     }
     if (
+      enforceHeadroomReserve &&
       Number.isSafeInteger(targets.min_total_unique_source_headroom_bytes) &&
       targets.max_total_unique_source_bytes - floor.total_unique_route_bytes <
         targets.min_total_unique_source_headroom_bytes

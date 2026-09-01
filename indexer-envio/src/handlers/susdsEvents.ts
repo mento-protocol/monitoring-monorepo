@@ -2,6 +2,8 @@ import { ZERO_ADDRESS } from "../constants.js";
 import { asAddress, eventId } from "../helpers.js";
 import { indexer } from "../indexer.js";
 import {
+  handleSusdsYieldDailySnapshotHeartbeat,
+  handleSusdsYieldLaunchBaseline,
   readSharePrice,
   recordSusdsYieldEventDailySnapshot,
 } from "./susds/dailySnapshots.js";
@@ -13,7 +15,10 @@ import {
 } from "./susds/movements.js";
 import { updateSummary } from "./susds/positions.js";
 import {
+  ETHEREUM_CHAIN_ID,
+  SUSDS_DAILY_SNAPSHOT_BLOCK_INTERVAL,
   TRACKED_SUSDS_WALLETS,
+  V3_REVENUE_LAUNCH_BLOCK,
   isTrackedWallet,
   type EventMeta,
 } from "./susds/shared.js";
@@ -52,11 +57,65 @@ function eventMeta(event: {
   };
 }
 
+function registerSusdsYieldSamplers(): void {
+  indexer.onBlock(
+    {
+      name: "SusdsLaunchBaseline",
+      where: ({ chain }) => {
+        if (chain.id !== ETHEREUM_CHAIN_ID) return false;
+        const chainEndBlock =
+          "endBlock" in chain && typeof chain.endBlock === "number"
+            ? chain.endBlock
+            : undefined;
+        if (
+          chainEndBlock !== undefined &&
+          chainEndBlock < V3_REVENUE_LAUNCH_BLOCK
+        ) {
+          return false;
+        }
+        if (chain.startBlock > V3_REVENUE_LAUNCH_BLOCK) return false;
+        return {
+          block: {
+            number: {
+              _gte: V3_REVENUE_LAUNCH_BLOCK,
+              _lte: V3_REVENUE_LAUNCH_BLOCK,
+            },
+          },
+        };
+      },
+    },
+    async (args) => {
+      await handleSusdsYieldLaunchBaseline(args);
+    },
+  );
+
+  indexer.onBlock(
+    {
+      name: "SusdsYieldDailySnapshots",
+      where: ({ chain }) =>
+        chain.id === ETHEREUM_CHAIN_ID
+          ? {
+              block: {
+                number: {
+                  _gte: Math.max(chain.startBlock, V3_REVENUE_LAUNCH_BLOCK),
+                  _every: SUSDS_DAILY_SNAPSHOT_BLOCK_INTERVAL,
+                },
+              },
+            }
+          : false,
+    },
+    async (args) => {
+      await handleSusdsYieldDailySnapshotHeartbeat(args);
+    },
+  );
+}
+
 export function registerSusdsYieldEventHandlers(): void {
   if (susdsRegistrationState.__mentoSusdsYieldEventHandlersRegistered) {
     return;
   }
   susdsRegistrationState.__mentoSusdsYieldEventHandlersRegistered = true;
+  registerSusdsYieldSamplers();
 
   indexer.onEvent(
     {

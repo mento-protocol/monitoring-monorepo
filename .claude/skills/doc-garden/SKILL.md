@@ -35,9 +35,12 @@ list for review.
    fallback in
    [`docs/notes/github-tooling-surfaces.md`](../../../docs/notes/github-tooling-surfaces.md)
    (label transition, claim comment, `issue:board backfill --issue <n>` and
-   `issue:board sync` handoff). Run the backfill helper first with `--dry-run`.
+   repository-wide `issue:board sync` handoff). Run the backfill helper first
+   with `--dry-run`.
    It fills empty ownership fields from a trusted claim comment and rejects
-   conflicting Project values. Do not
+   conflicting Project values. Preview the sync with `--dry-run`. Obtain
+   explicit authority for the repository-wide apply. The apply re-reads live
+   state, so a clean preview does not narrow its scope. Do not
    overwrite a packet already labeled `needs-grooming`, `agent-active`, or
    `in-pr`; it remains the one live packet until resolved or closed.
 3. Reproduce the packet when needed:
@@ -91,3 +94,9 @@ Summarize the disposition and evidence for every packet file in the PR body.
 Open a normal ready-for-review PR, use `Closes #<issue>` only when the entire
 packet is complete, and follow the repository ship/readiness workflow through
 review and merge.
+
+If a PR merges only part of a generated packet, keep the generated issue body
+and packet markers unchanged. Record merged work in issue comments and PR
+links. Follow the partial-merge route in
+[`agent-issue-workflow.md`](../../../docs/notes/agent-issue-workflow.md); never
+return the generated packet to `agent-ready`.
