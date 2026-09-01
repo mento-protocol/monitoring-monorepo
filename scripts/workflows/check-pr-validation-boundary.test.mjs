@@ -107,7 +107,7 @@ test("structural mutations fail closed at each M2 boundary", () => {
   // prettier-ignore
   mutateOnce(root, ".github/actions/pnpm-install/action.yml", "      continue-on-error: true\n      uses: actions/cache/save@", "      continue-on-error: false\n      uses: actions/cache/save@", /cache save must be nonfatal/u);
   // prettier-ignore
-  mutateOnce(root, ".github/actions/pnpm-install/action.yml", "    - name: Clear incomplete pnpm store restore\n      if: steps.pnpm-cache.outputs.cache-hit == ''", "    - name: Clear incomplete pnpm store restore\n      if: 'false'", /clear an incomplete extraction/u);
+  mutateOnce(root, ".github/actions/pnpm-install/action.yml", "    - name: Clear incomplete pnpm store restore\n      if: inputs.restore-cache == 'true' && steps.pnpm-cache.outputs.cache-hit == ''", "    - name: Clear incomplete pnpm store restore\n      if: 'false'", /clear an incomplete extraction|exact protected controls/u);
   mutateOnce(
     root,
     ".github/actions/pnpm-install/action.yml",
@@ -276,7 +276,7 @@ test("structural mutations fail closed at each M2 boundary", () => {
   mutateOnce(
     root,
     ".github/workflows/ci.yml",
-    "          write-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}",
+    "          write-cache: ${{ !inputs.no_skip_audit && github.event_name == 'push' && github.ref == 'refs/heads/main' }}",
     "          write-cache: true",
     /dependency-free x64 pnpm cache writer/u,
   );
@@ -299,11 +299,11 @@ test("structural mutations fail closed at each M2 boundary", () => {
   // prettier-ignore
   mutateOnce(root, ".github/workflows/ci.yml", "  production-infra-contract:\n    name: Production infrastructure contract", "  production-infra-contract:\n    name: Production infrastructure contract\n    needs: changes", /direct dependency-free x64 pnpm cache writer/u);
   // prettier-ignore
-  mutateOnce(root, ".github/workflows/ci.yml", "      - uses: ./.github/actions/pnpm-install\n        with:\n          write-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}", "      - uses: ./.github/actions/pnpm-install\n        if: 'false'\n        with:\n          write-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}", /dependency-free x64 pnpm cache writer/u);
+  mutateOnce(root, ".github/workflows/ci.yml", "      - uses: $/.github/actions/pnpm-install\n        with:\n          restore-cache: ${{ !inputs.no_skip_audit }}\n          write-cache: ${{ !inputs.no_skip_audit && github.event_name == 'push' && github.ref == 'refs/heads/main' }}", "      - uses: $/.github/actions/pnpm-install\n        if: 'false'\n        with:\n          restore-cache: ${{ !inputs.no_skip_audit }}\n          write-cache: ${{ !inputs.no_skip_audit && github.event_name == 'push' && github.ref == 'refs/heads/main' }}", /dependency-free x64 pnpm cache writer/u);
   // prettier-ignore
-  mutateOnce(root, ".github/workflows/ci.yml", "      - uses: ./.github/actions/pnpm-install\n        with:\n          write-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}", "      - uses: ./.github/actions/pnpm-install\n        env:\n          PNPM_CONFIG_STORE_DIR: /tmp/other\n        with:\n          write-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}", /store override is forbidden/u);
+  mutateOnce(root, ".github/workflows/ci.yml", "      - uses: $/.github/actions/pnpm-install\n        with:\n          restore-cache: ${{ !inputs.no_skip_audit }}\n          write-cache: ${{ !inputs.no_skip_audit && github.event_name == 'push' && github.ref == 'refs/heads/main' }}", "      - uses: $/.github/actions/pnpm-install\n        env:\n          PNPM_CONFIG_STORE_DIR: /tmp/other\n        with:\n          restore-cache: ${{ !inputs.no_skip_audit }}\n          write-cache: ${{ !inputs.no_skip_audit && github.event_name == 'push' && github.ref == 'refs/heads/main' }}", /store override is forbidden/u);
   // prettier-ignore
-  mutateOnce(root, ".github/workflows/ci.yml", "      - uses: ./.github/actions/pnpm-install\n        with:\n          write-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}", "      - name: Persist alternate pnpm store\n        run: echo \"PNPM_CONFIG_STORE_DIR=/tmp/other\" >> \"$GITHUB_ENV\"\n      - uses: ./.github/actions/pnpm-install\n        with:\n          write-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}", /store override is forbidden/u);
+  mutateOnce(root, ".github/workflows/ci.yml", "      - uses: $/.github/actions/pnpm-install\n        with:\n          restore-cache: ${{ !inputs.no_skip_audit }}\n          write-cache: ${{ !inputs.no_skip_audit && github.event_name == 'push' && github.ref == 'refs/heads/main' }}", "      - name: Persist alternate pnpm store\n        run: echo \"PNPM_CONFIG_STORE_DIR=/tmp/other\" >> \"$GITHUB_ENV\"\n      - uses: $/.github/actions/pnpm-install\n        with:\n          restore-cache: ${{ !inputs.no_skip_audit }}\n          write-cache: ${{ !inputs.no_skip_audit && github.event_name == 'push' && github.ref == 'refs/heads/main' }}", /store override is forbidden/u);
   // prettier-ignore
   mutateOnce(root, ".github/workflows/ci.yml", "  production-infra-contract:\n    name: Production infrastructure contract", "  production-infra-contract:\n    name: Production infrastructure contract\n    container: node:24", /caller jobs must not use containers/u);
   // prettier-ignore
@@ -311,8 +311,8 @@ test("structural mutations fail closed at each M2 boundary", () => {
   mutateOnce(
     root,
     ".github/workflows/ci.yml",
-    "      - uses: ./.github/actions/pnpm-install\n      - name: Resolve main baseline (PR baseline-growth check)",
-    "      - uses: ./.github/actions/pnpm-install\n        with:\n          write-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}\n      - name: Resolve main baseline (PR baseline-growth check)",
+    "      - uses: $/.github/actions/pnpm-install\n        with:\n          restore-cache: ${{ !inputs.no_skip_audit }}\n      - name: Resolve validation baseline",
+    "      - uses: $/.github/actions/pnpm-install\n        with:\n          restore-cache: ${{ !inputs.no_skip_audit }}\n          write-cache: ${{ !inputs.no_skip_audit && github.event_name == 'push' && github.ref == 'refs/heads/main' }}\n      - name: Resolve validation baseline",
     /dependency-free x64 pnpm cache writer/u,
   );
   mutateOnce(
