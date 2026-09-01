@@ -78,8 +78,8 @@ const MUTATIONS = [
   ["candidate checkout ref", DISPATCH, "          ref: ${{ inputs.source_sha }}", "          ref: ${{ inputs.base_sha }}", /candidate checkout step changed/u],
   ["candidate checkout depth", DISPATCH, "          fetch-depth: 0", "          fetch-depth: 1", /candidate checkout step changed/u],
   ["candidate checkout credentials", DISPATCH, "          persist-credentials: false", "          persist-credentials: true", /candidate checkout step changed/u],
-  ["candidate package drift condition", DISPATCH, "      - name: Reject candidate package-execution drift\n        env:", "      - name: Reject candidate package-execution drift\n        if: ${{ !cancelled() }}\n        env:", /package-execution drift check/u],
-  ["candidate package drift path set", DISPATCH, '            ":(glob)**/package.json"', '            ":(glob)**/other.json"', /package-execution drift check/u],
+  ["candidate protected drift condition", DISPATCH, "      - name: Reject candidate execution or evidence-instrument drift\n        env:", "      - name: Reject candidate execution or evidence-instrument drift\n        if: ${{ !cancelled() }}\n        env:", /candidate-execution or evidence-instrument drift check/u],
+  ["candidate protected drift path set", DISPATCH, '            ":(glob)**/package.json"', '            ":(glob)**/other.json"', /candidate-execution or evidence-instrument drift check/u],
   ["admission dependency", DISPATCH, "    needs: admit", "    needs: changes", /depend on admission/u],
   ["protected workflow reference", DISPATCH, "    uses: $/.github/workflows/ci.yml", "    uses: ./.github/workflows/ci.yml", /call protected CI/u],
   ["workflow-call lint scope", DISPATCH, "# trunk-ignore(actionlint/workflow-call)", "# trunk-ignore(actionlint/syntax-check)", /line-scoped actionlint/u],
@@ -162,18 +162,22 @@ for (const [label, path, before, after, expected] of MUTATIONS) {
   test(`rejects ${label}`, () => mutateOnce(path, before, after, expected));
 }
 
-const PACKAGE_DRIFT_RUN = load(readFileSync(join(ROOT, DISPATCH), "utf8")).jobs
-  .admit.steps[2].run;
+const PROTECTED_DRIFT_RUN = load(readFileSync(join(ROOT, DISPATCH), "utf8"))
+  .jobs.admit.steps[2].run;
 
 function git(root, ...args) {
   return execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
 }
 
-function packageDriftFixture() {
-  const root = mkdtempSync(join(tmpdir(), "no-skip-package-drift-"));
+function protectedDriftFixture(basePath) {
+  const root = mkdtempSync(join(tmpdir(), "no-skip-protected-drift-"));
   git(root, "init", "--quiet");
   writeFileSync(join(root, "README.md"), "base\n");
-  git(root, "add", "README.md");
+  if (basePath) {
+    mkdirSync(dirname(join(root, basePath)), { recursive: true });
+    writeFileSync(join(root, basePath), "base\n");
+  }
+  git(root, "add", "README.md", ...(basePath ? [basePath] : []));
   git(
     root,
     "-c",
@@ -207,8 +211,8 @@ function commitPath(root, path, content, force = false) {
   return git(root, "rev-parse", "HEAD");
 }
 
-function packageDriftResult(root, base, source) {
-  return spawnSync("bash", ["-c", PACKAGE_DRIFT_RUN], {
+function protectedDriftResult(root, base, source) {
+  return spawnSync("bash", ["-c", PROTECTED_DRIFT_RUN], {
     cwd: root,
     encoding: "utf8",
     env: { ...process.env, BASE_SHA: base, SOURCE_SHA: source },
@@ -216,10 +220,10 @@ function packageDriftResult(root, base, source) {
 }
 
 test("protected admission accepts ordinary candidate source drift", () => {
-  const { root, base } = packageDriftFixture();
+  const { root, base } = protectedDriftFixture();
   try {
     const source = commitPath(root, "src/page.ts", "export {};\n");
-    assert.equal(packageDriftResult(root, base, source).status, 0);
+    assert.equal(protectedDriftResult(root, base, source).status, 0);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -243,9 +247,16 @@ for (const path of [
   "nested/pnpmfile.cjs",
   "patches/example.patch",
   "nested/node_modules/.bin/node",
+  ".github/workflows/ci.yml",
+  ".github/workflows/no-skip-audit.yml",
+  "scripts/workflows/check-no-skip-audit.mjs",
+  "scripts/workflows/check-no-skip-audit.test.mjs",
+  "scripts/lib/workflow-yaml.mjs",
+  ".github/actions/pnpm-install/action.yml",
+  ".github/actions/resolve-eslint-baseline/action.yml",
 ]) {
   test(`protected admission rejects candidate drift at ${path}`, () => {
-    const { root, base } = packageDriftFixture();
+    const { root, base } = protectedDriftFixture();
     try {
       const source = commitPath(
         root,
@@ -253,7 +264,7 @@ for (const path of [
         "changed\n",
         path.includes("node_modules"),
       );
-      const result = packageDriftResult(root, base, source);
+      const result = protectedDriftResult(root, base, source);
       assert.equal(result.status, 1);
       assert.match(result.stderr, new RegExp(path.replaceAll(".", "\\."), "u"));
     } finally {
@@ -263,7 +274,7 @@ for (const path of [
 }
 
 test("protected admission rejects a tracked node_modules symlink", () => {
-  const { root, base } = packageDriftFixture();
+  const { root, base } = protectedDriftFixture();
   try {
     execFileSync("ln", ["-s", "payload", "node_modules"], { cwd: root });
     git(root, "add", "-f", "node_modules");
@@ -279,13 +290,54 @@ test("protected admission rejects a tracked node_modules symlink", () => {
       "add node_modules symlink",
     );
     const source = git(root, "rev-parse", "HEAD");
-    const result = packageDriftResult(root, base, source);
+    const result = protectedDriftResult(root, base, source);
     assert.equal(result.status, 1);
     assert.match(result.stderr, /node_modules/u);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+for (const operation of ["modify", "delete", "rename", "symlink"]) {
+  test(`protected admission rejects evidence-instrument ${operation}`, () => {
+    const path = ".github/actions/pnpm-install/action.yml";
+    const { root, base } = protectedDriftFixture(path);
+    try {
+      if (operation === "modify") {
+        writeFileSync(join(root, path), "changed\n");
+        git(root, "add", path);
+      } else if (operation === "delete") git(root, "rm", path);
+      else if (operation === "rename")
+        git(root, "mv", path, "moved-action.yml");
+      else {
+        git(root, "rm", path);
+        mkdirSync(dirname(join(root, path)), { recursive: true });
+        execFileSync("ln", ["-s", "../../../README.md", path], { cwd: root });
+        git(root, "add", path);
+      }
+      git(
+        root,
+        "-c",
+        "user.name=Audit Test",
+        "-c",
+        "user.email=audit@example.invalid",
+        "commit",
+        "--quiet",
+        "-m",
+        operation,
+      );
+      const result = protectedDriftResult(
+        root,
+        base,
+        git(root, "rev-parse", "HEAD"),
+      );
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /pnpm-install/u);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
 
 test("rejects an audit-mode workflow that bypasses admission", () => {
   const root = fixture();
@@ -351,6 +403,10 @@ test("the M4 checker and mutation suite stay within phase budgets", () => {
     implementationLines <= 250,
     `${implementationLines} implementation lines`,
   );
-  assert(testLines <= 375, `${testLines} test lines`);
+  assert(testLines <= 425, `${testLines} test lines`);
+  assert(
+    testLines <= implementationLines * 2,
+    "tests exceed twice the implementation",
+  );
   assert(MUTATIONS.length >= 20, `${MUTATIONS.length} focused mutations`);
 });

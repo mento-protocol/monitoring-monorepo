@@ -76,9 +76,9 @@ The evidence window uses these rules:
     package-execution path and therefore cannot enter no-skip. The protected
     `controlPlane` filter must select every retained job. All aggregate
     dependencies and `CI / ci` must conclude `success`. The pull request must
-    not change `ci.yml`, the no-skip dispatcher or checker, or a protected
-    local action. A skipped, missing, or failed retained job invalidates the
-    observation. The row can cover package, dependency, toolchain, and
+    not change the evidence instrument. Instrument drift cannot count through
+    either evidence form. A skipped, missing, or failed retained job invalidates
+    the observation. The row can cover package, dependency, toolchain, and
     supply-chain risk. It cannot support cold-audit cost claims.
 
 Rules 1 through 8 were drafted before the first eligible run. Rule 9 makes the
@@ -231,6 +231,11 @@ The audit also ran four legacy-heavy steps:
 4. `Gate routing-table suite` in `docs-checks` protected only the legacy
    local-gate router.
 
+The routing-table sources also route retained generated-output and workflow
+safeguards while the old gate exists. Their fixed CI jobs run those safeguards
+inside the no-skip target. The skipped suites test the legacy selector itself.
+Issues #2127 and #2128 still own final source allocation and deletion evidence.
+
 The second step runs `pnpm agent:quality-gate:test`. The tested Bash gate has
 12,223 lines. Its Bash test suite has 25,995 lines. The same step took 32
 minutes 6 seconds in ordinary CI. It was still running in the audit when the
@@ -253,11 +258,13 @@ The repair also keeps `Validate trusted package-script pins` audit-executable
 in all three jobs that use it. Before the reusable audit starts, protected
 inline admission code compares package manifests, pnpm workspace and lock
 files, package patches, the Node and pnpm selections, pnpm configuration, and
-tracked `node_modules` paths between the admitted base and source Git trees.
-Package-execution drift makes that pull request ineligible for no-skip. It can
-qualify through the ordinary-force-all evidence form instead. The protected
-`controlPlane` filter must select every retained job. Every retained job and
-`CI / ci` must succeed. The pull request cannot change the evidence instrument.
+tracked `node_modules` paths between the admitted base and source Git trees. It
+also compares `ci.yml`, the no-skip dispatcher, the no-skip checker and runtime
+parser, and both protected local action trees. Package-execution drift makes
+that pull request ineligible for no-skip. It can qualify through the
+ordinary-force-all evidence form instead. Evidence-instrument drift cannot
+count. The protected `controlPlane` filter must select every retained job.
+Every retained job and `CI / ci` must succeed.
 
 The dynamic comparison avoids a content hash registry and recurring pin
 updates. The workflow contract pins the comparison step, the semantic retained

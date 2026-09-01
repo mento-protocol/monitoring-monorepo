@@ -850,8 +850,9 @@
                   reject every skip.
                 </li>
                 <li>
-                  Reject package-execution drift before fan-out. Those pull
-                  requests use full ordinary CI as their evidence form.
+                  Reject package-execution and evidence-instrument drift before
+                  fan-out. Package drift can use full ordinary CI. Instrument
+                  drift cannot count as evidence.
                 </li>
                 <li>
                   Run two focused retained-contract suites. Skip only the four
@@ -901,14 +902,16 @@
             legacy-heavy steps. The operator stopped it. It gives no cohort
             credit. The repair extracts the retained setup, package-policy, and
             autoreview assertions into two focused suites. It excludes only the
-            four remaining legacy-only steps. The repaired cohort starts after
+            four legacy selector steps. Retained generated-output and workflow
+            safeguards still run in fixed CI. The repaired cohort starts after
             this change reaches protected <code>main</code>. Audit-eligible pull
             requests use ordinary CI plus no-skip for the same immutable head.
             Package, dependency, and toolchain pull requests use ordinary CI
             only when the protected filter selects the full fixed job set and
-            every retained job succeeds. At least 10 pull requests over at least
-            7 calendar days must pass these rules. The no-skip ceiling has 43.48
-            of 450 runner-minutes recorded.
+            every retained job succeeds. Evidence-instrument changes cannot
+            count. At least 10 pull requests over at least 7 calendar days must
+            pass these rules. The no-skip ceiling has 43.48 of 450
+            runner-minutes recorded.
           </div>
           <div class="callout">
             <strong>Trusted-candidate limit:</strong> GitHub gives dispatched

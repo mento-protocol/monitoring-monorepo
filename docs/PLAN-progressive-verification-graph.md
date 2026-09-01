@@ -218,9 +218,10 @@ with the mechanisms that already operate:
 - Contract tests that pin required jobs, filters, command aliases, workflow
   trust boundaries, and aggregate behavior.
 - GitHub merge with explicit operator authority.
-- A same-head no-skip run for audit-eligible control-plane changes.
+- A same-head no-skip run for audit-eligible changes.
 - A full ordinary CI run for package-execution changes that audit admission
   rejects.
+- No evidence credit for an evidence-instrument change.
 
 The protected surface includes workflows, repository-owned actions, required
 job sets, command aliases, lifecycle and toolchain configuration, path filters,
@@ -487,12 +488,12 @@ display name. A moved pull request head makes the recorded result historical.
 M4 adds the manual protected-`main` dispatcher and reuses `ci.yml` through a
 same-commit workflow call. The caller passes the admitted source and base SHAs.
 After exact candidate checkout, a protected inline step compares
-package-execution paths between the admitted base and source trees. A candidate
-with package-environment drift does not enter the no-skip audit. Its separate
-evidence form is an ordinary CI run in which the protected path filter selects
-the full fixed job set and every retained job succeeds. The pull request cannot
-change the evidence instrument in that observation. The comparison uses the
-admitted Git objects. It needs no content hash registry.
+package-execution and evidence-instrument paths between the admitted base and
+source trees. A candidate with either type of drift does not enter the no-skip
+audit. Package-execution drift can use ordinary CI when the protected path
+filter selects the full fixed job set and every retained job succeeds.
+Evidence-instrument drift cannot count through either evidence form. The
+comparison uses the admitted Git objects. It needs no content hash registry.
 The called workflow resolves its local actions from the running protected
 commit. It bypasses change selection, forces every conditional job, checks out
 the candidate by full SHA in each executing job, and rejects every job skip in
@@ -501,8 +502,10 @@ lineage, the ADR reminder, and Terraform selection to the admitted base.
 
 The retained SessionEnd, setup-marker, package-policy, autoreview owner, and
 autoreview schema assertions run in two focused suites. The no-skip audit runs
-both suites. It excludes only the remaining legacy Bash and routing parity
-steps.
+both suites. It excludes only the four legacy Bash, routing-table, and routing
+parity steps. Those routing-table suites test the legacy selector. Fixed CI
+runs the retained generated-output and workflow safeguards that the selector
+also routes.
 
 M4 does not add a schedule and does not run the shadow. The approved later
 execution ceiling is 45 runner-minutes per run and 450 runner-minutes total.
@@ -865,13 +868,16 @@ Record at least 10 distinct pull requests over at least 7 calendar days,
 subject to the approved spend ceiling. Multiple heads from one pull request do
 not increase the pull-request count. Use one of these evidence forms:
 
-- For a pull request without package-execution drift, record ordinary CI and
-  the distinct no-skip audit for the same immutable head.
+- For a pull request without package-execution or evidence-instrument drift,
+  record ordinary CI and the distinct no-skip audit for the same immutable
+  head.
 - For a package, dependency, or toolchain pull request that no-skip admission
   rejects, record ordinary CI only. The protected package path filter must
   select every retained job. Every job must succeed. The pull request must not
-  change `ci.yml`, the no-skip dispatcher or checker, or a protected local
-  action.
+  change `ci.yml`, the no-skip dispatcher or checker closure, or a protected
+  local action.
+- Do not count a pull request that changes the evidence instrument through
+  either evidence form.
 
 The sample must include every risk class that its evidence form can support.
 It must include package, dependency, or toolchain coverage through the

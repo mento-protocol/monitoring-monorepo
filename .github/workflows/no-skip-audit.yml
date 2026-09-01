@@ -68,14 +68,14 @@ jobs:
           ref: ${{ inputs.source_sha }}
           fetch-depth: 0
           persist-credentials: false
-      - name: Reject candidate package-execution drift
+      - name: Reject candidate execution or evidence-instrument drift
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
           BASE_SHA: ${{ inputs.base_sha }}
         shell: bash
         run: |
           set -euo pipefail
-          package_paths=(
+          protected_paths=(
             .node-version
             package.json
             ":(glob)**/package.json"
@@ -99,12 +99,21 @@ jobs:
             node_modules
             ":(glob)**/node_modules"
             ":(glob)**/node_modules/**"
+            .github/workflows/ci.yml
+            .github/workflows/no-skip-audit.yml
+            scripts/workflows/check-no-skip-audit.mjs
+            scripts/workflows/check-no-skip-audit.test.mjs
+            scripts/lib/workflow-yaml.mjs
+            .github/actions/pnpm-install
+            ":(glob).github/actions/pnpm-install/**"
+            .github/actions/resolve-eslint-baseline
+            ":(glob).github/actions/resolve-eslint-baseline/**"
           )
-          if git diff --quiet "$BASE_SHA" "$SOURCE_SHA" -- "${package_paths[@]}"; then
+          if git diff --quiet "$BASE_SHA" "$SOURCE_SHA" -- "${protected_paths[@]}"; then
             exit 0
           fi
-          echo "Candidate package-execution files differ from the admitted base:" >&2
-          git diff --name-status "$BASE_SHA" "$SOURCE_SHA" -- "${package_paths[@]}" >&2
+          echo "Candidate execution or evidence-instrument files differ from the admitted base:" >&2
+          git diff --name-status "$BASE_SHA" "$SOURCE_SHA" -- "${protected_paths[@]}" >&2
           exit 1
       - name: Verify exact source and base objects
         env:

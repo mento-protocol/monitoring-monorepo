@@ -193,22 +193,25 @@ manual push can omit author checks, but it cannot omit required CI.
 The no-skip audit is a protected default-branch `workflow_dispatch` entry
 point. Its input identifies one pull request, an immutable source SHA, and an
 immutable base SHA. It verifies that the pull request still names those SHAs,
-checks the candidate package execution boundary with protected inline code,
-normalizes pull-request-only semantics, and runs every retained deterministic
-CI job. Before the reusable audit starts, the dispatcher compares the admitted
-base and source trees for package manifests, pnpm workspace and lock files,
-package patches, the Node and pnpm selections, pnpm configuration, and tracked
-`node_modules` paths. A candidate that changes these paths does not enter the
-no-skip audit. Its evidence form is an ordinary CI run that selects the full
-fixed job set and has no skipped, missing, or failed retained job. The pull
-request cannot change the evidence instrument in that observation. The
-comparison uses the admitted Git objects and needs no content hash registry.
+checks protected candidate execution and evidence-instrument paths with inline
+code, normalizes pull-request-only semantics, and runs every retained
+deterministic CI job. Before the reusable audit starts, the dispatcher compares
+the admitted base and source trees for package manifests, pnpm workspace and
+lock files, package patches, the Node and pnpm selections, pnpm configuration,
+tracked `node_modules`, `ci.yml`, the dispatcher, the no-skip checker and its
+runtime parser, and both protected local action trees. A candidate that changes
+these paths does not enter the no-skip audit. Package-execution drift can use an
+ordinary full-job CI observation. Evidence-instrument drift cannot count
+through either evidence form. The comparison uses the admitted Git objects and
+needs no content hash registry.
 The audit excludes legacy local-gate self-tests from the replacement target.
 
 The repair extracts retained SessionEnd, setup-marker, package-policy,
 autoreview owner, and autoreview schema assertions into two focused suites.
-The no-skip audit runs both. It excludes only the remaining legacy Bash and
-routing parity steps.
+The no-skip audit runs both. It excludes only the four legacy Bash,
+routing-table, and routing parity steps. The routing-table suites test the
+legacy selector. The retained generated-output and workflow safeguards execute
+in their fixed CI jobs and remain inside the pinned audit graph.
 
 The audit contract pins the semantic `ci.yml` graph during the evidence window.
 It also allows only the protected dispatcher and `ci.yml` to contain audit
@@ -281,7 +284,7 @@ The migration has these gates:
 4. Record at least 10 distinct pull requests over at least 7 calendar days.
    Use same-head ordinary CI plus no-skip evidence for audit-eligible changes.
    Use full-graph ordinary CI evidence for package-execution changes that the
-   protected audit must reject.
+   protected audit must reject. Do not count evidence-instrument changes.
 5. Require explicit human approval before removing the mandatory local gate.
    A separate human-approved administration step applies any ruleset change.
 6. Observe at least 10 distinct merged pull requests over at least 7 calendar
@@ -345,7 +348,9 @@ suite. It also moves the retained autoreview owner and schema assertions out of
 the routing parity suite. The remaining routing-table family still mixes some
 retained workflow-pin and generated-drift behavior with deferred local routing.
 Issues #2127 and #2128 must allocate or migrate those components and publish
-the reviewed final denominator.
+the reviewed final denominator. This source-allocation work does not put the
+legacy selector's self-tests in the replacement target. Fixed CI already runs
+the retained safeguards during the no-skip audit.
 Replacement additions must be smaller than the gate-specific code they replace
 at each cutover stage. Final retirement must remove at least 80% of the final
 denominator.

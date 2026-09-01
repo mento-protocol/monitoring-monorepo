@@ -108,8 +108,8 @@ feedback-runtime pins.
 - **Workflow pins.** Workflows pin `scripts/`. Terraform uses
   `terraform.stacks.json` `workflowAdmissionPatterns`.
   `check-ci-contract{,.test}.mjs` pins CI.
-  `check-no-skip-audit{,.test}.mjs` pins admission, SHAs, cache, skips, package
-  drift, the focused contracts, and the retained workflow graph. Moves update
+  `check-no-skip-audit{,.test}.mjs` pins admission, SHAs, cache, skips, protected
+  drift, focused contracts, and the retained workflow graph. Moves update
   ADR 0064, routing, globs, and pins.
 - **Terraform stack registry.** `terraform.stacks.json` `changedPathPatterns`
   pins exact `scripts/` paths per stack. The broad workflow admission boundary

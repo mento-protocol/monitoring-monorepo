@@ -28,7 +28,7 @@ const CODECOV_IF = "${{ !inputs.no_skip_audit && !startsWith(github.event.pull_r
 // prettier-ignore
 const READ_SCOPES = Object.freeze({ actions: "read", contents: "read", "pull-requests": "read" });
 // prettier-ignore
-const ADMISSION_STEP_HASH = "18f1c3741064363a488462c96fd34772c3b66eeee4a3f4bd2fb2a86275c3a203", CHECKOUT_STEP_HASH = "2d39e2e5293845e1c63f0f2e95ab8eb7e3d65360955c5b2c54ea1bddff57c22d", PACKAGE_DRIFT_STEP_HASH = "fc8b866c97cb42fc7a5f022078afa38645bff98b56b7d1cc35663e79afef88cf", SUMMARY_STEP_HASH = "b6def63e8f5ccb7e13a6460f546cb391bf0e86350876470a787f038ea7cebb10";
+const ADMISSION_STEP_HASH = "18f1c3741064363a488462c96fd34772c3b66eeee4a3f4bd2fb2a86275c3a203", CHECKOUT_STEP_HASH = "2d39e2e5293845e1c63f0f2e95ab8eb7e3d65360955c5b2c54ea1bddff57c22d", PROTECTED_DRIFT_STEP_HASH = "ad9b067f8eb3f15c90b64a5703de4c54592777e476970cb8762827d7f8ba6370", SUMMARY_STEP_HASH = "b6def63e8f5ccb7e13a6460f546cb391bf0e86350876470a787f038ea7cebb10";
 const CI_GRAPH_HASH =
     "98fb0c2945d78059147cfe7b9ccbd8d00e3b2be9a2bb9edc76c104a4c9ca7eef",
   BASELINE_HASH =
@@ -108,10 +108,10 @@ function checkDispatcher(root, errors) {
   add(errors, Object.keys(workflow.jobs ?? {}).join() === "admit,audit", "no-skip audit must contain only admission and reusable-CI jobs");
   const admit = workflow.jobs?.admit ?? {};
   add(errors, Object.keys(admit).sort().join() === "name,permissions,runs-on,steps,timeout-minutes" && admit["runs-on"] === "blacksmith-2vcpu-ubuntu-2404-arm" && admit["timeout-minutes"] === 5 && stable(admit.permissions) === stable({ contents: "read", "pull-requests": "read" }), "admission job runtime or authority changed");
-  const [validate, checkout, packageDrift, summary] = admit.steps ?? [];
+  const [validate, checkout, protectedDrift, summary] = admit.steps ?? [];
   add(errors, admit.steps?.length === 4 && hash(stable(validate)) === ADMISSION_STEP_HASH, "immutable PR admission script changed");
   add(errors, hash(stable(checkout)) === CHECKOUT_STEP_HASH, "admission candidate checkout step changed");
-  add(errors, hash(stable(packageDrift)) === PACKAGE_DRIFT_STEP_HASH, "protected package-execution drift check changed");
+  add(errors, hash(stable(protectedDrift)) === PROTECTED_DRIFT_STEP_HASH, "protected candidate-execution or evidence-instrument drift check changed");
   add(errors, hash(stable(summary)) === SUMMARY_STEP_HASH, "admission object proof or operational summary changed");
   const audit = workflow.jobs?.audit ?? {};
   add(errors, stable(audit) === stable({ name: "Retained deterministic no-skip audit", needs: "admit", permissions: READ_SCOPES, uses: "$/.github/workflows/ci.yml", with: { no_skip_audit: true, audit_source_sha: "${{ inputs.source_sha }}", audit_base_sha: "${{ inputs.base_sha }}" } }), "audit job must depend on admission and call protected CI with exact inputs");
