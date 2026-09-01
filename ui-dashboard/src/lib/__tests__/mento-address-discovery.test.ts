@@ -117,10 +117,29 @@ describe("discoverMentoAddresses", () => {
     expect(result.addresses).toEqual([A(0x9)]);
   });
 
-  it("throws when every target fails", async () => {
+  it("keeps collected addresses when every target fails after paging", async () => {
+    // Every target walks a full first page, then hits a late blip on page 2.
+    // All 12 end up degraded, but the run still read real data.
+    requestMock.mockImplementation(async ({ variables }) => {
+      if (variables.offset > 0) throw new Error("hasura timeout");
+      return {
+        rows: Array.from({ length: 1000 }, (_, i) => ({
+          address: `0x${i.toString(16).padStart(40, "0")}`,
+        })),
+      };
+    });
+
+    const result = await discoverMentoAddresses(
+      "https://hasura/graphql",
+      42220,
+    );
+    expect(result.addresses).toHaveLength(1000);
+  });
+
+  it("throws when every target fails with nothing collected", async () => {
     // Endpoint-wide fault: an auth/schema/network failure on the first page
     // of every target. A zero-result success here would record a healthy
-    // cron check-in for a run that discovered nothing.
+    // cron check-in for a run that read no data at all.
     requestMock.mockRejectedValue(new Error("hasura unauthorized"));
 
     await expect(

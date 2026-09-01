@@ -109,18 +109,6 @@ export async function discoverMentoAddresses(
     ),
   );
 
-  // A failure in some targets is degradation the caller can live with; a
-  // failure in *every* target means no target completed its walk, which an
-  // endpoint-wide fault (auth, schema, network) produces. Reporting that as
-  // a success would give the cron a healthy check-in — and, in the common
-  // shape where each target dies on its first page, a zero-result response
-  // indistinguishable from "nothing to discover".
-  if (found.length > 0 && found.every((walk) => walk.failed)) {
-    throw new Error(
-      `[mento-address-discovery] all ${found.length} discovery targets failed`,
-    );
-  }
-
   const all = new Set<string>();
   const perEntity: DiscoveryResult["perEntity"] = DISCOVERY_TARGETS.map(
     ({ table, field }, i) => {
@@ -129,6 +117,22 @@ export async function discoverMentoAddresses(
       return { table, field, count: addresses.length };
     },
   );
+
+  // Any address the walk did collect is worth returning, however many targets
+  // degraded getting it — the per-target Sentry reports carry that detail.
+  // Every target failing with nothing to show for it is the different case an
+  // endpoint-wide fault (auth, schema, network) produces: an empty success
+  // here is indistinguishable from "nothing to discover", so it would give
+  // the cron a healthy check-in for a run that read no data at all.
+  if (
+    all.size === 0 &&
+    found.length > 0 &&
+    found.every((walk) => walk.failed)
+  ) {
+    throw new Error(
+      `[mento-address-discovery] all ${found.length} discovery targets failed`,
+    );
+  }
 
   return {
     addresses: Array.from(all).sort(),
