@@ -427,10 +427,9 @@ Field expectations:
    Concurrent `--run` gates from other worktrees can continue through the
    coordinator. They share weighted machine capacity. From invocation until
    this gate exits, do not start uncoordinated work there. Use same-machine spare
-   workers only for read-only work. Run the quality gate from operating-card
-   step 3 once for the batch. Hosted sessions use its exact direct warm command.
-   Local sessions use `pnpm agent:quality-gate --run`. Run validation outside
-   the coordinator from a fully hydrated checkout on another machine.
+   workers only for read-only work. Run the quality gate once from
+   operating-card step 3. It selects the hosted or local command. Run validation
+   outside the coordinator from a fully hydrated checkout on another machine.
 4. For non-trivial behavioral, workflow, security, data-flow, or UI batches,
    run `pnpm agent:autoreview` as a structured source-review closeout at the
    batch boundary rather than as an inner loop. Verify accepted findings before
