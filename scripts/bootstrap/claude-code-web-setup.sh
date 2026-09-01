@@ -25,6 +25,7 @@ git config --global --add safe.directory "$REPO_ROOT" || true
 
 echo "==> Configuring repository git hooks"
 git config core.hooksPath .trunk/hooks
+git config agent.qualityGate.cloudPrePushRequireFresh true
 
 echo "==> Activating package manager from package.json"
 if command -v corepack >/dev/null 2>&1; then

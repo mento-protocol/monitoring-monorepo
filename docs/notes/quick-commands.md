@@ -46,9 +46,11 @@ pnpm code-health:duplication       # jscpd duplication → reports/jscpd/; advis
 pnpm code-health:schema-diff       # GraphQL breaking-change diff vs origin/main; advisory, never blocks
 pnpm code-health                   # Run knip + deps; exclude history + duplication
 pnpm agent:quality-gate            # Map changed paths to required local checks and PR checklists
-pnpm agent:quality-gate --run      # Run mapped checks through the fair coordinator; default capacity 3
+pnpm agent:quality-gate --run      # Local: run mapped checks; resolve non-main PR bases per operating-card step 3
+./scripts/agent-quality-gate.sh --run --parallel 3 --base origin/main  # Hosted: warm the hook after resolved-base validation
 # Package scripts, package-manager settings, and lockfiles can change install code. Review before acknowledgment:
-pnpm agent:quality-gate --run --allow-package-script-changes
+pnpm agent:quality-gate --run --allow-package-script-changes  # Local
+git config agent.qualityGate.allowPackageScriptChanges true   # Hosted, before the direct warm command
 pnpm agent:context-check           # Validate repo-visible agent instructions, links, and routing
 pnpm agent:review-materiality      # Classify review depth + context-update signals for current diff
 pnpm agent:autoreview              # Isolated closeout; multi-pass uses --prepare-bundle-dir DIR + a fresh reviewer; gate owns tests

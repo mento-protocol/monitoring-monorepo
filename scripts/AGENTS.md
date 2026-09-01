@@ -178,8 +178,8 @@ in the same PR.
 
 ## Verification
 
-Run `pnpm agent:quality-gate --run`; its mapping routes `bash -n`,
-`pnpm lint:scripts`, and focused tests for what changed. Add
+Run the gate from operating-card step 3. It routes `bash -n`,
+`pnpm lint:scripts`, and focused tests. Add
 `pnpm agent:quality-gate:test` for gate routing changes,
 `node scripts/check-deploy-root-anchors.test.mjs` for deploy wrappers, and
 `pnpm agent:context-check` plus `pnpm docs:index` after a move.
