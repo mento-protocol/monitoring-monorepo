@@ -114,7 +114,10 @@ even when you never open an authority.
    `./scripts/agent-quality-gate.sh --run --parallel 3 --base origin/main` as an
    observable background task. The launcher, base, and parallelism must match
    the hook's freshness key. Retry the push after the gate passes. Local setup
-   keeps the normal cold pre-push run.
+   keeps the normal cold pre-push run. If the hosted branch has package-script
+   risk, review it first. Then set
+   `git config agent.qualityGate.allowPackageScriptChanges true` before the warm
+   run so the hook uses the same acknowledgement.
    Authority:
    [`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md).
 

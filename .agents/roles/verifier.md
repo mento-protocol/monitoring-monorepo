@@ -18,10 +18,13 @@ Run diff-scoped verification and report only actionable results.
 
 1. Inspect the branch diff against `origin/main`.
 2. Run `pnpm agent:quality-gate --dry-run` and confirm mapped commands/checklists match changed surfaces.
-3. Unless the requester asked for dry verification only, run
-   `pnpm agent:quality-gate --run` as a background task. Before invoking it,
-   ensure that no direct validation, dashboard server, or browser suite outside
-   the coordinator is active on the same machine. Concurrent `--run` gates from
+3. Unless the requester asked for dry verification only, run the gate as a
+   background task. In a hosted setup where
+   `agent.qualityGate.cloudPrePushRequireFresh` is true, fetch `origin/main` and
+   run `./scripts/agent-quality-gate.sh --run --parallel 3 --base origin/main`.
+   Otherwise, run `pnpm agent:quality-gate --run`. Before invoking it, ensure
+   that no direct validation, dashboard server, or browser suite outside the
+   coordinator is active on the same machine. Concurrent `--run` gates from
    other worktrees can continue through the coordinator. They share weighted
    machine capacity. From invocation until this gate exits, do not start
    uncoordinated work there. Use same-machine spare workers only for read-only

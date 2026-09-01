@@ -174,8 +174,10 @@ in the same PR.
 
 ## Verification
 
-Run `pnpm agent:quality-gate --run`; its mapping routes `bash -n`,
-`pnpm lint:scripts`, and focused tests for what changed. Add
+Run the quality gate through operating-card step 3. Hosted sessions use its
+exact direct warm command. Local sessions use `pnpm agent:quality-gate --run`.
+Its mapping routes `bash -n`, `pnpm lint:scripts`, and focused tests for what
+changed. Add
 `pnpm agent:quality-gate:test` for gate routing changes,
 `node scripts/check-deploy-root-anchors.test.mjs` for deploy wrappers, and
 `pnpm agent:context-check` plus `pnpm docs:index` after a move.

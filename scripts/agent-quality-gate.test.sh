@@ -1144,6 +1144,11 @@ const hostedSetups = [
   "scripts/bootstrap/codex-cloud-maintenance.sh",
   "scripts/bootstrap/codex-cloud-setup.sh",
 ];
+const hostedGateEntryPoints = [
+  ".agents/skills/ship/SKILL.md",
+  ".claude/skills/ship/SKILL.md",
+  ".agents/roles/verifier.md",
+];
 const activeTrunkLines = trunk
   .split("\n")
   .filter((line) => !line.trimStart().startsWith("#"))
@@ -1173,6 +1178,14 @@ for (const setupPath of hostedSetups) {
     setup,
     /^git config core\.hooksPath \.trunk\/hooks\ngit config agent\.qualityGate\.cloudPrePushRequireFresh true$/mu,
     `${setupPath} must require a fresh hosted pre-push stamp`,
+  );
+}
+for (const entryPointPath of hostedGateEntryPoints) {
+  const entryPoint = fs.readFileSync(entryPointPath, "utf8");
+  assert.match(
+    entryPoint,
+    /\.\/scripts\/agent-quality-gate\.sh --run --parallel 3 --base origin\/main/u,
+    `${entryPointPath} must use the exact hosted pre-push warm command`,
   );
 }
 const freshnessSkipIndex = gate.indexOf(
@@ -9939,10 +9952,21 @@ STUB
   grep -Fq -- "Hosted pre-push requires a fresh quality-gate stamp; no mapped command ran." "$output_file" ||
     fail "cold hosted pre-push did not explain its refusal"
 
-  git config --unset agent.qualityGate.cloudPrePushRequireFresh
   printf '{"name":"quality-gate-fixture","private":true}\n' > package.json
   git add package.json
   git commit -qm "add package-risk fixture"
+  : > "$output_file"
+  hosted_package_risk_exit=0
+  COUNTER_FILE="$fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --base "$base_ref" --run --parallel 3 \
+      > "$output_file" 2>&1 || hosted_package_risk_exit=$?
+  [[ "$hosted_package_risk_exit" -eq 2 ]] ||
+    fail "cold hosted package-risk run exited ${hosted_package_risk_exit} instead of 2"
+  grep -Fq -- "git config agent.qualityGate.allowPackageScriptChanges true" "$output_file" ||
+    fail "cold hosted package-risk run did not explain the reusable acknowledgement"
+
+  git config --unset agent.qualityGate.cloudPrePushRequireFresh
   : > "$output_file"
   local_pre_push_exit=0
   COUNTER_FILE="$fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count" \

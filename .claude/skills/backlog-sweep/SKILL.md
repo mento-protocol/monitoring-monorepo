@@ -456,8 +456,13 @@ Then spawn one worker subagent per issue. Give each a brief containing:
 
   ```bash
   pnpm agent:quality-gate                                # inspect first
-  bash scripts/agent-quality-gate.sh --run --lock-wait 3600
+  ./scripts/agent-quality-gate.sh --run --parallel 3 --base origin/main  # hosted
+  bash scripts/agent-quality-gate.sh --run --lock-wait 3600             # local
   ```
+
+  Fetch `origin/main` first. Run only the command for the current setup. A
+  hosted setup has `agent.qualityGate.cloudPrePushRequireFresh=true` in local
+  git config. Its launcher, base, and parallelism must match the pre-push hook.
 
   Inspect before running, as the operating card's step 3 requires: the bare
   form prints the mapped commands **and the checklists to apply**, and the
@@ -480,8 +485,11 @@ changed.` Review the lifecycle and install scripts in the diff first, then
 
   ```bash
   git config agent.qualityGate.allowPackageScriptChanges true
-  bash scripts/agent-quality-gate.sh --run --lock-wait 3600
+  ./scripts/agent-quality-gate.sh --run --parallel 3 --base origin/main  # hosted
+  bash scripts/agent-quality-gate.sh --run --lock-wait 3600             # local
   ```
+
+  Run only the command for the current setup.
 
   The **config**, not the `--allow-package-script-changes` flag, is what lets
   the push through. The pre-push hook runs the gate without that flag

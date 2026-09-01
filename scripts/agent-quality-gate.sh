@@ -7750,7 +7750,12 @@ fi
 
 if [[ "$package_script_risk_changed" == true && "$allow_package_script_changes" != "1" && "$allow_package_script_changes" != "true" ]]; then
   echo "Refusing to run because package manifests, patches, or lockfile changed." >&2
-  echo "Review package scripts, lifecycle hooks, and dependency install scripts first, then re-run with --allow-package-script-changes if they are safe." >&2
+  if [[ "$(git config --bool --get agent.qualityGate.cloudPrePushRequireFresh 2>/dev/null || true)" == "true" ]]; then
+    echo "Review package scripts, lifecycle hooks, and dependency install scripts first." >&2
+    echo "For hosted warm-then-push, set 'git config agent.qualityGate.allowPackageScriptChanges true', then rerun the same direct gate command so the hook reuses that acknowledgement." >&2
+  else
+    echo "Review package scripts, lifecycle hooks, and dependency install scripts first, then re-run with --allow-package-script-changes if they are safe." >&2
+  fi
   if gate_coordinator_requested; then
     gate_coordinator_report_no_work_failure 2 "pre-execution policy" \
       "No mapped command ran in this request"

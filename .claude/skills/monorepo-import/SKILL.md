@@ -91,7 +91,8 @@ agent gate:
 - Terraform fmt/init/validate/plan for touched Terraform roots; never apply
   without explicit user approval
 - workflow syntax and path/filter review for new CI/deploy workflows
-- `pnpm agent:quality-gate --run` before opening or updating the PR
+- the quality gate from operating-card step 3 before opening or updating the
+  PR; hosted sessions use its exact direct warm command
 
 If registry/network access is unavailable, do not pretend lockfile or install
 work is verified. Surface the blocked command and rerun with network access when

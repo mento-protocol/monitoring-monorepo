@@ -36,13 +36,16 @@ hygiene, and production closeout.
 
 ## What this repo adds
 
-- **Gate before publish**: `pnpm agent:quality-gate --run`, then the closeout
-  review for non-trivial behavioural, workflow, security, data-flow,
-  infrastructure, or UI changes. **Which closeout depends on the surface**, and a
-  bare `pnpm agent:autoreview` is not always it: inside an active Codex session
-  that silently selects the local deterministic engine, so the prepared-bundle
-  fresh-context flow is required instead. Card step 4 owns the choice — follow it
-  rather than the bare command.
+- **Gate before publish**: Follow card step 3. In a hosted setup where
+  `agent.qualityGate.cloudPrePushRequireFresh` is true, fetch `origin/main` and
+  run `./scripts/agent-quality-gate.sh --run --parallel 3 --base origin/main`.
+  Otherwise, run `pnpm agent:quality-gate --run`. Then run the closeout review
+  for non-trivial behavioural, workflow, security, data-flow, infrastructure,
+  or UI changes. **Which closeout depends on the surface**, and a bare
+  `pnpm agent:autoreview` is not always it: inside an active Codex session that
+  silently selects the local deterministic engine, so the prepared-bundle
+  fresh-context flow is required instead. Card step 4 owns the choice — follow
+  it rather than the bare command.
 - **Resolve the base repo from evidence.** A fork checkout uses its parent as
   `BASE_REPO`; never substitute a fork's `origin` for its parent. Bind every
   `gh pr view`, feedback-state, and ready-state call with `--repo <BASE_REPO>`.
