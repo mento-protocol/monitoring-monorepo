@@ -101,9 +101,9 @@ variable "oncall_announce_on_first_run" {
 }
 
 variable "oncall_rotation_check_schedule" {
-  description = "Cloud Scheduler cron expression for polling Splunk On-Call. The default checks shortly after the weekly Sunday 10:00 Europe/Berlin handover; the function stores last-seen state and only posts when the on-call username changes."
+  description = "Cloud Scheduler cron expression for polling Splunk On-Call. The default checks shortly after the weekly Monday 10:00 Europe/Berlin handover; the function stores last-seen state and only posts when the on-call username changes."
   type        = string
-  default     = "5,20 10 * * 0"
+  default     = "5,20 10 * * 1"
 }
 
 variable "oncall_slack_channel_id" {
