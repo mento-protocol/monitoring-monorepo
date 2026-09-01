@@ -1,4 +1,5 @@
 import { actionableFindingSignal } from "./review-process-metrics-finding-classifier.mjs";
+import { maskMarkdownNonProse } from "./review-process-metrics-markdown.mjs";
 
 const CODEX_BOT_LOGINS = new Set([
   "chatgpt-codex-connector",
@@ -241,7 +242,10 @@ function isTrustedHumanReply(reply, prAuthorLogin) {
 }
 
 function humanClassification(body) {
-  const text = String(body ?? "");
+  const text = maskMarkdownNonProse(body, {
+    maskRawHtmlNonProse: true,
+    preserveInlineCode: true,
+  });
   const fixed = text.match(/^\s*(Fixed in\s+`?[0-9a-f]{7,40}`?\s+[—-])\s+\S/im);
   if (fixed) {
     return { category: "fixed", signal: fixed[1] };
@@ -273,7 +277,7 @@ function explicitBotStances(body) {
   const sentenceBoundary =
     String.raw`(?:^|[.!?]\s+|\n)\s*(?:` + String.raw`@[^\s,]+,?\s*)?`;
   const sentenceEnd = String.raw`(?=\s*(?:[.!]|$|\n))`;
-  const text = String(body ?? "");
+  const text = maskMarkdownNonProse(body, { maskRawHtmlNonProse: true });
   return Object.entries(BOT_STANCE_PATTERNS)
     .flatMap(([stance, patterns]) =>
       patterns.flatMap((pattern) =>

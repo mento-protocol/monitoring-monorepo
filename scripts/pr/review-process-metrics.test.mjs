@@ -39,6 +39,7 @@ import {
   timelineItemIdentity,
   writeReportFile,
 } from "./review-process-metrics.mjs";
+import { actionableFindingSignal } from "./review-process-metrics-finding-classifier.mjs";
 import { maskMarkdownNonProse } from "./review-process-metrics-markdown.mjs";
 
 const SCRIPT_DIRECTORY = dirname(fileURLToPath(import.meta.url));
@@ -155,6 +156,45 @@ test("counts CodeRabbit findings as finding-like text", () => {
   // OLD path: the Cursor marker and priority badges still count.
   assert.equal(isFindingLikeText("<!-- BUGBOT_BUG_ID: example -->"), true);
   assert.equal(isFindingLikeText("[P2] Missing branch coverage"), true);
+});
+
+test("does not count clean notes on zero-count finding table rows", () => {
+  const cleanNotes = [
+    "No issues found",
+    "None found",
+    "None identified.",
+    "No issues found in the changed code.",
+    "No action needed",
+  ];
+  const cleanTables = cleanNotes.map((note) =>
+    [
+      "| Severity | Findings | Notes |",
+      "| --- | --- | --- |",
+      `| High severity | 0 | ${note} |`,
+    ].join("\n"),
+  );
+  cleanTables.push(
+    [
+      "| High severity | Notes |",
+      "| --- | --- |",
+      "| 0 | No issues were found. |",
+    ].join("\n"),
+  );
+  for (const body of cleanTables) {
+    assert.equal(actionableFindingSignal(body, "claude"), null);
+  }
+
+  assert.equal(
+    actionableFindingSignal(
+      [
+        "| Severity | Findings | Notes |",
+        "| --- | --- | --- |",
+        "| High severity | 0 | Parser crashes |",
+      ].join("\n"),
+      "claude",
+    ),
+    "High severity",
+  );
 });
 
 test("identifies review-summary detector text", () => {
@@ -1241,6 +1281,82 @@ test("preserves disposition signals outside bounded reply excerpts", () => {
     restored.botRestorationEvidence[0].excerpt.includes("stand by"),
     false,
   );
+});
+
+test("ignores disposition statements inside Markdown code examples", () => {
+  const summarizeRoot = (...replies) => {
+    const value = structuredClone(fixture);
+    value.reviewComments.push(...replies);
+    return summarizeFixture(
+      value,
+    ).evidence.byBot.coderabbit.surfaces.review_comments.evidence.find(
+      ({ id }) => id === "308",
+    );
+  };
+  const humanReply = (id, body) => ({
+    id,
+    in_reply_to_id: 308,
+    author_association: "MEMBER",
+    user: { login: "maintainer", type: "User" },
+    body,
+  });
+  const botReply = (id, body) => ({
+    id,
+    in_reply_to_id: 308,
+    user: { login: "coderabbitai[bot]", type: "Bot" },
+    body,
+  });
+
+  const fencedFixed = summarizeRoot(
+    humanReply(
+      425,
+      "Example reply:\n\n```text\nFixed in `deadbee` — added the guard.\n```",
+    ),
+  );
+  assert.equal(fencedFixed.disposition, "unknown");
+  assert.equal(fencedFixed.humanClassificationEvidence.length, 0);
+
+  const indentedWontFix = summarizeRoot(
+    humanReply(
+      426,
+      "Example reply:\n\n    Won't fix: the contract requires this behavior.",
+    ),
+  );
+  assert.equal(indentedWontFix.disposition, "unknown");
+  assert.equal(indentedWontFix.humanClassificationEvidence.length, 0);
+
+  for (const [id, body] of [
+    [431, "<!--\nFixed in `deadbee` — hidden example.\n-->"],
+    [432, "<pre>\nWon't fix: hidden example.\n</pre>"],
+    [434, "<pre>\nFixed in `deadbee` — unclosed hidden example."],
+  ]) {
+    const rawHtmlHumanExample = summarizeRoot(humanReply(id, body));
+    assert.equal(rawHtmlHumanExample.disposition, "unknown");
+    assert.equal(rawHtmlHumanExample.humanClassificationEvidence.length, 0);
+  }
+
+  for (const [id, body] of [
+    [427, "Example reply:\n\n```text\nI withdraw this finding.\n```"],
+    [428, "Example reply:\n\n    This finding does not apply."],
+    [433, "<code>\nI withdraw this finding.\n</code>"],
+    [435, "<code>\nI withdraw this finding."],
+  ]) {
+    const codedConcession = summarizeRoot(botReply(id, body));
+    assert.equal(codedConcession.disposition, "unclassified");
+    assert.equal(codedConcession.botConcessionEvidence.length, 0);
+  }
+
+  const liveSignalsRemain = summarizeRoot(
+    humanReply(
+      429,
+      "```text\nWon't fix: example only.\n```\n\nFixed in `deadbee` — added the guard.",
+    ),
+    botReply(430, "    I stand by this finding.\n\nI withdraw this finding."),
+  );
+  assert.equal(liveSignalsRemain.disposition, "fixed");
+  assert.equal(liveSignalsRemain.humanClassificationEvidence.length, 1);
+  assert.equal(liveSignalsRemain.botConcessionEvidence.length, 1);
+  assert.equal(liveSignalsRemain.botRestorationEvidence.length, 0);
 });
 
 test("uses review state and negation-safe text for submission findings", () => {

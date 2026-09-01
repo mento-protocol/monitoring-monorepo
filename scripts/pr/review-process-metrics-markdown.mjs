@@ -74,9 +74,23 @@ function mergeRanges(ranges) {
   return merged;
 }
 
+function rawHtmlNonProseRanges(source) {
+  return [
+    ...source.matchAll(/<!--[\s\S]*?(?:-->|$)/g),
+    ...source.matchAll(/<(pre|code)\b[^>]*>[\s\S]*?(?:<\/\1\s*>|$)/gi),
+  ].map((match) => ({
+    start: match.index,
+    end: match.index + match[0].length,
+  }));
+}
+
 export function maskMarkdownNonProse(
   value,
-  { preserveGitHubAlerts = false, preserveInlineCode = false } = {},
+  {
+    maskRawHtmlNonProse = false,
+    preserveGitHubAlerts = false,
+    preserveInlineCode = false,
+  } = {},
 ) {
   const source = String(value ?? "");
   if (source === "") return source;
@@ -87,6 +101,7 @@ export function maskMarkdownNonProse(
     preserveGitHubAlerts,
     preserveInlineCode,
   );
+  if (maskRawHtmlNonProse) ranges.push(...rawHtmlNonProseRanges(source));
   let cursor = 0;
   let masked = "";
   for (const { start, end } of mergeRanges(ranges)) {

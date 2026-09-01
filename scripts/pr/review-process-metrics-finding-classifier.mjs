@@ -51,8 +51,9 @@ const FINDING_ENTRY_START = new RegExp(
 );
 const EMPTY_FINDING_INTRO_PREFIX =
   /^(?:(?:[-+•>]|#{1,6})\s+)*(?:there\s+(?:are|is|was|were)|(?:i|we|the\s+(?:review|report|scan|analysis))\s+(?:found|finds|reported|reports|contains?|has|have)|this\s+(?:contains?|has|reports?)|(?:review\s+(?:summary|results)|finding\s+counts|summary|counts|findings?|results?|review|report)\s*:)\s*$/i;
+const EMPTY_FINDING_SCOPE_SOURCE = String.raw`(?:\s+in\s+(?:(?:this|the)\s+)?(?:changed\s+)?(?:code|changes?|review|pull\s+request|PR))?`;
 const EMPTY_FINDING_TRAILING_CLAUSE = new RegExp(
-  String.raw`^(?:(?:no|zero|none)\s+${EMPTY_FINDING_NOUN_SOURCE}(?:\s+(?:remains?|exists?|found|reported|identified|detected|flagged|shown|(?:are|is|was|were)\s+(?:found|reported|identified|detected|flagged|shown|present)))?|no\s+action\s+(?:is\s+)?required)\s*$`,
+  String.raw`^(?:(?:(?:no|zero)\s+${EMPTY_FINDING_NOUN_SOURCE}|none|nothing)(?:\s+(?:remains?|exists?|found|reported|identified|detected|flagged|shown|(?:are|is|was|were)\s+(?:found|reported|identified|detected|flagged|shown|present)))?${EMPTY_FINDING_SCOPE_SOURCE}|no\s+action\s+(?:is\s+)?(?:required|needed))\s*$`,
   "i",
 );
 function normalizeFindingSummary(value) {
@@ -291,10 +292,14 @@ function findingTableCountValue(cell) {
 
 function hasActionableFindingTableProse(row, proseColumns) {
   return proseColumns.some((column) => {
-    const cell = normalizeFindingSummary(row[column] ?? "").trim();
+    const cell = normalizeFindingSummary(row[column] ?? "")
+      .trim()
+      .replace(/[.!]+$/u, "")
+      .trim();
     return Boolean(
       cell &&
       !EMPTY_FINDING_TABLE_CELL.test(cell) &&
+      !EMPTY_FINDING_TRAILING_CLAUSE.test(cell) &&
       !/^(?:n\/?a|not\s+applicable|[-—–])$/i.test(cell),
     );
   });
