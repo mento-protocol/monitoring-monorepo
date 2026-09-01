@@ -805,14 +805,17 @@ drops the command. A change inside a root keeps it only when dependency-cruiser
 can read the path, in one of two ways. It parses the extension — the enabled
 half of `depcruise --info`, pinned in `engine.test.mjs` against the
 `allExtensions` the library exports. Or its resolver can reach the file as a
-dependency target: `.json` and `.node` hold no imports but Node resolution
-resolves them, so they can be the far end of an edge between two scanned roots.
+dependency target. dependency-cruiser resolves `.json`, `.node`, `.css`,
+`.sass`, `.scss`, `.stylus` and `.less` into the graph and then declines to
+parse them — its `lKnownUnfollowables` — so each is a node with no outgoing
+edges, and a node is still an edge target.
 `indexer-envio/src/handlers/stables/config.ts` imports
-`../../../config/nttAddresses.json`, and retargeting that JSON moves an edge the
-cross-package rules judge while no `.ts` file changes. dependency-cruiser
-exports nothing for what its resolver accepts, so that half is pinned by a
-fixture asserting the `nttAddresses.json` import still exists rather than
-against the library. An in-root path that is neither parsed nor resolvable —
+`../../../config/nttAddresses.json` and `ui-dashboard/src/app/layout.tsx`
+imports `./globals.css`; retargeting either moves an edge the cross-package
+rules judge while no `.ts` file changes. The library exports nothing for that
+list, so it is pinned three ways instead: the dependency-cruiser version it was
+read from, which turns an upgrade into a red test rather than a silent drift,
+and one fixture each for the JSON and stylesheet imports above. An in-root path that is neither parsed nor resolvable —
 `ui-dashboard/AGENTS.md`, a `.yaml`, a `.sol` — drops the command even though a
 package quality arm scheduled it; before that narrowing such a change bought a
 ~22s cruise of an unchanged 1,321-module graph. A change to

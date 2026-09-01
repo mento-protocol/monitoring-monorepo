@@ -13193,6 +13193,12 @@ assert_contains "- pnpm code-health:deps"
 run_gate "indexer-envio/config/nttAddresses.json"
 assert_contains "- pnpm code-health:deps"
 
+# Stylesheets are the same class: dep-cruiser resolves them into the graph and
+# declines to parse them, so they are edge targets with no outgoing edges.
+# ui-dashboard/src/app/layout.tsx imports ./globals.css.
+run_gate "ui-dashboard/src/app/globals.css"
+assert_contains "- pnpm code-health:deps"
+
 # The root manifest carries the `code-health:deps` script line that
 # engine.test.mjs holds the scanned-root list set-equal to, so it must route
 # that suite; the class dispatch alone would send a script edit to the shell

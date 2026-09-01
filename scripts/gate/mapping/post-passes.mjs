@@ -483,14 +483,40 @@ export const DEPCRUISE_EXTENSIONS = Object.freeze([
  * an edge, and the rules that judge indexer-to-dashboard reach would see it,
  * while no `.ts` file changed. The parse list alone dropped the command there.
  *
- * dependency-cruiser exports `allExtensions` for what it parses but nothing for
- * what its resolver accepts, so this half cannot be pinned against the library.
- * It is short because it is fixed by Node's own resolution rather than by
- * dependency-cruiser's configuration, and `engine.test.mjs` pins it against the
- * real `nttAddresses.json` import instead — a fixture that fails loudly if the
- * case it stands for ever stops existing.
+ * This is dependency-cruiser's own `lKnownUnfollowables`, read from
+ * `src/extract/resolve/module-classifiers.mjs` at the version pinned below. The
+ * cruiser resolves each of these into the graph and then deliberately declines
+ * to parse it: a stylesheet can hold `@import` statements that the fallback
+ * JavaScript parser would happily misread, so it is a node with no outgoing
+ * edges. A node is still an edge target, which is the whole point here.
+ * `ui-dashboard/src/app/layout.tsx` imports `./globals.css` for exactly that
+ * reason.
+ *
+ * The library exports `allExtensions` for what it parses but nothing for this
+ * list, so it cannot be pinned against the API the way the parse half is.
+ * Three things keep it honest instead: the version constant below, which turns
+ * any dependency-cruiser upgrade into a red test so the list is re-read rather
+ * than assumed; and two fixtures in `engine.test.mjs` standing for the JSON and
+ * stylesheet cases, which fail loudly if the imports they represent disappear.
  */
-export const DEPCRUISE_TARGET_EXTENSIONS = Object.freeze([".json", ".node"]);
+export const DEPCRUISE_TARGET_EXTENSIONS = Object.freeze([
+  ".json",
+  ".node",
+  ".css",
+  ".sass",
+  ".scss",
+  ".stylus",
+  ".less",
+]);
+
+/**
+ * The dependency-cruiser release `DEPCRUISE_TARGET_EXTENSIONS` was read from.
+ *
+ * Bumping the dependency without re-reading `lKnownUnfollowables` is the
+ * failure this guards: the list is internal, so nothing else would notice a
+ * change to it. On a version bump, re-read that constant and update both.
+ */
+export const DEPCRUISE_TARGET_EXTENSIONS_VERSION = "17.4.0";
 
 /**
  * A changed path dependency-cruiser can read inside a root it scans.

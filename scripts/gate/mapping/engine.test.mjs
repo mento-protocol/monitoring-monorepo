@@ -42,6 +42,7 @@ import {
   CODE_HEALTH_DEPS_COMMAND,
   DEPCRUISE_EXTENSIONS,
   DEPCRUISE_ROOTS,
+  DEPCRUISE_TARGET_EXTENSIONS_VERSION,
   addTrunkCheckCommand,
   addWorkspaceConfigBuild,
   applyScopedTestCommands,
@@ -1033,6 +1034,63 @@ test("a JSON dependency target inside a root keeps the command", () => {
     "a config JSON that source imports is a real dependency target",
   );
   assert.equal(depsSurvives(["shared-config/data/tokens.json"]), true);
+});
+
+test("a stylesheet dependency target inside a root keeps the command", () => {
+  // dependency-cruiser resolves stylesheets into the graph and declines to
+  // parse them, so they are nodes with no outgoing edges — and a node is still
+  // an edge target.
+  for (const path of [
+    "ui-dashboard/src/app/globals.css",
+    "ui-dashboard/src/styles/x.scss",
+    "ui-dashboard/src/styles/x.sass",
+    "ui-dashboard/src/styles/x.less",
+    "ui-dashboard/src/styles/x.stylus",
+  ]) {
+    assert.equal(
+      depsSurvives([path]),
+      true,
+      `${path} is resolved into the graph as a dependency target`,
+    );
+  }
+});
+
+test("the stylesheet-target case this pin stands for is still real", () => {
+  const repoRoot = join(
+    fileURLToPath(new URL(".", import.meta.url)),
+    "../../..",
+  );
+  const source = readFileSync(
+    join(repoRoot, "ui-dashboard/src/app/layout.tsx"),
+    "utf8",
+  );
+  assert.match(
+    source,
+    /import\s+"\.\/globals\.css"/,
+    "dashboard source must still statically import a stylesheet",
+  );
+});
+
+test("the target-extension list is pinned to the version it was read from", () => {
+  // `lKnownUnfollowables` is internal to dependency-cruiser, so no API change
+  // would announce it moving. Pinning the version makes an upgrade the signal:
+  // on a bump, re-read that constant and update both here.
+  const repoRoot = join(
+    fileURLToPath(new URL(".", import.meta.url)),
+    "../../..",
+  );
+  const installed = JSON.parse(
+    readFileSync(
+      join(repoRoot, "node_modules/dependency-cruiser/package.json"),
+      "utf8",
+    ),
+  ).version;
+  assert.equal(
+    installed,
+    DEPCRUISE_TARGET_EXTENSIONS_VERSION,
+    "dependency-cruiser moved: re-read lKnownUnfollowables in " +
+      "src/extract/resolve/module-classifiers.mjs and update the pinned set",
+  );
 });
 
 test("the JSON-target case this pin stands for is still real", () => {
