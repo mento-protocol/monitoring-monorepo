@@ -2777,6 +2777,18 @@ test("classifies observed coordinated priority negations", () => {
         "It still omits the rollback step.**",
       ].join("\n"),
     },
+    {
+      id: 415,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: '**[P3] Comment/prose update in `review-eval-score.mjs:257-260` is accurate. `blindJudgeCwd()`\'s docstring was updated to describe the empty scratch dir as defense-in-depth against the CLI ever failing to honor `--tools ""`, rather than as the primary safeguard — correctly reflects the new design where `--tools ""` is now the primary control.**',
+    },
+    {
+      id: 416,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "**[P3] Documentation update in `docs/runbook.md` is accurate. The explanation correctly reflects the new control while dropping the required rollback step.**",
+    },
   ];
 
   const records =
@@ -2803,6 +2815,8 @@ test("classifies observed coordinated priority negations", () => {
       { id: "412", finding: true, findingSignal: "[P3]" },
       { id: "413", finding: true, findingSignal: "[P3]" },
       { id: "414", finding: true, findingSignal: "[P3]" },
+      { id: "415", finding: false, findingSignal: null },
+      { id: "416", finding: true, findingSignal: "[P3]" },
     ],
   );
 });

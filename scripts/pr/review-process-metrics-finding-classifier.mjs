@@ -496,6 +496,7 @@ const REVIEW_DOMAIN_LIST_SOURCE = String.raw`${REVIEW_DOMAIN_SOURCE}(?:\s*,\s*${
 const LABEL_FIRST_ABSENCE_SOURCE = String.raw`(?:none\b|no\s+${NEGATED_FINDING_NOUN_SOURCE}\b(?:\s+(?:remains?|exists?|found|reported|identified|detected|flagged|shown|present|(?:are|is|was|were)\s+(?:found|reported|identified|detected|flagged|shown|present)))?)`;
 const REVIEW_LOCATION_SOURCE = String.raw`(?:\s+(?:in|at)\s+\`?[A-Za-z0-9_./-]+(?::\d+(?:-\d+)?)?\`?)?`;
 const VERIFIED_PROSE_UPDATE_SOURCE = String.raw`(?:comment(?:\/prose)?|prose|documentation|docs?)\s+(?:update|change|wording)${REVIEW_LOCATION_SOURCE}\s+(?:is|are|was|were)\s+(?:accurate|correct|valid|sound)`;
+const OBSERVED_BLIND_JUDGE_EXPLANATION_SOURCE = String.raw`(?:[.!?]?[ \t]+\`blindJudgeCwd\(\)\`(?:'s|’s)[ \t]+docstring[ \t]+was[ \t]+updated[ \t]+to[ \t]+describe[ \t]+the[ \t]+empty[ \t]+scratch[ \t]+dir[ \t]+as[ \t]+defense-in-depth[ \t]+against[ \t]+the[ \t]+CLI[ \t]+ever[ \t]+failing[ \t]+to[ \t]+honor[ \t]+\`--tools[ \t]+""\`,[ \t]+rather[ \t]+than[ \t]+as[ \t]+the[ \t]+primary[ \t]+safeguard[ \t]*[—–-][ \t]*correctly[ \t]+reflects[ \t]+the[ \t]+new[ \t]+design[ \t]+where[ \t]+\`--tools[ \t]+""\`[ \t]+is[ \t]+now[ \t]+the[ \t]+primary[ \t]+control)?`;
 const REVIEW_ITEM_END_SOURCE = String.raw`[.!?]?[ \t]*(?=(?:(?:\r?\n)[ \t]*)*(?:(?:[-+•>]|#{1,6})[ \t]+|\d+[.)][ \t]+|${BRACKETED_PRIORITY_SOURCE}|(?![\s\S])))`;
 const NEGATED_PRIORITY_CLAUSES = [
   new RegExp(
@@ -515,7 +516,7 @@ const NEGATED_PRIORITY_CLAUSES = [
     "gim",
   ),
   new RegExp(
-    String.raw`${PRIORITY_CLAUSE_LEAD_SOURCE}${BRACKETED_PRIORITY_LIST_SOURCE}\s+${VERIFIED_PROSE_UPDATE_SOURCE}${REVIEW_ITEM_END_SOURCE}`,
+    String.raw`${PRIORITY_CLAUSE_LEAD_SOURCE}${BRACKETED_PRIORITY_LIST_SOURCE}\s+${VERIFIED_PROSE_UPDATE_SOURCE}${OBSERVED_BLIND_JUDGE_EXPLANATION_SOURCE}${REVIEW_ITEM_END_SOURCE}`,
     "gim",
   ),
 ];
