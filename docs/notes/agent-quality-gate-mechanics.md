@@ -801,7 +801,8 @@ list, the positional arguments of the root `code-health:deps` script and the
 `engine.test.mjs` holds the gate's pinned copy set-equal to both, and the root
 manifest routes that suite so a script-only edit shrinking the scanned roots
 cannot merge without the staleness test running. A change outside every root
-drops the command. Any change inside a root keeps it, whatever the file type.
+drops the command unless it is an explicit manifest, configuration, or
+post-pass trigger. Any change inside a root keeps it, whatever the file type.
 
 That last point was narrowed by file type and then reverted, which is worth
 recording so it is not narrowed again. The narrowing aimed at
