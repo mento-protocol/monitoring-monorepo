@@ -21,15 +21,80 @@ const CODERABBIT_REVIEW_COMMIT_RANGE =
   /\bbetween\s+[0-9a-f]{40}\s+and\s+([0-9a-f]{40})(?![0-9a-f])/gi;
 const CODERABBIT_FINAL_HEAD_REQUEST_MARKER =
   /<!--\s*coderabbit-final-head-review:([0-9a-f]{40})\s*-->/i;
+const CODERABBIT_SUMMARY_MARKER =
+  /<!--\s*This is an auto-generated comment:\s*summarize by coderabbit\.ai\s*-->/gi;
+const CODERABBIT_SKIP_REVIEW_MARKER =
+  /<!--\s*This is an auto-generated comment:\s*skip review by coderabbit\.ai\s*-->/gi;
+const CODERABBIT_SKIP_REVIEW_END_MARKER =
+  /<!--\s*end of auto-generated comment:\s*skip review by coderabbit\.ai\s*-->/gi;
+const CODERABBIT_PATH_FILTER_SKIP_TEXT =
+  /^\s*>\s*Review was skipped due to path filters\s*$/gim;
+const CODERABBIT_IGNORED_FILES_BLOCK =
+  /<summary>\s*:no_entry:\s*Files ignored due to path filters\s*\((\d+)\)<\/summary>([\s\S]*?)<\/details>/gi;
+const CODERABBIT_IGNORED_FILE =
+  /^\s*>\s*\*\s+`([^`\r\n]+)`\s+is excluded by\s+`[^`\r\n]+`\s*$/gim;
 
 export function parseTimestamp(value) {
   const timestamp = Date.parse(value ?? "");
   return Number.isNaN(timestamp) ? null : timestamp;
 }
 
+function validIsoTimestamp(value) {
+  return Number.isFinite(Date.parse(value ?? "")) ? value : null;
+}
+
+function timelineEventTimestamp(item) {
+  return (
+    validIsoTimestamp(item?.created_at) ??
+    validIsoTimestamp(item?.submitted_at) ??
+    validIsoTimestamp(item?.updated_at) ??
+    null
+  );
+}
+
+export function headUpdatedAtFromTimeline(timelineItems = [], headSha) {
+  const normalizedHeadSha = String(headSha ?? "").toLowerCase();
+  if (!normalizedHeadSha) return null;
+
+  let headCommitIndex = -1;
+  let headCommitTimestamp = null;
+  for (const [index, item] of timelineItems.entries()) {
+    if (
+      item?.event === "committed" &&
+      String(item.sha ?? "").toLowerCase() === normalizedHeadSha
+    ) {
+      headCommitIndex = index;
+      headCommitTimestamp = timelineEventTimestamp(item);
+    }
+  }
+  if (headCommitIndex < 0) return null;
+  if (headCommitTimestamp) return headCommitTimestamp;
+
+  for (const item of timelineItems.slice(headCommitIndex + 1)) {
+    const timestamp = timelineEventTimestamp(item);
+    if (timestamp) return timestamp;
+  }
+  return null;
+}
+
+export function fetchHeadUpdatedAt({ headSha, timelineItems, observedAt }) {
+  const timelineTimestamp = headUpdatedAtFromTimeline(timelineItems, headSha);
+  const statusTimestamp = validIsoTimestamp(observedAt);
+  if (!timelineTimestamp) return statusTimestamp;
+  if (!statusTimestamp) return timelineTimestamp;
+  return Date.parse(statusTimestamp) < Date.parse(timelineTimestamp)
+    ? statusTimestamp
+    : timelineTimestamp;
+}
+
 function isAtOrAfter(timestamp, lowerBound) {
   const parsed = parseTimestamp(timestamp);
-  return parsed !== null && lowerBound !== null && parsed >= lowerBound;
+  const parsedLowerBound = Number.isFinite(lowerBound)
+    ? lowerBound
+    : parseTimestamp(lowerBound);
+  return (
+    parsed !== null && parsedLowerBound !== null && parsed >= parsedLowerBound
+  );
 }
 
 function isCurrentSignal(timestamp, lowerBound) {
@@ -100,6 +165,166 @@ function codeRabbitCommentTimestamp(comment) {
     comment.createdAt ??
     null
   );
+}
+
+function singleMatch(body, pattern) {
+  const flags = pattern.flags.includes("g")
+    ? pattern.flags
+    : `${pattern.flags}g`;
+  const matches = [
+    ...String(body ?? "").matchAll(new RegExp(pattern.source, flags)),
+  ];
+  return matches.length === 1 ? matches[0] : null;
+}
+
+function matchesInCanonicalOrder(matches) {
+  return matches.every((match, index) => {
+    if (index === 0) return true;
+    const previous = matches[index - 1];
+    return previous.index + previous[0].length <= match.index;
+  });
+}
+
+function pathFilterSkipCandidate(comment, headUpdatedAt) {
+  const author = comment.user?.login ?? comment.author?.login ?? null;
+  if (!CODERABBIT_AUTHORS.has(String(author ?? "").toLowerCase())) {
+    return null;
+  }
+  if (
+    headUpdatedAt === null ||
+    !isAtOrAfter(codeRabbitCommentTimestamp(comment), headUpdatedAt)
+  ) {
+    return null;
+  }
+
+  const body = String(comment.body ?? "");
+  const summaryMatch = singleMatch(body, CODERABBIT_SUMMARY_MARKER);
+  const skipStartMatch = singleMatch(body, CODERABBIT_SKIP_REVIEW_MARKER);
+  const skipTextMatch = singleMatch(body, CODERABBIT_PATH_FILTER_SKIP_TEXT);
+  const ignoredBlockMatch = singleMatch(body, CODERABBIT_IGNORED_FILES_BLOCK);
+  const runMarkerMatch = singleMatch(body, CODERABBIT_REVIEW_RUN_MARKER);
+  const skipEndMatch = singleMatch(body, CODERABBIT_SKIP_REVIEW_END_MARKER);
+  if (
+    !summaryMatch ||
+    !skipStartMatch ||
+    !skipTextMatch ||
+    !ignoredBlockMatch ||
+    !runMarkerMatch ||
+    !skipEndMatch ||
+    !matchesInCanonicalOrder([
+      summaryMatch,
+      skipStartMatch,
+      skipTextMatch,
+      ignoredBlockMatch,
+      runMarkerMatch,
+      skipEndMatch,
+    ])
+  ) {
+    return null;
+  }
+
+  const declaredCount = Number(ignoredBlockMatch[1]);
+  const ignoredPaths = [
+    ...ignoredBlockMatch[2].matchAll(CODERABBIT_IGNORED_FILE),
+  ]
+    .map((match) => match[1])
+    .filter(Boolean);
+  const uniquePaths = new Set(ignoredPaths);
+  if (
+    !Number.isSafeInteger(declaredCount) ||
+    declaredCount <= 0 ||
+    ignoredPaths.length !== declaredCount ||
+    uniquePaths.size !== declaredCount
+  ) {
+    return null;
+  }
+
+  const sourceUrl = comment.html_url ?? comment.url ?? null;
+  if (!sourceUrl) return null;
+  return {
+    declaredCount,
+    ignoredPaths,
+    sourceUrl,
+    observedAt: codeRabbitCommentTimestamp(comment),
+  };
+}
+
+export function findCodeRabbitPathFilterSkipCandidate({
+  issueComments = [],
+  headUpdatedAt = null,
+} = {}) {
+  const candidates = issueComments
+    .map((comment) => pathFilterSkipCandidate(comment, headUpdatedAt))
+    .filter(Boolean)
+    .sort(
+      (left, right) =>
+        (parseTimestamp(right.observedAt) ?? 0) -
+        (parseTimestamp(left.observedAt) ?? 0),
+    );
+  return candidates[0] ?? null;
+}
+
+export function validateCodeRabbitPathFilterSkip({
+  candidate = null,
+  currentFiles = null,
+  expectedChangedFileCount = null,
+  filesComplete = false,
+} = {}) {
+  if (
+    !candidate ||
+    !filesComplete ||
+    !Array.isArray(currentFiles) ||
+    !Array.isArray(candidate.ignoredPaths) ||
+    !candidate.sourceUrl
+  ) {
+    return null;
+  }
+  if (
+    !Number.isSafeInteger(expectedChangedFileCount) ||
+    expectedChangedFileCount <= 0 ||
+    currentFiles.length !== expectedChangedFileCount
+  ) {
+    return null;
+  }
+  if (
+    currentFiles.some(
+      (path) => typeof path !== "string" || path.length === 0,
+    ) ||
+    new Set(currentFiles).size !== currentFiles.length ||
+    candidate.declaredCount !== candidate.ignoredPaths.length ||
+    candidate.declaredCount !== currentFiles.length ||
+    new Set(candidate.ignoredPaths).size !== candidate.ignoredPaths.length
+  ) {
+    return null;
+  }
+
+  const ignoredPaths = [...candidate.ignoredPaths].sort((left, right) =>
+    left.localeCompare(right),
+  );
+  const sortedCurrentFiles = [...currentFiles].sort((left, right) =>
+    left.localeCompare(right),
+  );
+  if (ignoredPaths.some((path, index) => path !== sortedCurrentFiles[index])) {
+    return null;
+  }
+
+  return {
+    reason: "path_filters",
+    sourceUrl: candidate.sourceUrl,
+    ignoredPaths,
+  };
+}
+
+export function summarizeCodeRabbitReviewGate(state, pathFilterSkip = null) {
+  return {
+    ready: ["reviewed", "not_applicable"].includes(state),
+    required: false,
+    state,
+    fallbackAction: ["missing", "stale"].includes(state)
+      ? "request_review_once_for_head_after_optional_check"
+      : "wait",
+    ...(state === "not_applicable" ? pathFilterSkip : {}),
+  };
 }
 
 export function isCodeRabbitFinalHeadReviewRequestBody(
@@ -232,6 +457,7 @@ export function classifyCodeRabbitReviewSignal({
   reviews = [],
   currentHeadOid = null,
   headUpdatedAt = null,
+  pathFilterSkip = null,
 } = {}) {
   const currentHead = String(currentHeadOid ?? "").toLowerCase();
   let hasHistoricalSignal = false;
@@ -270,6 +496,8 @@ export function classifyCodeRabbitReviewSignal({
     }
     hasHistoricalSignal = true;
   }
+
+  if (pathFilterSkip) return "not_applicable";
 
   for (const comment of issueComments) {
     if (!isTrustedCodeRabbitReviewRequestComment(comment)) continue;
