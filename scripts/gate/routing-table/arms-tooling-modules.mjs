@@ -505,6 +505,18 @@ export const TOOLING_MODULE_ARMS = [
     ],
   },
   {
+    patterns: [
+      "scripts/review/review-eval-publication.mjs",
+      "scripts/review/review-eval-publication.test.mjs",
+    ],
+    effects: [
+      {
+        command: "node scripts/pr/check-pr-description.test.mjs",
+        reason: "review-eval publication PR body renderer changed",
+      },
+    ],
+  },
+  {
     patterns: ["scripts/alerts/check-deviation-threshold-drift.mjs"],
     effects: [
       {

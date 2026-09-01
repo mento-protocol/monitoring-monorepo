@@ -3,7 +3,7 @@ title: Agent Quality Gate — Mechanics
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-29
+last_verified: 2026-09-01
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -160,11 +160,8 @@ routing-sensitive source, the shared classifier adds the offline
 scheduled evaluation. Every tracked Markdown change runs `pnpm docs:index
 --check` and `pnpm docs:navigation-eval:test`. The second command enforces the
 navigation source budgets that the Markdown-only CI job checks. Review the
-output, then run:
-
-```bash
-pnpm agent:quality-gate --run
-```
+output. Then run the local or hosted gate command from step 3 of the
+[PR operating card](pr-operating-card.md).
 
 Every non-empty candidate change set also runs the Terraform-stack suite. The
 gate spells it `pnpm tf:test`, unless a root-tooling `package.json` edit already
@@ -2341,9 +2338,21 @@ for it is scoped to that exact name.
 
 The pre-push hook reaches neither bypass. It runs a fixed command line, and
 Trunk strips these variables. If coordination fails, the hook exits non-zero.
-Run `pnpm agent:quality-gate --run` normally after the reported recovery or
-compatibility blocker clears. A verified matching success lets the hook's
-`--skip-if-fresh` path exit before it registers another request.
+After the reported recovery or compatibility blocker clears, fetch the hook's
+base and warm the matching stamp with `git fetch --quiet origin main &&
+./scripts/agent-quality-gate.sh --run --parallel 3 --base origin/main`. A
+verified matching success lets the hook's `--skip-if-fresh` path exit before it
+registers another request.
+
+Set `AGENT_QUALITY_GATE_DEBUG_STAMP=1` to print the active freshness-stamp
+schema and fields, one per line on stderr. The first line names the schema. The
+remaining lines mirror the exact v3 or v4 fields, including `scrubPolicy` and
+the v4 `coordinatorContext`. The output therefore follows the active base
+binding instead of assuming whether it is a tip or merge-base. It prints only
+the stored identifiers and hashes. It does not print raw environment values.
+The switch does not change the stamp or stdout. To diagnose a miss, capture the
+warm command and the hook's exact fetch-and-run command back to back. The first
+changed line names the input that prevented reuse.
 
 **Heavy suites form barriers.** Dashboard coverage, its scoped `vitest related`
 substitute, browser work, production builds, and size-limit work take all
@@ -2798,7 +2807,8 @@ pnpm agent:review-materiality
 The command reports `trivial`, `standard`, or `full` materiality from changed
 path risk and diff size, plus whether the change likely needs AGENTS, README,
 runbook, checklist, or skill context updates. It is advisory and does not
-replace `pnpm agent:quality-gate --run`,
+replace the applicable gate command from step 3 of the
+[PR operating card](pr-operating-card.md),
 `pnpm agent:autoreview`, or `pnpm pr:ready-state`.
 
 To warm Turbo's local cache for the Turbo-backed package tasks mapped by the
@@ -2818,7 +2828,7 @@ concurrent logs do not interleave. The same dashboard `.next` serialization rule
 applies to prewarm.
 
 The Trunk pre-push hook delegates to this same path-aware gate with
-`--parallel 3 --skip-if-fresh`. Independent ordinary commands can run
+`--parallel 3 --skip-if-fresh --pre-push`. Independent ordinary commands can run
 concurrently within the global capacity. An all-capacity command runs after the
 active pool drains. The hook reuses a recent successful manual gate run when
 the whole-run freshness key is unchanged and the recorded success is no older
@@ -2826,14 +2836,27 @@ than the freshness TTL (two hours). Because it runs in parallel rather than
 `--fail-fast`, a red push runs the remaining in-flight ordinary commands before
 failing. Package-script acknowledgement is folded out
 of the reuse key when there is no package-script risk, so a warm
-`pnpm agent:quality-gate --run` — even one passed `--allow-package-script-changes`
-defensively — satisfies the flag-less hook's `--skip-if-fresh` check, and
-warm-then-push then skips the mapped commands. When a push DOES change package
-scripts or package-manager config, the acknowledgement is part of the reuse key:
-review the script/lifecycle diff first, then set
+`./scripts/agent-quality-gate.sh --run --parallel 3 --base origin/main` satisfies
+the flag-less hook's `--skip-if-fresh` check, and warm-then-push then skips the
+mapped commands. When a push DOES change package scripts or package-manager
+config, the acknowledgement is part of the reuse key: review the
+script/lifecycle diff first, then set
 `agent.qualityGate.allowPackageScriptChanges=true` in local git config (seen by
 both the manual warm run and the hook) so a just-passed acknowledged manual gate
 can satisfy the `--skip-if-fresh` check.
+
+Hosted setup sets `agent.qualityGate.cloudPrePushRequireFresh=true` in the
+repository git config. A hosted pre-push with a fresh exact stamp exits through
+the normal freshness path. A cold or invalid stamp exits with status 2 before
+scheduler registration, lock acquisition, or mapped work. Fetch `origin/main`,
+run `./scripts/agent-quality-gate.sh --run --parallel 3 --base origin/main` as
+an observable background task, and retry the push after it passes. The direct
+launcher, base, and parallelism match the hook's freshness key. A `pnpm`
+launcher adds material lifecycle environment values and cannot warm this exact
+hook stamp. This hook warm does not replace validation against the resolved PR
+base. A stacked PR must pass its resolved-base gate first, then warm the separate
+`origin/main` hook stamp. Local setup leaves this option unset, so a cold local
+pre-push still runs the mapped gate.
 
 Coordinator coalescing and retained-result reuse use the complete execution key
 described above, including HEAD. The leader recomputes it before execution and

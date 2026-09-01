@@ -376,6 +376,7 @@ function writeRowEvidence(root, row) {
     comparability_key: row.comparability_key,
     kind: row.kind,
     detail_dir: row.detail_dir,
+    plan_dir: row.detail_dir,
     baseline_selection: row.vs_baseline?.selection ?? "automatic",
     baseline:
       row.vs_baseline?.selection === "explicit"
@@ -5239,6 +5240,15 @@ test("the installed baseline survives the checkout the candidate needs", () => {
   assert.match(doc, new RegExp(`--against "\\$\\{TMPDIR:-/tmp\\}/${kept}"`));
 });
 
+test("the runbook forwards paid-run flags without a literal separator", () => {
+  const doc = readFileSync(
+    path.join(repoRoot, "docs/evals/review-skill.md"),
+    "utf8",
+  );
+  assert.doesNotMatch(doc, /pnpm review:eval:run -- --kind/);
+  assert.equal([...doc.matchAll(/pnpm review:eval:run --kind/g)].length, 5);
+});
+
 test("the ledger branch names one run, not one day", () => {
   const script = runEvalSourceSet();
   // Two runs finishing on the same UTC day — the installed and candidate pair
@@ -5884,9 +5894,12 @@ test("the freshness workflow watches the frozen input directories", () => {
   // form is what reaches docs/evals/review-skill-truth/ and its siblings.
   assert.match(workflow, /- docs\/evals\/review-skill\*\*/);
   assert.doesNotMatch(workflow, /- docs\/evals\/review-skill\*$/m);
-  // Every step of the job runs a `review:eval*` alias, so a PR that renames or
-  // removes one has to run this workflow.
+  // Every contract-job command runs a `review:eval*` alias, so a PR that
+  // renames or removes one has to run this workflow.
   assert.match(workflow, /^ {6}- package\.json$/m);
+  // Publication relies on the root ignore rule to keep raw cells out of Git
+  // and autoreview bundles, so an ignore-only edit must run this suite too.
+  assert.match(workflow, /^ {6}- \.gitignore$/m);
   const aliases = [
     ...new Set(
       [...workflow.matchAll(/pnpm (review:eval[\w:]*)/g)].map((m) => m[1]),
@@ -5898,6 +5911,11 @@ test("the freshness workflow watches the frozen input directories", () => {
   for (const alias of aliases) {
     assert.ok(scripts[alias], `package.json has no ${alias} script`);
   }
+  assert.match(
+    workflow,
+    /node scripts\/review\/review-eval-freshness-publication\.mjs --json/,
+  );
+  assert.doesNotMatch(workflow, /pnpm review:eval -- --schedule-issue --json/);
 });
 
 test("required CI routes the nested frozen inputs to the scripts job", () => {
@@ -5917,6 +5935,7 @@ test("required CI routes the nested frozen inputs to the scripts job", () => {
   // The flat inputs — review-skill.md, the fixtures, the ledger — still need
   // the non-recursive form, which `*/**` does not match on its own.
   assert.match(workflow, /^ {14}- docs\/evals\/review-skill\*$/m);
+  assert.match(workflow, /^ {14}- \.gitignore$/m);
 });
 
 test("the ledger PR workflow recomputes the rows it appends", () => {
@@ -6562,7 +6581,17 @@ test("a scheduled run refuses a checkout that is not at origin/main", () => {
   assert.match(script, /has uncommitted changes/);
 });
 
-test("the launchd template carries placeholders the runbook install step rewrites", () => {
+function launchdRunbookBlocks(runbook) {
+  const section = runbook.match(
+    /### Install the scheduler\n([\s\S]*?)\nIt fires on the 8th/,
+  );
+  assert.ok(section, "the scheduler install section was not found");
+  return [...section[1].matchAll(/```bash\n([\s\S]*?)\n```/g)].map(
+    (match) => match[1],
+  );
+}
+
+test("the launchd template carries safe arguments and installed PATH placeholders", () => {
   const plist = readFileSync(
     path.join(repoRoot, "scripts/review/launchd/org.mento.review-eval.plist"),
     "utf8",
@@ -6571,20 +6600,187 @@ test("the launchd template carries placeholders the runbook install step rewrite
     path.join(repoRoot, "docs/evals/review-skill.md"),
     "utf8",
   );
+  const installer = readFileSync(
+    path.join(repoRoot, "scripts/review/install-review-eval-launchd.sh"),
+    "utf8",
+  );
   // The managed-context rule: no author-account path may survive in either file.
   assert.doesNotMatch(plist, /\/Users\//);
   assert.doesNotMatch(runbook, /\/Users\//);
   const tokens = [
     ...new Set([...plist.matchAll(/__[A-Z_]+__/g)].map((match) => match[0])),
   ].sort();
-  assert.deepEqual(tokens, ["__REPO_CHECKOUT__", "__USER_HOME__"]);
+  assert.deepEqual(tokens, [
+    "__REPO_CHECKOUT__",
+    "__RUNTIME_PATH__",
+    "__USER_HOME__",
+  ]);
   for (const token of tokens) {
     assert.ok(
-      runbook.includes(`s|${token}|`),
-      `${token} is not rewritten by the documented install step`,
+      runbook.includes(`\`${token}\``),
+      `${token} is not documented by the install step`,
     );
   }
+  const programArgumentsBlock = plist.match(
+    /<key>ProgramArguments<\/key>\s*<array>([\s\S]*?)<\/array>/,
+  );
+  assert.ok(programArgumentsBlock, "ProgramArguments was not found");
+  const programArguments = [
+    ...programArgumentsBlock[1].matchAll(/<string>(.*?)<\/string>/g),
+  ].map((match) => match[1]);
+  assert.deepEqual(programArguments, [
+    "/bin/zsh",
+    "-l",
+    "-c",
+    'set -eu; runtime_path="$1"; shift; export PATH="$runtime_path"; exec /bin/bash "$@"',
+    "org.mento.review-eval",
+    "__RUNTIME_PATH__",
+    "__REPO_CHECKOUT__/scripts/review/run-eval.sh",
+    "--kind",
+    "auto",
+  ]);
+  assert.match(plist, /<key>PATH<\/key>\s*<string>__RUNTIME_PATH__<\/string>/);
+  assert.match(installer, /for command_name in node git codex claude/);
+  assert.match(installer, /runtime_path="\$PATH:\/usr\/local\/bin:/);
+  assert.match(
+    installer,
+    /command_path="\$\(PATH="\$runtime_path" command -v "\$command_name"\)"/,
+  );
+  assert.match(installer, /-remove ProgramArguments\.5/);
+  assert.match(installer, /-insert ProgramArguments\.5/);
+  assert.match(installer, /-remove ProgramArguments\.6/);
+  assert.match(installer, /-insert ProgramArguments\.6/);
+  assert.match(installer, /-replace EnvironmentVariables\.PATH/);
+  assert.doesNotMatch(installer, /sed -e "s\|__REPO_CHECKOUT__/);
+
+  const [installBlock, kickstartBlock, ...extraBlocks] =
+    launchdRunbookBlocks(runbook);
+  assert.equal(extraBlocks.length, 0);
+  assert.equal(installBlock, "./scripts/review/install-review-eval-launchd.sh");
+  assert.doesNotMatch(installBlock, /kickstart/);
+  assert.match(installer, /^#!\/usr\/bin\/env bash\n\nset -euo pipefail/);
+  assert.match(installer, /launchctl_path=\/bin\/launchctl/);
+  assert.match(installer, /\/usr\/bin\/id -u/);
+  assert.match(installer, /\/bin\/mkdir -p/);
+  assert.match(installer, /linkSync\(process\.argv\[1\], process\.argv\[2\]\)/);
+  assert.match(installer, /\$lock_owner -ef \$run_lock/);
+  assert.match(installer, /fetch --quiet origin main/);
+  assert.match(installer, /rev-parse origin\/main/);
+  assert.match(installer, /status --porcelain=v1 --untracked-files=normal/);
+  assert.match(installer, /-extract Label raw/);
+  assert.match(installer, /"\$launchctl_path" bootstrap/);
+  assert.doesNotMatch(installer, /bootout|kickstart/);
+  assert.doesNotMatch(kickstartBlock, /bootstrap|plutil/);
+  assert.match(
+    kickstartBlock,
+    /^launchctl kickstart -p gui\/"\$\(id -u\)"\/org\.mento\.review-eval$/,
+  );
+  assert.match(
+    runbook,
+    /separate opt-in command only when you intend to start a paid\nevaluation immediately/,
+  );
 });
+
+test(
+  "the launchd install preserves login credentials and one safe program vector",
+  { skip: process.platform !== "darwin" },
+  () => {
+    const root = mkdtempSync(path.join(tmpdir(), "review eval & launchd-"));
+    try {
+      const target = path.join(root, "org.mento.review-eval.plist");
+      const script = path.join(
+        root,
+        "checkout & eval",
+        "scripts/review/run-eval.sh",
+      );
+      const runtimePath = `${[
+        "node & bin",
+        "git & bin",
+        "codex & bin",
+        "claude & bin",
+      ]
+        .map((directory) => path.join(root, directory))
+        .join(":")}:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin`;
+      const logPath = path.join(root, "Logs", "review & eval.log");
+      cpSync(
+        path.join(
+          repoRoot,
+          "scripts/review/launchd/org.mento.review-eval.plist",
+        ),
+        target,
+      );
+      const plutil = (...args) =>
+        spawnSync("/usr/bin/plutil", [...args, target], {
+          encoding: "utf8",
+        });
+      for (const args of [
+        ["-remove", "ProgramArguments.5"],
+        ["-insert", "ProgramArguments.5", "-string", runtimePath],
+        ["-remove", "ProgramArguments.6"],
+        ["-insert", "ProgramArguments.6", "-string", script],
+        ["-replace", "EnvironmentVariables.PATH", "-string", runtimePath],
+        ["-replace", "StandardOutPath", "-string", logPath],
+        ["-replace", "StandardErrorPath", "-string", logPath],
+      ]) {
+        const result = plutil(...args);
+        assert.equal(result.status, 0, result.stdout + result.stderr);
+      }
+      const extract = (key, format = "raw") => {
+        const result = plutil("-extract", key, format, "-o", "-");
+        assert.equal(result.status, 0, result.stdout + result.stderr);
+        return result.stdout.trim();
+      };
+      const programArguments = JSON.parse(extract("ProgramArguments", "json"));
+      assert.deepEqual(programArguments, [
+        "/bin/zsh",
+        "-l",
+        "-c",
+        'set -eu; runtime_path="$1"; shift; export PATH="$runtime_path"; exec /bin/bash "$@"',
+        "org.mento.review-eval",
+        runtimePath,
+        script,
+        "--kind",
+        "auto",
+      ]);
+      assert.equal(extract("EnvironmentVariables.PATH"), runtimePath);
+      assert.equal(extract("StandardOutPath"), logPath);
+      assert.equal(extract("StandardErrorPath"), logPath);
+
+      const profileHome = path.join(root, "profile home");
+      const probeOutput = path.join(root, "login probe.txt");
+      mkdirSync(profileHome);
+      mkdirSync(path.dirname(script), { recursive: true });
+      writeFileSync(
+        path.join(profileHome, ".zprofile"),
+        "export REVIEW_EVAL_PROFILE_MARKER='profile marker'\nexport PATH='/profile only'\n",
+      );
+      writeFileSync(
+        script,
+        '#!/bin/bash\nprintf \'%s\\n\' "${REVIEW_EVAL_PROFILE_MARKER:-missing}" "$PATH" > "$REVIEW_EVAL_LOGIN_PROBE"\n',
+      );
+      const launched = spawnSync(
+        programArguments[0],
+        programArguments.slice(1),
+        {
+          encoding: "utf8",
+          env: {
+            HOME: profileHome,
+            PATH: "/launchd only",
+            REVIEW_EVAL_LOGIN_PROBE: probeOutput,
+            ZDOTDIR: profileHome,
+          },
+        },
+      );
+      assert.equal(launched.status, 0, launched.stdout + launched.stderr);
+      assert.deepEqual(readFileSync(probeOutput, "utf8").trim().split("\n"), [
+        "profile marker",
+        runtimePath,
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
 
 test("--revalidate-appended leaves an unpaired row's verdict alone", () => {
   const root = makeRoot();
@@ -7247,6 +7443,18 @@ test("--revalidate-appended checks a row against its committed plan", () => {
     const clean = cli(flags, { root });
     assert.equal(clean.status, 0, clean.stdout + clean.stderr);
 
+    const rawPlanFile = path.join(detail, "plan.json");
+    const rawPlan = JSON.parse(readFileSync(rawPlanFile, "utf8"));
+    rawPlan.plan_dir = detail;
+    writeFileSync(rawPlanFile, JSON.stringify(rawPlan));
+    const unprepared = cli(flags, { root });
+    assert.equal(unprepared.status, 1);
+    assert.match(
+      JSON.parse(unprepared.stdout).problems.join(" | "),
+      /must carry the same repository-relative plan_dir as the row detail_dir/,
+    );
+    writeRowEvidence(root, row);
+
     writeFileSync(
       path.join(detail, "result-9999-pipeline-1.json"),
       JSON.stringify({
@@ -7682,6 +7890,7 @@ test("a hand-assembled bridge row keeps the full run's plan", () => {
       comparability_key: row.comparability_key,
       kind: "full",
       detail_dir: row.detail_dir,
+      plan_dir: row.detail_dir,
       baseline_selection: "automatic",
       baseline: null,
       inputs: row.inputs,
@@ -7694,9 +7903,38 @@ test("a hand-assembled bridge row keeps the full run's plan", () => {
         dir,
         row: { ...row, kind: "bridge" },
         contract,
+        requirePortablePlanDir: true,
       }),
       [],
     );
+
+    writeFileSync(
+      path.join(dir, "plan.json"),
+      JSON.stringify({ ...plan, plan_dir: dir }),
+    );
+    assert.match(
+      planProvenanceProblems({
+        dir,
+        row: { ...row, kind: "bridge" },
+        contract,
+        requirePortablePlanDir: true,
+      }).join(" | "),
+      /must carry the same repository-relative plan_dir as the row detail_dir/,
+    );
+    writeFileSync(
+      path.join(dir, "plan.json"),
+      JSON.stringify({ ...plan, plan_dir: { unexpected: true } }),
+    );
+    assert.match(
+      planProvenanceProblems({
+        dir,
+        row: { ...row, kind: "bridge" },
+        contract,
+        requirePortablePlanDir: true,
+      }).join(" | "),
+      /must carry the same repository-relative plan_dir as the row detail_dir/,
+    );
+    writeFileSync(path.join(dir, "plan.json"), JSON.stringify(plan));
 
     // Nothing else about a bridge row is waived. Re-keying it after the append
     // still opens a lineage no run produced.

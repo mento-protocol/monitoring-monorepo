@@ -402,10 +402,11 @@ export function jobPersistsWriteCheckout(job, effectivePermissions) {
 const THIS_REPO = "mento-protocol/monitoring-monorepo";
 
 /** True when a job's `uses:` value names a reusable workflow IN THIS REPO —
- * either the relative form (`./.github/workflows/…`) or the fully-qualified
+ * the self-repository or relative form, or the fully-qualified
  * self-reference (`mento-protocol/monitoring-monorepo/.github/workflows/…@ref`),
  * which GitHub resolves to the same repository. */
 function callsInRepoReusableWorkflow(uses) {
+  if (uses.startsWith("$/")) return true;
   if (/^\.\.?\//.test(uses)) return true;
   // GitHub owner/repo matching is case-insensitive, so compare lowercased
   // (THIS_REPO is already lowercase). Over-matching here only ADDS scrutiny.
@@ -474,7 +475,7 @@ export function jobReceivesCredential(job, inherited) {
   // is out of this pass's scope, so fail closed: treat an in-repo reusable-
   // workflow call as credential-bearing (the author guards or annotates,
   // stating the callee is credential-free). This covers the relative form
-  // (`./.github/workflows/…`) AND the fully-qualified self-reference
+  // (`$/.github/workflows/…` or `./.github/workflows/…`) and the qualified form
   // (`mento-protocol/monitoring-monorepo/.github/workflows/…@ref`), which
   // GitHub resolves to the same repo. Step `uses:` (actions) live under
   // `steps[]`, not here. A reusable workflow in ANOTHER repo receives secrets

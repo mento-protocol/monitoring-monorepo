@@ -11,7 +11,7 @@ gate_start_ts="$(date +%s)"
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/agent-quality-gate.sh [--dry-run|--run] [--base <ref>] [--head <ref>] [--changed-paths-file <file>] [--allow-package-script-changes] [--fail-fast|--keep-going] [--skip-if-fresh] [--parallel <n>] [--full-local-tests]
+Usage: scripts/agent-quality-gate.sh [--dry-run|--run] [--base <ref>] [--head <ref>] [--changed-paths-file <file>] [--allow-package-script-changes] [--fail-fast|--keep-going] [--skip-if-fresh] [--pre-push] [--parallel <n>] [--full-local-tests]
 
 Maps changed paths to the local commands and PR checklists an agent should run
 before opening or updating a PR. Defaults to dry-run.
@@ -34,6 +34,8 @@ Options:
                  implementation, validated file content, toolchain, material
                  environment, runtime, and scheduler policy. Intended for the
                  pre-push hook only.
+  --pre-push     Mark this invocation as the git pre-push hook. Hosted setup
+                 uses this to refuse a cold gate inside a blocking git push.
   --parallel <n> With --run, execute independent quality commands with up to
                  n concurrent jobs. Default: auto, capped at 4. Fail-fast mode
                  stays sequential so it still stops before starting the next
@@ -71,6 +73,10 @@ Environment:
                       Same behavior as --command-timeout. Default: 1500; an
                       explicit value also overrides the 2100-second gate
                       self-test default.
+  AGENT_QUALITY_GATE_DEBUG_STAMP
+                      Set to 1 to print the active freshness-stamp schema and
+                      fields, one per stderr line. The stamp and stdout do not
+                      change.
   AGENT_QUALITY_GATE_LOCK
                       Set to 0 or false for the same effect as --no-lock.
   AGENT_QUALITY_GATE_LOCK_WAIT_SECONDS
@@ -117,6 +123,7 @@ changed_paths_input_file=""
 allow_package_script_changes="${AGENT_QUALITY_ALLOW_PACKAGE_SCRIPT_CHANGES:-}"
 fail_fast="${AGENT_QUALITY_FAIL_FAST:-false}"
 skip_if_fresh="${AGENT_QUALITY_SKIP_IF_FRESH:-false}"
+pre_push="false"
 quality_parallelism="${AGENT_QUALITY_PARALLELISM:-auto}"
 full_local_tests="${AGENT_GATE_FULL_TESTS:-false}"
 # The gate self-test is the only mapped command that needs more than the
@@ -235,6 +242,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skip-if-fresh)
       skip_if_fresh="true"
+      shift
+      ;;
+    --pre-push)
+      pre_push="true"
       shift
       ;;
     --full-local-tests)
@@ -6583,7 +6594,7 @@ acquire_gate_run_lock_legacy() {
       echo "Running the gate directly? --no-lock starts anyway and accepts the contention." >&2
       # The pre-push hook passes a fixed command line and Trunk strips the
       # environment, so neither escape hatch is reachable from a failed push.
-      echo "Pushing? Warm the stamps with 'pnpm agent:quality-gate --run' first, then push: --skip-if-fresh cache-hits and exits before this lock." >&2
+      echo "Pushing? Fetch the hook's base, then warm the matching stamp with 'git fetch --quiet origin main && ./scripts/agent-quality-gate.sh --run --parallel 3 --base origin/main'; the hook's --skip-if-fresh path can then exit before coordinator registration." >&2
       # GitHub issue #1894. Every other outcome states itself on stdout — a green
       # run ends "All mapped commands passed." — but this one used to speak on
       # stderr alone, so a caller reading the gate's stdout saw the reassuring
@@ -7501,6 +7512,24 @@ stamp_line() {
     "$gate_mapped_child_scrub_policy_hash"
 }
 
+gate_print_freshness_stamp_debug() {
+  local stamp="$1" schema field name
+  local -a fields=()
+  IFS=$'\t' read -r -a fields <<< "$stamp"
+  [[ "${#fields[@]}" -ge 2 ]] || return 1
+  schema="${fields[0]}"
+  [[ "$schema" =~ ^v[1-9][0-9]*$ ]] || return 1
+  for field in "${fields[@]:1}"; do
+    name="${field%%=*}"
+    [[ "$field" == *=* && "$name" =~ ^[A-Za-z][A-Za-z0-9]*$ &&
+      "$field" != *$'\n'* ]] || return 1
+  done
+  printf 'agent-quality-gate stamp schema=%s\n' "$schema" >&2
+  for field in "${fields[@]:1}"; do
+    printf 'agent-quality-gate stamp %s\n' "$field" >&2
+  done
+}
+
 current_stamp=""
 
 recomputed_stamp_line() {
@@ -7720,6 +7749,12 @@ if [[ -n "$gate_coordinator_freshness_context" ]]; then
   unset verified_freshness_stamp
 fi
 
+if [[ "${AGENT_QUALITY_GATE_DEBUG_STAMP:-0}" == "1" ]]; then
+  if ! gate_print_freshness_stamp_debug "$current_stamp"; then
+    echo "warning: could not format the quality-gate freshness stamp for debug output." >&2
+  fi
+fi
+
 if [[ "$skip_if_fresh" == "1" || "$skip_if_fresh" == "true" ]]; then
   if is_fresh_success_stamp; then
     echo "Previous successful agent quality gate run is still fresh; skipping mapped commands."
@@ -7727,9 +7762,28 @@ if [[ "$skip_if_fresh" == "1" || "$skip_if_fresh" == "true" ]]; then
   fi
 fi
 
+if [[ "$pre_push" == "1" || "$pre_push" == "true" ]]; then
+  cloud_pre_push_require_fresh="$(
+    git config --bool --get agent.qualityGate.cloudPrePushRequireFresh 2>/dev/null || true
+  )"
+  if [[ "$cloud_pre_push_require_fresh" == "true" ]]; then
+    echo "Hosted pre-push requires a fresh quality-gate stamp; no mapped command ran." >&2
+    echo "Run 'git fetch origin main', then start './scripts/agent-quality-gate.sh --run --parallel 3 --base origin/main' as an observable background task." >&2
+    echo "Retry the push after that command passes; the hook will reuse the fresh stamp." >&2
+    gate_report_coordinated_no_work_failure 2 "hosted pre-push freshness" \
+      "No mapped command ran in this request"
+    exit 2
+  fi
+fi
+
 if [[ "$package_script_risk_changed" == true && "$allow_package_script_changes" != "1" && "$allow_package_script_changes" != "true" ]]; then
   echo "Refusing to run because package manifests, patches, or lockfile changed." >&2
-  echo "Review package scripts, lifecycle hooks, and dependency install scripts first, then re-run with --allow-package-script-changes if they are safe." >&2
+  if [[ "$(git config --bool --get agent.qualityGate.cloudPrePushRequireFresh 2>/dev/null || true)" == "true" ]]; then
+    echo "Review package scripts, lifecycle hooks, and dependency install scripts first." >&2
+    echo "For hosted warm-then-push, set 'git config agent.qualityGate.allowPackageScriptChanges true', then rerun the same direct gate command so the hook reuses that acknowledgement." >&2
+  else
+    echo "Review package scripts, lifecycle hooks, and dependency install scripts first, then re-run with --allow-package-script-changes if they are safe." >&2
+  fi
   if gate_coordinator_requested; then
     gate_coordinator_report_no_work_failure 2 "pre-execution policy" \
       "No mapped command ran in this request"
