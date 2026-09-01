@@ -39,7 +39,7 @@ subdirectories.
 
 `lib/` and `production-infra-identity-contract/` predate the reorg.
 Eight docs and `.config/wt.toml` pin flat `setup.sh`.
-ADR 0064 keeps `redrive-onchain-deadletter.{mjs,test.mjs}` flat under
+ADR 0064 keeps `redrive-onchain-deadletter.{mjs,test.mjs}` flat in
 `alerts/infra/` for lint.
 
 Shared `lib/` cores: `hcl.mjs` (Terraform HCL), `workflow-yaml.mjs` (Actions/shell),
@@ -52,7 +52,7 @@ validators. Inventories, pinned hashes, and identities stay with their domain.
 
 ## Why Files Stay Flat
 
-Move 15 path-pin classes with their files except `agent-autoreview.sh`
+Move 15 path-pin classes with files except `agent-autoreview.sh`
 feedback-runtime pins.
 
 - **Autoreview runtime pins.** `agent-autoreview.sh` pins runtime, sealed
