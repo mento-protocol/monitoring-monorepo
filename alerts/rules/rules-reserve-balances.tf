@@ -8,8 +8,8 @@ resource "grafana_rule_group" "reserve_balances" {
       # Removed CELO because it's not being actively managed in the Reserve at the moment
       # trunk-ignore(checkov/CKV_SECRET_6)
       # CELO    = { token = "CELOToken", threshold = 5000000 }
-      USDC    = { token = "USDC", threshold = 100000 }
-      USDT    = { token = "USDT", threshold = 100000 }
+      USDC    = { token = "USDC", threshold = 90000 }
+      USDT    = { token = "USDT", threshold = 90000 }
       axlUSDC = { token = "axlUSDC", threshold = 50000 }
     }
     content {

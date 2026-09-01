@@ -3,7 +3,7 @@ title: PR Ready State
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-26
+last_verified: 2026-08-31
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -81,17 +81,17 @@ Required blockers:
 
 Optional signals:
 
-- Cursor Bugbot or other advisory bot reviews when they are not required by
-  branch protection.
+- Legacy Cursor Bugbot checks on PRs opened before its 2026-08-31 disablement,
+  when branch protection does not require them.
 - Non-required check runs, flaky advisory jobs, or lint/report jobs configured
   outside the required status rollup.
 - Older bot comments or reviews that do not apply to the current head, provided
   every required current-head comment has been handled.
 
-Cursor Bugbot commonly lags behind the raw status rollup. Treat that lag as a
-separate advisory state: report it in the readiness output, but do not hold the
-all-clear on it unless the Cursor check or review is required by branch
-protection.
+Legacy Cursor Bugbot check lag can still appear on PRs opened before its
+2026-08-31 disablement. Report the check as advisory, but do not hold the
+all-clear on it unless branch protection requires it. Actionable Cursor
+feedback and an aggregate `CHANGES_REQUESTED` verdict remain required blockers.
 
 CodeRabbit's `CodeRabbit` check context (ADR 0066) is advisory the same way,
 with one added trap: it reports `SUCCESS` even when no review ran. A
@@ -286,7 +286,7 @@ Expected top-level fields:
     "ready": false,
     "items": [
       {
-        "kind": "review",
+        "kind": "check",
         "name": "Cursor Bugbot",
         "state": "pending",
         "required": false,
@@ -454,10 +454,10 @@ Field expectations:
    `gates.codeRabbitReviewSignal.state` is `missing` or `stale`, post one
    head-bound closeout request with the body above. Do not post when the state
    is `requested` or `reviewed`.
-9. Report optional lag separately, especially Cursor Bugbot lag and visibly
-   in-progress review-producing workflows. If you are still watching the PR when
-   one finishes, rerun `pr:feedback-state` to catch late feedback; do not treat
-   the optional workflow status itself as a blocker.
+9. Report optional lag separately, especially legacy Cursor Bugbot check lag and
+   visibly in-progress review-producing workflows. If you are still watching the
+   PR when one finishes, rerun `pr:feedback-state` to catch late feedback; do not
+   treat the optional workflow status itself as a blocker.
 10. After the CodeRabbit closeout step and any final optional-review refresh,
     rerun `pr:feedback-state` and then `pr:ready-state`. Signal all-clear only
     when feedback-state has no required blocker and ready-state `ready` is true
