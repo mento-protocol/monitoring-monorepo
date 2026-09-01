@@ -213,6 +213,7 @@ Authority: canonical
 - [`docs/adr/0080-merge-base-freshness-stamp.md`](adr/0080-merge-base-freshness-stamp.md) — The gate's freshness stamp binds the merge-base
 - [`docs/adr/0081-narrow-dependabot-auto-merge-exception.md`](adr/0081-narrow-dependabot-auto-merge-exception.md) — Narrow Dependabot auto-merge exception
 - [`docs/adr/0082-persistent-issue-board-mutation-mutex.md`](adr/0082-persistent-issue-board-mutation-mutex.md) — Persistent Issue-Board Mutation Mutex
+- [`docs/adr/0083-non-ledger-review-eval-experiments.md`](adr/0083-non-ledger-review-eval-experiments.md) — Review-skill experiments use a separate staged non-ledger lane
 
 Authority: non-canonical
 
