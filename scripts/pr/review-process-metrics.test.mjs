@@ -1220,12 +1220,48 @@ test("treats numeric zero summaries as empty without hiding defect prose", () =>
       user: { login: "claude[bot]", type: "Bot" },
       body: "P1 Badge: The parser rejects 0 as a valid value.",
     },
+    {
+      id: 230,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "0: high severity findings.",
+    },
+    {
+      id: 231,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "0 — [P1] findings.",
+    },
+    {
+      id: 232,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "High severity: 0 findings.",
+    },
+    {
+      id: 233,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "P2 Badge: 0 findings.",
+    },
+    {
+      id: 234,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "0 [P1]/[P2]/[P3] findings.",
+    },
+    {
+      id: 235,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "[P1]/[P2]/[P3]: 0 findings.",
+    },
   );
 
   const records = summarizeFixture(
     value,
   ).evidence.byBot.claude.surfaces.review_submissions.evidence.filter(
-    ({ id }) => Number(id) >= 226 && Number(id) <= 229,
+    ({ id }) => Number(id) >= 226 && Number(id) <= 235,
   );
   assert.deepEqual(
     records.map(({ id, finding, findingSignal }) => ({
@@ -1238,6 +1274,12 @@ test("treats numeric zero summaries as empty without hiding defect prose", () =>
       { id: "227", finding: false, findingSignal: null },
       { id: "228", finding: true, findingSignal: "High severity" },
       { id: "229", finding: true, findingSignal: "P1 Badge" },
+      { id: "230", finding: false, findingSignal: null },
+      { id: "231", finding: false, findingSignal: null },
+      { id: "232", finding: false, findingSignal: null },
+      { id: "233", finding: false, findingSignal: null },
+      { id: "234", finding: false, findingSignal: null },
+      { id: "235", finding: false, findingSignal: null },
     ],
   );
 });

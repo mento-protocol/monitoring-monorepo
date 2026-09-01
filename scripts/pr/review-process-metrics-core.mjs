@@ -103,17 +103,25 @@ function containsNegation(value) {
     /\b(?:no|not|without|zero|never|none|neither|cannot)\b/i.test(value) ||
     /\b(?:did|do|does|is|are|was|were|has|have|had|ca|could|would|should|wo)n['’]t\b/i.test(
       value,
-    ) ||
-    /^\s*(?:findings?\s*(?::|[—-])\s*)?0\s*$/i.test(value)
+    )
   );
 }
 
 function isExplicitEmptySummary(value) {
-  return (
-    /^\s*(?:findings?\s*)?(?::|[—-])\s*(?:none|zero|no\s+findings?)\b/i.test(
-      value,
-    ) || /^\s*(?:findings?\s*)?(?::|[—-])\s*0\s*$/i.test(value)
+  return /^\s*(?:findings?\s*)?(?::|[—-])\s*(?:none|zero|no\s+findings?)\b/i.test(
+    value,
   );
+}
+
+const FINDING_LABEL_SOURCE = String.raw`(?:\[[Pp][0-3]\]|\b[Pp][0-3]\s+Badge\b|\b(?:critical|high|medium|low)\s+severity\b)`;
+const FINDING_LABEL_LIST_SOURCE = String.raw`${FINDING_LABEL_SOURCE}(?:\s*(?:[/,]|\band\b|\bor\b)\s*${FINDING_LABEL_SOURCE})*`;
+const NUMERIC_EMPTY_FINDING_CLAUSE = new RegExp(
+  String.raw`^\s*(?:0\s*(?:findings?\s*)?(?:(?::|[—-])\s*)?${FINDING_LABEL_LIST_SOURCE}(?:\s+findings?)?|${FINDING_LABEL_LIST_SOURCE}\s*(?:findings?\s*)?(?::|[—-])\s*0(?:\s+findings?)?)\s*$`,
+  "i",
+);
+
+function isNumericEmptyFindingClause(value) {
+  return NUMERIC_EMPTY_FINDING_CLAUSE.test(value);
 }
 
 function affirmativeOccurrence(body, pattern) {
@@ -124,7 +132,12 @@ function affirmativeOccurrence(body, pattern) {
     const boundary = /[.!?;\n]|\b(?:although|but|however|yet)\b/i;
     const prefix = text.slice(0, matchIndex).split(boundary).at(-1) ?? "";
     const suffix = text.slice(matchEnd).split(boundary)[0] ?? "";
-    return !containsNegation(prefix) && !isExplicitEmptySummary(suffix);
+    const clause = `${prefix}${candidate[0]}${suffix}`;
+    return (
+      !containsNegation(prefix) &&
+      !isExplicitEmptySummary(suffix) &&
+      !isNumericEmptyFindingClause(clause)
+    );
   });
   return match?.[0] ?? null;
 }
