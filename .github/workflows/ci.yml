@@ -29,6 +29,27 @@ on:
     branches: [main]
   push:
     branches: [main]
+  workflow_call:
+    inputs:
+      no_skip_audit:
+        description: Run every deterministic job from the protected no-skip caller
+        required: false
+        default: false
+        type: boolean
+      audit_source_sha:
+        description: Admitted immutable candidate SHA
+        required: false
+        default: ""
+        type: string
+      audit_base_sha:
+        description: Admitted immutable protected-main SHA
+        required: false
+        default: ""
+        type: string
+    secrets:
+      CODECOV_TOKEN:
+        description: Optional upload token for ordinary reusable calls
+        required: false
 
 # Concurrency: on PRs, group by ref so new pushes to a PR cancel in-flight
 # runs. On push to main (or any non-PR event), group by SHA so each commit
@@ -36,8 +57,11 @@ on:
 # a fast-follow merge from cancelling a still-running main CI — important
 # because main CI acts as the quality gate for the trust-main deploys.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
-  cancel-in-progress: true
+  # A no-skip call uses the caller run ID. This keeps each proof independent:
+  # GitHub replaces older pending runs that share a concurrency group even
+  # when cancel-in-progress is false.
+  group: ${{ inputs.no_skip_audit && format('ci-no-skip-{0}', github.run_id) || format('{0}-{1}', github.workflow, github.event_name == 'pull_request' && github.ref || github.sha) }}
+  cancel-in-progress: ${{ !inputs.no_skip_audit }}
 
 permissions: read-all
 
@@ -67,11 +91,14 @@ jobs:
       autoreviewSuite: ${{ steps.filter.outputs.autoreviewSuite }}
       autoreviewRootRuntime: ${{ steps.filter.outputs.autoreviewRootRuntime }}
       versionSkew: ${{ steps.filter.outputs.versionSkew }}
+      forceAll: ${{ inputs.no_skip_audit || steps.filter.outputs.controlPlane == 'true' || steps.filter.outputs.all_count != steps.filter.outputs.routed_count || steps.filter.outputs.all_count != steps.filter.outputs.ordinary_count || (github.event_name == 'pull_request' && github.event.pull_request.changed_files >= 3000) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: ${{ !inputs.no_skip_audit }}
         with:
           persist-credentials: false
       - id: filter
+        if: ${{ !inputs.no_skip_audit }}
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
           filters: |
@@ -79,7 +106,7 @@ jobs:
             # wrapper. Any change to it needs to re-run every package's lint
             # so a broken wrapper can't merge silently — see PR-423 codex
             # finding (Run package lint when the lint gate changes).
-            shared:
+            shared: &shared
               - shared-config/**
               - scripts/eslint-baseline-diff.mjs
               - pnpm-lock.yaml
@@ -90,7 +117,7 @@ jobs:
               - .github/workflows/ci.yml
               - .github/actions/pnpm-install/**
               - .github/actions/resolve-eslint-baseline/**
-            ui:
+            ui: &ui
               - ui-dashboard/**
               - shared-config/**
               # GraphQL contract test validates dashboard queries against the
@@ -114,7 +141,7 @@ jobs:
             # shared-config originals (the indexer builds outside the pnpm
             # workspace — see indexer-envio/src/healthScore.ts). The indexer
             # does NOT import shared-config at runtime.
-            indexer:
+            indexer: &indexer
               - indexer-envio/**
               - shared-config/**
               - scripts/eslint-baseline-diff.mjs
@@ -126,7 +153,7 @@ jobs:
               - .github/workflows/ci.yml
               - .github/actions/pnpm-install/**
               - .github/actions/resolve-eslint-baseline/**
-            bridge:
+            bridge: &bridge
               - metrics-bridge/**
               - shared-config/**
               # GraphQL contract test validates bridge queries against the
@@ -145,7 +172,7 @@ jobs:
               - .github/workflows/ci.yml
               - .github/actions/pnpm-install/**
               - .github/actions/resolve-eslint-baseline/**
-            integrationProbes:
+            integrationProbes: &integrationProbes
               - integration-probes/**
               - shared-config/**
               - scripts/eslint-baseline-diff.mjs
@@ -158,7 +185,7 @@ jobs:
               - .github/workflows/integration-probes.yml
               - .github/actions/pnpm-install/**
               - .github/actions/resolve-eslint-baseline/**
-            aegis:
+            aegis: &aegis
               - aegis/**
               - scripts/eslint-baseline-diff.mjs
               - pnpm-lock.yaml
@@ -171,7 +198,7 @@ jobs:
               - .github/workflows/aegis-app-engine.yml
               - .github/actions/pnpm-install/**
               - .github/actions/resolve-eslint-baseline/**
-            terraform:
+            terraform: &terraform
               # Coarse admission only. `scripts/tf-stacks.mjs` classifies the
               # exact stacks after this job starts. Keep this list equal to
               # terraform.stacks.json `workflowAdmissionPatterns`; `pnpm
@@ -184,7 +211,7 @@ jobs:
               - scripts/**
               - .github/workflows/**
               - terraform.stacks.json
-            alerts:
+            alerts: &alerts
               - alerts/infra/onchain-event-handler/**
               - alerts/infra/oncall-announcer/**
               - alerts/infra/scripts/**
@@ -209,7 +236,7 @@ jobs:
             # Governance Watchdog Cloud Function. Deploys as a standalone
             # source root (package-local pnpm-lock.yaml), so its quality job
             # installs from that lockfile like the alerts functions.
-            govWatchdog:
+            govWatchdog: &govWatchdog
               - governance-watchdog/**
               - scripts/eslint-baseline-diff.mjs
               - pnpm-lock.yaml
@@ -224,7 +251,7 @@ jobs:
             # package filters false → the cross-package `deps` job would skip
             # → blocking architecture rule changes ship unvalidated. This
             # filter fires the `deps` job whenever the policy itself moves.
-            codeHealth:
+            codeHealth: &codeHealth
               - .dependency-cruiser.cjs
               - "*/knip.json"
               - .github/workflows/ci.yml
@@ -235,7 +262,7 @@ jobs:
             # imports, and syntax issues in build/quality scripts can't
             # merge unnoticed — see PR-423 codex finding (Keep root scripts
             # under ESLint).
-            rootScripts:
+            rootScripts: &rootScripts
               # `scripts/**` matches every path under scripts/ at any depth,
               # including the extensionless directory symlinks the extension
               # globs below miss. The extension globs stay to document the
@@ -270,6 +297,8 @@ jobs:
               # where `**` does cross separators. Different engine.)
               - docs/evals/review-skill*
               - docs/evals/review-skill*/**
+              # The review-eval suite pins the local-only raw cells/ boundary.
+              - .gitignore
               - .lighthouserc.cjs
               - "**/vitest.hermetic-setup.ts"
               - "**/vitest.config.ts"
@@ -349,7 +378,7 @@ jobs:
             # ci.yml for that same reason. Beyond those two, keep this filter
             # to Markdown: any other non-Markdown input belongs in the filter
             # of the job that consumes it.
-            docs:
+            docs: &docs
               - "*.md"
               - "**/*.md"
               - .github/workflows/ci.yml
@@ -359,7 +388,7 @@ jobs:
             # and runs sequentially in CI for deterministic fixture/process
             # cleanup. The local quality gate may orchestrate the same complete
             # family set in parallel.
-            autoreviewSuite:
+            autoreviewSuite: &autoreviewSuite
               - scripts/agent-autoreview.sh
               - scripts/agent-autoreview.mjs
               - scripts/agent-autoreview-core.mjs
@@ -381,7 +410,7 @@ jobs:
             # Focused x64 Blacksmith proof for the Linux/root Node trust path.
             # Keep this separate from the broader scripts job so a regression
             # cannot skip unrelated root suites and does not need pnpm install.
-            autoreviewRootRuntime:
+            autoreviewRootRuntime: &autoreviewRootRuntime
               - scripts/agent-autoreview.sh
               - scripts/agent-autoreview*.mjs
               - scripts/agent-autoreview-secret-suppressions.json
@@ -391,7 +420,7 @@ jobs:
             # This runs independently of package quality jobs so a manifest-only
             # PR cannot satisfy the required `ci` sentinel while bypassing the
             # catalog-vs-literal version invariant.
-            versionSkew:
+            versionSkew: &versionSkew
               - package.json
               - "**/package.json"
               - pnpm-workspace.yaml
@@ -405,13 +434,61 @@ jobs:
               - scripts/supply-chain/version-skew-check.test.mjs
               - .github/workflows/ci.yml
               - .github/actions/pnpm-install/**
+            # Closed-world fallback for the existing fixed fan-out. `routed`
+            # reuses the live filters through YAML aliases. `ordinary` names
+            # the stable product and documentation namespaces where affected
+            # selection is allowed. A path outside either set selects every
+            # conditional job. This catches a new top-level service even when
+            # its README also matches the broad documentation filter.
+            routed:
+              - *shared
+              - *ui
+              - *indexer
+              - *bridge
+              - *integrationProbes
+              - *aegis
+              - *terraform
+              - *alerts
+              - *govWatchdog
+              - *codeHealth
+              - *rootScripts
+              - *docs
+              - *autoreviewSuite
+              - *autoreviewRootRuntime
+              - *versionSkew
+            ordinary:
+              - "*.md"
+              - aegis/**
+              - alerts/**
+              - docs/**
+              - governance-watchdog/**
+              - indexer-envio/**
+              - integration-probes/**
+              - metrics-bridge/**
+              - terraform/**
+              - ui-dashboard/**
+            # Package-manager and package-local toolchain files inside an
+            # ordinary namespace can change how required checks execute.
+            # Select the full fixed set for those control-plane inputs.
+            controlPlane:
+              - "**/package.json"
+              - "**/pnpm-lock.yaml"
+              - "**/pnpm-workspace.yaml"
+              - "**/.npmrc"
+              - "**/tsconfig*.json"
+              - "**/eslint.config.*"
+              - "**/vitest*.{js,cjs,mjs,ts,cts,mts}"
+              - "**/knip.json"
+              - "**/react-doctor.config.json"
+            all:
+              - "**"
       - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
-        if: always()
+        if: always() && !inputs.no_skip_audit
 
   shared:
     name: Quality Checks (shared-config)
     needs: changes
-    if: needs.changes.outputs.shared == 'true'
+    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.shared == 'true'
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     permissions:
@@ -420,13 +497,23 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.no_skip_audit && inputs.audit_source_sha || github.sha }}
+          fetch-depth: ${{ inputs.no_skip_audit && '0' || '1' }}
           persist-credentials: false
-      - uses: ./.github/actions/pnpm-install
-      - name: Resolve main baseline (PR baseline-growth check)
-        if: github.event_name == 'pull_request'
-        uses: ./.github/actions/resolve-eslint-baseline
+      # GitHub resolves $/ from the running commit; actionlint lacks support.
+      # trunk-ignore(actionlint/action)
+      - uses: $/.github/actions/pnpm-install
+        with:
+          restore-cache: ${{ !inputs.no_skip_audit }}
+      - name: Resolve validation baseline
+        if: github.event_name == 'pull_request' || inputs.no_skip_audit
+        # GitHub resolves $/ from the running commit; actionlint lacks support.
+        # trunk-ignore(actionlint/action)
+        uses: $/.github/actions/resolve-eslint-baseline
         with:
           package-path: shared-config
+          fetch-main: ${{ inputs.no_skip_audit && 'false' || 'true' }}
+          baseline-ref: ${{ inputs.no_skip_audit && inputs.audit_base_sha || 'origin/main' }}
       - name: Typecheck
         run: pnpm --filter @mento-protocol/config typecheck
       - name: Lint
@@ -438,19 +525,19 @@ jobs:
       - name: Test with coverage
         run: pnpm --filter @mento-protocol/config test:coverage
       - uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
-        if: ${{ !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') }}
+        if: ${{ !inputs.no_skip_audit && !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') }}
         with:
           fail_ci_if_error: false
           flags: config
           directory: shared-config/coverage
           token: ${{ secrets.CODECOV_TOKEN }}
       - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
-        if: always()
+        if: always() && !inputs.no_skip_audit
 
   ui:
     name: Quality Checks (ui-dashboard)
     needs: changes
-    if: needs.changes.outputs.ui == 'true'
+    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.ui == 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 25
     permissions:
@@ -459,19 +546,27 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.no_skip_audit && inputs.audit_source_sha || github.sha }}
           persist-credentials: false
           # react-doctor --diff needs the base ref's history to compute the
           # changed-files set against origin/${{ github.base_ref }}.
           fetch-depth: 0
-      - uses: ./.github/actions/pnpm-install
-      - name: Resolve main baseline (PR baseline-growth check)
-        if: github.event_name == 'pull_request'
+      # GitHub resolves $/ from the running commit; actionlint lacks support.
+      # trunk-ignore(actionlint/action)
+      - uses: $/.github/actions/pnpm-install
+        with:
+          restore-cache: ${{ !inputs.no_skip_audit }}
+      - name: Resolve validation baseline
+        if: github.event_name == 'pull_request' || inputs.no_skip_audit
         # ui-dashboard uses checkout fetch-depth=0, so origin/main is
         # already available without an extra fetch.
-        uses: ./.github/actions/resolve-eslint-baseline
+        # GitHub resolves $/ from the running commit; actionlint lacks support.
+        # trunk-ignore(actionlint/action)
+        uses: $/.github/actions/resolve-eslint-baseline
         with:
           package-path: ui-dashboard
           fetch-main: "false"
+          baseline-ref: ${{ inputs.no_skip_audit && inputs.audit_base_sha || 'origin/main' }}
       - name: GraphQL codegen
         run: pnpm --filter @mento-protocol/ui-dashboard codegen
       - name: Verify generated GraphQL types are committed
@@ -500,10 +595,12 @@ jobs:
         # react-doctor's `getDiffInfo` returns null when
         # `git rev-parse --abbrev-ref HEAD` is "HEAD", silently falling back
         # to a full scan that would surface the entire backlog.
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || inputs.no_skip_audit
+        env:
+          BASELINE_REF: ${{ inputs.no_skip_audit && inputs.audit_base_sha || format('origin/{0}', github.base_ref) }}
         run: |
           git switch -c __react_doctor_scan
-          pnpm --filter @mento-protocol/ui-dashboard react-doctor --diff origin/${{ github.base_ref }} --fail-on warning --annotations --offline
+          pnpm --filter @mento-protocol/ui-dashboard react-doctor --diff "$BASELINE_REF" --fail-on warning --annotations --offline
       - name: React Doctor score floor
         run: |
           score="$(pnpm --filter @mento-protocol/ui-dashboard react-doctor --full --score --offline | tail -n 1 | tr -d '[:space:]')"
@@ -513,8 +610,15 @@ jobs:
           fi
       - name: Test with coverage
         run: pnpm --filter @mento-protocol/ui-dashboard test:coverage
+      - name: Production build and bundle-size budget
+        # The browser suite builds `.next-fixture`. This target builds the
+        # production `.next` output and then checks the committed size budget.
+        env:
+          TURBO_CACHE_POLICY: ${{ inputs.no_skip_audit && 'local:,remote:' || 'local:rw' }}
+        run: VERCEL_DEPLOYMENT_ID=ci pnpm exec turbo run size-limit --filter=@mento-protocol/ui-dashboard --cache="$TURBO_CACHE_POLICY"
       - name: Restore Playwright Chromium
         id: playwright-cache
+        if: ${{ !inputs.no_skip_audit }}
         continue-on-error: true
         # `playwright install chromium` re-downloads ~130 MB on every run
         # otherwise (~84s of uncached CI time). The cache key hashes BOTH
@@ -544,13 +648,13 @@ jobs:
           restore-keys: |
             trusted-main-v1-playwright-chromium-${{ runner.arch }}-
       - name: Clear incomplete Playwright restore
-        if: steps.playwright-cache.outputs.cache-hit == ''
+        if: inputs.no_skip_audit || steps.playwright-cache.outputs.cache-hit == ''
         run: >-
           node -e 'const { rmSync } = require("node:fs"); const { homedir } = require("node:os"); const { join } = require("node:path"); rmSync(join(homedir(), ".cache", "ms-playwright"), { force: true, recursive: true });'
       - name: Install Playwright Chromium
         run: pnpm --filter @mento-protocol/ui-dashboard exec playwright install --with-deps chromium
       - name: Save Playwright Chromium
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.playwright-cache.outputs.cache-hit != 'true'
+        if: ${{ !inputs.no_skip_audit && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.playwright-cache.outputs.cache-hit != 'true' }}
         continue-on-error: true
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -559,26 +663,26 @@ jobs:
       - name: Browser interaction tests
         run: pnpm --filter @mento-protocol/ui-dashboard test:browser
       - name: Upload snapshot diffs on failure
-        if: failure()
+        if: failure() && !inputs.no_skip_audit
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: playwright-snapshot-diffs
           path: ui-dashboard/test-results/
           retention-days: 7
       - uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
-        if: ${{ !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') }}
+        if: ${{ !inputs.no_skip_audit && !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') }}
         with:
           fail_ci_if_error: false
           flags: ui-dashboard
           directory: ui-dashboard/coverage
           token: ${{ secrets.CODECOV_TOKEN }}
       - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
-        if: always()
+        if: always() && !inputs.no_skip_audit
 
   indexer:
     name: Quality Checks (indexer-envio)
     needs: changes
-    if: needs.changes.outputs.indexer == 'true'
+    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.indexer == 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
     permissions:
@@ -594,8 +698,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.no_skip_audit && inputs.audit_source_sha || github.sha }}
+          fetch-depth: ${{ inputs.no_skip_audit && '0' || '1' }}
           persist-credentials: false
-      - uses: ./.github/actions/pnpm-install
+      # GitHub resolves $/ from the running commit; actionlint lacks support.
+      # trunk-ignore(actionlint/action)
+      - uses: $/.github/actions/pnpm-install
+        with:
+          restore-cache: ${{ !inputs.no_skip_audit }}
       - name: Validate YAML address drift
         # Every hex address in config*.yaml must resolve to either
         # @mento-protocol/contracts, indexer-envio/config/nttAddresses.json,
@@ -618,11 +728,15 @@ jobs:
         # Ethereum sUSDS/stETH accounting paths stay covered after mainnet
         # codegen.
         run: pnpm --filter @mento-protocol/indexer-envio indexer:reserve-yield:test
-      - name: Resolve main baseline (PR baseline-growth check)
-        if: github.event_name == 'pull_request'
-        uses: ./.github/actions/resolve-eslint-baseline
+      - name: Resolve validation baseline
+        if: github.event_name == 'pull_request' || inputs.no_skip_audit
+        # GitHub resolves $/ from the running commit; actionlint lacks support.
+        # trunk-ignore(actionlint/action)
+        uses: $/.github/actions/resolve-eslint-baseline
         with:
           package-path: indexer-envio
+          fetch-main: ${{ inputs.no_skip_audit && 'false' || 'true' }}
+          baseline-ref: ${{ inputs.no_skip_audit && inputs.audit_base_sha || 'origin/main' }}
       - name: Typecheck
         run: pnpm --filter @mento-protocol/indexer-envio typecheck
       - name: Lint
@@ -635,19 +749,19 @@ jobs:
       - name: Test with coverage
         run: pnpm --filter @mento-protocol/indexer-envio test:coverage
       - uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
-        if: ${{ !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') }}
+        if: ${{ !inputs.no_skip_audit && !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') }}
         with:
           fail_ci_if_error: false
           flags: indexer-envio
           directory: indexer-envio/coverage
           token: ${{ secrets.CODECOV_TOKEN }}
       - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
-        if: always()
+        if: always() && !inputs.no_skip_audit
 
   bridge:
     name: Quality Checks (metrics-bridge)
     needs: changes
-    if: needs.changes.outputs.bridge == 'true'
+    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.bridge == 'true'
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     permissions:
@@ -656,19 +770,30 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.no_skip_audit && inputs.audit_source_sha || github.sha }}
           persist-credentials: false
           # Peg-policy lineage compares the candidate artifact with the actual
           # PR base. A shallow checkout cannot resolve origin/<base> and must
           # fail closed rather than waive the predecessor invariant.
           fetch-depth: 0
-      - uses: ./.github/actions/pnpm-install
+      # GitHub resolves $/ from the running commit; actionlint lacks support.
+      # trunk-ignore(actionlint/action)
+      - uses: $/.github/actions/pnpm-install
+        with:
+          restore-cache: ${{ !inputs.no_skip_audit }}
       - name: Peg registry integrity
+        env:
+          PEG_POLICY_BASE_REF: ${{ inputs.no_skip_audit && inputs.audit_base_sha || format('origin/{0}', github.base_ref || 'main') }}
         run: node scripts/alerts/check-peg-registry-integrity.mjs
-      - name: Resolve main baseline (PR baseline-growth check)
-        if: github.event_name == 'pull_request'
-        uses: ./.github/actions/resolve-eslint-baseline
+      - name: Resolve validation baseline
+        if: github.event_name == 'pull_request' || inputs.no_skip_audit
+        # GitHub resolves $/ from the running commit; actionlint lacks support.
+        # trunk-ignore(actionlint/action)
+        uses: $/.github/actions/resolve-eslint-baseline
         with:
           package-path: metrics-bridge
+          fetch-main: ${{ inputs.no_skip_audit && 'false' || 'true' }}
+          baseline-ref: ${{ inputs.no_skip_audit && inputs.audit_base_sha || 'origin/main' }}
       - name: Typecheck
         run: pnpm --filter @mento-protocol/metrics-bridge typecheck
       - name: Build
@@ -681,19 +806,19 @@ jobs:
       - name: Test with coverage
         run: pnpm --filter @mento-protocol/metrics-bridge test:coverage
       - uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
-        if: ${{ !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') }}
+        if: ${{ !inputs.no_skip_audit && !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') }}
         with:
           fail_ci_if_error: false
           flags: metrics-bridge
           directory: metrics-bridge/coverage
           token: ${{ secrets.CODECOV_TOKEN }}
       - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
-        if: always()
+        if: always() && !inputs.no_skip_audit
 
   integration-probes:
     name: Quality Checks (integration-probes)
     needs: changes
-    if: needs.changes.outputs.integrationProbes == 'true'
+    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.integrationProbes == 'true'
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     permissions:
@@ -702,13 +827,23 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.no_skip_audit && inputs.audit_source_sha || github.sha }}
+          fetch-depth: ${{ inputs.no_skip_audit && '0' || '1' }}
           persist-credentials: false
-      - uses: ./.github/actions/pnpm-install
-      - name: Resolve main baseline (PR baseline-growth check)
-        if: github.event_name == 'pull_request'
-        uses: ./.github/actions/resolve-eslint-baseline
+      # GitHub resolves $/ from the running commit; actionlint lacks support.
+      # trunk-ignore(actionlint/action)
+      - uses: $/.github/actions/pnpm-install
+        with:
+          restore-cache: ${{ !inputs.no_skip_audit }}
+      - name: Resolve validation baseline
+        if: github.event_name == 'pull_request' || inputs.no_skip_audit
+        # GitHub resolves $/ from the running commit; actionlint lacks support.
+        # trunk-ignore(actionlint/action)
+        uses: $/.github/actions/resolve-eslint-baseline
         with:
           package-path: integration-probes
+          fetch-main: ${{ inputs.no_skip_audit && 'false' || 'true' }}
+          baseline-ref: ${{ inputs.no_skip_audit && inputs.audit_base_sha || 'origin/main' }}
       - name: Typecheck
         run: pnpm --filter @mento-protocol/integration-probes typecheck
       - name: Lint
@@ -718,19 +853,19 @@ jobs:
       - name: Test with coverage
         run: pnpm --filter @mento-protocol/integration-probes test:coverage
       - uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
-        if: ${{ !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') }}
+        if: ${{ !inputs.no_skip_audit && !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') }}
         with:
           fail_ci_if_error: false
           flags: integration-probes
           directory: integration-probes/coverage
           token: ${{ secrets.CODECOV_TOKEN }}
       - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
-        if: always()
+        if: always() && !inputs.no_skip_audit
 
   alerts:
     name: Quality Checks (alerts Cloud Functions)
     needs: changes
-    if: needs.changes.outputs.alerts == 'true'
+    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.alerts == 'true'
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     permissions:
@@ -739,8 +874,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.no_skip_audit && inputs.audit_source_sha || github.sha }}
+          fetch-depth: ${{ inputs.no_skip_audit && '0' || '1' }}
           persist-credentials: false
-      - uses: ./.github/actions/pnpm-install
+      # GitHub resolves $/ from the running commit; actionlint lacks support.
+      # trunk-ignore(actionlint/action)
+      - uses: $/.github/actions/pnpm-install
+        with:
+          restore-cache: ${{ !inputs.no_skip_audit }}
       # Cloud Build deploys alerts/infra/onchain-event-handler/ as a standalone
       # source root. Install from the package-local pnpm-lock.yaml before the
       # handler checks so CI exercises the same dependency graph that deploys.
@@ -804,26 +945,26 @@ jobs:
           find alerts/infra -name '*.sh' -not -path '*/node_modules/*' -print0 \
             | xargs -0 -I {} bash -n {}
       - uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
-        if: ${{ !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') }}
+        if: ${{ !inputs.no_skip_audit && !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') }}
         with:
           fail_ci_if_error: false
           flags: alerts-onchain-event-handler
           directory: alerts/infra/onchain-event-handler/coverage
           token: ${{ secrets.CODECOV_TOKEN }}
       - uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
-        if: ${{ !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') }}
+        if: ${{ !inputs.no_skip_audit && !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') }}
         with:
           fail_ci_if_error: false
           flags: alerts-oncall-announcer
           directory: alerts/infra/oncall-announcer/coverage
           token: ${{ secrets.CODECOV_TOKEN }}
       - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
-        if: always()
+        if: always() && !inputs.no_skip_audit
 
   gov-watchdog:
     name: Quality Checks (governance-watchdog)
     needs: changes
-    if: needs.changes.outputs.govWatchdog == 'true'
+    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.govWatchdog == 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 10
     permissions:
@@ -832,8 +973,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.no_skip_audit && inputs.audit_source_sha || github.sha }}
+          fetch-depth: ${{ inputs.no_skip_audit && '0' || '1' }}
           persist-credentials: false
-      - uses: ./.github/actions/pnpm-install
+      # GitHub resolves $/ from the running commit; actionlint lacks support.
+      # trunk-ignore(actionlint/action)
+      - uses: $/.github/actions/pnpm-install
+        with:
+          restore-cache: ${{ !inputs.no_skip_audit }}
       # Cloud Build deploys governance-watchdog/ as a standalone source root.
       # Install from the package-local pnpm-lock.yaml before the checks so CI
       # exercises the same dependency graph that deploys.
@@ -870,14 +1017,14 @@ jobs:
           find governance-watchdog/infra/quicknode-filter-functions -name '*.js' -print0 \
             | xargs -0 -I {} node --check {}
       - uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
-        if: ${{ !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') }}
+        if: ${{ !inputs.no_skip_audit && !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') }}
         with:
           fail_ci_if_error: false
           flags: governance-watchdog
           directory: governance-watchdog/coverage
           token: ${{ secrets.CODECOV_TOKEN }}
       - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
-        if: always()
+        if: always() && !inputs.no_skip_audit
 
   # Registry-backed Terraform validation inside the required `ci` sentinel.
   # The separate `Infra` workflow prints richer stack summaries and validates
@@ -885,7 +1032,7 @@ jobs:
   terraform:
     name: Terraform Validate (registry)
     needs: changes
-    if: needs.changes.outputs.terraform == 'true'
+    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.terraform == 'true'
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     timeout-minutes: 10
     permissions:
@@ -894,6 +1041,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.no_skip_audit && inputs.audit_source_sha || github.sha }}
           persist-credentials: false
           fetch-depth: 0
       - name: Deviation threshold drift check
@@ -906,7 +1054,7 @@ jobs:
       # assertions before any backend or cloud authentication, so the required
       # ci sentinel retains PR coverage without exposing credentials.
       - name: Test Peg rule definitions
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || inputs.no_skip_audit
         working-directory: alerts/rules
         run: |
           terraform init -backend=false -input=false
@@ -916,10 +1064,15 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           BASE_REF: ${{ github.base_ref }}
           BEFORE_SHA: ${{ github.event.before }}
+          NO_SKIP_AUDIT: ${{ inputs.no_skip_audit }}
+          AUDIT_BASE_SHA: ${{ inputs.audit_base_sha }}
+          AUDIT_SOURCE_SHA: ${{ inputs.audit_source_sha }}
         run: |
           set -euo pipefail
 
-          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+          if [[ "$NO_SKIP_AUDIT" == "true" ]]; then
+            matrix="$(node scripts/tf-stacks.mjs changed --base "$AUDIT_BASE_SHA" --head "$AUDIT_SOURCE_SHA" --json)"
+          elif [[ "$EVENT_NAME" == "pull_request" ]]; then
             matrix="$(node scripts/tf-stacks.mjs changed --base "origin/${BASE_REF}" --head HEAD --json)"
           elif [[ "$EVENT_NAME" == "push" && -n "$BEFORE_SHA" && "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ]]; then
             matrix="$(node scripts/tf-stacks.mjs changed --base "$BEFORE_SHA" --head HEAD --json)"
@@ -939,12 +1092,12 @@ jobs:
             node scripts/tf-stacks.mjs validate "$stack"
           done <<< "$stack_ids"
       - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
-        if: always()
+        if: always() && !inputs.no_skip_audit
 
   aegis:
     name: Quality Checks (aegis)
     needs: changes
-    if: needs.changes.outputs.aegis == 'true'
+    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.aegis == 'true'
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 15
     permissions:
@@ -955,16 +1108,26 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.no_skip_audit && inputs.audit_source_sha || github.sha }}
+          fetch-depth: ${{ inputs.no_skip_audit && '0' || '1' }}
           persist-credentials: false
           submodules: true
       - name: Initialize forge-std test dependency
         run: git -C aegis/lib/forge-std submodule update --init --depth=1 lib/ds-test
-      - uses: ./.github/actions/pnpm-install
-      - name: Resolve main baseline (PR baseline-growth check)
-        if: github.event_name == 'pull_request'
-        uses: ./.github/actions/resolve-eslint-baseline
+      # GitHub resolves $/ from the running commit; actionlint lacks support.
+      # trunk-ignore(actionlint/action)
+      - uses: $/.github/actions/pnpm-install
+        with:
+          restore-cache: ${{ !inputs.no_skip_audit }}
+      - name: Resolve validation baseline
+        if: github.event_name == 'pull_request' || inputs.no_skip_audit
+        # GitHub resolves $/ from the running commit; actionlint lacks support.
+        # trunk-ignore(actionlint/action)
+        uses: $/.github/actions/resolve-eslint-baseline
         with:
           package-path: aegis
+          fetch-main: ${{ inputs.no_skip_audit && 'false' || 'true' }}
+          baseline-ref: ${{ inputs.no_skip_audit && inputs.audit_base_sha || 'origin/main' }}
       - name: Typecheck
         run: pnpm --filter @mento-protocol/aegis typecheck
       - name: Build
@@ -979,23 +1142,24 @@ jobs:
         uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1
         with:
           version: stable
+          cache: ${{ !inputs.no_skip_audit && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
       - name: Forge tests
         working-directory: aegis
         run: forge test -vvv
       - uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
-        if: ${{ !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') }}
+        if: ${{ !inputs.no_skip_audit && !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') }}
         with:
           fail_ci_if_error: false
           flags: aegis
           directory: aegis/coverage
           token: ${{ secrets.CODECOV_TOKEN }}
       - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
-        if: always()
+        if: always() && !inputs.no_skip_audit
 
   scripts:
     name: Lint + test root scripts
     needs: changes
-    if: needs.changes.outputs.rootScripts == 'true'
+    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.rootScripts == 'true'
     runs-on: blacksmith-2vcpu-ubuntu-2404
     # The quality-gate routing regression suite reached 24m37s on this runner
     # after earlier job setup. The prior 25-minute cap cancelled it before
@@ -1009,6 +1173,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.no_skip_audit && inputs.audit_source_sha || github.sha }}
           persist-credentials: false
           # Baseline validation reads source blobs from its claimed pre-baseline
           # commit so results remain reproducible after later doc changes.
@@ -1036,10 +1201,16 @@ jobs:
         #   `sentry:*` aliases the local quality gate trusts are pinned by the
         #   same validator.
         run: node scripts/check-agent-quality-gate-package-scripts.mjs
-      - uses: ./.github/actions/pnpm-install
+      # GitHub resolves $/ from the running commit; actionlint lacks support.
+      # trunk-ignore(actionlint/action)
+      - uses: $/.github/actions/pnpm-install
+        with:
+          restore-cache: ${{ !inputs.no_skip_audit }}
       - name: ESLint root scripts
         run: pnpm lint:scripts
       - name: Peg registry integrity
+        env:
+          PEG_POLICY_BASE_REF: ${{ inputs.no_skip_audit && inputs.audit_base_sha || format('origin/{0}', github.base_ref || 'main') }}
         run: node scripts/alerts/check-peg-registry-integrity.mjs
       - name: Peg registry integrity checker suite
         run: node scripts/alerts/check-peg-registry-integrity.test.mjs
@@ -1049,6 +1220,11 @@ jobs:
         # the required `ci` sentinel path so config-only regressions cannot
         # merge behind the advisory Lighthouse workflow.
         run: node scripts/lighthouse-config.test.mjs
+      - name: Fixed CI structural contract
+        # This path-gated witness catches accidental removal of the full
+        # contract command from the unconditional job below. Workflow changes
+        # always admit the scripts job.
+        run: node scripts/workflows/check-ci-contract.mjs
       - name: Agent quality-gate routing regression suite
         # Verifies the path-to-command mapping in scripts/agent-quality-gate.sh.
         # Without this in CI, a routing regression only fails locally (pre-push)
@@ -1119,6 +1295,12 @@ jobs:
         run: pnpm docs:audit --dry-run
       - name: Documentation garden issue automation tests
         run: pnpm docs:garden:test
+      - name: ADR reminder
+        env:
+          AGENT_QUALITY_BASE: ${{ inputs.no_skip_audit && inputs.audit_base_sha || 'origin/main' }}
+        run: pnpm adr:check
+      - name: ADR reminder suite
+        run: pnpm adr:check:test
       - name: Documentation navigation evaluation tests
         run: pnpm docs:navigation-eval:test
       - name: Documentation navigation fixture contract
@@ -1175,8 +1357,8 @@ jobs:
         run: node scripts/workflows/check-notifier-coverage.mjs
       - name: Autofix CI trust unit tests
         # Behavioral coverage of scripts/workflows/check-autofix-ci-trust.mjs
-        # (trigger/secret detectors, pull_request_target refusal, guard +
-        # annotation acceptance).
+        # (trigger/secret detectors, unconditional pull_request_target refusal,
+        # workflow_run guards, and guard/annotation acceptance).
         run: node scripts/workflows/check-autofix-ci-trust.test.mjs
       - name: Autofix CI trust assertion
         # Machine-authored sentry-autofix/* PRs pass every fork/dependabot
@@ -1229,7 +1411,7 @@ jobs:
       # strictly stronger claim than a step existing. Running them in both jobs
       # cost a second copy of the whole set and let the two paths disagree.
       - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
-        if: always()
+        if: always() && !inputs.no_skip_audit
 
   guardrail-prose:
     name: Guardrail prose pins
@@ -1259,6 +1441,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.no_skip_audit && inputs.audit_source_sha || github.sha }}
+          fetch-depth: ${{ inputs.no_skip_audit && '0' || '1' }}
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -1269,7 +1453,7 @@ jobs:
       - name: Guardrail prose pin suite
         run: node scripts/repo-health/check-guardrail-prose.test.mjs
       - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
-        if: always()
+        if: always() && !inputs.no_skip_audit
 
   docs-checks:
     name: Documentation corpus checks
@@ -1309,7 +1493,7 @@ jobs:
     # removed from there: a change to the documentation tooling must still run
     # them against the corpus. A mixed diff runs both jobs and pays for one
     # duplicate pass, which is the accepted cost of the split.
-    if: needs.changes.outputs.docs == 'true'
+    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.docs == 'true'
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     permissions:
@@ -1318,6 +1502,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.no_skip_audit && inputs.audit_source_sha || github.sha }}
           persist-credentials: false
           # Baseline validation reads source blobs from its claimed pre-baseline
           # commit so results remain reproducible after later doc changes. That
@@ -1337,7 +1522,11 @@ jobs:
         # name, exactly as it does for `scripts`, so moving pnpm-install or an
         # alias above this step fails required CI.
         run: node scripts/check-agent-quality-gate-package-scripts.mjs
-      - uses: ./.github/actions/pnpm-install
+      # GitHub resolves $/ from the running commit; actionlint lacks support.
+      # trunk-ignore(actionlint/action)
+      - uses: $/.github/actions/pnpm-install
+        with:
+          restore-cache: ${{ !inputs.no_skip_audit }}
       - name: Agent context checker
         # Discovers canonical files from the tracked tree, so an added, renamed
         # or removed document changes which files it validates.
@@ -1386,7 +1575,7 @@ jobs:
         # assertion depends on a path this staleness check already names.
         run: pnpm gate:routing-table:test
       - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
-        if: always()
+        if: always() && !inputs.no_skip_audit
 
   production-infra-contract:
     name: Production infrastructure contract
@@ -1400,22 +1589,30 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.no_skip_audit && inputs.audit_source_sha || github.sha }}
+          fetch-depth: ${{ inputs.no_skip_audit && '0' || '1' }}
           persist-credentials: false
       - name: Validate trusted package-script pins
         # Runs before pnpm-install because the install executes PR-authored
         # lifecycle hooks. It also pins the tf:test and issue:board:test aliases
         # before this required job trusts them.
         run: node scripts/check-agent-quality-gate-package-scripts.mjs
-      - uses: ./.github/actions/pnpm-install
+      # GitHub resolves $/ from the running commit; actionlint lacks support.
+      # trunk-ignore(actionlint/action)
+      - uses: $/.github/actions/pnpm-install
         with:
-          write-cache: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          restore-cache: ${{ !inputs.no_skip_audit }}
+          write-cache: ${{ !inputs.no_skip_audit && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
       - name: Terraform production infrastructure contract
         run: pnpm tf:test
       - name: Issue board owner-mutation confinement contract
         if: ${{ !cancelled() }}
         run: pnpm issue:board:test
+      - name: Fixed CI contract
+        if: ${{ !cancelled() }}
+        run: pnpm ci:contract:test
       - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
-        if: always()
+        if: always() && !inputs.no_skip_audit
 
   sentry-suites:
     name: Sentry suites
@@ -1444,6 +1641,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.no_skip_audit && inputs.audit_source_sha || github.sha }}
+          fetch-depth: ${{ inputs.no_skip_audit && '0' || '1' }}
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -1455,7 +1654,11 @@ jobs:
       # `postinstall` is PR-authored code, so putting it first would restore the
       # R1 window the job exists to close; ordering it here keeps that window
       # shut and still gives the checker the `js-yaml` it needs.
-      - uses: ./.github/actions/pnpm-install
+      # GitHub resolves $/ from the running commit; actionlint lacks support.
+      # trunk-ignore(actionlint/action)
+      - uses: $/.github/actions/pnpm-install
+        with:
+          restore-cache: ${{ !inputs.no_skip_audit }}
       - name: Sentry CI wiring assertion
         # The static half of the pair (issue #1721, relocated by #1779 PR C).
         # The gate above proves the suites ran; it cannot prove its own job still
@@ -1470,7 +1673,7 @@ jobs:
   autoreview-suite:
     name: Autoreview adversarial suite
     needs: changes
-    if: needs.changes.outputs.autoreviewSuite == 'true'
+    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.autoreviewSuite == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     permissions:
@@ -1479,9 +1682,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.no_skip_audit && inputs.audit_source_sha || github.sha }}
           persist-credentials: false
           fetch-depth: 0
-      - uses: ./.github/actions/pnpm-install
+      # GitHub resolves $/ from the running commit; actionlint lacks support.
+      # trunk-ignore(actionlint/action)
+      - uses: $/.github/actions/pnpm-install
+        with:
+          restore-cache: ${{ !inputs.no_skip_audit }}
       - name: Full sequential autoreview regression suite
         shell: bash
         run: |
@@ -1497,12 +1705,12 @@ jobs:
           /usr/bin/install -m 0500 "$node_source" "$trusted_node_dir/node"
           PATH="$trusted_node_dir:$PATH" pnpm agent:autoreview:test -- --jobs 1
       - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
-        if: always()
+        if: always() && !inputs.no_skip_audit
 
   autoreview-root-runtime:
     name: Autoreview root-runtime trust
     needs: changes
-    if: needs.changes.outputs.autoreviewRootRuntime == 'true'
+    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.autoreviewRootRuntime == 'true'
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
     permissions:
@@ -1511,6 +1719,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.no_skip_audit && inputs.audit_source_sha || github.sha }}
+          fetch-depth: ${{ inputs.no_skip_audit && '0' || '1' }}
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -1543,12 +1753,12 @@ jobs:
             AUTOREVIEW_TEST_TRUSTED_FIXTURE_PARENT=/root \
             "$node_path" scripts/agent-autoreview-target-guard.test.mjs
       - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
-        if: always()
+        if: always() && !inputs.no_skip_audit
 
   version-skew:
     name: Version skew
     needs: changes
-    if: needs.changes.outputs.versionSkew == 'true'
+    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.versionSkew == 'true'
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
     permissions:
@@ -1557,8 +1767,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.no_skip_audit && inputs.audit_source_sha || github.sha }}
+          fetch-depth: ${{ inputs.no_skip_audit && '0' || '1' }}
           persist-credentials: false
-      - uses: ./.github/actions/pnpm-install
+      # GitHub resolves $/ from the running commit; actionlint lacks support.
+      # trunk-ignore(actionlint/action)
+      - uses: $/.github/actions/pnpm-install
+        with:
+          restore-cache: ${{ !inputs.no_skip_audit }}
       - name: Version skew check
         # Required via the `ci` sentinel. Prevents catalog/literal package drift
         # in both agent and non-agent PRs that touch manifests or pnpm config.
@@ -1566,7 +1782,7 @@ jobs:
       - name: Version skew checker tests
         run: pnpm skew:check:test
       - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
-        if: always()
+        if: always() && !inputs.no_skip_audit
 
   deps:
     name: Code Health (cross-package)
@@ -1577,7 +1793,7 @@ jobs:
     # workspace edit to recheck the architecture. Also fires on `codeHealth`
     # (dep-cruiser config + knip configs) so a PR that only edits the
     # rule file is validated against the codebase before merge.
-    if: needs.changes.outputs.shared == 'true' || needs.changes.outputs.ui == 'true' || needs.changes.outputs.indexer == 'true' || needs.changes.outputs.bridge == 'true' || needs.changes.outputs.integrationProbes == 'true' || needs.changes.outputs.aegis == 'true' || needs.changes.outputs.codeHealth == 'true'
+    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.shared == 'true' || needs.changes.outputs.ui == 'true' || needs.changes.outputs.indexer == 'true' || needs.changes.outputs.bridge == 'true' || needs.changes.outputs.integrationProbes == 'true' || needs.changes.outputs.aegis == 'true' || needs.changes.outputs.codeHealth == 'true'
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
     permissions:
@@ -1586,12 +1802,18 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.no_skip_audit && inputs.audit_source_sha || github.sha }}
+          fetch-depth: ${{ inputs.no_skip_audit && '0' || '1' }}
           persist-credentials: false
-      - uses: ./.github/actions/pnpm-install
+      # GitHub resolves $/ from the running commit; actionlint lacks support.
+      # trunk-ignore(actionlint/action)
+      - uses: $/.github/actions/pnpm-install
+        with:
+          restore-cache: ${{ !inputs.no_skip_audit }}
       - name: dependency-cruiser (cross-package boundaries, blocking)
         run: pnpm code-health:deps
       - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
-        if: always()
+        if: always() && !inputs.no_skip_audit
 
   ci:
     name: ci
@@ -1625,8 +1847,14 @@ jobs:
       actions: read
     steps:
       - uses: re-actors/alls-green@b5b5b37504aa4183270bd3d855c52a67f212be35 # v1.3.0
+        if: ${{ !inputs.no_skip_audit }}
         with:
           jobs: ${{ toJSON(needs) }}
           allowed-skips: shared,ui,indexer,bridge,integration-probes,aegis,alerts,gov-watchdog,terraform,deps,scripts,docs-checks,autoreview-suite,autoreview-root-runtime,version-skew
+      - name: Require every no-skip job to pass
+        if: ${{ inputs.no_skip_audit }}
+        uses: re-actors/alls-green@b5b5b37504aa4183270bd3d855c52a67f212be35 # v1.3.0
+        with:
+          jobs: ${{ toJSON(needs) }}
       - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
-        if: always()
+        if: always() && !inputs.no_skip_audit

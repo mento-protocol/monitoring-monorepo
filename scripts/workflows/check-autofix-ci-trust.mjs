@@ -14,9 +14,9 @@
  * that a hard CI failure instead.
  *
  * Assertions:
- *  1. NO workflow may use `pull_request_target` (it hands secrets to
- *     PR-controlled context by design; the repo has none and must stay that
- *     way).
+ *  1. NO workflow may use `pull_request_target`. The Dependabot lane uses an
+ *     unprivileged `pull_request` classifier and a default-branch
+ *     `workflow_run` writer instead.
  *  2. Every JOB that can receive a CREDENTIAL in a workflow REACHABLE on an
  *     autofix branch — the eventual `pull_request`, the `push` the finalizer
  *     makes to `sentry-autofix/*` before the PR exists (when its branch filter
@@ -402,10 +402,11 @@ export function jobPersistsWriteCheckout(job, effectivePermissions) {
 const THIS_REPO = "mento-protocol/monitoring-monorepo";
 
 /** True when a job's `uses:` value names a reusable workflow IN THIS REPO —
- * either the relative form (`./.github/workflows/…`) or the fully-qualified
+ * the self-repository or relative form, or the fully-qualified
  * self-reference (`mento-protocol/monitoring-monorepo/.github/workflows/…@ref`),
  * which GitHub resolves to the same repository. */
 function callsInRepoReusableWorkflow(uses) {
+  if (uses.startsWith("$/")) return true;
   if (/^\.\.?\//.test(uses)) return true;
   // GitHub owner/repo matching is case-insensitive, so compare lowercased
   // (THIS_REPO is already lowercase). Over-matching here only ADDS scrutiny.
@@ -474,7 +475,7 @@ export function jobReceivesCredential(job, inherited) {
   // is out of this pass's scope, so fail closed: treat an in-repo reusable-
   // workflow call as credential-bearing (the author guards or annotates,
   // stating the callee is credential-free). This covers the relative form
-  // (`./.github/workflows/…`) AND the fully-qualified self-reference
+  // (`$/.github/workflows/…` or `./.github/workflows/…`) and the qualified form
   // (`mento-protocol/monitoring-monorepo/.github/workflows/…@ref`), which
   // GitHub resolves to the same repo. Step `uses:` (actions) live under
   // `steps[]`, not here. A reusable workflow in ANOTHER repo receives secrets
@@ -538,7 +539,7 @@ export function evaluateWorkflow(body) {
     return {
       ok: false,
       reason:
-        "uses pull_request_target, which hands secrets to PR-controlled context by design — use pull_request with an explicit trust gate instead",
+        "uses pull_request_target, which hands secrets to PR-controlled context by design — use pull_request with an explicit trust gate or split read-only classification from a default-branch workflow_run writer",
     };
   }
   // A workflow is reachable on an UNTRUSTED autofix branch two ways: the PR it
@@ -547,7 +548,9 @@ export function evaluateWorkflow(body) {
   // `sentry-autofix/*`). Each is its own guard context — a job reachable via
   // both must exclude in both.
   const contextSet = new Set();
-  if (triggers.has("pull_request")) contextSet.add("pull_request");
+  if (triggers.has("pull_request")) {
+    contextSet.add("pull_request");
+  }
   const onValue = "on" in doc ? doc.on : doc[true];
   const pushCfg =
     onValue && typeof onValue === "object" && !Array.isArray(onValue)
@@ -639,7 +642,7 @@ function main() {
     process.exit(1);
   }
   ok(
-    `All ${checked} workflow(s) respect the autofix CI trust boundary (no pull_request_target; every credential-bearing pull_request lane guards or annotates).`,
+    `All ${checked} workflow(s) respect the autofix CI trust boundary (no pull_request_target; every credential-bearing pull-request lane guards or annotates).`,
   );
 }
 

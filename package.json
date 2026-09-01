@@ -38,6 +38,7 @@
     "verification:manifest:write": "node scripts/docs/check-verification-redesign-evidence.mjs --write-manifest",
     "verification:manifest:check": "node scripts/docs/check-verification-redesign-evidence.mjs --check-manifest",
     "verification:evidence:check": "node --test scripts/docs/check-verification-redesign-evidence.test.mjs scripts/docs/check-verification-redesign-evidence-source-patch.test.mjs && pnpm verification:inventory:check && pnpm verification:manifest:check",
+    "ci:contract:test": "node scripts/workflows/check-ci-contract.mjs && node scripts/workflows/check-no-skip-audit.mjs && node --test scripts/workflows/check-ci-contract.test.mjs scripts/workflows/check-no-skip-audit.test.mjs scripts/workflows/check-pr-validation-boundary.test.mjs scripts/workflows/check-workflow-permissions-drift.test.mjs",
     "review:eval": "node scripts/review/review-eval.mjs",
     "review:eval:test": "node --test \"scripts/review/*.test.mjs\"",
     "review:eval:run": "bash scripts/review/run-eval.sh",
@@ -165,6 +166,7 @@
     "js-yaml": "4.3.1",
     "jscpd": "4.0.9",
     "mdast-util-from-markdown": "2.0.3",
+    "picomatch": "2.3.2",
     "smol-toml": "1.6.1",
     "turbo": "^2.9.14",
     "typescript": "5.9.3"

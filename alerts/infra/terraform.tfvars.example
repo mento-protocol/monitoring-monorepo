@@ -63,9 +63,9 @@ oncall_slack_channel_id = "C0123ABC456"
 # enabled. Create the usergroup in Slack once, then paste its ID here.
 oncall_support_usergroup_id = "S0123ABC456"
 
-# Optional: poll at 10:05 and 10:20 every Sunday in Europe/Berlin by default,
+# Optional: poll at 10:05 and 10:20 every Monday in Europe/Berlin by default,
 # shortly after the observed 10:00 weekly handover.
-# oncall_rotation_check_schedule = "5,20 10 * * 0"
+# oncall_rotation_check_schedule = "5,20 10 * * 1"
 
 #####################
 # Google Cloud Configuration

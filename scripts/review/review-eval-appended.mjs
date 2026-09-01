@@ -276,6 +276,7 @@ export function revalidateAppendedRows({ options, context, result, base }) {
         contract: context.contract,
         baselineRow,
         expectedComparabilityKey,
+        requirePortablePlanDir: true,
       }).map((problem) => `${label}: ${problem}`),
     );
     problems.push(

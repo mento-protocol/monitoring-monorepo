@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { test } from "node:test";
@@ -869,6 +875,74 @@ test("CLI no-argument local inference fails closed without origin/main", () => {
 
     assert.equal(result.status, 1);
     assert.match(result.stderr, /cannot resolve policy base ref origin\/main/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("CLI keeps an explicit admitted base after origin/main moves", () => {
+  const directory = mkdtempSync(join(tmpdir(), "peg-integrity-base-test-"));
+  const repository = join(directory, "repository");
+  const policyDirectory = join(repository, "alerts/rules");
+  const committedPolicy = join(policyDirectory, "peg-thresholds.json");
+  execFileSync("git", ["init", "--initial-branch=main", repository], {
+    encoding: "utf8",
+    stdio: "ignore",
+  });
+  execFileSync("git", ["-C", repository, "config", "user.name", "Test"]);
+  execFileSync("git", [
+    "-C",
+    repository,
+    "config",
+    "user.email",
+    "test@example.com",
+  ]);
+  mkdirSync(policyDirectory, { recursive: true });
+  writeFileSync(committedPolicy, readFileSync(POLICY_PATH));
+  execFileSync("git", ["-C", repository, "add", "."]);
+  execFileSync("git", ["-C", repository, "commit", "-m", "admitted base"], {
+    stdio: "ignore",
+  });
+  const admittedBase = execFileSync(
+    "git",
+    ["-C", repository, "rev-parse", "HEAD"],
+    { encoding: "utf8" },
+  ).trim();
+  writeFileSync(committedPolicy, "{");
+  execFileSync("git", ["-C", repository, "add", "."]);
+  execFileSync("git", ["-C", repository, "commit", "-m", "move main"], {
+    stdio: "ignore",
+  });
+  execFileSync("git", [
+    "-C",
+    repository,
+    "update-ref",
+    "refs/remotes/origin/main",
+    "HEAD",
+  ]);
+  const env = {
+    ...process.env,
+    GIT_DIR: join(repository, ".git"),
+    PEG_POLICY_BASE_REF: admittedBase,
+  };
+  delete env.GITHUB_BASE_REF;
+
+  try {
+    const accepted = spawnSync(process.execPath, [SCRIPT_PATH], {
+      cwd: REPO_ROOT,
+      encoding: "utf8",
+      env,
+    });
+    assert.equal(accepted.status, 0, accepted.stderr);
+
+    delete env.PEG_POLICY_BASE_REF;
+    const movedMain = spawnSync(process.execPath, [SCRIPT_PATH], {
+      cwd: REPO_ROOT,
+      encoding: "utf8",
+      env,
+    });
+    assert.equal(movedMain.status, 1);
+    assert.match(movedMain.stderr, /base policy: invalid JSON/);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

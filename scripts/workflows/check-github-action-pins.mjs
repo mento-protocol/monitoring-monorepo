@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
  * Fail when workflow or composite-action `uses:` references point at mutable
- * third-party refs. Local relative actions (`./...` / `../...`) are allowed;
- * external actions must use a full 40-character commit SHA.
+ * third-party refs. Self-repository (`$/...`) and local relative actions are
+ * allowed; external actions must use a full 40-character commit SHA.
  */
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
@@ -62,7 +62,9 @@ function normalizeUsesValue(raw) {
 
 /** @param {string} value */
 function isLocalAction(value) {
-  return value.startsWith("./") || value.startsWith("../");
+  return (
+    value.startsWith("$/") || value.startsWith("./") || value.startsWith("../")
+  );
 }
 
 /** @param {string} value */
@@ -103,9 +105,11 @@ function isInsideRoot(root, path) {
 
 /** @param {string} fromFile @param {string} value */
 function localActionManifestPaths(fromFile, value) {
-  const base = value.startsWith("../")
-    ? resolve(dirname(fromFile), value)
-    : resolve(ROOT, value);
+  const base = value.startsWith("$/")
+    ? resolve(ROOT, value.slice(2))
+    : value.startsWith("../")
+      ? resolve(dirname(fromFile), value)
+      : resolve(ROOT, value);
   if (!isInsideRoot(ROOT, base)) return [];
   return ["action.yml", "action.yaml"]
     .map((name) => join(base, name))
