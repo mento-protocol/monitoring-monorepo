@@ -3295,6 +3295,279 @@ test("fails closed when a later timeline item predates the marker comment", () =
   assert.equal(evidence.effectiveHead, null);
 });
 
+test("rejects an inverted future force push after a leading commit", () => {
+  const value = structuredClone(fixture);
+  const headA = "a".repeat(40);
+  const headB = "b".repeat(40);
+  const request = {
+    id: 147,
+    node_id: "IC_force_order_conflict_after_commit",
+    created_at: "2026-08-01T10:12:00Z",
+    updated_at: "2026-08-01T10:12:00Z",
+    author_association: "OWNER",
+    user: { login: "maintainer", type: "User" },
+    body: `@coderabbitai review\n\n<!-- coderabbit-final-head-review:${headA} -->`,
+  };
+  value.pr.head.sha = headB;
+  value.commits = [{ sha: headA }, { sha: headB }];
+  value.issueComments = [request];
+  value.timeline = [
+    { event: "committed", node_id: "C_before_inverted_force", sha: headA },
+    {
+      event: "commented",
+      id: request.id,
+      node_id: request.node_id,
+      created_at: request.created_at,
+      updated_at: request.updated_at,
+    },
+    {
+      event: "head_ref_force_pushed",
+      node_id: "FP_force_order_conflict_after_commit",
+      created_at: "2026-08-01T10:11:00Z",
+      force_push_proof: {
+        kind: "graphql",
+        nodeId: "FP_force_order_conflict_after_commit",
+        createdAt: "2026-08-01T10:11:00Z",
+        beforeHead: headA,
+        afterHead: headB,
+      },
+    },
+  ];
+
+  const evidence =
+    summarizeFixture(value).evidence.signals.manualRequests.evidence[0];
+  assert.equal(evidence.marker, "unknown");
+  assert.equal(
+    evidence.markerReason,
+    "timeline_order_conflicts_with_force_push_timestamp",
+  );
+  assert.equal(evidence.effectiveHead, null);
+});
+
+test("rejects every unproved force push after the marker comment", () => {
+  const value = structuredClone(fixture);
+  const headA = "a".repeat(40);
+  const headB = "b".repeat(40);
+  const request = {
+    id: 148,
+    node_id: "IC_unproved_force_after_commit",
+    created_at: "2026-08-01T10:12:00Z",
+    updated_at: "2026-08-01T10:12:00Z",
+    author_association: "OWNER",
+    user: { login: "maintainer", type: "User" },
+    body: `@coderabbitai review\n\n<!-- coderabbit-final-head-review:${headA} -->`,
+  };
+  value.pr.head.sha = headB;
+  value.commits = [{ sha: headA }, { sha: headB }];
+  value.issueComments = [request];
+  value.timeline = [
+    { event: "committed", node_id: "C_before_unproved_force", sha: headA },
+    {
+      event: "commented",
+      id: request.id,
+      node_id: request.node_id,
+      created_at: request.created_at,
+      updated_at: request.updated_at,
+    },
+    {
+      event: "head_ref_force_pushed",
+      node_id: "FP_unproved_force_after_commit",
+      created_at: "2026-08-01T10:13:00Z",
+    },
+  ];
+
+  const evidence =
+    summarizeFixture(value).evidence.signals.manualRequests.evidence[0];
+  assert.equal(evidence.marker, "unknown");
+  assert.equal(evidence.markerReason, "timeline_force_push_enrichment_missing");
+  assert.equal(evidence.effectiveHead, null);
+});
+
+test("rejects an inverted future force push after a prior force push", () => {
+  const value = structuredClone(fixture);
+  const headA = "a".repeat(40);
+  const headB = "b".repeat(40);
+  const headC = "c".repeat(40);
+  const request = {
+    id: 149,
+    node_id: "IC_inverted_force_after_force",
+    created_at: "2026-08-01T10:12:00Z",
+    updated_at: "2026-08-01T10:12:00Z",
+    author_association: "OWNER",
+    user: { login: "maintainer", type: "User" },
+    body: `@coderabbitai review\n\n<!-- coderabbit-final-head-review:${headB} -->`,
+  };
+  const forcePush = (nodeId, createdAt, beforeHead, afterHead) => ({
+    event: "head_ref_force_pushed",
+    node_id: nodeId,
+    created_at: createdAt,
+    force_push_proof: {
+      kind: "graphql",
+      nodeId,
+      createdAt,
+      beforeHead,
+      afterHead,
+    },
+  });
+  value.pr.head.sha = headC;
+  value.commits = [{ sha: headA }, { sha: headB }, { sha: headC }];
+  value.issueComments = [request];
+  value.timeline = [
+    forcePush("FP_before_marker", "2026-08-01T10:10:00Z", headA, headB),
+    {
+      event: "commented",
+      id: request.id,
+      node_id: request.node_id,
+      created_at: request.created_at,
+      updated_at: request.updated_at,
+    },
+    forcePush("FP_after_marker", "2026-08-01T10:11:00Z", headB, headC),
+  ];
+
+  const evidence =
+    summarizeFixture(value).evidence.signals.manualRequests.evidence[0];
+  assert.equal(evidence.marker, "unknown");
+  assert.equal(
+    evidence.markerReason,
+    "timeline_order_conflicts_with_force_push_timestamp",
+  );
+  assert.equal(evidence.effectiveHead, null);
+});
+
+test("rejects an inverted future force push after ref restoration", () => {
+  const value = structuredClone(fixture);
+  const headA = "a".repeat(40);
+  const headB = "b".repeat(40);
+  const request = {
+    id: 150,
+    node_id: "IC_inverted_force_after_restore",
+    created_at: "2026-08-01T10:12:00Z",
+    updated_at: "2026-08-01T10:12:00Z",
+    author_association: "OWNER",
+    user: { login: "maintainer", type: "User" },
+    body: `@coderabbitai review\n\n<!-- coderabbit-final-head-review:${headA} -->`,
+  };
+  value.pr.head.sha = headB;
+  value.commits = [{ sha: headA }, { sha: headB }];
+  value.issueComments = [request];
+  value.timeline = [
+    { event: "committed", node_id: "C_before_restore", sha: headA },
+    {
+      event: "head_ref_deleted",
+      node_id: "HD_before_marker",
+      created_at: "2026-08-01T10:08:00Z",
+    },
+    {
+      event: "head_ref_restored",
+      node_id: "HR_before_marker",
+      created_at: "2026-08-01T10:09:00Z",
+    },
+    {
+      event: "commented",
+      id: request.id,
+      node_id: request.node_id,
+      created_at: request.created_at,
+      updated_at: request.updated_at,
+    },
+    {
+      event: "head_ref_force_pushed",
+      node_id: "FP_after_restore_marker",
+      created_at: "2026-08-01T10:11:00Z",
+      force_push_proof: {
+        kind: "graphql",
+        nodeId: "FP_after_restore_marker",
+        createdAt: "2026-08-01T10:11:00Z",
+        beforeHead: headA,
+        afterHead: headB,
+      },
+    },
+  ];
+
+  const evidence =
+    summarizeFixture(value).evidence.signals.manualRequests.evidence[0];
+  assert.equal(evidence.marker, "unknown");
+  assert.equal(
+    evidence.markerReason,
+    "timeline_order_conflicts_with_force_push_timestamp",
+  );
+  assert.equal(evidence.effectiveHead, null);
+});
+
+test("fails closed on unproved future delete and restore transitions", () => {
+  const headA = "a".repeat(40);
+  const summarize = (event, id) => {
+    const value = structuredClone(fixture);
+    const request = {
+      id,
+      node_id: `IC_future_head_transition_${id}`,
+      created_at: "2026-08-01T10:12:00Z",
+      updated_at: "2026-08-01T10:12:00Z",
+      author_association: "OWNER",
+      user: { login: "maintainer", type: "User" },
+      body: `@coderabbitai review\n\n<!-- coderabbit-final-head-review:${headA} -->`,
+    };
+    value.pr.head.sha = headA;
+    value.commits = [{ sha: headA }];
+    value.issueComments = [request];
+    value.timeline = [
+      { event: "committed", node_id: `C_future_transition_${id}`, sha: headA },
+      {
+        event: "commented",
+        id: request.id,
+        node_id: request.node_id,
+        created_at: request.created_at,
+        updated_at: request.updated_at,
+      },
+      event,
+    ];
+    return summarizeFixture(value).evidence.signals.manualRequests.evidence[0];
+  };
+  const cases = [
+    {
+      event: {
+        event: "head_ref_deleted",
+        node_id: "HD_inverted_after_marker",
+        created_at: "2026-08-01T10:11:00Z",
+      },
+      reason: "timeline_order_conflicts_with_head_ref_timestamp",
+    },
+    {
+      event: {
+        event: "head_ref_deleted",
+        node_id: "HD_missing_time_after_marker",
+      },
+      reason: "timeline_head_ref_deletion_is_unprovable",
+    },
+    {
+      event: {
+        event: "head_ref_restored",
+        node_id: "HR_inverted_after_marker",
+        created_at: "2026-08-01T10:11:00Z",
+      },
+      reason: "timeline_order_conflicts_with_head_ref_timestamp",
+    },
+  ];
+
+  for (const [index, item] of cases.entries()) {
+    const evidence = summarize(item.event, 151 + index);
+    assert.equal(evidence.marker, "unknown");
+    assert.equal(evidence.markerReason, item.reason);
+    assert.equal(evidence.effectiveHead, null);
+  }
+
+  const futureDelete = summarize(
+    {
+      event: "head_ref_deleted",
+      node_id: "HD_valid_after_marker",
+      created_at: "2026-08-01T10:13:00Z",
+    },
+    154,
+  );
+  assert.equal(futureDelete.marker, "marked_exact_head");
+  assert.equal(futureDelete.markerReason, null);
+  assert.equal(futureDelete.effectiveHead, headA);
+});
+
 test("does not infer a marker head from a later force push", () => {
   const value = structuredClone(fixture);
   const headA = "a".repeat(40);

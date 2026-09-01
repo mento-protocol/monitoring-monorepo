@@ -275,11 +275,48 @@ function nextForcePush(timeline, index) {
   return null;
 }
 
+function futureHeadTransitionFailure(timeline, commentIndex, commentTimestamp) {
+  for (let index = commentIndex; index < timeline.length; index += 1) {
+    const item = timeline[index];
+    if (item?.event === "head_ref_force_pushed") {
+      const proof = provenForcePush(item);
+      if (proof.reason !== null) return proof.reason;
+      if (proof.timestamp <= commentTimestamp) {
+        return "timeline_order_conflicts_with_force_push_timestamp";
+      }
+      continue;
+    }
+    if (
+      item?.event === "head_ref_deleted" ||
+      item?.event === "head_ref_restored"
+    ) {
+      const timestamp = evidenceTimestamp(item.created_at);
+      if (timestamp === null) {
+        return item.event === "head_ref_deleted"
+          ? "timeline_head_ref_deletion_is_unprovable"
+          : "timeline_head_ref_restoration_is_unprovable";
+      }
+      if (timestamp <= commentTimestamp) {
+        return "timeline_order_conflicts_with_head_ref_timestamp";
+      }
+    }
+  }
+  return null;
+}
+
 export function effectiveHeadBeforeComment(
   timeline,
   commentIndex,
   commentTimestamp,
 ) {
+  const futureFailure = futureHeadTransitionFailure(
+    timeline,
+    commentIndex,
+    commentTimestamp,
+  );
+  if (futureFailure !== null) {
+    return { head: null, reason: futureFailure };
+  }
   const initial = initialHeadFromForcePush(
     timeline,
     commentIndex,
@@ -304,13 +341,7 @@ export function effectiveHeadBeforeComment(
         upcomingForcePush?.reason === null &&
         upcomingForcePush.beforeHead === head
       ) {
-        if (
-          upcomingForcePush.index >= commentIndex &&
-          upcomingForcePush.timestamp <= commentTimestamp
-        ) {
-          head = null;
-          reason = "timeline_order_conflicts_with_force_push_timestamp";
-        }
+        // The force-push proof already established this pre-force head.
       } else {
         head = committedHead;
         lastKnownHead = committedHead;
