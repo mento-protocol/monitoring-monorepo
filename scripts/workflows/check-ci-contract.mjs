@@ -5,21 +5,21 @@ import { fileURLToPath } from "node:url";
 
 // prettier-ignore
 import { envMutationBlockers, parseActionList, sentinelBlockers } from "../sentry/ci-wiring/check-sentry-suites-in-ci-core.mjs";
-
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const FORCE_ALL = "needs.changes.outputs.forceAll == 'true'";
 const DORNY_PIN = "dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d";
 const ALLS_GREEN_PIN =
   "re-actors/alls-green@b5b5b37504aa4183270bd3d855c52a67f212be35";
 // prettier-ignore
-const CHECKOUT_STEP = Object.freeze({ uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", with: { "persist-credentials": false } }), TIMELINE_STEP = Object.freeze({ uses: "Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad", if: "always()" });
+const ORDINARY_GATE_IF = "${{ !inputs.no_skip_audit }}", AUDIT_GATE_IF = "${{ inputs.no_skip_audit }}";
+// prettier-ignore
+const CHECKOUT_STEP = Object.freeze({ uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", if: "${{ !inputs.no_skip_audit }}", with: { "persist-credentials": false } }), TIMELINE_STEP = Object.freeze({ uses: "Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad", if: "always() && !inputs.no_skip_audit" });
 // prettier-ignore
 const ORDINARY = "*.md|aegis/**|alerts/**|docs/**|governance-watchdog/**|indexer-envio/**|integration-probes/**|metrics-bridge/**|terraform/**|ui-dashboard/**".split("|");
 // prettier-ignore
 const CONTROL_PLANE = "**/package.json|**/pnpm-lock.yaml|**/pnpm-workspace.yaml|**/.npmrc|**/tsconfig*.json|**/eslint.config.*|**/vitest*.{js,cjs,mjs,ts,cts,mts}|**/knip.json|**/react-doctor.config.json".split("|");
 export const FORCE_ALL_OUTPUT =
-  "${{ steps.filter.outputs.controlPlane == 'true' || steps.filter.outputs.all_count != steps.filter.outputs.routed_count || steps.filter.outputs.all_count != steps.filter.outputs.ordinary_count || (github.event_name == 'pull_request' && github.event.pull_request.changed_files >= 3000) }}";
-
+  "${{ inputs.no_skip_audit || steps.filter.outputs.controlPlane == 'true' || steps.filter.outputs.all_count != steps.filter.outputs.routed_count || steps.filter.outputs.all_count != steps.filter.outputs.ordinary_count || (github.event_name == 'pull_request' && github.event.pull_request.changed_files >= 3000) }}";
 // prettier-ignore
 export const FILTER_NAMES = Object.freeze("shared|ui|indexer|bridge|integrationProbes|aegis|terraform|alerts|govWatchdog|codeHealth|rootScripts|docs|autoreviewSuite|autoreviewRootRuntime|versionSkew".split("|"));
 // prettier-ignore
@@ -53,7 +53,7 @@ const EXPECTED_RUNNERS = Object.freeze({ changes: "blacksmith-2vcpu-ubuntu-2404-
 // prettier-ignore
 const EXPECTED_JOB_ENV = Object.freeze({ indexer: { ENVIO_STRICT_START_BLOCK: "true" }, aegis: { FOUNDRY_PROFILE: "ci" } });
 // prettier-ignore
-const REQUIRED_COMMANDS = Object.freeze({ ui: [["VERCEL_DEPLOYMENT_ID=ci pnpm exec turbo run size-limit --filter=@mento-protocol/ui-dashboard --cache=local:rw", null]], scripts: [["node scripts/workflows/check-ci-contract.mjs", null], ["pnpm adr:check", null], ["pnpm adr:check:test", null]], "production-infra-contract": [["pnpm ci:contract:test", "${{ !cancelled() }}"]] });
+const REQUIRED_COMMANDS = Object.freeze({ ui: [["VERCEL_DEPLOYMENT_ID=ci pnpm exec turbo run size-limit --filter=@mento-protocol/ui-dashboard --cache=\"$TURBO_CACHE_POLICY\"", null, { TURBO_CACHE_POLICY: "${{ inputs.no_skip_audit && 'local:,remote:' || 'local:rw' }}" }]], scripts: [["node scripts/workflows/check-ci-contract.mjs", null], ["pnpm adr:check", null, { AGENT_QUALITY_BASE: "${{ inputs.no_skip_audit && inputs.audit_base_sha || 'origin/main' }}" }], ["pnpm adr:check:test", null]], "production-infra-contract": [["pnpm ci:contract:test", "${{ !cancelled() }}"]] });
 
 function list(value) {
   if (value === undefined) return [];
@@ -193,7 +193,7 @@ export function workflowViolations(workflow, filters) {
   const filter = filterSteps[0];
   if (filterSteps.length !== 1) errors.push("paths-filter step count changed");
   // prettier-ignore
-  if (Object.keys(filter ?? {}).sort().join() !== "id,uses,with") errors.push("paths-filter step shape changed");
+  if (Object.keys(filter ?? {}).sort().join() !== "id,if,uses,with" || filter?.if !== "${{ !inputs.no_skip_audit }}") errors.push("paths-filter step shape changed");
   if (Object.keys(filter?.with ?? {}).join() !== "filters")
     errors.push("paths-filter inputs changed");
   if (filter?.uses !== DORNY_PIN)
@@ -232,12 +232,12 @@ export function workflowViolations(workflow, filters) {
     }
   }
   for (const [name, commands] of Object.entries(REQUIRED_COMMANDS)) {
-    for (const [command, condition] of commands) {
+    for (const [command, condition, environment] of commands) {
       const step = (jobs[name]?.steps ?? []).find(
         (candidate) => candidate.run === command,
       );
       // prettier-ignore
-      if (!step || (step.if ?? null) !== condition || Object.keys(step).sort().join() !== (condition == null ? "name,run" : "if,name,run")) errors.push(`${name} no longer enforces ${command}`);
+      if (!step || (step.if ?? null) !== condition || JSON.stringify(step.env ?? null) !== JSON.stringify(environment ?? null) || Object.keys(step).sort().join() !== [condition == null ? null : "if", environment == null ? null : "env", "name", "run"].filter(Boolean).sort().join()) errors.push(`${name} no longer enforces ${command}`);
     }
   }
   const ci = jobs.ci ?? {};
@@ -255,13 +255,16 @@ export function workflowViolations(workflow, filters) {
   } catch (error) {
     errors.push(`ci sentinel is malformed: ${error.message}`);
   }
-  const gate = ci.steps?.find((step) =>
-    String(step.uses ?? "").startsWith("re-actors/alls-green@"),
-  );
-  if (gate?.uses !== ALLS_GREEN_PIN)
-    errors.push("alls-green action pin changed");
+  const gates =
+    ci.steps?.filter((step) =>
+      String(step.uses ?? "").startsWith("re-actors/alls-green@"),
+    ) ?? [];
+  const gate = gates.find((step) => step.if === ORDINARY_GATE_IF);
+  const auditGate = gates.find((step) => step.if === AUDIT_GATE_IF);
+  if (gates.length !== 2 || gates.some((step) => step.uses !== ALLS_GREEN_PIN))
+    errors.push("alls-green action pin or split changed");
   // prettier-ignore
-  if (ci.steps?.length !== 2 || ci.steps[0] !== gate || JSON.stringify(ci.steps[1]) !== JSON.stringify(TIMELINE_STEP)) errors.push("ci steps changed");
+  if (ci.steps?.length !== 3 || ci.steps[0] !== gate || ci.steps[1] !== auditGate || JSON.stringify(ci.steps[2]) !== JSON.stringify(TIMELINE_STEP) || Object.keys(gate ?? {}).sort().join() !== "if,uses,with" || Object.keys(auditGate ?? {}).sort().join() !== "if,name,uses,with" || auditGate?.name !== "Require every no-skip job to pass" || JSON.stringify(auditGate?.with) !== '{"jobs":"${{ toJSON(needs) }}"}') errors.push("ci steps changed");
   errors.push(
     ...setErrors(
       "allowed-skips",
@@ -269,14 +272,10 @@ export function workflowViolations(workflow, filters) {
       CONDITIONAL_JOBS,
     ),
   );
-  const expectedGroup =
-    "${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}";
-  if (
-    workflow.concurrency?.group !== expectedGroup ||
-    workflow.concurrency?.["cancel-in-progress"] !== true
-  ) {
-    errors.push("workflow concurrency no longer uses PR refs and main SHAs");
-  }
+  // prettier-ignore
+  const expectedGroup = "${{ inputs.no_skip_audit && format('ci-no-skip-{0}', github.run_id) || format('{0}-{1}', github.workflow, github.event_name == 'pull_request' && github.ref || github.sha) }}";
+  // prettier-ignore
+  if (workflow.concurrency?.group !== expectedGroup || workflow.concurrency?.["cancel-in-progress"] !== "${{ !inputs.no_skip_audit }}") errors.push("workflow concurrency no longer separates audit runs, PR refs, and main SHAs");
   return [...new Set(errors)];
 }
 

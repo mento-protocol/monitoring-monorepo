@@ -1,0 +1,105 @@
+name: No-skip audit
+
+run-name: "No-skip audit PR #${{ inputs.pr_number }} at ${{ inputs.source_sha }}"
+
+on:
+  workflow_dispatch:
+    # checkov:skip=CKV_GHA_7: inputs select immutable source and base objects after protected-main admission.
+    inputs:
+      pr_number:
+        description: Open same-repository pull request number
+        required: true
+        type: string
+      source_sha:
+        description: Full immutable pull request head SHA
+        required: true
+        type: string
+      base_sha:
+        description: Full immutable protected main SHA recorded by the pull request
+        required: true
+        type: string
+
+permissions: read-all
+
+jobs:
+  admit:
+    name: Admit immutable PR revision
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Validate protected-main dispatch inputs
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          PR_NUMBER: ${{ inputs.pr_number }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          BASE_SHA: ${{ inputs.base_sha }}
+        with:
+          script: |
+            const fail = (message) => core.setFailed(message);
+            const shaPattern = /^[0-9a-f]{40}$/;
+            const prText = process.env.PR_NUMBER ?? "";
+            const sourceSha = process.env.SOURCE_SHA ?? "";
+            const baseSha = process.env.BASE_SHA ?? "";
+
+            if (context.eventName !== "workflow_dispatch") return fail("event must be workflow_dispatch");
+            if (context.ref !== "refs/heads/main") return fail("dispatch ref must be refs/heads/main");
+            if (!shaPattern.test(sourceSha)) return fail("source_sha must be a full lowercase commit SHA");
+            if (!shaPattern.test(baseSha)) return fail("base_sha must be a full lowercase commit SHA");
+            if (context.sha !== baseSha) return fail("dispatch revision does not equal base_sha");
+            if (!/^[1-9][0-9]*$/.test(prText)) return fail("pr_number must be a positive integer");
+
+            const pull_number = Number(prText);
+            const { data: pull } = await github.rest.pulls.get({ ...context.repo, pull_number });
+            if (pull.state !== "open") return fail("pull request must be open");
+            if (pull.head.repo?.full_name !== context.repo.owner + "/" + context.repo.repo) return fail("pull request head repository must equal the base repository");
+            if (pull.base.repo?.full_name !== context.repo.owner + "/" + context.repo.repo) return fail("pull request base repository must equal the dispatch repository");
+            if (pull.base.ref !== "main") return fail("pull request base branch must be main");
+            if (pull.head.sha !== sourceSha) return fail("pull request head no longer equals source_sha");
+            if (pull.base.sha !== baseSha) return fail("pull request base no longer equals base_sha");
+
+            const { data: main } = await github.rest.git.getRef({ ...context.repo, ref: "heads/main" });
+            if (main.object.sha !== baseSha) return fail("protected main no longer equals base_sha");
+      - name: Check out immutable candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify exact source and base objects
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          BASE_SHA: ${{ inputs.base_sha }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$(git rev-parse "${BASE_SHA}^{commit}")" = "$BASE_SHA"
+          {
+            echo "## No-skip audit admission"
+            echo
+            echo "- Run ID: ${GITHUB_RUN_ID}"
+            echo "- Workflow revision: ${GITHUB_SHA}"
+            echo "- Pull request: #${PR_NUMBER}"
+            echo "- Source SHA: ${SOURCE_SHA}"
+            echo "- Base SHA: ${BASE_SHA}"
+            echo "- Cache policy: disabled"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  audit:
+    name: Full deterministic no-skip audit
+    needs: admit
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+    # GitHub resolves $/ from the running commit; actionlint lacks support.
+    # trunk-ignore(actionlint/workflow-call)
+    uses: $/.github/workflows/ci.yml
+    with:
+      no_skip_audit: true
+      audit_source_sha: ${{ inputs.source_sha }}
+      audit_base_sha: ${{ inputs.base_sha }}

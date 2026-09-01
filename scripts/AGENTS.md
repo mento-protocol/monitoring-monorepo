@@ -3,7 +3,7 @@ title: Scripts Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-31
+last_verified: 2026-09-01
 doc_type: agent-instructions
 scope: scripts
 review_interval_days: 90
@@ -43,12 +43,12 @@ subdirectories.
 `redrive-onchain-deadletter.{mjs,test.mjs}` stays flat under
 `alerts/infra/`; ADR 0064 gives the lint reason.
 
-`lib/` holds cores that multiple clusters read: `hcl.mjs` for Terraform HCL,
-`workflow-yaml.mjs` for Actions and shell parsing,
-`pnpm-override-selector.mjs` for pnpm overrides, and
-`gh-issue-lifecycle.mjs` for shared GitHub issue and label mechanics, which doc
-schedulers also read. Local projection keeps only `agent-ready` on create and
-all lifecycle labels on closed repair. ADR 0064 lists readers.
+`lib/` holds cores multiple clusters read: `hcl.mjs` (Terraform HCL),
+`workflow-yaml.mjs` (Actions and shell parsing), `pnpm-override-selector.mjs`
+(pnpm overrides), and `gh-issue-lifecycle.mjs` (GitHub issue and label
+mechanics), which doc schedulers also read. Local projection keeps only
+`agent-ready` on create and all lifecycle labels on closed repair. ADR 0064
+lists readers.
 `peg-policy-digest.mjs` defines the peg version-digest contract for both
 validators. Inventories, pinned hashes, and identities stay with their domain.
 
@@ -73,10 +73,10 @@ feedback-runtime pins.
   `deploy/deploy-indexer-verify-status-identity.mjs` use one any-depth arm;
   both verifier tests run. Exact `pr/agent-issue-board{,.test}.mjs` and
   `pr/issue-board-{backfill,cli,commands,lock,ownership,projects,release,state,sync,sync-lock,transactions,transport}.mjs`
-  route to `pnpm issue:board:test`; CI runs it after failures. ADR 0082 owns
+  route `pnpm issue:board:test`; CI runs it after failures. ADR 0082 owns
   confinement. Exact
   `repo-health/check-guardrail-prose{,.test}.mjs` and
-  `repo-health/guardrail-prose.json` route to the guardrail suite. `ci.yml`,
+  `repo-health/guardrail-prose.json` route the guardrail suite. `ci.yml`,
   quick-commands, and the manifest pin it as ADR 0073 specifies.
   `pr/merge-pr*`, both PR-state helpers, and `agent-autoreview.sh` (Codex
   markers) route `pnpm pr:merge:test`.
@@ -84,9 +84,9 @@ feedback-runtime pins.
   `gate/run-handles.sh`, coordinator files,
   `docs/docs-navigation-eval-helpers.mjs`, and `gate/lockfile-scope.mjs` from
   `$script_source_dir`; tests hash them from `$repo_root`. Move each path with
-  its routes, signatures, fixtures, and literals (ADRs 0064 and
-  0076).
-- **Gate mapping pins.** The signature and Turbo inputs pin
+  its routes, signatures, fixtures, literals, and the `.coderabbit.yaml` review
+  scope (ADRs 0064 and 0076).
+- **Gate mapping pins.** Signature and Turbo inputs pin
   `gate/routing-table/**`, `gate/mapping*`, the autoreview core, and its sealed
   policy. Runtime hashes use `$script_source_dir`; suites use `$repo_root`.
   Core edits route both suites; policy edits route autoreview. Missing pins
@@ -97,17 +97,17 @@ feedback-runtime pins.
 - **Navigation-eval self-pin.** `forbidden_sources` in
   `docs/evals/documentation-navigation-fixtures.json` names its implementation.
 - **Verification evidence.** Move
-  `scripts/docs/check-verification-redesign-evidence*.mjs` with the
+  `scripts/docs/check-verification-redesign-evidence*.mjs` with its
   `.gitattributes` patch rule.
 - **Sentry suite manifest.** `scripts/sentry/gate/sentry-suite-manifest.json`
   keys are exact repo-relative paths, reconciled against `findSentrySuites()`
   by set equality both ways. A moved or renamed suite fails the gate closed.
   `sentry/fixture-scan-canary.test.mjs` re-pins four; ADR 0068 has the policy.
-- **Workflow pins.** Workflows and `sentry-triage-agent.yml` pin `scripts/`.
-  Terraform filters use `terraform.stacks.json` `workflowAdmissionPatterns`.
-  `check-ci-contract{,.test}.mjs` pins jobs, filters,
-  commands, and the aggregate. Moves update ADR 0064, routing equality,
-  glob rules, and review-eval pins.
+- **Workflow pins.** Workflows pin `scripts/`; Terraform uses
+  `terraform.stacks.json` `workflowAdmissionPatterns`.
+  `check-ci-contract{,.test}.mjs` pins normal CI.
+  `check-no-skip-audit{,.test}.mjs` pins admission, SHAs, cold cache, and zero
+  skips. Moves update ADR 0064, routing, globs, and eval pins.
 - **Terraform stack registry.** `terraform.stacks.json` `changedPathPatterns`
   pins exact `scripts/` paths per stack. The broad workflow admission boundary
   covers the directory; `pnpm tf:test` enforces subsumption.
