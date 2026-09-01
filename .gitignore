@@ -66,6 +66,9 @@ CLAUDE.md
 # Persisted to disk + Vercel Blob; never committed.
 .intel-marathon/
 
+# Older checkouts can retain this retired merge-wrapper ledger.
+.merge-consents.jsonl
+
 # Backlog ranking receipts and the local exclusion ledger. One run writes one
 # dated receipt; committing them would add a file per run and make the ledger
 # a merge conflict. See `docs/notes/backlog-ranking.md`.

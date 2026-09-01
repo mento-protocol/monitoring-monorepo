@@ -36,13 +36,15 @@ workflow documentation. A human operator normally merges through the GitHub UI.
 The default agent workflow drives a PR to ALL_CLEAR and then stops. An agent
 can merge only when the user gives explicit, direct approval for that specific
 merge. The agent then rechecks the current PR state and uses GitHub directly.
-The merge request must bind the probed head SHA and abort on a mismatch.
+The merge request must use squash, bind the probed head SHA, and abort on a
+mismatch.
 `ship it`, ALL_CLEAR, and general workflow approval do not authorize a merge.
 
-Remove the wrapper-specific agent command denies for `gh pr merge` and the
-consent-ledger ignore. The general approval rule remains in the operating card.
-Keep the narrow unattended Dependabot exception from ADR 0081. Any new
-unattended merge lane needs a separate reviewed decision.
+Remove the wrapper-specific agent command denies for `gh pr merge`. Keep the
+retired consent-ledger filename ignored so a file left by an older checkout
+cannot enter Git. No live code writes that file. The general approval rule
+remains in the operating card. Keep the narrow unattended Dependabot exception
+from ADR 0081. Any new unattended merge lane needs a separate reviewed decision.
 
 ## Alternatives considered
 
@@ -66,6 +68,8 @@ unattended merge lane needs a separate reviewed decision.
   App, or local ledger for ordinary merges.
 - Agent tooling no longer adds wrapper-specific merge-command denies. The
   operating-card approval rule remains the policy boundary.
+- The retired consent-ledger filename stays ignored to protect files left by
+  older checkouts. The repository does not create new ledger entries.
 - ADR 0075 remains archived as the record of the retired design.
 - ADR 0081 remains the only unattended merge lane.
 
