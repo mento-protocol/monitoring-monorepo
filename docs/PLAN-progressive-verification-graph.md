@@ -493,6 +493,7 @@ source trees. A candidate with either type of drift does not enter the no-skip
 audit. Package-execution drift can use ordinary CI when the protected path
 filter selects the full fixed job set and every retained job succeeds.
 Evidence-instrument drift cannot count through either evidence form. The
+protected set includes both focused retained-contract definitions. The
 comparison uses the admitted Git objects. It needs no content hash registry.
 The called workflow resolves its local actions from the running protected
 commit. It bypasses change selection, forces every conditional job, checks out

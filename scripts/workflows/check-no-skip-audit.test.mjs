@@ -249,6 +249,8 @@ for (const path of [
   "nested/node_modules/.bin/node",
   ".github/workflows/ci.yml",
   ".github/workflows/no-skip-audit.yml",
+  "scripts/bootstrap/agent-setup-contract.test.sh",
+  "scripts/agent-autoreview-indexer-invariant-contract.test.mjs",
   "scripts/workflows/check-no-skip-audit.mjs",
   "scripts/workflows/check-no-skip-audit.test.mjs",
   "scripts/lib/workflow-yaml.mjs",
@@ -256,7 +258,12 @@ for (const path of [
   ".github/actions/resolve-eslint-baseline/action.yml",
 ]) {
   test(`protected admission rejects candidate drift at ${path}`, () => {
-    const { root, base } = protectedDriftFixture();
+    const isFocusedContract =
+      path === "scripts/bootstrap/agent-setup-contract.test.sh" ||
+      path === "scripts/agent-autoreview-indexer-invariant-contract.test.mjs";
+    const { root, base } = protectedDriftFixture(
+      isFocusedContract ? path : undefined,
+    );
     try {
       const source = commitPath(
         root,

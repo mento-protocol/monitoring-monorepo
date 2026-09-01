@@ -260,11 +260,11 @@ inline admission code compares package manifests, pnpm workspace and lock
 files, package patches, the Node and pnpm selections, pnpm configuration, and
 tracked `node_modules` paths between the admitted base and source Git trees. It
 also compares `ci.yml`, the no-skip dispatcher, the no-skip checker and runtime
-parser, and both protected local action trees. Package-execution drift makes
-that pull request ineligible for no-skip. It can qualify through the
-ordinary-force-all evidence form instead. Evidence-instrument drift cannot
-count. The protected `controlPlane` filter must select every retained job.
-Every retained job and `CI / ci` must succeed.
+parser, both focused retained-contract definitions, and both protected local
+action trees. Package-execution drift makes that pull request ineligible for
+no-skip. It can qualify through the ordinary-force-all evidence form instead.
+Evidence-instrument drift cannot count. The protected `controlPlane` filter
+must select every retained job. Every retained job and `CI / ci` must succeed.
 
 The dynamic comparison avoids a content hash registry and recurring pin
 updates. The workflow contract pins the comparison step, the semantic retained
