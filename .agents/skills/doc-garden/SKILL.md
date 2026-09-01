@@ -87,8 +87,11 @@ pnpm docs:index --write
 pnpm docs:index --check
 pnpm agent:context-check
 pnpm agent:context-budget --strict
-pnpm agent:quality-gate --run
 ```
+
+Run the quality gate through step 3 of the operating card. Hosted sessions use
+the exact direct warm command from that step. Local sessions use
+`pnpm agent:quality-gate --run`.
 
 Summarize the disposition and evidence for every packet file in the PR body.
 Open a normal ready-for-review PR, use `Closes #<issue>` only when the entire

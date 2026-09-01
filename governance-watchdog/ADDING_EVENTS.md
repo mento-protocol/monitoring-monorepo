@@ -105,8 +105,10 @@ pnpm --filter @mento-protocol/governance-watchdog lint
 pnpm --filter @mento-protocol/governance-watchdog typecheck
 pnpm --filter @mento-protocol/governance-watchdog test:coverage
 pnpm --filter @mento-protocol/governance-watchdog build
-pnpm agent:quality-gate --run
 ```
+
+Then run the gate or gates from step 3 of the
+[PR operating card](../docs/notes/pr-operating-card.md).
 
 The PR must contain the TypeScript handler, source guard, filter input,
 fixture, tests, and any Terraform bootstrap change as one reviewed unit.
