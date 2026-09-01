@@ -6590,7 +6590,7 @@ acquire_gate_run_lock_legacy() {
       echo "Running the gate directly? --no-lock starts anyway and accepts the contention." >&2
       # The pre-push hook passes a fixed command line and Trunk strips the
       # environment, so neither escape hatch is reachable from a failed push.
-      echo "Pushing? Warm the stamps with 'pnpm agent:quality-gate --run' first, then push: --skip-if-fresh cache-hits and exits before this lock." >&2
+      echo "Pushing? Warm the stamps with 'pnpm agent:quality-gate --run --parallel 3' first, then push: --skip-if-fresh cache-hits and exits before this lock." >&2
       # GitHub issue #1894. Every other outcome states itself on stdout — a green
       # run ends "All mapped commands passed." — but this one used to speak on
       # stderr alone, so a caller reading the gate's stdout saw the reassuring
@@ -7740,7 +7740,7 @@ if [[ "$pre_push" == "1" || "$pre_push" == "true" ]]; then
   )"
   if [[ "$cloud_pre_push_require_fresh" == "true" ]]; then
     echo "Hosted pre-push requires a fresh quality-gate stamp; no mapped command ran." >&2
-    echo "Run 'git fetch origin main', then start 'pnpm agent:quality-gate --run' as an observable background task." >&2
+    echo "Run 'git fetch origin main', then start 'pnpm agent:quality-gate --run --parallel 3' as an observable background task." >&2
     echo "Retry the push after that command passes; the hook will reuse the fresh stamp." >&2
     gate_report_coordinated_no_work_failure 2 "hosted pre-push freshness" \
       "No mapped command ran in this request"

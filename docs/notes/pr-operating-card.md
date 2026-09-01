@@ -110,8 +110,10 @@ even when you never open an authority.
    reused. Background the `--run` gate and the `git push`; a 600s foreground
    kill discards the freshness stamp. Hosted setup requires this fresh stamp
    before pre-push. A cold hosted pre-push exits before scheduler registration
-   or mapped work. Fetch `origin/main`, run the gate as an observable background
-   task, then retry the push. Local setup keeps the normal cold pre-push run.
+   or mapped work. Fetch `origin/main`, then run
+   `pnpm agent:quality-gate --run --parallel 3` as an observable background task.
+   The parallelism must match the hook's freshness key. Retry the push after the
+   gate passes. Local setup keeps the normal cold pre-push run.
    Authority:
    [`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md).
 

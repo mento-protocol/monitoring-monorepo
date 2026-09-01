@@ -2839,8 +2839,9 @@ Hosted setup sets `agent.qualityGate.cloudPrePushRequireFresh=true` in the
 repository git config. A hosted pre-push with a fresh exact stamp exits through
 the normal freshness path. A cold or invalid stamp exits with status 2 before
 scheduler registration, lock acquisition, or mapped work. Fetch `origin/main`,
-run `pnpm agent:quality-gate --run` as an observable background task, and retry
-the push after it passes. Local setup leaves this option unset, so a cold local
+run `pnpm agent:quality-gate --run --parallel 3` as an observable background
+task, and retry the push after it passes. The matching parallelism is part of
+the freshness key. Local setup leaves this option unset, so a cold local
 pre-push still runs the mapped gate.
 
 Coordinator coalescing and retained-result reuse use the complete execution key

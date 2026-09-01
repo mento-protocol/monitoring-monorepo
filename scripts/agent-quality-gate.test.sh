@@ -1141,6 +1141,7 @@ const gate = fs.readFileSync("scripts/agent-quality-gate.sh", "utf8");
 const trunk = fs.readFileSync(".trunk/trunk.yaml", "utf8");
 const hostedSetups = [
   "scripts/bootstrap/claude-code-web-setup.sh",
+  "scripts/bootstrap/codex-cloud-maintenance.sh",
   "scripts/bootstrap/codex-cloud-setup.sh",
 ];
 const activeTrunkLines = trunk
@@ -1184,6 +1185,11 @@ const lockAcquisitionIndex = gate.lastIndexOf("\nacquire_gate_run_lock\n");
 assert.ok(freshnessSkipIndex >= 0, "quality-gate freshness skip is missing");
 assert.ok(hostedRefusalIndex > freshnessSkipIndex, "hosted refusal must follow freshness reuse");
 assert.ok(lockAcquisitionIndex > hostedRefusalIndex, "hosted refusal must precede lock acquisition");
+assert.match(
+  gate,
+  /start 'pnpm agent:quality-gate --run --parallel 3' as an observable background task\./u,
+  "hosted refusal must warm the exact hook parallelism",
+);
 NODE
   fail "expected the public quality-gate entry contract to remain pinned"
 
@@ -9895,7 +9901,9 @@ STUB
   # share a freshness stamp, so the flag-less run skips (allowPackageScripts is
   # folded out of the stamp when packageRisk is false).
   COUNTER_FILE="$fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
-    "$repo_root/scripts/agent-quality-gate.sh" --base "$base_ref" --run --allow-package-script-changes > "$output_file" 2>&1
+    "$repo_root/scripts/agent-quality-gate.sh" \
+      --base "$base_ref" --run --parallel 3 --allow-package-script-changes \
+      > "$output_file" 2>&1
   git add fixture.txt
   git commit -qm "commit validated content"
   stamp_file="$fresh_stamp_repo/.tmp/agent-quality-gate/last-success.stamp"
@@ -9907,7 +9915,7 @@ STUB
   : > "$output_file"
   COUNTER_FILE="$fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
     "$repo_root/scripts/agent-quality-gate.sh" \
-      --base "$base_ref" --run --skip-if-fresh --pre-push \
+      --base "$base_ref" --run --parallel 3 --skip-if-fresh --pre-push \
       > "$output_file" 2>&1
   [[ "$(cat "$fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "1" ]] ||
     fail "warm hosted pre-push executed a mapped command"
@@ -9922,7 +9930,7 @@ STUB
   cold_pre_push_exit=0
   COUNTER_FILE="$fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
     "$repo_root/scripts/agent-quality-gate.sh" \
-      --base "$base_ref" --run --skip-if-fresh --pre-push \
+      --base "$base_ref" --run --parallel 3 --skip-if-fresh --pre-push \
       > "$output_file" 2>&1 || cold_pre_push_exit=$?
   [[ "$cold_pre_push_exit" -eq 2 ]] ||
     fail "cold hosted pre-push exited ${cold_pre_push_exit} instead of 2"
@@ -9939,7 +9947,7 @@ STUB
   local_pre_push_exit=0
   COUNTER_FILE="$fresh_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
     "$repo_root/scripts/agent-quality-gate.sh" \
-      --base "$base_ref" --run --skip-if-fresh --pre-push \
+      --base "$base_ref" --run --parallel 3 --skip-if-fresh --pre-push \
       > "$output_file" 2>&1 || local_pre_push_exit=$?
   [[ "$local_pre_push_exit" -eq 2 ]] ||
     fail "cold local pre-push exited ${local_pre_push_exit} instead of 2"
@@ -16801,6 +16809,7 @@ STUB
   assert_contains "timed out after"
   # The pre-push hook cannot pass --no-lock, so the timeout must also name the
   # recovery that works from a failed push.
+  assert_contains "pnpm agent:quality-gate --run --parallel 3"
   assert_contains "--skip-if-fresh cache-hits and exits before this lock"
   [[ -d "$gate_lock_root/run.lock" ]] ||
     fail "a run that never acquired the lock must not delete the holder's lock"
