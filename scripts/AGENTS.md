@@ -59,11 +59,11 @@ feedback-runtime pins.
   `agent-autoreview-secret-suppressions.json` (ADR 0079), and optional
   `pr-feedback-state-claude.mjs` and `pr-ready-state-review-signals.mjs`.
   Feedback uses `origin/main`. Use ADR 0064's three-merge move sequence.
-- **Gate routing pins.** Stub-repo tests require
+- **Gate routing pins.** Stub tests require
   `$script_source_dir == $repo_root/scripts`.
-  `pr/review-process-metrics{,-{core,finding-classifier,legacy,report,signals,timeline},.test}.mjs`
+  `pr/review-process-metrics{,-{core,finding-classifier,legacy,markdown,report,signals,timeline},.test}.mjs`
   and
-  `pr/fixtures/review-process-metrics-coderabbit.json` need exact suite routes.
+  `pr/fixtures/review-process-metrics-coderabbit.json` use exact routes.
   `bootstrap/codex-cloud-setup.{sh,test.sh}` pair for offline tests.
   `sentry/autofix/sentry-autofix-refused-inventory.mjs` routes
   `pnpm sentry:autofix:{run-record,finalize}:test`. Exact

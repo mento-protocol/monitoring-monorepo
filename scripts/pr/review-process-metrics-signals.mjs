@@ -9,6 +9,7 @@ import {
   effectiveHeadBeforeComment,
   provenForcePush,
 } from "./review-process-metrics-timeline.mjs";
+import { maskMarkdownNonProse } from "./review-process-metrics-markdown.mjs";
 
 function extractRunIds(body) {
   return [
@@ -94,7 +95,7 @@ function completedCodeRabbitReviewRunIds(value, surface) {
 }
 
 function requestTargets(body) {
-  const text = String(body ?? "");
+  const text = maskMarkdownNonProse(body);
   return [
     ["coderabbit", /(?:^|\n)\s*@coderabbitai\s+review\s*(?:\n|$)/i],
     ["codex", /(?:^|\n)\s*@codex\s+review\s*(?:\n|$)/i],
@@ -288,7 +289,7 @@ function proveMarkerHeadAtComment(comment, markerHead, timeline) {
 }
 
 function classifyRequestMarker(comment, target, knownHeads, timeline) {
-  const text = String(comment.body ?? "");
+  const text = maskMarkdownNonProse(comment.body);
   const markerStarts = [
     ...text.matchAll(/<!--\s*coderabbit-final-head-review:/gi),
   ];

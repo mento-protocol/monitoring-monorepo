@@ -14,6 +14,8 @@ import { fileURLToPath } from "node:url";
 import {
   aggregateMetrics,
   aggregateMetricsV2,
+  assertOpenPullRequestSnapshotStable,
+  assertPullRequestMetadata,
   assertCompleteCohort,
   assertCompleteForcePushGraphqlPages,
   assertCompletePaginatedSurface,
@@ -37,6 +39,7 @@ import {
   timelineItemIdentity,
   writeReportFile,
 } from "./review-process-metrics.mjs";
+import { maskMarkdownNonProse } from "./review-process-metrics-markdown.mjs";
 
 const SCRIPT_DIRECTORY = dirname(fileURLToPath(import.meta.url));
 const fixture = JSON.parse(
@@ -117,6 +120,7 @@ test("identifies review bots and finding-like review text", () => {
   assert.equal(isCodexBotLogin("chatgpt-codex-connector[bot]"), true);
   assert.equal(isReviewBotLogin("chapati23"), false);
   assert.equal(isFindingLikeText("[P2] Missing branch coverage"), true);
+  assert.equal(isFindingLikeText("`[P2]` Missing branch coverage"), true);
   assert.equal(isFindingLikeText("Codex Review: no major issues"), false);
 });
 
@@ -385,6 +389,59 @@ test("parses one half-open UTC cohort and rejects ambiguous selectors", () => {
       /requires owner\/repo/,
     );
   }
+});
+
+test("keeps explicit open PR metadata while merged selectors fail closed", () => {
+  const open = { number: 42, merged_at: null };
+  assert.equal(assertPullRequestMetadata(open, 42), open);
+  assert.throws(
+    () => assertPullRequestMetadata(open, 42, { requireMerged: true }),
+    /pull request #42 is not merged/,
+  );
+  assert.throws(
+    () => assertPullRequestMetadata({ number: 43 }, 42),
+    /pull request metadata mismatch for #42/,
+  );
+});
+
+test("serializes open PR mergedAt metadata as null", () => {
+  const value = structuredClone(fixture);
+  value.pr.merged_at = null;
+  delete value.pr.mergedAt;
+  const summary = summarizeFixture(value);
+  assert.equal(summary.mergedAt, null);
+  assert.match(JSON.stringify(summary), /"mergedAt":null/);
+});
+
+test("fails open PR collection closed when its head or state changes", () => {
+  const head = "a".repeat(40);
+  const initial = {
+    number: 42,
+    merged_at: null,
+    state: "open",
+    head: { sha: head },
+  };
+  const stable = structuredClone(initial);
+  assert.equal(
+    assertOpenPullRequestSnapshotStable(initial, stable, 42),
+    stable,
+  );
+  for (const changed of [
+    { ...structuredClone(initial), head: { sha: "b".repeat(40) } },
+    { ...structuredClone(initial), state: "closed" },
+    { ...structuredClone(initial), merged_at: "2026-09-01T00:00:00Z" },
+    { ...structuredClone(initial), head: {} },
+  ]) {
+    assert.throws(
+      () => assertOpenPullRequestSnapshotStable(initial, changed, 42),
+      /pull request #42 changed during collection/,
+    );
+  }
+  const missingHead = { ...structuredClone(initial), head: {} };
+  assert.throws(
+    () => assertOpenPullRequestSnapshotStable(missingHead, missingHead, 42),
+    /pull request #42 changed during collection/,
+  );
 });
 
 test("selects merged PRs in the half-open UTC interval", () => {
@@ -2821,6 +2878,194 @@ test("classifies observed coordinated priority negations", () => {
   );
 });
 
+test("masks only parsed Markdown code blocks and block quotes", () => {
+  const maskedSamples = [
+    "```text\n[P1] fenced sample\n```",
+    "~~~text\n[P1] unclosed sample",
+    "- Example:\n    ```text\n    [P1] nested sample\n    ```",
+    "    [P1] indented sample",
+    "> Prior finding:\n[P1] lazy quoted issue",
+    "> \\[!CAUTION]\n> [P1] escaped marker remains a quote",
+  ];
+  for (const source of maskedSamples) {
+    const masked = maskMarkdownNonProse(source);
+    assert.equal(masked.length, source.length);
+    assert.doesNotMatch(masked, /\[P1\]/);
+  }
+
+  const liveSamples = [
+    "\t```text\n[P1] live after indented code",
+    "```bad`info\n[P1] live after invalid fence\n```",
+    "> Prior quoted finding\n- [P1] live bullet finding",
+    "> Prior quoted finding\n1. [P1] live numbered finding",
+    "> # Quoted context\n[P1] live after heading",
+  ];
+  for (const source of liveSamples) {
+    assert.match(maskMarkdownNonProse(source), /\[P1\]/);
+  }
+  assert.match(
+    maskMarkdownNonProse("> [!CAUTION]\n> [P1] live alert finding", {
+      preserveGitHubAlerts: true,
+    }),
+    /\[P1\]/,
+  );
+  assert.doesNotMatch(
+    maskMarkdownNonProse(
+      `@coderabbitai review\n\n\`<!-- coderabbit-final-head-review:${"a".repeat(40)} -->\``,
+    ),
+    /coderabbit-final-head-review/,
+  );
+  for (const nestedAlert of [
+    "- > [!WARNING]\n  > [P1] list-nested quote",
+    "> > [!WARNING]\n> > [P1] quote-nested quote",
+  ]) {
+    assert.doesNotMatch(
+      maskMarkdownNonProse(nestedAlert, { preserveGitHubAlerts: true }),
+      /\[P1\]/,
+    );
+  }
+
+  const marker = `<!-- coderabbit-final-head-review:${"a".repeat(40)} -->`;
+  const crlf = `> [P1] quoted\r\n${marker}\r\n[P2] live`;
+  const maskedCrlf = maskMarkdownNonProse(crlf);
+  assert.equal(maskedCrlf.length, crlf.length);
+  assert.match(maskedCrlf, /\r\n/);
+  assert.match(maskedCrlf, /coderabbit-final-head-review/);
+  assert.match(maskedCrlf, /\[P2\] live/);
+
+  const alertWithCode = [
+    "> [!WARNING]",
+    ">",
+    "> ```text",
+    "> [P1] sample",
+    "> ```",
+    ">",
+    "> [P2] live alert finding",
+  ].join("\n");
+  const maskedAlert = maskMarkdownNonProse(alertWithCode, {
+    preserveGitHubAlerts: true,
+  });
+  assert.doesNotMatch(maskedAlert, /\[P1\]/);
+  assert.match(maskedAlert, /\[P2\] live alert finding/);
+});
+
+test("ignores Markdown code blocks and block-quoted finding examples", () => {
+  const value = structuredClone(fixture);
+  value.reviews = [
+    {
+      id: 417,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "No findings.\n\n```text\n[P1] sample output\n```",
+    },
+    {
+      id: 418,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "```text\n[P1] sample output\n```\n\n[P2] The live parser drops a record.",
+    },
+    {
+      id: 419,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "No findings.\n\n> [P1] quoted prior finding",
+    },
+    {
+      id: 420,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "No findings.\n\n~~~text\n[P1] unclosed sample",
+    },
+    {
+      id: 421,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "No findings.\n\n> Prior finding:\n[P1] lazy quoted issue",
+    },
+    {
+      id: 422,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "> Prior finding:\n[P1] lazy quoted issue\n\n[P2] The live parser drops a record.",
+    },
+    {
+      id: 423,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "> # Quoted context\n[P2] The live parser drops a record.",
+    },
+    {
+      id: 424,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "> Prior quoted finding\n- [P1] The live parser drops a record.",
+    },
+    {
+      id: 425,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "- Example:\n    ```text\n    [P1] nested sample\n    ```\n\nNo findings.",
+    },
+    {
+      id: 426,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "    [P1] indented sample",
+    },
+    {
+      id: 427,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "\t```text\n[P1] The live parser drops a record.",
+    },
+    {
+      id: 428,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "```bad`info\n[P1] The live parser drops a record.\n```",
+    },
+    {
+      id: 429,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "> [!CAUTION]\n> [P1] The live parser drops a record.",
+    },
+    {
+      id: 430,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "- > [!WARNING]\n  > [P1] list-nested quoted example",
+    },
+  ];
+
+  const evidence =
+    summarizeFixture(value).evidence.byBot.claude.surfaces.review_submissions
+      .evidence;
+  assert.deepEqual(
+    evidence.map(({ id, finding, findingSignal }) => ({
+      id,
+      finding,
+      findingSignal: findingSignal ?? null,
+    })),
+    [
+      { id: "417", finding: false, findingSignal: null },
+      { id: "418", finding: true, findingSignal: "[P2]" },
+      { id: "419", finding: false, findingSignal: null },
+      { id: "420", finding: false, findingSignal: null },
+      { id: "421", finding: false, findingSignal: null },
+      { id: "422", finding: true, findingSignal: "[P2]" },
+      { id: "423", finding: true, findingSignal: "[P2]" },
+      { id: "424", finding: true, findingSignal: "[P1]" },
+      { id: "425", finding: false, findingSignal: null },
+      { id: "426", finding: false, findingSignal: null },
+      { id: "427", finding: true, findingSignal: "[P1]" },
+      { id: "428", finding: true, findingSignal: "[P1]" },
+      { id: "429", finding: true, findingSignal: "[P1]" },
+      { id: "430", finding: false, findingSignal: null },
+    ],
+  );
+});
+
 test("attributes only canonical Claude GitHub Actions reviews", () => {
   const value = structuredClone(fixture);
   value.issueComments = [
@@ -2914,6 +3159,76 @@ test("trusts request authors and proves exact-head markers from the timeline", (
         rejectedReason: "request_author_is_not_trusted",
       }),
     ),
+  );
+});
+
+test("ignores Markdown code blocks and block-quoted manual review examples", () => {
+  const value = structuredClone(fixture);
+  value.issueComments = [
+    {
+      id: 113,
+      author_association: "OWNER",
+      user: { login: "maintainer", type: "User" },
+      body: [
+        "```markdown",
+        "@coderabbitai review",
+        `<!-- coderabbit-final-head-review:${"a".repeat(40)} -->`,
+        "```",
+        "> Example request:",
+        "@coderabbitai review",
+        "",
+        "> @codex review",
+        "",
+        "- Example:",
+        "    ```markdown",
+        "    @coderabbitai review",
+        "    ```",
+        "",
+        "> # Quoted context",
+        "@codex review",
+        "",
+        "@claude review",
+      ].join("\n"),
+    },
+    {
+      id: 114,
+      author_association: "OWNER",
+      user: { login: "maintainer", type: "User" },
+      body: [
+        "@coderabbitai review",
+        "",
+        "> [!NOTE]",
+        `> <!-- coderabbit-final-head-review:${"a".repeat(40)} -->`,
+        "",
+        `\`<!-- coderabbit-final-head-review:${"a".repeat(40)} -->\``,
+      ].join("\n"),
+    },
+    {
+      id: 115,
+      author_association: "OWNER",
+      user: { login: "maintainer", type: "User" },
+      body: "    @cursor review",
+    },
+    {
+      id: 116,
+      author_association: "OWNER",
+      user: { login: "maintainer", type: "User" },
+      body: "> [!NOTE]\n> @cursor review",
+    },
+  ];
+
+  const manual = summarizeFixture(value).evidence.signals.manualRequests;
+  assert.equal(manual.count, 3);
+  assert.equal(manual.bare, 3);
+  assert.equal(manual.markedExactHead, 0);
+  assert.equal(manual.unknown, 0);
+  assert.deepEqual(
+    manual.evidence.map(({ target, marker }) => ({ target, marker })),
+    [
+      { target: "codex", marker: "bare" },
+      { target: "claude", marker: "bare" },
+      { target: "coderabbit", marker: "bare" },
+    ],
   );
 });
 
@@ -3756,6 +4071,7 @@ test("keeps every review-metrics source module under 600 physical lines", () => 
     "review-process-metrics-core.mjs",
     "review-process-metrics-finding-classifier.mjs",
     "review-process-metrics-legacy.mjs",
+    "review-process-metrics-markdown.mjs",
     "review-process-metrics-report.mjs",
     "review-process-metrics-signals.mjs",
     "review-process-metrics-timeline.mjs",

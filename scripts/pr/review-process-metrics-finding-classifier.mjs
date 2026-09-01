@@ -1,3 +1,5 @@
+import { maskMarkdownNonProse } from "./review-process-metrics-markdown.mjs";
+
 const FINDING_LABEL_SOURCE = String.raw`(?:\[[Pp][0-3]\]|\b[Pp][0-3]\s+Badge\b|\b(?:critical|high|medium|low)\s+severity\b|\bchanges requested\b)`;
 const FINDING_LABEL_SEPARATOR_SOURCE = String.raw`(?:,\s*(?:and|or|nor)\b|[/,&]|\b(?:and|or|nor)\b)`;
 const FINDING_LABEL_LIST_SOURCE = String.raw`${FINDING_LABEL_SOURCE}(?:\s*${FINDING_LABEL_SEPARATOR_SOURCE}\s*${FINDING_LABEL_SOURCE})*`;
@@ -53,13 +55,11 @@ const EMPTY_FINDING_TRAILING_CLAUSE = new RegExp(
   String.raw`^(?:(?:no|zero|none)\s+${EMPTY_FINDING_NOUN_SOURCE}(?:\s+(?:remains?|exists?|found|reported|identified|detected|flagged|shown|(?:are|is|was|were)\s+(?:found|reported|identified|detected|flagged|shown|present)))?|no\s+action\s+(?:is\s+)?required)\s*$`,
   "i",
 );
-
 function normalizeFindingSummary(value) {
   return String(value ?? "")
     .replace(new RegExp(String.raw`\`(${FINDING_LABEL_SOURCE})\``, "gi"), "$1")
     .replace(/[*_~]/g, "");
 }
-
 function isEmptyFindingSummary(value) {
   const normalized = normalizeFindingSummary(value)
     .trim()
@@ -538,7 +538,10 @@ export function actionableFindingSignal(
   bot,
   { reviewState = null } = {},
 ) {
-  const body = String(value ?? "");
+  const body = maskMarkdownNonProse(value, {
+    preserveGitHubAlerts: true,
+    preserveInlineCode: true,
+  });
   if (String(reviewState ?? "").toUpperCase() === "CHANGES_REQUESTED") {
     return "review state: CHANGES_REQUESTED";
   }

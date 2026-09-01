@@ -53,7 +53,7 @@ export function summarizePullRequestMetricsV2({
     title: pr.title,
     url: pr.html_url ?? pr.url,
     createdAt: pr.created_at ?? pr.createdAt,
-    mergedAt: pr.merged_at ?? pr.mergedAt,
+    mergedAt: pr.merged_at ?? pr.mergedAt ?? null,
     changedFiles: pr.changed_files ?? pr.changedFiles,
     additions: pr.additions,
     deletions: pr.deletions,

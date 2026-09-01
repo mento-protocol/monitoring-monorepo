@@ -12566,6 +12566,9 @@ assert_contains "- node scripts/pr/review-process-metrics.test.mjs (review-proce
 run_gate "scripts/pr/review-process-metrics-legacy.mjs"
 assert_contains "- node scripts/pr/review-process-metrics.test.mjs (review-process metrics collector changed)"
 
+run_gate "scripts/pr/review-process-metrics-markdown.mjs"
+assert_contains "- node scripts/pr/review-process-metrics.test.mjs (review-process metrics collector changed)"
+
 run_gate "scripts/pr/review-process-metrics-report.mjs"
 assert_contains "- node scripts/pr/review-process-metrics.test.mjs (review-process metrics collector changed)"
 

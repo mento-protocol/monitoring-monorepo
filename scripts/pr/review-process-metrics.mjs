@@ -31,16 +31,17 @@ const DEFAULT_REPO = "mento-protocol/monitoring-monorepo";
 const DEFAULT_LIMIT = 20;
 const PAGE_SIZE = 100;
 const PULL_REQUEST_COMMITS_LIMIT = 250;
+const GIT_OBJECT_ID = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/i;
 const FORCE_PUSH_QUERY = `query($owner:String!,$name:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$name){pullRequest(number:$number){timelineItems(first:100,after:$cursor,itemTypes:[HEAD_REF_FORCE_PUSHED_EVENT]){totalCount pageInfo{hasNextPage endCursor} nodes{... on HeadRefForcePushedEvent{id createdAt beforeCommit{oid} afterCommit{oid}}}}}}}`;
 
 function usage() {
   return `Usage: node scripts/pr/review-process-metrics.mjs [options]
 
-Collect review-process metrics for merged PR cohorts.
+Collect review-process metrics for merged cohorts or an explicit PR list.
 
 Options:
   --repo <owner/repo>       GitHub repo. Default: ${DEFAULT_REPO}
-  --prs <list>              Comma-separated PR numbers to collect.
+  --prs <list>              Comma-separated PR numbers, including open PRs.
   --before-pr <number>      Select merged PRs before this PR's mergedAt.
   --after-pr <number>       Select merged PRs after this PR's mergedAt.
   --since <UTC timestamp>   Include PRs merged at or after this timestamp.
@@ -334,17 +335,46 @@ function fetchMergedPrList(repo) {
     .map(mapPullRequestFromRest);
 }
 
-function fetchPrMetadata(repo, number) {
-  const pr = ghJson(["api", `repos/${repo}/pulls/${number}`]);
-  if (pr.number !== number) {
+export function assertPullRequestMetadata(
+  pr,
+  number,
+  { requireMerged = false } = {},
+) {
+  if (pr?.number !== number) {
     throw new Error(`pull request metadata mismatch for #${number}`);
   }
-  if (!pr.merged_at) throw new Error(`pull request #${number} is not merged`);
+  if (requireMerged && !pr.merged_at) {
+    throw new Error(`pull request #${number} is not merged`);
+  }
   return pr;
 }
 
-function fetchPrEvidence(repo, number, collectedAt) {
-  const pr = fetchPrMetadata(repo, number);
+export function assertOpenPullRequestSnapshotStable(initial, final, number) {
+  assertPullRequestMetadata(initial, number);
+  assertPullRequestMetadata(final, number);
+  const initialHead = initial.head?.sha;
+  const finalHead = final.head?.sha;
+  if (
+    initial.merged_at !== null ||
+    final.merged_at !== null ||
+    initial.state !== "open" ||
+    final.state !== "open" ||
+    !GIT_OBJECT_ID.test(initialHead ?? "") ||
+    !GIT_OBJECT_ID.test(finalHead ?? "") ||
+    initialHead !== finalHead
+  ) {
+    throw new Error(`pull request #${number} changed during collection`);
+  }
+  return final;
+}
+
+function fetchPrMetadata(repo, number, options) {
+  const pr = ghJson(["api", `repos/${repo}/pulls/${number}`]);
+  return assertPullRequestMetadata(pr, number, options);
+}
+
+function fetchPrEvidence(repo, number, collectedAt, options) {
+  const pr = fetchPrMetadata(repo, number, options);
   const issueComments = fetchPaginated(repo, `issues/${number}/comments`, {
     surface: `PR #${number} issue comments`,
     expectedCount: pr.comments,
@@ -392,6 +422,13 @@ function fetchPrEvidence(repo, number, collectedAt) {
     sourceLimit: PULL_REQUEST_COMMITS_LIMIT,
     id: (commit) => commit.sha,
   });
+  if (pr.merged_at === null) {
+    assertOpenPullRequestSnapshotStable(
+      pr,
+      fetchPrMetadata(repo, number, options),
+      number,
+    );
+  }
   return summarizePullRequestMetricsV2({
     pr,
     issueComments: issueComments.items,
@@ -420,7 +457,9 @@ function fetchPrEvidence(repo, number, collectedAt) {
 }
 
 function fetchBoundary(repo, number) {
-  return mapPullRequestFromRest(fetchPrMetadata(repo, number));
+  return mapPullRequestFromRest(
+    fetchPrMetadata(repo, number, { requireMerged: true }),
+  );
 }
 
 function resolveCohort(args) {
@@ -508,11 +547,12 @@ async function main() {
   }
   const collectedAt = new Date().toISOString();
   const cohort = resolveCohort(args);
+  const requireMerged = cohort.mode !== "explicit";
   const pullRequests = cohort.pullRequests.map(({ number }, index) => {
     process.stderr.write(
       `Collecting PR #${number} (${index + 1}/${cohort.pullRequests.length})\n`,
     );
-    return fetchPrEvidence(args.repo, number, collectedAt);
+    return fetchPrEvidence(args.repo, number, collectedAt, { requireMerged });
   });
   const output = `${JSON.stringify(
     buildReport({ args, cohort, pullRequests, collectedAt }),
