@@ -257,9 +257,12 @@ jobs:
   #   - RESIDUAL, stated plainly: CLAUDE_CODE_OAUTH_TOKEN is still live in the
   #     agent's Bash env. `claude-code-action` puts it there itself — its
   #     base-action/src/parse-sdk-options.ts spreads the whole `process.env`
-  #     into the CLI subprocess, deleting only the OIDC request vars — and the
-  #     pinned v1.0.194 offers no per-step or first-class MCP env forwarding to
-  #     move it (parse-sdk-options.ts is byte-identical to the v1.0.190 blob). It is inference-scoped: worst case is inference-quota abuse,
+  #     into the CLI subprocess, deleting only the OIDC request vars and
+  #     ALL_INPUTS — and the pinned v1.0.202 offers no per-step or first-class
+  #     MCP env forwarding to move it (parse-sdk-options.ts differs from the
+  #     v1.0.194 blob in one hunk: an added `delete env.ALL_INPUTS`, which
+  #     narrows that env rather than widening it; `{ ...process.env }` still
+  #     seeds it). It is inference-scoped: worst case is inference-quota abuse,
   #     not repo or queue compromise, and any use lands in an auditable public
   #     comment. Re-check on the next action bump.
   #   - RESIDUAL, stated plainly: the run handle IS in the agent's env, and
@@ -303,13 +306,24 @@ jobs:
     # verified v1.0.179 / b76a0776), on the v1.0.190 bump (5ef2e550: its
     # action.yml differs from v1.0.183 in three places, none of them an input
     # or an env channel — a new `conclusion` output, one input DESCRIPTION
-    # reworded, and `no-cache: true` on its setup-bun step), and again on the
-    # bump to the version pinned below, v1.0.194 (459ad358): its root
-    # action.yml and base-action/src/parse-sdk-options.ts are byte-identical
-    # to the v1.0.190 blobs; only base-action/action.yml changed, bumping the
-    # bundled CLI to 2.1.234 and appending ~/.local/bin to $GITHUB_PATH after
-    # auto-install — neither an input nor an env channel. So there is still no
-    # per-step env passthrough and no
+    # reworded, and `no-cache: true` on its setup-bun step), on the v1.0.194
+    # bump (459ad358: its root action.yml and
+    # base-action/src/parse-sdk-options.ts are byte-identical to the v1.0.190
+    # blobs; only base-action/action.yml changed, bumping the bundled CLI to
+    # 2.1.234 and appending ~/.local/bin to $GITHUB_PATH after auto-install —
+    # neither an input nor an env channel), and again on the bump to the
+    # version pinned below, v1.0.202 (e5ad3c77): its root action.yml is
+    # byte-identical to the v1.0.194 blob, so no input and no env channel
+    # moved. base-action/action.yml changed only the bundled CLI version,
+    # 2.1.234 to 2.1.243. base-action/src/parse-sdk-options.ts gained one
+    # hunk, `delete env.ALL_INPUTS`, which removes a variable from the agent
+    # subprocess env; --mcp-config still resolves a path or inline JSON and
+    # never env. src/mcp/install-mcp-server.ts also changed, but only to match
+    # the bare `mcp__github`-style aggregate selectors alongside the
+    # `mcp__github__` prefixes when deciding whether to add the action's OWN
+    # built-in GitHub servers; it does not touch how a user-supplied
+    # --mcp-config server is launched or what env it reads. So there is still
+    # no per-step env passthrough and no
     # first-class MCP env input — upstream deprecated `mcp_config` in favour of
     # `claude_args: --mcp-config`, which takes a path or JSON, never env. So
     # anything the MCP server must read has to be job env — which is exactly why
