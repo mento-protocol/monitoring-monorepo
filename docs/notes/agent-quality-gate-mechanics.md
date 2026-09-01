@@ -2342,9 +2342,10 @@ for it is scoped to that exact name.
 The pre-push hook reaches neither bypass. It runs a fixed command line, and
 Trunk strips these variables. If coordination fails, the hook exits non-zero.
 After the reported recovery or compatibility blocker clears, fetch the hook's
-base and warm the matching stamp with `git fetch --quiet origin main && pnpm
-agent:quality-gate --run --base origin/main`. A verified matching success lets
-the hook's `--skip-if-fresh` path exit before it registers another request.
+base and warm the matching stamp with `git fetch --quiet origin main &&
+./scripts/agent-quality-gate.sh --run --parallel 3 --base origin/main`. A
+verified matching success lets the hook's `--skip-if-fresh` path exit before it
+registers another request.
 
 Set `AGENT_QUALITY_GATE_DEBUG_STAMP=1` to print the active freshness-stamp
 schema and fields, one per line on stderr. The first line names the schema. The

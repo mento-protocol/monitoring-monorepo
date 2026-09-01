@@ -1925,7 +1925,8 @@ while IFS= read -r -d '' validator_scrub_name; do
   fi
   validator_scrub_launcher+=(-u "$validator_scrub_name")
 done < <(
-  ESLINT_BASELINE_INPUT=ambient \
+  AGENT_QUALITY_GATE_DEBUG_STAMP=1 \
+    ESLINT_BASELINE_INPUT=ambient \
     ALERT_RULES_LINT_RULES_DIR=ambient \
     GIT_DIR=ambient \
     node scripts/gate/quality-gate-coordinator-environment.mjs \
@@ -1933,10 +1934,12 @@ done < <(
 )
 if [[ "$validator_scrub_scan_complete" -ne 1 ||
   ! "$validator_scrub_policy_hash" =~ ^[a-f0-9]{64}$ ]] ||
-  ! ESLINT_BASELINE_INPUT=ambient \
+  ! AGENT_QUALITY_GATE_DEBUG_STAMP=1 \
+    ESLINT_BASELINE_INPUT=ambient \
     ALERT_RULES_LINT_RULES_DIR=ambient \
     GIT_DIR=ambient \
     "${validator_scrub_launcher[@]}" /bin/bash -p -c '
+      [[ -z "${AGENT_QUALITY_GATE_DEBUG_STAMP+x}" ]]
       [[ -z "${ESLINT_BASELINE_INPUT+x}" ]]
       [[ -z "${ALERT_RULES_LINT_RULES_DIR+x}" ]]
       [[ -z "${GIT_DIR+x}" ]]
@@ -16853,7 +16856,7 @@ STUB
   assert_contains "timed out after"
   # The pre-push hook cannot pass --no-lock, so the timeout must also name the
   # recovery that works from a failed push.
-  assert_contains "git fetch --quiet origin main && pnpm agent:quality-gate --run --base origin/main"
+  assert_contains "git fetch --quiet origin main && ./scripts/agent-quality-gate.sh --run --parallel 3 --base origin/main"
   assert_contains "before coordinator registration"
   [[ -d "$gate_lock_root/run.lock" ]] ||
     fail "a run that never acquired the lock must not delete the holder's lock"

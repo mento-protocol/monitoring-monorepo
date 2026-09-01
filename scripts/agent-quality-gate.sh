@@ -6587,7 +6587,7 @@ acquire_gate_run_lock_legacy() {
       echo "Running the gate directly? --no-lock starts anyway and accepts the contention." >&2
       # The pre-push hook passes a fixed command line and Trunk strips the
       # environment, so neither escape hatch is reachable from a failed push.
-      echo "Pushing? Fetch the hook's base, then warm the matching stamp with 'git fetch --quiet origin main && pnpm agent:quality-gate --run --base origin/main'; the hook's --skip-if-fresh path can then exit before coordinator registration." >&2
+      echo "Pushing? Fetch the hook's base, then warm the matching stamp with 'git fetch --quiet origin main && ./scripts/agent-quality-gate.sh --run --parallel 3 --base origin/main'; the hook's --skip-if-fresh path can then exit before coordinator registration." >&2
       # GitHub issue #1894. Every other outcome states itself on stdout — a green
       # run ends "All mapped commands passed." — but this one used to speak on
       # stderr alone, so a caller reading the gate's stdout saw the reassuring
