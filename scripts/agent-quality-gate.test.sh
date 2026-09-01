@@ -13134,6 +13134,13 @@ run_gate ".github/actions/deleted/action.yml" "docs/deployment.md"
 assert_contains "- ./tools/trunk check --ci --all (changed paths require full-repo Trunk checks)"
 assert_not_contains "- ./tools/trunk check --ci docs/deployment.md ("
 
+# The same class for shell: ShellCheck follows `# shellcheck source=<path>`
+# against the real tree, so deleting a sourced helper raises a new SC1091 on
+# surviving callers that name it and are not in the change set.
+run_gate "scripts/bootstrap/deleted-helper.sh" "docs/deployment.md"
+assert_contains "- ./tools/trunk check --ci --all (changed paths require full-repo Trunk checks)"
+assert_not_contains "- ./tools/trunk check --ci docs/deployment.md ("
+
 # Code-health routing: ensure a `.dependency-cruiser.cjs` change schedules
 # the cross-package dep-cruiser gate + surfaces the code-health checklist.
 run_gate ".dependency-cruiser.cjs"
@@ -13152,6 +13159,14 @@ assert_contains "- docs/pr-checklists/code-health.md"
 
 # One path inside a scanned root brings it back for the whole set.
 run_gate "governance-watchdog/src/index.ts" "shared-config/src/index.ts"
+assert_contains "- pnpm code-health:deps"
+
+# The scope pass schedules dep-cruiser itself for the triggers no arm routes.
+# Without this the documented self-pin never fired: declining to remove a
+# command nothing added leaves the plan without it.
+run_gate "scripts/gate/mapping/post-passes.mjs"
+assert_contains "- pnpm code-health:deps"
+run_gate "pnpm-lock.yaml"
 assert_contains "- pnpm code-health:deps"
 
 # Code-health routing: each package's knip.json routes to the matching

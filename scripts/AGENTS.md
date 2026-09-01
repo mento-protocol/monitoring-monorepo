@@ -93,7 +93,7 @@ feedback-runtime pins.
   freeze the stamp (ADRs 0069 and 0079). Two exact pins inside that glob move
   alone: the `.dependency-cruiser.cjs` arm names
   `gate/mapping/engine.test.mjs`, and `gate/mapping/post-passes.mjs` names
-  itself to keep `code-health:deps` scheduled.
+  itself to schedule `code-health:deps`.
 - **Review-eval pins.** `docs/evals/review-skill.md` tracks
   `review/run-eval{,-source-snapshot,-lifecycle,-runtime}.sh`,
   `review/install-review-eval-launchd.{sh,test.mjs}`,

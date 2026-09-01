@@ -478,6 +478,24 @@ test("an ordinary deletion beside a survivor does NOT force full", () => {
   ]);
 });
 
+test("a deleted sourced shell helper forces full, because ShellCheck follows sources", () => {
+  // Measured: deleting scripts/bootstrap/codex-cloud-git-helpers.sh takes its
+  // two surviving callers from clean to SC1091, because each names it in a
+  // `# shellcheck source=` directive that resolves against the real tree. No
+  // survivor naming it is in the change set, so a targeted run never sees it.
+  const plan = new Plan();
+  addTrunkCheckCommand(
+    plan,
+    ["scripts/bootstrap/codex-cloud-git-helpers.sh", "docs/note.md"],
+    stubFacts({ presentPaths: ["docs/note.md"] }),
+  );
+  assert.deepEqual(
+    commandsOf(plan),
+    ["./tools/trunk check --ci --all"],
+    "surviving callers source the deleted helper and are not in the change set",
+  );
+});
+
 test("a deleted path still in the full-scan list forces full", () => {
   const plan = new Plan();
   addTrunkCheckCommand(
@@ -963,6 +981,53 @@ test("the dep-cruiser config and this pass keep the command", () => {
     ]),
     true,
   );
+});
+
+/** A plan as an arm that never schedules dep-cruiser would leave it. */
+const depsAddedTo = (changedPaths) => {
+  const plan = new Plan();
+  plan.addCommand("pnpm exec turbo run lint --filter=x --cache=local:rw", "a");
+  narrowCodeHealthDepsCommand(plan, changedPaths);
+  return commandsOf(plan).filter((c) => c === CODE_HEALTH_DEPS_COMMAND).length;
+};
+
+test("the pass schedules the command when no arm did", () => {
+  // The defect this closes: declining to remove a command nothing added leaves
+  // the plan without it. Measured against the real gate, `post-passes.mjs` and
+  // `pnpm-lock.yaml` reach no arm that schedules dep-cruiser, so for those two
+  // the guarantee only exists if this pass adds the command itself.
+  for (const path of [
+    "scripts/gate/mapping/post-passes.mjs",
+    "pnpm-lock.yaml",
+    "package.json",
+    "pnpm-workspace.yaml",
+    ".dependency-cruiser.cjs",
+  ]) {
+    assert.equal(
+      depsAddedTo([path]),
+      1,
+      `${path} must schedule dep-cruiser even when no arm does`,
+    );
+  }
+});
+
+test("the pass does not schedule dep-cruiser for a scanned root alone", () => {
+  // The arms own the roots, and they decide better: a root's README matches the
+  // root prefix but cannot change a verdict. Scheduling here would add work the
+  // arms correctly leave out.
+  assert.equal(depsAddedTo(["shared-config/README.md"]), 0);
+  assert.equal(depsAddedTo(["ui-dashboard/src/thing.ts"]), 0);
+});
+
+test("the pass does not duplicate a command an arm already scheduled", () => {
+  const plan = depsPlan();
+  narrowCodeHealthDepsCommand(plan, [".dependency-cruiser.cjs"]);
+  assert.equal(
+    commandsOf(plan).filter((c) => c === CODE_HEALTH_DEPS_COMMAND).length,
+    1,
+    "addCommand dedupes, so the arm's entry and reason survive",
+  );
+  assert.equal(reasonOf(plan, CODE_HEALTH_DEPS_COMMAND), "package bundle");
 });
 
 test("the pass removes only its own command", () => {

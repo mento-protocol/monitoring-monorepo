@@ -45,14 +45,24 @@ const TRUNK_FULL_SCAN = [
  * the changed set, so nothing would name it. `.github/actions/pnpm-install` is
  * referenced by most workflows in this repo, which is the measured case.
  *
- * The other enabled Trunk linters (prettier, markdownlint, codespell,
- * yamllint, trufflehog, git-diff-check, shellcheck under Trunk's
- * one-file-at-a-time `copy_targets` sandbox) judge each file on its own bytes,
- * so an ordinary source or docs deletion cannot invalidate a survivor. checkov
- * would belong here for local `module { source = "./…" }` references; this repo
- * has none today, and `.tf` deletions stay covered by the whole-repo branches.
+ * ShellCheck runs with external sources enabled, and a `# shellcheck
+ * source=<repo-relative path>` directive resolves against the real tree even
+ * under Trunk's one-file-at-a-time `copy_targets` sandbox. Deleting a sourced
+ * helper therefore raises a NEW SC1091 on every surviving caller that names it
+ * — measured on `scripts/bootstrap/codex-cloud-git-helpers.sh`, whose two
+ * callers go from clean to SC1091 the moment it is gone. Callers that source
+ * only through a runtime `${DIR}/…` path are the separate, already-suppressed
+ * false positive `.shellcheckrc` documents; the rule below does not try to tell
+ * the two apart, because any sourced-by analysis would rot the first time a
+ * caller changed how it spells the path.
+ *
+ * The remaining enabled Trunk linters (prettier, markdownlint, codespell,
+ * yamllint, trufflehog, git-diff-check) judge each file on its own bytes, so an
+ * ordinary source or docs deletion cannot invalidate a survivor. checkov would
+ * belong here for local `module { source = "./…" }` references; this repo has
+ * none today, and `.tf` deletions stay covered by the whole-repo branches.
  */
-const TRUNK_DELETION_FULL_SCAN = [/^\.github\//];
+const TRUNK_DELETION_FULL_SCAN = [/^\.github\//, /\.sh$/];
 
 export function addTrunkCheckCommand(plan, changedPaths, facts) {
   const present = [];
@@ -405,24 +415,49 @@ const WORKSPACE_RESOLUTION_MANIFESTS = [
 ];
 
 /**
- * Changed paths that keep `pnpm code-health:deps` in the plan.
+ * Triggers this pass schedules itself, rather than leaving to an arm.
  *
- * The roots are the reason the command exists. The manifests above decide what
- * the roots resolve to. The last two entries are fail-closed:
- * `.dependency-cruiser.cjs` is the config whose rules the command enforces, and
- * this module is where the narrowing itself lives, so an edit to either has to
- * run the command it governs rather than be judged by it.
+ * No arm routes a bare `pnpm-lock.yaml` or this module, so for these paths
+ * declining to remove the command is not enough — there would be nothing in the
+ * plan to decline to remove, and the guarantee they exist for would never fire.
+ * `.dependency-cruiser.cjs` and the other two manifests do have arms; they stay
+ * in this list so the guarantee holds on the pass's own terms rather than on an
+ * arm that could be re-scoped later. `plan.addCommand` dedupes, so naming a
+ * command an arm already scheduled keeps the arm's reason.
+ *
+ * The scanned roots are deliberately NOT here. Their arms already decide, and
+ * they decide better: a root's `README.md` matches the root prefix but cannot
+ * change a dependency-cruiser verdict, so scheduling on the prefix alone would
+ * add work the arms correctly leave out.
  */
-const CODE_HEALTH_DEPS_TRIGGERS = [
-  new RegExp(`^(${DEPCRUISE_ROOTS.join("|")})/`),
+const CODE_HEALTH_DEPS_SELF_SCHEDULED = [
   ...WORKSPACE_RESOLUTION_MANIFESTS,
   /^\.dependency-cruiser\.cjs$/,
   /^scripts\/gate\/mapping\/post-passes\.mjs$/,
 ];
 
+/**
+ * Changed paths that keep `pnpm code-health:deps` in the plan.
+ *
+ * The roots are the reason the command exists. The manifests decide what the
+ * roots resolve to. `.dependency-cruiser.cjs` is the config whose rules the
+ * command enforces, and this module is where the narrowing itself lives, so an
+ * edit to either has to run the command it governs rather than be judged by it.
+ */
+const CODE_HEALTH_DEPS_TRIGGERS = [
+  new RegExp(`^(${DEPCRUISE_ROOTS.join("|")})/`),
+  ...CODE_HEALTH_DEPS_SELF_SCHEDULED,
+];
+
 export function codeHealthDepsTriggered(changedPaths) {
   return changedPaths.some((path) =>
     CODE_HEALTH_DEPS_TRIGGERS.some((r) => r.test(path)),
+  );
+}
+
+export function codeHealthDepsSelfScheduled(changedPaths) {
+  return changedPaths.some((path) =>
+    CODE_HEALTH_DEPS_SELF_SCHEDULED.some((r) => r.test(path)),
   );
 }
 
@@ -441,8 +476,19 @@ export function codeHealthDepsTriggered(changedPaths) {
  * still runs per package.
  */
 export function narrowCodeHealthDepsCommand(plan, changedPaths) {
-  if (codeHealthDepsTriggered(changedPaths)) return;
-  plan.quality = plan.quality.filter(
-    (entry) => entry.command !== CODE_HEALTH_DEPS_COMMAND,
-  );
+  if (!codeHealthDepsTriggered(changedPaths)) {
+    plan.quality = plan.quality.filter(
+      (entry) => entry.command !== CODE_HEALTH_DEPS_COMMAND,
+    );
+    return;
+  }
+  // Removing is only half the pass. For the self-scheduled triggers no arm adds
+  // the command at all, so a pass that could only decline to remove it would
+  // leave the plan without the check those triggers exist to guarantee.
+  if (codeHealthDepsSelfScheduled(changedPaths)) {
+    plan.addCommand(
+      CODE_HEALTH_DEPS_COMMAND,
+      "dep-cruiser config, a workspace manifest, or the scope pass changed",
+    );
+  }
 }

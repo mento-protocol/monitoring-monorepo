@@ -211,15 +211,21 @@ targeted Trunk checks for faster local iteration. Trunk/tooling changes,
 package-manager changes, pnpm patches, and package-manifest changes still run
 full-repo Trunk locally. A deleted path is dropped from the targeted argument
 list — Trunk fails on an argument that is not there — and the surviving paths
-are still linted. Three deletion cases keep the whole-repo scan: a change set
+are still linted. Four deletion cases keep the whole-repo scan: a change set
 with no survivor to target, a deleted path that is itself in the whole-repo
-list, and a deleted path under `.github/`. That last one is cross-file
-semantics: actionlint resolves `uses: ./.github/actions/<name>` and
+list, a deleted path under `.github/`, and a deleted `*.sh`. The last two are
+cross-file semantics. actionlint resolves `uses: ./.github/actions/<name>` and
 `uses: ./.github/workflows/<file>` against the tree, so deleting one invalidates
 surviving callers that are not in the change set and that a targeted run would
-never name. Every other enabled Trunk linter judges a file on its own bytes —
-shellcheck included, because Trunk's `copy_targets` sandbox lints one file at a
-time. checkov would join `.github/` if this repo gained a local
+never name. ShellCheck does the same for `# shellcheck source=<repo-relative
+path>`, which resolves against the real tree even inside Trunk's `copy_targets`
+sandbox: deleting `scripts/bootstrap/codex-cloud-git-helpers.sh` takes its two
+surviving callers from clean to SC1091. A caller that sources only through a
+runtime `${DIR}/…` path is the separate false positive `.shellcheckrc`
+documents, already suppressed per line; the rule does not try to tell the two
+apart, because a sourced-by analysis would rot the first time a caller changed
+how it spells the path. Every other enabled Trunk linter judges a file on its
+own bytes. checkov would join these if this repo gained a local
 `module { source = "./…" }` reference; it has none today. CI also runs a
 required full-repo Trunk check on every
 PR. Where the environment blocks Trunk's downloads — a Claude cloud container
@@ -781,7 +787,16 @@ change to `package.json`, `pnpm-lock.yaml`, or `pnpm-workspace.yaml`: a scanned
 root reaches another scanned root by package name — `ui-dashboard/package.json`
 declares `"@mento-protocol/config": "workspace:*"` — so those three files decide
 what a bare specifier resolves to and can add or remove an edge between two
-roots while no file inside a root changes. The
+roots while no file inside a root changes.
+
+The pass both removes and adds. For the five triggers that are not scanned
+roots — the three manifests, `.dependency-cruiser.cjs`, and this pass's own
+module — it schedules the command itself rather than only declining to remove
+it, because no arm routes a bare `pnpm-lock.yaml` or `post-passes.mjs`: there
+would be nothing in the plan to preserve, and the guarantee would never fire.
+`plan.addCommand` dedupes, so an arm that already scheduled the command keeps
+its own reason. The scanned roots stay with their arms, which decide better — a
+root's `README.md` matches the root prefix but cannot change a verdict. The
 `docs/pr-checklists/code-health.md` checklist is unaffected either way, because
 knip is the other half of it and still runs per package. This is the only pass
 that makes a plan smaller, so its condition is about what dependency-cruiser can
