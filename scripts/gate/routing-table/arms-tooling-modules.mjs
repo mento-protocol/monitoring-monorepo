@@ -80,11 +80,13 @@ export const TOOLING_MODULE_ARMS = [
   {
     patterns: [
       "scripts/pr/review-process-metrics.mjs",
+      "scripts/pr/review-process-metrics-actions.mjs",
       "scripts/pr/review-process-metrics-core.mjs",
       "scripts/pr/review-process-metrics-finding-classifier.mjs",
       "scripts/pr/review-process-metrics-finding-preflight.mjs",
       "scripts/pr/review-process-metrics-legacy.mjs",
       "scripts/pr/review-process-metrics-markdown.mjs",
+      "scripts/pr/review-process-metrics-output.mjs",
       "scripts/pr/review-process-metrics-report.mjs",
       "scripts/pr/review-process-metrics-signals.mjs",
       "scripts/pr/review-process-metrics-timeline.mjs",

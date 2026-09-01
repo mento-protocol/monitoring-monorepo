@@ -12815,7 +12815,13 @@ assert_contains "- pnpm agent:review-materiality:test (agent review materiality 
 run_gate "scripts/pr/review-process-metrics.mjs"
 assert_contains "- node scripts/pr/review-process-metrics.test.mjs (review-process metrics collector changed)"
 
+run_gate "scripts/pr/review-process-metrics-actions.mjs"
+assert_contains "- node scripts/pr/review-process-metrics.test.mjs (review-process metrics collector changed)"
+
 run_gate "scripts/pr/review-process-metrics-core.mjs"
+assert_contains "- node scripts/pr/review-process-metrics.test.mjs (review-process metrics collector changed)"
+
+run_gate "scripts/pr/review-process-metrics-output.mjs"
 assert_contains "- node scripts/pr/review-process-metrics.test.mjs (review-process metrics collector changed)"
 
 run_gate "scripts/pr/review-process-metrics-finding-classifier.mjs"

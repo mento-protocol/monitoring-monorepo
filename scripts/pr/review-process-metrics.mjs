@@ -1,28 +1,35 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
-import { writeFileSync } from "node:fs";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
+import { verifyClaudeActionsEvidence } from "./review-process-metrics-actions.mjs";
 import {
   assertCompleteCohort,
   selectMergedAfter,
   selectMergedBefore,
   selectMergedInUtcWindow,
 } from "./review-process-metrics-legacy.mjs";
+import { writeReportFile } from "./review-process-metrics-output.mjs";
 import {
   REVIEW_PROCESS_METRICS_V2_CATEGORIES,
   aggregateMetricsV2,
   summarizePullRequestMetricsV2,
 } from "./review-process-metrics-report.mjs";
+import { pullRequestEvidenceHeads } from "./review-process-metrics-signals.mjs";
 import {
   assertCompleteForcePushGraphqlPages,
+  assertEvidenceSnapshotStable,
+  assertPullRequestMetadata,
+  assertPullRequestSnapshotStable,
   enrichTimelineForcePushes,
   parseForcePushGraphqlPage,
 } from "./review-process-metrics-timeline.mjs";
 
+export * from "./review-process-metrics-actions.mjs";
 export * from "./review-process-metrics-core.mjs";
 export * from "./review-process-metrics-legacy.mjs";
+export * from "./review-process-metrics-output.mjs";
 export * from "./review-process-metrics-report.mjs";
 export * from "./review-process-metrics-signals.mjs";
 export * from "./review-process-metrics-timeline.mjs";
@@ -31,7 +38,6 @@ const DEFAULT_REPO = "mento-protocol/monitoring-monorepo";
 const DEFAULT_LIMIT = 20;
 const PAGE_SIZE = 100;
 const PULL_REQUEST_COMMITS_LIMIT = 250;
-const GIT_OBJECT_ID = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/i;
 const FORCE_PUSH_QUERY = `query($owner:String!,$name:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$name){pullRequest(number:$number){timelineItems(first:100,after:$cursor,itemTypes:[HEAD_REF_FORCE_PUSHED_EVENT]){totalCount pageInfo{hasNextPage endCursor} nodes{... on HeadRefForcePushedEvent{id createdAt beforeCommit{oid} afterCommit{oid}}}}}}}`;
 
 function usage() {
@@ -335,75 +341,12 @@ function fetchMergedPrList(repo) {
     .items.filter((pr) => pr.merged_at)
     .map(mapPullRequestFromRest);
 }
-export function assertPullRequestMetadata(
-  pr,
-  number,
-  { requireMerged = false } = {},
-) {
-  if (pr?.number !== number) {
-    throw new Error(`pull request metadata mismatch for #${number}`);
-  }
-  if (pr.state !== "open" && pr.state !== "closed") {
-    throw new Error(`pull request #${number} has invalid state metadata`);
-  }
-  const mergedAt = pr.merged_at;
-  if (
-    mergedAt !== null &&
-    (typeof mergedAt !== "string" || !Number.isFinite(Date.parse(mergedAt)))
-  ) {
-    throw new Error(`pull request #${number} has invalid merged_at metadata`);
-  }
-  if (pr.state === "open" && mergedAt !== null) {
-    throw new Error(`pull request #${number} has inconsistent open metadata`);
-  }
-  if (requireMerged && mergedAt === null) {
-    throw new Error(`pull request #${number} is not merged`);
-  }
-  return pr;
-}
-export function assertOpenPullRequestSnapshotStable(initial, final, number) {
-  assertPullRequestMetadata(initial, number);
-  assertPullRequestMetadata(final, number);
-  const initialHead = initial.head?.sha;
-  const finalHead = final.head?.sha;
-  const initialUpdatedAt = initial.updated_at;
-  const finalUpdatedAt = final.updated_at;
-  const countFields = ["comments", "review_comments", "commits"];
-  const countsAreStable = countFields.every(
-    (field) =>
-      Number.isSafeInteger(initial[field]) &&
-      initial[field] >= 0 &&
-      Number.isSafeInteger(final[field]) &&
-      final[field] >= 0 &&
-      initial[field] === final[field],
-  );
-  if (
-    initial.merged_at !== null ||
-    final.merged_at !== null ||
-    initial.state !== "open" ||
-    final.state !== "open" ||
-    !GIT_OBJECT_ID.test(initialHead ?? "") ||
-    !GIT_OBJECT_ID.test(finalHead ?? "") ||
-    initialHead !== finalHead ||
-    typeof initialUpdatedAt !== "string" ||
-    !Number.isFinite(Date.parse(initialUpdatedAt)) ||
-    typeof finalUpdatedAt !== "string" ||
-    !Number.isFinite(Date.parse(finalUpdatedAt)) ||
-    initialUpdatedAt !== finalUpdatedAt ||
-    !countsAreStable
-  ) {
-    throw new Error(`pull request #${number} changed during collection`);
-  }
-  return final;
-}
-
 function fetchPrMetadata(repo, number, options) {
   const pr = ghJson(["api", `repos/${repo}/pulls/${number}`]);
   return assertPullRequestMetadata(pr, number, options);
 }
 
-function fetchPrEvidence(repo, number, collectedAt, options) {
-  const pr = fetchPrMetadata(repo, number, options);
+function fetchEvidenceSurfaces(repo, number, pr) {
   const issueComments = fetchPaginated(repo, `issues/${number}/comments`, {
     surface: `PR #${number} issue comments`,
     expectedCount: pr.comments,
@@ -419,6 +362,20 @@ function fetchPrEvidence(repo, number, collectedAt, options) {
     surface: `PR #${number} timeline`,
     id: timelineItemIdentity,
   });
+  const commits = fetchPaginated(repo, `pulls/${number}/commits`, {
+    surface: `PR #${number} commits`,
+    expectedCount: pr.commits,
+    sourceLimit: PULL_REQUEST_COMMITS_LIMIT,
+    id: (commit) => commit.sha,
+  });
+  return { issueComments, reviews, reviewComments, timeline, commits };
+}
+
+function fetchPrEvidence(repo, number, collectedAt, options) {
+  const pr = fetchPrMetadata(repo, number, options);
+  const surfaces = fetchEvidenceSurfaces(repo, number, pr);
+  const { issueComments, reviews, reviewComments, timeline, commits } =
+    surfaces;
   const restForcePushCount = timeline.items.filter(
     ({ event }) => event === "head_ref_force_pushed",
   ).length;
@@ -445,19 +402,45 @@ function fetchPrEvidence(repo, number, collectedAt, options) {
       `PR #${number} force-push proof conflicts with the REST timeline: ${JSON.stringify(enrichedTimeline.conflicts)}`,
     );
   }
-  const commits = fetchPaginated(repo, `pulls/${number}/commits`, {
-    surface: `PR #${number} commits`,
-    expectedCount: pr.commits,
-    sourceLimit: PULL_REQUEST_COMMITS_LIMIT,
-    id: (commit) => commit.sha,
-  });
-  if (pr.state === "open") {
-    assertOpenPullRequestSnapshotStable(
-      pr,
-      fetchPrMetadata(repo, number, options),
-      number,
-    );
-  }
+  verifyClaudeActionsEvidence(
+    [issueComments.items, reviews.items, reviewComments.items],
+    {
+      repo,
+      prNumber: number,
+      prUrl: pr.html_url,
+      headRepository: pr.head?.repo?.full_name,
+      headRef: pr.head?.ref,
+      headShas: pullRequestEvidenceHeads(
+        pr,
+        commits.items,
+        enrichedTimeline.items,
+      ),
+      verifiedAt: collectedAt,
+      fetchRun: (runId) =>
+        ghJson(["api", `repos/${repo}/actions/runs/${runId}`]),
+      fetchPullRequestsByHead: (owner, headRef) =>
+        fetchPaginated(
+          repo,
+          `pulls?state=all&head=${encodeURIComponent(`${owner}:${headRef}`)}`,
+          {
+            surface: `PR #${number} Claude Actions head lookup`,
+            id: (pullRequest) => pullRequest.number,
+          },
+        ).items,
+      beforeFinalize: () => {
+        assertEvidenceSnapshotStable(
+          surfaces,
+          fetchEvidenceSurfaces(repo, number, pr),
+          number,
+        );
+        assertPullRequestSnapshotStable(
+          pr,
+          fetchPrMetadata(repo, number, options),
+          number,
+        );
+      },
+    },
+  );
   return summarizePullRequestMetricsV2({
     pr,
     issueComments: issueComments.items,
@@ -562,10 +545,6 @@ export function buildReport({ args, cohort, pullRequests, collectedAt }) {
         "Use unknown for conflicting or insufficient evidence. Unclassified means no human classification was present.",
     },
   };
-}
-
-export function writeReportFile(path, output) {
-  writeFileSync(path, output, { flag: "wx", mode: 0o600 });
 }
 
 async function main() {

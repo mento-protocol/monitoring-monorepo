@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -16,7 +17,8 @@ import { fileURLToPath } from "node:url";
 import {
   aggregateMetrics,
   aggregateMetricsV2,
-  assertOpenPullRequestSnapshotStable,
+  assertEvidenceSnapshotStable,
+  assertPullRequestSnapshotStable,
   assertPullRequestMetadata,
   assertCompleteCohort,
   assertCompleteForcePushGraphqlPages,
@@ -33,12 +35,14 @@ import {
   parseArgs,
   parseForcePushGraphqlPage,
   parseUtcTimestamp,
+  pullRequestEvidenceHeads,
   selectMergedAfter,
   selectMergedBefore,
   selectMergedInUtcWindow,
   summarizePullRequestMetrics,
   summarizePullRequestMetricsV2,
   timelineItemIdentity,
+  verifyClaudeActionsEvidence,
   writeReportFile,
 } from "./review-process-metrics.mjs";
 import { actionableFindingSignal } from "./review-process-metrics-finding-classifier.mjs";
@@ -1118,25 +1122,70 @@ test("serializes open PR mergedAt metadata as null", () => {
   assert.match(JSON.stringify(summary), /"mergedAt":null/);
 });
 
-test("fails open PR collection closed when its metadata snapshot changes", () => {
+test("fails PR collection closed when its metadata snapshot changes", () => {
   const head = "a".repeat(40);
   const initial = {
     number: 42,
     merged_at: null,
     state: "open",
-    head: { sha: head },
+    html_url: "https://github.com/example/repo/pull/42",
+    head: {
+      sha: head,
+      ref: "feature",
+      repo: { full_name: "example/repo" },
+    },
     updated_at: "2026-09-01T00:00:00Z",
     comments: 2,
     review_comments: 3,
     commits: 4,
   };
   const stable = structuredClone(initial);
+  assert.equal(assertPullRequestSnapshotStable(initial, stable, 42), stable);
+  const merged = {
+    ...structuredClone(initial),
+    state: "closed",
+    merged_at: "2026-09-01T00:00:00Z",
+  };
+  const stableMerged = structuredClone(merged);
   assert.equal(
-    assertOpenPullRequestSnapshotStable(initial, stable, 42),
-    stable,
+    assertPullRequestSnapshotStable(merged, stableMerged, 42),
+    stableMerged,
   );
   for (const changed of [
-    { ...structuredClone(initial), head: { sha: "b".repeat(40) } },
+    { ...structuredClone(merged), updated_at: "2026-09-01T00:00:01Z" },
+    { ...structuredClone(merged), comments: 3 },
+    { ...structuredClone(merged), review_comments: 4 },
+    {
+      ...structuredClone(merged),
+      head: { ...structuredClone(merged.head), sha: "b".repeat(40) },
+    },
+    {
+      ...structuredClone(merged),
+      head: { ...structuredClone(merged.head), ref: "renamed-feature" },
+    },
+    {
+      ...structuredClone(merged),
+      head: {
+        ...structuredClone(merged.head),
+        repo: { full_name: "example/renamed-repo" },
+      },
+    },
+    {
+      ...structuredClone(merged),
+      html_url: "https://github.com/example/renamed-repo/pull/42",
+    },
+    { ...structuredClone(merged), merged_at: "2026-09-01T00:00:01Z" },
+  ]) {
+    assert.throws(
+      () => assertPullRequestSnapshotStable(merged, changed, 42),
+      /pull request #42 changed during collection/,
+    );
+  }
+  for (const changed of [
+    {
+      ...structuredClone(initial),
+      head: { ...structuredClone(initial.head), sha: "b".repeat(40) },
+    },
     { ...structuredClone(initial), state: "closed" },
     { ...structuredClone(initial), merged_at: "2026-09-01T00:00:00Z" },
     { ...structuredClone(initial), head: {} },
@@ -1149,13 +1198,13 @@ test("fails open PR collection closed when its metadata snapshot changes", () =>
     { ...structuredClone(initial), commits: 5 },
   ]) {
     assert.throws(
-      () => assertOpenPullRequestSnapshotStable(initial, changed, 42),
+      () => assertPullRequestSnapshotStable(initial, changed, 42),
       /pull request #42 (?:changed during collection|has inconsistent open metadata)/,
     );
   }
   const missingHead = { ...structuredClone(initial), head: {} };
   assert.throws(
-    () => assertOpenPullRequestSnapshotStable(missingHead, missingHead, 42),
+    () => assertPullRequestSnapshotStable(missingHead, missingHead, 42),
     /pull request #42 changed during collection/,
   );
   for (const field of [
@@ -1167,20 +1216,90 @@ test("fails open PR collection closed when its metadata snapshot changes", () =>
     const malformed = structuredClone(initial);
     delete malformed[field];
     assert.throws(
-      () => assertOpenPullRequestSnapshotStable(malformed, malformed, 42),
+      () => assertPullRequestSnapshotStable(malformed, malformed, 42),
       /pull request #42 changed during collection/,
     );
   }
   for (const malformed of [
     { ...structuredClone(initial), updated_at: "invalid" },
+    { ...structuredClone(initial), updated_at: 0 },
     { ...structuredClone(initial), comments: -1 },
     { ...structuredClone(initial), review_comments: 1.5 },
     { ...structuredClone(initial), commits: "4" },
   ]) {
     assert.throws(
-      () => assertOpenPullRequestSnapshotStable(malformed, malformed, 42),
+      () => assertPullRequestSnapshotStable(malformed, malformed, 42),
       /pull request #42 changed during collection/,
     );
+  }
+});
+
+test("fails PR collection closed when an evidence surface changes", () => {
+  const head = "a".repeat(40);
+  const snapshot = {
+    issueComments: { items: [{ id: 1, body: "original" }] },
+    reviews: { items: [{ id: 2, body: "original", state: "COMMENTED" }] },
+    reviewComments: {
+      items: [{ id: 3, body: "original", in_reply_to_id: 2 }],
+    },
+    timeline: { items: [{ node_id: "T1", event: "commented" }] },
+    commits: { items: [{ sha: head }] },
+  };
+  assert.deepEqual(
+    assertEvidenceSnapshotStable(snapshot, structuredClone(snapshot), 42),
+    snapshot,
+  );
+  const mutations = [
+    ["issueComments", (item) => (item.body = "edited")],
+    ["reviews", (item) => (item.body = "edited")],
+    ["reviews", (item) => (item.state = "CHANGES_REQUESTED")],
+    ["reviewComments", (item) => (item.body = "edited reply")],
+    ["reviewComments", (item) => (item.in_reply_to_id = 4)],
+    ["timeline", (item) => (item.event = "committed")],
+    ["commits", (item) => (item.sha = "b".repeat(40))],
+  ];
+  const directory = mkdtempSync(join(tmpdir(), "review-metrics-snapshot-"));
+  const metadata = {
+    number: 42,
+    state: "open",
+    merged_at: null,
+    head: { sha: head },
+    updated_at: "2026-09-01T00:00:00Z",
+    comments: 1,
+    review_comments: 1,
+    commits: 1,
+  };
+  const states = [
+    ["open", metadata],
+    [
+      "merged",
+      {
+        ...metadata,
+        state: "closed",
+        merged_at: "2026-09-01T00:00:00Z",
+      },
+    ],
+    ["closed-unmerged", { ...metadata, state: "closed" }],
+  ];
+  try {
+    for (const [state, pr] of states) {
+      for (const [surface, mutate] of mutations) {
+        const changed = structuredClone(snapshot);
+        mutate(changed[surface].items[0]);
+        const output = join(directory, `${state}-${surface}.json`);
+        assert.throws(
+          () => {
+            assertPullRequestSnapshotStable(pr, structuredClone(pr), 42);
+            assertEvidenceSnapshotStable(snapshot, changed, 42);
+            writeReportFile(output, "{}\n");
+          },
+          new RegExp(`pull request #42 ${surface} changed during collection`),
+        );
+        assert.equal(existsSync(output), false);
+      }
+    }
+  } finally {
+    rmSync(directory, { recursive: true });
   }
 });
 
@@ -4181,11 +4300,14 @@ test("ignores Markdown code blocks and block-quoted finding examples", () => {
 });
 
 test("attributes only canonical Claude GitHub Actions reviews", () => {
+  const head = "a".repeat(40);
   const value = structuredClone(fixture);
   value.issueComments = [
     {
       id: 404,
       user: { login: "github-actions[bot]", type: "Bot" },
+      created_at: "2026-09-01T00:00:30Z",
+      updated_at: "2026-09-01T00:00:30Z",
       body: [
         "**Claude finished @maintainer's task in 2m 0s** —— [View job](https://github.com/example/repo/actions/runs/123456)",
         "### Claude finished the review",
@@ -4213,6 +4335,44 @@ test("attributes only canonical Claude GitHub Actions reviews", () => {
     },
   ];
 
+  assert.equal(
+    summarizeFixture(value).evidence.byBot.claude.surfaces.issue_comments
+      .records,
+    0,
+  );
+  let fetches = 0;
+  verifyClaudeActionsEvidence([value.issueComments, [], []], {
+    repo: "example/repo",
+    prNumber: 42,
+    prUrl: "https://github.com/example/repo/pull/42",
+    fetchRun: (runId) => {
+      fetches += 1;
+      assert.equal(runId, "123456");
+      return {
+        id: 123456,
+        workflow_id: 77,
+        run_attempt: 1,
+        repository: { full_name: "example/repo" },
+        head_repository: { full_name: "example/repo" },
+        head_branch: "feature",
+        path: ".github/workflows/claude.yml@main",
+        event: "pull_request",
+        actor: { login: "maintainer" },
+        status: "completed",
+        conclusion: "success",
+        pull_requests: [{ number: 42 }],
+        head_sha: head,
+        created_at: "2026-09-01T00:00:00Z",
+        run_started_at: "2026-09-01T00:00:00Z",
+        updated_at: "2026-09-01T00:01:00Z",
+      };
+    },
+    headRepository: "example/repo",
+    headRef: "feature",
+    headShas: [head],
+    verifiedAt: "2026-09-01T00:01:01Z",
+  });
+  assert.equal(fetches, 2);
   const summary = summarizeFixture(value);
   assert.deepEqual(
     summary.evidence.byBot.claude.surfaces.issue_comments.evidence.map(
@@ -4222,6 +4382,433 @@ test("attributes only canonical Claude GitHub Actions reviews", () => {
   );
   assert.equal(summary.botReviewSignals.claudeSummaryComments, 1);
   assert.equal(summary.botReviewSignals.topLevelReviewBotComments, 1);
+});
+
+test("binds shared GitHub Actions evidence to the Claude workflow run", () => {
+  const head = "a".repeat(40);
+  const ordinaryHistoricalHead = "b".repeat(40);
+  const previousHead = "c".repeat(40);
+  const body = [
+    "**Claude finished @maintainer's task in 1m 0s** —— [View job](https://github.com/example/repo/actions/runs/222)",
+    "### Claude finished the review",
+    "[P1] Preserve the provenance boundary.",
+  ].join("\n\n");
+  const value = structuredClone(fixture);
+  value.issueComments = [
+    {
+      id: 501,
+      user: { login: "github-actions[bot]", type: "Bot" },
+      body,
+      created_at: "2026-09-01T00:00:30Z",
+      updated_at: "2026-09-01T00:00:30Z",
+    },
+  ];
+  value.reviews = [
+    {
+      id: 502,
+      user: { login: "github-actions[bot]", type: "Bot" },
+      body,
+      state: "COMMENTED",
+      submitted_at: "2026-09-01T00:00:30Z",
+    },
+  ];
+  value.reviewComments = [
+    {
+      id: 503,
+      user: { login: "github-actions[bot]", type: "Bot" },
+      body,
+      created_at: "2026-09-01T00:00:30Z",
+      updated_at: "2026-09-01T00:00:30Z",
+    },
+  ];
+  const canonicalRun = {
+    id: 222,
+    workflow_id: 77,
+    run_attempt: 1,
+    repository: { full_name: "example/repo" },
+    head_repository: { full_name: "example/repo" },
+    head_branch: "feature",
+    path: ".github/workflows/claude.yml@main",
+    event: "pull_request",
+    actor: { login: "maintainer" },
+    status: "completed",
+    conclusion: "success",
+    pull_requests: [],
+    head_sha: head,
+    created_at: "2026-09-01T00:00:00Z",
+    run_started_at: "2026-09-01T00:00:00Z",
+    updated_at: "2026-09-01T00:01:00Z",
+  };
+  let headLookups = 0;
+  const options = {
+    repo: "example/repo",
+    prNumber: 42,
+    prUrl: "https://github.com/example/repo/pull/42",
+    headRepository: "example/repo",
+    headRef: "feature",
+    headShas: [head],
+    verifiedAt: "2026-09-01T00:01:01Z",
+    fetchPullRequestsByHead: (owner, headRef) => {
+      headLookups += 1;
+      assert.equal(owner, "example");
+      assert.equal(headRef, "feature");
+      return [
+        {
+          number: 42,
+          base: { repo: { full_name: "example/repo" } },
+          head: {
+            ref: "feature",
+            repo: { full_name: "example/repo" },
+          },
+        },
+      ];
+    },
+  };
+  const unrelated = structuredClone(value);
+  verifyClaudeActionsEvidence(
+    [unrelated.issueComments, unrelated.reviews, unrelated.reviewComments],
+    {
+      ...options,
+      fetchRun: () => ({
+        ...structuredClone(canonicalRun),
+        path: ".github/workflows/ci.yml",
+      }),
+    },
+  );
+  const unrelatedSummary = summarizeFixture(unrelated);
+  for (const surface of [
+    "issue_comments",
+    "review_submissions",
+    "review_comments",
+  ]) {
+    assert.equal(
+      unrelatedSummary.evidence.byBot.claude.surfaces[surface].records,
+      0,
+    );
+  }
+  assert.equal(unrelatedSummary.botReviewSignals.claudeSummaryComments, 0);
+  assert.equal(unrelatedSummary.botReviewSignals.topLevelReviewBotComments, 0);
+
+  const verified = structuredClone(value);
+  let fetches = 0;
+  verifyClaudeActionsEvidence(
+    [verified.issueComments, verified.reviews, verified.reviewComments],
+    {
+      ...options,
+      fetchRun: () => {
+        fetches += 1;
+        return structuredClone(canonicalRun);
+      },
+      beforeFinalize: () => {
+        assert.equal(
+          summarizeFixture(verified).evidence.byBot.claude.surfaces
+            .issue_comments.records,
+          0,
+        );
+      },
+    },
+  );
+  assert.equal(fetches, 2);
+  assert.equal(headLookups, 2);
+  const verifiedSummary = summarizeFixture(verified);
+  for (const surface of [
+    "issue_comments",
+    "review_submissions",
+    "review_comments",
+  ]) {
+    assert.equal(
+      verifiedSummary.evidence.byBot.claude.surfaces[surface].records,
+      1,
+    );
+    assert.equal(
+      verifiedSummary.evidence.byBot.claude.surfaces[surface].findings,
+      1,
+    );
+  }
+  assert.deepEqual(
+    verifiedSummary.evidence.byBot.claude.surfaces.issue_comments.evidence[0]
+      .attributionProof,
+    {
+      type: "claude_github_actions_run",
+      runId: "222",
+      runUrl: "https://github.com/example/repo/actions/runs/222",
+      workflowId: 77,
+      workflowPath: ".github/workflows/claude.yml@main",
+      runAttempt: 1,
+      event: "pull_request",
+      actor: "maintainer",
+      repository: "example/repo",
+      headRepository: "example/repo",
+      headRef: "feature",
+      headSha: head,
+      status: "completed",
+      conclusion: "success",
+      runStartedAt: "2026-09-01T00:00:00Z",
+      runCompletedAt: "2026-09-01T00:01:00Z",
+      pullRequestAssociation: {
+        type: "unique_owner_head_lookup",
+        pullRequest: 42,
+        head: "example:feature",
+      },
+      verifiedAt: "2026-09-01T00:01:01Z",
+    },
+  );
+
+  const forcePushTimeline = enrichTimelineForcePushes(
+    [
+      {
+        event: "committed",
+        node_id: "C1",
+        sha: ordinaryHistoricalHead,
+      },
+      {
+        event: "committed",
+        node_id: "C2",
+        sha: previousHead,
+      },
+      {
+        event: "head_ref_force_pushed",
+        node_id: "FP1",
+        created_at: "2026-09-01T00:02:00Z",
+        commit_id: head,
+      },
+    ],
+    [
+      {
+        nodeId: "FP1",
+        createdAt: "2026-09-01T00:02:00Z",
+        beforeHead: previousHead,
+        afterHead: head,
+      },
+    ],
+  );
+  assert.equal(forcePushTimeline.complete, true);
+  const historicalHeads = pullRequestEvidenceHeads(
+    { head: { sha: head } },
+    [{ sha: head }],
+    forcePushTimeline.items,
+  );
+  const historical = structuredClone(value);
+  verifyClaudeActionsEvidence(
+    [historical.issueComments, historical.reviews, historical.reviewComments],
+    {
+      ...options,
+      headShas: historicalHeads,
+      fetchRun: () => ({
+        ...structuredClone(canonicalRun),
+        head_sha: previousHead,
+      }),
+    },
+  );
+  assert.equal(
+    summarizeFixture(historical).evidence.byBot.claude.surfaces.issue_comments
+      .records,
+    1,
+  );
+  const ordinaryHistorical = structuredClone(value);
+  verifyClaudeActionsEvidence(
+    [
+      ordinaryHistorical.issueComments,
+      ordinaryHistorical.reviews,
+      ordinaryHistorical.reviewComments,
+    ],
+    {
+      ...options,
+      headShas: historicalHeads,
+      fetchRun: () => ({
+        ...structuredClone(canonicalRun),
+        head_sha: ordinaryHistoricalHead,
+      }),
+    },
+  );
+  assert.equal(
+    summarizeFixture(ordinaryHistorical).evidence.byBot.claude.surfaces
+      .issue_comments.records,
+    1,
+  );
+
+  for (const changedRun of [
+    {
+      ...structuredClone(canonicalRun),
+      repository: { full_name: "other/repo" },
+    },
+    {
+      ...structuredClone(canonicalRun),
+      head_repository: { full_name: "other/repo" },
+    },
+    { ...structuredClone(canonicalRun), head_branch: "other-feature" },
+    { ...structuredClone(canonicalRun), actor: { login: "other" } },
+    { ...structuredClone(canonicalRun), pull_requests: [{ number: 41 }] },
+    {
+      ...structuredClone(canonicalRun),
+      pull_requests: [{ number: 42 }, { number: 41 }],
+    },
+    { ...structuredClone(canonicalRun), event: "issue_comment" },
+    { ...structuredClone(canonicalRun), event: "pull_request_review" },
+    {
+      ...structuredClone(canonicalRun),
+      event: "pull_request_review_comment",
+    },
+    { ...structuredClone(canonicalRun), head_sha: "b".repeat(40) },
+    { ...structuredClone(canonicalRun), conclusion: "failure" },
+    { ...structuredClone(canonicalRun), updated_at: "2026-09-01T00:00:20Z" },
+  ]) {
+    const rejected = structuredClone(value);
+    verifyClaudeActionsEvidence(
+      [rejected.issueComments, rejected.reviews, rejected.reviewComments],
+      { ...options, fetchRun: () => changedRun },
+    );
+    assert.equal(
+      summarizeFixture(rejected).evidence.byBot.claude.surfaces.issue_comments
+        .records,
+      0,
+    );
+  }
+  for (const pullRequests of [
+    [],
+    [
+      {
+        number: 42,
+        base: { repo: { full_name: "example/repo" } },
+        head: {
+          ref: "feature",
+          repo: { full_name: "example/repo" },
+        },
+      },
+      {
+        number: 43,
+        base: { repo: { full_name: "example/repo" } },
+        head: {
+          ref: "feature",
+          repo: { full_name: "example/repo" },
+        },
+      },
+    ],
+    [
+      {
+        number: 42,
+        base: { repo: { full_name: "example/repo" } },
+        head: {
+          ref: "other-feature",
+          repo: { full_name: "example/repo" },
+        },
+      },
+    ],
+  ]) {
+    const rejected = structuredClone(value);
+    verifyClaudeActionsEvidence(
+      [rejected.issueComments, rejected.reviews, rejected.reviewComments],
+      {
+        ...options,
+        fetchRun: () => structuredClone(canonicalRun),
+        fetchPullRequestsByHead: () => structuredClone(pullRequests),
+      },
+    );
+    assert.equal(
+      summarizeFixture(rejected).evidence.byBot.claude.surfaces.issue_comments
+        .records,
+      0,
+    );
+  }
+  let snapshotReads = 0;
+  const changedHeadLookup = structuredClone(value);
+  assert.throws(
+    () =>
+      verifyClaudeActionsEvidence(
+        [
+          changedHeadLookup.issueComments,
+          changedHeadLookup.reviews,
+          changedHeadLookup.reviewComments,
+        ],
+        {
+          ...options,
+          fetchRun: () => structuredClone(canonicalRun),
+          fetchPullRequestsByHead: () => {
+            snapshotReads += 1;
+            return snapshotReads === 1
+              ? options.fetchPullRequestsByHead("example", "feature")
+              : [];
+          },
+        },
+      ),
+    /Claude Actions head lookup changed during collection/,
+  );
+  let runSnapshotReads = 0;
+  let outerSnapshotChecked = false;
+  const changedRunSnapshot = structuredClone(value);
+  assert.throws(
+    () =>
+      verifyClaudeActionsEvidence(
+        [
+          changedRunSnapshot.issueComments,
+          changedRunSnapshot.reviews,
+          changedRunSnapshot.reviewComments,
+        ],
+        {
+          ...options,
+          fetchRun: () => {
+            runSnapshotReads += 1;
+            return {
+              ...structuredClone(canonicalRun),
+              run_attempt: runSnapshotReads,
+            };
+          },
+          beforeFinalize: () => {
+            outerSnapshotChecked = true;
+          },
+        },
+      ),
+    /Claude Actions run 222 changed during collection/,
+  );
+  assert.equal(outerSnapshotChecked, true);
+  assert.equal(
+    summarizeFixture(changedRunSnapshot).evidence.byBot.claude.surfaces
+      .issue_comments.records,
+    0,
+  );
+  assert.throws(
+    () =>
+      verifyClaudeActionsEvidence(
+        [value.issueComments, value.reviews, value.reviewComments],
+        { ...options, fetchRun: () => null },
+      ),
+    /Claude Actions run 222 returned invalid metadata/,
+  );
+  assert.throws(
+    () =>
+      verifyClaudeActionsEvidence(
+        [value.issueComments, value.reviews, value.reviewComments],
+        {
+          ...options,
+          fetchRun: () => {
+            throw new Error("run not found");
+          },
+        },
+      ),
+    /run not found/,
+  );
+  const directory = mkdtempSync(join(tmpdir(), "review-metrics-run-"));
+  try {
+    const output = join(directory, "in-progress.json");
+    const pending = structuredClone(value);
+    assert.throws(() => {
+      verifyClaudeActionsEvidence(
+        [pending.issueComments, pending.reviews, pending.reviewComments],
+        {
+          ...options,
+          fetchRun: () => ({
+            ...structuredClone(canonicalRun),
+            status: "in_progress",
+            conclusion: null,
+          }),
+        },
+      );
+      writeReportFile(output, "{}\n");
+    }, /Claude Actions run 222 is not complete/);
+    assert.equal(existsSync(output), false);
+  } finally {
+    rmSync(directory, { recursive: true });
+  }
 });
 
 test("trusts request authors and proves exact-head markers from the timeline", () => {
@@ -5242,11 +5829,13 @@ test("scopes exact-head request deduplication to each pull request", () => {
 test("keeps every review-metrics source module under 600 physical lines", () => {
   const modules = [
     "review-process-metrics.mjs",
+    "review-process-metrics-actions.mjs",
     "review-process-metrics-core.mjs",
     "review-process-metrics-finding-classifier.mjs",
     "review-process-metrics-finding-preflight.mjs",
     "review-process-metrics-legacy.mjs",
     "review-process-metrics-markdown.mjs",
+    "review-process-metrics-output.mjs",
     "review-process-metrics-report.mjs",
     "review-process-metrics-signals.mjs",
     "review-process-metrics-timeline.mjs",
@@ -5266,10 +5855,20 @@ test("creates report files exclusively with private permissions", () => {
     writeFileSync(existing, "old\n", { mode: 0o644 });
     assert.throws(() => writeReportFile(existing, "new\n"), /EEXIST/);
     assert.equal(readFileSync(existing, "utf8"), "old\n");
+    assert.deepEqual(readdirSync(directory), ["existing.json"]);
+
+    const failed = join(directory, "failed.json");
+    assert.throws(() => writeReportFile(failed, Symbol("invalid output")));
+    assert.equal(existsSync(failed), false);
+    assert.deepEqual(readdirSync(directory), ["existing.json"]);
 
     const fresh = join(directory, "fresh.json");
     writeReportFile(fresh, "{}\n");
     assert.equal(statSync(fresh).mode & 0o777, 0o600);
+    assert.deepEqual(readdirSync(directory).sort(), [
+      "existing.json",
+      "fresh.json",
+    ]);
   } finally {
     rmSync(directory, { recursive: true });
   }

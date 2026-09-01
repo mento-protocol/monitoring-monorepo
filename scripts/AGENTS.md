@@ -61,7 +61,7 @@ feedback-runtime pins.
   0064's three-merge sequence.
 - **Gate routing pins.** Stubs require
   `$script_source_dir == $repo_root/scripts`.
-  `pr/review-process-metrics{,-{core,finding-{classifier,preflight},legacy,markdown,report,signals,timeline},.test}.mjs`
+  `pr/review-process-metrics{,-{actions,core,finding-{classifier,preflight},legacy,markdown,output,report,signals,timeline},.test}.mjs`
   and `pr/fixtures/review-process-metrics-coderabbit.json` have exact routes.
   `bootstrap/codex-cloud-setup.{sh,test.sh}` pair offline.
   `sentry/autofix/sentry-autofix-refused-inventory.mjs` routes

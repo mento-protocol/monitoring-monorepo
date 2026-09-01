@@ -33,8 +33,11 @@ export const REVIEW_BOT_KEYS = Object.freeze(
 const REVIEW_BOT_LOGINS = new Set(
   BOT_DEFINITIONS.flatMap(({ logins }) => [...logins]),
 );
+export const VERIFIED_CLAUDE_ACTIONS_EVIDENCE = Symbol(
+  "verified-claude-actions-evidence",
+);
 const CLAUDE_ACTIONS_HEADER =
-  /^\*\*Claude finished @[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})['’]s task(?: in \d+(?:h|m|s)(?:\s+\d+(?:h|m|s)){0,2})?\*\*/m;
+  /^\*\*Claude finished @([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))['’]s task(?: in \d+(?:h|m|s)(?:\s+\d+(?:h|m|s)){0,2})?\*\*/m;
 const CLAUDE_ACTIONS_RUN_LINK =
   /\[View job\]\((https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/actions\/runs\/[1-9]\d*(?:\/job\/[1-9]\d*)?)\)/i;
 const CLAUDE_REVIEW_STRUCTURE =
@@ -97,24 +100,31 @@ function githubRepositoryFromUrl(value) {
   }
 }
 
-function isCanonicalClaudeActionsReviewBody(value, prUrl) {
-  const body = String(value ?? "");
+export function claudeActionsRunEvidence(
+  value,
+  prUrl = value?.html_url ?? value?.url,
+) {
+  const body = String(value?.body ?? "");
+  const header = body.match(CLAUDE_ACTIONS_HEADER);
   const runUrl = body.match(CLAUDE_ACTIONS_RUN_LINK)?.[1] ?? null;
   const prRepository = githubRepositoryFromUrl(prUrl);
-  return (
+  const runId = /\/actions\/runs\/([1-9]\d*)/i.exec(runUrl ?? "")?.[1];
+  return isKnownLogin(authorLogin(value), GITHUB_ACTIONS_BOT_LOGINS) &&
     prRepository !== null &&
-    CLAUDE_ACTIONS_HEADER.test(body) &&
+    header &&
     githubRepositoryFromUrl(runUrl) === prRepository &&
-    CLAUDE_REVIEW_STRUCTURE.test(body)
-  );
+    CLAUDE_REVIEW_STRUCTURE.test(body) &&
+    runId
+    ? { runId, runUrl, actorLogin: header[1].toLowerCase() }
+    : null;
 }
 
 export function isClaudeEvidence(value, prUrl = value?.html_url ?? value?.url) {
-  const login = authorLogin(value);
   return (
-    isClaudeBotLogin(login) ||
-    (isKnownLogin(login, GITHUB_ACTIONS_BOT_LOGINS) &&
-      isCanonicalClaudeActionsReviewBody(value?.body, prUrl))
+    isClaudeBotLogin(authorLogin(value)) ||
+    (value?.[VERIFIED_CLAUDE_ACTIONS_EVIDENCE]?.type ===
+      "claude_github_actions_run" &&
+      claudeActionsRunEvidence(value, prUrl) !== null)
   );
 }
 
@@ -211,6 +221,8 @@ export function baseEvidence(
   value,
   { prUrl, surface, finding = false, findingSignal = null },
 ) {
+  const attributionProof = value?.[VERIFIED_CLAUDE_ACTIONS_EVIDENCE] ?? null;
+  const hasProof = attributionProof?.type === "claude_github_actions_run";
   return {
     id: String(value.id ?? value.node_id ?? "unknown"),
     url: evidenceUrl(value, prUrl),
@@ -223,6 +235,7 @@ export function baseEvidence(
     path: value.path ?? null,
     finding,
     ...(findingSignal === null ? {} : { findingSignal }),
+    ...(hasProof ? { attributionProof } : {}),
     excerpt: normalizedExcerpt(value.body),
   };
 }

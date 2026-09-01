@@ -1,4 +1,94 @@
+import { isDeepStrictEqual } from "node:util";
+
 const FULL_SHA_PATTERN = /^[0-9a-f]{40}$/i;
+const GIT_OBJECT_ID = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/i;
+const EVIDENCE_SURFACES = [
+  "issueComments",
+  "reviews",
+  "reviewComments",
+  "timeline",
+  "commits",
+];
+
+export function assertPullRequestMetadata(
+  pr,
+  number,
+  { requireMerged = false } = {},
+) {
+  if (pr?.number !== number) {
+    throw new Error(`pull request metadata mismatch for #${number}`);
+  }
+  if (pr.state !== "open" && pr.state !== "closed") {
+    throw new Error(`pull request #${number} has invalid state metadata`);
+  }
+  const mergedAt = pr.merged_at;
+  if (
+    mergedAt !== null &&
+    (typeof mergedAt !== "string" || !Number.isFinite(Date.parse(mergedAt)))
+  ) {
+    throw new Error(`pull request #${number} has invalid merged_at metadata`);
+  }
+  if (pr.state === "open" && mergedAt !== null) {
+    throw new Error(`pull request #${number} has inconsistent open metadata`);
+  }
+  if (requireMerged && mergedAt === null) {
+    throw new Error(`pull request #${number} is not merged`);
+  }
+  return pr;
+}
+
+export function assertPullRequestSnapshotStable(initial, final, number) {
+  assertPullRequestMetadata(initial, number);
+  assertPullRequestMetadata(final, number);
+  const countFields = ["comments", "review_comments", "commits"];
+  const countsAreStable = countFields.every(
+    (field) =>
+      Number.isSafeInteger(initial[field]) &&
+      initial[field] >= 0 &&
+      Number.isSafeInteger(final[field]) &&
+      final[field] >= 0 &&
+      initial[field] === final[field],
+  );
+  const initialUpdatedAt =
+    typeof initial.updated_at === "string"
+      ? Date.parse(initial.updated_at)
+      : Number.NaN;
+  const finalUpdatedAt =
+    typeof final.updated_at === "string"
+      ? Date.parse(final.updated_at)
+      : Number.NaN;
+  if (
+    initial.state !== final.state ||
+    initial.merged_at !== final.merged_at ||
+    initial.html_url !== final.html_url ||
+    !GIT_OBJECT_ID.test(initial.head?.sha ?? "") ||
+    initial.head.sha !== final.head?.sha ||
+    initial.head?.repo?.full_name !== final.head?.repo?.full_name ||
+    initial.head?.ref !== final.head?.ref ||
+    !Number.isFinite(initialUpdatedAt) ||
+    !Number.isFinite(finalUpdatedAt) ||
+    initialUpdatedAt !== finalUpdatedAt ||
+    !countsAreStable
+  ) {
+    throw new Error(`pull request #${number} changed during collection`);
+  }
+  return final;
+}
+
+export function assertEvidenceSnapshotStable(initial, final, number) {
+  for (const surface of EVIDENCE_SURFACES) {
+    if (
+      !Array.isArray(initial?.[surface]?.items) ||
+      !Array.isArray(final?.[surface]?.items) ||
+      !isDeepStrictEqual(initial[surface].items, final[surface].items)
+    ) {
+      throw new Error(
+        `pull request #${number} ${surface} changed during collection`,
+      );
+    }
+  }
+  return final;
+}
 
 function normalizedOid(value) {
   return typeof value === "string" && FULL_SHA_PATTERN.test(value)

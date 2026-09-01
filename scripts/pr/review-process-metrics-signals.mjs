@@ -168,6 +168,23 @@ function normalizedFullSha(value) {
   return FULL_SHA_PATTERN.test(text) ? text.toLowerCase() : null;
 }
 
+export function pullRequestEvidenceHeads(pr, commits, timeline) {
+  const committedHeads = timeline
+    .filter(({ event }) => event === "committed")
+    .map(({ sha }) => normalizedFullSha(sha));
+  const forcePushHeads = timeline.flatMap((event) => {
+    if (event?.event !== "head_ref_force_pushed") return [];
+    const proof = provenForcePush(event);
+    return proof.reason === null ? [proof.beforeHead, proof.afterHead] : [];
+  });
+  return [
+    normalizedFullSha(pr.head?.sha),
+    ...commits.map(({ sha }) => normalizedFullSha(sha)),
+    ...committedHeads,
+    ...forcePushHeads,
+  ].filter(Boolean);
+}
+
 function evidenceTimestamp(value) {
   if (
     typeof value !== "string" ||
