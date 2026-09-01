@@ -312,12 +312,26 @@ export const addPegRegistryIntegrityCheck = (plan, reason, facts) => {
   // the tip while the stamp binds only the merge-base, so an advance of the
   // base could skip a lineage check whose answer had just changed.
   //
-  // The ref, not `facts.baseOid`, for the same reason the ADR reminder takes
-  // one: this argument has to resolve, and the OID carries an
-  // `__unresolved__:` sentinel when the gate could not resolve it.
+  // Pass the RESOLVED OID when there is one. The validator's `validateGitRef`
+  // admits only `[A-Za-z0-9._/-]+`, which rejects spellings the gate itself
+  // accepts — `HEAD~1`, and any ref carrying a quote — and every peg plan would
+  // then fail before validating anything. A hex OID always satisfies that
+  // allowlist, so sending it spares the gate from mirroring a regex that lives
+  // in another script and could tighten without warning. It also pins the base
+  // the gate measured, so a fetch landing mid-run cannot move the comparison.
+  //
+  // Fall back to the ref only for the `__unresolved__:` sentinel, which is not
+  // a rev the validator could use. That path stays fail-closed: an unresolvable
+  // ref makes `readPolicyFromGit` throw `cannot resolve policy base ref`, and a
+  // spelling outside the allowlist throws `invalid policy base ref`. Neither
+  // silently skips the lineage check — the no-baseline return is reserved for a
+  // ref that DOES resolve but does not yet carry the policy file.
+  const baseOid = facts.baseOid;
+  const resolved =
+    typeof baseOid === "string" && !baseOid.startsWith("__unresolved__:");
   const command =
     "node scripts/alerts/check-peg-registry-integrity.mjs" +
-    ` --base-ref ${shellQuote(facts.baseRef)}`;
+    ` --base-ref ${shellQuote(resolved ? baseOid : facts.baseRef)}`;
   plan.addCommand(command, reason);
 };
 

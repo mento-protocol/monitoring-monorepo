@@ -2886,8 +2886,9 @@ with `--all` because plain `git merge-base` prints one unspecified pick from
 the several, which would bind rather than fail closed. A plan that can **observe** the base tip keeps tip binding:
 `react-doctor:diff` bakes the resolved base OID into its Turbo cache key,
 `check-adr-reminder.mjs` takes `--base <ref>` and resolves it when it runs, and
-`check-peg-registry-integrity.mjs` takes `--base-ref <ref>` and reads the
-previous peg policy out of that ref's tip, so
+`check-peg-registry-integrity.mjs` takes `--base-ref` — the resolved base OID,
+because that validator's own allowlist rejects ref spellings the gate accepts —
+and reads the previous peg policy out of that commit, so
 the gate asks whether the plan text names the base at all rather than carrying a
 list of such commands — a future verb that passes the base down inherits tip
 binding on its own, and a false positive costs only the stricter binding. Two
@@ -2896,7 +2897,10 @@ short marker list for them: `docs:navigation-eval -- --validate` tests ancestry
 against `refs/remotes/origin/main`, and the autoreview suite reads
 protected-main checklist blobs at `origin/main^{commit}`. Both mean the DEFAULT
 branch rather than the gate's base, so they are listed instead of being handed
-`--base`; a listed command only ever gets the stricter binding. The
+`--base`; a listed command only ever gets the stricter binding. A marker match
+also binds `+default-branch:<oid>` as a second component, because on a stacked
+PR the base tip and the merge-base hold still while `origin/main` advances —
+and that advance is what changes these commands' answers. The
 binding kind is part of the field, so a tip-bound and a merge-base-bound stamp
 cannot be read as each other on a branch whose base has not advanced. A stamp
 warmed before a rebase is not reused after it, because a rebase moves the

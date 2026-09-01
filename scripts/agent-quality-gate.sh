@@ -7457,22 +7457,6 @@ gate_command_plan_reads_base() {
   # binding, so an unreadable plan can never buy a wider reuse window.
   [[ -f "$plan_file" ]] || return 0
   [[ -n "$base_ref" && -n "$base_tip" ]] || return 0
-  # The markers below name two commands that read a branch tip WITHOUT naming
-  # it in their own text, so nothing structural can see them. The autoreview
-  # suite gets both of its spellings, which share a plan dedupe key:
-  #
-  #   * `docs:navigation-eval -- --validate` tests whether a scored commit is
-  #     an ancestor of `refs/remotes/origin/main`
-  #     (scripts/docs/docs-navigation-eval-result.mjs, DEFAULT_BRANCH_REF).
-  #   * the autoreview suite reads protected-main checklist blobs at
-  #     `origin/main^{commit}` (scripts/agent-autoreview.test.sh).
-  #
-  # Both resolve the DEFAULT branch on purpose. That is a different thing from
-  # the gate's base ref and must not be replaced by it, which is why they are
-  # listed rather than fixed at the emitter. Where a command's base IS the
-  # gate's base, make its verb name it instead — see
-  # `add_peg_registry_integrity_check`. Listing a command here only ever makes
-  # the binding STRICTER, so a stale entry costs a re-run, never a missed check.
   # The plan carries the `printf %q` SPELLING of the base, not its raw text:
   # every verb that names the base interpolates it through `shellQuote`
   # (scripts/gate/mapping/shell-quote.mjs), which exists to reproduce
@@ -7489,9 +7473,6 @@ gate_command_plan_reads_base() {
   grep -qF \
     -e "$base_ref" -e "$quoted_base_ref" \
     -e "$base_tip" -e "$quoted_base_tip" \
-    -e 'docs:navigation-eval -- --validate' \
-    -e 'scripts/agent-autoreview.test.sh' \
-    -e 'agent:autoreview:test' \
     -- "$plan_file" || st=$?
   # 0 names the base, 1 does not. Any other status is a grep failure rather
   # than an answer, so it must not reach the merge-base branch.
@@ -7499,17 +7480,73 @@ gate_command_plan_reads_base() {
   return 0
 }
 
+# The markers below name two commands that read the DEFAULT branch's tip
+# WITHOUT naming any ref in their own text, so nothing structural can see them.
+# The autoreview suite gets both of its spellings, which share a plan dedupe
+# key:
+#
+#   * `docs:navigation-eval -- --validate` tests whether a scored commit is an
+#     ancestor of `refs/remotes/origin/main`
+#     (scripts/docs/docs-navigation-eval-result.mjs, DEFAULT_BRANCH_REF).
+#   * the autoreview suite reads protected-main checklist blobs at
+#     `origin/main^{commit}` (scripts/agent-autoreview.test.sh).
+#
+# Both mean the default branch on purpose, which is NOT the gate's base: on a
+# stacked PR the base is the parent branch while these still read `origin/main`.
+# Binding the base tip for them would therefore miss exactly the advance that
+# changes their answer, so the caller binds the default branch's own OID as a
+# separate stamp component. Where a command's base IS the gate's base, make its
+# verb name it instead — see `add_peg_registry_integrity_check`.
+gate_command_plan_reads_default_branch() {
+  local plan_file="$1"
+  local st=0
+  # Same fail-closed shape as the predicate above: anything unexpected answers
+  # "yes", which only ever adds a component and narrows reuse.
+  [[ -f "$plan_file" ]] || return 0
+  grep -qF \
+    -e 'docs:navigation-eval -- --validate' \
+    -e 'scripts/agent-autoreview.test.sh' \
+    -e 'agent:autoreview:test' \
+    -- "$plan_file" || st=$?
+  [[ "$st" -eq 1 ]] && return 1
+  return 0
+}
+
+# The ref both marker commands resolve. `docs-navigation-eval-result.mjs` calls
+# it DEFAULT_BRANCH_REF; keep the two spellings in step.
+gate_default_branch_ref="refs/remotes/origin/main"
+
 gate_stamp_base_binding() {
   local plan_file="$1"
   local base_tip="$2"
   local merge_base
+  local suffix=""
+  local reads_default_branch=0
+  # A plan that reads the DEFAULT branch binds that branch's OID as its own
+  # component. It cannot ride on the base component: the two are different refs
+  # whenever `--base` is not `origin/main`, and on a stacked PR only this
+  # component moves when `origin/main` advances — which is precisely the advance
+  # that changes these commands' answers. `ref_oid` keeps its `__unresolved__:`
+  # sentinel on failure, and that sentinel differs from every OID, so a default
+  # branch that is absent and later appears still busts the stamp.
+  #
+  # Such a plan ALSO keeps tip binding below. Binding the base tip is not
+  # required by anything measured here, but it is strictly stricter, and the
+  # autoreview marker's runtime behaviour was established by reading its source
+  # rather than by running it. The narrower binding is not worth that gap for
+  # two commands this rare.
+  if gate_command_plan_reads_default_branch "$plan_file"; then
+    reads_default_branch=1
+    suffix="+default-branch:$(ref_oid "$gate_default_branch_ref")"
+  fi
   if [[ -z "$base_ref" || -z "$head_ref" || -z "$base_tip" ]] ||
     [[ "$base_tip" == __unresolved__:* ]]; then
-    printf 'tip:%s\n' "$base_tip"
+    printf 'tip:%s%s\n' "$base_tip" "$suffix"
     return 0
   fi
-  if gate_command_plan_reads_base "$plan_file" "$base_tip"; then
-    printf 'tip:%s\n' "$base_tip"
+  if [[ "$reads_default_branch" -eq 1 ]] ||
+    gate_command_plan_reads_base "$plan_file" "$base_tip"; then
+    printf 'tip:%s%s\n' "$base_tip" "$suffix"
     return 0
   fi
   # `--all` is load-bearing. Plain `git merge-base A B` prints exactly ONE OID
@@ -7522,10 +7559,10 @@ gate_stamp_base_binding() {
   # A single full OID and nothing else. Bash matches this pattern against the
   # whole string with no newline handling, so any multi-line answer fails it.
   if [[ ! "$merge_base" =~ ^[a-f0-9]{40}([a-f0-9]{24})?$ ]]; then
-    printf 'tip:%s\n' "$base_tip"
+    printf 'tip:%s%s\n' "$base_tip" "$suffix"
     return 0
   fi
-  printf 'merge-base:%s\n' "$merge_base"
+  printf 'merge-base:%s%s\n' "$merge_base" "$suffix"
 }
 
 base_oid="$(ref_oid "$base_ref")"

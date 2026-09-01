@@ -253,14 +253,46 @@ test("the ADR reminder is fed the gate's own base, head and path set", () => {
 // is a tip reader in the same class as react-doctor and the ADR reminder. The
 // stamp's tip-reader predicate is textual, so the base has to appear in the
 // command or a merge-base-bound stamp could skip a check whose answer moved.
-test("the peg registry check is fed the gate's own base ref", () => {
+// It is fed the RESOLVED OID, not the ref: the validator's `validateGitRef`
+// admits only [A-Za-z0-9._/-]+, so a ref spelling the gate accepts but that
+// allowlist rejects would fail the whole plan. Hex always passes.
+test("the peg registry check is fed the gate's resolved base OID", () => {
   const plan = new Plan();
-  verbs.addPegRegistryIntegrityCheck(plan, "r", stubFacts());
+  const facts = stubFacts();
+  verbs.addPegRegistryIntegrityCheck(plan, "r", facts);
   const [command] = commandsOf(plan);
   assert.ok(
     command.startsWith("node scripts/alerts/check-peg-registry-integrity.mjs"),
   );
-  assert.ok(command.includes("--base-ref origin/main"));
+  assert.ok(command.includes(`--base-ref ${facts.baseOid}`));
+  assert.match(facts.baseOid, /^[a-f0-9]{40}$/);
+});
+
+// Only the sentinel falls back to the ref. That path is fail-closed downstream:
+// an unresolvable ref makes readPolicyFromGit throw rather than report "no
+// baseline", which it reserves for a ref that resolves without the policy file.
+test("an unresolved base OID falls back to the ref spelling", () => {
+  const plan = new Plan();
+  verbs.addPegRegistryIntegrityCheck(
+    plan,
+    "r",
+    stubFacts({ baseOid: "__unresolved__:origin/main" }),
+  );
+  assert.ok(commandsOf(plan)[0].includes("--base-ref origin/main"));
+});
+
+// The emitted text must move with the base, or a plan hash identical on both
+// sides of a fetch would hide a stale peg answer.
+test("the peg check's command text moves when the base OID moves", () => {
+  const commandFor = (baseOid) => {
+    const plan = new Plan();
+    verbs.addPegRegistryIntegrityCheck(plan, "r", stubFacts({ baseOid }));
+    return commandsOf(plan)[0];
+  };
+  assert.notEqual(
+    commandFor("1111111111111111111111111111111111111111"),
+    commandFor("2222222222222222222222222222222222222222"),
+  );
 });
 
 // A future arm spelling this check as a bare `command:` string would read the
@@ -508,7 +540,7 @@ test("peg registry checks build shared-config before loading its exports", () =>
     // The form the verb actually emits. `commandConsumesWorkspaceConfig`
     // matches it through its `startsWith(script + " ")` branch; without that
     // the based check would run before shared-config was built.
-    "node scripts/alerts/check-peg-registry-integrity.mjs --base-ref origin/main",
+    "node scripts/alerts/check-peg-registry-integrity.mjs --base-ref 0123456789abcdef0123456789abcdef01234567",
     "node scripts/alerts/check-peg-registry-integrity.test.mjs",
   ]) {
     const plan = new Plan();

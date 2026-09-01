@@ -7217,9 +7217,14 @@ run_lockfile_scope_gate() {
     printf '%s' "$lockfile_scope_base_yaml" > pnpm-lock.yaml
     git add package.json pnpm-lock.yaml
     git commit -qm init
+    # This fixture's base resolves, so the peg check is emitted with the
+    # RESOLVED OID rather than the ref spelling. Hand it out so the assertion
+    # can pin the whole command instead of a prefix.
+    git rev-parse --verify HEAD > "$repo/head-oid"
     printf '%s' "$head_yaml" > pnpm-lock.yaml
     "$repo_root/scripts/agent-quality-gate.sh" --base HEAD > "$output_file"
   )
+  lockfile_scope_head_oid="$(cat "$repo/head-oid")"
   rm -rf "$repo"
 }
 
@@ -7248,7 +7253,7 @@ packages:
 assert_contains "- pnpm skew:check (lockfile change scoped to importers)"
 assert_contains "- pnpm lockfile:lint (lockfile change scoped to importers)"
 assert_contains "- pnpm --filter @mento-protocol/metrics-bridge test:coverage (lockfile importer metrics-bridge changed (coverage floor))"
-assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs --base-ref HEAD (root lockfile changed (peg registry authority dependency))"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs --base-ref $lockfile_scope_head_oid (root lockfile changed (peg registry authority dependency))"
 assert_not_contains "cd aegis && forge test"
 assert_not_contains "@mento-protocol/integration-probes test:coverage"
 assert_not_contains "workspace dependency/config changed (coverage floor)"
@@ -7761,7 +7766,7 @@ run_gate "metrics-bridge/src/peg/metrics.ts"
 assert_contains "- pnpm alerts:rules:lint (metrics-bridge gauge registry changed (alerts cross-check))"
 
 run_gate "metrics-bridge/peg-registry.json"
-assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs --base-ref HEAD (peg registry changed)"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs --base-ref origin/test (peg registry changed)"
 
 run_gate "metrics-bridge/src/rpc.ts"
 assert_contains "- docs/pr-checklists/terraform-cloudrun.md (metrics bridge Cloud Run runtime changed)"
@@ -7981,7 +7986,7 @@ assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate node scripts/t
 assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules init -backend=false -input=false (alerts/rules Terraform changed)"
 assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate terraform -chdir=alerts/rules validate -no-color (alerts/rules Terraform changed)"
 assert_contains "- pnpm alerts:rules:lint (alerts/rules PromQL lint + metric cross-check)"
-assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs --base-ref HEAD (peg threshold policy changed)"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs --base-ref origin/test (peg threshold policy changed)"
 
 run_gate "alerts/rules/main.tf"
 assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate node scripts/terraform/terraform-fmt-check.mjs alerts/rules (alerts/rules Terraform changed)"
@@ -8174,7 +8179,7 @@ assert_contains "- pnpm --filter @mento-protocol/metrics-bridge typecheck (metri
 assert_contains "- pnpm --filter @mento-protocol/metrics-bridge test:coverage (metrics bridge build context changed (coverage floor))"
 
 run_gate "shared-config/deployment-namespaces.json"
-assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs --base-ref HEAD (peg registry authority input changed)"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs --base-ref origin/test (peg registry authority input changed)"
 assert_order \
   "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (shared-config vendored indexer fixture changed)" \
   "- pnpm indexer:testnet:codegen (shared-config vendored indexer fixture changed)"
@@ -8200,22 +8205,22 @@ assert_contains "- pnpm dashboard:size-limit (shared-config exports feed the das
 run_gate "shared-config/src/chains.ts"
 assert_contains "- pnpm --filter @mento-protocol/config test:coverage (shared-config changed (coverage floor))"
 assert_contains "- pnpm dashboard:size-limit (shared-config exports feed the dashboard bundle)"
-assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs --base-ref HEAD (peg registry authority input changed)"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs --base-ref origin/test (peg registry authority input changed)"
 # The cache key includes shared-config inputs for browser tests, but the local
 # gate still does not broaden shared-config-only edits into Playwright runs.
 assert_not_contains_mapped "- pnpm --filter @mento-protocol/ui-dashboard test:browser (shared-config exports feed the dashboard bundle)"
 
 run_gate "shared-config/oracle-reporters.json"
-assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs --base-ref HEAD (peg registry authority input changed)"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs --base-ref origin/test (peg registry authority input changed)"
 
 run_gate "shared-config/chain-metadata.json"
-assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs --base-ref HEAD (peg registry authority input changed)"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs --base-ref origin/test (peg registry authority input changed)"
 
 run_gate "shared-config/src/oracle-reporters.ts"
-assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs --base-ref HEAD (peg registry authority input changed)"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs --base-ref origin/test (peg registry authority input changed)"
 
 run_gate "shared-config/src/tokens.ts"
-assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs --base-ref HEAD (peg registry authority input changed)"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs --base-ref origin/test (peg registry authority input changed)"
 
 run_gate "shared-config/src/thresholds.ts"
 assert_contains "- node scripts/alerts/check-deviation-threshold-drift.mjs (shared deviation threshold source changed)"
@@ -10422,7 +10427,10 @@ STUB
   }
 
   pegbound_gate
-  grep -Fq -- "check-peg-registry-integrity.mjs --base-ref origin/main" \
+  # The base resolves here, so the check is emitted with the resolved OID: the
+  # validator's allowlist rejects ref spellings the gate accepts, and hex never
+  # trips it.
+  grep -Fq -- "check-peg-registry-integrity.mjs --base-ref ${pegbound_one}" \
     "$output_file" ||
     fail "the peg fixture did not schedule the peg check carrying its base ref"
   if grep -Fq -- "check-adr-reminder.mjs" "$output_file"; then
@@ -10529,6 +10537,10 @@ STUB
   done
   grep -q '^stamp=v3.*base=tip:[a-f0-9]\{40\}' "$stamp_file" ||
     fail "a plan carrying a listed tip-reading command did not keep tip binding"
+  # The default branch is bound as its own component, because it is a different
+  # ref from the base whenever `--base` is not `origin/main`.
+  grep -Fq -- "+default-branch:${markerbound_one}" "$stamp_file" ||
+    fail "a marker plan did not bind the default branch's own OID"
 
   # Negative control: the fixture must be able to reuse before the advance.
   markerbound_gate --skip-if-fresh
@@ -10546,6 +10558,104 @@ STUB
     fail "a listed tip-reading command reused its stamp across a tip advance"
 )
 rm -rf "$markerbound_stamp_repo"
+
+# The stacked-PR case, which is the whole reason the default branch is a
+# SEPARATE component. Here `--base` is a parent branch, so the base tip and the
+# merge-base both hold still while `origin/main` advances underneath — and
+# `origin/main` is exactly what the marker command reads. Binding only the base
+# would reuse the stamp and skip a check whose answer had changed.
+stackedmarker_stamp_repo="$(mktemp -d)"
+(
+  cd "$stackedmarker_stamp_repo"
+  git init -q
+  git config user.email test@example.invalid
+  git config user.name "Quality Gate Test"
+  mkdir -p docs/evals bin tools
+  printf '{ "cases": [] }\n' > docs/evals/documentation-navigation-baseline.json
+  cat > tools/trunk <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-} ${2:-}" == "daemon status" ]]; then
+  echo "✖ Daemon stopped"
+  exit 1
+fi
+counter_file="${COUNTER_FILE:?}"
+count=0
+if [[ -f "$counter_file" ]]; then
+  count="$(cat "$counter_file")"
+fi
+printf '%s\n' "$((count + 1))" > "$counter_file"
+STUB
+  cat > bin/node <<'STUB'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--input-type=module" ||
+  "${1:-}" == -e ||
+  "${1:-}" == -p ||
+  "${1:-}" == */quality-gate-coordinator.mjs ||
+  "${1:-}" == */quality-gate-coordinator-environment.mjs ]]; then
+  exec "${REAL_NODE:?}" "$@"
+fi
+case "${1:-}" in
+  *"/scripts/gate/mapping.mjs") exec "${REAL_NODE:?}" "$@" ;;
+esac
+exit 0
+STUB
+  cat > bin/pnpm <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+  chmod +x bin/node bin/pnpm tools/trunk
+  git add .
+  git commit -qm init
+  stackedmarker_root="$(git rev-parse --verify HEAD)"
+  # The stack: `origin/parent` is the gate's base, `origin/main` is the default
+  # branch the marker command reads. They start at the same commit so the
+  # advance below is the only difference between the two runs.
+  git update-ref refs/remotes/origin/parent "$stackedmarker_root"
+  git update-ref refs/remotes/origin/main "$stackedmarker_root"
+  printf '{ "cases": ["changed"] }\n' \
+    > docs/evals/documentation-navigation-baseline.json
+  counter="$stackedmarker_stamp_repo/.tmp/agent-quality-gate/trunk-count"
+  stamp_file="$stackedmarker_stamp_repo/.tmp/agent-quality-gate/last-success.stamp"
+
+  stackedmarker_gate() {
+    REAL_NODE="$(command -v node)" \
+      AGENT_QUALITY_GATE_COORDINATOR=0 \
+      COUNTER_FILE="$counter" \
+      PATH="$stackedmarker_stamp_repo/bin:$PATH" \
+      "$repo_root/scripts/agent-quality-gate.sh" \
+        --base origin/parent --run "$@" \
+        > "$output_file" 2>&1
+  }
+
+  stackedmarker_gate
+  grep -Fq -- "docs:navigation-eval -- --validate" "$output_file" ||
+    fail "the stacked fixture did not schedule the tip-reading navigation eval"
+  grep -Fq -- "+default-branch:${stackedmarker_root}" "$stamp_file" ||
+    fail "the stacked fixture did not bind the default branch"
+
+  # Negative control: the fixture must be able to reuse before the advance.
+  stackedmarker_gate --skip-if-fresh
+  [[ "$(cat "$counter")" == "1" ]] ||
+    fail "an exact repeat did not reuse the stacked fixture's fresh success"
+
+  # Advance ONLY the default branch. Same tree, so nothing the gate validates
+  # changes; the base ref and the merge-base are asserted unmoved below, which
+  # is what makes the re-run attributable to the default-branch component.
+  stackedmarker_main="$(git commit-tree \
+    "$(git rev-parse --verify "${stackedmarker_root}^{tree}")" \
+    -p "$stackedmarker_root" -m "default branch advance")"
+  git update-ref refs/remotes/origin/main "$stackedmarker_main"
+  [[ "$(git rev-parse --verify origin/parent)" == "$stackedmarker_root" ]] ||
+    fail "the stacked fixture moved the base tip it meant to hold still"
+  [[ "$(git merge-base origin/parent HEAD)" == "$stackedmarker_root" ]] ||
+    fail "the stacked fixture moved the merge-base it meant to hold still"
+  stackedmarker_gate --skip-if-fresh
+  [[ "$(cat "$counter")" == "2" ]] ||
+    fail "a default-branch advance reused a stamp whose marker command reads it"
+  grep -Fq -- "+default-branch:${stackedmarker_main}" "$stamp_file" ||
+    fail "the re-run did not rebind the advanced default branch"
+)
+rm -rf "$stackedmarker_stamp_repo"
 
 # Fail closed when the merge-base cannot be computed. A base ref sharing no
 # history with HEAD has none, and the binding must fall back to the tip rather
@@ -13329,15 +13439,15 @@ run_gate "scripts/alerts/alert-rules-lint-peg-policy.mjs"
 assert_contains "- pnpm alerts:rules:lint:test (alert-rules lint helper changed)"
 
 run_gate "scripts/alerts/check-peg-registry-integrity.mjs"
-assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs --base-ref HEAD (peg registry integrity checker changed)"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs --base-ref origin/test (peg registry integrity checker changed)"
 assert_contains "- node scripts/alerts/check-peg-registry-integrity.test.mjs (peg registry integrity checker changed)"
 
 run_gate "scripts/alerts/check-peg-registry-integrity-lineage.mjs"
-assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs --base-ref HEAD (peg registry integrity checker changed)"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs --base-ref origin/test (peg registry integrity checker changed)"
 assert_contains "- node scripts/alerts/check-peg-registry-integrity.test.mjs (peg registry integrity checker changed)"
 
 run_gate "scripts/alerts/check-peg-registry-integrity.test.mjs"
-assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs --base-ref HEAD (peg registry integrity checker changed)"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs --base-ref origin/test (peg registry integrity checker changed)"
 assert_contains "- node scripts/alerts/check-peg-registry-integrity.test.mjs (peg registry integrity checker changed)"
 
 run_gate "scripts/alerts/check-peg-policy-publication.mjs"
@@ -13349,7 +13459,7 @@ assert_contains "- pnpm tf:test (peg policy publication boundary changed)"
 # The shared digest both peg validators compare against: one file, both suites.
 run_gate "scripts/lib/peg-policy-digest.mjs"
 assert_contains "- pnpm alerts:rules:lint:test (peg policy version digest changed)"
-assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs --base-ref HEAD (peg policy version digest changed)"
+assert_contains "- node scripts/alerts/check-peg-registry-integrity.mjs --base-ref origin/test (peg policy version digest changed)"
 assert_contains "- node scripts/alerts/check-peg-registry-integrity.test.mjs (peg policy version digest changed)"
 
 run_gate "scripts/pr/check-pr-description.mjs"

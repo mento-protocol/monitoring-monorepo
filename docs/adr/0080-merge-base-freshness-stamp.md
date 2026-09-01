@@ -47,7 +47,8 @@ only the ref _name_, so the command-plan hash is byte-identical on both sides of
 a fetch: nothing else in the stamp would have noticed. The third named the base
 nowhere at all — it defaulted to `origin/main` inside `inferredPolicyBaseRef()`
 while the gate emitted a bare command — so the gate now passes it
-`--base-ref <ref>` from the same facts the other two read.
+`--base-ref`, carrying the resolved base OID, from the same facts the other two
+read.
 
 ## Decision
 
@@ -111,10 +112,22 @@ the allowlist did not: a command that reads the base must be made to NAME the
 base. Review of this change found `check-peg-registry-integrity.mjs` reading
 `origin/main` through an internal default while the gate emitted a bare command,
 which no textual predicate could have caught. The fix belongs at the emitter,
-not in a second list: its verb now passes `--base-ref <ref>`, and
-`engine.test.mjs` fails if any routing-table arm spells the check as a bare
-command again. The predicate keeps its self-maintaining property for every
-command that states its base, and one guard test holds the emitters to it.
+not in a second list: its verb now passes `--base-ref`, and `engine.test.mjs`
+fails if any routing-table arm spells the check as a bare command again. The
+predicate keeps its self-maintaining property for every command that states its
+base, and one guard test holds the emitters to it.
+
+The verb sends the resolved base **OID**, not the ref. `validateGitRef` in that
+validator admits only `[A-Za-z0-9._/-]+`, so ref spellings the gate itself
+accepts — `HEAD~1`, or a ref carrying a quote — would make every peg plan fail
+before it validated anything. A hex OID always satisfies that allowlist, which
+keeps the gate from mirroring a regex owned by another script, and it pins the
+base the gate measured so a fetch landing mid-run cannot move the comparison.
+The `__unresolved__:` sentinel falls back to the ref, and that path stays
+fail-closed: an unresolvable ref throws `cannot resolve policy base ref`, and a
+rejected spelling throws `invalid policy base ref`. The validator's
+no-baseline return is reserved for a ref that resolves without carrying the
+policy file yet, so neither failure can be mistaken for a skip.
 
 An audit of every emitted command then found two that the emitter fix cannot
 reach, because the ref they read is not the gate's base. `docs:navigation-eval
@@ -128,6 +141,21 @@ command only ever gets the stricter binding, so a stale entry costs a re-run
 while a missing one costs a skipped check. The residual is that a rename makes a
 marker stale silently; the `markerbound` stamps-freshness fixture is what
 notices, since it asserts tip binding for a real navigation-eval plan.
+
+A marker match binds the **default branch's own OID** as a second component,
+`+default-branch:<oid>`. Binding the base tip alone was not enough, and the
+stacked PR is the case that shows why: with `--base origin/<parent>` the base
+tip and the merge-base both hold still while `origin/main` advances underneath,
+which is the advance that changes these commands' answers. The two refs coincide
+only when the base happens to be `origin/main`. Resolution failure keeps
+`ref_oid`'s `__unresolved__:` sentinel, which differs from every OID, so a
+default branch that is absent and later appears still busts the stamp — and the
+navigation eval itself reports an unreachable default branch as an error, so a
+run cannot be stamped green in that state anyway. Such a plan also keeps tip
+binding, which nothing measured requires; it is strictly stricter, and the
+autoreview marker's runtime behaviour was established from its source rather
+than by running it, which is not a gap worth trading for a narrower binding on
+two rare commands.
 
 ## Consequences
 
