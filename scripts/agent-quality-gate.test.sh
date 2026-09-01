@@ -13180,22 +13180,16 @@ assert_contains "- pnpm code-health:deps"
 run_gate "pnpm-lock.yaml"
 assert_contains "- pnpm code-health:deps"
 
-# In-root but unreadable by dep-cruiser: a package quality arm schedules the
-# command, and the scope pass drops it because nothing it can parse changed.
-run_gate "ui-dashboard/AGENTS.md"
-assert_not_contains "- pnpm code-health:deps"
+# Any path inside a scanned root keeps the command, whatever its file type.
+# Resolution, not parsing, decides what joins the graph: an import naming a
+# file with its extension makes it an edge target, so .md/.css/.json/.sol are
+# all possible. An extension list here was tried and reverted.
 run_gate "ui-dashboard/src/thing.ts"
 assert_contains "- pnpm code-health:deps"
-
-# A JSON inside a root is a dependency TARGET even though it holds no imports:
-# indexer source statically imports config/nttAddresses.json, so retargeting it
-# moves an edge the cross-package rules judge.
+run_gate "ui-dashboard/AGENTS.md"
+assert_contains "- pnpm code-health:deps"
 run_gate "indexer-envio/config/nttAddresses.json"
 assert_contains "- pnpm code-health:deps"
-
-# Stylesheets are the same class: dep-cruiser resolves them into the graph and
-# declines to parse them, so they are edge targets with no outgoing edges.
-# ui-dashboard/src/app/layout.tsx imports ./globals.css.
 run_gate "ui-dashboard/src/app/globals.css"
 assert_contains "- pnpm code-health:deps"
 

@@ -801,25 +801,29 @@ list, the positional arguments of the root `code-health:deps` script and the
 `engine.test.mjs` holds the gate's pinned copy set-equal to both, and the root
 manifest routes that suite so a script-only edit shrinking the scanned roots
 cannot merge without the staleness test running. A change outside every root
-drops the command. A change inside a root keeps it only when dependency-cruiser
-can read the path, in one of two ways. It parses the extension — the enabled
-half of `depcruise --info`, pinned in `engine.test.mjs` against the
-`allExtensions` the library exports. Or its resolver can reach the file as a
-dependency target. dependency-cruiser resolves `.json`, `.node`, `.css`,
-`.sass`, `.scss`, `.stylus` and `.less` into the graph and then declines to
-parse them — its `lKnownUnfollowables` — so each is a node with no outgoing
-edges, and a node is still an edge target.
-`indexer-envio/src/handlers/stables/config.ts` imports
-`../../../config/nttAddresses.json` and `ui-dashboard/src/app/layout.tsx`
-imports `./globals.css`; retargeting either moves an edge the cross-package
-rules judge while no `.ts` file changes. The library exports nothing for that
-list, so it is pinned three ways instead: the dependency-cruiser version it was
-read from, which turns an upgrade into a red test rather than a silent drift,
-and one fixture each for the JSON and stylesheet imports above. An in-root path that is neither parsed nor resolvable —
-`ui-dashboard/AGENTS.md`, a `.yaml`, a `.sol` — drops the command even though a
-package quality arm scheduled it; before that narrowing such a change bought a
-~22s cruise of an unchanged 1,321-module graph. A change to
-`.dependency-cruiser.cjs` or to the narrowing pass itself keeps it. So does a
+drops the command. Any change inside a root keeps it, whatever the file type.
+
+That last point was narrowed by file type and then reverted, which is worth
+recording so it is not narrowed again. The narrowing aimed at
+`ui-dashboard/AGENTS.md` buying a ~22s cruise of an unchanged 1,321-module
+graph, and shipped as "an extension dependency-cruiser parses". It then had to
+grow twice, first for `.json` and `.node`, then for the stylesheet languages,
+because parsing is not how a file joins the graph — resolution is. A file
+becomes a node whenever an import specifier names it with its extension.
+dependency-cruiser says so in `determineFollowableExtensions`: its
+`lKnownUnfollowables` list exists only to stop the fallback parser reading
+stylesheets, and the comment beside it notes that pictures, movies, html and
+xml resolve the same way without being listed. An SVG imported from the indexer
+into the dashboard activates `indexer-no-dashboard` with no `.ts` file changed.
+Every file is therefore a possible edge target, no closed list of them can be
+sound, and deciding membership properly needs the dependency graph that the
+command being scheduled is what computes. The ~22s on in-root docs-only changes
+is the price of a sound answer. Two fixtures remain as regression tests,
+asserting the real `nttAddresses.json` and `globals.css` imports still exist,
+because they are why an in-root non-source change can move an edge at all.
+
+A change to
+`.dependency-cruiser.cjs` or to the narrowing pass itself keeps it too. So does a
 change to `package.json`, `pnpm-lock.yaml`, or `pnpm-workspace.yaml`: a scanned
 root reaches another scanned root by package name — `ui-dashboard/package.json`
 declares `"@mento-protocol/config": "workspace:*"` — so those three files decide

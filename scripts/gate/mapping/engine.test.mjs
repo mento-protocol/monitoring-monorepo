@@ -40,9 +40,7 @@ import { Facts } from "./facts.mjs";
 import { BUCKETS, Plan, commandDedupeKey } from "./plan.mjs";
 import {
   CODE_HEALTH_DEPS_COMMAND,
-  DEPCRUISE_EXTENSIONS,
   DEPCRUISE_ROOTS,
-  DEPCRUISE_TARGET_EXTENSIONS_VERSION,
   addTrunkCheckCommand,
   addWorkspaceConfigBuild,
   applyScopedTestCommands,
@@ -996,143 +994,48 @@ test("every scanned root keeps pnpm code-health:deps", () => {
   }
 });
 
-test("an in-root path dep-cruiser cannot parse drops the command", () => {
-  // The over-preserve this closes: a package quality arm schedules the command
-  // for any in-root change, and the pass used to keep it on the root prefix
-  // alone. `ui-dashboard/AGENTS.md` cost a ~22s cruise of an unchanged graph.
+test("ANY path inside a scanned root keeps the command, whatever its type", () => {
+  // Reverted narrowing, kept as a regression test. Extension lists cannot
+  // decide graph membership: resolution can reach any file an import names
+  // with its extension, so `.md`, `.svg`, `.css`, `.json` and `.sol` are all
+  // possible edge targets. See the note on DEPCRUISE_ROOT_PREFIX.
   for (const path of [
     "ui-dashboard/AGENTS.md",
     "ui-dashboard/README.md",
+    "ui-dashboard/public/logo.svg",
+    "ui-dashboard/src/app/globals.css",
+    "ui-dashboard/src/thing.ts",
     "aegis/src/Thing.sol",
     "indexer-envio/config/celo.yaml",
-  ]) {
-    assert.equal(
-      depsSurvives([path]),
-      false,
-      `${path} is inside a scanned root but dependency-cruiser never parses it`,
-    );
-  }
-});
-
-test("every dep-cruiser extension keeps the command inside a root", () => {
-  for (const extension of DEPCRUISE_EXTENSIONS) {
-    assert.equal(
-      depsSurvives([`ui-dashboard/src/thing${extension}`]),
-      true,
-      `${extension} is parsed by dependency-cruiser`,
-    );
-  }
-});
-
-test("a JSON dependency target inside a root keeps the command", () => {
-  // Parsing is not the only way into the graph: Node resolution reaches a JSON
-  // module, so it can be the far end of an edge between two scanned roots
-  // while holding no imports of its own.
-  assert.equal(
-    depsSurvives(["indexer-envio/config/nttAddresses.json"]),
-    true,
-    "a config JSON that source imports is a real dependency target",
-  );
-  assert.equal(depsSurvives(["shared-config/data/tokens.json"]), true);
-});
-
-test("a stylesheet dependency target inside a root keeps the command", () => {
-  // dependency-cruiser resolves stylesheets into the graph and declines to
-  // parse them, so they are nodes with no outgoing edges — and a node is still
-  // an edge target.
-  for (const path of [
-    "ui-dashboard/src/app/globals.css",
-    "ui-dashboard/src/styles/x.scss",
-    "ui-dashboard/src/styles/x.sass",
-    "ui-dashboard/src/styles/x.less",
-    "ui-dashboard/src/styles/x.stylus",
+    "indexer-envio/config/nttAddresses.json",
+    "ui-dashboard/package.json",
   ]) {
     assert.equal(
       depsSurvives([path]),
       true,
-      `${path} is resolved into the graph as a dependency target`,
+      `${path} is inside a scanned root, so dependency-cruiser may report it`,
     );
   }
 });
 
-test("the stylesheet-target case this pin stands for is still real", () => {
+test("the in-root asset imports these cases stand for are still real", () => {
+  // Two real imports, kept from the reverted extension pins. They are why an
+  // in-root non-source change can move an edge: if either stops existing, the
+  // reasoning above needs re-checking rather than quiet trust.
   const repoRoot = join(
     fileURLToPath(new URL(".", import.meta.url)),
     "../../..",
   );
-  const source = readFileSync(
-    join(repoRoot, "ui-dashboard/src/app/layout.tsx"),
-    "utf8",
-  );
+  const read = (relative) => readFileSync(join(repoRoot, relative), "utf8");
   assert.match(
-    source,
-    /import\s+"\.\/globals\.css"/,
-    "dashboard source must still statically import a stylesheet",
-  );
-});
-
-test("the target-extension list is pinned to the version it was read from", () => {
-  // `lKnownUnfollowables` is internal to dependency-cruiser, so no API change
-  // would announce it moving. Pinning the version makes an upgrade the signal:
-  // on a bump, re-read that constant and update both here.
-  const repoRoot = join(
-    fileURLToPath(new URL(".", import.meta.url)),
-    "../../..",
-  );
-  const installed = JSON.parse(
-    readFileSync(
-      join(repoRoot, "node_modules/dependency-cruiser/package.json"),
-      "utf8",
-    ),
-  ).version;
-  assert.equal(
-    installed,
-    DEPCRUISE_TARGET_EXTENSIONS_VERSION,
-    "dependency-cruiser moved: re-read lKnownUnfollowables in " +
-      "src/extract/resolve/module-classifiers.mjs and update the pinned set",
-  );
-});
-
-test("the JSON-target case this pin stands for is still real", () => {
-  // Fixture pin. dependency-cruiser exports `allExtensions` for what it parses
-  // but nothing for what its resolver accepts, so the target half cannot be
-  // pinned against the library. This keeps it honest instead: if the import
-  // moves, re-point the pin rather than delete the rule.
-  const repoRoot = join(
-    fileURLToPath(new URL(".", import.meta.url)),
-    "../../..",
-  );
-  const source = readFileSync(
-    join(repoRoot, "indexer-envio/src/handlers/stables/config.ts"),
-    "utf8",
-  );
-  assert.match(
-    source,
+    read("indexer-envio/src/handlers/stables/config.ts"),
     /import\s+\w+\s+from\s+"[^"]*config\/nttAddresses\.json"/,
     "indexer source must still statically import a config JSON",
   );
-});
-
-test("a package.json inside a root keeps the command", () => {
-  // Resolution, not parsing: this is where `"@mento-protocol/config":
-  // "workspace:*"` declares the edge into shared-config/.
-  assert.equal(depsSurvives(["ui-dashboard/package.json"]), true);
-  assert.equal(depsSurvives(["aegis/sub/package.json"]), true);
-});
-
-test("the pinned extensions match dependency-cruiser's own available list", async () => {
-  // Hermetic: the library exports the same list `depcruise --info` prints, so
-  // this needs no CLI spawn. An upgrade that enables `.vue` or `.svelte` turns
-  // into a red test rather than a file class the gate silently stops routing.
-  const { allExtensions } = await import("dependency-cruiser");
-  const available = allExtensions
-    .filter((entry) => entry.available)
-    .map((entry) => entry.extension);
-  const sorted = (values) => [...values].sort();
-  assert.deepEqual(
-    sorted(available),
-    sorted(DEPCRUISE_EXTENSIONS),
-    "the gate's parsed-extension pin and dependency-cruiser must agree",
+  assert.match(
+    read("ui-dashboard/src/app/layout.tsx"),
+    /import\s+"\.\/globals\.css"/,
+    "dashboard source must still statically import a stylesheet",
   );
 });
 

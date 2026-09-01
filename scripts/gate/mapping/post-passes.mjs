@@ -442,104 +442,38 @@ const WORKSPACE_RESOLUTION_MANIFESTS = [
 ];
 
 /**
- * Extensions dependency-cruiser can actually parse for dependencies.
+ * Any changed path inside a root dependency-cruiser scans.
  *
- * This is the enabled half of the list `depcruise --info` prints. It is pinned
- * by `engine.test.mjs` against `allExtensions` exported by the library itself,
- * so an upgrade that enables a transpiler — `.vue` and `.svelte` are present
- * but unavailable today — turns into a red test rather than a scanned file the
- * gate silently stops routing.
+ * DO NOT narrow this by file type. That was tried and reverted, and the reason
+ * is worth keeping: no extension list can decide what the graph contains.
  *
- * A path inside a scanned root whose extension is not here cannot change a
- * verdict: dependency-cruiser never parses it, so it can neither hold an import
- * nor appear as one. `ui-dashboard/AGENTS.md` is the measured case — before this
- * narrowing it kept a ~22s cruise of an unchanged 1,321-module graph, because a
- * package quality arm scheduled the command and this pass only declined to
- * remove it.
- */
-export const DEPCRUISE_EXTENSIONS = Object.freeze([
-  ".js",
-  ".cjs",
-  ".mjs",
-  ".jsx",
-  ".ts",
-  ".tsx",
-  ".d.ts",
-  ".cts",
-  ".d.cts",
-  ".mts",
-  ".d.mts",
-]);
-
-/**
- * Extensions that appear in the graph as dependency TARGETS without being
- * parsed for dependencies of their own.
+ * The narrowing was requested to stop `ui-dashboard/AGENTS.md` buying a ~22s
+ * cruise of an unchanged graph (PR comment 3906221722). It shipped as "an
+ * extension dependency-cruiser parses", then had to grow twice — `.json` and
+ * `.node` (3906713274), then the stylesheet languages (3906943568) — because
+ * parsing is not how a file joins the graph. Resolution is. A file becomes a
+ * node whenever an import specifier names it with its extension, and
+ * dependency-cruiser says so itself in `determineFollowableExtensions`: its
+ * `lKnownUnfollowables` list exists only to stop the fallback parser reading
+ * stylesheets, and the comment beside it notes pictures, movies, html and xml
+ * resolve the same way without being listed. An SVG imported from the indexer
+ * into the dashboard activates `indexer-no-dashboard` with no `.ts` file
+ * changed (3907083527).
  *
- * Parsing is not the only way a file reaches the graph. Node resolution
- * resolves a JSON module and a native addon, so a file with either extension
- * can be the far end of an edge between two scanned roots even though it can
- * hold no imports. `indexer-envio/src/handlers/stables/config.ts` imports
- * `../../../config/nttAddresses.json`; moving or retargeting that JSON changes
- * an edge, and the rules that judge indexer-to-dashboard reach would see it,
- * while no `.ts` file changed. The parse list alone dropped the command there.
+ * So the set of possible edge targets is every file, and a closed list of them
+ * cannot be sound — three rounds of widening never reached the end because
+ * there is no end. Deciding membership properly needs the dependency graph,
+ * which is what the command being scheduled computes: the check cannot be its
+ * own precondition. The prefix stays, and the ~22s on in-root docs-only changes
+ * is the price of a sound answer.
  *
- * This is dependency-cruiser's own `lKnownUnfollowables`, read from
- * `src/extract/resolve/module-classifiers.mjs` at the version pinned below. The
- * cruiser resolves each of these into the graph and then deliberately declines
- * to parse it: a stylesheet can hold `@import` statements that the fallback
- * JavaScript parser would happily misread, so it is a node with no outgoing
- * edges. A node is still an edge target, which is the whole point here.
- * `ui-dashboard/src/app/layout.tsx` imports `./globals.css` for exactly that
- * reason.
- *
- * The library exports `allExtensions` for what it parses but nothing for this
- * list, so it cannot be pinned against the API the way the parse half is.
- * Three things keep it honest instead: the version constant below, which turns
- * any dependency-cruiser upgrade into a red test so the list is re-read rather
- * than assumed; and two fixtures in `engine.test.mjs` standing for the JSON and
- * stylesheet cases, which fail loudly if the imports they represent disappear.
- */
-export const DEPCRUISE_TARGET_EXTENSIONS = Object.freeze([
-  ".json",
-  ".node",
-  ".css",
-  ".sass",
-  ".scss",
-  ".stylus",
-  ".less",
-]);
-
-/**
- * The dependency-cruiser release `DEPCRUISE_TARGET_EXTENSIONS` was read from.
- *
- * Bumping the dependency without re-reading `lKnownUnfollowables` is the
- * failure this guards: the list is internal, so nothing else would notice a
- * change to it. On a version bump, re-read that constant and update both.
- */
-export const DEPCRUISE_TARGET_EXTENSIONS_VERSION = "17.4.0";
-
-/**
- * A changed path dependency-cruiser can read inside a root it scans.
- *
- * Three shapes qualify. A source file it parses, by extension. A file its
- * resolver can reach as a dependency target, which is how a JSON config joins
- * the graph. And any `package.json` beneath a root, because that is where a
- * workspace dependency is declared — `ui-dashboard/package.json` carries
- * `"@mento-protocol/config": "workspace:*"`, the edge into `shared-config/` —
- * so it decides resolution the same way the root manifests do.
+ * Out-of-root narrowing is untouched by this and remains sound: a path under no
+ * scanned root is neither walked nor reported, whatever its extension.
  */
 const DEPCRUISE_ROOT_PREFIX = new RegExp(`^(${DEPCRUISE_ROOTS.join("|")})/`);
 
-const DEPCRUISE_READABLE_EXTENSIONS = Object.freeze([
-  ...DEPCRUISE_EXTENSIONS,
-  ...DEPCRUISE_TARGET_EXTENSIONS,
-]);
-
-function inRootAndReadable(path) {
-  if (!DEPCRUISE_ROOT_PREFIX.test(path)) return false;
-  return DEPCRUISE_READABLE_EXTENSIONS.some((extension) =>
-    path.endsWith(extension),
-  );
+function inScannedRoot(path) {
+  return DEPCRUISE_ROOT_PREFIX.test(path);
 }
 
 /**
@@ -566,15 +500,17 @@ const CODE_HEALTH_DEPS_SELF_SCHEDULED = [
 /**
  * Changed paths that keep `pnpm code-health:deps` in the plan.
  *
- * Either dependency-cruiser can read the path inside a root it scans, or the
- * path is one of the self-scheduled triggers above. Anything else — a root's
- * `AGENTS.md`, a `.sol` file, a docs edit — is neither parsed nor reported, so
- * it cannot move the verdict and the command comes out of the plan.
+ * Either the path sits inside a root dependency-cruiser scans, or it is one of
+ * the self-scheduled triggers above. Anything else — `governance-watchdog/**`,
+ * `alerts/infra/**`, a workflow, a doc outside every root — is neither walked
+ * nor reported, so it cannot move the verdict and the command comes out of the
+ * plan. That is the narrowing this pass still makes, and it holds for any file
+ * type, because the root list is what dependency-cruiser is pointed at.
  */
 export function codeHealthDepsTriggered(changedPaths) {
   return changedPaths.some(
     (path) =>
-      inRootAndReadable(path) ||
+      inScannedRoot(path) ||
       CODE_HEALTH_DEPS_SELF_SCHEDULED.some((r) => r.test(path)),
   );
 }
