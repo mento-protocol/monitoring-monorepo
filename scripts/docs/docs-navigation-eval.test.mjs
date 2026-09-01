@@ -967,13 +967,24 @@ test("a qualified historical source requires loaded canonical verification", () 
     (candidate) => candidate.question_id === "commands-pr-readiness",
   );
   const currentAuthority = "docs/notes/pr-ready-state.md";
-  answer.loaded_sources.push(fixtureSource(contents, currentAuthority));
-  answer.authority_qualifications.push({
-    path: currentAuthority,
-    authority: "canonical",
-    qualification: "",
-    verified_against: [],
-  });
+  answer.chosen_documents = [currentAuthority];
+  answer.evidence = [
+    {
+      path: currentAuthority,
+      line_start: 1,
+      line_end: 1,
+      supports: "The canonical runbook supplies current readiness evidence.",
+    },
+  ];
+  answer.loaded_sources = [fixtureSource(contents, currentAuthority)];
+  answer.authority_qualifications = [
+    {
+      path: currentAuthority,
+      authority: "canonical",
+      qualification: "",
+      verified_against: [],
+    },
+  ];
   const historical = "docs/PLAN-ai-review-process.md";
   answer.loaded_sources.push(fixtureSource(contents, historical));
   answer.authority_qualifications.push({

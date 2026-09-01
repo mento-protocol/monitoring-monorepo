@@ -78,11 +78,12 @@ The coordinator adopts the legacy `run.lock` while scheduled or recovery work
 exists, which makes `run.lock/owner` name a live pid for as long as anyone on
 the machine is gating — hours, routinely, during ordinary parallel work. A
 sweep that read that record as a busy signal would refuse to start in the
-normal case. Workers wait with `--lock-wait 3600`, which covers scheduler
-admission, a command lease, a coalesced result, and an older legacy holder.
-Never pass `--no-lock` and never delete the lock directory: the gate owns its
-own reclaim rules, and a record that looks stale from outside is routinely a
-live holder inside a long browser suite.
+normal case. Local workers wait with `--lock-wait 3600`. Hosted workers use the
+hook's exact 1,800-second default. Both cover scheduler admission, a command
+lease, a coalesced result, and an older legacy holder. Never pass `--no-lock`
+and never delete the lock directory: the gate owns its own reclaim rules, and a
+record that looks stale from outside is routinely a live holder inside a long
+browser suite.
 
 **State the usage reality before starting.** One shipped PR costs roughly 3% of
 the weekly usage window, and every push to it triggers another round of bot
@@ -425,6 +426,13 @@ Then spawn one worker subagent per issue. Give each a brief containing:
   work when the inputs are unchanged — which is why this is a blanket rule
   rather than a condition to evaluate.
 
+  Before spawning workers, read the orchestrator checkout's
+  `agent.qualityGate.cloudPrePushRequireFresh` value and pass one hosted/local
+  boolean to every worker. After `./scripts/setup.sh` in each fresh or resumed
+  clone, set `agent.qualityGate.cloudPrePushRequireFresh=true` when that boolean
+  is hosted. Unset the key when it is local. A clone does not inherit local git
+  config, so never infer its setup type from the clone before this propagation.
+
   Branch as **the exact name the orchestrator passed to `issue:claim
 --branch`**, from `origin/main`. That name is already in the Project `Branch`
   field and the claim comment, and the release guard looks for an open PR with
@@ -456,8 +464,14 @@ Then spawn one worker subagent per issue. Give each a brief containing:
 
   ```bash
   pnpm agent:quality-gate                                # inspect first
-  bash scripts/agent-quality-gate.sh --run --lock-wait 3600
+  ./scripts/agent-quality-gate.sh --run --parallel 3 --base origin/main  # hosted
+  pnpm agent:quality-gate --run --lock-wait 3600                     # local
   ```
+
+  Run only the command for the current setup. Before a hosted run, fetch
+  `origin/main`. A hosted setup has
+  `agent.qualityGate.cloudPrePushRequireFresh=true` in local git config. Its
+  launcher, base, and parallelism must match the pre-push hook.
 
   Inspect before running, as the operating card's step 3 requires: the bare
   form prints the mapped commands **and the checklists to apply**, and the
@@ -467,9 +481,10 @@ Then spawn one worker subagent per issue. Give each a brief containing:
   mangles the arguments on the way through the package manager. Every worker
   gate goes through the machine's gate coordinator and counts against its
   capacity — 3 by default, `AGENT_QUALITY_GATE_CAPACITY`. Gates from different
-  worktrees run together under that capacity; the hour-long `--lock-wait` is
-  what covers the rest, since it spans scheduler admission, a command lease, a
-  coalesced result, and an older legacy holder.
+  worktrees run together under that capacity. Local sweeps keep the hour-long
+  `--lock-wait`. Hosted sweeps use the hook's exact 1,800-second default so the
+  push can reuse their stamp. Both budgets span scheduler admission, a command
+  lease, a coalesced result, and an older legacy holder.
 
   **A package-manifest change needs the gate's acknowledgement, not a
   hand-off.** When the issue touches a package manifest, `pnpm-lock.yaml`, pnpm
@@ -480,8 +495,11 @@ changed.` Review the lifecycle and install scripts in the diff first, then
 
   ```bash
   git config agent.qualityGate.allowPackageScriptChanges true
-  bash scripts/agent-quality-gate.sh --run --lock-wait 3600
+  ./scripts/agent-quality-gate.sh --run --parallel 3 --base origin/main  # hosted
+  pnpm agent:quality-gate --run --lock-wait 3600                     # local
   ```
+
+  Run only the command for the current setup.
 
   The **config**, not the `--allow-package-script-changes` flag, is what lets
   the push through. The pre-push hook runs the gate without that flag

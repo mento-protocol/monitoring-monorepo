@@ -48,7 +48,9 @@ body:
       label: Verification commands
       description: Commands or checks the agent should run before opening/updating a PR.
       placeholder: |
-        pnpm agent:quality-gate --run
+        # Follow docs/notes/pr-operating-card.md step 3.
+        pnpm agent:quality-gate --run  # local
+        ./scripts/agent-quality-gate.sh --run --parallel 3 --base origin/main  # hosted hook warm
         pnpm --filter @mento-protocol/... test
     validations:
       required: true

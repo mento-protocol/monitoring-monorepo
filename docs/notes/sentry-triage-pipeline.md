@@ -3,7 +3,7 @@ title: Sentry Triage Pipeline
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-28
+last_verified: 2026-09-01
 scope: ci/process
 doc_type: runbook
 review_interval_days: 90
@@ -637,9 +637,9 @@ shell. The fix removes the credential instead. See
 `CLAUDE_CODE_OAUTH_TOKEN` is the remaining credential in the agent's Bash, and
 it stays there: `claude-code-action` places it in that process env itself
 (`base-action/src/parse-sdk-options.ts` spreads the whole `process.env` into the
-CLI subprocess, deleting only the OIDC request vars), and the pinned v1.0.194
-offers no per-step or first-class MCP env forwarding to move it. Accepted with
-its bounding: it is inference-only, so worst case is
+CLI subprocess, deleting only the OIDC request vars and `ALL_INPUTS`), and the
+pinned v1.0.202 offers no per-step or first-class MCP env forwarding to move it.
+Accepted with its bounding: it is inference-only, so worst case is
 inference-quota abuse, not repo or queue compromise, and any use lands in an
 auditable public comment. Re-check on the next action bump.
 
