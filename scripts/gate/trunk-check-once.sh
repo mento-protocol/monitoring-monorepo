@@ -118,6 +118,7 @@ const {
   existsSync,
   fstatSync,
   lstatSync,
+  openSync,
   readFileSync,
   renameSync,
   rmSync,
@@ -249,15 +250,32 @@ function trunk(args, baseStdio = ["ignore", "pipe", "pipe"], timeout = 30_000) {
     if (new Set(descriptors).size !== descriptors.length) {
       throw new Error("Trunk guardian gate marker declaration is duplicated");
     }
+    // A runtime between the gate and this guardian can take these low
+    // descriptors for its own handles, so a declared path reopens the marker
+    // the descriptor no longer holds (issue 2189).
+    const markerPath = (descriptor) => {
+      const value = process.env[`AGENTQG_MARKER_PATH_${descriptor}`];
+      return typeof value === "string" && value !== "" ? value : undefined;
+    };
     const descriptorStates = descriptors.map((descriptor) => {
+      let inspection;
       try {
-        return { descriptor, regular: fstatSync(descriptor).isFile() };
+        inspection = { descriptor, regular: fstatSync(descriptor).isFile() };
       } catch (error) {
-        return { descriptor, error, regular: false };
+        inspection = { descriptor, error, regular: false };
+      }
+      if (inspection.regular) return { ...inspection, source: descriptor };
+      const path = markerPath(descriptor);
+      if (path === undefined) return inspection;
+      try {
+        return { descriptor, regular: true, source: openSync(path, "r") };
+      } catch {
+        return inspection;
       }
     });
     const unexpectedError = descriptorStates.find(
-      ({ error }) => error && error.code !== "EBADF",
+      ({ error, source }) =>
+        source === undefined && error && error.code !== "EBADF",
     );
     if (unexpectedError) {
       throw new Error(
@@ -269,23 +287,24 @@ function trunk(args, baseStdio = ["ignore", "pipe", "pipe"], timeout = 30_000) {
     // runtime closed every marker and reused a descriptor, the stale
     // declaration grants no signal authority. Linux keeps marker-only
     // containment, and every platform rejects a partially surviving set.
-    const allStale = !descriptorStates.some(({ regular }) => regular);
+    const allStale = !descriptorStates.some(
+      ({ source }) => source !== undefined,
+    );
     if (process.platform !== "darwin" || !allStale) {
-      for (const { descriptor, error, regular } of descriptorStates) {
+      for (const { descriptor, error, source } of descriptorStates) {
+        if (source !== undefined) continue;
         if (error) {
           throw new Error(`Trunk guardian marker ${descriptor} is not open`, {
             cause: error,
           });
         }
-        if (!regular) {
-          throw new Error(`Trunk guardian marker ${descriptor} is not regular`);
-        }
+        throw new Error(`Trunk guardian marker ${descriptor} is not regular`);
       }
     }
     if (!allStale) {
-      for (const { descriptor } of descriptorStates) {
+      for (const { descriptor, source } of descriptorStates) {
         while (stdio.length <= descriptor) stdio.push("ignore");
-        stdio[descriptor] = descriptor;
+        stdio[descriptor] = source;
       }
     }
   }

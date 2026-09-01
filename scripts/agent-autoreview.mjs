@@ -43,7 +43,10 @@ import {
   utf8Size,
   writeReviewPromptOutputs,
 } from "./agent-autoreview-core.mjs";
-import { inheritGateMarkerStdio } from "./gate/mapped-command-process-identity.mjs";
+import {
+  closeReopenedGateMarkers,
+  inheritGateMarkerStdio,
+} from "./gate/mapped-command-process-identity.mjs";
 import { parseDarwinExactIdentity } from "./gate/darwin-process-lineage.mjs";
 import { validateState as validateDarwinLineageState } from "./gate/darwin-process-lineage-model.mjs";
 
@@ -2192,15 +2195,23 @@ function spawnGitWithinCaptureDeadline(git, gitArgs, options, label) {
   // clock stepping backwards mid-run cannot make a capture that took minutes
   // charge nothing and hand the next one time the run already spent.
   const startedAt = performance.now();
-  const result = spawnTrustedSync(git, gitArgs, {
-    ...options,
-    stdio: inheritGateMarkerStdio(options.stdio),
-    // The monotonic clock reports fractions of a millisecond; spawnSync only
-    // takes whole ones.
-    timeout: Math.ceil(remainingMs),
-    killSignal: "SIGKILL",
-    detached: true,
-  });
+  let result;
+  try {
+    result = spawnTrustedSync(git, gitArgs, {
+      ...options,
+      stdio: inheritGateMarkerStdio(options.stdio),
+      // The monotonic clock reports fractions of a millisecond; spawnSync only
+      // takes whole ones.
+      timeout: Math.ceil(remainingMs),
+      killSignal: "SIGKILL",
+      detached: true,
+    });
+  } finally {
+    // This capture runs once per git command, so a marker reopened for it has
+    // to be released here or a long review accrues descriptors until it hits
+    // the process limit. The child keeps its own copies.
+    closeReopenedGateMarkers();
+  }
   const elapsedMs = Math.max(0, performance.now() - startedAt);
   gitCaptureSpentMs += elapsedMs;
   // spawnSync reports an exhausted `maxBuffer` the same way it reports an
@@ -2386,23 +2397,28 @@ function detectPrBase(repo, branch) {
     if (process.env[key]) env[key] = process.env[key];
   }
   try {
-    const repoResult = spawnTrustedSync(
-      gh,
-      ["repo", "view", repositorySlug, "--json", "owner"],
-      {
-        cwd: repo,
-        env,
-        encoding: "utf8",
-        stdio: inheritGateMarkerStdio(["ignore", "pipe", "pipe"]),
-        timeout: GH_LOOKUP_TIMEOUT_MS,
-        // SIGKILL, not SIGTERM: spawnSync blocks until the child actually
-        // exits after the timeout fires, so a child that handles or ignores
-        // SIGTERM would hang this call (and autoreview) indefinitely despite
-        // the "timeout" option. SIGKILL can't be caught or ignored.
-        killSignal: "SIGKILL",
-        detached: true,
-      },
-    );
+    let repoResult;
+    try {
+      repoResult = spawnTrustedSync(
+        gh,
+        ["repo", "view", repositorySlug, "--json", "owner"],
+        {
+          cwd: repo,
+          env,
+          encoding: "utf8",
+          stdio: inheritGateMarkerStdio(["ignore", "pipe", "pipe"]),
+          timeout: GH_LOOKUP_TIMEOUT_MS,
+          // SIGKILL, not SIGTERM: spawnSync blocks until the child actually
+          // exits after the timeout fires, so a child that handles or ignores
+          // SIGTERM would hang this call (and autoreview) indefinitely despite
+          // the "timeout" option. SIGKILL can't be caught or ignored.
+          killSignal: "SIGKILL",
+          detached: true,
+        },
+      );
+    } finally {
+      closeReopenedGateMarkers();
+    }
     if (
       repoResult.error?.code === "ETIMEDOUT" ||
       repoResult.signal === "SIGKILL"
