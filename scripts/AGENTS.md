@@ -101,7 +101,10 @@ feedback-runtime pins.
   `scripts/review/review-eval.test.mjs`, and
   `scripts/review/install-review-eval-launchd.test.mjs`.
   `review/review-eval-*publication*` pins both tests.
-  `scripts/review/review-eval-experiment*.mjs` are pinned by the file table in\n `docs/evals/review-skill.md`, the `review:eval:experiment` package script,\n and ADR 0083.\n- **Navigation-eval pin.** `forbidden_sources` in
+  `scripts/review/review-eval-experiment*.mjs` are pinned by the file table in
+  `docs/evals/review-skill.md`, the `review:eval:experiment` package script,
+  and ADR 0083.
+- **Navigation-eval pin.** `forbidden_sources` in
   `docs/evals/documentation-navigation-fixtures.json` names its source.
 - **Verification evidence.** `.gitattributes` pins
   `scripts/docs/check-verification-redesign-evidence*.mjs`.

@@ -58,7 +58,10 @@ pnpm agent:autoreview:test         # Full regressions; defaults to up to 3 worke
 pnpm agent:autoreview:test -- --jobs 1  # Sequential full closeout for autoreview runtime changes
 pnpm agent:autoreview --verify-bundle-dir DIR  # Pre-review rehash; retain the printed manifest digest
 pnpm agent:autoreview --verify-bundle-dir DIR --expected-bundle-manifest DIGEST  # Bound post-review rehash
-pnpm review:eval:experiment -- --help  # Non-ledger paired screen; canonical qualification reruns all 24 cells\npnpm review:eval:experiment -- --validate-plan <campaign-dir> --json  # Validate one candidate campaign without a model call\npnpm review:eval:experiment -- --run <campaign-dir> --stage screen --dry-run --json  # List paid lanes without a model call\npnpm docs:index --write            # Regenerate docs/README.md from tracked + non-ignored untracked Markdown
+pnpm review:eval:experiment -- --help  # Non-ledger paired screen; canonical qualification reruns all 24 cells
+pnpm review:eval:experiment -- --validate-plan <campaign-dir> --json  # Validate one candidate campaign without a model call
+pnpm review:eval:experiment -- --run <campaign-dir> --stage screen --dry-run --json  # List paid lanes without a model call
+pnpm docs:index --write            # Regenerate docs/README.md from tracked + non-ignored untracked Markdown
 pnpm docs:index --check            # Fail on catalog drift, invalid classification, or broken internal Markdown links
 pnpm docs:audit --dry-run          # Print this week's bounded semantic-review packet without mutating documentation
 pnpm docs:garden --dry-run --json  # Read the queue; preview the exact weekly garden issue decision; no mutation
