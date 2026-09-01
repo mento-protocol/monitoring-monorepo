@@ -71,6 +71,10 @@ Environment:
                       Same behavior as --command-timeout. Default: 1500; an
                       explicit value also overrides the 2100-second gate
                       self-test default.
+  AGENT_QUALITY_GATE_DEBUG_STAMP
+                      Set to 1 to print the active freshness-stamp schema and
+                      fields, one per stderr line. The stamp and stdout do not
+                      change.
   AGENT_QUALITY_GATE_LOCK
                       Set to 0 or false for the same effect as --no-lock.
   AGENT_QUALITY_GATE_LOCK_WAIT_SECONDS
@@ -6583,7 +6587,7 @@ acquire_gate_run_lock_legacy() {
       echo "Running the gate directly? --no-lock starts anyway and accepts the contention." >&2
       # The pre-push hook passes a fixed command line and Trunk strips the
       # environment, so neither escape hatch is reachable from a failed push.
-      echo "Pushing? Warm the stamps with 'pnpm agent:quality-gate --run' first, then push: --skip-if-fresh cache-hits and exits before this lock." >&2
+      echo "Pushing? Fetch the hook's base, then warm the matching stamp with 'git fetch --quiet origin main && ./scripts/agent-quality-gate.sh --run --parallel 3 --base origin/main'; the hook's --skip-if-fresh path can then exit before coordinator registration." >&2
       # GitHub issue #1894. Every other outcome states itself on stdout — a green
       # run ends "All mapped commands passed." — but this one used to speak on
       # stderr alone, so a caller reading the gate's stdout saw the reassuring
@@ -7501,6 +7505,24 @@ stamp_line() {
     "$gate_mapped_child_scrub_policy_hash"
 }
 
+gate_print_freshness_stamp_debug() {
+  local stamp="$1" schema field name
+  local -a fields=()
+  IFS=$'\t' read -r -a fields <<< "$stamp"
+  [[ "${#fields[@]}" -ge 2 ]] || return 1
+  schema="${fields[0]}"
+  [[ "$schema" =~ ^v[1-9][0-9]*$ ]] || return 1
+  for field in "${fields[@]:1}"; do
+    name="${field%%=*}"
+    [[ "$field" == *=* && "$name" =~ ^[A-Za-z][A-Za-z0-9]*$ &&
+      "$field" != *$'\n'* ]] || return 1
+  done
+  printf 'agent-quality-gate stamp schema=%s\n' "$schema" >&2
+  for field in "${fields[@]:1}"; do
+    printf 'agent-quality-gate stamp %s\n' "$field" >&2
+  done
+}
+
 current_stamp=""
 
 recomputed_stamp_line() {
@@ -7718,6 +7740,12 @@ if [[ -n "$gate_coordinator_freshness_context" ]]; then
     exit 2
   fi
   unset verified_freshness_stamp
+fi
+
+if [[ "${AGENT_QUALITY_GATE_DEBUG_STAMP:-0}" == "1" ]]; then
+  if ! gate_print_freshness_stamp_debug "$current_stamp"; then
+    echo "warning: could not format the quality-gate freshness stamp for debug output." >&2
+  fi
 fi
 
 if [[ "$skip_if_fresh" == "1" || "$skip_if_fresh" == "true" ]]; then
