@@ -234,17 +234,19 @@ function initialHeadFromForcePush(timeline, commentIndex, commentTimestamp) {
     const item = timeline[index];
     if (item?.event === "head_ref_force_pushed") {
       const proof = provenForcePush(item);
-      if (
-        proof.reason === null &&
-        index >= commentIndex &&
-        proof.timestamp <= commentTimestamp
-      ) {
+      if (proof.reason !== null) {
+        return { head: null, reason: proof.reason };
+      }
+      if (index >= commentIndex && proof.timestamp <= commentTimestamp) {
         return {
           head: null,
           reason: "timeline_order_conflicts_with_force_push_timestamp",
         };
       }
-      return { head: proof.beforeHead, reason: proof.reason };
+      if (index >= commentIndex) {
+        return { head: null, reason: "timeline_head_not_established" };
+      }
+      return { head: proof.beforeHead, reason: null };
     }
     if (
       item?.event === "committed" ||

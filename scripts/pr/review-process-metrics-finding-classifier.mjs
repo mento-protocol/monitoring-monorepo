@@ -494,7 +494,8 @@ const PRIORITY_CLAUSE_LEAD_SOURCE = String.raw`(^|[.!?;\n])\s*(?:(?:[-+•>]|#{1
 const REVIEW_DOMAIN_SOURCE = String.raw`(?:correctness|security|convention)`;
 const REVIEW_DOMAIN_LIST_SOURCE = String.raw`${REVIEW_DOMAIN_SOURCE}(?:\s*,\s*${REVIEW_DOMAIN_SOURCE})*(?:\s*,?\s*(?:and|or)\s+${REVIEW_DOMAIN_SOURCE})?`;
 const LABEL_FIRST_ABSENCE_SOURCE = String.raw`(?:none\b|no\s+${NEGATED_FINDING_NOUN_SOURCE}\b(?:\s+(?:remains?|exists?|found|reported|identified|detected|flagged|shown|present|(?:are|is|was|were)\s+(?:found|reported|identified|detected|flagged|shown|present)))?)`;
-const VERIFIED_PROSE_UPDATE_SOURCE = String.raw`(?:comment(?:\/prose)?|prose|documentation|docs?)\s+(?:update|change|wording)(?:\s+[^!?;\n]{0,180}?)?\s+(?:is|are|was|were)\s+(?:accurate|correct|valid|sound)`;
+const REVIEW_LOCATION_SOURCE = String.raw`(?:\s+(?:in|at)\s+\`?[A-Za-z0-9_./-]+(?::\d+(?:-\d+)?)?\`?)?`;
+const VERIFIED_PROSE_UPDATE_SOURCE = String.raw`(?:comment(?:\/prose)?|prose|documentation|docs?)\s+(?:update|change|wording)${REVIEW_LOCATION_SOURCE}\s+(?:is|are|was|were)\s+(?:accurate|correct|valid|sound)`;
 const NEGATED_PRIORITY_CLAUSES = [
   new RegExp(
     String.raw`${PRIORITY_CLAUSE_LEAD_SOURCE}no\s+inline\s+findings?\s*[—–-]\s*nothing\s+(?:rose|rises?)\s+to\s+${BRACKETED_PRIORITY_LIST_SOURCE}(?=\s*(?:[.!?;\n]|$))`,

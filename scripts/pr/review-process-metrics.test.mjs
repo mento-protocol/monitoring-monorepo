@@ -2756,6 +2756,12 @@ test("classifies observed coordinated priority negations", () => {
       user: { login: "claude[bot]", type: "Bot" },
       body: "**[P3] Comment/prose update in `review-eval-score.mjs:257-260` is inaccurate.**",
     },
+    {
+      id: 412,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "**[P3] Documentation update omits the fallback when TMPDIR is correct.**",
+    },
   ];
 
   const records =
@@ -2779,6 +2785,7 @@ test("classifies observed coordinated priority negations", () => {
       { id: "409", finding: true, findingSignal: "[P3]" },
       { id: "410", finding: false, findingSignal: null },
       { id: "411", finding: true, findingSignal: "[P3]" },
+      { id: "412", finding: true, findingSignal: "[P3]" },
     ],
   );
 });
@@ -3254,6 +3261,51 @@ test("fails closed when a later timeline item predates the marker comment", () =
     evidence.markerReason,
     "timeline_order_conflicts_with_force_push_timestamp",
   );
+  assert.equal(evidence.effectiveHead, null);
+});
+
+test("does not infer a marker head from a later force push", () => {
+  const value = structuredClone(fixture);
+  const headA = "a".repeat(40);
+  const headB = "b".repeat(40);
+  const request = {
+    id: 146,
+    node_id: "IC_before_future_force",
+    created_at: "2026-08-01T10:10:00Z",
+    updated_at: "2026-08-01T10:10:00Z",
+    author_association: "OWNER",
+    user: { login: "maintainer", type: "User" },
+    body: `@coderabbitai review\n\n<!-- coderabbit-final-head-review:${headA} -->`,
+  };
+  value.pr.head.sha = headB;
+  value.commits = [{ sha: headA }, { sha: headB }];
+  value.issueComments = [request];
+  value.timeline = [
+    {
+      event: "commented",
+      id: request.id,
+      node_id: request.node_id,
+      created_at: request.created_at,
+      updated_at: request.updated_at,
+    },
+    {
+      event: "head_ref_force_pushed",
+      node_id: "FP_after_marker",
+      created_at: "2026-08-01T10:12:00Z",
+      force_push_proof: {
+        kind: "graphql",
+        nodeId: "FP_after_marker",
+        createdAt: "2026-08-01T10:12:00Z",
+        beforeHead: headA,
+        afterHead: headB,
+      },
+    },
+  ];
+
+  const evidence =
+    summarizeFixture(value).evidence.signals.manualRequests.evidence[0];
+  assert.equal(evidence.marker, "unknown");
+  assert.equal(evidence.markerReason, "timeline_head_not_established");
   assert.equal(evidence.effectiveHead, null);
 });
 
