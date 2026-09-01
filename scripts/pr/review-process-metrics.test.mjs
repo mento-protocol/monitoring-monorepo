@@ -2762,6 +2762,21 @@ test("classifies observed coordinated priority negations", () => {
       user: { login: "claude[bot]", type: "Bot" },
       body: "**[P3] Documentation update omits the fallback when TMPDIR is correct.**",
     },
+    {
+      id: 413,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: "**[P3] Documentation update in `docs/runbook.md` is correct. It still omits the rollback step.**",
+    },
+    {
+      id: 414,
+      state: "COMMENTED",
+      user: { login: "claude[bot]", type: "Bot" },
+      body: [
+        "**[P3] Documentation update in `docs/runbook.md` is correct.",
+        "It still omits the rollback step.**",
+      ].join("\n"),
+    },
   ];
 
   const records =
@@ -2786,6 +2801,8 @@ test("classifies observed coordinated priority negations", () => {
       { id: "410", finding: false, findingSignal: null },
       { id: "411", finding: true, findingSignal: "[P3]" },
       { id: "412", finding: true, findingSignal: "[P3]" },
+      { id: "413", finding: true, findingSignal: "[P3]" },
+      { id: "414", finding: true, findingSignal: "[P3]" },
     ],
   );
 });
