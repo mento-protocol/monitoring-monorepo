@@ -846,6 +846,18 @@
                   refs again.
                 </li>
                 <li>
+                  Reuse the fixed CI jobs. Force every conditional job and
+                  reject every skip.
+                </li>
+                <li>
+                  Forward no repository or environment secrets. Called jobs keep
+                  a scoped read-only <code>GITHUB_TOKEN</code>.
+                </li>
+                <li>
+                  Disable every reviewed pnpm, Playwright, Foundry, and Turbo
+                  cache restore, save, and post hook.
+                </li>
+                <li>
                   Use a distinct run and display name. Record the run ID with
                   its immutable inputs as operational evidence. It is not a PR
                   check and cannot satisfy readiness.
@@ -872,15 +884,17 @@
             command.
           </div>
           <div class="callout">
-            <strong>Spend is not approved:</strong> recommend 45 runner-minutes
-            per no-skip run and 450 cumulative runner-minutes across the
-            selected no-skip runs. A human must approve the ceiling and stop
-            condition before shadow execution. The Phase 0 cold planning
-            estimate is 41.18 runner-minutes. It is not an upper bound. An
-            all-cache-disabled current no-skip proof must run before shadow. The
-            Phase 0 sample selects one <code>CI</code> workflow run for each of
-            10 immutable PR heads. It counts every non-skipped job across all 13
-            attempts, including <code>Sentry suites</code> and the
+            <strong>Shadow spend is approved:</strong> allow at most 45
+            runner-minutes per no-skip run and 450 cumulative runner-minutes.
+            Stop after a run exceeds 45 minutes. Do not start another run when
+            it could exceed the cumulative ceiling. The Phase 0 cold planning
+            estimate is 41.18 runner-minutes. It is not an upper bound. The
+            first all-cache-disabled proof runs only after M4 reaches protected
+            <code>main</code>. It counts as one of the 10 sampled PRs when it
+            meets the sample rules. M4 adds no schedule and spends no shadow
+            minutes. The Phase 0 sample selects one <code>CI</code> workflow run
+            for each of 10 immutable PR heads. It counts every non-skipped job
+            across all 13 attempts, including <code>Sentry suites</code> and the
             <code>ci</code> aggregate. It excludes the separate
             <code>Code Quality</code> workflow and the external
             <code>Vercel</code> and <code>Vercel Preview Comments</code>
@@ -890,6 +904,14 @@
             <code>blacksmith-4vcpu-ubuntu-2404</code>, plus GitHub-hosted
             <code>ubuntu-latest</code>. This is selected-workflow elapsed job
             time, not total PR spend or provider-billed minutes.
+          </div>
+          <div class="callout">
+            <strong>Trusted-candidate limit:</strong> GitHub gives dispatched
+            jobs cache-service authority outside the workflow
+            <code>permissions</code> map. The reviewed workflow disables every
+            known cache path. It cannot sandbox malicious same-repository
+            candidate code that calls the cache service directly. The accepted
+            trusted-contributor model bounds this residual.
           </div>
         </div>
       </section>

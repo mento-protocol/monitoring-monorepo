@@ -61,7 +61,7 @@ function contains(haystack, needle, msg) {
   }
 }
 
-test("passes pinned external actions and local relative actions", () => {
+test("passes pinned external, self-repository, and local relative actions", () => {
   const root = fixtureRoot("pass");
   try {
     write(
@@ -73,7 +73,7 @@ jobs:
     steps:
       - uses: actions/checkout@${PINNED_SHA} # v6.0.3
       - { uses: actions/cache@${PINNED_SHA} } # v5.0.5
-      - uses: ./.github/actions/pnpm-install
+      - uses: $/.github/actions/pnpm-install
 `,
     );
     write(

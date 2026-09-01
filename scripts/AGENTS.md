@@ -3,7 +3,7 @@ title: Scripts Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-31
+last_verified: 2026-09-01
 doc_type: agent-instructions
 scope: scripts
 review_interval_days: 90
@@ -103,11 +103,11 @@ feedback-runtime pins.
   keys are exact repo-relative paths, reconciled against `findSentrySuites()`
   by set equality both ways. A moved or renamed suite fails the gate closed.
   `sentry/fixture-scan-canary.test.mjs` re-pins four; ADR 0068 has the policy.
-- **Workflow pins.** Workflows and `sentry-triage-agent.yml` pin `scripts/`.
-  Terraform filters use `terraform.stacks.json` `workflowAdmissionPatterns`.
-  `check-ci-contract{,.test}.mjs` pins jobs, filters,
-  commands, and the aggregate. Moves update ADR 0064, routing equality,
-  glob rules, and review-eval pins.
+- **Workflow pins.** Workflows pin `scripts/`; Terraform uses
+  `terraform.stacks.json` `workflowAdmissionPatterns`.
+  `check-ci-contract{,.test}.mjs` pins normal CI.
+  `check-no-skip-audit{,.test}.mjs` pins admission, SHAs, cold cache, and zero
+  skips. Moves update ADR 0064, routing, globs, and eval pins.
 - **Terraform stack registry.** `terraform.stacks.json` `changedPathPatterns`
   pins exact `scripts/` paths per stack. The broad workflow admission boundary
   covers the directory; `pnpm tf:test` enforces subsumption.

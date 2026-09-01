@@ -225,7 +225,7 @@ const STATIC_MUTATIONS = [
   // prettier-ignore
   ["unexpected aggregate need", /ci\.needs has unexpected rogue/u, ({ workflow }) => { workflow.jobs.ci.needs.push("rogue"); }],
   // prettier-ignore
-  ["changed aggregate pin", /alls-green action pin/u, ({ workflow }) => { aggregateStep(workflow).uses = "re-actors/alls-green@unreviewed"; }],
+  ["changed aggregate pin", /alls-green action pin or split/u, ({ workflow }) => { aggregateStep(workflow).uses = "re-actors/alls-green@unreviewed"; }],
   // prettier-ignore
   ["ci job runtime env", /ci job runtime/u, ({ workflow }) => { workflow.jobs.ci.env = { NODE_OPTIONS: "--require=./hook.cjs" }; }],
   // prettier-ignore
@@ -235,7 +235,7 @@ const STATIC_MUTATIONS = [
   // prettier-ignore
   ["ci permissions", /ci job runtime/u, ({ workflow }) => { workflow.jobs.ci.permissions = { contents: "write" }; }],
   // prettier-ignore
-  ["ci timeline identity", /ci steps/u, ({ workflow }) => { workflow.jobs.ci.steps[1].uses = "Kesin11/actions-timeline@unreviewed"; }],
+  ["ci timeline identity", /ci steps/u, ({ workflow }) => { workflow.jobs.ci.steps[2].uses = "Kesin11/actions-timeline@unreviewed"; }],
   // prettier-ignore
   ["missing allowed skip", /allowed-skips misses ui/u, ({ workflow }) => { const gate = aggregateStep(workflow); gate.with["allowed-skips"] = gate.with["allowed-skips"].split(",").filter((name) => name !== "ui").join(","); }],
   [

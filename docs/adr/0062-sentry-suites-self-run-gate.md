@@ -3,7 +3,7 @@ title: An unconditional gate job runs the Sentry suites and proves from their ou
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-12
+last_verified: 2026-09-01
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -64,7 +64,7 @@ The job's step list is closed-world and its order is load-bearing:
 | 1   | `actions/checkout` (SHA-pinned, `persist-credentials: false`)                                   | Upstream, one of exactly two non-PR-authored things trusted before the suites                                      | this PR  |
 | 2   | `actions/setup-node` (SHA-pinned, `node-version-file: .node-version`)                           | Same                                                                                                               | this PR  |
 | 3   | `run: /usr/bin/env -u NODE_OPTIONS -u NODE_PATH node scripts/sentry/gate/sentry-suite-gate.mjs` | The first and only PR-authored code before the suites; strips both vars, symmetric with the gate's per-child spawn | this PR  |
-| 4   | `uses: ./.github/actions/pnpm-install`                                                          | After the suites, so its `postinstall` cannot reach them                                                           | PR C     |
+| 4   | `uses: $/.github/actions/pnpm-install`                                                          | After the suites, so its `postinstall` cannot reach them; `$` binds the action to the running workflow commit      | PR C     |
 | 5   | `run: node scripts/sentry/ci-wiring/check-sentry-suites-in-ci.test.mjs`                         | Needs `js-yaml`; after the suites for the same reason                                                              | PR C     |
 
 Steps 1-3 are the security-critical core: no PR-authored step runs before the

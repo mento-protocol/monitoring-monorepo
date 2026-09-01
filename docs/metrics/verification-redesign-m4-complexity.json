@@ -1,0 +1,251 @@
+{
+  "schemaVersion": 1,
+  "baseSha": "b4bf201c3b87580771c55ec615fcc9a4e51ae267",
+  "baseline": "M4 additive complexity receipt for #2126.",
+  "scope": "Every changed and untracked M4 path relative to baseSha, except this receipt.",
+  "derivation": {
+    "method": "Use git diff --numstat from baseSha for tracked paths and physical line counts for untracked paths. The receipt path self-excludes from its own scope and totals.",
+    "trackedCommand": "git diff --numstat b4bf201c3b87580771c55ec615fcc9a4e51ae267 -- . ':!docs/metrics/verification-redesign-m4-complexity.json'",
+    "untrackedMethod": "List untracked, non-ignored paths with git ls-files --others --exclude-standard, exclude this receipt, and count each remaining file with awk END NR.",
+    "receiptPath": "docs/metrics/verification-redesign-m4-complexity.json",
+    "receiptSelfExcluded": true
+  },
+  "files": [
+    {
+      "path": ".github/actions/pnpm-install/action.yml",
+      "category": "action",
+      "additions": 7,
+      "deletions": 2
+    },
+    {
+      "path": ".github/actions/resolve-eslint-baseline/action.yml",
+      "category": "action",
+      "additions": 19,
+      "deletions": 16
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "category": "workflow",
+      "additions": 234,
+      "deletions": 73
+    },
+    {
+      "path": ".github/workflows/no-skip-audit.yml",
+      "category": "workflow",
+      "additions": 105,
+      "deletions": 0,
+      "countMethod": "physical-lines"
+    },
+    {
+      "path": "docs/PLAN-progressive-verification-graph.html",
+      "category": "doc",
+      "additions": 31,
+      "deletions": 9
+    },
+    {
+      "path": "docs/PLAN-progressive-verification-graph.md",
+      "category": "doc",
+      "additions": 48,
+      "deletions": 8
+    },
+    {
+      "path": "docs/adr/0062-sentry-suites-self-run-gate.md",
+      "category": "doc",
+      "additions": 2,
+      "deletions": 2
+    },
+    {
+      "path": "docs/adr/0078-staged-verification-redesign.md",
+      "category": "doc",
+      "additions": 40,
+      "deletions": 9
+    },
+    {
+      "path": "docs/metrics/verification-redesign-safeguards.jsonl",
+      "category": "doc",
+      "additions": 2,
+      "deletions": 1
+    },
+    {
+      "path": "docs/notes/quick-commands.md",
+      "category": "doc",
+      "additions": 7,
+      "deletions": 2
+    },
+    {
+      "path": "docs/pr-checklists/ci-workflow-gates.md",
+      "category": "doc",
+      "additions": 44,
+      "deletions": 2
+    },
+    {
+      "path": "package.json",
+      "category": "package",
+      "additions": 1,
+      "deletions": 1
+    },
+    {
+      "path": "scripts/AGENTS.md",
+      "category": "doc",
+      "additions": 6,
+      "deletions": 6
+    },
+    {
+      "path": "scripts/alerts/check-peg-registry-integrity.test.mjs",
+      "category": "test",
+      "additions": 75,
+      "deletions": 1
+    },
+    {
+      "path": "scripts/check-agent-quality-gate-package-scripts.mjs",
+      "category": "check",
+      "additions": 1,
+      "deletions": 1
+    },
+    {
+      "path": "scripts/production-infra-identity-contract/routing.test.mjs",
+      "category": "test",
+      "additions": 2,
+      "deletions": 2
+    },
+    {
+      "path": "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-core.mjs",
+      "category": "check",
+      "additions": 17,
+      "deletions": 4
+    },
+    {
+      "path": "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-job.test.mjs",
+      "category": "test",
+      "additions": 9,
+      "deletions": 2
+    },
+    {
+      "path": "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-probes.mjs",
+      "category": "check",
+      "additions": 13,
+      "deletions": 7
+    },
+    {
+      "path": "scripts/workflows/check-autofix-ci-trust.mjs",
+      "category": "check",
+      "additions": 3,
+      "deletions": 2
+    },
+    {
+      "path": "scripts/workflows/check-ci-contract.mjs",
+      "category": "check",
+      "additions": 21,
+      "deletions": 22
+    },
+    {
+      "path": "scripts/workflows/check-ci-contract.test.mjs",
+      "category": "test",
+      "additions": 2,
+      "deletions": 2
+    },
+    {
+      "path": "scripts/workflows/check-github-action-pins.mjs",
+      "category": "check",
+      "additions": 10,
+      "deletions": 6
+    },
+    {
+      "path": "scripts/workflows/check-github-action-pins.test.mjs",
+      "category": "test",
+      "additions": 2,
+      "deletions": 2
+    },
+    {
+      "path": "scripts/workflows/check-no-skip-audit.mjs",
+      "category": "check",
+      "additions": 180,
+      "deletions": 0,
+      "countMethod": "physical-lines"
+    },
+    {
+      "path": "scripts/workflows/check-no-skip-audit.test.mjs",
+      "category": "test",
+      "additions": 171,
+      "deletions": 0,
+      "countMethod": "physical-lines"
+    },
+    {
+      "path": "scripts/workflows/check-pr-validation-boundary.mjs",
+      "category": "check",
+      "additions": 10,
+      "deletions": 10
+    },
+    {
+      "path": "scripts/workflows/check-pr-validation-boundary.test.mjs",
+      "category": "test",
+      "additions": 7,
+      "deletions": 7
+    }
+  ],
+  "totals": {
+    "action": {
+      "additions": 26,
+      "deletions": 18,
+      "net": 8
+    },
+    "workflow": {
+      "additions": 339,
+      "deletions": 73,
+      "net": 266
+    },
+    "check": {
+      "additions": 255,
+      "deletions": 52,
+      "net": 203
+    },
+    "test": {
+      "additions": 268,
+      "deletions": 16,
+      "net": 252
+    },
+    "doc": {
+      "additions": 180,
+      "deletions": 39,
+      "net": 141
+    },
+    "package": {
+      "additions": 1,
+      "deletions": 1,
+      "net": 0
+    },
+    "all": {
+      "additions": 1069,
+      "deletions": 199,
+      "net": 870
+    }
+  },
+  "replacementSpecific": {
+    "implementationAdditions": {
+      "definition": "All action, workflow, package, and checker additions in the phase-scoped diff. Documentation and tests do not count as implementation additions.",
+      "total": 621
+    },
+    "testAdditions": {
+      "definition": "All additions to phase-scoped test files, including the focused audit mutation suite.",
+      "total": 268
+    },
+    "testToImplementationRatio": 0.4316,
+    "limits": {
+      "thinOrchestrationScriptPhysicalLines": 180,
+      "thinOrchestrationScriptUnder300": true,
+      "newWorkflowPhysicalLines": 105,
+      "newTestPhysicalLines": 171,
+      "newReplacementFilePhysicalLineLimit": 500,
+      "allNewReplacementFilesUnder500": true,
+      "twiceImplementationAdditions": 1242,
+      "testAdditionsUnderTwiceImplementationAdditions": true
+    }
+  },
+  "forbiddenMechanisms": [],
+  "phaseClaim": {
+    "mode": "additive",
+    "claimsCutoverAdditionsBelowDeletionsCondition": false,
+    "claimsShadowRunEvidence": false,
+    "statement": "M4 adds the manual audit lane and its static contract. It adds no schedule and records no shadow run. Operational run evidence remains in GitHub and the later Markdown evidence record."
+  }
+}
