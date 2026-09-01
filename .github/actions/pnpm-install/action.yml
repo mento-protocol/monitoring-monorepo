@@ -7,6 +7,10 @@ description: Setup pnpm + Node + install deps (frozen lockfile)
 # .github/workflows/claude.yml — update via Dependabot (.github/dependabot.yml).
 
 inputs:
+  restore-cache:
+    description: Restore the protected-main pnpm store before install
+    required: false
+    default: "true"
   write-cache:
     description: Save the pnpm store after install on a protected main push
     required: false
@@ -32,6 +36,7 @@ runs:
         node -e 'const { rmSync } = require("node:fs"); const { homedir } = require("node:os"); const { join } = require("node:path"); rmSync(join(homedir(), "pnpm-store"), { force: true, recursive: true });'
     - name: Restore pnpm store
       id: pnpm-cache
+      if: inputs.restore-cache == 'true'
       continue-on-error: true
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
@@ -40,7 +45,7 @@ runs:
         restore-keys: |
           trusted-main-v1-pnpm-store-${{ runner.os }}-${{ runner.arch }}-
     - name: Clear incomplete pnpm store restore
-      if: steps.pnpm-cache.outputs.cache-hit == ''
+      if: inputs.restore-cache == 'true' && steps.pnpm-cache.outputs.cache-hit == ''
       shell: bash
       run: >-
         node -e 'const { rmSync } = require("node:fs"); const { homedir } = require("node:os"); const { join } = require("node:path"); rmSync(join(homedir(), "pnpm-store"), { force: true, recursive: true });'
@@ -52,7 +57,7 @@ runs:
       shell: bash
       run: pnpm install --frozen-lockfile --store-dir ~/pnpm-store
     - name: Save pnpm store
-      if: inputs.write-cache == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.pnpm-cache.outputs.cache-hit != 'true'
+      if: inputs.restore-cache == 'true' && inputs.write-cache == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.pnpm-cache.outputs.cache-hit != 'true'
       continue-on-error: true
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:

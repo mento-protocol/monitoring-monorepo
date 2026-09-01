@@ -3,7 +3,7 @@ title: Scripts Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-31
+last_verified: 2026-09-01
 doc_type: agent-instructions
 scope: scripts
 review_interval_days: 90
@@ -43,25 +43,25 @@ subdirectories.
 `redrive-onchain-deadletter.{mjs,test.mjs}` stays flat under
 `alerts/infra/`; ADR 0064 gives the lint reason.
 
-`lib/` holds cores that multiple clusters read: `hcl.mjs` for Terraform HCL,
-`workflow-yaml.mjs` for Actions and shell parsing,
-`pnpm-override-selector.mjs` for pnpm overrides, and
-`gh-issue-lifecycle.mjs` for shared GitHub issue and label mechanics, which doc
-schedulers also read. Local projection keeps only `agent-ready` on create and
-all lifecycle labels on closed repair. ADR 0064 lists readers.
+`lib/` holds cores multiple clusters read: `hcl.mjs` (Terraform HCL),
+`workflow-yaml.mjs` (Actions and shell parsing), `pnpm-override-selector.mjs`
+(pnpm overrides), and `gh-issue-lifecycle.mjs` (GitHub issue and label
+mechanics), which doc schedulers also read. Local projection keeps only
+`agent-ready` on create and all lifecycle labels on closed repair. ADR 0064
+lists readers.
 `peg-policy-digest.mjs` defines the peg version-digest contract for both
 validators. Inventories, pinned hashes, and identities stay with their domain.
 
 ## Why Files Stay Flat
 
-Move all 15 path-pin classes with their files. Keep `agent-autoreview.sh`
-feedback-runtime pins in place.
+Move all 15 pin classes with their files; keep `agent-autoreview.sh`
+feedback-runtime pins.
 
 - **Autoreview pins.** `agent-autoreview.sh` pins runtime,
   sealed `agent-autoreview-secret-suppressions.json` (ADR 0079),
   `pr-feedback-state-claude.mjs` and
   `pr-ready-state-review-signals.mjs`; feedback uses `origin/main`. Use ADR
-  0064's three-merge move sequence.
+  0064's three-merge sequence.
 - **Gate routing pins.** Stub-repo tests require
   `$script_source_dir == $repo_root/scripts`.
   `bootstrap/codex-cloud-setup.{sh,test.sh}` pair offline.
@@ -70,20 +70,22 @@ feedback-runtime pins in place.
   `sentry/triage/sentry-triage-project-route.mjs` routes
   `pnpm sentry:project:test`.
   `deploy/deploy-indexer-verify{,-analysis}{,.test}.mjs` and
-  `deploy/deploy-indexer-verify-status-identity.mjs` share one any-depth arm;
-  both tests run. `pr/agent-issue-board{,.test}.mjs` and
+  `deploy/deploy-indexer-verify-status-identity.mjs` share an any-depth arm;
+  both run. `pr/agent-issue-board{,.test}.mjs` and
   `pr/issue-board-{backfill,cli,commands,lock,ownership,projects,release,state,sync,sync-lock,transactions,transport}.mjs`
-  route `pnpm issue:board:test`; CI reruns it after failures (ADR 0082).
+  route `pnpm issue:board:test`; CI reruns it after failures (ADR 0082
+  confinement).
   `repo-health/check-guardrail-prose{,.test}.mjs` and
-  `repo-health/guardrail-prose.json` route to the guardrail suite. `ci.yml`,
+  `repo-health/guardrail-prose.json` route the guardrail suite. `ci.yml`,
   quick-commands, and the manifest pin it (ADR 0073).
   `pr/merge-pr*`, both PR-state helpers, and `agent-autoreview.sh` (Codex
   markers) route `pnpm pr:merge:test`.
 - **Gate runtime pins.** Before `cd`, `agent-quality-gate.sh` resolves
   `gate/run-handles.sh`, coordinator files,
   `docs/docs-navigation-eval-helpers.mjs`, and `gate/lockfile-scope.mjs` from
-  `$script_source_dir`; tests hash them from `$repo_root`. Move paths, routes,
-  signatures, fixtures, and literals together (ADRs 0064 and 0076).
+  `$script_source_dir`; tests hash them from `$repo_root`. Move these paths with
+  signatures, fixtures, literals, and `.coderabbit.yaml` review scope together
+  (ADRs 0064 and 0076).
 - **Gate mapping pins.** Signatures and Turbo inputs pin
   `gate/routing-table/**`, `gate/mapping*`, the autoreview core, and sealed
   policy. Runtime hashes use `$script_source_dir`; suites use `$repo_root`.
@@ -106,10 +108,11 @@ feedback-runtime pins in place.
 - **Sentry suite manifest.** `scripts/sentry/gate/sentry-suite-manifest.json`
   enforces two-way path equality with `findSentrySuites()`; moves fail closed.
   `sentry/fixture-scan-canary.test.mjs` re-pins four (ADR 0068).
-- **Workflow pins.** Workflows and `sentry-triage-agent.yml` pin `scripts/`.
-  Terraform filters use `terraform.stacks.json` `workflowAdmissionPatterns`.
-  `check-ci-contract{,.test}.mjs` pins jobs, filters, commands, and aggregate.
-  Moves update ADR 0064, routing equality, globs, and review-eval pins.
+- **Workflow pins.** Workflows pin `scripts/`. Terraform uses
+  `terraform.stacks.json` `workflowAdmissionPatterns`.
+  `check-ci-contract{,.test}.mjs` pins CI.
+  `check-no-skip-audit{,.test}.mjs` pins admission, SHAs, cold cache, and zero
+  skips. Moves update ADR 0064, routing, globs, and eval pins.
 - **Terraform stack registry.** `terraform.stacks.json` `changedPathPatterns`
   pins exact `scripts/` paths per stack. The broad workflow admission boundary
   covers the directory; `pnpm tf:test` enforces subsumption.
@@ -121,8 +124,8 @@ feedback-runtime pins in place.
   `trunk.yml`. ADR 0078 defines the boundary.
 - **Production identity pins.** In `production-infra-identity-contract/`, align
   `workflow-inventory.mjs`, `workflow.test.mjs`,
-  `dependabot-auto-merge.test.mjs`, and `index.test.mjs` aligned with their
-  boundary import. The inventory pins audited workflow script paths.
+  `dependabot-auto-merge.test.mjs`, and `index.test.mjs` with their
+  boundary import. The inventory pins audited paths.
 - **External console pins.** Codex Cloud pins
   `bootstrap/codex-cloud-{setup,maintenance}.sh`; Claude Code web pins
   `bootstrap/claude-code-web-setup.sh` through `.claude/hooks/session-start.sh`.
