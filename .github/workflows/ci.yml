@@ -1182,12 +1182,13 @@ jobs:
     needs: changes
     if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.rootScripts == 'true'
     runs-on: blacksmith-2vcpu-ubuntu-2404
-    # The quality-gate routing regression suite reached 24m37s on this runner
-    # after earlier job setup. The prior 25-minute cap cancelled it before
-    # later steps could run. The waits bind real queue, cleanup, and no-signal
+    # The quality-gate routing regression suite reached 39m02s on this runner
+    # in main CI run 33535970973, attempt 1, job 99950409872, after earlier job
+    # setup. The prior 40-minute cap cancelled the job before later steps could
+    # run. The waits bind real queue, cleanup, and no-signal
     # guarantees, so keep a bounded 15-minute margin for the remaining steps
     # and runner variance instead of weakening those assertions.
-    timeout-minutes: 40
+    timeout-minutes: 55
     permissions:
       contents: read
       actions: read

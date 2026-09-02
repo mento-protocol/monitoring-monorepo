@@ -114,7 +114,7 @@ cleanup, cross-worktree scheduling, and crash recovery.
   [source patch](metrics/verification-redesign-local-gate-source.patch) permits
   a fresh clone to reproduce the measured tree from a reachable commit. This
   one narrow route does not replace the seven-request distribution.
-- The gate self-test has needed a 40-minute CI timeout.
+- The gate self-test has needed a 55-minute CI timeout.
 - Remote Turbo result caching is disabled.
 
 The generated Phase 0 manifest widens this count to the complete control-plane
