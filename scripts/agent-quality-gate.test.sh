@@ -4915,6 +4915,14 @@ STUB
 
     # shellcheck disable=SC2329
     cleanup_sequential_descendant_fixture() {
+      # Release the drain barrier before signalling anything. A holder parked
+      # here is inside a 20-second poll for `.release`, so an assertion that
+      # fails between arming and the release below used to leave it there for
+      # the full budget and then report `the test-only drain refresh barrier
+      # did not release` on top of the real failure — burying the assertion
+      # that actually failed under an artifact of the failing (issue 2212).
+      # Unconditional: releasing a barrier that never armed is a no-op file.
+      : > "${drain_refresh_barrier}.release" 2>/dev/null || true
       if [[ "$holder_pid" =~ ^[1-9][0-9]*$ && -n "$holder_start" ]] &&
         gate_test_process_has_live_start "$holder_pid" "$holder_start"; then
         gate_test_signal_with_current_parent \
@@ -5060,7 +5068,12 @@ STUB
     contender_output="$fixture_runtime/replacement-contender-output"
     rm -f "$descendant_pid_file" "$replacement_pid_file" "$contender_started" \
       "${drain_refresh_barrier}.used" "${drain_refresh_barrier}.ready" \
-      "${drain_refresh_barrier}.release"
+      "${drain_refresh_barrier}.release" "${drain_refresh_barrier}.command"
+    # Only the prewarm command forks the descendant this fixture rendezvouses
+    # with; the two commands before it fork nothing. Naming it keeps an earlier
+    # drain — one that saw only a transient helper — from consuming the barrier
+    # and stranding this fixture at a rendezvous that already happened.
+    printf '%s\n' "pnpm agent:prewarm:test" > "${drain_refresh_barrier}.command"
     holder_start=""
     contender_start=""
     descendant_start=""
@@ -6375,9 +6388,70 @@ STUB
   )
 }
 
+# Which drain the test-only refresh barrier arms on. The fixture below rides a
+# real gate and so can only ever sample the ordering it happens to get; this
+# exercises the selection directly, so the case that used to lose the race is
+# deterministic rather than occasional (issue 2212).
+run_drain_refresh_barrier_selection_regression() {
+  local fixture_root barrier source_body rc
+  fixture_root="$(mktemp -d)"
+  barrier="$fixture_root/drain-refresh"
+  # Lift the function out of the gate rather than sourcing the script, which
+  # would run its whole top level. Bounded to the first column-0 `}` so a body
+  # brace cannot end it early.
+  source_body="$(awk '
+    /^gate_drain_test_refresh_barrier\(\) \{$/ { capture = 1 }
+    capture { print }
+    capture && /^\}$/ { exit }
+  ' "$repo_root/scripts/agent-quality-gate.sh")"
+  [[ "$source_body" == *"gate_drain_test_refresh_barrier() {"* &&
+    "$source_body" == *$'\n}' ]] ||
+    fail "could not lift gate_drain_test_refresh_barrier out of the gate"
+
+  barrier_case() {
+    local expect_armed="$1" expect_rc="$2" active="$3" named="$4"
+    local drain_refresh_test_barrier="$barrier"
+    local gate_drain_active_mapped_command="$active"
+    rm -f "${barrier}.used" "${barrier}.ready" "${barrier}.command"
+    # Pre-created so an arming case returns on its first poll instead of
+    # spending the 20-second budget.
+    : > "${barrier}.release"
+    [[ "$named" == "<none>" ]] ||
+      printf '%s\n' "$named" > "${barrier}.command"
+    eval "$source_body"
+    rc=0
+    gate_drain_test_refresh_barrier || rc=$?
+    [[ "$rc" -eq "$expect_rc" ]] ||
+      fail "drain refresh barrier named '${named}' under '${active}' returned ${rc}, expected ${expect_rc}"
+    if [[ "$expect_armed" -eq 1 ]]; then
+      [[ -e "${barrier}.ready" && -e "${barrier}.used" ]] ||
+        fail "drain refresh barrier named '${named}' under '${active}' did not arm"
+    else
+      [[ ! -e "${barrier}.ready" && ! -e "${barrier}.used" ]] ||
+        fail "drain refresh barrier named '${named}' under '${active}' armed on the wrong drain"
+    fi
+  }
+
+  # An unnamed barrier keeps arming on whatever drain reaches it first, so a
+  # fixture that never opts in is unaffected by this change.
+  barrier_case 1 0 "pnpm lint:scripts" "<none>"
+  # Named: the earlier command must pass straight through. This is the case the
+  # race lost — the barrier was consumed here and the real rendezvous starved.
+  barrier_case 0 0 "./tools/trunk check --ci x" "pnpm agent:prewarm:test"
+  barrier_case 0 0 "pnpm lint:scripts" "pnpm agent:prewarm:test"
+  # Named, and this is the drain that was named.
+  barrier_case 1 0 "pnpm agent:prewarm:test" "pnpm agent:prewarm:test"
+  # A name that cannot be read is a fixture asking for a rendezvous it will not
+  # get; arming everywhere instead is exactly the defect, so this fails closed.
+  barrier_case 0 2 "pnpm agent:prewarm:test" ""
+  unset -f barrier_case
+  rm -rf "$fixture_root"
+}
+
 run_parallel_worker_loss_coordinator_regression
 run_parallel_release_failure_coordinator_regression
 run_stale_failure_result_regression
+run_drain_refresh_barrier_selection_regression
 run_sequential_descendant_lease_regression
 run_trunk_probe_lease_regression
 run_trunk_probe_deadline_regression

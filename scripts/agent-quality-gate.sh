@@ -1086,6 +1086,10 @@ if [[ -n "$worker_registration_test_barrier" && "${NODE_ENV:-}" != "test" ]]; th
   echo "AGENT_QUALITY_GATE_TEST_WORKER_REGISTRATION_BARRIER: test-only override requires NODE_ENV=test" >&2
   exit 2
 fi
+# The mapped command whose drains are running right now, for the test-only
+# refresh barrier's `.command` rendezvous. Declared here so it is always defined
+# under `set -u`, including for a drain that runs outside any mapped command.
+gate_drain_active_mapped_command=""
 drain_refresh_test_barrier="${AGENT_QUALITY_GATE_TEST_DRAIN_REFRESH_BARRIER:-}"
 if [[ -n "$drain_refresh_test_barrier" && "${NODE_ENV:-}" != "test" ]]; then
   echo "AGENT_QUALITY_GATE_TEST_DRAIN_REFRESH_BARRIER: test-only override requires NODE_ENV=test" >&2
@@ -3585,10 +3589,34 @@ gate_lock_test_crash() {
   kill -9 $$
 }
 
+# Pause one drain so a fixture can inspect the tree while it is held open.
+#
+# The barrier arms once per run, which is what a fixture wants: it rendezvouses
+# with a single drain. But "once" alone says nothing about WHICH drain, and a
+# drain runs after any mapped command with something to settle — including one
+# that only ever saw a short-lived helper enter the durable capture. The first
+# such drain consumed the barrier, the fixture was still waiting at a rendezvous
+# that had already happened, and twenty seconds later the gate failed the wrong
+# command (issue 2212).
+#
+# A fixture therefore names the mapped command it means to synchronize with, in
+# a `.command` sibling of the barrier path. Naming it is optional and the file
+# is read, never written, here: an unnamed barrier keeps the old arm-anywhere
+# behaviour, so this cannot change a run that does not opt in — and no run
+# outside NODE_ENV=test can set the barrier at all.
 gate_drain_test_refresh_barrier() {
   local barrier="$drain_refresh_test_barrier"
+  local expected
   local attempt
   [[ -n "$barrier" && ! -e "${barrier}.used" ]] || return 0
+  if [[ -r "${barrier}.command" ]]; then
+    IFS= read -r expected < "${barrier}.command" || expected=""
+    # An unreadable or empty name must not silently arm everywhere: a fixture
+    # that asked for a specific command and got the first one instead is the
+    # defect this exists to prevent.
+    [[ -n "$expected" ]] || return 2
+    [[ "$expected" == "${gate_drain_active_mapped_command:-}" ]] || return 0
+  fi
   : > "${barrier}.used" || return 2
   : > "${barrier}.ready" || return 2
   for ((attempt = 0; attempt < 1000; attempt++)); do
@@ -9287,6 +9315,12 @@ run_with_timeout() {
   local deferred_lease_file="${2:-}"
   local command_drain_identity="${3:-}"
   local trunk_probe_handshake_file="${4:-}"
+  # Which mapped command the drains below belong to. Set explicitly rather than
+  # read from this function's own `command` local: bash would make that local
+  # visible to every callee by dynamic scope, and a rename four frames away
+  # would then silently stop matching instead of failing. Only the test-only
+  # refresh barrier reads it.
+  gate_drain_active_mapped_command="$command"
   local cmd_pid
   local cmd_start
   local watchdog_pid

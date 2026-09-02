@@ -2331,7 +2331,18 @@ active control.
   validated test-control preflight establishes the worktree runtime capability
   receipt before the gate creates a parallel worker.
 - `AGENT_QUALITY_GATE_TEST_DRAIN_REFRESH_BARRIER` pauses once between a drain's
-  refreshed tag capture and its process census.
+  refreshed tag capture and its process census. "Once" does not by itself say
+  which drain: one runs after any mapped command with something to settle,
+  including a command that only saw a short-lived helper enter the durable
+  capture, so the first of them consumed the barrier and left a fixture waiting
+  at a rendezvous that had already happened. A fixture names the mapped command
+  it means to meet in a `.command` sibling of the barrier path, and the barrier
+  arms only there. The name is optional — an unnamed barrier keeps arming on the
+  first drain — but an unreadable or empty one fails the drain closed rather
+  than arming everywhere. A fixture must also write `.release` on every terminal
+  path, including its cleanup trap: a barrier left unreleased parks the gate for
+  the full 20-second budget and then reports the barrier as the failure, burying
+  the assertion that actually failed.
 - `AGENT_QUALITY_GATE_TEST_PARALLEL_RELEASE_FAILURE_AT` accepts a positive
   integer and injects failure at that parallel lease-release attempt.
 - `AGENT_QUALITY_GATE_TEST_OWNER_WITNESS_BARRIER`,
