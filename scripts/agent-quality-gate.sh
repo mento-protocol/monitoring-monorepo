@@ -1491,6 +1491,9 @@ teardown_active_timeouts() {
   local -a worker_lifecycle_contracts=("${active_worker_lifecycle_contracts[@]+"${active_worker_lifecycle_contracts[@]}"}")
   local -a worker_mapped_commands=("${active_worker_mapped_commands[@]+"${active_worker_mapped_commands[@]}"}")
   local -a darwin_cohort_tokens=()
+  # Mapped command names aligned with darwin_cohort_tokens. A one-token cohort
+  # is one identifiable command and keeps its name; see the cohort drain below.
+  local -a darwin_cohort_commands=()
   local -a fallback_args=()
   for record in "${timeout_records[@]+"${timeout_records[@]}"}"; do
     pid="${record%%|*}"
@@ -1536,6 +1539,9 @@ teardown_active_timeouts() {
     if [[ -n "$timeout_drain_identity" &&
       "$timeout_lifecycle_contract" == darwin-coherent-lineage-v2 ]]; then
       darwin_cohort_tokens+=("$timeout_drain_identity")
+      # The sequential command in flight. `run_with_timeout` named it in this
+      # same process, so its name is the one already carried here.
+      darwin_cohort_commands+=("${gate_drain_active_mapped_command:-}")
       darwin_timeout_settled=1
     fi
     worker_index=0
@@ -1544,17 +1550,26 @@ teardown_active_timeouts() {
         darwin-coherent-lineage-v2 ]]; then
         case " ${darwin_cohort_tokens[*]-} " in
           *" ${drain_identity} "*) ;;
-          *) darwin_cohort_tokens+=("$drain_identity") ;;
+          *)
+            darwin_cohort_tokens+=("$drain_identity")
+            darwin_cohort_commands+=("${worker_mapped_commands[$worker_index]}")
+            ;;
         esac
         darwin_workers_settled=1
       fi
       worker_index=$((worker_index + 1))
     done
     if [[ "${#darwin_cohort_tokens[@]}" -gt 0 ]]; then
-      # A cohort drains several commands at once, so no single name describes
-      # it. Clear the name rather than leaving a stale one: a named test-only
-      # refresh barrier must not rendezvous with a drain it cannot identify.
-      gate_drain_active_mapped_command=""
+      # A cohort of several commands settles them at once, so no single name
+      # describes its drain: clear the name rather than leave a stale one, so a
+      # named barrier cannot rendezvous with a drain it cannot identify. One
+      # token is not that case — it is one identifiable command taking the
+      # cohort route because Darwin teardown always does — so it keeps its name.
+      if [[ "${#darwin_cohort_tokens[@]}" -eq 1 ]]; then
+        gate_drain_active_mapped_command="${darwin_cohort_commands[0]}"
+      else
+        gate_drain_active_mapped_command=""
+      fi
       drain_completed_darwin_command_cohort \
         "${darwin_cohort_tokens[@]}" || return $?
     fi

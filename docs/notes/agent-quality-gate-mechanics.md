@@ -2354,9 +2354,11 @@ active control.
   asked for. The third is `teardown_active_timeouts`, which drains registered
   workers on EXIT/INT/TERM after the reaping loop is gone, so it takes each name
   from the `active_worker_mapped_commands` registry that aligns with the worker
-  identities. A cohort drain settles several commands at once and clears the
-  name instead: no single name describes it, and a named barrier must not meet a
-  drain it cannot identify.
+  identities. A cohort drain of several commands settles them at once and clears
+  the name instead: no single name describes it, and a named barrier must not
+  meet a drain it cannot identify. A cohort of one keeps its name — Darwin
+  teardown takes the cohort route even for a single command, so "cohort" there
+  does not imply "unidentifiable".
 
   A fourth site is the Darwin census seam, `waitAtDarwinCensusTestBarrier` in
   `scripts/gate/darwin-process-lineage.mjs`. It is not a redundant consumer: on
@@ -2368,13 +2370,15 @@ active control.
   applies the same rules: unnamed arms on the first drain, a name arms only on
   its own command, and an unresolvable name fails the drain closed.
 
-  Two helper routes settle a lineage and **both** must pass that argument:
-  `watch-settle`, which a mapped command takes when it completes normally, and
-  `settle`, the recovery route. `settle-cohort` passes an explicit none and so
-  declines any named barrier, the same cohort rule as the shell side. Adding a
-  third route without the argument would silently strand a named rendezvous, so
-  `darwin-process-lineage.test.mjs` asserts every settlement call site carries
-  it.
+  Three helper routes settle a lineage and **all** must pass that argument:
+  `watch-settle`, which a mapped command takes when it completes normally;
+  `settle`, the recovery route; and `settle-cohort`, which Darwin teardown takes
+  on EXIT/INT/TERM. A cohort of one is one identifiable command and keeps its
+  name — the helper honours a name only when exactly one state settles, and the
+  shell teardown clears it only for a cohort of several, where no single name
+  describes the drain. Adding a fourth route without the argument would silently
+  strand a named rendezvous, so `darwin-process-lineage.test.mjs` asserts every
+  settlement call site carries it.
 
   A fixture must also write `.release` on every terminal path, including its
   cleanup trap: a barrier left unreleased parks the gate for the full 20-second

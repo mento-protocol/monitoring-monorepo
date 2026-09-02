@@ -725,10 +725,15 @@ gate_darwin_lineage_settle_cohort() {
     echo "error: Darwin process-lineage helper is unavailable: ${module}" >&2
     return 2
   fi
+  # Darwin teardown always takes the cohort route, so a cohort of one is one
+  # identifiable command. The helper honours this name only when exactly one
+  # state settles; for a real cohort no single name describes the drain and it
+  # is ignored there.
   if ! "$gate_darwin_node_bin" "$module" settle-cohort \
     --state-directory "$root" --tokens "$tokens_csv" \
     --scratch "$scratch_dir" \
     --timeout-seconds "$gate_lock_orphan_drain_bound_seconds" \
+    --active-mapped-command "${gate_drain_active_mapped_command:-}" \
     --retain-state "$retain_state" >/dev/null; then
     echo "error: Darwin process-lineage cohort recovery did not reach empty exact identity sets." >&2
     return 2

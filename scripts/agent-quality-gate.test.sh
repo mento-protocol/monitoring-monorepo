@@ -6636,6 +6636,60 @@ run_teardown_drain_command_identity_regression() {
   IFS= read -r line < "$observed"
   [[ "$line" == $'kept\t1\tpnpm agent:prewarm:test' ]] ||
     fail "unregistering a settled worker left '${line}', expected only the other worker's mapped command"
+
+  # Darwin teardown always settles through the cohort route, so a cohort of one
+  # is one identifiable command and must keep its name. Only a real cohort of
+  # several has no single name to be.
+  local workers
+  for workers in 1 2; do
+    rc=0
+    # shellcheck disable=SC2034
+    (
+      gate_darwin_lineage_host_platform=Darwin
+      gate_lock_enabled=1
+      gate_lock_token=teardown-lock-token
+      gate_run_id=teardown-run-id
+      gate_drain_capture=""
+      active_timeout_records=()
+      active_timeout_exact_identities=()
+      active_timeout_drain_identity=""
+      active_timeout_lifecycle_contract=""
+      active_worker_pgids=(4000001)
+      active_worker_drain_identities=(teardown-identity-a)
+      active_worker_start_identities=(teardown-start-a)
+      active_worker_lifecycle_contracts=(darwin-coherent-lineage-v2)
+      active_worker_mapped_commands=("pnpm agent:prewarm:test")
+      if [[ "$workers" -eq 2 ]]; then
+        active_worker_pgids+=(4000002)
+        active_worker_drain_identities+=(teardown-identity-b)
+        active_worker_start_identities+=(teardown-start-b)
+        active_worker_lifecycle_contracts+=(darwin-coherent-lineage-v2)
+        active_worker_mapped_commands+=("pnpm lint:scripts")
+      fi
+      gate_drain_active_mapped_command="./tools/trunk check --ci x"
+      drain_completed_darwin_command_cohort() {
+        # `-` not `:-`: an empty name is the cleared-for-a-real-cohort case
+        # and must not be reported as an unset variable.
+        printf 'cohort\t%s\t%s\n' "$#" \
+          "${gate_drain_active_mapped_command-<unset>}" > "$observed"
+      }
+      gate_darwin_exact_identity_terminate() { :; }
+      collect_process_tree() { :; }
+      eval "$contract_body"
+      eval "$source_body"
+      teardown_active_timeouts
+    ) || rc=$?
+    [[ "$rc" -eq 0 ]] ||
+      fail "the Darwin teardown of ${workers} worker(s) returned ${rc}, expected 0"
+    IFS= read -r line < "$observed"
+    if [[ "$workers" -eq 1 ]]; then
+      [[ "$line" == $'cohort\t1\tpnpm agent:prewarm:test' ]] ||
+        fail "a one-token Darwin teardown cohort reported '${line}', expected it to keep its own mapped command"
+    else
+      [[ "$line" == $'cohort\t2\t' ]] ||
+        fail "a two-token Darwin teardown cohort reported '${line}', expected no name"
+    fi
+  done
   rm -rf "$fixture_root"
 }
 

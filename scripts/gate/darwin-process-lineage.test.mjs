@@ -3955,11 +3955,12 @@ test("every Darwin settlement route carries the active mapped command", () => {
   // Both CLI branches read the option, and each shell invocation passes it.
   assert.equal(
     moduleSource.split('options.get("--active-mapped-command")').length - 1,
-    2,
-    "both the settle and watch-settle CLI branches must read the option",
+    3,
+    "the settle, watch-settle and settle-cohort CLI branches must read it",
   );
   for (const [file, cliCommand] of [
     ["gate/darwin-process-lineage.sh", "settle"],
+    ["gate/darwin-process-lineage.sh", "settle-cohort"],
     ["agent-quality-gate.sh", "watch-settle"],
   ]) {
     const source = readFileSync(join(repoRoot, file), "utf8");

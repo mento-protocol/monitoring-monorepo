@@ -1567,6 +1567,7 @@ async function main() {
   }
   if (command === "settle-cohort") {
     const allowedOptions = new Set([
+      "--active-mapped-command",
       "--retain-state",
       "--scratch",
       "--state-directory",
@@ -1590,10 +1591,12 @@ async function main() {
       scratchDirectory: required(options, "--scratch"),
       timeoutSeconds: required(options, "--timeout-seconds"),
       retainState,
-      // Explicitly none. A cohort settles several mapped commands at once, so
-      // no single name describes its drain and a named test barrier must
-      // decline it rather than meet an arbitrary member.
-      activeMappedCommand: null,
+      // Darwin teardown takes this route even for a single command, so a name
+      // can be meaningful here. `settleDarwinLineageCohort` honours it only
+      // when exactly one state settles; a real cohort settles several mapped
+      // commands at once, so no single name describes its drain and a named
+      // test barrier must decline it rather than meet an arbitrary member.
+      activeMappedCommand: options.get("--active-mapped-command") || null,
     });
     process.stdout.write(`${JSON.stringify(result)}\n`);
     return;
