@@ -280,7 +280,11 @@ polled. Do not foreground-poll and never sleep-poll.
      `true`, wait for the automatic attempt to become terminal as before; when
      it is `false`, a push onto an already-open PR starts no automatic review —
      only the opening push does — so refresh once the head is stable instead of
-     waiting. If the signal is missing or stale and no
+     waiting. One exception to that second branch: if this PR's opening review
+     never completed, coming back as a rate-limit or cap notice rather than a
+     review, CodeRabbit may still run and possibly retry it, so wait the
+     bounded time as in the `true` branch before posting (PR #2236 observed
+     three runs across three pushes with `false` in force). If the signal is missing or stale and no
      trusted top-level comment contains both `@coderabbitai review` and
      `<!-- coderabbit-final-head-review:<full-head-sha> -->`, use
      `add_issue_comment` to post `@coderabbitai review`, a blank line, and that

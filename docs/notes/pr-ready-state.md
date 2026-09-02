@@ -170,6 +170,15 @@ governs this PR is the one at its head, not the one on `main`. Read
 - **`false`** — a push onto an already-open PR starts no automatic review, so
   there is nothing to wait for. Only the PR's opening push still draws one.
   Refresh once the head is stable and go straight to the closeout request.
+  **Unless the opening review never finished.** `false` says what should
+  happen; it does not establish what did. If this PR's opening review came
+  back as a rate-limit or cap notice rather than a review, CodeRabbit may
+  still run — possibly retrying that unfinished review — and a request posted
+  into the middle of it recreates the duplicate review and bill. PR #2236
+  observed exactly that: three pushes with `false` in force produced three
+  runs, each within about 75 seconds of its push. So when no opening review
+  completed, wait the bounded time for an automatic attempt first, exactly as
+  in the `true` branch.
 
 Either way, batch fixes into one push. If the signal is then `missing` or
 `stale`, re-resolve `headRefOid` immediately before posting and require it to
@@ -502,7 +511,9 @@ Field expectations:
    `.coderabbit.yaml`. If it is `true` — a branch predating the 2026-09-02
    change — wait for the automatic attempt to become terminal, as before. If it
    is `false`, no automatic run follows the push, so refresh once the head is
-   stable instead of waiting. Then, if
+   stable instead of waiting — except when this PR's opening review never
+   completed, in which case wait the bounded time as in the `true` branch,
+   because an unfinished review can still be retried on a push. Then, if
    `gates.codeRabbitReviewSignal.state` is `missing` or `stale`, recheck the
    head and post at most one marked closeout request for that head. Do not post
    when the state is `requested`, `reviewed`, or `not_applicable`. After
