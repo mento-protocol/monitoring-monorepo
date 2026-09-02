@@ -243,6 +243,10 @@ test("classifies root script changes as full and requiring context", () => {
   assertEqual(report.contextUpdateRequired, true);
   assertEqual(report.contextUpdatesPresent, false);
   assertEqual(report.contextUpdateMissing, true);
+  assertEqual(
+    report.recommendedReview[2],
+    "Identify every applicable checklist from the changed surfaces and scoped instructions, then audit sibling surfaces before the next push.",
+  );
   assertIncludes(
     report.contextReasons.map((reason) => reason.detail).join("\n"),
     "agent:review-materiality",

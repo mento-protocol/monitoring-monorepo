@@ -339,7 +339,7 @@ function recommendedReview(tier) {
   return [
     "Run the applicable direct author checks from docs/notes/pr-operating-card.md step 3.",
     "Run pnpm agent:autoreview before pushing.",
-    "Read any mapped checklist and audit sibling surfaces before the next push.",
+    "Identify every applicable checklist from the changed surfaces and scoped instructions, then audit sibling surfaces before the next push.",
   ];
 }
 
