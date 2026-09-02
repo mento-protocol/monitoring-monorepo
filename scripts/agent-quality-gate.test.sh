@@ -6503,10 +6503,13 @@ run_teardown_drain_command_identity_regression() {
     active_worker_lifecycle_contracts=(portable-marker-v1 portable-marker-v1)
     active_worker_mapped_commands=("pnpm lint:scripts" "pnpm agent:prewarm:test")
     gate_drain_active_mapped_command="./tools/trunk check --ci x"
+    # The lifted teardown invokes this test stub through eval.
+    # shellcheck disable=SC2329
     drain_completed_parallel_command() {
       printf '%s\t%s\n' "$1" "${gate_drain_active_mapped_command:-<unset>}" \
         >> "$observed"
     }
+    # shellcheck disable=SC2329
     collect_process_tree() { :; }
     eval "$contract_body"
     eval "$source_body"
@@ -6567,7 +6570,7 @@ run_teardown_drain_command_identity_regression() {
   local workers
   for workers in 1 2; do
     rc=0
-    # shellcheck disable=SC2034
+    # shellcheck disable=SC2030,SC2034
     (
       gate_darwin_lineage_host_platform=Darwin
       gate_lock_enabled=1
@@ -6591,13 +6594,17 @@ run_teardown_drain_command_identity_regression() {
         active_worker_mapped_commands+=("pnpm lint:scripts")
       fi
       gate_drain_active_mapped_command="./tools/trunk check --ci x"
+      # The lifted teardown invokes these test stubs through eval.
+      # shellcheck disable=SC2329
       drain_completed_darwin_command_cohort() {
         # `-` not `:-`: an empty name is the cleared-for-a-real-cohort case
         # and must not be reported as an unset variable.
         printf 'cohort\t%s\t%s\n' "$#" \
           "${gate_drain_active_mapped_command-<unset>}" > "$observed"
       }
+      # shellcheck disable=SC2329
       gate_darwin_exact_identity_terminate() { :; }
+      # shellcheck disable=SC2329
       collect_process_tree() { :; }
       eval "$contract_body"
       eval "$source_body"
