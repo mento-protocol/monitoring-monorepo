@@ -6450,6 +6450,50 @@ run_drain_refresh_barrier_selection_regression() {
   # A name that cannot be read is a fixture asking for a rendezvous it will not
   # get; arming everywhere instead is exactly the defect, so this fails closed.
   barrier_case 0 2 "pnpm agent:prewarm:test" ""
+  # A name written without a trailing newline still names that command. `read`
+  # fills the variable and only then reports EOF, so a fallback on its status
+  # would silently turn this into the empty-name refusal above.
+  rm -f "${barrier}.used" "${barrier}.ready" "${barrier}.command"
+  : > "${barrier}.release"
+  printf '%s' "pnpm agent:prewarm:test" > "${barrier}.command"
+  (
+    # Both are read by name inside the lifted function, which shellcheck cannot
+    # see through the eval, so it reads them as dead assignments.
+    # shellcheck disable=SC2034
+    drain_refresh_test_barrier="$barrier"
+    # shellcheck disable=SC2034
+    gate_drain_active_mapped_command="pnpm agent:prewarm:test"
+    eval "$source_body"
+    gate_drain_test_refresh_barrier
+  ) || fail "a drain refresh barrier name without a trailing newline was discarded"
+  [[ -e "${barrier}.ready" ]] ||
+    fail "a drain refresh barrier name without a trailing newline did not arm"
+
+  # A name that exists but cannot be read must refuse, not fall back to arming
+  # anywhere: `-r` alone cannot tell it apart from no name at all.
+  rm -f "${barrier}.used" "${barrier}.ready"
+  printf '%s\n' "pnpm agent:prewarm:test" > "${barrier}.command"
+  chmod 000 "${barrier}.command"
+  if [[ -r "${barrier}.command" ]]; then
+    # Running as a user that bypasses the permission bits, so the case cannot
+    # be posed here. Skipping silently would look like coverage.
+    echo "note: skipping unreadable drain-barrier name case (reads bypass mode 000)"
+  else
+    rc=0
+    (
+      # shellcheck disable=SC2034
+      drain_refresh_test_barrier="$barrier"
+      # shellcheck disable=SC2034
+      gate_drain_active_mapped_command="pnpm agent:prewarm:test"
+      eval "$source_body"
+      gate_drain_test_refresh_barrier
+    ) 2>/dev/null || rc=$?
+    [[ "$rc" -eq 2 ]] ||
+      fail "an unreadable drain refresh barrier name returned ${rc}, expected 2"
+    [[ ! -e "${barrier}.ready" && ! -e "${barrier}.used" ]] ||
+      fail "an unreadable drain refresh barrier name armed anyway"
+  fi
+  chmod 600 "${barrier}.command"
   unset -f barrier_case
   rm -rf "$fixture_root"
 }

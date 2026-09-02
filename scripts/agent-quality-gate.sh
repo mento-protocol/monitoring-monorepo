@@ -3604,17 +3604,32 @@ gate_lock_test_crash() {
 # is read, never written, here: an unnamed barrier keeps the old arm-anywhere
 # behaviour, so this cannot change a run that does not opt in — and no run
 # outside NODE_ENV=test can set the barrier at all.
+#
+# Every failure to resolve a name that was asked for is fatal rather than a
+# fall back to arming anywhere: a present-but-unreadable file, an empty one, or
+# a read that fails. Treating any of those as "unnamed" would hand the fixture
+# the first drain instead of the one it asked for, which is the defect.
 gate_drain_test_refresh_barrier() {
   local barrier="$drain_refresh_test_barrier"
-  local expected
+  local expected=""
   local attempt
   [[ -n "$barrier" && ! -e "${barrier}.used" ]] || return 0
-  if [[ -r "${barrier}.command" ]]; then
-    IFS= read -r expected < "${barrier}.command" || expected=""
-    # An unreadable or empty name must not silently arm everywhere: a fixture
-    # that asked for a specific command and got the first one instead is the
-    # defect this exists to prevent.
-    [[ -n "$expected" ]] || return 2
+  if [[ -e "${barrier}.command" ]]; then
+    # `-e` then `-r`, not `-r` alone: `-r` is false for a file that exists and
+    # cannot be read, which would make an unreadable name indistinguishable
+    # from no name at all.
+    [[ -r "${barrier}.command" ]] || {
+      echo "error: the test-only drain refresh barrier name is unreadable." >&2
+      return 2
+    }
+    # No `|| expected=""`. `read` fills the variable and THEN reports failure
+    # at EOF-without-newline, so the fallback would discard a name a fixture
+    # wrote with `printf '%s'` and turn it into the empty-name refusal below.
+    IFS= read -r expected < "${barrier}.command" || true
+    [[ -n "$expected" ]] || {
+      echo "error: the test-only drain refresh barrier name is empty." >&2
+      return 2
+    }
     [[ "$expected" == "${gate_drain_active_mapped_command:-}" ]] || return 0
   fi
   : > "${barrier}.used" || return 2
@@ -11443,6 +11458,15 @@ run_mapped_entries_parallel() {
       # Capture and drain the exact command identity before signalling the
       # worker or its descendants. A detached child can leave the worker group.
       # The drain retains durable evidence for every process while signals run.
+      #
+      # Name the command for the test-only refresh barrier here as well as in
+      # run_with_timeout. For a parallel command that function runs inside the
+      # worker subshell — a different process — so its assignment never reaches
+      # this one. Without this the parent would carry whatever the last
+      # sequential command left behind, which both makes a named parallel
+      # rendezvous impossible and lets a stale name match a drain the fixture
+      # never asked for: the same wrong-drain race, one process boundary over.
+      gate_drain_active_mapped_command="$command"
       if ! drain_completed_parallel_command \
         "$drain_identity" "$pid" "$worker_start" \
         "$worker_lifecycle_contract"; then
