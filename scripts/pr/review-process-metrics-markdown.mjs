@@ -3,6 +3,48 @@ import { fromMarkdown } from "mdast-util-from-markdown";
 const MASKED_NODE_TYPES = new Set(["blockquote", "code", "inlineCode"]);
 const GITHUB_ALERT_START =
   /^[ \t]{0,3}>[ \t]?\[!(?:CAUTION|IMPORTANT|NOTE|TIP|WARNING)\][ \t]*(?:\r?\n|$)/i;
+const SIMPLE_IMAGE_REFERENCE_LINE =
+  /^!\[[A-Za-z0-9 _.-]{0,256}\]\[([A-Za-z0-9_-]{1,64})\][ \t]*$/u;
+const SIMPLE_HTTPS_DEFINITION_LINE =
+  /^\[([A-Za-z0-9_-]{1,64})\]:[ \t]+https:\/\/[A-Za-z0-9.-]{1,253}\/?[ \t]*$/u;
+
+export function isResolvedImageReferenceOnly(value) {
+  const source = String(value ?? "");
+  const references = new Set();
+  const definitions = new Set();
+  let foundImage = false;
+  let separatedDefinitions = false;
+  let readingDefinitions = false;
+  for (const line of source.split(/\r?\n/u)) {
+    if (/^[ \t]*$/u.test(line)) {
+      if (foundImage) separatedDefinitions = true;
+      continue;
+    }
+    const image = readingDefinitions
+      ? null
+      : SIMPLE_IMAGE_REFERENCE_LINE.exec(line);
+    if (image !== null) {
+      foundImage = true;
+      separatedDefinitions = false;
+      references.add(image[1].toLowerCase());
+      continue;
+    }
+    const definition = SIMPLE_HTTPS_DEFINITION_LINE.exec(line);
+    if (!foundImage || !separatedDefinitions || definition === null) {
+      return false;
+    }
+    readingDefinitions = true;
+    definitions.add(definition[1].toLowerCase());
+  }
+  if (
+    !foundImage ||
+    definitions.size === 0 ||
+    [...references].some((reference) => !definitions.has(reference))
+  ) {
+    return false;
+  }
+  return true;
+}
 
 function sourceSpan(node, sourceLength) {
   const start = node.position?.start?.offset;

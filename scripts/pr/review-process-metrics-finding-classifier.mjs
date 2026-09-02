@@ -1,4 +1,7 @@
-import { parseMarkdownEvidence } from "./review-process-metrics-markdown.mjs";
+import {
+  isResolvedImageReferenceOnly,
+  parseMarkdownEvidence,
+} from "./review-process-metrics-markdown.mjs";
 import {
   botSpecificFindingSignal,
   boundedFindingProse,
@@ -381,6 +384,7 @@ export function actionableFindingSignal(
   ) {
     return null;
   }
+  if (bot === "claude" && isResolvedImageReferenceOnly(value)) return null;
   const markdown = parseMarkdownEvidence(value, {
     maskRawHtmlNonProse: true,
     preserveGitHubAlerts: true,

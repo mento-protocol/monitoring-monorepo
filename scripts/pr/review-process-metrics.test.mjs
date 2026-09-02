@@ -49,6 +49,7 @@ import {
 import { actionableFindingSignal } from "./review-process-metrics-finding-classifier.mjs";
 import { boundedFindingProse } from "./review-process-metrics-finding-preflight.mjs";
 import {
+  isResolvedImageReferenceOnly,
   maskMarkdownFormattingSyntax,
   maskMarkdownNonProse,
 } from "./review-process-metrics-markdown.mjs";
@@ -682,6 +683,47 @@ test("requires priority labels to use finding-entry or bounded count context", (
   startedAt = performance.now();
   assert.equal(actionableFindingSignal(resolvedReferences, "claude"), null);
   assert.ok(performance.now() - startedAt < 1_000);
+  assert.equal(isResolvedImageReferenceOnly(resolvedReferences), true);
+  assert.equal(
+    isResolvedImageReferenceOnly(
+      "![P1][REF]\n\n[ref]: https://example.test/\n",
+    ),
+    true,
+  );
+
+  for (const body of [
+    "![P1][missing]\n\n[ref]: https://example.test\n",
+    "\\![P1][ref]\n\n[ref]: https://example.test\n",
+    "![P1][ref]\n\n[ref]: http://example.test\n",
+    "![P1][ref]\n\n[ref]: https://example.test/path\n",
+    '![P1][ref]\n\n[ref]: https://example.test "title"\n',
+    "![P1][white space]\n\n[white space]: https://example.test\n",
+    "![high severity][a]\n\n![safe][b]\n[b]: https://b\n[a]: https://a\n",
+    "![P1][ref]\n\n[ref]: https://example.test\n\nOne `[P2]` issue remains.",
+  ]) {
+    assert.equal(isResolvedImageReferenceOnly(body), false, body);
+  }
+  assert.equal(
+    actionableFindingSignal(
+      "![P1][ref]\n\n[ref]: https://example.test\n\nOne `[P2]` issue remains.",
+      "claude",
+    ),
+    "[P2]",
+  );
+  assert.equal(
+    actionableFindingSignal(
+      "![high severity][a]\n\n![safe][b]\n[b]: https://b\n[a]: https://a\n",
+      "claude",
+    ),
+    "high severity",
+  );
+  assert.equal(
+    actionableFindingSignal(
+      "![_ Major _][ref]\n\n[ref]: https://example.test\n",
+      "coderabbit",
+    ),
+    "_ Major _",
+  );
 
   for (const [open, close] of [
     ["<!--", "-->"],
