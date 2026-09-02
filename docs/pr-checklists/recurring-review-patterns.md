@@ -273,6 +273,13 @@ tldr: **ruleset-required** workflows (`ci`, `Code Quality`, `Sentry suites`, the
 
 - Don't remove an env-var fallback in the same PR that introduces the new var. Keep dual-read for one release so mid-deploy state doesn't break
 
+### Retired local tooling
+
+- When removing a tool that writes local files, audit existing checkouts. Keep
+  the legacy filenames ignored or provide a safe migration when old files can
+  persist. Treat files that contain identities, reasons, or other local data as
+  sensitive even after the writer is removed.
+
 ### Dynamic-route metadata + private data — [checklist](dynamic-route-metadata.md)
 
 tldr: `generateMetadata` reading access-controlled data must gate on `isPublic === true` before emitting tags (no session, tags visible to crawlers). `export const revalidate = 0` for access-controlled sources (ISR would serve stale post-revocation tags from the edge cache). Metadata-fetching body lives in a dedicated `_lib/og-metadata.ts` helper imported by the page — not directly in `layout.tsx` — to keep the RSC label-leak guard allowlist narrow (PR #345 commit `b476776`). Full rules in the linked checklist.
