@@ -240,6 +240,12 @@ export const HEAD_GROUPS = [
         effects: [
           { set: "root_package_json_class" },
           {
+            why: "The `code-health:deps` script line lives in this file, and its positional arguments are one of the two sources `engine.test.mjs` holds the gate's scanned-root list set-equal to. The class dispatch below sends a script-only edit to the shell gate alone, and required CI never runs `engine.test.mjs`, so shrinking the scanned roots here would merge with the staleness test that exists to catch it never having been invoked. Routed for every root manifest change rather than only ones touching that line: a whole-file trigger cannot be defeated by reformatting, and this file changes rarely.",
+            command: "node --test scripts/gate/mapping/engine.test.mjs",
+            reason:
+              "root manifest changed (gate pins its scanned roots against the code-health:deps script)",
+          },
+          {
             dispatch: "root_package_json_class",
             arms: [
               {
@@ -331,6 +337,12 @@ export const HEAD_GROUPS = [
             why: "`.dependency-cruiser.cjs` is also linted by `pnpm lint:scripts` (see eslint.config.mjs root coverage). A CJS-only edit must run both.",
             command: "pnpm lint:scripts",
             reason: "dep-cruiser config changed (root ESLint coverage)",
+          },
+          {
+            why: "The engine narrows `pnpm code-health:deps` to the roots dependency-cruiser actually scans, and it holds those roots as a pinned constant. `engine.test.mjs` is what compares that constant with this file's `includeOnly.path` and with the root `code-health:deps` script, set-equal both ways. Without this route, adding a root here would leave the gate under-routing every change under it — a smaller plan, arrived at silently, which is the failure mode ADR 0069 exists to prevent.",
+            command: "node --test scripts/gate/mapping/engine.test.mjs",
+            reason:
+              "dep-cruiser config changed (gate pins its scanned roots against this file)",
           },
           {
             checklist: "docs/pr-checklists/code-health.md",

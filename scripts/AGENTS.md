@@ -26,7 +26,7 @@ subdirectories.
 
 - `deploy/`: deploy wrappers and Node helpers
 - `workflows/`: Actions workflow support
-- `bootstrap/`: container and hosted-session setup
+- `bootstrap/`: setup scripts and retained setup/package-policy contract
 - `context/`: agent context, budget, doc catalog
 - `docs/`: audit, garden, navigation, verification evidence
 - `pr/`: PR and issue state projections
@@ -87,8 +87,12 @@ feedback-runtime pins.
 - **Gate mapping pins.** Signatures and Turbo inputs pin
   `gate/routing-table/**`, `gate/mapping*`, the autoreview core, and sealed
   policy. Runtime hashes use `$script_source_dir`; suites use `$repo_root`.
-  Core edits route both suites; policy edits route autoreview. Missing pins
-  freeze the stamp (ADRs 0069 and 0079).
+  Core and inventory edits route autoreview and parity suites.
+  Setup, marker, SessionEnd, and package-policy edits route focused setup
+  suite. Missing pins freeze the stamp (ADRs 0069 and 0079). Three exact pins:
+  `.dependency-cruiser.cjs` and root `package.json` both name
+  `gate/mapping/engine.test.mjs` (scanned roots);
+  `gate/mapping/post-passes.mjs` schedules `code-health:deps` itself.
 - **Review-eval pins.** The runbook tracks `scripts/review/run-eval*.sh`,
   `install-review-eval-launchd*`, the launchd plist, and
   `review-eval-*publication*` with their tests. Its file table,
@@ -104,8 +108,9 @@ feedback-runtime pins.
 - **Workflow pins.** Workflows pin `scripts/`. Terraform uses
   `terraform.stacks.json` `workflowAdmissionPatterns`.
   `check-ci-contract{,.test}.mjs` pins CI.
-  `check-no-skip-audit{,.test}.mjs` pins admission, SHAs, cold cache, and zero
-  skips. Moves update ADR 0064, routing, globs, and eval pins.
+  `check-no-skip-audit{,.test}.mjs` pins admission, SHAs, cache, skips, protected
+  drift, focused contracts, and the retained workflow graph. Moves update
+  ADR 0064, routing, globs, and pins.
 - **Terraform stack registry.** `terraform.stacks.json` `changedPathPatterns`
   pins exact `scripts/` paths per stack. The broad workflow admission boundary
   covers the directory; `pnpm tf:test` enforces subsumption.

@@ -1,9 +1,9 @@
 name: CI
 
 # Aggregate workflow fanning out to package-scoped quality jobs gated on
-# path changes. The `ci` sentinel aggregates the results so branch
-# protection needs only one required check (`CI / ci`) instead of one per
-# package. A PR that only touches ui-dashboard/ runs the `ui` job and the
+# path changes. The `ci` sentinel aggregates this package-scoped fan-out into
+# one required check (`CI / ci`) instead of one required check per package.
+# A PR that only touches ui-dashboard/ runs the `ui` job and the
 # unconditional production-infrastructure contract; other irrelevant jobs skip
 # cleanly (GitHub hides them from the checks list).
 #
@@ -32,7 +32,7 @@ on:
   workflow_call:
     inputs:
       no_skip_audit:
-        description: Run every deterministic job from the protected no-skip caller
+        description: Run every retained deterministic job from the protected no-skip caller
         required: false
         default: false
         type: boolean
@@ -147,6 +147,8 @@ jobs:
             indexer: &indexer
               - indexer-envio/**
               - shared-config/**
+              - scripts/agent-autoreview-core.mjs
+              - scripts/agent-autoreview-indexer-invariant-contract.test.mjs
               - scripts/eslint-baseline-diff.mjs
               - pnpm-lock.yaml
               - package.json
@@ -474,10 +476,19 @@ jobs:
             # ordinary namespace can change how required checks execute.
             # Select the full fixed set for those control-plane inputs.
             controlPlane:
+              - .node-version
               - "**/package.json"
-              - "**/pnpm-lock.yaml"
+              - "**/package.json5"
+              - "**/package.yaml"
               - "**/pnpm-workspace.yaml"
+              - "**/pnpm-lock.yaml"
               - "**/.npmrc"
+              - "**/.pnpmfile.cjs"
+              - "**/pnpmfile.cjs"
+              - "**/patches"
+              - "**/patches/**"
+              - "**/node_modules"
+              - "**/node_modules/**"
               - "**/tsconfig*.json"
               - "**/eslint.config.*"
               - "**/vitest*.{js,cjs,mjs,ts,cts,mts}"
@@ -747,7 +758,14 @@ jobs:
         run: pnpm --filter @mento-protocol/indexer-envio lint
       - name: Knip (dead-code / dep hygiene, blocking)
         run: pnpm --filter @mento-protocol/indexer-envio knip
-      - name: Validate indexer invariant routing inventory
+      - name: Indexer autoreview invariant contract
+        # Retained owner inventory and fail-closed schema checks. Keep this
+        # separate from the legacy routing parity suite below.
+        run: node --test scripts/agent-autoreview-indexer-invariant-contract.test.mjs
+      - name: Legacy indexer routing parity suite
+        # This remaining suite checks only the legacy local gate's table and
+        # checklist router. The no-skip audit measures retained commands.
+        if: ${{ !inputs.no_skip_audit }}
         run: node --test scripts/gate/routing-table/indexer-invariant-parity.test.mjs
       - name: Test with coverage
         run: pnpm --filter @mento-protocol/indexer-envio test:coverage
@@ -1164,12 +1182,13 @@ jobs:
     needs: changes
     if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.rootScripts == 'true'
     runs-on: blacksmith-2vcpu-ubuntu-2404
-    # The quality-gate routing regression suite reached 24m37s on this runner
-    # after earlier job setup. The prior 25-minute cap cancelled it before
-    # later steps could run. The waits bind real queue, cleanup, and no-signal
+    # The quality-gate routing regression suite reached 39m02s on this runner
+    # in main CI run 33535970973, attempt 1, job 99950409872, after earlier job
+    # setup. The prior 40-minute cap cancelled the job before later steps could
+    # run. The waits bind real queue, cleanup, and no-signal
     # guarantees, so keep a bounded 15-minute margin for the remaining steps
     # and runner variance instead of weakening those assertions.
-    timeout-minutes: 40
+    timeout-minutes: 55
     permissions:
       contents: read
       actions: read
@@ -1228,10 +1247,14 @@ jobs:
         # contract command from the unconditional job below. Workflow changes
         # always admit the scripts job.
         run: node scripts/workflows/check-ci-contract.mjs
+      - name: Agent setup and package-policy contracts
+        # Retained SessionEnd, setup-marker, and pre-install policy checks were
+        # extracted from the legacy Bash gate suite.
+        run: bash scripts/bootstrap/agent-setup-contract.test.sh
       - name: Agent quality-gate routing regression suite
-        # Verifies the path-to-command mapping in scripts/agent-quality-gate.sh.
-        # Without this in CI, a routing regression only fails locally (pre-push)
-        # and could merge if a contributor bypasses the local gate.
+        # Keep the mandatory legacy gate safe during the shadow period. The
+        # no-skip audit measures only commands retained after gate retirement.
+        if: ${{ !inputs.no_skip_audit }}
         run: pnpm agent:quality-gate:test
       - name: Gate routing-table suite
         # ADR 0069. The gate's routing is data in scripts/gate/routing-table/,
@@ -1243,6 +1266,8 @@ jobs:
         # It belongs in the required `ci` sentinel path for the same reason the
         # routing regression suite above does: the local pre-push gate is the
         # thing a contributor can bypass, and a broken table fails nowhere else.
+        # It is not part of the retained no-skip target command set.
+        if: ${{ !inputs.no_skip_audit }}
         run: pnpm gate:routing-table:test
       - name: CodeRabbit config allowlist pin
         # ADR 0066. CodeRabbit resolves .coderabbit.yaml from the PR's SOURCE
@@ -1576,6 +1601,8 @@ jobs:
         # steps of `scripts` that read the Markdown corpus; it also covers the
         # other one, agent:quality-gate:test, whose docs/deployment.md
         # assertion depends on a path this staleness check already names.
+        # The no-skip audit excludes both legacy local-gate suites.
+        if: ${{ !inputs.no_skip_audit }}
         run: pnpm gate:routing-table:test
       - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
         if: always() && !inputs.no_skip_audit
