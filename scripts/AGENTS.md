@@ -78,11 +78,6 @@ feedback-runtime pins.
   `repo-health/check-guardrail-prose{,.test}.mjs` and
   `repo-health/guardrail-prose.json` route the guardrail suite. `ci.yml`,
   quick-commands, and the manifest pin it (ADR 0073).
-  `pr/closeout-review{,.test}.mjs` route
-  `node --test scripts/pr/closeout-review.test.mjs`; root `package.json` and
-  `check-agent-quality-gate-package-scripts.mjs` exact-pin
-  `agent:closeout-review` and `agent:closeout-review:test`, and
-  `gate/mapping/facts.mjs` lists both aliases.
 - **Gate runtime pins.** Before `cd`, `agent-quality-gate.sh` resolves
   `gate/run-handles.sh`, coordinator files,
   `docs/docs-navigation-eval-helpers.mjs`, and `gate/lockfile-scope.mjs` from

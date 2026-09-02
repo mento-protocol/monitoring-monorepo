@@ -713,7 +713,11 @@ procedure below.
   The exact
   `sentry/broker/mapped-command-process-identity.mjs` bridge routes
   `pnpm sentry:broker:test`. It keeps the probe's local import on the same
-  canonical helper that the workflow stages.
+  canonical helper that the workflow stages. The exact
+  `pr/closeout-review{,.test}.mjs` pair routes
+  `node --test scripts/pr/closeout-review.test.mjs`; root `package.json`,
+  `check-agent-quality-gate-package-scripts.mjs`, and `gate/mapping/facts.mjs`
+  name both `agent:closeout-review` aliases.
 - **Gate runtime pins.** Before `cd`, `agent-quality-gate.sh` resolves
   `gate/run-handles.sh`, coordinator files,
   `gate/darwin-broker-launch-preflight.mjs`,
