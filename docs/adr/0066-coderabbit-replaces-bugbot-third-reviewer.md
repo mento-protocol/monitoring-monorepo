@@ -247,6 +247,20 @@ and stay in place as history.
   incremental delta, and the second reused the same sticky comment, which fits
   either explanation. A clean measurement needs a PR whose opening review
   completed, so it waits for the 2026-09-18 cap reset.
+- **The closeout request is the vendor-documented path here, checked
+  2026-09-02.** docs.coderabbit.ai/configuration/auto-review states that
+  `auto_incremental_review: false` reviews "only when a PR is first opened.
+  Subsequent pushes will be ignored until you trigger the review manually", and
+  names `@coderabbitai review` as that manual trigger.
+  docs.coderabbit.ai/reference/review-commands lists "when automatic reviews
+  are disabled" as a use case for the same command, describes it as triggering
+  "an incremental review of new changes only", and notes it spends one review
+  from the allowance. The "applicable only when automatic reviews are paused"
+  line in PR #2236's refusal came attached to a rate-limited command, so it is
+  not evidence against the documented path. Two things stay open for the
+  2026-09-18 re-measure: the runs that fired on pushes two and three, which the
+  documentation says should have been ignored, and whether the closeout command
+  completes once the allowance permits it.
 - **Rejected here:** raising the cap keeps the per-push meter and buys more
   duplicate reviews; tightening `path_filters` saves little because the billed
   unit is an already-small push delta. The $0 OSS tier stays the fallback if
