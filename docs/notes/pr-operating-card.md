@@ -32,7 +32,7 @@ existing PR. With no PR, require a non-fork checkout whose `origin` serves
 target, or a failed identity lookup before executing repository code. Fetch
 the base only after its repository and remote are bound. Keep these values as
 the authority for author checks and publication, and re-read them before each
-mutation.
+publication mutation in step 5.
 
 1. **Claim.** Before substantive edits, claim from the ready queue:
 

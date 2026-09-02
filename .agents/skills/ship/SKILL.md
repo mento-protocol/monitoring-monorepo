@@ -20,10 +20,11 @@ loads the user-global `ship` skill instead of this file
 ([`codex-agent-skills.md`](../../../docs/notes/codex-agent-skills.md#claude-global-store-shadowing)),
 so a rule written here and nowhere else would reach Codex only.
 
-Work [`pr-operating-card.md`](../../../docs/notes/pr-operating-card.md) from
-step 2 through step 9. It owns the PR description shape, the ready-for-review
-default, `Closes` vs `Refs`, the babysit and ready-state contracts, merge
-hygiene, and production closeout.
+Run the repository preflight in
+[`pr-operating-card.md`](../../../docs/notes/pr-operating-card.md) before any
+repo-local command. Then work card steps 2 through 9. The card owns the PR
+description shape, the ready-for-review default, `Closes` vs `Refs`, the
+babysit and ready-state contracts, merge hygiene, and production closeout.
 
 | Decision                                                       | Authority                                                                                   |
 | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
@@ -37,6 +38,12 @@ hygiene, and production closeout.
 
 ## What this repo adds
 
+- **Repository identity before repository code**: Resolve `CURRENT_REPO`,
+  `BASE_REPO`, the target PR, both remotes, and the PR base through the card
+  preflight. Stop a fork checkout or cross-repository head before formatting,
+  package-manager commands, repo-local scripts, or autoreview. Bind every
+  `gh pr view`, feedback-state, and ready-state call with
+  `--repo <BASE_REPO>`. A failed GitHub query is not evidence that no PR exists.
 - **Author checks before ready publication**: Apply every matching row in card
   step 3. Format every intended changed file before those checks. Record each
   result in `## Validation`. Reapply affected rows after a material fix, base
@@ -48,10 +55,6 @@ hygiene, and production closeout.
   silently selects the local deterministic engine, so the prepared-bundle
   fresh-context flow is required instead. Card step 4 owns the choice — follow
   it rather than the bare command.
-- **Resolve the base repo from evidence.** A fork checkout uses its parent as
-  `BASE_REPO`; never substitute a fork's `origin` for its parent. Bind every
-  `gh pr view`, feedback-state, and ready-state call with `--repo <BASE_REPO>`.
-  A failed GitHub query is not evidence that no PR exists.
 - **PRs open ready for review.** Drafts suppress the automated AI reviews this
   workflow depends on.
 - **`scripts/pr/check-pr-description.mjs` enforces `## The Problem` then

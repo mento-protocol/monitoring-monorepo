@@ -29,10 +29,12 @@
     "**Inspect package-script, package-manager, lockfile, and patch changes before"
   ],
   ".agents/skills/ship/SKILL.md": [
+    "Run the repository preflight in",
     "Apply every matching row in card",
     "Pre-push runs no repository verification."
   ],
   ".claude/skills/ship/SKILL.md": [
+    "Run the repository preflight in",
     "Apply every matching row in card",
     "Pre-push runs no repository verification."
   ]
