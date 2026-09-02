@@ -19,8 +19,9 @@ runs' retained-target and evidence-instrument incidents.
 
 This receipt authorizes no cutover, schedule, ruleset change, local-gate
 removal, legacy deletion, or merge. The operator separately approved an early
-local cutover on 2026-09-02. Issue #2128 now owns the 10-PR, seven-day
-post-cutover canary. Required CI remains merge authority.
+local cutover on 2026-09-02. ADR 0078 records that exception and its rollback
+condition. Issue #2128 now owns the 10-PR, seven-day post-cutover canary.
+Required CI remains merge authority.
 
 ## Sources
 
