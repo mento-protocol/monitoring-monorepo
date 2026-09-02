@@ -2362,13 +2362,19 @@ active control.
   `scripts/gate/darwin-process-lineage.mjs`. It is not a redundant consumer: on
   a Darwin lineage contract `drain_condemned_run_commands` returns at its
   lineage arm before reaching the shell barrier, so the seam is the _only_
-  consumer on that path and does its own selection. The name reaches it as the
-  `settle` helper's `--active-mapped-command` argument — an argument rather than
-  an environment variable, so the mapped-child environment policy stays
-  untouched — and it applies the same rules: unnamed arms on the first drain, a
-  name arms only on its own command, and an unresolvable name fails the drain
-  closed. `settle-cohort` passes no name and so declines any named barrier, the
-  same cohort rule as the shell side.
+  consumer on that path and does its own selection. The name reaches it as an
+  `--active-mapped-command` argument — an argument rather than an environment
+  variable, so the mapped-child environment policy stays untouched — and it
+  applies the same rules: unnamed arms on the first drain, a name arms only on
+  its own command, and an unresolvable name fails the drain closed.
+
+  Two helper routes settle a lineage and **both** must pass that argument:
+  `watch-settle`, which a mapped command takes when it completes normally, and
+  `settle`, the recovery route. `settle-cohort` passes an explicit none and so
+  declines any named barrier, the same cohort rule as the shell side. Adding a
+  third route without the argument would silently strand a named rendezvous, so
+  `darwin-process-lineage.test.mjs` asserts every settlement call site carries
+  it.
 
   A fixture must also write `.release` on every terminal path, including its
   cleanup trap: a barrier left unreleased parks the gate for the full 20-second

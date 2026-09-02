@@ -9295,6 +9295,11 @@ gate_run_darwin_lineage_watcher_after_barrier() {
   local action_file="$7"
   local armed_file="$8"
   local timeout_seconds="$9"
+  # Which mapped command this watcher will settle, for the test-only refresh
+  # barrier's `.command` rendezvous. Passed rather than read from the caller's
+  # locals: this function `exec`s into node, so the value has to be an argument
+  # anyway, and an implicit read would stop matching silently on a rename.
+  local active_mapped_command="${10:-}"
   local action
 
   trap - EXIT INT TERM HUP
@@ -9344,6 +9349,7 @@ gate_run_darwin_lineage_watcher_after_barrier() {
       --controller-identity "$controller_identity" \
       --cancel-file "$action_file" \
       --armed-file "$armed_file" \
+      --active-mapped-command "$active_mapped_command" \
       --timeout-seconds "$timeout_seconds"
 }
 
@@ -9952,6 +9958,7 @@ run_with_timeout() {
         "$gate_darwin_controller_exact_identity" \
         "$lineage_watcher_action_file" "$lineage_watcher_armed_file" \
         "$lineage_watcher_timeout_seconds" \
+        "$gate_drain_active_mapped_command" \
         >"$lineage_watcher_output_file" \
         2>"$lineage_watcher_stderr_file" &
       lineage_watcher_pid=$!

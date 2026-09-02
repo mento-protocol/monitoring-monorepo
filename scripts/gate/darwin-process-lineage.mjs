@@ -482,12 +482,14 @@ async function settleWatchedDarwinLineage(
   statePath,
   scratchDirectory,
   timeoutSeconds,
+  activeMappedCommand = null,
 ) {
   const result = await settleDarwinLineage({
     statePath,
     scratchDirectory,
     timeoutSeconds,
     retainState: true,
+    activeMappedCommand,
   });
   if (!result.active || !result.settled || result.retained !== true) {
     fail("Darwin settlement watcher did not prove an empty coherent exact set");
@@ -503,6 +505,11 @@ export async function watchDarwinLineageSettlement({
   cancelFile,
   armedFile,
   timeoutSeconds,
+  // The watcher settles one lineage, so it can carry a command name. This is
+  // the path a mapped command takes when it completes normally on Darwin; the
+  // `settle` CLI is the recovery route. Both have to name their drain or a
+  // named barrier meets neither.
+  activeMappedCommand = null,
 }) {
   if (process.platform !== "darwin") {
     fail("a Darwin lineage watcher cannot run on this platform");
@@ -518,7 +525,12 @@ export async function watchDarwinLineageSettlement({
     fail("Darwin settlement watcher requires a bound lineage");
   }
   const settle = () =>
-    settleWatchedDarwinLineage(statePath, scratchDirectory, settleTimeout);
+    settleWatchedDarwinLineage(
+      statePath,
+      scratchDirectory,
+      settleTimeout,
+      activeMappedCommand,
+    );
   let controlDirectory;
   let controller;
   let launcher;
@@ -1522,6 +1534,7 @@ async function main() {
       cancelFile: required(options, "--cancel-file"),
       armedFile: required(options, "--armed-file"),
       timeoutSeconds: required(options, "--timeout-seconds"),
+      activeMappedCommand: options.get("--active-mapped-command") || null,
     });
     process.stdout.write(`${result.status}\n`);
     return;
@@ -1577,6 +1590,10 @@ async function main() {
       scratchDirectory: required(options, "--scratch"),
       timeoutSeconds: required(options, "--timeout-seconds"),
       retainState,
+      // Explicitly none. A cohort settles several mapped commands at once, so
+      // no single name describes its drain and a named test barrier must
+      // decline it rather than meet an arbitrary member.
+      activeMappedCommand: null,
     });
     process.stdout.write(`${JSON.stringify(result)}\n`);
     return;

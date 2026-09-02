@@ -3896,3 +3896,81 @@ test("the Darwin census barrier fails closed on an unresolvable name", async () 
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+// Every settlement route has to name the drain it is running, or a named
+// barrier meets none of them. Two exist — `watch-settle` for a mapped command
+// that completes normally, `settle` for recovery — and each was missed once
+// during review, so this checks the wiring rather than trusting it. Each call
+// site's arguments are read to its balanced close paren, so reformatting the
+// file cannot make this pass by accident.
+test("every Darwin settlement route carries the active mapped command", () => {
+  const gateDirectory = dirname(fileURLToPath(import.meta.url));
+  const repoRoot = dirname(gateDirectory);
+  const moduleSource = readFileSync(
+    join(gateDirectory, "darwin-process-lineage.mjs"),
+    "utf8",
+  );
+  const callArguments = (source, callee) => {
+    const calls = [];
+    const opener = new RegExp(`(?<![\\w.])${callee}\\(`, "gu");
+    let match;
+    while ((match = opener.exec(source)) !== null) {
+      const before = source.slice(0, match.index);
+      // Skip the declaration itself; only calls have to pass the name.
+      if (/function\s+$/u.test(before)) continue;
+      let depth = 0;
+      let index = match.index + match[0].length - 1;
+      for (; index < source.length; index += 1) {
+        if (source[index] === "(") depth += 1;
+        else if (source[index] === ")") {
+          depth -= 1;
+          if (depth === 0) break;
+        }
+      }
+      calls.push(source.slice(match.index, index + 1));
+    }
+    return calls;
+  };
+  for (const callee of [
+    "settleDarwinLineage",
+    "settleWatchedDarwinLineage",
+    "settleDarwinLineageCohort",
+  ]) {
+    const calls = callArguments(moduleSource, callee);
+    assert.ok(calls.length > 0, `no call to ${callee} was found`);
+    for (const call of calls) {
+      assert.ok(
+        call.includes("activeMappedCommand"),
+        `a call to ${callee} does not carry the active mapped command: ${call}`,
+      );
+    }
+  }
+  // The barrier only sees a name when exactly one lineage is settling. A real
+  // cohort has no single name and must decline a named barrier.
+  const [barrierCall] = callArguments(
+    moduleSource,
+    "waitAtDarwinCensusTestBarrier",
+  );
+  assert.match(barrierCall, /descriptors\.length === 1/u);
+  // Both CLI branches read the option, and each shell invocation passes it.
+  assert.equal(
+    moduleSource.split('options.get("--active-mapped-command")').length - 1,
+    2,
+    "both the settle and watch-settle CLI branches must read the option",
+  );
+  for (const [file, cliCommand] of [
+    ["gate/darwin-process-lineage.sh", "settle"],
+    ["agent-quality-gate.sh", "watch-settle"],
+  ]) {
+    const source = readFileSync(join(repoRoot, file), "utf8");
+    const index = source.indexOf(`"$module" ${cliCommand} \\`);
+    assert.ok(index !== -1, `${file} does not invoke ${cliCommand}`);
+    // The invocation ends at the first line that is not a continuation.
+    const rest = source.slice(index);
+    const invocation = rest.slice(0, rest.indexOf("\n\n"));
+    assert.ok(
+      invocation.includes("--active-mapped-command"),
+      `${file} invokes ${cliCommand} without --active-mapped-command`,
+    );
+  }
+});
