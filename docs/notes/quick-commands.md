@@ -71,7 +71,7 @@ pnpm docs:navigation-eval -- --prompt --base-commit <full-sha>  # Pin a committe
 pnpm docs:navigation-eval -- --validate <result.json>  # Recompute authority, evidence, route, and context scores
 pnpm ci:contract:test             # Test fixed CI, protected no-skip admission and drift, cache, base, and aggregate contracts
 bash scripts/bootstrap/agent-setup-contract.test.sh  # Test retained SessionEnd, setup-marker, and package-policy behavior
-node --test scripts/agent-autoreview-indexer-invariant-contract.test.mjs  # Test retained indexer autoreview owners and schema
+node --test scripts/indexer-handler-invariant-contract.test.mjs  # Test retained indexer handler invariant owners and schema
 # After M4 reaches main and before each approved proof, read the current immutable inputs:
 gh pr view <pr> --json number,state,headRefOid,baseRefName,baseRefOid,headRepositoryOwner
 # The audit refuses a stale baseRefOid. Update or rebase the PR branch, then read fresh inputs.

@@ -148,7 +148,6 @@ jobs:
               - indexer-envio/**
               - shared-config/**
               - scripts/agent-autoreview-core.mjs
-              - scripts/agent-autoreview-indexer-invariant-contract.test.mjs
               - scripts/eslint-baseline-diff.mjs
               - scripts/gate/routing-table/indexer-handler-invariant-contract.mjs
               - scripts/gate/routing-table/indexer-handler-invariant-families.mjs

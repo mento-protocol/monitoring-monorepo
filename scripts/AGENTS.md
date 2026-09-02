@@ -86,8 +86,11 @@ feedback-runtime pins.
   (ADRs 0064 and 0076).
 - **Gate mapping pins.** Signatures and Turbo inputs pin
   `gate/routing-table/**`, `gate/mapping*`, the autoreview core, and sealed
-  policy. Runtime hashes use `$script_source_dir`; suites use `$repo_root`.
-  Core and inventory edits route autoreview and parity suites.
+  policy. The signature names
+  `gate/routing-table/indexer-handler-invariant-{contract,families}.mjs`, and
+  `scripts/indexer-handler-invariant-contract.test.mjs` covers them.
+  Runtime hashes use `$script_source_dir`; suites use `$repo_root`.
+  Core, contract, and inventory edits route autoreview and parity suites.
   Setup, marker, SessionEnd, and package-policy edits route focused setup
   suite. Missing pins freeze the stamp (ADRs 0069 and 0079). Three exact pins:
   `.dependency-cruiser.cjs` and root `package.json` both name
