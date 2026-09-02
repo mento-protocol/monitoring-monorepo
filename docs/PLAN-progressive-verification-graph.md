@@ -289,8 +289,9 @@ repository-wide selector or quick wrapper.
 
 Inspect install-affecting changes before any package-manager command. When
 they change, install the candidate graph with
-`CI=true pnpm install --frozen-lockfile` before package checks. Keep the small
-exact trust-configuration contract rows in the operating card.
+`CI=true pnpm install --frozen-lockfile` before code generation and package
+checks. Keep the small exact trust-configuration contract rows in the operating
+card.
 
 Use the package's CI-aligned local test command. Do not assume that every
 package's generic `test` alias is unattended. For Governance Watchdog behavior
