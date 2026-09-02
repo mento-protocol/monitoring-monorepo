@@ -69,10 +69,13 @@ pnpm docs:navigation-eval -- --check-fixtures  # Check fresh-agent navigation qu
 pnpm docs:navigation-eval -- --prompt          # Print the bounded read-only prompt; no model call
 pnpm docs:navigation-eval -- --prompt --base-commit <full-sha>  # Pin a committed result to a reachable default-branch ancestor
 pnpm docs:navigation-eval -- --validate <result.json>  # Recompute authority, evidence, route, and context scores
-pnpm ci:contract:test             # Test fixed CI and protected no-skip admission, cache, base, and aggregate contracts
+pnpm ci:contract:test             # Test fixed CI, protected no-skip admission and drift, cache, base, and aggregate contracts
+bash scripts/bootstrap/agent-setup-contract.test.sh  # Test retained SessionEnd, setup-marker, and package-policy behavior
+node --test scripts/agent-autoreview-indexer-invariant-contract.test.mjs  # Test retained indexer autoreview owners and schema
 # After M4 reaches main and before each approved proof, read the current immutable inputs:
 gh pr view <pr> --json number,state,headRefOid,baseRefName,baseRefOid,headRepositoryOwner
 # The audit refuses a stale baseRefOid. Update or rebase the PR branch, then read fresh inputs.
+# Do not dispatch no-skip for package-execution or evidence-instrument drift. Package drift can use ordinary-force-all evidence. Instrument drift cannot count.
 # Stop after any run exceeds 45 runner-minutes. Do not exceed 450 cumulative runner-minutes.
 gh workflow run no-skip-audit.yml --ref main -f pr_number=<pr> -f source_sha=<headRefOid> -f base_sha=<baseRefOid>
 pnpm verification:inventory:check  # Validate Phase 0 inventory schema, unique IDs, and complete dispositions
@@ -85,7 +88,6 @@ pnpm agent:context-budget --strict # Enforce root, scoped-file, and aggregate-ro
 # /pr-ready-override gate=codex-description-approval head=<full-head-sha> reason=<why this is safe>
 pnpm --silent pr:feedback-state --pr 123 --json  # Normalize unresolved/reply-required feedback before all-clear
 pnpm pr:ready-state --pr 123 --json              # Final current-head required-readiness probe
-pnpm pr:merge --pr 123   # Human-only sanctioned merge; --not-ready-reason "<why>" overrides
 # Collect a manual monthly review cohort. The UTC interval is half-open: [since, until).
 # Write live reports to a new path outside the repo. Do not commit them.
 node scripts/pr/review-process-metrics.mjs --since <YYYY-MM-01T00:00:00Z> --until <next-YYYY-MM-01T00:00:00Z> --output "${TMPDIR:-/tmp}/review-process-metrics-<YYYY-MM>.json"

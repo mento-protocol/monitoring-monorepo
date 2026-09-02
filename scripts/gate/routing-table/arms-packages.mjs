@@ -506,6 +506,11 @@ export const PACKAGE_ARMS = [
             effects: [
               {
                 command:
+                  "node --test scripts/agent-autoreview-indexer-invariant-contract.test.mjs",
+                reason: "indexer autoreview invariant inventory changed",
+              },
+              {
+                command:
                   "node --test scripts/gate/routing-table/indexer-invariant-parity.test.mjs",
                 reason: "indexer invariant routing inventory changed",
               },

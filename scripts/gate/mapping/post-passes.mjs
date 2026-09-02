@@ -1,15 +1,16 @@
 /**
- * The five whole-set passes that run AFTER every changed path has been routed.
+ * The six whole-set passes that run AFTER every changed path has been routed.
  *
  * They are separate from the verbs because they cannot be decided per path:
  * each reads the complete changed set or the complete command list. Their order
  * is fixed and is itself contract — Trunk is prepended first so it lands at the
  * head, codegen is sorted before the plan is written, workspace dependency
  * setup is added from the complete command list, Turbo compaction rewrites the
- * quality bucket, and scoped tests rewrite it again afterwards.
+ * quality bucket, scoped tests rewrite it again afterwards, and the dep-cruiser
+ * narrowing runs last on the finished quality bucket.
  *
  *   addTrunkCheckCommand → sortCodegenCommands → addWorkspaceConfigBuild →
- *   compactTurbo → applyScopedTests
+ *   compactTurbo → applyScopedTests → narrowCodeHealthDepsCommand
  */
 
 import { shellQuote } from "./shell-quote.mjs";
@@ -17,9 +18,7 @@ import { shellQuote } from "./shell-quote.mjs";
 // ── 1. Trunk ───────────────────────────────────────────────────────────────
 
 /**
- * Patterns that force a full-repo Trunk scan. A changed path that no longer
- * exists forces one too: a targeted invocation naming a deleted file fails, so
- * the whole-repo scan is the fail-safe answer.
+ * Patterns that force a full-repo Trunk scan, whether or not the path survives.
  */
 const TRUNK_FULL_SCAN = [
   /^\.trunk\//,
@@ -36,23 +35,94 @@ const TRUNK_FULL_SCAN = [
   /\/package\.json$/,
 ];
 
+/**
+ * Deleted paths whose absence changes what a linter reports about files that
+ * did NOT change, so a targeted run over the survivors cannot see the damage.
+ *
+ * actionlint resolves `uses: ./.github/actions/<name>` and `uses:
+ * ./.github/workflows/<file>` against the working tree. Deleting one of those
+ * makes every surviving caller newly invalid — and no surviving caller is in
+ * the changed set, so nothing would name it. `.github/actions/pnpm-install` is
+ * referenced by most workflows in this repo, which is the measured case.
+ *
+ * ShellCheck runs with external sources enabled, and a `# shellcheck
+ * source=<repo-relative path>` directive resolves against the real tree even
+ * under Trunk's one-file-at-a-time `copy_targets` sandbox. Deleting a sourced
+ * helper therefore raises a NEW SC1091 on every surviving caller that names it
+ * — measured on `scripts/bootstrap/codex-cloud-git-helpers.sh`, whose two
+ * callers go from clean to SC1091 the moment it is gone. Callers that source
+ * only through a runtime `${DIR}/…` path are the separate, already-suppressed
+ * false positive `.shellcheckrc` documents; the rule below does not try to tell
+ * the two apart, because any sourced-by analysis would rot the first time a
+ * caller changed how it spells the path.
+ *
+ * A deleted dotfile is the third class, at any depth. Several enabled linters
+ * read configuration from one — codespell from `.codespellrc`, shellcheck from
+ * `.shellcheckrc`, osv-scanner from `.osv-scanner.toml` — and `.gitignore` and
+ * `.gitattributes` decide what Trunk looks at in the first place. Prettier,
+ * markdownlint and yamllint additionally cascade: the nearest config wins, so a
+ * package can carry its own. Deleting one changes the verdict on files that did
+ * not change, and both levels are measured. Remove `.codespellrc` and
+ * `scripts/terraform/tf-platform-plan-guard.mjs` gains a codespell hit on
+ * `applyable`, an ignore-word that config carries. Remove `aegis/.prettierrc`
+ * and `aegis/src/app.module.ts` — untouched — starts failing prettier, because
+ * the package's `singleQuote` setting went with it. In both cases the targeted
+ * run over the survivors still exits 0, so the gate passes locally and the
+ * required full scan is where it surfaces.
+ *
+ * This is deliberately the structural rule "any deleted dotfile" rather than a
+ * list of the config files that exist today, or a name-shape class like
+ * `.*rc`/`.*ignore`. Both of those rot, and rot silently in the direction of
+ * under-scanning: a list the first time a linter gains a config, a name class
+ * the first time one is spelled outside the shape (`.osv-scanner.toml` already
+ * is). The plain rule cannot rot because it names nothing. It over-includes
+ * dotfiles no Trunk linter reads — `.terraform.lock.hcl`, `.env.example`,
+ * `.dockerignore`, `.coderabbit.yaml` — so deleting one buys a full scan it did
+ * not need. That costs time and is never wrong, which is the correct direction
+ * for a rule whose other failure mode is a green local gate over broken files.
+ * `.trunk/**` is already whole-repo on both edit and delete, so Trunk's own
+ * configs need no entry here.
+ *
+ * The remaining enabled Trunk linters (prettier, markdownlint, yamllint,
+ * trufflehog, git-diff-check) judge each file on its own bytes, so an ordinary
+ * source or docs deletion cannot invalidate a survivor. checkov would join the
+ * list for local `module { source = "./…" }` references; this repo has none
+ * today, and `.tf` deletions stay covered by the whole-repo branches.
+ */
+const TRUNK_DELETION_FULL_SCAN = [/^\.github\//, /\.sh$/, /(^|\/)\.[^/]+$/];
+
 export function addTrunkCheckCommand(plan, changedPaths, facts) {
-  const missing = changedPaths.some(
-    (path) => !facts.pathExistsInWorktree(path),
-  );
+  const present = [];
+  const missing = [];
+  for (const path of changedPaths) {
+    (facts.pathExistsInWorktree(path) ? present : missing).push(path);
+  }
+
+  // A deleted path cannot be named on a targeted command line — Trunk fails on
+  // an argument that is not there. Dropping it from the argument list is the
+  // narrow fix; the two branches below cover the cases where dropping it would
+  // also drop coverage.
   const forcesFull =
-    missing ||
-    changedPaths.some((path) => TRUNK_FULL_SCAN.some((r) => r.test(path)));
+    changedPaths.some((path) => TRUNK_FULL_SCAN.some((r) => r.test(path))) ||
+    missing.some((path) => TRUNK_DELETION_FULL_SCAN.some((r) => r.test(path)));
 
   if (forcesFull) {
     plan.prependCommand(
       "./tools/trunk check --ci --all",
       "changed paths require full-repo Trunk checks",
     );
-  } else if (changedPaths.length > 0) {
+  } else if (present.length > 0) {
     plan.prependCommand(
-      `./tools/trunk check --ci ${changedPaths.map(shellQuote).join(" ")}`,
+      `./tools/trunk check --ci ${present.map(shellQuote).join(" ")}`,
       "changed existing paths should pass targeted Trunk checks",
+    );
+  } else if (changedPaths.length > 0) {
+    // Every changed path was deleted. There is no survivor to target, and a
+    // deletion-only change set is exactly where a cross-file linter has the
+    // most to say, so keep the whole-repo scan.
+    plan.prependCommand(
+      "./tools/trunk check --ci --all",
+      "every changed path was deleted; full-repo Trunk checks",
     );
   } else {
     plan.prependCommand(
@@ -317,4 +387,168 @@ export function applyScopedTestCommands(plan, changedPaths, facts) {
       reason: `${entry.reason} (scoped-tests)`,
     };
   });
+}
+
+// ── 6. dep-cruiser scope ───────────────────────────────────────────────────
+
+/** The command this pass narrows. */
+export const CODE_HEALTH_DEPS_COMMAND = "pnpm code-health:deps";
+
+/**
+ * The roots `pnpm code-health:deps` actually scans.
+ *
+ * Two sources agree on this list and both are pinned by
+ * `engine.test.mjs`, set-equal in both directions: the positional arguments of
+ * the root `package.json` `code-health:deps` script, and the `includeOnly.path`
+ * alternation in `.dependency-cruiser.cjs`. The arguments decide what
+ * dependency-cruiser walks; `includeOnly` decides what it reports. A module
+ * outside both is neither walked nor reported, so a change to it cannot change
+ * the command's verdict.
+ *
+ * Duplicated here rather than derived at run time on purpose: routing is
+ * reviewable data, and a routing constant parsed out of a shell string at gate
+ * time would be neither. The staleness test is what keeps the copy honest —
+ * adding a seventh root turns into a red test, not a silently under-routed
+ * gate.
+ */
+export const DEPCRUISE_ROOTS = Object.freeze([
+  "shared-config",
+  "ui-dashboard",
+  "indexer-envio",
+  "metrics-bridge",
+  "integration-probes",
+  "aegis",
+]);
+
+/**
+ * Workspace manifests that decide how a bare specifier resolves.
+ *
+ * A scanned root reaches another scanned root by package name, not by relative
+ * path: `ui-dashboard/package.json` declares
+ * `"@mento-protocol/config": "workspace:*"`, and 47 imports of that specifier
+ * resolve into `shared-config/`. Which directories are workspace packages, and
+ * what each specifier resolves to, is decided by these three files. Editing one
+ * can therefore add or remove an edge between two scanned roots while no file
+ * inside any root changes — so a change set holding only a manifest still has
+ * something dependency-cruiser can read.
+ *
+ * A root's own `package.json` needs no entry here: it already matches the root
+ * prefix below.
+ */
+const WORKSPACE_RESOLUTION_MANIFESTS = [
+  /^package\.json$/,
+  /^pnpm-lock\.yaml$/,
+  /^pnpm-workspace\.yaml$/,
+];
+
+/**
+ * Any changed path inside a root dependency-cruiser scans.
+ *
+ * DO NOT narrow this by file type. That was tried and reverted, and the reason
+ * is worth keeping: no extension list can decide what the graph contains.
+ *
+ * The narrowing was requested to stop `ui-dashboard/AGENTS.md` buying a ~22s
+ * cruise of an unchanged graph (PR comment 3906221722). It shipped as "an
+ * extension dependency-cruiser parses", then had to grow twice — `.json` and
+ * `.node` (3906713274), then the stylesheet languages (3906943568) — because
+ * parsing is not how a file joins the graph. Resolution is. A file becomes a
+ * node whenever an import specifier names it with its extension, and
+ * dependency-cruiser says so itself in `determineFollowableExtensions`: its
+ * `lKnownUnfollowables` list exists only to stop the fallback parser reading
+ * stylesheets, and the comment beside it notes pictures, movies, html and xml
+ * resolve the same way without being listed. An SVG imported from the indexer
+ * into the dashboard activates `indexer-no-dashboard` with no `.ts` file
+ * changed (3907083527).
+ *
+ * So the set of possible edge targets is every file, and a closed list of them
+ * cannot be sound — three rounds of widening never reached the end because
+ * there is no end. Deciding membership properly needs the dependency graph,
+ * which is what the command being scheduled computes: the check cannot be its
+ * own precondition. The prefix stays, and the ~22s on in-root docs-only changes
+ * is the price of a sound answer.
+ *
+ * Out-of-root narrowing is untouched by this and remains sound: a path under no
+ * scanned root is neither walked nor reported, whatever its extension.
+ */
+const DEPCRUISE_ROOT_PREFIX = new RegExp(`^(${DEPCRUISE_ROOTS.join("|")})/`);
+
+function inScannedRoot(path) {
+  return DEPCRUISE_ROOT_PREFIX.test(path);
+}
+
+/**
+ * Triggers this pass schedules itself, rather than leaving to an arm.
+ *
+ * No arm routes a bare `pnpm-lock.yaml` or this module, so for these paths
+ * declining to remove the command is not enough — there would be nothing in the
+ * plan to decline to remove, and the guarantee they exist for would never fire.
+ * `.dependency-cruiser.cjs` and the other two manifests do have arms; they stay
+ * in this list so the guarantee holds on the pass's own terms rather than on an
+ * arm that could be re-scoped later. `plan.addCommand` dedupes, so naming a
+ * command an arm already scheduled keeps the arm's reason.
+ *
+ * The scanned roots are deliberately NOT here. An in-root source file reaches
+ * the command through its package's quality arm, which knows what else that
+ * package needs; this pass only decides whether to keep what the arm scheduled.
+ */
+const CODE_HEALTH_DEPS_SELF_SCHEDULED = [
+  ...WORKSPACE_RESOLUTION_MANIFESTS,
+  /^\.dependency-cruiser\.cjs$/,
+  /^scripts\/gate\/mapping\/post-passes\.mjs$/,
+];
+
+/**
+ * Changed paths that keep `pnpm code-health:deps` in the plan.
+ *
+ * Either the path sits inside a root dependency-cruiser scans, or it is one of
+ * the self-scheduled triggers above. Anything else — `governance-watchdog/**`,
+ * `alerts/infra/**`, a workflow, a doc outside every root — is neither walked
+ * nor reported, so it cannot move the verdict and the command comes out of the
+ * plan. That is the narrowing this pass still makes, and it holds for any file
+ * type, because the root list is what dependency-cruiser is pointed at.
+ */
+export function codeHealthDepsTriggered(changedPaths) {
+  return changedPaths.some(
+    (path) =>
+      inScannedRoot(path) ||
+      CODE_HEALTH_DEPS_SELF_SCHEDULED.some((r) => r.test(path)),
+  );
+}
+
+export function codeHealthDepsSelfScheduled(changedPaths) {
+  return changedPaths.some((path) =>
+    CODE_HEALTH_DEPS_SELF_SCHEDULED.some((r) => r.test(path)),
+  );
+}
+
+/**
+ * Drop `pnpm code-health:deps` when nothing it can see changed.
+ *
+ * Several arms reach it as part of a package quality bundle — a
+ * `governance-watchdog/**` edit, an `alerts/infra/**` edit, a
+ * `.github/workflows/**` edit that routes a package's bundle — and none of
+ * those paths is inside a scanned root, so the command re-proves the same
+ * verdict on an unchanged graph. This is the one pass that makes the plan
+ * smaller, which is the direction the rest of the engine refuses to go, so its
+ * condition is deliberately about what dependency-cruiser can read rather than
+ * about which package was routed. The `docs/pr-checklists/code-health.md`
+ * checklist stays either way: knip is the other half of that checklist and it
+ * still runs per package.
+ */
+export function narrowCodeHealthDepsCommand(plan, changedPaths) {
+  if (!codeHealthDepsTriggered(changedPaths)) {
+    plan.quality = plan.quality.filter(
+      (entry) => entry.command !== CODE_HEALTH_DEPS_COMMAND,
+    );
+    return;
+  }
+  // Removing is only half the pass. For the self-scheduled triggers no arm adds
+  // the command at all, so a pass that could only decline to remove it would
+  // leave the plan without the check those triggers exist to guarantee.
+  if (codeHealthDepsSelfScheduled(changedPaths)) {
+    plan.addCommand(
+      CODE_HEALTH_DEPS_COMMAND,
+      "dep-cruiser config, a workspace manifest, or the scope pass changed",
+    );
+  }
 }

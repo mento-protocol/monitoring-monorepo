@@ -205,7 +205,6 @@ Authority: canonical
 - [`docs/adr/0072-md-only-docs-checks-job.md`](adr/0072-md-only-docs-checks-job.md) — The Markdown globs route to a small docs-checks CI job instead of the scripts job
 - [`docs/adr/0073-guardrail-prose-pinned-in-ci.md`](adr/0073-guardrail-prose-pinned-in-ci.md) — Normative guardrail sentences are pinned in CI, and scripts are not
 - [`docs/adr/0074-trove-ledger-parallel-append-only-entity.md`](adr/0074-trove-ledger-parallel-append-only-entity.md) — TroveLedgerEvent is a parallel append-only entity, not a widened TroveOperationEvent
-- [`docs/adr/0075-pr-merge.md`](adr/0075-pr-merge.md) — One sanctioned operator merge path
 - [`docs/adr/0076-fair-quality-gate-coordinator.md`](adr/0076-fair-quality-gate-coordinator.md) — Fair local quality-gate coordination across worktrees
 - [`docs/adr/0077-operator-triggered-backlog-sweep.md`](adr/0077-operator-triggered-backlog-sweep.md) — Operator-triggered backlog sweep with isolated workers
 - [`docs/adr/0078-staged-verification-redesign.md`](adr/0078-staged-verification-redesign.md) — Staged replacement of the mandatory local gate with existing CI
@@ -214,10 +213,12 @@ Authority: canonical
 - [`docs/adr/0081-narrow-dependabot-auto-merge-exception.md`](adr/0081-narrow-dependabot-auto-merge-exception.md) — Narrow Dependabot auto-merge exception
 - [`docs/adr/0082-persistent-issue-board-mutation-mutex.md`](adr/0082-persistent-issue-board-mutation-mutex.md) — Persistent Issue-Board Mutation Mutex
 - [`docs/adr/0083-non-ledger-review-eval-experiments.md`](adr/0083-non-ledger-review-eval-experiments.md) — Review-skill experiments use a separate staged non-ledger lane
+- [`docs/adr/0084-github-ui-operator-merge.md`](adr/0084-github-ui-operator-merge.md) — Use GitHub for ordinary pull request merges
 
 Authority: non-canonical
 
 - [`docs/adr/0020-swr-polling-read-model.md`](adr/0020-swr-polling-read-model.md) — Read model is SWR polling plus bounded snapshot composition at current scale (archived)
+- [`docs/adr/0075-pr-merge.md`](adr/0075-pr-merge.md) — One sanctioned operator merge path (archived)
 - [`docs/adr/README.md`](adr/README.md)
 
 ## package-readmes-reference
@@ -252,6 +253,7 @@ Authority: non-canonical
 
 - [`BACKLOG.md`](../BACKLOG.md)
 - [`docs/metrics/review-process-after-1045-comparison-2026-07-07.md`](metrics/review-process-after-1045-comparison-2026-07-07.md) (archived)
+- [`docs/metrics/verification-redesign-m4-shadow-evidence.md`](metrics/verification-redesign-m4-shadow-evidence.md) (draft)
 - [`docs/notes/indexer-spec-followups.md`](notes/indexer-spec-followups.md) (archived)
 - [`docs/notes/react-compiler-annotation-pilot.md`](notes/react-compiler-annotation-pilot.md) (archived)
 - [`docs/notes/terraform-cicd-hardening-decisions-2026-05.md`](notes/terraform-cicd-hardening-decisions-2026-05.md) (archived)

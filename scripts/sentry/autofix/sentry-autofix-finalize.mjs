@@ -594,7 +594,7 @@ function provenanceSection(shortId, queueIssue) {
     "This PR was authored automatically by the Mento Sentry autofix pipeline " +
       "(ADR 0036, Phase 2b) from a triage verdict — it implements a scoped, " +
       "machine-written code fix and enters the normal review gauntlet: required " +
-      "CI and independent review run on it, and **merge stays human**. Review it " +
+      "CI and independent review run on it, and **merge requires explicit operator approval**. Review it " +
       "as you would any other PR; the diff is mechanically bounded to a small, " +
       "scoped change.",
     "",

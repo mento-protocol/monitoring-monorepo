@@ -445,7 +445,10 @@ await test("PR body is fully deterministic (no agent free-text accepted or publi
   );
   assert(body.includes(`Fixes ${SHORT_ID}`), "Fixes SHORT-ID present");
   assert(body.includes("Refs #1278"), "Refs queue issue present");
-  assert(body.includes("merge stays human"), "provenance present");
+  assert(
+    body.includes("merge requires explicit operator approval"),
+    "provenance present",
+  );
   // No fenced agent block, ever — the diff is the authoritative artifact.
   assert(!body.includes("```"), "no fenced block in the body");
   assert(

@@ -17,7 +17,7 @@ const CHECKOUT_STEP = Object.freeze({ uses: "actions/checkout@3d3c42e5aac5ba8058
 // prettier-ignore
 const ORDINARY = "*.md|aegis/**|alerts/**|docs/**|governance-watchdog/**|indexer-envio/**|integration-probes/**|metrics-bridge/**|terraform/**|ui-dashboard/**".split("|");
 // prettier-ignore
-const CONTROL_PLANE = "**/package.json|**/pnpm-lock.yaml|**/pnpm-workspace.yaml|**/.npmrc|**/tsconfig*.json|**/eslint.config.*|**/vitest*.{js,cjs,mjs,ts,cts,mts}|**/knip.json|**/react-doctor.config.json".split("|");
+const CONTROL_PLANE = ".node-version|**/package.json|**/package.json5|**/package.yaml|**/pnpm-workspace.yaml|**/pnpm-lock.yaml|**/.npmrc|**/.pnpmfile.cjs|**/pnpmfile.cjs|**/patches|**/patches/**|**/node_modules|**/node_modules/**|**/tsconfig*.json|**/eslint.config.*|**/vitest*.{js,cjs,mjs,ts,cts,mts}|**/knip.json|**/react-doctor.config.json".split("|");
 export const FORCE_ALL_OUTPUT =
   "${{ inputs.no_skip_audit || steps.filter.outputs.controlPlane == 'true' || steps.filter.outputs.all_count != steps.filter.outputs.routed_count || steps.filter.outputs.all_count != steps.filter.outputs.ordinary_count || (github.event_name == 'pull_request' && github.event.pull_request.changed_files >= 3000) }}";
 // prettier-ignore

@@ -19,8 +19,9 @@ name: Sentry Triage Ingest
 #
 # Advisory only: `schedule` / `workflow_dispatch` triggers can never satisfy a
 # required PR status check (see supply-chain.yml's note that only `ci`,
-# `Code Quality`, and the Vercel checks are in the branch ruleset), so this
-# workflow is intentionally not registered as a required check anywhere.
+# `Code Quality`, `Sentry suites`, and the Vercel checks are in the branch
+# ruleset), so this workflow is intentionally not registered as a required
+# check anywhere.
 #
 # Failures (including inside the ingest script itself) surface through
 # notify-slack-on-main-failure.yml like every other schedule-only workflow —

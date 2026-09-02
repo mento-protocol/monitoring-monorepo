@@ -104,6 +104,11 @@ export const WORKSPACE_ARMS = [
     effects: [
       { set: "root_package_json_class" },
       {
+        why: "The focused setup and package-policy contract reads the root manifest. Route it for every manifest class, including dependency and metadata changes. Earlier script-specific routing reaches the same command first and the plan deduplicates it.",
+        command: "bash scripts/bootstrap/agent-setup-contract.test.sh",
+        reason: "root package manifest changed",
+      },
+      {
         dispatch: "root_package_json_class",
         arms: [
           {

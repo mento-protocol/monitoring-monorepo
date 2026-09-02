@@ -333,19 +333,18 @@ test("unknown, control-plane, and mixed diffs select every conditional job", asy
   assert.deepEqual(globalMarkdown.unknown, ["new-service/README.md"]);
   assertAllConditionalJobsUseForceAll(globalMarkdown);
 
-  for (const path of [
-    "ui-dashboard/package.json",
-    "ui-dashboard/tsconfig.json",
-    "ui-dashboard/eslint.config.mjs",
-    "ui-dashboard/vitest.config.ts",
-    "ui-dashboard/react-doctor.config.json",
-  ]) {
+  // prettier-ignore
+  for (const path of "ui-dashboard/tsconfig.json|ui-dashboard/eslint.config.mjs|ui-dashboard/vitest.config.ts|ui-dashboard/react-doctor.config.json".split("|")) {
     const controlPlane = await forceAllForChanges(LIVE.filters, [
       changed(path),
     ]);
     assert.deepEqual(controlPlane.controlPlane, [path]);
     assertAllConditionalJobsUseForceAll(controlPlane);
   }
+
+  // Package drift rejected by no-skip must force all ordinary CI jobs.
+  // prettier-ignore
+  for (const path of ".node-version|package.json|ui-dashboard/package.json|package.json5|ui-dashboard/package.json5|package.yaml|ui-dashboard/package.yaml|pnpm-workspace.yaml|ui-dashboard/pnpm-workspace.yaml|pnpm-lock.yaml|ui-dashboard/pnpm-lock.yaml|.npmrc|ui-dashboard/.npmrc|.pnpmfile.cjs|ui-dashboard/.pnpmfile.cjs|pnpmfile.cjs|ui-dashboard/pnpmfile.cjs|patches|patches/example.patch|ui-dashboard/patches|ui-dashboard/patches/example.patch|node_modules|node_modules/example.js|ui-dashboard/node_modules|ui-dashboard/node_modules/example.js".split("|")) for (const [operation, change] of [["modified", changed(path)], ["deleted", changed(path, "deleted")], ["renamed", changed(UI_SOURCE, "renamed", path)]]) { const decision = await forceAllForChanges(LIVE.filters, [change]); assert.deepEqual(decision.controlPlane, [path], `${operation} ${path} must enter the control-plane set`); assertAllConditionalJobsUseForceAll(decision); }
 
   const mixed = await forceAllForChanges(LIVE.filters, [
     changed("ui-dashboard/src/app/page.tsx"),

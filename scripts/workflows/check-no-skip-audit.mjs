@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { load } from "js-yaml";
@@ -28,7 +28,13 @@ const CODECOV_IF = "${{ !inputs.no_skip_audit && !startsWith(github.event.pull_r
 // prettier-ignore
 const READ_SCOPES = Object.freeze({ actions: "read", contents: "read", "pull-requests": "read" });
 // prettier-ignore
-const ADMISSION_HASH = "4d7f93bcbbd354c4ade518fb9db9c36e211f5d9af39d5bc62ccfa8b8b52bdc3e", SUMMARY_HASH = "23691af2c65d242efe88a75d9ff73f55a9baf78fc2bd38fcc04e2956992e1f5e", BASELINE_HASH = "467641beda8b2b45d49d0c62429d8e95f62b05c1db96f6665b106012a09cef12";
+const ADMISSION_STEP_HASH = "18f1c3741064363a488462c96fd34772c3b66eeee4a3f4bd2fb2a86275c3a203", CHECKOUT_STEP_HASH = "2d39e2e5293845e1c63f0f2e95ab8eb7e3d65360955c5b2c54ea1bddff57c22d", PROTECTED_DRIFT_STEP_HASH = "384f12fd7350be70968c0eb10a8613017a1ddc32dda1e54514f0cd6632420fa7", SUMMARY_STEP_HASH = "b6def63e8f5ccb7e13a6460f546cb391bf0e86350876470a787f038ea7cebb10";
+const CI_GRAPH_HASH =
+    "98fb0c2945d78059147cfe7b9ccbd8d00e3b2be9a2bb9edc76c104a4c9ca7eef",
+  BASELINE_HASH =
+    "467641beda8b2b45d49d0c62429d8e95f62b05c1db96f6665b106012a09cef12";
+// prettier-ignore
+const PNPM_HASH = "6bad699c8835ab2f16d7b463a6ccd286ee7435084a6ed42f4f9269b8d020cee6", BASELINE_ACTION_HASH = "f3adae89bc5e406a3c93cb3e6bca6bac895ca950150f2ce685041ee57449e462";
 
 // prettier-ignore
 const DISPATCH_INPUTS = {
@@ -38,10 +44,28 @@ const DISPATCH_INPUTS = {
 };
 // prettier-ignore
 const CALL_INPUTS = {
-  no_skip_audit: { description: "Run every deterministic job from the protected no-skip caller", required: false, default: false, type: "boolean" },
+  no_skip_audit: { description: "Run every retained deterministic job from the protected no-skip caller", required: false, default: false, type: "boolean" },
   audit_source_sha: { description: "Admitted immutable candidate SHA", required: false, default: "", type: "string" },
   audit_base_sha: { description: "Admitted immutable protected-main SHA", required: false, default: "", type: "string" },
 };
+// prettier-ignore
+const LEGACY_GATE_STEPS = Object.freeze([
+  ["indexer", "Legacy indexer routing parity suite", "node --test scripts/gate/routing-table/indexer-invariant-parity.test.mjs"],
+  ["scripts", "Agent quality-gate routing regression suite", "pnpm agent:quality-gate:test"],
+  ["scripts", "Gate routing-table suite", "pnpm gate:routing-table:test"],
+  ["docs-checks", "Gate routing-table suite", "pnpm gate:routing-table:test"],
+]);
+// prettier-ignore
+const RETAINED_EXTRACTED_STEPS = Object.freeze([
+  ["indexer", "Indexer autoreview invariant contract", "node --test scripts/agent-autoreview-indexer-invariant-contract.test.mjs"],
+  ["scripts", "Agent setup and package-policy contracts", "bash scripts/bootstrap/agent-setup-contract.test.sh"],
+]);
+// prettier-ignore
+const RUN_DIRECTORIES = new Set(["aegis", "alerts/infra/oncall-announcer", "alerts/infra/onchain-event-handler", "alerts/rules", "governance-watchdog"]);
+// prettier-ignore
+const AUDIT_EXECUTABLE_IFS = new Set([PR_OR_AUDIT, "inputs.no_skip_audit || steps.playwright-cache.outputs.cache-hit == ''", "${{ !cancelled() }}", "${{ inputs.no_skip_audit }}"]);
+const LEGACY_GATE_RUN =
+  /(?:(?<!check-)\bagent-quality-gate|agent:quality-gate|gate[:/]routing-table|agent-prewarm|scripts\/gate(?:\/|\b)|\bgate\/(?:agent-|darwin-|lockfile-|mapped-|mapping(?:\/|\b)|quality-gate-|routing-table(?:\/|\b)|run-handles|trunk-check-once))/u;
 
 // prettier-ignore
 const stable = (value) => JSON.stringify(value, (_key, item) => isMapping(item) ? Object.fromEntries(Object.keys(item).sort().map((key) => [key, item[key]])) : item);
@@ -49,12 +73,15 @@ const stable = (value) => JSON.stringify(value, (_key, item) => isMapping(item) 
 const hash = (value) => createHash("sha256").update(String(value ?? "")).digest("hex");
 // prettier-ignore
 const expression = (value) => String(value ?? "").replace(/^\$\{\{\s*/u, "").replace(/\s*\}\}$/u, "").trim();
+const shellText = (value) => String(value ?? "").replace(/[\s'"\\${}]/gu, "");
 const add = (errors, valid, message) => {
   if (!valid) errors.push(message);
 };
 const yaml = (root, path) => load(readFileSync(join(root, path), "utf8"));
 // prettier-ignore
 const stepsOf = (workflow) => Object.entries(workflow.jobs ?? {}).flatMap(([job, value]) => workflowJobSteps(value).map((step) => [job, step]));
+// prettier-ignore
+const stepRunsLegacy = (step) => LEGACY_GATE_RUN.test(shellText([step["working-directory"], step.shell, step.run, step.env, step.id === "filter" ? undefined : step.with].map((value) => isMapping(value) ? stable(value) : String(value ?? "")).join("\n")));
 
 // prettier-ignore
 export function auditAggregateViolations(results, expected) {
@@ -73,6 +100,7 @@ function checkDispatcher(root, errors) {
   const raw = readFileSync(join(root, DISPATCH), "utf8"), workflow = yaml(root, DISPATCH);
   add(errors, raw.includes(`workflow_dispatch:\n    ${CHECKOV_REASON}\n    inputs:`), "dispatch inputs need the narrow protected-admission Checkov exception");
   add(errors, raw.includes(`${TRUST_REASON}\n    # trunk-ignore(actionlint/workflow-call)\n    uses: $/.github/workflows/ci.yml`) && (raw.match(/trunk-ignore\(actionlint\//gu) ?? []).length === 1, "protected workflow call needs only its line-scoped actionlint exception");
+  add(errors, Object.keys(workflow).sort().join() === "jobs,name,on,permissions,run-name" && workflow.env === undefined && workflow.defaults === undefined, "no-skip dispatcher runtime keys changed");
   add(errors, workflow.name === "No-skip audit" && workflow["run-name"] === "No-skip audit PR #${{ inputs.pr_number }} at ${{ inputs.source_sha }}", "no-skip audit identity changed");
   add(errors, stable(workflow.on) === stable({ workflow_dispatch: { inputs: DISPATCH_INPUTS } }), "no-skip audit must expose only the three manual immutable inputs");
   add(errors, workflow.permissions === "read-all", "no-skip audit workflow must remain read-only");
@@ -80,18 +108,20 @@ function checkDispatcher(root, errors) {
   add(errors, Object.keys(workflow.jobs ?? {}).join() === "admit,audit", "no-skip audit must contain only admission and reusable-CI jobs");
   const admit = workflow.jobs?.admit ?? {};
   add(errors, Object.keys(admit).sort().join() === "name,permissions,runs-on,steps,timeout-minutes" && admit["runs-on"] === "blacksmith-2vcpu-ubuntu-2404-arm" && admit["timeout-minutes"] === 5 && stable(admit.permissions) === stable({ contents: "read", "pull-requests": "read" }), "admission job runtime or authority changed");
-  const [validate, checkout, summary] = admit.steps ?? [];
-  add(errors, admit.steps?.length === 3 && validate?.uses === "actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3" && stable(validate.env) === stable({ PR_NUMBER: "${{ inputs.pr_number }}", SOURCE_SHA: "${{ inputs.source_sha }}", BASE_SHA: "${{ inputs.base_sha }}" }) && Object.keys(validate.with ?? {}).join() === "script" && hash(validate.with?.script) === ADMISSION_HASH, "immutable PR admission script changed");
-  add(errors, checkout?.uses === CHECKOUT && stable(checkout.with) === stable({ ref: "${{ inputs.source_sha }}", "fetch-depth": 0, "persist-credentials": false }), "admission must check out the exact source with full history and no credentials");
-  add(errors, summary?.shell === "bash" && stable(summary.env) === stable({ SOURCE_SHA: "${{ inputs.source_sha }}", BASE_SHA: "${{ inputs.base_sha }}", PR_NUMBER: "${{ inputs.pr_number }}" }) && hash(summary.run) === SUMMARY_HASH, "admission object proof or operational summary changed");
+  const [validate, checkout, protectedDrift, summary] = admit.steps ?? [];
+  add(errors, admit.steps?.length === 4 && hash(stable(validate)) === ADMISSION_STEP_HASH, "immutable PR admission script changed");
+  add(errors, hash(stable(checkout)) === CHECKOUT_STEP_HASH, "admission candidate checkout step changed");
+  add(errors, hash(stable(protectedDrift)) === PROTECTED_DRIFT_STEP_HASH, "protected candidate-execution or evidence-instrument drift check changed");
+  add(errors, hash(stable(summary)) === SUMMARY_STEP_HASH, "admission object proof or operational summary changed");
   const audit = workflow.jobs?.audit ?? {};
-  add(errors, stable(audit) === stable({ name: "Full deterministic no-skip audit", needs: "admit", permissions: READ_SCOPES, uses: "$/.github/workflows/ci.yml", with: { no_skip_audit: true, audit_source_sha: "${{ inputs.source_sha }}", audit_base_sha: "${{ inputs.base_sha }}" } }), "audit job must depend on admission and call protected CI with exact inputs");
+  add(errors, stable(audit) === stable({ name: "Retained deterministic no-skip audit", needs: "admit", permissions: READ_SCOPES, uses: "$/.github/workflows/ci.yml", with: { no_skip_audit: true, audit_source_sha: "${{ inputs.source_sha }}", audit_base_sha: "${{ inputs.base_sha }}" } }), "audit job must depend on admission and call protected CI with exact inputs");
   add(errors, !stable(workflow).includes("secrets") && !stable(workflow).includes("write"), "no-skip caller must not receive secrets or write authority");
 }
 
 // prettier-ignore
 function checkCandidateGraph(root, errors) {
   const raw = readFileSync(join(root, CI), "utf8"), ci = yaml(root, CI), call = ci.on?.workflow_call ?? {};
+  add(errors, hash(stable(ci)) === CI_GRAPH_HASH, "retained audit workflow graph changed");
   add(errors, stable(call.inputs) === stable(CALL_INPUTS) && stable(call.secrets) === stable({ CODECOV_TOKEN: { description: "Optional upload token for ordinary reusable calls", required: false } }), "reusable CI audit inputs or optional Codecov secret changed");
   add(errors, stable(ci.concurrency) === stable({ group: "${{ inputs.no_skip_audit && format('ci-no-skip-{0}', github.run_id) || format('{0}-{1}', github.workflow, github.event_name == 'pull_request' && github.ref || github.sha) }}", "cancel-in-progress": "${{ !inputs.no_skip_audit }}" }), "reusable CI must keep audit runs independent");
   add(errors, ci.jobs?.changes?.outputs?.forceAll === FORCE_ALL, "audit mode must force every routed job");
@@ -115,12 +145,40 @@ function checkCandidateGraph(root, errors) {
   add(errors, gates.length === 2 && gates.every((step) => step.uses === ALLS_GREEN) && ordinary?.with?.["allowed-skips"] && stable(audit) === stable({ name: "Require every no-skip job to pass", if: "${{ inputs.no_skip_audit }}", uses: ALLS_GREEN, with: { jobs: "${{ toJSON(needs) }}" } }), "audit aggregate must reject every skipped, missing, or failed job");
   const allSteps = stepsOf(ci), runs = allSteps.map(([, step]) => String(step.run ?? ""));
   add(errors, runs.every((run) => !run.includes("${{ inputs.audit_")), "audit inputs must enter shell steps through quoted environment variables");
-  const selfActions = allSteps.filter(([, step]) => /(?:^\.\/|^\$\/)\.github\/actions\//u.test(String(step.uses ?? "")));
-  add(errors, selfActions.length === 21 && selfActions.every(([, step]) => [PNPM_ACTION, BASELINE_ACTION].includes(step.uses)), "CI must resolve every self action from the protected running commit");
+  const selfActions = allSteps.filter(([, step]) => /^(?:\.\/|\$\/)/u.test(String(step.uses ?? "")));
+  add(errors, selfActions.length === 21 && selfActions.every(([, step]) => [PNPM_ACTION, BASELINE_ACTION].includes(step.uses)), "CI may use only the protected local actions from the running commit");
   const actionlintBindings = raw.match(/# GitHub resolves \$\/ from the running commit; actionlint lacks support\.\n\s*# trunk-ignore\(actionlint\/action\)\n\s*(?:- )?uses: \$\/\.github\/actions\//gu) ?? [];
   add(errors, actionlintBindings.length === 21 && (raw.match(/trunk-ignore\(actionlint\//gu) ?? []).length === 21, "protected self actions need only line-scoped actionlint exceptions");
   const pnpm = selfActions.filter(([, step]) => step.uses === PNPM_ACTION);
   add(errors, pnpm.length === 15 && pnpm.every(([job, step]) => stable(step.with) === stable(job === "production-infra-contract" ? { "restore-cache": CACHE_OFF, "write-cache": WRITE_CACHE } : { "restore-cache": CACHE_OFF })), "every audit pnpm install must disable persistent cache reads and writes");
+}
+
+// prettier-ignore
+function checkRetainedBoundary(root, errors) {
+  const ci = yaml(root, CI), allSteps = stepsOf(ci);
+  add(errors, ci.defaults?.run === undefined && Object.values(ci.jobs ?? {}).every((job) => job.defaults?.run === undefined), "audit legacy detection requires step-owned working directories and shells");
+  add(errors, allSteps.every(([, step]) => step["working-directory"] === undefined || RUN_DIRECTORIES.has(step["working-directory"])), "CI step working directories must stay in the retained package allowlist");
+  const identities = new Set(LEGACY_GATE_STEPS.map(([job, name]) => `${job}|${name}`));
+  const actual = allSteps.filter(([job, step]) => identities.has(`${job}|${step.name}`) || stepRunsLegacy(step)).map(([job, step]) => ({ job, step }));
+  const expected = LEGACY_GATE_STEPS.map(([job, name, run]) => ({ job, step: { name, if: CACHE_OFF, run } }));
+  add(errors, stable(actual) === stable(expected), "no-skip audit must exclude the exact legacy local-gate step inventory");
+  const extractedIdentities = new Set(RETAINED_EXTRACTED_STEPS.map(([job, name]) => `${job}|${name}`));
+  const extracted = allSteps.filter(([job, step]) => extractedIdentities.has(`${job}|${step.name}`)).map(([job, step]) => ({ job, step }));
+  const expectedExtracted = RETAINED_EXTRACTED_STEPS.map(([job, name, run]) => ({ job, step: { name, run } }));
+  add(errors, stable(extracted) === stable(expectedExtracted), "extracted retained contracts must remain exact and audit-executable");
+  const approvedSkip = ([job, step]) => identities.has(`${job}|${step.name}`) || (job === "changes" && (step.uses === CHECKOUT || step.id === "filter")) || String(step.uses ?? "").startsWith("codecov/codecov-action@") || String(step.uses ?? "").startsWith("Kesin11/actions-timeline@") || String(step.uses ?? "").startsWith("actions/upload-artifact@") || String(step.uses ?? "").startsWith("actions/cache/") || (job === "ci" && step.uses === ALLS_GREEN && step.if === CACHE_OFF);
+  const unapprovedSkips = allSteps.filter((entry) => entry[1].if !== undefined && !AUDIT_EXECUTABLE_IFS.has(entry[1].if) && !approvedSkip(entry));
+  add(errors, unapprovedSkips.length === 0, "only pinned non-target steps may skip during the retained audit");
+  const nonblocking = allSteps.filter(([, step]) => step["continue-on-error"] !== undefined).map(([job, step]) => ({ job, step }));
+  const expectedNonblocking = [
+    { job: "ui", step: { name: "Restore Playwright Chromium", id: "playwright-cache", if: CACHE_OFF, "continue-on-error": true, uses: "actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9", with: { path: "~/.cache/ms-playwright", key: "trusted-main-v1-playwright-chromium-${{ runner.arch }}-${{ hashFiles('ui-dashboard/package.json', 'pnpm-lock.yaml') }}", "restore-keys": "trusted-main-v1-playwright-chromium-${{ runner.arch }}-\n" } } },
+    { job: "ui", step: { name: "Save Playwright Chromium", if: "${{ !inputs.no_skip_audit && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.playwright-cache.outputs.cache-hit != 'true' }}", "continue-on-error": true, uses: "actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9", with: { path: "~/.cache/ms-playwright", key: "trusted-main-v1-playwright-chromium-${{ runner.arch }}-${{ hashFiles('ui-dashboard/package.json', 'pnpm-lock.yaml') }}" } } },
+  ];
+  add(errors, stable(nonblocking) === stable(expectedNonblocking), "only the exact pinned Playwright cache steps may be nonblocking");
+  const retainedPins = allSteps.filter(([, step]) => step.run === "node scripts/check-agent-quality-gate-package-scripts.mjs");
+  add(errors, retainedPins.length === 3 && retainedPins.every(([, step]) => step.if === undefined), "retained package-script validators must remain audit-executable");
+  const auditUsers = readdirSync(join(root, ".github/workflows")).filter((name) => /\.ya?ml$/u.test(name) && /(?:no_skip_audit|audit_source_sha|audit_base_sha)/u.test(stable(yaml(root, `.github/workflows/${name}`)))).map((name) => `.github/workflows/${name}`).sort();
+  add(errors, stable(auditUsers) === stable([CI, DISPATCH].sort()), "only the protected dispatcher may call audit mode");
 }
 
 // prettier-ignore
@@ -129,6 +187,7 @@ function checkNormalizedChecks(root, errors) {
   const baselineCalls = allSteps.filter(([, step]) => step.uses === BASELINE_ACTION);
   add(errors, stable(baselineCalls.map(([, step]) => step.with?.["package-path"]).sort()) === stable(["aegis", "indexer-envio", "integration-probes", "metrics-bridge", "shared-config", "ui-dashboard"]) && baselineCalls.every(([, step]) => step.if === PR_OR_AUDIT && step.with?.["baseline-ref"] === AUDIT_BASE && ["false", "${{ inputs.no_skip_audit && 'false' || 'true' }}"].includes(step.with?.["fetch-main"])), "ESLint baselines must use the admitted base in audit mode");
   const baseline = yaml(root, BASELINE);
+  add(errors, hash(stable(yaml(root, PNPM))) === PNPM_HASH && hash(stable(baseline)) === BASELINE_ACTION_HASH, "protected local action definitions changed");
   add(errors, baseline.inputs?.["baseline-ref"]?.default === "origin/main" && baseline.runs?.steps?.[1]?.env?.BASELINE_REF === "${{ inputs.baseline-ref }}" && hash(baseline.runs?.steps?.[1]?.run) === BASELINE_HASH, "baseline action no longer reads the exact caller-owned base");
   const react = allSteps.find(([, step]) => step.name === "React Doctor (diff vs base)")?.[1];
   add(errors, react?.if === PR_OR_AUDIT && stable(react.env) === stable({ BASELINE_REF: "${{ inputs.no_skip_audit && inputs.audit_base_sha || format('origin/{0}', github.base_ref) }}" }) && react.run === "git switch -c __react_doctor_scan\npnpm --filter @mento-protocol/ui-dashboard react-doctor --diff \"$BASELINE_REF\" --fail-on warning --annotations --offline\n", "React Doctor must compare the candidate with the admitted base");
@@ -166,6 +225,7 @@ export function noSkipAuditViolations(root = process.cwd()) {
   const errors = [];
   checkDispatcher(root, errors);
   checkCandidateGraph(root, errors);
+  checkRetainedBoundary(root, errors);
   checkNormalizedChecks(root, errors);
   checkColdAuthority(root, errors);
   return [...new Set(errors)];

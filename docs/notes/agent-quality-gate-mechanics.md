@@ -207,9 +207,44 @@ entrypoint validator
 (`scripts/check-agent-quality-gate-package-scripts.mjs`) runs as a fail-fast
 quality-setup prerequisite: an unpinned or drifted alias aborts the run before
 any `pnpm <alias>` executes, and `--skip-if-fresh` cannot skip it. Existing changed paths run
-targeted Trunk checks for faster local iteration. Deleted paths,
-Trunk/tooling changes, package-manager changes, pnpm patches, and
-package-manifest changes still run full-repo Trunk locally. CI also runs a
+targeted Trunk checks for faster local iteration. Trunk/tooling changes,
+package-manager changes, pnpm patches, and package-manifest changes still run
+full-repo Trunk locally. A deleted path is dropped from the targeted argument
+list — Trunk fails on an argument that is not there — and the surviving paths
+are still linted. Five deletion cases keep the whole-repo scan: a change set
+with no survivor to target, a deleted path that is itself in the whole-repo
+list, a deleted path under `.github/`, a deleted `*.sh`, and a deleted dotfile
+at any depth. The last three are cross-file semantics. actionlint resolves `uses: ./.github/actions/<name>` and
+`uses: ./.github/workflows/<file>` against the tree, so deleting one invalidates
+surviving callers that are not in the change set and that a targeted run would
+never name. ShellCheck does the same for `# shellcheck source=<repo-relative
+path>`, which resolves against the real tree even inside Trunk's `copy_targets`
+sandbox: deleting `scripts/bootstrap/codex-cloud-git-helpers.sh` takes its two
+surviving callers from clean to SC1091. A caller that sources only through a
+runtime `${DIR}/…` path is the separate false positive `.shellcheckrc`
+documents, already suppressed per line; the rule does not try to tell the two
+apart, because a sourced-by analysis would rot the first time a caller changed
+how it spells the path. A deleted dotfile at any depth is the third: codespell,
+shellcheck, and osv-scanner read `.codespellrc`, `.shellcheckrc`, and
+`.osv-scanner.toml` from the root, `.gitignore` decides what Trunk looks at at
+all, and prettier, markdownlint and yamllint cascade to the nearest config so a
+package can carry its own. Both levels are measured. Remove `.codespellrc` and
+the unchanged `scripts/terraform/tf-platform-plan-guard.mjs` gains a codespell
+hit on `applyable`, an ignore-word that file carried. Remove `aegis/.prettierrc`
+and the untouched `aegis/src/app.module.ts` starts failing prettier, because the
+package's `singleQuote` setting went with it. In both cases the targeted run
+over the survivors still exits 0. The rule is structural, "any deleted
+dotfile", rather than a list or a name-shape class like `.*rc`/`.*ignore`: both
+rot silently toward under-scanning, a list when a linter gains a config and a
+name class when one is spelled outside the shape, as `.osv-scanner.toml`
+already is. It over-includes dotfiles no linter reads — `.terraform.lock.hcl`,
+`.env.example`, `.dockerignore` — which costs a full scan and is never wrong.
+`.trunk/**` needs no entry because it is already whole-repo on edit and delete. Note the matching gap for _edits_: modifying
+`.codespellrc` has the same cross-file reach and still only targets survivors,
+covered today for `.shellcheckrc` alone by its own filtered full scan. Every
+other enabled Trunk linter judges a file on its own bytes. checkov would join
+these if this repo gained a local `module { source = "./…" }` reference; it has
+none today. CI also runs a
 required full-repo Trunk check on every
 PR. Where the environment blocks Trunk's downloads — a Claude cloud container
 proxies egress and refuses any host outside its allowlist, and its credential
@@ -669,8 +704,7 @@ procedure below.
   both paths in two jobs, quick-commands names the checker, and the manifest's
   keys pin `AGENTS.md`, `CLAUDE.md`, and the operating card.
   [ADR 0073](../adr/0073-guardrail-prose-pinned-in-ci.md) owns that contract.
-  `pr/merge-pr*`, both PR-state helpers, and `agent-autoreview.sh` (Codex
-  markers) route `pnpm pr:merge:test`. The exact
+  The exact
   `sentry/broker/mapped-command-process-identity.mjs` bridge routes
   `pnpm sentry:broker:test`. It keeps the probe's local import on the same
   canonical helper that the workflow stages.
@@ -749,9 +783,65 @@ comparison would be the engine against itself. What routing correctness rests on
 now is `pnpm gate:routing-table:test` (the pairing lint, the staleness check, the
 `/bin/bash` pattern oracle, the closed verb set) and
 `node --test scripts/gate/mapping/engine.test.mjs` (dedupe and first-reason-wins,
-bucket order, the five post-passes, the root-manifest classifier). Both are
+bucket order, the six post-passes, the root-manifest classifier). Both are
 routed by a change to the engine or the table, and the routing-table suite also
-runs in the required `ci` job.
+runs in the required `ci` job. The engine suite is routed by
+`.dependency-cruiser.cjs` as well, because it is what pins the gate's copy of
+the scanned roots against that file.
+
+The sixth post-pass narrows `pnpm code-health:deps`. Several arms reach that
+command through a package quality bundle — a `governance-watchdog/**` edit, an
+`alerts/infra/**` edit, a `.github/workflows/**` edit that routes a package's
+bundle — from paths dependency-cruiser neither walks nor reports. The command
+scans six roots: `shared-config`, `ui-dashboard`, `indexer-envio`,
+`metrics-bridge`, `integration-probes`, and `aegis`. Two sources define that
+list, the positional arguments of the root `code-health:deps` script and the
+`includeOnly.path` alternation in `.dependency-cruiser.cjs`, and
+`engine.test.mjs` holds the gate's pinned copy set-equal to both, and the root
+manifest routes that suite so a script-only edit shrinking the scanned roots
+cannot merge without the staleness test running. A change outside every root
+drops the command unless it is an explicit manifest, configuration, or
+post-pass trigger. Any change inside a root keeps it, whatever the file type.
+
+That last point was narrowed by file type and then reverted, which is worth
+recording so it is not narrowed again. The narrowing aimed at
+`ui-dashboard/AGENTS.md` buying a ~22s cruise of an unchanged 1,321-module
+graph, and shipped as "an extension dependency-cruiser parses". It then had to
+grow twice, first for `.json` and `.node`, then for the stylesheet languages,
+because parsing is not how a file joins the graph — resolution is. A file
+becomes a node whenever an import specifier names it with its extension.
+dependency-cruiser says so in `determineFollowableExtensions`: its
+`lKnownUnfollowables` list exists only to stop the fallback parser reading
+stylesheets, and the comment beside it notes that pictures, movies, html and
+xml resolve the same way without being listed. An SVG imported from the indexer
+into the dashboard activates `indexer-no-dashboard` with no `.ts` file changed.
+Every file is therefore a possible edge target, no closed list of them can be
+sound, and deciding membership properly needs the dependency graph that the
+command being scheduled is what computes. The ~22s on in-root docs-only changes
+is the price of a sound answer. Two fixtures remain as regression tests,
+asserting the real `nttAddresses.json` and `globals.css` imports still exist,
+because they are why an in-root non-source change can move an edge at all.
+
+A change to
+`.dependency-cruiser.cjs` or to the narrowing pass itself keeps it too. So does a
+change to `package.json`, `pnpm-lock.yaml`, or `pnpm-workspace.yaml`: a scanned
+root reaches another scanned root by package name — `ui-dashboard/package.json`
+declares `"@mento-protocol/config": "workspace:*"` — so those three files decide
+what a bare specifier resolves to and can add or remove an edge between two
+roots while no file inside a root changes.
+
+The pass both removes and adds. For the five triggers that are not scanned
+roots — the three manifests, `.dependency-cruiser.cjs`, and this pass's own
+module — it schedules the command itself rather than only declining to remove
+it, because no arm routes a bare `pnpm-lock.yaml` or `post-passes.mjs`: there
+would be nothing in the plan to preserve, and the guarantee would never fire.
+`plan.addCommand` dedupes, so an arm that already scheduled the command keeps
+its own reason. The scanned roots stay with their arms, which decide better — a
+root's `README.md` matches the root prefix but cannot change a verdict. The
+`docs/pr-checklists/code-health.md` checklist is unaffected either way, because
+knip is the other half of it and still runs per package. This is the only pass
+that makes a plan smaller, so its condition is about what dependency-cruiser can
+read, never about which package the arms routed.
 
 ### Scheduling contract (Refs #1802, #2006; [ADR 0076](../adr/0076-fair-quality-gate-coordinator.md))
 
@@ -3041,7 +3131,6 @@ GATE_TEST_FOCUS=routing-packaging,routing-docs bash scripts/agent-quality-gate.t
 | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ------------ |
 | `gate-contract`      | Pins on the gate's source text, classifier resolution, Turbo task-graph inputs, agent context check.                               | 2s           |
 | `coordinator`        | Coordinator protocol, fair weighted capacity, barriers, named resources, coalescing, and recovery.                                 | 210s         |
-| `install-wiring`     | Pre-push hook installation, the install-marker library, the package-script pin validator.                                          | 1s           |
 | `routing-packaging`  | Manifests, package-manager config, root package-script and dev-metadata classification, lockfile-importer scoping.                 | 52s          |
 | `routing-sources`    | Source-path routing: scoped `vitest related`, indexer codegen order, shared-config blast radius, deploy/terraform arms.            | 86s          |
 | `execution-phases`   | Phase order, fail-fast prerequisites, local parallelism, quality-setup, and scheduler classification.                              | 41s          |
@@ -3051,6 +3140,12 @@ GATE_TEST_FOCUS=routing-packaging,routing-docs bash scripts/agent-quality-gate.t
 | `stamps-commands`    | Per-command stamps, always-rerun exemptions, command timeouts and interrupts.                                                      | 27s          |
 | `execution-parallel` | Parallel identity and process-group drains, detached-session lease ordering, the production identity contract, prerequisite reuse. | 51s          |
 | `lock-drain`         | Legacy compatibility lock: acquisition, stale-holder reclaim, drain obligations, and crash-point recovery.                         | 319s         |
+
+The retained SessionEnd, install-marker, setup-consumer, and package-policy
+checks are no longer a gate self-test family. Run
+`bash scripts/bootstrap/agent-setup-contract.test.sh`. Required CI runs this
+focused contract in the root scripts job. The temporary local gate also routes
+its inputs to the focused command.
 
 Rules that keep the focus honest:
 
