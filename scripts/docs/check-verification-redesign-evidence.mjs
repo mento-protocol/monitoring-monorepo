@@ -231,7 +231,7 @@ export function buildManifest({ repoRoot = DEFAULT_ROOT, source }) {
   const hookPresent = paths.includes(".trunk/hooks/pre-push");
   const trunkConfig = paths.includes(".trunk/trunk.yaml")
     ? git(repoRoot, ["show", `${sourceSha}:.trunk/trunk.yaml`])
-    : "";
+    : fail("Missing manifest path: .trunk/trunk.yaml");
   const trunkActionPresent = TRUNK_PRE_PUSH_MARKER.test(trunkConfig);
   if (hookPresent !== trunkActionPresent)
     fail(

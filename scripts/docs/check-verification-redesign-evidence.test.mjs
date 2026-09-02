@@ -442,7 +442,7 @@ test("buildManifest counts whole files and matching reference lines", () => {
   });
 });
 
-test("buildManifest accepts complete pre-push removal", () => {
+test("buildManifest accepts pre-push removal only with Trunk config", () => {
   withGitFixture((repoRoot) => {
     fs.rmSync(join(repoRoot, ".trunk/hooks/pre-push"));
     fs.writeFileSync(
@@ -462,11 +462,14 @@ test("buildManifest accepts complete pre-push removal", () => {
 
     const manifest = buildManifest({ repoRoot, source: "HEAD" });
     assert.equal(
-      manifest.entries.some(
-        ({ path }) =>
-          path === ".trunk/hooks/pre-push" || path === ".trunk/trunk.yaml",
-      ),
+      manifest.entries.some(({ path }) => path.startsWith(".trunk/")),
       false,
+    );
+    fs.rmSync(join(repoRoot, ".trunk/trunk.yaml"));
+    execFileSync("git", ["-C", repoRoot, "commit", "-qam", "remove config"]);
+    assert.throws(
+      () => buildManifest({ repoRoot, source: "HEAD" }),
+      /Missing manifest path: \.trunk\/trunk\.yaml/u,
     );
   });
 });
