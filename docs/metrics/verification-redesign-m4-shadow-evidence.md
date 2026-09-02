@@ -286,7 +286,7 @@ dispatch.
 | --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | External and separate required checks                                                   | All live required contexts passed for the exact sampled head                                                                                                    |
 | Local gate result for the same SHA                                                      | Not collected and not required for this incident record; the repair delivery uses the exact user-approved legacy-gate waiver, focused checks, and exact-head CI |
-| Credentialed publication, deployment, Terraform apply or plan, and live-provider checks | Excluded from no-skip; record the applicable separate assurance path before cutover                                                                             |
+| Credentialed publication, deployment, Terraform apply or plan, and live-provider checks | Excluded from no-skip; retain each surface's separate assurance policy during the post-cutover canary                                                           |
 
 ## Cold-proof attempt on PR #2205: workflow graph pin incident
 
@@ -373,36 +373,37 @@ receipt and corrected complexity attribution.
 
 ## Coverage ledger
 
-The live sample must fill every row before cutover. One pull request can cover
-more than one row. Same-head audit rows cover product and cross-layer selection
-risk. Ordinary-force-all rows cover package, dependency, toolchain, and
-supply-chain execution risk.
+The post-cutover canary in issue #2128 must fill every row before legacy
+deletion. One pull request can cover more than one row. Same-head audit rows
+cover product and cross-layer selection risk. Ordinary-force-all rows cover
+package, dependency, toolchain, and supply-chain execution risk.
 
-| Required coverage                               | Evidence form      | Status        | Sample or evidence                             |
-| ----------------------------------------------- | ------------------ | ------------- | ---------------------------------------------- |
-| Dashboard-only                                  | Same-head audit    | Pending       | Pending for the repaired cohort                |
-| Indexer-only                                    | Same-head audit    | Pending       | Pending for the repaired cohort                |
-| Dashboard and indexer cross-layer               | Same-head audit    | Pending       | Pending for the repaired cohort                |
-| Root or control-plane                           | Same-head audit    | Incident only | PRs #2199 and #2205; no repaired-cohort credit |
-| Package, dependency, toolchain, or supply-chain | Ordinary force-all | Pending       | Pending for the repaired cohort                |
-| Required risk-class union                       | Both forms         | Pending       | PRs #2199 and #2205 remain incident evidence   |
+| Required coverage                               | Evidence form      | Status        | Sample or evidence                           |
+| ----------------------------------------------- | ------------------ | ------------- | -------------------------------------------- |
+| Dashboard-only                                  | Same-head audit    | Deferred      | Post-cutover canary in issue #2128           |
+| Indexer-only                                    | Same-head audit    | Deferred      | Post-cutover canary in issue #2128           |
+| Dashboard and indexer cross-layer               | Same-head audit    | Deferred      | Post-cutover canary in issue #2128           |
+| Root or control-plane                           | Same-head audit    | Incident only | PRs #2199 and #2205; pre-cutover incidents   |
+| Package, dependency, toolchain, or supply-chain | Ordinary force-all | Deferred      | Post-cutover canary in issue #2128           |
+| Required risk-class union                       | Both forms         | Deferred      | PRs #2199 and #2205 remain incident evidence |
 
 ## Window summary
 
-| Measure                                 | Current value                                          |
-| --------------------------------------- | ------------------------------------------------------ |
-| Evidence window status                  | Closed; measurement moved to post-cutover issue #2128  |
-| Eligible incident pull requests         | 2                                                      |
-| Accepted repaired-cohort pull requests  | 0 of at least 10                                       |
-| First accepted UTC date                 | Pending                                                |
-| Last accepted UTC date                  | Pending                                                |
-| Inclusive accepted UTC date span        | 0 of at least 7 dates                                  |
-| No-skip cumulative runner minutes       | 73.73 of 450                                           |
-| Ordinary CI median and maximum          | Pending; no accepted repaired-cohort sample            |
-| No-skip median and maximum              | Pending; report observed numerator over cohort size    |
-| p95                                     | Not reported for a cohort of at least 10 pull requests |
-| Selection-only product failures         | None observed                                          |
-| Retained-target or instrument incidents | 2                                                      |
+| Measure                                   | Current value                                         |
+| ----------------------------------------- | ----------------------------------------------------- |
+| Evidence window status                    | Closed; measurement moved to post-cutover issue #2128 |
+| Eligible incident pull requests           | 2                                                     |
+| Accepted pre-cutover cohort pull requests | 0                                                     |
+| First accepted UTC date                   | N/A; pre-cutover window archived                      |
+| Last accepted UTC date                    | N/A; pre-cutover window archived                      |
+| Inclusive accepted UTC date span          | N/A; pre-cutover window archived                      |
+| Post-cutover acceptance target            | At least 10 merged PRs over at least 7 calendar days  |
+| No-skip cumulative runner minutes         | 73.73 of 450                                          |
+| Ordinary CI median and maximum            | Not reported; pre-cutover cohort archived             |
+| No-skip median and maximum                | Not reported; pre-cutover cohort archived             |
+| p95                                       | Not reported; pre-cutover cohort has zero samples     |
+| Selection-only product failures           | None observed                                         |
+| Retained-target or instrument incidents   | 2                                                     |
 
 The pre-cutover receipt closed with zero accepted samples. The two incident
 rows remain evidence. The separately approved cutover moves acceptance
