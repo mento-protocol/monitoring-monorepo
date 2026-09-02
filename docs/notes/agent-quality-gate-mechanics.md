@@ -2356,10 +2356,17 @@ active control.
   from the `active_worker_mapped_commands` registry that aligns with the worker
   identities. A Darwin cohort drain settles several commands at once and clears
   the name instead: no single name describes it, and a named barrier must not
-  meet a drain it cannot identify. A fixture must also write `.release` on every
-  terminal path, including its cleanup trap: a barrier left unreleased parks the
-  gate for the full 20-second budget and then reports the barrier as the
-  failure, burying the assertion that actually failed.
+  meet a drain it cannot identify. The Darwin census seam
+  (`waitAtDarwinCensusTestBarrier`) arms inside that same cohort settlement and
+  applies the rule the other way round, since it has no name to compare: it
+  declines a named barrier outright rather than consuming a rendezvous it can
+  never honour. Mere presence of `.command` decides there, so an unresolvable
+  name does not read as unnamed. Naming a rendezvous on the Darwin census path
+  is therefore refused rather than served — see #2227.
+  A fixture must also write `.release` on every terminal path, including its
+  cleanup trap: a barrier left unreleased parks the gate for the full 20-second
+  budget and then reports the barrier as the failure, burying the assertion that
+  actually failed.
 - `AGENT_QUALITY_GATE_TEST_PARALLEL_RELEASE_FAILURE_AT` accepts a positive
   integer and injects failure at that parallel lease-release attempt.
 - `AGENT_QUALITY_GATE_TEST_OWNER_WITNESS_BARRIER`,

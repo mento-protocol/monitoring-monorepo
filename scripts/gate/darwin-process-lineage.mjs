@@ -678,6 +678,20 @@ function uidMatches(record) {
   return [record.uid, record.realUid, record.savedUid].includes(uid);
 }
 
+// Whether a fixture named the mapped command it wants this barrier to meet.
+// Mere presence decides: an unresolvable name is still a name that was asked
+// for, so a dangling symlink or a directory must not read as "unnamed". `lstat`
+// rather than `existsSync` because the latter follows the link and is false
+// when its target is absent.
+function namedDrainRefreshBarrier(barrier) {
+  try {
+    lstatSync(`${barrier}.command`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function waitAtDarwinCensusTestBarrier() {
   const barrier = process.env.AGENT_QUALITY_GATE_TEST_DRAIN_REFRESH_BARRIER;
   if (!barrier) return;
@@ -690,6 +704,14 @@ async function waitAtDarwinCensusTestBarrier() {
   ) {
     fail("Darwin census test barrier is unsafe");
   }
+  // A fixture that names the mapped command it means to meet cannot mean this
+  // seam. It arms inside a cohort settlement, which drains several commands at
+  // once, so no single name describes it — the same reason the shell teardown
+  // clears the active name before a cohort drain. Consuming a named barrier
+  // here would steal a rendezvous this seam can never honour and leave the
+  // fixture waiting at one that already happened, which is the race the name
+  // exists to close. An unnamed barrier still arms on the first drain.
+  if (namedDrainRefreshBarrier(barrier)) return;
   try {
     writeFileSync(`${barrier}.used`, "", { flag: "wx", mode: 0o600 });
   } catch (error) {
@@ -1602,6 +1624,13 @@ export const darwinLineageTransitionForTest = Object.freeze({
 
 export const darwinLineageWatchForTest = Object.freeze({
   readPrivateWatchState,
+});
+
+// The census barrier seam. Its selection is plain file inspection, so it runs
+// and is verifiable on any platform even though the census around it is Darwin
+// only.
+export const darwinLineageCensusBarrierForTest = Object.freeze({
+  waitAtDarwinCensusTestBarrier,
 });
 
 export const darwinLineageConstantsForTest = Object.freeze({

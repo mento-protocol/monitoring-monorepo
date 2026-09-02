@@ -31,6 +31,7 @@ import {
   captureDarwinExactChildOrGone,
   captureDarwinExactParent,
   classifyDarwinLineageCandidates,
+  darwinLineageCensusBarrierForTest,
   darwinLineageConstantsForTest,
   darwinLineageTransitionForTest,
   darwinNativeHelperTrustForTest,
@@ -3752,3 +3753,62 @@ test(
     }
   },
 );
+
+// The census barrier arms inside a cohort settlement, which drains several
+// mapped commands at once. A fixture that named the one command it means to
+// meet cannot mean this seam, so consuming its barrier here would steal a
+// rendezvous the seam can never honour — the wrong-drain race the name exists
+// to close. Selection is plain file inspection, so it is verifiable here even
+// though the census around it is Darwin only.
+test("the Darwin census barrier declines a named drain refresh barrier", async () => {
+  const { waitAtDarwinCensusTestBarrier } = darwinLineageCensusBarrierForTest;
+  const directory = mkdtempSync(join(tmpdir(), "darwin-census-barrier-"));
+  const previousNodeEnv = process.env.NODE_ENV;
+  const previousBarrier =
+    process.env.AGENT_QUALITY_GATE_TEST_DRAIN_REFRESH_BARRIER;
+  process.env.NODE_ENV = "test";
+  try {
+    const armed = [];
+    for (const name of ["absent", "named", "dangling", "directory"]) {
+      const barrier = join(directory, name);
+      // Pre-created so the arming case returns on its first poll rather than
+      // spending the seam's twenty-second budget.
+      writeFileSync(`${barrier}.release`, "");
+      if (name === "named") {
+        writeFileSync(`${barrier}.command`, "pnpm agent:prewarm:test\n");
+      } else if (name === "dangling") {
+        symlinkSync(`${barrier}.command.absent`, `${barrier}.command`);
+      } else if (name === "directory") {
+        mkdirSync(`${barrier}.command.dir`);
+        symlinkSync(`${barrier}.command.dir`, `${barrier}.command`);
+      }
+      process.env.AGENT_QUALITY_GATE_TEST_DRAIN_REFRESH_BARRIER = barrier;
+      await waitAtDarwinCensusTestBarrier();
+      armed.push([
+        name,
+        existsSync(`${barrier}.used`),
+        existsSync(`${barrier}.ready`),
+      ]);
+    }
+    assert.deepEqual(armed, [
+      // Opting out of naming is unchanged: the seam still arms on the first
+      // drain that reaches it.
+      ["absent", true, true],
+      ["named", false, false],
+      // A name that resolves nowhere is still a name that was asked for.
+      // `existsSync` follows the link and would read this as unnamed.
+      ["dangling", false, false],
+      ["directory", false, false],
+    ]);
+  } finally {
+    if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previousNodeEnv;
+    if (previousBarrier === undefined) {
+      delete process.env.AGENT_QUALITY_GATE_TEST_DRAIN_REFRESH_BARRIER;
+    } else {
+      process.env.AGENT_QUALITY_GATE_TEST_DRAIN_REFRESH_BARRIER =
+        previousBarrier;
+    }
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
