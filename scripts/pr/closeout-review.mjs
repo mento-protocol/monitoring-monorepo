@@ -296,6 +296,9 @@ function runCodex(repoRoot, base, reportPath, timeoutSeconds) {
 
   return new Promise((resolve) => {
     let timedOut = false;
+    // A failed spawn can emit both "error" and "close"; settle once, so the
+    // two descriptors are never closed twice.
+    let settled = false;
     const kill = (signal) => {
       try {
         process.kill(-child.pid, signal);
@@ -308,18 +311,18 @@ function runCodex(repoRoot, base, reportPath, timeoutSeconds) {
       kill("SIGTERM");
       setTimeout(() => kill("SIGKILL"), 5000).unref();
     }, timeoutSeconds * 1000);
-    child.on("error", (error) => {
+    const settle = (outcome) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(deadline);
       fs.closeSync(bodyFd);
       fs.closeSync(stderrFd);
-      resolve({ code: null, timedOut: false, spawnError: error.message });
-    });
-    child.on("close", (code) => {
-      clearTimeout(deadline);
-      fs.closeSync(bodyFd);
-      fs.closeSync(stderrFd);
-      resolve({ code, timedOut, spawnError: null });
-    });
+      resolve(outcome);
+    };
+    child.on("error", (error) =>
+      settle({ code: null, timedOut: false, spawnError: error.message }),
+    );
+    child.on("close", (code) => settle({ code, timedOut, spawnError: null }));
   });
 }
 
@@ -424,7 +427,9 @@ async function main() {
 
   if (reason) process.stderr.write(`closeout-review: ${reason}\n`);
   process.stdout.write(`report: ${reportPath}\n`);
-  process.exit(exitCode);
+  // Set the code rather than calling process.exit, so the last stdout line is
+  // never truncated when stdout is a pipe.
+  process.exitCode = exitCode;
 }
 
 await main();
