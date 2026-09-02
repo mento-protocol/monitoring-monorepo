@@ -6410,7 +6410,13 @@ run_drain_refresh_barrier_selection_regression() {
 
   barrier_case() {
     local expect_armed="$1" expect_rc="$2" active="$3" named="$4"
+    # The lifted function reads both of these by name, which shellcheck cannot
+    # see through the eval below. They are the inputs under test: the barrier
+    # path the gate was configured with, and the mapped command whose drains
+    # are running.
+    # shellcheck disable=SC2034
     local drain_refresh_test_barrier="$barrier"
+    # shellcheck disable=SC2034
     local gate_drain_active_mapped_command="$active"
     rm -f "${barrier}.used" "${barrier}.ready" "${barrier}.command"
     # Pre-created so an arming case returns on its first poll instead of
