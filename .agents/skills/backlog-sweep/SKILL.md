@@ -240,8 +240,12 @@ grades one issue's own labels and never sees the batch.
 
 If fewer than N issues qualify, take fewer and say so in the report. Never
 relax a rule to fill the batch. Zero qualifying issues is a valid result: write
-the report with an empty disposition table, name what the receipt held, and
-stop.
+the empty disposition table and name what the receipt held.
+
+**Zero does not end the run.** An empty batch is the case grooming exists for,
+so a 0-of-N run carries on to Groom The Queue For The Next Run below and writes
+its report after that pass, not instead of it. Returning here would leave the
+queue exactly as it was found, and the next run would find the same nothing.
 
 ## Hand Each Issue To A Worker
 
