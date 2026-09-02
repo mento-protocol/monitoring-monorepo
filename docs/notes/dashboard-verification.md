@@ -315,11 +315,11 @@ does `#text` after the path (`--attach './after.png#After, …'`) set the alt
 text. Images are capped at 10 MB, and the upload needs write access to the
 repository. When one upload fails, `gh` still writes the body with the files
 that succeeded and exits non-zero; treat that exit as failed evidence. Then
-reopen the description and verify both attachment URLs render and the labels
-map to the correct revisions. A local path, broken Markdown, or an unverified
+reopen the description and verify every attachment URL renders and each label
+maps to its recorded revision. A local path, broken Markdown, or an unverified
 upload is not visual evidence.
 
-If either revision cannot be rendered, or the uploaded images do not render,
+If any revision cannot be rendered, or any uploaded image does not render,
 stop before publication and report the blocker; do not call the UI PR shipped
 or ready. The user may waive visual evidence for a specific PR.
 
