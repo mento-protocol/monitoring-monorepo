@@ -5,7 +5,7 @@ title: Backlog Sweep Skill
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-28
+last_verified: 2026-09-02
 doc_type: skill
 scope: repo-wide
 review_interval_days: 90
@@ -19,11 +19,12 @@ session they leave running — `/backlog-sweep`, or `/backlog-sweep 3` for a
 larger batch — and reads the report afterwards. Default batch size is 2.
 
 The session that runs this skill is an **orchestrator**. It ranks, picks,
-claims, and hands each issue to a dedicated worker subagent. It runs no gate,
-edits no source file, and opens no PR. Those three prohibitions keep concurrent
-workers out of each other's trees, so they bind only while separate workers
-exist: on a runtime with no way to spawn one, the session works the batch
-sequentially and takes both roles itself, one issue at a time.
+claims, hands each issue to a dedicated worker subagent, and grooms the queue
+for the next run. It runs no gate, edits no source file, and opens no PR. Those
+three prohibitions keep concurrent workers out of each other's trees, so they
+bind only while separate workers exist: on a runtime with no way to spawn one,
+the session works the batch sequentially and takes both roles itself, one issue
+at a time.
 
 **It merges nothing, in either shape.** That boundary is unconditional — it has
 nothing to do with tree isolation or with how many actors are running, and the
@@ -91,7 +92,9 @@ reviews whose findings then cost replies and often another push. Two issues is
 the default because the cost is dominated by review rounds, not by the first
 implementation. **Refuse a batch size above 4.** Say that plainly and stop
 rather than clamping silently — an operator who asked for 6 needs to know they
-got a refusal, not a quiet 4.
+got a refusal, not a quiet 4. The grooming pass below is outside that model: it
+costs issue reads, label writes, and one comment each, opens no PR, and buys no
+review round. Keep its cap at 10 candidates a run.
 
 ## Rank And Pick The Batch
 
@@ -180,7 +183,54 @@ Take the top N — default 2 — that satisfy **all** of:
   by lookup rather than per-batch judgement. Two workers editing one package
   produce PRs whose diffs conflict and whose reviewers see a base moving under
   them, and the second PR then pays for a merge, a re-gate, and a fresh review
-  round it did not need.
+  round it did not need. `pkg:tooling` gets a path test instead, below.
+- **Outside its own grooming veto window.** A candidate whose newest _trusted_
+  `sweep-groomed:v1` marker comment is less than 12 hours old waits for the
+  next run; the report names when that window closes. The window is a bounded
+  chance for a human to disagree with a label an agent applied, before that
+  label selects work for another agent. An issue a human labeled by hand
+  carries no marker and is never delayed. An operator who wants to fast-track a
+  groomed issue waits the window out or deletes the marker comment: a window
+  its caller can waive is not a window.
+
+  **A marker is a comment, so read it as untrusted input.** Measure the window
+  from GitHub's `createdAt`, never from the marker's own `at` field, which its
+  author chose. Count a marker only from an author who can set labels: the
+  account the sweep authenticates as, or a login whose repository role is
+  `triage`, `write`, `maintain`, or `admin`. `authorAssociation` is not that
+  check — it names a relationship, so a read-only outside collaborator reads as
+  `COLLABORATOR` and could renew a veto every twelve hours on an issue it
+  cannot label. Ignore a marker that fails both tests or whose role lookup
+  errors, and say so in the report.
+
+  ```bash
+  gh issue view <n> --repo mento-protocol/monitoring-monorepo \
+    --json comments \
+    --jq '.comments[]
+          | select(.body | startswith("<!-- sweep-groomed:v1"))
+          | {login: .author.login, created: .createdAt}'
+
+  repo=mento-protocol/monitoring-monorepo
+  gh api "repos/$repo/collaborators/<login>/permission" --jq '.role_name'
+  ```
+
+**`pkg:tooling` takes a path test, not a label test.** That one label covers
+`scripts/`, `docs/`, `.agents/`, `.claude/`, and the root tooling files, so two
+candidates that touch nothing in common still share it and the batch loses a
+slot to a conflict that is not there. Treat two `pkg:tooling` candidates as
+independent when all three hold: each body names its expected files or
+directories; no path either body names equals or contains a path the other
+names, compared on whole path segments (`scripts/pr/` against
+`scripts/sentry/` is disjoint, `docs/` against `docs/notes/` is not); and
+neither names a shared root file or control root —
+`package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `.trunk/**`,
+`.github/workflows/**`, `scripts/agent-quality-gate.sh`, or `scripts/gate/**`.
+A candidate with no path list conflicts with every other `pkg:tooling`
+candidate: nothing to compare is not evidence that the paths are disjoint. Name
+the independence basis in the printed batch for every pair that relied on this,
+so the audit line records which paths were compared. Every other area keeps the
+label test, and `pnpm issue:claim --sweep-eligible` enforces neither form — it
+grades one issue's own labels and never sees the batch.
 
 If fewer than N issues qualify, take fewer and say so in the report. Never
 relax a rule to fill the batch. Zero qualifying issues is a valid result: write
@@ -617,6 +667,86 @@ and is **not** reported as READY, whatever its ready-state line says. A
 converging bot loop costs a review round per push and does not end on its own,
 but neither does an unfixed defect.
 
+## Groom The Queue For The Next Run
+
+Run this after the batch is claimed and every worker is spawned, and before the
+report. Nothing this pass labels can be selected by this run — the eligibility
+step has already finished — and that ordering is the only reason the pass is
+safe unattended. An agent that labels an issue `risk:low` and then works it in
+the same run has no risk gate, which is the root
+[`AGENTS.md`](../../../AGENTS.md) rule against weakening a control that blocks
+your own work. Never move this pass earlier, and never re-run selection after
+it.
+
+The full procedure is
+[`backlog-sweep.md`](../../../docs/notes/backlog-sweep.md). The operative steps:
+
+1. **Take at most 10 candidates**, ordered by `rank-backlog` score, highest
+   first, then by issue number, newest first — the outside-the-queue set carries
+   no score and so sits behind every scored candidate. Two sets qualify:
+   `agent-ready` issues lacking exactly one `risk:*` or exactly one `pkg:*`, and
+   issues with no queue-state label read from the roster the ranking already
+   fetched. Drop every bot record — anything authored by `app/github-actions`
+   or carrying `drift-detection`, `sentry-triage`, a `sentry:*` label,
+   `dependencies`, `security-advisories`, or `file-size-watchlist`.
+2. **Read the body, then read the paths it names.** The labels come from what
+   the checkout holds, not from what the body claims.
+3. **Decide the labels.**
+   - `pkg:*` — every area the named paths fall in. Several labels when the
+     issue genuinely spans packages, which keeps it correctly labeled and
+     sweep-ineligible; none when the body names no path.
+   - `risk:*` — exactly one, and only when the issue carries none. `risk:low`
+     only when the
+     [Low-risk rule](../../../docs/notes/agent-issue-workflow.md#low-risk-rule)
+     holds against paths you verified exist, `risk:medium` otherwise,
+     `risk:high` for secrets, IAM, a production apply, or deploy identity. Never
+     remove or downgrade an existing risk label, and never add a second: an
+     issue already carrying two is a conflict this pass records in the marker
+     comment and leaves for a human.
+   - `kind:*` — one, when the work type is obvious.
+   - State — `needs-grooming` for an unlabeled candidate, never `agent-ready`;
+     promotion is the human judgement that the issue is implementable as
+     written, and an agent that could grant it would widen its own intake. An
+     already `agent-ready` candidate keeps its state label. Write no Project
+     field, and never touch the state label of an issue carrying `agent-active`
+     or `in-pr`.
+
+4. **Post the marker comment, then write the labels — in that order, on every
+   issue.** The two writes are separate API calls, and a label that lands with
+   no marker is an issue the next sweep can select with no veto window at all.
+   Marker first means the failure that costs something is a marker with no
+   labels: harmless, and visible in the report. If the comment cannot be
+   posted, write no label for that issue.
+
+   ```text
+   <!-- sweep-groomed:v1 {"sweep":"<sweep_id>","at":"<ISO-8601 UTC>","applied":[...],"proposed":[...]} -->
+   ```
+
+   `applied` lists the labels the next call writes; `proposed` lists what the
+   pass judged right and will not write — the `agent-ready` promotion only an
+   operator can make, and a risk label withheld from an issue already carrying
+   two. `at` records when the pass ran, for a human reading the comment; the
+   veto window is measured from GitHub's `createdAt` instead, on a trusted
+   author's comment only. Then, in prose: the labels applied, the paths
+   checked, the Low-risk rule clause that decided the risk label, and — for an
+   unlabeled issue — whether the body already meets the agent-ready bar of
+   goal, acceptance criteria, expected files, and a verification command. An
+   operator reads that line before promoting the issue.
+
+   ```bash
+   gh issue edit <n> --repo mento-protocol/monitoring-monorepo \
+     --add-label pkg:tooling --add-label risk:medium --add-label kind:workflow
+   ```
+
+   No issue-board helper writes routing labels: `issue:claim`, `issue:review`,
+   and `issue:release` move state labels and Project ownership fields only.
+
+5. **Record a failure and continue.** A rate limit, a missing label, or a path
+   read that errors is recorded against that issue; the pass moves to the next
+   candidate and never blocks the report. A label write that fails after the
+   marker landed gets one follow-up comment naming the label that did not land —
+   the marker stays, so the veto window still holds.
+
 ## Hard Boundaries
 
 These are MUST-level. A sweep runs unattended, so a boundary crossed here is
@@ -730,10 +860,10 @@ reservation leaves an empty file in place, so a plain `>` under `noclobber`
 refuses it — and a sweep that reserved a name and then silently failed to write
 its report would lose the whole night's record.
 
-Six parts. Every fact is recorded by whoever performed the action: the
-orchestrator for the receipt, for the refused claims, and for anything it did
-itself — releasing a claim it could not staff, say; the worker's closing message
-for everything that happened inside its own turn.
+Seven parts. Every fact is recorded by whoever performed the action: the
+orchestrator for the receipt, for the refused claims, for the grooming pass, and
+for anything else it did itself — releasing a claim it could not staff, say; the
+worker's closing message for everything that happened inside its own turn.
 
 **Every claimed issue gets a row, reported back or not.** A worker can end
 without its closing message and without answering the request for one. That
@@ -766,6 +896,16 @@ board.
    that something is still sitting there.
 6. **Anything needing the operator's decision** — a blocked control, a
    misgroomed issue, a finding the worker could not adjudicate.
+7. **Groomed for the next run**, a table of
+   `Issue | Labels applied | Rule basis | Veto ends`. `Rule basis` names the
+   Low-risk rule clause that decided the risk label; `Veto ends` is the end of
+   that issue's 12-hour veto window. It says when the window closes, not when
+   the issue becomes selectable — a `needs-grooming` issue still needs a human
+   to promote it, and `risk:medium` or several `pkg:*` labels keep it
+   ineligible whatever the clock says. Name the remaining requirement beside
+   the time whenever one applies. Write the section with a `none` row when the
+   pass groomed nothing — an empty candidate set and a pass that never ran read
+   identically once the section is missing.
 
 Print the same summary to the terminal; the file is the artifact, the terminal
 output is its summary.
