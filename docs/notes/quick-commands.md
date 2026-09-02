@@ -130,7 +130,7 @@ pnpm issue:review --pr 123 --issue 901 --claim-id <id> --rebind-branch # Prove a
 pnpm issue:release --issue 901 --claim-id <id> # Release the matching claim back to agent-ready
 pnpm issue:release --issue 901 --claim-id <id> --closed-unmerged-pr # Release after the stored PR closes unmerged
 pnpm issue:release --issue 901 --claim-id <id> --merged-pr --needs-grooming # Continue a still-open issue after its stored PR merges
-pnpm issue:board sync --dry-run                # Preview the repository-wide queue-label and Project projection
+pnpm issue:board sync --dry-run                # Preview the repository-wide projection; reports incompletely groomed agent-ready issues
 pnpm issue:board sync                          # Apply the authorized projection; preserve Project Status
 pnpm issue:board backfill --issue 901 --dry-run # Preview fill-only ownership-field recovery from a trusted claim comment
 pnpm issue:board:test                          # Offline tests for the issue-board helper
