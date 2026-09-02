@@ -325,6 +325,18 @@ test("an --out path Git would track is refused", (t) => {
   assert.match(tracked.stderr, /not ignored by Git/);
   assert.equal(fs.existsSync(path.join(repo.repo, "report.md")), false);
 
+  // The sibling stderr log is unscanned output too, so it must also be ignored.
+  fs.appendFileSync(path.join(repo.repo, ".gitignore"), "kept.md\n");
+  const halfIgnored = runScript(repo, [
+    "--base",
+    "base",
+    "--no-fetch",
+    "--out",
+    "kept.md",
+  ]);
+  assert.equal(halfIgnored.status, 2);
+  assert.match(halfIgnored.stderr, /not ignored by Git/);
+
   const ignored = runScript(repo, [
     "--base",
     "base",

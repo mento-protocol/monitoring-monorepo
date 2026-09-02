@@ -243,13 +243,17 @@ function verifyBase(repoRoot, base, shouldFetch) {
   return sha.stdout;
 }
 
-/** Refuse a report path that Git would track. The report is unscanned output. */
+/**
+ * Refuse a report path that Git would track. Both the report and its sibling
+ * `.stderr.log` are unscanned model output, so both have to be ignored.
+ */
 function checkOutPath(repoRoot, outPath) {
   const resolved = path.resolve(outPath);
   if (!resolved.startsWith(`${repoRoot}${path.sep}`)) return resolved;
-  const ignored = run("git", ["check-ignore", "-q", resolved], repoRoot);
-  if (!ignored.ok) {
-    fail(`--out ${outPath} is inside the repository and not ignored by Git`);
+  for (const candidate of [resolved, `${resolved}.stderr.log`]) {
+    if (!run("git", ["check-ignore", "-q", candidate], repoRoot).ok) {
+      fail(`--out ${outPath} is inside the repository and not ignored by Git`);
+    }
   }
   return resolved;
 }
