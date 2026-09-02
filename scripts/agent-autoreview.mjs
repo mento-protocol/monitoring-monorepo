@@ -43,7 +43,10 @@ import {
   utf8Size,
   writeReviewPromptOutputs,
 } from "./agent-autoreview-core.mjs";
-import { inheritGateMarkerStdio } from "./gate/mapped-command-process-identity.mjs";
+import {
+  closeReopenedGateMarkers,
+  inheritGateMarkerStdio,
+} from "./gate/mapped-command-process-identity.mjs";
 import { parseDarwinExactIdentity } from "./gate/darwin-process-lineage.mjs";
 import { validateState as validateDarwinLineageState } from "./gate/darwin-process-lineage-model.mjs";
 
@@ -2192,15 +2195,23 @@ function spawnGitWithinCaptureDeadline(git, gitArgs, options, label) {
   // clock stepping backwards mid-run cannot make a capture that took minutes
   // charge nothing and hand the next one time the run already spent.
   const startedAt = performance.now();
-  const result = spawnTrustedSync(git, gitArgs, {
-    ...options,
-    stdio: inheritGateMarkerStdio(options.stdio),
-    // The monotonic clock reports fractions of a millisecond; spawnSync only
-    // takes whole ones.
-    timeout: Math.ceil(remainingMs),
-    killSignal: "SIGKILL",
-    detached: true,
-  });
+  let result;
+  try {
+    result = spawnTrustedSync(git, gitArgs, {
+      ...options,
+      stdio: inheritGateMarkerStdio(options.stdio),
+      // The monotonic clock reports fractions of a millisecond; spawnSync only
+      // takes whole ones.
+      timeout: Math.ceil(remainingMs),
+      killSignal: "SIGKILL",
+      detached: true,
+    });
+  } finally {
+    // This capture runs once per git command, so a marker reopened for it has
+    // to be released here or a long review accrues descriptors until it hits
+    // the process limit. The child keeps its own copies.
+    closeReopenedGateMarkers();
+  }
   const elapsedMs = Math.max(0, performance.now() - startedAt);
   gitCaptureSpentMs += elapsedMs;
   // spawnSync reports an exhausted `maxBuffer` the same way it reports an
@@ -2386,23 +2397,28 @@ function detectPrBase(repo, branch) {
     if (process.env[key]) env[key] = process.env[key];
   }
   try {
-    const repoResult = spawnTrustedSync(
-      gh,
-      ["repo", "view", repositorySlug, "--json", "owner"],
-      {
-        cwd: repo,
-        env,
-        encoding: "utf8",
-        stdio: inheritGateMarkerStdio(["ignore", "pipe", "pipe"]),
-        timeout: GH_LOOKUP_TIMEOUT_MS,
-        // SIGKILL, not SIGTERM: spawnSync blocks until the child actually
-        // exits after the timeout fires, so a child that handles or ignores
-        // SIGTERM would hang this call (and autoreview) indefinitely despite
-        // the "timeout" option. SIGKILL can't be caught or ignored.
-        killSignal: "SIGKILL",
-        detached: true,
-      },
-    );
+    let repoResult;
+    try {
+      repoResult = spawnTrustedSync(
+        gh,
+        ["repo", "view", repositorySlug, "--json", "owner"],
+        {
+          cwd: repo,
+          env,
+          encoding: "utf8",
+          stdio: inheritGateMarkerStdio(["ignore", "pipe", "pipe"]),
+          timeout: GH_LOOKUP_TIMEOUT_MS,
+          // SIGKILL, not SIGTERM: spawnSync blocks until the child actually
+          // exits after the timeout fires, so a child that handles or ignores
+          // SIGTERM would hang this call (and autoreview) indefinitely despite
+          // the "timeout" option. SIGKILL can't be caught or ignored.
+          killSignal: "SIGKILL",
+          detached: true,
+        },
+      );
+    } finally {
+      closeReopenedGateMarkers();
+    }
     if (
       repoResult.error?.code === "ETIMEDOUT" ||
       repoResult.signal === "SIGKILL"
@@ -2436,32 +2452,41 @@ function detectPrBase(repo, branch) {
         "failed to inspect repository owner: gh omitted owner.login",
       );
     }
-    const result = spawnTrustedSync(
-      gh,
-      [
-        "pr",
-        "list",
-        "--repo",
-        repositorySlug,
-        "--head",
-        branch,
-        "--state",
-        "open",
-        "--limit",
-        "2",
-        "--json",
-        "baseRefName,headRepositoryOwner",
-      ],
-      {
-        cwd: repo,
-        env,
-        encoding: "utf8",
-        stdio: inheritGateMarkerStdio(["ignore", "pipe", "pipe"]),
-        timeout: GH_LOOKUP_TIMEOUT_MS,
-        killSignal: "SIGKILL",
-        detached: true,
-      },
-    );
+    // The cleanup belongs in a finally, not after the call: inheriting the
+    // markers can reopen some and then refuse the declaration, and the spawn
+    // itself can throw, either of which would otherwise leak every descriptor
+    // already reopened.
+    let result;
+    try {
+      result = spawnTrustedSync(
+        gh,
+        [
+          "pr",
+          "list",
+          "--repo",
+          repositorySlug,
+          "--head",
+          branch,
+          "--state",
+          "open",
+          "--limit",
+          "2",
+          "--json",
+          "baseRefName,headRepositoryOwner",
+        ],
+        {
+          cwd: repo,
+          env,
+          encoding: "utf8",
+          stdio: inheritGateMarkerStdio(["ignore", "pipe", "pipe"]),
+          timeout: GH_LOOKUP_TIMEOUT_MS,
+          killSignal: "SIGKILL",
+          detached: true,
+        },
+      );
+    } finally {
+      closeReopenedGateMarkers();
+    }
     if (result.error?.code === "ETIMEDOUT" || result.signal === "SIGKILL") {
       killProcessGroup(result.pid);
       throw new Error(
@@ -3564,12 +3589,21 @@ function runCommandWithInput(
   return new Promise((resolve, reject) => {
     revalidateAllTrustedExecutableSnapshots();
     assertAllAttestedNodeLibraryPaths();
-    const child = spawn(command, commandArgs, {
-      cwd,
-      detached: process.platform !== "win32",
-      env,
-      stdio: inheritGateMarkerStdio(["pipe", "pipe", "pipe"]),
-    });
+    let child;
+    try {
+      child = spawn(command, commandArgs, {
+        cwd,
+        detached: process.platform !== "win32",
+        env,
+        stdio: inheritGateMarkerStdio(["pipe", "pipe", "pipe"]),
+      });
+    } finally {
+      // spawn()'s fork/exec completes before it returns, so the child already
+      // holds its own copies. This path runs several times per review — two
+      // isolation probes, the review call, and one per Codex launcher
+      // candidate — so the parent's copies are released here.
+      closeReopenedGateMarkers();
+    }
     activeReviewerChildren.add(child);
     if (pendingTerminationSignal) terminateActiveReviewerChildren();
     let stdout = "";
@@ -3734,6 +3768,8 @@ function engineVersionProbeFailure(executable, cwd, env) {
     });
   } catch (error) {
     return `its --version probe could not start: ${error.message}`;
+  } finally {
+    closeReopenedGateMarkers();
   }
   if (probe.error?.code === "ETIMEDOUT" || probe.signal === "SIGKILL") {
     killProcessGroup(probe.pid);

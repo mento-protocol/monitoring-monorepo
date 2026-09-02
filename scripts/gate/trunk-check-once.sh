@@ -115,9 +115,11 @@ const { spawnSync } = require("node:child_process");
 const {
   chmodSync,
   closeSync,
+  constants,
   existsSync,
   fstatSync,
   lstatSync,
+  openSync,
   readFileSync,
   renameSync,
   rmSync,
@@ -230,6 +232,10 @@ function removePrivateState() {
 
 function trunk(args, baseStdio = ["ignore", "pipe", "pipe"], timeout = 30_000) {
   const stdio = [...baseStdio];
+  // Descriptors this call reopened. spawnSync leaves the parent's copies open,
+  // and trunk() runs more than once per guardian, so they are closed below
+  // rather than accrued across calls.
+  const reopenedMarkers = [];
   const carriesGateIdentity = [
     process.env.AGENTQG_RUN,
     process.env.AGENTQG_REQUEST,
@@ -249,15 +255,75 @@ function trunk(args, baseStdio = ["ignore", "pipe", "pipe"], timeout = 30_000) {
     if (new Set(descriptors).size !== descriptors.length) {
       throw new Error("Trunk guardian gate marker declaration is duplicated");
     }
-    const descriptorStates = descriptors.map((descriptor) => {
+    // A runtime between the gate and this guardian can take these low
+    // descriptors for its own handles, so a declared path reopens the marker
+    // the descriptor no longer holds (issue 2189).
+    const markerPath = (descriptor) => {
+      const value = process.env[`AGENTQG_MARKER_PATH_${descriptor}`];
+      return typeof value === "string" && value !== "" ? value : undefined;
+    };
+    // Opening the declared name proves nothing by itself: it may land on a
+    // directory, a device, a FIFO that would park this process waiting for a
+    // writer, or a regular file that is no longer the marker. Authenticate on
+    // the same terms the gate uses for its own marker opens — regular file,
+    // this user, and the inode the name still resolves to — and close a
+    // descriptor that fails rather than passing a stranger to the child.
+    const reopenMarker = (path) => {
+      let reopened;
+      try {
+        reopened = openSync(
+          path,
+          constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+        );
+        const opened = fstatSync(reopened);
+        const named = lstatSync(path);
+        const uid =
+          typeof process.getuid === "function" ? process.getuid() : undefined;
+        if (
+          opened.isFile() &&
+          named.isFile() &&
+          opened.dev === named.dev &&
+          opened.ino === named.ino &&
+          (uid === undefined || opened.uid === uid)
+        ) {
+          return reopened;
+        }
+      } catch {
+        // An unopenable or unstattable path is a marker that did not resolve.
+      }
+      if (reopened !== undefined) {
+        try {
+          closeSync(reopened);
+        } catch {
+          // Nothing to release.
+        }
+      }
+      return undefined;
+    };
+    // Inspect every declared descriptor BEFORE reopening any path: an open
+    // takes the lowest free descriptor, which can be one a later declaration
+    // still names, and inspecting it afterwards would read the reopened
+    // marker and call it a survivor.
+    const inspections = descriptors.map((descriptor) => {
       try {
         return { descriptor, regular: fstatSync(descriptor).isFile() };
       } catch (error) {
         return { descriptor, error, regular: false };
       }
     });
+    const descriptorStates = inspections.map((inspection) => {
+      const { descriptor } = inspection;
+      if (inspection.regular) return { ...inspection, source: descriptor };
+      const path = markerPath(descriptor);
+      if (path === undefined) return inspection;
+      const reopened = reopenMarker(path);
+      if (reopened === undefined) return inspection;
+      reopenedMarkers.push(reopened);
+      return { descriptor, regular: true, source: reopened };
+    });
     const unexpectedError = descriptorStates.find(
-      ({ error }) => error && error.code !== "EBADF",
+      ({ error, source }) =>
+        source === undefined && error && error.code !== "EBADF",
     );
     if (unexpectedError) {
       throw new Error(
@@ -269,23 +335,24 @@ function trunk(args, baseStdio = ["ignore", "pipe", "pipe"], timeout = 30_000) {
     // runtime closed every marker and reused a descriptor, the stale
     // declaration grants no signal authority. Linux keeps marker-only
     // containment, and every platform rejects a partially surviving set.
-    const allStale = !descriptorStates.some(({ regular }) => regular);
+    const allStale = !descriptorStates.some(
+      ({ source }) => source !== undefined,
+    );
     if (process.platform !== "darwin" || !allStale) {
-      for (const { descriptor, error, regular } of descriptorStates) {
+      for (const { descriptor, error, source } of descriptorStates) {
+        if (source !== undefined) continue;
         if (error) {
           throw new Error(`Trunk guardian marker ${descriptor} is not open`, {
             cause: error,
           });
         }
-        if (!regular) {
-          throw new Error(`Trunk guardian marker ${descriptor} is not regular`);
-        }
+        throw new Error(`Trunk guardian marker ${descriptor} is not regular`);
       }
     }
     if (!allStale) {
-      for (const { descriptor } of descriptorStates) {
+      for (const { descriptor, source } of descriptorStates) {
         while (stdio.length <= descriptor) stdio.push("ignore");
-        stdio[descriptor] = descriptor;
+        stdio[descriptor] = source;
       }
     }
   }
@@ -303,16 +370,30 @@ function trunk(args, baseStdio = ["ignore", "pipe", "pipe"], timeout = 30_000) {
   // Node can retain an existing high-numbered descriptor when its stdio entry
   // is "ignore" on Linux. Close the guardian capability in the exec process
   // before Trunk starts, while the guardian keeps its own writer open.
-  return spawnSync(
-    "/bin/bash",
-    [
-      "-c",
-      'exec 25>&-; exec ./tools/trunk "$@"',
-      "agentqg-trunk-guardian",
-      ...args,
-    ],
-    options,
-  );
+  try {
+    return spawnSync(
+      "/bin/bash",
+      [
+        "-c",
+        'exec 25>&-; exec ./tools/trunk "$@"',
+        "agentqg-trunk-guardian",
+        ...args,
+      ],
+      options,
+    );
+  } finally {
+    // spawnSync leaves the parent's copies open. trunk() runs several times
+    // per guardian — daemonState() and stopOwnedDaemon() both call it — so
+    // without this each call would accrue a descriptor per reopened marker,
+    // and a later reopen could land on a slot an earlier call still held.
+    for (const descriptor of reopenedMarkers) {
+      try {
+        closeSync(descriptor);
+      } catch {
+        // Already closed, or never ours to close.
+      }
+    }
+  }
 }
 
 function daemonState() {
