@@ -107,10 +107,10 @@ const MUTATIONS = [
   ["inherited legacy working directory", CI, "    timeout-minutes: 5\n    permissions:", "    timeout-minutes: 5\n    defaults:\n      run:\n        working-directory: scripts/gate\n    permissions:", /requires step-owned working directories/u],
   ["unreviewed step working directory", CI, "        working-directory: alerts/rules", "        working-directory: unreviewed/package", /retained package allowlist/u],
   ["retained command audit skip", CI, "      - name: Typecheck\n        run: pnpm --filter @mento-protocol/config typecheck", "      - name: Typecheck\n        if: ${{ !inputs.no_skip_audit }}\n        run: pnpm --filter @mento-protocol/config typecheck", /only pinned non-target steps may skip/u],
-  ["skipped retained indexer contract", CI, "      - name: Indexer autoreview invariant contract\n        # Retained", "      - name: Indexer autoreview invariant contract\n        if: false\n        # Retained", /extracted retained contracts/u],
-  ["renamed retained indexer contract", CI, "      - name: Indexer autoreview invariant contract", "      - name: Renamed indexer contract", /extracted retained contracts/u],
-  ["deleted retained indexer contract", CI, "      - name: Indexer autoreview invariant contract\n        # Retained owner inventory and fail-closed schema checks. Keep this\n        # separate from the legacy routing parity suite below.\n        run: node --test scripts/agent-autoreview-indexer-invariant-contract.test.mjs\n", "", /extracted retained contracts/u],
-  ["soft retained indexer contract", CI, "        run: node --test scripts/agent-autoreview-indexer-invariant-contract.test.mjs", "        continue-on-error: true\n        run: node --test scripts/agent-autoreview-indexer-invariant-contract.test.mjs", /extracted retained contracts/u],
+  ["skipped retained indexer contract", CI, "      - name: Indexer handler invariant contract\n        # Retained", "      - name: Indexer handler invariant contract\n        if: false\n        # Retained", /extracted retained contracts/u],
+  ["renamed retained indexer contract", CI, "      - name: Indexer handler invariant contract", "      - name: Renamed indexer contract", /extracted retained contracts/u],
+  ["deleted retained indexer contract", CI, "      - name: Indexer handler invariant contract\n        # Retained owner inventory and fail-closed schema checks. Keep this\n        # separate from the legacy routing parity suite below.\n        run: node --test scripts/indexer-handler-invariant-contract.test.mjs\n", "", /extracted retained contracts/u],
+  ["soft retained indexer contract", CI, "        run: node --test scripts/indexer-handler-invariant-contract.test.mjs", "        continue-on-error: true\n        run: node --test scripts/indexer-handler-invariant-contract.test.mjs", /extracted retained contracts/u],
   ["skipped retained setup contract", CI, "      - name: Agent setup and package-policy contracts\n        # Retained", "      - name: Agent setup and package-policy contracts\n        if: false\n        # Retained", /extracted retained contracts/u],
   ["renamed retained setup contract", CI, "      - name: Agent setup and package-policy contracts", "      - name: Renamed setup contract", /extracted retained contracts/u],
   ["deleted retained setup contract", CI, "      - name: Agent setup and package-policy contracts\n        # Retained SessionEnd, setup-marker, and pre-install policy checks were\n        # extracted from the legacy Bash gate suite.\n        run: bash scripts/bootstrap/agent-setup-contract.test.sh\n", "", /extracted retained contracts/u],
@@ -250,7 +250,7 @@ for (const path of [
   ".github/workflows/ci.yml",
   ".github/workflows/no-skip-audit.yml",
   "scripts/bootstrap/agent-setup-contract.test.sh",
-  "scripts/agent-autoreview-indexer-invariant-contract.test.mjs",
+  "scripts/indexer-handler-invariant-contract.test.mjs",
   "scripts/workflows/check-no-skip-audit.mjs",
   "scripts/workflows/check-no-skip-audit.test.mjs",
   "scripts/lib/workflow-yaml.mjs",
@@ -260,7 +260,7 @@ for (const path of [
   test(`protected admission rejects candidate drift at ${path}`, () => {
     const isFocusedContract =
       path === "scripts/bootstrap/agent-setup-contract.test.sh" ||
-      path === "scripts/agent-autoreview-indexer-invariant-contract.test.mjs";
+      path === "scripts/indexer-handler-invariant-contract.test.mjs";
     const { root, base } = protectedDriftFixture(
       isFocusedContract ? path : undefined,
     );
