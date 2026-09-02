@@ -27,6 +27,8 @@ import {
 import { mappedChildScrubbedEnvironmentName } from "./quality-gate-coordinator-environment.mjs";
 
 const repoRoot = resolve(import.meta.dirname, "../..");
+const REVIEW_EVAL_INSTALLER_PATH =
+  "scripts/review/install-review-eval-launchd.sh";
 
 function rulesFor(path, source) {
   return new Set(scanSource(path, source).map((finding) => finding.rule));
@@ -1627,6 +1629,83 @@ test("a source change invalidates an exact coordinator exception", () => {
     assert.ok(
       result.policyErrors.some((error) =>
         error.includes("broker capability is stale"),
+      ),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the review-eval launchd installer holds one reviewed shell exception", () => {
+  const entry = BROKER_CLIENT_ALLOWLIST.find(
+    (item) => item.path === REVIEW_EVAL_INSTALLER_PATH,
+  );
+  assert.ok(entry, "the review-eval installer is not on the allowlist");
+  assert.deepEqual(entry.rules, ["shell-process-broker"]);
+  assert.deepEqual(validateAllowlist(), []);
+
+  // The exception rests on one claim: this installer cannot run during a gate
+  // run, so it cannot create a process that Darwin lineage tracking would miss.
+  // Check the claim where the exception is recorded. The refusal must read both
+  // markers the gate exports, and it must precede the first launchctl path the
+  // installer names.
+  const source = readFileSync(
+    join(repoRoot, REVIEW_EVAL_INSTALLER_PATH),
+    "utf8",
+  );
+  assert.match(source, /-n \$\{AGENTQG_RUN:-\}/u);
+  assert.match(source, /-n \$\{AGENTQG_REQUEST:-\}/u);
+  const refusal = source.indexOf("refuses to run inside a quality-gate run");
+  const launchctlPath = source.indexOf("launchctl_path=");
+  assert.ok(refusal > 0);
+  assert.ok(launchctlPath > refusal);
+});
+
+test("the allowlisted review-eval installer passes exact source attestation", () => {
+  const root = makePolicyFixture();
+  try {
+    const paths = BROKER_CLIENT_ALLOWLIST.map((entry) => entry.path);
+    const result = scanRepository(root, { paths, policyRoot: repoRoot });
+    assert.deepEqual(result.policyErrors, []);
+    assert.deepEqual(result.rejected, []);
+    assert.ok(
+      result.accepted.some(
+        (finding) =>
+          finding.path === REVIEW_EVAL_INSTALLER_PATH &&
+          finding.rule === "shell-process-broker",
+      ),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("one changed byte in the review-eval installer fails closed again", () => {
+  const root = makePolicyFixture();
+  try {
+    const original = readFileSync(
+      join(repoRoot, REVIEW_EVAL_INSTALLER_PATH),
+      "utf8",
+    );
+    writeFileSync(join(root, REVIEW_EVAL_INSTALLER_PATH), `${original}\n`);
+    const paths = BROKER_CLIENT_ALLOWLIST.map((entry) => entry.path);
+
+    // A changed working tree no longer carries the reviewed exception.
+    const scanned = scanRepository(root, { paths, policyRoot: repoRoot });
+    assert.deepEqual(scanned.policyErrors, []);
+    assert.ok(
+      scanned.rejected.some(
+        (finding) =>
+          finding.path === REVIEW_EVAL_INSTALLER_PATH &&
+          finding.rule === "shell-process-broker",
+      ),
+    );
+
+    // A changed policy source is stale policy, not a new exception.
+    const policy = scanRepository(root, { paths });
+    assert.ok(
+      policy.policyErrors.some((error) =>
+        error.includes(`source hash is stale: ${REVIEW_EVAL_INSTALLER_PATH}`),
       ),
     );
   } finally {
