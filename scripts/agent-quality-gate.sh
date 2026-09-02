@@ -1074,6 +1074,12 @@ active_worker_start_identities=()
 # use the contract that was selected before the worker started. It must not
 # infer a contract from mutable state-file presence.
 active_worker_lifecycle_contracts=()
+# Mapped command names align with the same registry. The EXIT/INT/TERM teardown
+# drains registered workers after the normal reaping loop is gone, so it cannot
+# recover a name from that loop's locals. Without one it would compare the
+# test-only refresh barrier against whatever the last sequential command left in
+# `gate_drain_active_mapped_command`.
+active_worker_mapped_commands=()
 
 # A signal can arrive after Bash creates a parallel worker but before the parent
 # records its process group. Defer INT/TERM handling across that short registry
@@ -1483,6 +1489,7 @@ teardown_active_timeouts() {
   local -a worker_drain_identities=("${active_worker_drain_identities[@]+"${active_worker_drain_identities[@]}"}")
   local -a worker_start_identities=("${active_worker_start_identities[@]+"${active_worker_start_identities[@]}"}")
   local -a worker_lifecycle_contracts=("${active_worker_lifecycle_contracts[@]+"${active_worker_lifecycle_contracts[@]}"}")
+  local -a worker_mapped_commands=("${active_worker_mapped_commands[@]+"${active_worker_mapped_commands[@]}"}")
   local -a darwin_cohort_tokens=()
   local -a fallback_args=()
   for record in "${timeout_records[@]+"${timeout_records[@]}"}"; do
@@ -1499,10 +1506,12 @@ teardown_active_timeouts() {
     -n "${worker_drain_identities[*]-}" ||
     -n "${worker_start_identities[*]-}" ||
     -n "${worker_lifecycle_contracts[*]-}" ||
+    -n "${worker_mapped_commands[*]-}" ||
     -n "$timeout_drain_identity" ]] || return 0
   if ! [[ "${#worker_pgids[@]}" -eq "${#worker_drain_identities[@]}" &&
     "${#worker_pgids[@]}" -eq "${#worker_start_identities[@]}" &&
-    "${#worker_pgids[@]}" -eq "${#worker_lifecycle_contracts[@]}" ]]; then
+    "${#worker_pgids[@]}" -eq "${#worker_lifecycle_contracts[@]}" &&
+    "${#worker_pgids[@]}" -eq "${#worker_mapped_commands[@]}" ]]; then
     echo "error: parallel worker cleanup registry is inconsistent." >&2
     case "$gate_lock_enabled" in
       0|false|no)
@@ -1542,6 +1551,10 @@ teardown_active_timeouts() {
       worker_index=$((worker_index + 1))
     done
     if [[ "${#darwin_cohort_tokens[@]}" -gt 0 ]]; then
+      # A cohort drains several commands at once, so no single name describes
+      # it. Clear the name rather than leaving a stale one: a named test-only
+      # refresh barrier must not rendezvous with a drain it cannot identify.
+      gate_drain_active_mapped_command=""
       drain_completed_darwin_command_cohort \
         "${darwin_cohort_tokens[@]}" || return $?
     fi
@@ -1590,6 +1603,10 @@ teardown_active_timeouts() {
       continue
     fi
     worker_index=$((worker_index + 1))
+    # Name the command for the test-only refresh barrier, as the normal reaping
+    # loop does. This teardown runs from EXIT/INT/TERM after that loop is gone,
+    # so the name has to come from the registry rather than its locals.
+    gate_drain_active_mapped_command="${worker_mapped_commands[$((worker_index - 1))]}"
     drain_completed_parallel_command \
       "$drain_identity" "$pgid" "$worker_start" \
       "${worker_lifecycle_contracts[$((worker_index - 1))]}" || drain_status=$?
@@ -1643,6 +1660,7 @@ teardown_active_timeouts() {
     active_worker_drain_identities=()
     active_worker_start_identities=()
     active_worker_lifecycle_contracts=()
+    active_worker_mapped_commands=()
     return 0
   fi
   # Snapshot every descendant BEFORE signalling: TERM kills intermediate
@@ -1771,6 +1789,7 @@ teardown_active_timeouts() {
   active_worker_drain_identities=()
   active_worker_start_identities=()
   active_worker_lifecycle_contracts=()
+  active_worker_mapped_commands=()
 }
 
 # ---------------------------------------------------------------------------
@@ -11232,10 +11251,12 @@ unregister_active_parallel_worker() {
   local -a kept_identities=()
   local -a kept_starts=()
   local -a kept_lifecycle_contracts=()
+  local -a kept_mapped_commands=()
   gate_lifecycle_contract_is_supported "$target_lifecycle_contract" || return 2
   [[ "${#active_worker_pgids[@]}" -eq "${#active_worker_drain_identities[@]}" &&
     "${#active_worker_pgids[@]}" -eq "${#active_worker_start_identities[@]}" &&
-    "${#active_worker_pgids[@]}" -eq "${#active_worker_lifecycle_contracts[@]}" ]] ||
+    "${#active_worker_pgids[@]}" -eq "${#active_worker_lifecycle_contracts[@]}" &&
+    "${#active_worker_pgids[@]}" -eq "${#active_worker_mapped_commands[@]}" ]] ||
     return 2
   for index in "${!active_worker_pgids[@]}"; do
     if [[ "${active_worker_pgids[$index]}" == "$target_pgid" &&
@@ -11249,12 +11270,14 @@ unregister_active_parallel_worker() {
     kept_identities+=("${active_worker_drain_identities[$index]}")
     kept_starts+=("${active_worker_start_identities[$index]}")
     kept_lifecycle_contracts+=("${active_worker_lifecycle_contracts[$index]}")
+    kept_mapped_commands+=("${active_worker_mapped_commands[$index]}")
   done
   [[ "$found" -eq 1 ]] || return 2
   active_worker_pgids=("${kept_pgids[@]+"${kept_pgids[@]}"}")
   active_worker_drain_identities=("${kept_identities[@]+"${kept_identities[@]}"}")
   active_worker_start_identities=("${kept_starts[@]+"${kept_starts[@]}"}")
   active_worker_lifecycle_contracts=("${kept_lifecycle_contracts[@]+"${kept_lifecycle_contracts[@]}"}")
+  active_worker_mapped_commands=("${kept_mapped_commands[@]+"${kept_mapped_commands[@]}"}")
 }
 
 run_mapped_entries_parallel() {
@@ -11383,7 +11406,8 @@ run_mapped_entries_parallel() {
       "${#active_pids[@]}" -eq "${#active_worker_pgids[@]}" &&
       "${#active_pids[@]}" -eq "${#active_worker_drain_identities[@]}" &&
       "${#active_pids[@]}" -eq "${#active_worker_start_identities[@]}" &&
-      "${#active_pids[@]}" -eq "${#active_worker_lifecycle_contracts[@]}" ]]; then
+      "${#active_pids[@]}" -eq "${#active_worker_lifecycle_contracts[@]}" &&
+      "${#active_pids[@]}" -eq "${#active_worker_mapped_commands[@]}" ]]; then
       echo "error: parallel worker lifecycle registry is inconsistent." >&2
       fail_command_scheduler_infrastructure \
         "parallel worker settlement" || return $?
@@ -11617,6 +11641,7 @@ run_mapped_entries_parallel() {
     active_worker_drain_identities=("${next_active_drain_identities[@]+"${next_active_drain_identities[@]}"}")
     active_worker_start_identities=("${next_active_start_identities[@]+"${next_active_start_identities[@]}"}")
     active_worker_lifecycle_contracts=("${next_active_lifecycle_contracts[@]+"${next_active_lifecycle_contracts[@]}"}")
+    active_worker_mapped_commands=("${next_active_commands[@]+"${next_active_commands[@]}"}")
     finish_worker_settlement
 
     # Process every completion observed above before opening another pool slot.
@@ -11947,6 +11972,7 @@ run_mapped_entries_parallel() {
       active_worker_drain_identities+=("$drain_identity")
       active_worker_start_identities+=("$worker_start")
       active_worker_lifecycle_contracts+=("$worker_lifecycle_contract")
+      active_worker_mapped_commands+=("$command")
       active_commands+=("$command")
       active_output_files+=("$output_file")
       active_status_files+=("$status_file")

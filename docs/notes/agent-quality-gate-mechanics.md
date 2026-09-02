@@ -2347,14 +2347,19 @@ active control.
   first drain — but a name that was asked for and cannot be resolved fails the
   drain closed rather than arming everywhere: present but unreadable, empty, or
   unreadable by any other cause. A name needs no trailing newline. The command
-  is named for the barrier in two places, because a parallel command's
+  is named for the barrier in three places, because a parallel command's
   `run_with_timeout` runs inside the worker subshell while the parent reaps that
   worker and runs the drain; naming it only in the child would make a parallel
   rendezvous impossible and let a stale sequential name match a drain no fixture
-  asked for. A fixture must also write `.release` on every terminal path,
-  including its cleanup trap: a barrier left unreleased parks the gate for the
-  full 20-second budget and then reports the barrier as the failure, burying the
-  assertion that actually failed.
+  asked for. The third is `teardown_active_timeouts`, which drains registered
+  workers on EXIT/INT/TERM after the reaping loop is gone, so it takes each name
+  from the `active_worker_mapped_commands` registry that aligns with the worker
+  identities. A Darwin cohort drain settles several commands at once and clears
+  the name instead: no single name describes it, and a named barrier must not
+  meet a drain it cannot identify. A fixture must also write `.release` on every
+  terminal path, including its cleanup trap: a barrier left unreleased parks the
+  gate for the full 20-second budget and then reports the barrier as the
+  failure, burying the assertion that actually failed.
 - `AGENT_QUALITY_GATE_TEST_PARALLEL_RELEASE_FAILURE_AT` accepts a positive
   integer and injects failure at that parallel lease-release attempt.
 - `AGENT_QUALITY_GATE_TEST_OWNER_WITNESS_BARRIER`,

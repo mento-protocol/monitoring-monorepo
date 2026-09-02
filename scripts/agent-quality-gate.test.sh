@@ -6528,10 +6528,122 @@ run_drain_refresh_barrier_selection_regression() {
   rm -rf "$fixture_root"
 }
 
+# The EXIT/INT/TERM teardown drains registered parallel workers after the
+# reaping loop — and its locals — are gone. It must still name each worker's
+# mapped command for the test-only refresh barrier. Carrying whatever the last
+# sequential command left behind is the same wrong-drain race one process
+# boundary over (issue 2212).
+run_teardown_drain_command_identity_regression() {
+  local fixture_root observed contract_body source_body unregister_body line rc
+  fixture_root="$(mktemp -d)"
+  observed="$fixture_root/observed"
+  # Lift the two functions out of the gate rather than sourcing the script,
+  # which would run its whole top level. Bounded to the first column-0 `}` so a
+  # body brace cannot end either one early.
+  contract_body="$(awk '
+    /^gate_lifecycle_contract_is_supported\(\) \{$/ { capture = 1 }
+    capture { print }
+    capture && /^\}$/ { exit }
+  ' "$repo_root/scripts/agent-quality-gate.sh")"
+  source_body="$(awk '
+    /^teardown_active_timeouts\(\) \{$/ { capture = 1 }
+    capture { print }
+    capture && /^\}$/ { exit }
+  ' "$repo_root/scripts/agent-quality-gate.sh")"
+  [[ "$contract_body" == *"gate_lifecycle_contract_is_supported() {"* &&
+    "$contract_body" == *$'\n}' ]] ||
+    fail "could not lift gate_lifecycle_contract_is_supported out of the gate"
+  [[ "$source_body" == *"teardown_active_timeouts() {"* &&
+    "$source_body" == *$'\n}' ]] ||
+    fail "could not lift teardown_active_timeouts out of the gate"
+
+  rc=0
+  # The lifted teardown reads its whole environment by name, which shellcheck
+  # cannot see through the eval below, so every input here reads as dead.
+  # shellcheck disable=SC2034
+  (
+    gate_darwin_lineage_host_platform=Linux
+    gate_lock_enabled=1
+    gate_lock_token=teardown-lock-token
+    gate_run_id=teardown-run-id
+    gate_drain_capture=""
+    active_timeout_records=()
+    active_timeout_exact_identities=()
+    active_timeout_drain_identity=""
+    active_timeout_lifecycle_contract=""
+    # Two registered workers, neither of them the command whose name the parent
+    # is still carrying from the last sequential run.
+    active_worker_pgids=(4000001 4000002)
+    active_worker_drain_identities=(teardown-identity-a teardown-identity-b)
+    active_worker_start_identities=(teardown-start-a teardown-start-b)
+    active_worker_lifecycle_contracts=(portable-marker-v1 portable-marker-v1)
+    active_worker_mapped_commands=("pnpm lint:scripts" "pnpm agent:prewarm:test")
+    gate_drain_active_mapped_command="./tools/trunk check --ci x"
+    drain_completed_parallel_command() {
+      printf '%s\t%s\n' "$1" "${gate_drain_active_mapped_command:-<unset>}" \
+        >> "$observed"
+    }
+    collect_process_tree() { :; }
+    eval "$contract_body"
+    eval "$source_body"
+    teardown_active_timeouts
+    printf 'remaining\t%s\n' "${#active_worker_mapped_commands[@]}" >> "$observed"
+  ) || rc=$?
+  [[ "$rc" -eq 0 ]] ||
+    fail "the teardown drain of registered parallel workers returned ${rc}, expected 0"
+  local -a lines=()
+  while IFS= read -r line; do
+    lines+=("$line")
+  done < "$observed"
+  [[ "${#lines[@]}" -eq 3 ]] ||
+    fail "the teardown drained ${#lines[@]} entries, expected 2 workers and a registry count"
+  [[ "${lines[0]}" == $'teardown-identity-a\tpnpm lint:scripts' ]] ||
+    fail "the teardown named '${lines[0]#*$'\t'}' for the first worker, expected its own mapped command"
+  [[ "${lines[1]}" == $'teardown-identity-b\tpnpm agent:prewarm:test' ]] ||
+    fail "the teardown named '${lines[1]#*$'\t'}' for the second worker, expected its own mapped command"
+  # The command registry clears with the identities it aligns with; a survivor
+  # would misalign the next pool's registry and fail every later teardown.
+  [[ "${lines[2]}" == $'remaining\t0' ]] ||
+    fail "the teardown left ${lines[2]#*$'\t'} mapped command(s) registered, expected none"
+
+  # The settled-worker path prunes the same registry. A command left behind
+  # here misaligns the registry the teardown above depends on.
+  unregister_body="$(awk '
+    /^unregister_active_parallel_worker\(\) \{$/ { capture = 1 }
+    capture { print }
+    capture && /^\}$/ { exit }
+  ' "$repo_root/scripts/agent-quality-gate.sh")"
+  [[ "$unregister_body" == *"unregister_active_parallel_worker() {"* &&
+    "$unregister_body" == *$'\n}' ]] ||
+    fail "could not lift unregister_active_parallel_worker out of the gate"
+  rc=0
+  (
+    active_worker_pgids=(4000001 4000002)
+    active_worker_drain_identities=(teardown-identity-a teardown-identity-b)
+    active_worker_start_identities=(teardown-start-a teardown-start-b)
+    active_worker_lifecycle_contracts=(portable-marker-v1 portable-marker-v1)
+    active_worker_mapped_commands=("pnpm lint:scripts" "pnpm agent:prewarm:test")
+    eval "$contract_body"
+    eval "$unregister_body"
+    unregister_active_parallel_worker \
+      4000001 teardown-identity-a teardown-start-a portable-marker-v1
+    printf 'kept\t%s\t%s\n' \
+      "${#active_worker_mapped_commands[@]}" \
+      "${active_worker_mapped_commands[0]-<unset>}" > "$observed"
+  ) || rc=$?
+  [[ "$rc" -eq 0 ]] ||
+    fail "unregistering a settled parallel worker returned ${rc}, expected 0"
+  IFS= read -r line < "$observed"
+  [[ "$line" == $'kept\t1\tpnpm agent:prewarm:test' ]] ||
+    fail "unregistering a settled worker left '${line}', expected only the other worker's mapped command"
+  rm -rf "$fixture_root"
+}
+
 run_parallel_worker_loss_coordinator_regression
 run_parallel_release_failure_coordinator_regression
 run_stale_failure_result_regression
 run_drain_refresh_barrier_selection_regression
+run_teardown_drain_command_identity_regression
 run_sequential_descendant_lease_regression
 run_trunk_probe_lease_regression
 run_trunk_probe_deadline_regression
