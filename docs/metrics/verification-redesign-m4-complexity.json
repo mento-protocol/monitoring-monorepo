@@ -705,8 +705,8 @@
       "name": "retained-graph-pin-incident-receipt",
       "pr": 2218,
       "baseSha": "2222f4a3fa78a0cb905cdbcae998206e631f6b67",
-      "sourceSha": "2e1dfc88fc748814d3661a1d65439014a345e558",
-      "trackedCommand": "git diff --numstat 2222f4a3fa78a0cb905cdbcae998206e631f6b67 2e1dfc88fc748814d3661a1d65439014a345e558 -- . ':!docs/metrics/verification-redesign-m4-complexity.json'",
+      "sourceSha": "83996f31a06827b90330c935b075b315e1a98acd",
+      "trackedCommand": "git diff --numstat 2222f4a3fa78a0cb905cdbcae998206e631f6b67 83996f31a06827b90330c935b075b315e1a98acd -- . ':!docs/metrics/verification-redesign-m4-complexity.json'",
       "files": [
         {
           "path": "docs/README.md",
@@ -715,22 +715,28 @@
           "deletions": 1
         },
         {
+          "path": "docs/adr/0078-staged-verification-redesign.md",
+          "category": "doc",
+          "additions": 56,
+          "deletions": 26
+        },
+        {
           "path": "docs/metrics/verification-redesign-m4-shadow-evidence.md",
           "category": "doc",
-          "additions": 125,
+          "additions": 126,
           "deletions": 36
         }
       ],
       "totals": {
         "doc": {
-          "additions": 126,
-          "deletions": 37,
-          "net": 89
+          "additions": 183,
+          "deletions": 63,
+          "net": 120
         },
         "all": {
-          "additions": 126,
-          "deletions": 37,
-          "net": 89
+          "additions": 183,
+          "deletions": 63,
+          "net": 120
         }
       },
       "replacementSpecific": {
@@ -767,9 +773,9 @@
         "net": 660
       },
       "doc": {
-        "additions": 853,
-        "deletions": 162,
-        "net": 691
+        "additions": 910,
+        "deletions": 188,
+        "net": 722
       },
       "package": {
         "additions": 1,
@@ -777,9 +783,9 @@
         "net": 0
       },
       "all": {
-        "additions": 2777,
-        "deletions": 759,
-        "net": 2018
+        "additions": 2834,
+        "deletions": 785,
+        "net": 2049
       }
     },
     "replacementSpecific": {
