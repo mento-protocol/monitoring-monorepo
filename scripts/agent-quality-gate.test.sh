@@ -13819,12 +13819,6 @@ assert_contains "- pnpm agent:review-materiality:test (agent review materiality 
 run_gate "scripts/pr/review-materiality.test.mjs"
 assert_contains "- pnpm agent:review-materiality:test (agent review materiality helper changed)"
 
-run_gate "scripts/pr/review-process-metrics.mjs"
-assert_contains "- node scripts/pr/review-process-metrics.test.mjs (review-process metrics collector changed)"
-
-run_gate "scripts/pr/review-process-metrics.test.mjs"
-assert_contains "- node scripts/pr/review-process-metrics.test.mjs (review-process metrics collector changed)"
-
 # The CodeRabbit config pin (ADR 0066). The config is a repo-root .yaml, so it
 # reaches no `scripts/*` arm and needs its own top-level route; both halves of
 # the pair must run the pin.

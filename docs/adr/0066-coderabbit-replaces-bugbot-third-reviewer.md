@@ -171,10 +171,16 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
    `scripts/pr/pr-feedback-state-claude.mjs`, and
    `scripts/pr/pr-ready-state-core.mjs`. Issue #2178 owns the related
    readiness projection update.
-5. **Keep measurement repeatable.** Preserve historical Cursor recognition in
-   `scripts/pr/review-process-metrics.mjs`. Use before and after cohorts to
-   assess future review changes. Do not erase historical evidence when the
-   live compatibility path retires.
+5. **Use CodeRabbit's native monthly report** (configured 2026-09-02). The
+   `Monthly CodeRabbit value review` report runs on day 1 at 09:00
+   Europe/Berlin, filters to `monitoring-monorepo`, and delivers by email. It
+   uses CodeRabbit's organization statistics and bot comments to report review
+   coverage, suggestions, accepted suggestions, noise, a value verdict, and up
+   to three evidence-linked improvements. It replaces the local metrics
+   collector, and the repository carries no replacement schedule. Historical
+   cohort artifacts stay under `docs/metrics/`. If a future decision needs
+   cross-bot forensic evidence, create a narrow issue-scoped query for that
+   decision.
 
 ## Alternatives considered
 
@@ -246,8 +252,8 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
   an unrecognized context: optional when branch protection reports required
   contexts that do not name it, required in the fallback path that runs when
   those contexts are unavailable — a path that already reports its own
-  `branch-protection` blocker. Cursor recognition stays in historical metrics
-  (`scripts/pr/review-process-metrics.mjs`) and in frozen review fixtures.
+  `branch-protection` blocker. Historical Cursor evidence stays in this ADR,
+  prior measurement artifacts, and frozen review fixtures.
 - CodeRabbit is a new third-party GitHub App with repo read access and PR
   comment/review write access, steered by `.coderabbit.yaml` — and CodeRabbit
   resolves that file from the **source branch** of the PR under review,
@@ -260,8 +266,8 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
   (`pnpm coderabbit:config:test`), so a source-branch edit to
   `.coderabbit.yaml` fails the build instead of silently weakening the
   reviewer; and the feedback-ledger roster
-  (`scripts/pr/pr-feedback-state-core.mjs`, `scripts/pr/pr-feedback-state-claude.mjs`,
-  `scripts/pr/review-process-metrics.mjs`) carries marker-recognition tests
+  (`scripts/pr/pr-feedback-state-core.mjs` and
+  `scripts/pr/pr-feedback-state-claude.mjs`) carries marker-recognition tests
   for CodeRabbit's finding markers (`cr-indicator-types`, the severity badge)
   and its non-finding machinery (rate-limit, summary, trigger-ack,
   thread-resolved-ack). CodeRabbit's inline findings now feed
@@ -308,6 +314,10 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
   repository's `.coderabbit.yaml`. The applied override was read back in the
   CodeRabbit UI on 2026-09-02 under Organization settings → View mode →
   Global overrides.
+- CodeRabbit Reports UI, read back on 2026-09-02: the active
+  `Monthly CodeRabbit value review` report filters to `monitoring-monorepo`,
+  runs monthly on day 1 at 09:00 Europe/Berlin, includes organization statistics
+  and bot comments, and has email delivery configured.
 - CodeRabbit pricing and public-repo terms: coderabbit.ai/pricing,
   docs.coderabbit.ai/management/plans, docs.coderabbit.ai/management/seat-assignment
   (seat = PR-opener; pushes free), kb.coderabbit.ai article 8856795235
@@ -348,7 +358,7 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
   `gh api pulls/<n>/comments` (26/26 findings fixed; per-bot split above);
   merged-PR volume from `git log --first-parent` (280 in 30 days, 850 in 90);
   BugBot's not-required check status per ADR 0007 and
-  `docs/pr-checklists/ci-workflow-gates.md`; its `BUGBOT_BUG_ID` marker as it
-  stood before the 2026-09-02 retirement, per `scripts/pr/pr-feedback-state-core.mjs`
-  at that revision, and still live for historical measurement in
-  `scripts/pr/review-process-metrics.mjs`.
+  `docs/pr-checklists/ci-workflow-gates.md`; and its `BUGBOT_BUG_ID` marker as
+  it stood before the 2026-09-02 retirement, per
+  `scripts/pr/pr-feedback-state-core.mjs` at that revision. Retained
+  `docs/metrics/` artifacts preserve prior measurements.
