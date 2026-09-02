@@ -177,6 +177,29 @@ test("the header records the run's provenance", (t) => {
   assert.match(report, /^---$/m);
 });
 
+test("a commit landing during the run is recorded in the header", (t) => {
+  const repo = makeRepo(t);
+  // The fake codex commits while the script is waiting on it.
+  fakeCodex(
+    repo.bin,
+    [
+      `cd ${JSON.stringify(repo.repo)}`,
+      'echo "moved" > moved.txt',
+      "git add -A",
+      "git commit --quiet -m during-run",
+      'echo "clean"',
+    ].join("\n"),
+  );
+
+  const run = runScript(repo, ["--base", "base", "--no-fetch"]);
+
+  const report = fs.readFileSync(run.reportPath, "utf8");
+  assert.equal(
+    report.match(/^head_sha_at_finish: ([0-9a-f]{40})$/m)[1],
+    git(repo.repo, "rev-parse", "HEAD"),
+  );
+});
+
 test("a dirty working tree is recorded in the header", (t) => {
   const repo = makeRepo(t);
   fakeCodex(repo.bin, 'echo "clean"');

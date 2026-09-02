@@ -404,6 +404,11 @@ async function main() {
     exitCode = 0;
   }
 
+  // codex re-reads the tree while it runs, so a commit landing mid-run moves
+  // what the report actually covers. Record it rather than hide it.
+  const headAtFinish = run("git", ["rev-parse", "HEAD"], repoRoot);
+  const moved = headAtFinish.ok && headAtFinish.stdout !== head.stdout;
+
   const header = renderHeader({
     tool: "scripts/pr/closeout-review.mjs",
     codex_version: version.stdout.split("\n")[0],
@@ -418,6 +423,7 @@ async function main() {
     started: started.toISOString(),
     finished: new Date().toISOString(),
     codex_exit_code: result.code === null ? "none" : result.code,
+    ...(moved ? { head_sha_at_finish: headAtFinish.stdout } : {}),
     verdict,
   });
   const footer = result.timedOut
