@@ -3257,12 +3257,14 @@ test("classifies clean and actionable Claude review variants", () => {
       preface(`${label}\nMalformed input crashes requests.`),
     ),
     before("Roll-up", "Action items: restore validation."),
+    // Two marker entries, both of which must read as actionable in a roll-up.
+    // The first is CodeRabbit's live finding marker, matched by its own rule.
+    // The second is Cursor's retired `BUGBOT_BUG_ID` (ADR 0066): it no longer
+    // has a rule of its own, so that entry pins the fail-closed behavior that
+    // now covers it — the clean-review scan rejects any roll-up line it does
+    // not positively recognize. The cleanBodies half above still returns
+    // ready=true, so neither assertion is vacuous.
     before("Roll-up", "<!-- cr-indicator-types:potential_issue -->"),
-    // The retired `BUGBOT_BUG_ID` marker must still read as actionable here.
-    // Dropping it from EXPLICIT_SEVERITY is safe because the clean-review scan
-    // fails closed on any roll-up line it does not positively recognize; this
-    // entry pins that, and the cleanBodies half above proves the harness can
-    // still return ready=true, so the assertion is not vacuous.
     before("Roll-up", "<!-- BUGBOT_BUG_ID: malformed-input -->"),
     PR_1431_CLEAN_CLAUDE_REVIEW.body.replace(
       "1. [P3] No-action: override selector is correctly bounded and matches repo convention.",
