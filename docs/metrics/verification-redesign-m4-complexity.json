@@ -654,10 +654,56 @@
         "testAdditionsUnderTwiceImplementationAdditions": false,
         "budgetEvaluation": "informational segment; evaluate the initial implementation limit on cumulativeM4"
       }
+    },
+    {
+      "name": "retained-graph-pin",
+      "pr": 2218,
+      "baseSha": "46a1e871788b2b13376e367d0fc008a348713a85",
+      "sourceSha": "a601331c25183add3d811c55997310448532e1ab",
+      "trackedCommand": "git diff --numstat 46a1e871788b2b13376e367d0fc008a348713a85 a601331c25183add3d811c55997310448532e1ab -- . ':!docs/metrics/verification-redesign-m4-complexity.json'",
+      "files": [
+        {
+          "path": "docs/metrics/verification-redesign-m4-shadow-evidence.md",
+          "category": "doc",
+          "additions": 109,
+          "deletions": 28
+        },
+        {
+          "path": "scripts/workflows/check-no-skip-audit.mjs",
+          "category": "check",
+          "additions": 1,
+          "deletions": 1
+        }
+      ],
+      "totals": {
+        "check": {
+          "additions": 1,
+          "deletions": 1,
+          "net": 0
+        },
+        "doc": {
+          "additions": 109,
+          "deletions": 28,
+          "net": 81
+        },
+        "all": {
+          "additions": 110,
+          "deletions": 29,
+          "net": 81
+        }
+      },
+      "replacementSpecific": {
+        "implementationAdditions": 1,
+        "testAdditions": 0,
+        "testToImplementationRatio": 0,
+        "twiceImplementationAdditions": 2,
+        "testAdditionsUnderTwiceImplementationAdditions": true,
+        "budgetEvaluation": "informational segment; evaluate the initial implementation limit on cumulativeM4"
+      }
     }
   ],
   "cumulativeM4": {
-    "method": "Sum the initial segment and four repair segments. These additive activity counts preserve each reviewed diff. They are not a direct diff across unrelated main-branch merges.",
+    "method": "Sum the initial segment and five repair segments. These additive activity counts preserve each reviewed diff. They are not a direct diff across unrelated main-branch merges.",
     "totals": {
       "action": {
         "additions": 26,
@@ -670,8 +716,8 @@
         "net": 346
       },
       "check": {
-        "additions": 383,
-        "deletions": 70,
+        "additions": 384,
+        "deletions": 71,
         "net": 313
       },
       "test": {
@@ -680,9 +726,9 @@
         "net": 660
       },
       "doc": {
-        "additions": 724,
-        "deletions": 122,
-        "net": 602
+        "additions": 833,
+        "deletions": 150,
+        "net": 683
       },
       "package": {
         "additions": 1,
@@ -690,15 +736,15 @@
         "net": 0
       },
       "all": {
-        "additions": 2647,
-        "deletions": 718,
-        "net": 1929
+        "additions": 2757,
+        "deletions": 747,
+        "net": 2010
       }
     },
     "replacementSpecific": {
-      "implementationAdditions": 846,
+      "implementationAdditions": 847,
       "testAdditions": 1077,
-      "testToImplementationRatio": 1.273,
+      "testToImplementationRatio": 1.2715,
       "limits": {
         "thinOrchestrationScriptPhysicalLines": 245,
         "thinOrchestrationScriptUnder300": true,
@@ -712,7 +758,7 @@
         },
         "newReplacementFilePhysicalLineLimit": 500,
         "allNewReplacementFilesUnder500": true,
-        "twiceImplementationAdditions": 1692,
+        "twiceImplementationAdditions": 1694,
         "testAdditionsUnderTwiceImplementationAdditions": true
       }
     }
@@ -723,6 +769,6 @@
     "claimsCutoverAdditionsBelowDeletionsCondition": false,
     "recordsShadowRunIncidentEvidence": true,
     "claimsEligibleShadowCohort": false,
-    "statement": "M4 adds the manual audit lane and its static contract. It adds no schedule. The separate Markdown record contains incident evidence from the first run. M4 does not claim an eligible shadow cohort or cutover evidence."
+    "statement": "M4 adds the manual audit lane and its static contract. It adds no schedule. The separate Markdown record contains incident evidence from the first two eligible runs. M4 does not claim an eligible shadow cohort or cutover evidence."
   }
 }
