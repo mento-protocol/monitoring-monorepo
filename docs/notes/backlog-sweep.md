@@ -297,11 +297,14 @@ Two `pkg:tooling` candidates are independent when all three hold:
   `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `.trunk/**`, `.github/workflows/**`,
   `scripts/agent-quality-gate.sh`, or `scripts/gate/**`.
 
-Normalize the mirrored skill trees before comparing: read
-`.claude/skills/<x>/` as `.agents/skills/<x>/`. The two are one collision
+Normalize the mirrored skill trees before comparing, by path segments rather
+than by text: any path whose first two segments are `.claude/skills` is read
+with those segments replaced by `.agents/skills`, whatever follows and whether
+or not it ends in a slash. `.claude/skills/foo`, `.claude/skills/foo/`, and
+`.claude/skills/foo/SKILL.md` all normalize. The two trees are one collision
 surface — the mirror check makes every edit land in both — so an issue naming
-one and an issue naming the other would pass a literal containment test and
-then produce two PRs touching the same files.
+one and an issue naming the other would otherwise pass a literal containment
+test and then produce two PRs touching the same files.
 
 A candidate with no path list conflicts with every other `pkg:tooling`
 candidate. Nothing to compare is not evidence that the paths are disjoint, and
@@ -435,14 +438,26 @@ by age alone and sits behind every scored candidate. Two sets qualify:
   own lifecycles, and labeling their output into the human queue would bury
   the issues a person wrote.
 
-**Skip a candidate the pass cannot improve.** Every marker records the SHA-256
-of the issue body the pass read. Skip a candidate whose current body digest
-equals the digest in its newest trusted marker: the verdict is read off the body
-and the paths it names, so an unchanged body reaches the same verdict. Without
-that rule an `agent-ready` issue whose body names no path stays a candidate for
-ever — it can never earn a `pkg:*` label, and ten such issues would hold the cap
-every run and starve everything below them. Count the skip in the report so a
-stuck issue is visible rather than silent.
+**Skip a candidate the pass cannot improve.** Without such a rule an
+`agent-ready` issue whose body names no path stays a candidate for ever: it can
+never earn a `pkg:*` label, and ten of them would hold the cap every run and
+starve everything below.
+
+Every marker records the SHA-256 of the issue body the pass read and, beside it,
+which of the paths that body named existed in the checkout at that moment. Skip
+a candidate only when three things hold: the body digest still matches, that
+resolved path set still matches, and every label in the marker's `applied` list
+is on the issue.
+
+Each guards a different way the verdict can go stale. The body is what the pass
+reads. The resolved path set is the rest of it — a named path that was absent
+then and exists now changes the answer, and one that has since been deleted
+changes it too, so comparing the set catches both. The `applied` labels prove
+the previous run finished: a marker whose labels are missing records a write
+that failed after the comment landed, and skipping on the digest that failed run
+wrote would strand the issue permanently.
+
+Count every skip in the report, so a stuck issue is visible rather than silent.
 
 Compare the body, not `updatedAt`: posting the marker updates the issue, so a
 timestamp test would compare the pass against its own write and never skip
@@ -456,20 +471,31 @@ only because the tree changed underneath it does not.
 Read the body, then read the paths it names in the checkout. Every label below
 comes from what the tree holds, not from what the body claims.
 
+**The pass never writes a label that leaves an issue sweep-eligible.** Work out
+the label set the write would produce; when that set satisfies the sweep
+predicate — `agent-ready`, exactly one `risk:*` equal to `risk:low`, exactly one
+`pkg:*` — the label goes in the marker's `proposed` list instead, and a human
+applies it. This is one rule rather than a list of labels because which label
+completes eligibility depends on what the issue already carries: for an issue
+holding `risk:low` and no package area it is the `pkg:*`, and for one holding a
+package area and no risk label it is the `risk:low`. The pass may narrow
+eligibility freely and may never widen it.
+
+The run boundary alone does not cover this. The veto is passive, the next run is
+the same agent population, and an issue nobody read would become claimable on a
+timer. One human label is the acknowledgement that ordering cannot supply, and
+it is the same click the `agent-ready` promotion already needs.
+
 - **`pkg:*`** — every package area the named paths fall in. One label when the
   paths sit in one area; several when the issue genuinely spans packages, which
-  leaves it correctly labeled and still sweep-ineligible. When the body names
-  no path, apply none and say so in the marker comment.
-- **`risk:*`** — one, and only when the issue carries none, and **never
-  `risk:low`.** The pass writes `risk:medium`, or `risk:high` when the issue
-  touches secrets, IAM, a production apply, or deploy identity. Both of those
-  only narrow what the sweep may claim. `risk:low` is the one label that widens
-  it, so the pass records it in the marker's `proposed` list, citing the
-  [Low-risk rule](agent-issue-workflow.md#low-risk-rule) clause it relied on,
-  and a human applies it. Deciding the run boundary was enough was the first
-  design and it is not: the veto is passive, the next run is the same agent
-  population, and an issue nobody looked at would become claimable on a timer.
-  One human label is the acknowledgement that ordering cannot supply.
+  leaves it correctly labeled and still sweep-ineligible. Several areas can be
+  written freely: they narrow. A single area that would complete eligibility is
+  proposed. When the body names no path, apply none and say so in the marker.
+- **`risk:*`** — one, and only when the issue carries none. The pass writes
+  `risk:medium`, or `risk:high` when the issue touches secrets, IAM, a
+  production apply, or deploy identity; both narrow. `risk:low` is proposed,
+  never written, citing the
+  [Low-risk rule](agent-issue-workflow.md#low-risk-rule) clause it relied on.
 
   Read that rule at its anchor rather than from memory, and when it cannot be
   read, propose nothing and say so: an agent that reconstructs the criterion for
@@ -525,11 +551,12 @@ field, and it never touches the state label of an owned issue — one carrying
 One comment per groomed issue, opening with a machine-readable marker:
 
 ```text
-<!-- sweep-groomed:v1 {"sweep":"<sweep_id>","at":"<ISO-8601 UTC>","body":"<sha256>","applied":[...],"proposed":[...]} -->
+<!-- sweep-groomed:v1 {"sweep":"<sweep_id>","at":"<ISO-8601 UTC>","body":"<sha256>","paths":[...],"applied":[...],"proposed":[...]} -->
 ```
 
-`body` is the SHA-256 of the issue body this pass read, and the next run skips
-the candidate while it still matches. `applied` lists the labels the pass writes
+`body` is the SHA-256 of the issue body this pass read and `paths` the named
+paths that existed in the checkout when it read them; the next run skips the
+candidate only while both still match and its `applied` labels are present. `applied` lists the labels the pass writes
 immediately after posting this comment; the comment is written first, so the field names an intent that the
 label call then carries out. `proposed` lists everything the pass judged right
 and will not write itself: a `risk:low` it is not allowed to apply, the state

@@ -105,13 +105,17 @@ unattended session grant itself `risk:low` and immediately work the issue,
 which is the root [`AGENTS.md`](../../AGENTS.md) rule against weakening a
 control that blocks your own work, applied to the sweep's own gate.
 
-**Ordering alone was not enough, so the pass never writes `risk:low` and never
-writes a state label.** `risk:low` is the only label that widens what a sweep
-may claim; `risk:medium` and `risk:high` only narrow it. A run boundary plus a
-passive veto still ends with the same agent population treating its own label
-as authorization twelve hours later, on an issue no human read. The pass
-therefore records `risk:low` in the marker's `proposed` list with the rule
-clause behind it, and one human label supplies the acknowledgement that
+**Ordering alone was not enough, so the pass never writes a label that leaves an
+issue sweep-eligible, and never writes a state label.** A run boundary plus a
+passive veto still ends with the same agent population treating its own label as
+authorization twelve hours later, on an issue no human read. The rule is stated
+against the eligibility predicate rather than against a list of labels, because
+which label completes it depends on what the issue already carries: for an issue
+holding `risk:low` and no package area it is the `pkg:*`; for one holding a
+package area and no risk label it is the `risk:low`. Narrowing labels —
+`risk:medium`, `risk:high`, several `pkg:*` areas — are written freely. Anything
+that would complete the predicate goes in the marker's `proposed` list with the
+rule clause behind it, and one human label supplies the acknowledgement that
 ordering cannot. State labels are withheld for a different reason:
 [ADR 0082](0082-persistent-issue-board-mutation-mutex.md) serializes queue-state
 writes behind the per-issue mutex, `gh issue edit` does not take it, and a raw
@@ -155,7 +159,9 @@ files, no path either names equals or contains a path the other names, and
 neither names a shared root file or control root. Containment rather than a
 fixed-depth prefix, because `docs/` and `docs/notes/` differ at every prefix
 length yet overlap on every file. The mirrored skill trees normalize to one
-path first, since the mirror check makes every edit land in both. A candidate
+path first, since the mirror check makes every edit land in both; that
+normalization is by path segment, so it does not depend on how a body happens
+to spell a directory. A candidate
 with no path list conflicts with every other. The refinement is scoped to that
 one label; every other area keeps the label test. `pnpm issue:claim
 --sweep-eligible` enforces neither form and needs no change: it grades one

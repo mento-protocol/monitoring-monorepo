@@ -225,10 +225,12 @@ names, compared on whole path segments (`scripts/pr/` against
 neither names a shared root file or control root —
 `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `.trunk/**`,
 `.github/workflows/**`, `scripts/agent-quality-gate.sh`, or `scripts/gate/**`.
-Normalize the mirrored skill trees first, reading `.claude/skills/<x>/` as
-`.agents/skills/<x>/`: they are one collision surface, so an issue naming one
-and an issue naming the other would pass a literal containment test and then
-produce two PRs touching the same files.
+Normalize the mirrored skill trees first, by path segments rather than by text:
+a path whose first two segments are `.claude/skills` is read with those replaced
+by `.agents/skills`, whatever follows and whether or not it ends in a slash. The
+two are one collision surface, so an issue naming one and an issue naming the
+other would otherwise pass a literal containment test and then produce two PRs
+touching the same files.
 A candidate with no path list conflicts with every other `pkg:tooling`
 candidate: nothing to compare is not evidence that the paths are disjoint. Name
 the independence basis in the printed batch for every pair that relied on this,
@@ -678,10 +680,10 @@ report — including when the batch came out empty, which is the case grooming
 exists for. Nothing this pass labels can be selected by this run: the
 eligibility step has already finished. Never move the pass earlier and never
 re-run selection after it. Ordering alone is not the whole guard, though, which
-is why the pass never writes `risk:low`: that is the one label that widens what
-a sweep may claim, the veto is passive, and the next run is the same agent
-population. Writing it would be the root [`AGENTS.md`](../../../AGENTS.md) rule
-against widening a control that blocks your own work, one run later.
+is why **the pass never writes a label that leaves an issue sweep-eligible**:
+the veto is passive and the next run is the same agent population, so writing
+one would be the root [`AGENTS.md`](../../../AGENTS.md) rule against widening a
+control that blocks your own work, one run later. Narrowing is free.
 
 The full procedure is
 [`backlog-sweep.md`](../../../docs/notes/backlog-sweep.md). The operative steps:
@@ -694,30 +696,39 @@ The full procedure is
    fetched. Drop every bot record — anything authored by `app/github-actions`
    or carrying `drift-detection`, `sentry-triage`, a `sentry:*` label,
    `dependencies`, `security-advisories`, or `file-size-watchlist`. Skip a
-   candidate whose body digest still matches the one in its newest trusted
-   marker: the verdict is read off the body, so an unchanged body repeats it,
-   and a body that names no path would otherwise hold a cap slot for ever.
-   Compare the body, never `updatedAt` — posting the marker updates the issue,
-   so a timestamp test would compare the pass against its own write. Count the
-   skip in the report.
+   candidate only when its body digest still matches its newest trusted marker,
+   the marker's resolved path set still matches, and the issue carries every
+   label in that marker's `applied` list. All three are needed: the verdict
+   comes from the body and from what the tree holds, so a named path that did
+   not exist then and does now must be read again; and missing `applied` labels
+   mean a write failed after the comment landed, so retry rather than skip for
+   ever. Compare the body, never `updatedAt` — posting the marker updates the
+   issue, so a timestamp test would compare the pass against its own write.
+   Count the skip in the report.
 2. **Read the body, then read the paths it names.** The labels come from what
    the checkout holds, not from what the body claims.
 3. **Decide the labels.**
    - `pkg:*` — every area the named paths fall in. Several labels when the
      issue genuinely spans packages, which keeps it correctly labeled and
-     sweep-ineligible; none when the body names no path.
-   - `risk:*` — one, only when the issue carries none, and **never
-     `risk:low`.** Write `risk:medium`, or `risk:high` for secrets, IAM, a
-     production apply, or deploy identity; both only narrow what a sweep may
-     claim. Put `risk:low` in the marker's `proposed` list with the
+     sweep-ineligible; none when the body names no path. A single area that
+     would complete eligibility is proposed, not written.
+   - Before every write, work out the label set it would produce. When that set
+     satisfies the sweep predicate — `agent-ready`, exactly one `risk:*` equal
+     to `risk:low`, exactly one `pkg:*` — put the label in `proposed` instead
+     and let a human apply it. Which label completes eligibility depends on what
+     the issue already carries: the `pkg:*` for an issue already holding
+     `risk:low`, the `risk:low` for one already holding a package area.
+   - `risk:*` — one, only when the issue carries none. Write `risk:medium`, or
+     `risk:high` for secrets, IAM, a production apply, or deploy identity; both
+     narrow. `risk:low` is always proposed, with the
      [Low-risk rule](../../../docs/notes/agent-issue-workflow.md#low-risk-rule)
-     clause behind it, and let a human apply it. Read that rule at its anchor,
-     never from memory; when it cannot be read, propose nothing and say so.
-     Never remove or downgrade an existing risk label. Write nothing at all on
-     two issues, naming the reason in the marker: one already carrying two risk
-     labels, and one carrying `risk:low` whose verified paths touch secrets,
-     IAM, a production apply, or deploy identity — completing its `pkg:*`
-     routing would hand a worker the issue that label misdescribes.
+     clause behind it. Read that rule at its anchor, never from memory; when it
+     cannot be read, propose nothing and say so. Never remove or downgrade an
+     existing risk label. Write nothing at all on two issues, naming the reason
+     in the marker: one already carrying two risk labels, and one carrying
+     `risk:low` whose verified paths touch secrets, IAM, a production apply, or
+     deploy identity — completing its `pkg:*` routing would hand a worker the
+     issue that label misdescribes.
    - `kind:*` — one, when the work type is obvious.
    - State — write none. Queue-state labels are serialized behind the ADR 0082
      per-issue mutex and `gh issue edit` does not take it, so a raw write
@@ -734,11 +745,12 @@ The full procedure is
    posted, write no label for that issue.
 
    ```text
-   <!-- sweep-groomed:v1 {"sweep":"<sweep_id>","at":"<ISO-8601 UTC>","body":"<sha256>","applied":[...],"proposed":[...]} -->
+   <!-- sweep-groomed:v1 {"sweep":"<sweep_id>","at":"<ISO-8601 UTC>","body":"<sha256>","paths":[...],"applied":[...],"proposed":[...]} -->
    ```
 
-   `body` is the SHA-256 of the issue body this pass read, and the next run
-   skips the candidate while it still matches. `applied` lists the labels the
+   `body` is the SHA-256 of the issue body this pass read and `paths` the named
+   paths that existed in the checkout when it read them; the next run skips the
+   candidate only while both still match and its `applied` labels are present. `applied` lists the labels the
    next call writes; `proposed` lists everything
    the pass judged right and will not write itself — a `risk:low`, the state
    label the mutex owns, the `agent-ready` promotion, workboard enrollment, and
