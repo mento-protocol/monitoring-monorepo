@@ -1207,10 +1207,29 @@ test("the exact pre-split cache is discovered, seeded, and reused", () => {
     "d183758cd7a3b28aa14fe857ed04c6ca93601e1834a1dfd08cf730ad2332c922";
   const oldOrchestrator =
     "5cdfbd0e709af2d68c193d484b724706b339ab0562d14b283f5fc38eebe9ae49";
+  const oldContractDigest =
+    "7223888cc6bd15c9bdb3bf1f6929a516719dd497ee6d2f1bc577a6405e8202e9";
+  // The reusable lineage is a fixed tuple of digests, one of which is the
+  // contract that scored those cells. So the case drives it with the frozen
+  // pre-split contract instead of whatever the live contract holds today: an
+  // amendment to the live contract retires the lineage for real runs — which
+  // is correct, since every cell fingerprint carries the contract digest — and
+  // must not quietly delete the coverage that proves the discovery works.
+  const { contract: oldContract, digest: frozenContractDigest } = loadContract(
+    path.join(
+      repoRoot,
+      "scripts/review/testdata/review-eval-split-equivalence/contract.json.txt",
+    ),
+  );
+  assert.equal(
+    frozenContractDigest,
+    oldContractDigest,
+    "the frozen split-equivalence contract is no longer the pre-split contract",
+  );
   try {
     const planArgs = {
-      contract,
-      contractDigest,
+      contract: oldContract,
+      contractDigest: oldContractDigest,
       kind: "full",
       repoRoot: root,
       now,

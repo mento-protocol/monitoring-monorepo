@@ -52,8 +52,17 @@ export const CALIBRATION_VERDICTS = ["matched", "unmatched"];
 // The `.tf`, `.hcl`, `.toml`, and `.tftest.hcl` extensions were missing from
 // the original matcher, so Terraform findings were never candidates at all.
 // Absolute paths are fine here: only the basename is compared.
+//
+// Alternation order is load-bearing. JavaScript takes the first branch that
+// matches, never the longest, and `[\w./-]+` backtracks to the last dot, so an
+// alternative listed before a longer one it prefixes wins and truncates the
+// file name. With `ts` ahead of `tsx`, `recent-alerts.test.tsx:193` matched as
+// `recent-alerts.test.ts` and dropped both the `x` and the line number, so a
+// `.tsx` truth defect was never offered to the judge. Every prefix pair is
+// listed longest first: `json` before `js`, `tsx` before `ts`, `tftest.hcl`
+// before `tf`.
 const LOCATION_PATTERN =
-  /([\w./-]+\.(?:md|sh|mjs|js|ts|tsx|py|json|ya?ml|tf|hcl|toml|tftest\.hcl))(?::(\d+))?/g;
+  /([\w./-]+\.(?:md|sh|mjs|json|js|tsx|ts|py|ya?ml|tftest\.hcl|tf|hcl|toml))(?::(\d+))?/g;
 
 const MARKUP_PATTERN = /<[^>]+>|[*`]/g;
 const PLACEHOLDER_PATTERN = /\{\{([A-Z_]+)\}\}/g;

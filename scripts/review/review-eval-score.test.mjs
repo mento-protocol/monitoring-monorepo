@@ -137,6 +137,42 @@ test("structuralCandidates proposes only findings whose file is named", () => {
   );
 });
 
+// Alternation order, not the extension list, is what broke here: `ts` sat
+// ahead of `tsx`, so a `.tsx` citation matched as `.ts` and lost its line
+// number with it. `js` ahead of `json` had the same shape.
+test("mentionedLocations keeps an extension that another one prefixes", () => {
+  const [tsx] = mentionedLocations(
+    "see ui-dashboard/app/x/recent-alerts.test.tsx:193",
+  );
+  assert.equal(tsx.file, "recent-alerts.test.tsx");
+  assert.equal(tsx.line, 193);
+  const [json] = mentionedLocations("scripts/review/tsconfig.json:4 is off");
+  assert.equal(json.file, "tsconfig.json");
+  assert.equal(json.line, 4);
+});
+
+test("structuralCandidates offers a .tsx truth finding the output cites", () => {
+  // The shape of truth 3830371329 in `docs/evals/review-skill-truth/pr-1999.json`.
+  const tsxFinding = {
+    id: 104,
+    path: "ui-dashboard/src/app/peg-monitoring/__tests__/recent-alerts.test.tsx",
+    line: 193,
+    severity: "P2",
+    title: "Assert the rendered alert history",
+    body: "The test never asserts the recovered row.",
+    acted_on: true,
+  };
+  const candidates = structuralCandidates({
+    truthFindings: [...truthFindings, tsxFinding],
+    output: "see ui-dashboard/app/x/recent-alerts.test.tsx:193",
+  });
+  assert.deepEqual(
+    candidates.map((candidate) => candidate.finding.id),
+    [104],
+  );
+  assert.equal(candidates[0].lineNear, true);
+});
+
 test("structuralCandidates drops a line hit outside the proximity window", () => {
   const [candidate] = structuralCandidates({
     truthFindings,
