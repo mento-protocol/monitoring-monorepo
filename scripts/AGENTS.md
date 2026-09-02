@@ -16,8 +16,7 @@ Read the relevant [ADR](../docs/adr/README.md) before changing script behavior.
 
 ## Scope
 
-`scripts/` holds deploy and maintenance tools, agent gates, and code-health
-checks.
+`scripts/` holds deploy, maintenance, gate, and code-health tools.
 
 ## Layout
 
@@ -153,15 +152,13 @@ in the same PR.
   before mutation. `deploy-indexer:promote` acts on a registered remote
   deployment; use it through the `deploy-indexer` skill after its clean-tree
   preflight, verification, and production approval.
-- Do not add `--no-verify` to normal Git commands. `deploy-indexer.sh` retains
-  it only for the isolated `envio` trigger-ref push. Do not copy it into a
-  developer workflow.
+- Only `deploy-indexer.sh`'s isolated `envio` trigger-ref push may use
+  `--no-verify`. Never use it in developer Git commands.
 - New deploy scripts print target, commit, and rollback/verification around
   mutation.
-- New Node root scripts need `pnpm lint:scripts` coverage. New shell scripts
-  must pass `bash -n`. Add a focused test command for behavior that syntax and
-  lint cannot verify. Add required CI wiring when no existing fixed job owns
-  that test.
+- Run `pnpm lint:scripts` for new Node root scripts and `bash -n` for new shell
+  scripts. Add focused tests beyond lint and syntax. Add required CI wiring if
+  no fixed job owns them.
 - No ESLint `max-lines` reaches this tree. The file-size watchlist reports it
   instead — tests aside, three trust-root files exempt:
   [ADR 0065](../docs/adr/0065-scripts-file-size-watchlist-scope.md).
@@ -177,9 +174,9 @@ in the same PR.
 
 ## Verification
 
-Apply step 3 of the [PR operating card](../docs/notes/pr-operating-card.md).
-Run `bash -n <changed-shell-script>`, `pnpm lint:scripts`, and the focused test
-for each changed root tool. Run `pnpm agent:quality-gate:test` only for a
-deliberate legacy-gate change. Run
-`node scripts/check-deploy-root-anchors.test.mjs` for deploy wrappers. Run
-`pnpm agent:context-check` and `pnpm docs:index --check` after a move.
+Apply [PR operating card step 3](../docs/notes/pr-operating-card.md) to each
+changed root tool: `bash -n <changed-shell-script>`, `pnpm lint:scripts`, and
+its focused test. Run `pnpm agent:quality-gate:test` only for legacy-gate
+changes. Deploy wrappers also run
+`node scripts/check-deploy-root-anchors.test.mjs`. After a move, run
+`pnpm agent:context-check` and `pnpm docs:index --check`.
