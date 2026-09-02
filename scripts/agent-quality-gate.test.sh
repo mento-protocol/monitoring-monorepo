@@ -1129,20 +1129,13 @@ assert_turbo_task_has_input "react-doctor:score" '$TURBO_ROOT$/.npmrc'
 assert_turbo_task_has_input "react-doctor:score" '$TURBO_ROOT$/.node-version'
 assert_turbo_task_has_input "react-doctor:score" '$TURBO_ROOT$/turbo.json'
 
-# The public diagnostic must reach the protected Bash shebang before any
-# inherited startup control can run. Pin the local-cutover boundary separately:
-# pre-commit formatting stays active, no tracked pre-push entry remains, and
-# hosted setup does not restore the dormant freshness policy.
+# Pin the public diagnostic's protected Bash prologue and the staged pre-commit
+# formatter. The focused setup contract owns the removed pre-push surfaces.
 node - <<'NODE' ||
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const gate = fs.readFileSync("scripts/agent-quality-gate.sh", "utf8");
 const trunk = fs.readFileSync(".trunk/trunk.yaml", "utf8");
-const hostedSetups = [
-  "scripts/bootstrap/claude-code-web-setup.sh",
-  "scripts/bootstrap/codex-cloud-maintenance.sh",
-  "scripts/bootstrap/codex-cloud-setup.sh",
-];
 const activeTrunkLines = trunk
   .split("\n")
   .filter((line) => !line.trimStart().startsWith("#"))
@@ -1160,41 +1153,10 @@ assert.ok(
   fs.existsSync(".trunk/hooks/pre-commit"),
   "tracked pre-commit formatter hook is missing",
 );
-assert.ok(
-  !fs.existsSync(".trunk/hooks/pre-push"),
-  "tracked pre-push hook must stay absent after local cutover",
-);
 assert.match(
   activeTrunkLines,
   /^[ \t]*- trunk-fmt-pre-commit[ \t]*$/mu,
   "Trunk staged pre-commit formatting must stay enabled",
-);
-assert.doesNotMatch(
-  activeTrunkLines,
-  /trunk-check-pre-push|agent-quality-gate-pre-push|git_hooks:\s*\[pre-push\]|--pre-push/u,
-  "Trunk must not retain a pre-push repository-verification action",
-);
-for (const setupPath of hostedSetups) {
-  const setup = fs.readFileSync(setupPath, "utf8");
-  assert.match(
-    setup,
-    /^git config core\.hooksPath \.trunk\/hooks$/mu,
-    `${setupPath} must retain the tracked pre-commit hook path`,
-  );
-  assert.doesNotMatch(
-    setup,
-    /agent\.qualityGate\.cloudPrePushRequireFresh/u,
-    `${setupPath} must not restore hosted pre-push freshness`,
-  );
-}
-const claudeSessionStart = fs.readFileSync(
-  ".claude/hooks/session-start.sh",
-  "utf8",
-);
-assert.doesNotMatch(
-  claudeSessionStart,
-  /agent\.qualityGate\.cloudPrePushRequireFresh/u,
-  "Claude SessionStart must not restore hosted pre-push freshness",
 );
 assert.match(
   gate,
@@ -9853,8 +9815,11 @@ STUB
       > "$output_file" 2>&1 || hosted_package_risk_exit=$?
   [[ "$hosted_package_risk_exit" -eq 2 ]] ||
     fail "cold hosted package-risk run exited ${hosted_package_risk_exit} instead of 2"
-  grep -Fq -- "git config agent.qualityGate.allowPackageScriptChanges true" "$output_file" ||
-    fail "cold hosted package-risk run did not explain the reusable acknowledgement"
+  grep -Fq -- "re-run with --allow-package-script-changes if they are safe" "$output_file" ||
+    fail "cold hosted package-risk diagnostic did not explain the explicit acknowledgement"
+  if grep -Fq -- "git config agent.qualityGate.allowPackageScriptChanges true" "$output_file"; then
+    fail "cold hosted package-risk diagnostic printed retired warm-then-push guidance"
+  fi
 
   git config --unset agent.qualityGate.cloudPrePushRequireFresh
   : > "$output_file"
@@ -17472,9 +17437,8 @@ rm -rf "$no_lock_fallback_fixture_dir"
 no_lock_fallback_fixture_dir=""
 
 # --- Cross-run mutual exclusion (GitHub issue #1802) -------------------------
-# Two gate runs on one machine starve each other, and the pre-push hook starts
-# one of its own while a manual run is still going, so `--run` takes a
-# machine-wide mkdir lock. What has to hold: a live holder makes the second run
+# Two gate runs on one machine can starve each other, so `--run` takes a
+# machine-wide mkdir lock. A live holder must make the second run
 # wait rather than race, a holder that was killed never wedges the next run,
 # and both escape hatches (--no-lock, an inherited nested-run marker) still
 # start immediately.
@@ -17617,12 +17581,25 @@ STUB
   assert_contains "Waiting for the agent quality gate run lock"
   assert_contains "held by pid ${live_holder_pid}"
   assert_contains "timed out after"
-  # The pre-push hook cannot pass --no-lock, so the timeout must also name the
-  # recovery that works from a failed push.
+  assert_contains "Running the gate directly? --no-lock starts anyway and accepts the contention."
+  assert_not_contains "Pushing through the retained compatibility path?"
+  [[ -d "$gate_lock_root/run.lock" ]] ||
+    fail "a run that never acquired the lock must not delete the holder's lock"
+
+  # Only an explicit --pre-push compatibility invocation names the retained
+  # warm-then-push recovery.
+  sleep 120 &
+  compatibility_holder_pid=$!
+  write_lock_owner "$compatibility_holder_pid"
+  compatibility_exit="$(run_locked_gate --pre-push)"
+  kill "$compatibility_holder_pid" 2>/dev/null || true
+  [[ "$compatibility_exit" == "2" ]] ||
+    fail "expected a contended compatibility run to exit 2 after --lock-wait, got $compatibility_exit"
+  assert_contains "Pushing through the retained compatibility path?"
   assert_contains "git fetch --quiet origin main && ./scripts/agent-quality-gate.sh --run --parallel 3 --base origin/main"
   assert_contains "before coordinator registration"
   [[ -d "$gate_lock_root/run.lock" ]] ||
-    fail "a run that never acquired the lock must not delete the holder's lock"
+    fail "a compatibility run that never acquired the lock must not delete the holder's lock"
 
   # GitHub issue #1894: the same expiry, read the way a piped caller reads it.
   # Every other outcome states itself on stdout — a green run ends "All mapped

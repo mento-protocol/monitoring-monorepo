@@ -247,8 +247,11 @@ normally be clean because the full-score floor is 100. Fix warnings or use a
 narrow `// react-doctor-disable-next-line <rule-id>` with a one-line rationale
 when a finding is genuinely inapplicable.
 
-Run `pnpm dashboard:react-doctor:diff` from the root for the CI-equivalent diff
-scan, `pnpm react-doctor` inside the package for a full scan, and
+Run `REACT_DOCTOR_BASE_REF=<base-remote>/<base-ref> pnpm --filter
+@mento-protocol/ui-dashboard react-doctor:diff` for the CI-equivalent scan
+against the resolved PR base. The root `pnpm dashboard:react-doctor:diff` alias
+hardcodes `origin/main`; use it only for a main-base PR after fetching that
+ref. Run `pnpm react-doctor` inside the package for a full scan. Run
 `pnpm react-doctor:score` for the enforced 100/100 score. The standalone CLI
 and `react-doctor.config.json` are authoritative even where noisy rules are
 disabled in ESLint.

@@ -452,6 +452,8 @@ Field expectations:
    applicable check after a material fix changes its surface. Record every
    result in the validation record as the card requires. Do not substitute the
    legacy diagnostic gate for these checks.
+   Use the resolved PR base, not a fixed `origin/main`, for every diff-based
+   author check, including stacked PRs.
 4. For non-trivial behavioral, workflow, security, data-flow, or UI batches,
    run `pnpm agent:autoreview` as a structured source-review closeout at the
    batch boundary rather than as an inner loop. Verify accepted findings before

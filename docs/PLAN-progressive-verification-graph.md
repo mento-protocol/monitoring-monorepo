@@ -284,8 +284,13 @@ repository-wide selector or quick wrapper.
 | Typed source in a package              | Run that package's `typecheck` command at the same checkpoint.                                                                                                             |
 | Behavior change in a package           | Run focused tests while editing as useful. Run that package's normal `test` command once before review handoff.                                                            |
 | Generated input or consumer            | Run the owning code generator as soon as the schema, configuration, ABI, query, entry point, or handler reachability is coherent. Check the generated diff.                |
-| Dashboard React or client source       | Run `pnpm dashboard:react-doctor:diff` after the changed UI is coherent and before review handoff.                                                                         |
+| Dashboard React or client source       | Run `REACT_DOCTOR_BASE_REF=<resolved-pr-base> pnpm --filter @mento-protocol/ui-dashboard react-doctor:diff` after the changed UI is coherent and before review handoff.    |
 | New or changed UI interaction or route | Run the documented build when the route, server, or build boundary changes. Verify the changed route in a browser. Check the console and exercise the changed interaction. |
+
+Inspect install-affecting changes before any package-manager command. When
+they change, install the candidate graph with
+`CI=true pnpm install --frozen-lockfile` before package checks. Keep the small
+exact trust-configuration contract rows in the operating card.
 
 Use the package's CI-aligned local test command. Do not assume that every
 package's generic `test` alias is unattended. For Governance Watchdog behavior
@@ -313,8 +318,9 @@ sequence:
    `pnpm --filter @mento-protocol/ui-dashboard typecheck`, and
    `pnpm --filter @mento-protocol/ui-dashboard test`.
 5. When the page is feature-complete, run
-   `pnpm dashboard:react-doctor:diff` against the resolved current pull request
-   base. Run `pnpm dashboard:build` for the new route with the documented
+   `REACT_DOCTOR_BASE_REF=<resolved-pr-base> pnpm --filter
+@mento-protocol/ui-dashboard react-doctor:diff`. Run `pnpm dashboard:build`
+   for the new route with the documented
    non-secret build environment. Follow the dashboard browser runbook for the
    changed route, console, interaction, and applicable auth states.
 6. Push at any point when shared CI feedback is useful. Complete all applicable

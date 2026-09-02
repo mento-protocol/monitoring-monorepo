@@ -38,8 +38,8 @@ is enforced, not just documented:
   detects high-signal architectural changes (new package/service, new Terraform
   stack, new CI/deploy workflow) that ship without an ADR and prints a reminder.
   The required `Lint + test root scripts` CI job runs it and its tests. The
-  operating card's root control-plane row also requires its focused contract
-  during author checks.
+  operating card requires it for the same high-signal surfaces during author
+  checks.
 - **The PR template** asks "Architecture decision?" so authors consciously
   answer yes (link the ADR) or no (why).
 

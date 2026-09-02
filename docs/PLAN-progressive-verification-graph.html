@@ -730,7 +730,8 @@
               <h3>Check affected packages</h3>
               <p>
                 Run direct lint, typecheck, test, codegen, React Doctor, build,
-                and browser checks when their named trigger applies.
+                and browser checks when their named trigger applies. Inspect
+                install changes first, then install the frozen candidate graph.
               </p>
             </article>
             <article class="moment">
@@ -764,7 +765,7 @@
               <li>
                 <strong>Check the page</strong
                 ><span
-                  >Run <code>dashboard:react-doctor:diff</code>, build the
+                  >Run React Doctor against the resolved PR base, build the
                   route, and verify route, console, interaction, and auth states
                   in a browser.</span
                 >

@@ -42,7 +42,7 @@ decision — but do not manufacture ADRs for non-decisions.
 These changes almost always encode a decision. `pnpm adr:check` flags them when
 no ADR accompanies the diff. Step 3 of the
 [PR operating card](../notes/pr-operating-card.md) requires that focused check
-for a matching control-plane change:
+for the same trigger surfaces:
 
 - **A new package/service** — a new top-level directory with its own
   `AGENTS.md` / `package.json`, or a new workspace package registered in

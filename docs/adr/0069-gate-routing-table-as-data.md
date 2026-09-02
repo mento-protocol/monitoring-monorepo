@@ -3,7 +3,7 @@ title: The quality gate's routing table is data, compiled by the repo's own bash
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-24
+last_verified: 2026-09-02
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -13,15 +13,13 @@ garden_lane: adrs-architecture
 
 # ADR 0069 — the quality gate's routing table is data, compiled by the repo's own bash-`case` translator
 
-**Status:** Active (Aug 2026), complete. Implemented across four PRs of
-[issue 1877](https://github.com/mento-protocol/monitoring-monorepo/issues/1877)'s
-deferred D5 track: D5a made the table data, D5b landed the Node mapping engine
-and proved it at parity, D5b part 2 made it the routing behind an in-production
-parity guard, and D5c retired the bash arms, that guard and the parity harness
-once the soak was clean
-([issue 2020](https://github.com/mento-protocol/monitoring-monorepo/issues/2020)).
-Sections 3 and 4 below describe the transitional machinery and are kept for the
-record; what is live is the table, the engine, and the checks in section 5.
+**Status:** Active (Aug 2026), complete. The four D5 PRs in
+[issue 1877](https://github.com/mento-protocol/monitoring-monorepo/issues/1877)
+made the table data, added the engine and parity guard, then retired the bash
+arms after [issue 2020](https://github.com/mento-protocol/monitoring-monorepo/issues/2020)'s
+clean soak. Sections 3 and 4 are historical. The table, engine, and section 5
+checks remain live. M5 retained the gate as an optional diagnostic; required CI
+is authoritative.
 
 **Scope:** ci/process
 
@@ -123,7 +121,7 @@ to tell a considered exception from a silenced check.
 
 One routing family has an external data source. The indexer handler-invariant
 classifier stays in the attested `scripts/agent-autoreview-core.mjs` runtime so
-autoreview and the local gate do not grow separate owner lists. The core exports
+autoreview and the optional diagnostic do not grow separate owner lists. The core exports
 a detached, deeply frozen family view and consumes that same view for its
 `{path, route, owner}` decisions. It validates the family schema before export:
 unknown fields, invalid types, overlapping exact owners, and Bash-unsafe literal
@@ -164,8 +162,8 @@ A focused parity test covers all current JS, JSON, and TypeScript module paths
 below `src/` and `test/`, every current file below `abis/` and `config/`, every
 current root `config*.yaml` file, Vitest input, indexer test wrapper, Stryker
 configuration, `schema.graphql`, exact owners, exclusions, and synthetic future
-extensions. The local indexer route runs it for these 25 inventory patterns,
-and the indexer CI job runs it for every indexer change. A new module below
+extensions. The optional diagnostic's indexer route runs it for these 25
+inventory patterns, and the indexer CI job runs it for every indexer change. A new module below
 `src/` or `test/`, root config YAML, root Vitest input, indexer test wrapper,
 ABI, or config file must gain an explicit owner in the PR that adds it.
 
@@ -177,7 +175,7 @@ used. A prepared runtime keeps its existing prepared-runtime trust contract.
 When a candidate changes `scripts/agent-autoreview-core.mjs`, that protected
 classifier cannot see a new owner or a false-to-true reclassification in the
 candidate revision. The core path therefore selects the handler-invariant
-checklist in both autoreview and the local gate. This source trigger
+checklist in both autoreview and the optional diagnostic. This source trigger
 intentionally routes unrelated core edits. Executing the candidate classifier
 would break the protected-main trust boundary.
 
@@ -199,7 +197,8 @@ So the matcher is a hand-written translator, and its test uses `/bin/bash` itsel
 as the oracle over every pattern in the table crossed with every literal path in
 the table, every tracked repo path, one synthetic matching path per glob, and a
 set of near misses per glob. The oracle runs on every bash the machine has, not
-only the first on `PATH`, because 3.2 is what the pre-push hook runs on a Mac.
+only the first on `PATH`. Before M5, Bash 3.2 was the version that the pre-push
+hook ran on a Mac.
 The machinery to run bash from Node already exists in
 `scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-extract.mjs`
 (`runProbeShell`, `probeDirs`).
@@ -208,68 +207,13 @@ The near misses are checked twice: the shell must agree that the synthetic match
 matches and that at least one near miss does not. A control the shell rejects
 controls nothing.
 
-### 3. TRANSITIONAL (D5a–D5b): the bash arms stay, and an equality test holds the two together
+### 3–4. Historical D5 transition
 
-**Retired at D5c.** `gate-equality.test.mjs` and the `gate-arms.mjs` parser it
-rested on are deleted; the table is the only copy of the routing now, so there is
-nothing left to compare it against. The routing-table suite kept every check that
-was about the DATA — the schema, the pairing lint, staleness, the bash pattern
-oracle — and gained the closed verb set, measured against
-`scripts/gate/mapping/route.mjs` instead of against the gate's bash helpers.
-
-Until the arms are retired, the table is a second copy of a routing authority,
-and a second copy nobody compares is a copy that drifts. `gate-equality.test.mjs`
-parses the gate's own routing region and asserts the two describe the same
-routing — patterns, verbs, arguments, guards and order, with comments dropped on
-both sides because rewording one is not a routing change.
-
-The parser is narrow and **fails closed**: it recognises exactly the constructs
-the routing region uses today and raises on anything else, naming the line. A
-parser that skipped what it did not understand would report equality over the
-subset it happened to read.
-
-Because the arms are the code that runs, the equality test is also what makes a
-`scripts/` move complete: it fails if only one side moved.
-
-That is only true if it RUNS in both directions, so it is routed from both. A
-change under `scripts/gate/routing-table/` schedules it, and so does a change to
-`scripts/agent-quality-gate.sh` itself — the commoner drift, where somebody adds
-or reorders an arm and does not touch the data. It also runs in the required
-`ci` job, beside the routing regression suite and for the same stated reason:
-the local pre-push gate is the thing a contributor can bypass, and a table that
-has drifted from the arms fails nowhere at all.
-
-### 4. D5b part 2: the engine becomes the routing, behind a guard that runs in production
-
-**The guard is retired; the first paragraph is what stands.** The gate runs
-`scripts/gate/mapping.mjs` once and executes its plan, and every refusal in the
-paragraph beginning "Every failure around the seam" is still live. What went at
-D5c is the arms, `plan_records_from_bash`, and the byte comparison between them.
-
-The gate no longer builds its plan from the `case` arms. It runs
-`scripts/gate/mapping.mjs` once per run, reads the plan back as the TSV
-`write_command_plan` already emits, and uses that. The arms still execute, and
-the gate **refuses the whole run if the two plans differ by one byte** — every
-record, in order, including the two run-scoped flags the routing sets.
-
-That guard is the point of the split. The parity harness proved agreement over
-a corpus; this proves it over whatever a contributor actually changed, on every
-run, on every machine. It is also what makes the step reversible without a
-revert: a divergence stops the run rather than silently picking a winner, and
-the arms are still sitting there.
-
-Every failure around the seam is a refusal, because the failure mode this whole
-track exists to remove is a plan that came out smaller and still exited 0: a
-mapper that cannot be found, exits non-zero, emits nothing, emits a record the
-gate cannot parse, or names a bucket that does not exist. Measured, each of
-those refuses with exit 2 (evidence below).
-
-**Why the arms stayed for a soak rather than going in the same PR.** The engine's
-plan is hashed into the freshness stamp and executed. The arms cost nothing but
-wall-clock, and while they ran, every gate invocation anyone made was another
-parity sample on a path set nobody thought to put in a corpus. D5c deletes the
-arms, the comparison, and the harness together, once the soak has produced no
-refusal.
+D5a–D5b kept the Bash arms and required exact parity with the data table and
+Node plan. D5c removed the arms, parser, equality suite, and in-run parity guard
+after the clean soak in section 5. `scripts/gate/mapping.mjs` is now the only
+routing authority. A missing mapper, non-zero exit, empty or malformed plan, or
+unknown bucket stops the diagnostic with exit 2.
 
 ### 5. D5c: what the soak produced, and what routing correctness rests on now
 
@@ -331,8 +275,9 @@ Six pins land with the table:
    — the same treatment `scripts/agent-quality-gate.test.sh` and
    `scripts/terraform/terraform-fmt-check.test.mjs` already get, since a suite is
    part of what the gate proves about itself. An entry it cannot
-   `stat` hashes as `__missing__`, which **freezes** the signature, so
-   `--skip-if-fresh` reuses a stale stamp and skips real pre-push work
+   `stat` hashes as `__missing__`, which **freezes** the signature. Before M5,
+   `--skip-if-fresh` then skipped mandatory pre-push work; it now affects only
+   an operator-invoked diagnostic
    (`docs/adr/0064-scripts-module-directories.md:273-275`). This is the one that
    must not be forgotten, and `routing-table.test.mjs` asserts it per module.
    Runtime modules hash from the gate's `$script_source_dir`; suites and the
@@ -364,8 +309,9 @@ comments would drift within one phase. It also cannot express the templated
 commands without an eval, and nothing in the repo lints JSON.
 
 **YAML.** Holds comments. Rejected: it puts a YAML parser on the gate's hot
-path, which runs on every pre-push, and the repo has already learned here that a
-parse failure must fail closed rather than widen (`scripts/gate/lockfile-scope.mjs`
+path. Before M5, that path ran on every pre-push; it now serves the optional
+diagnostic. A parse failure must fail closed rather than widen
+(`scripts/gate/lockfile-scope.mjs`
 and `docs/notes/agent-quality-gate-mechanics.md:148-157`). A hand-checked module
 has no parser to fail.
 
