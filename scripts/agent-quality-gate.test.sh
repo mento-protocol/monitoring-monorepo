@@ -13490,10 +13490,16 @@ assert_contains "- node scripts/pr/review-process-metrics.test.mjs (review-proce
 run_gate "scripts/pr/review-process-metrics-core.mjs"
 assert_contains "- node scripts/pr/review-process-metrics.test.mjs (review-process metrics collector changed)"
 
+run_gate "scripts/pr/review-process-metrics-evidence.mjs"
+assert_contains "- node scripts/pr/review-process-metrics.test.mjs (review-process metrics collector changed)"
+
 run_gate "scripts/pr/review-process-metrics-output.mjs"
 assert_contains "- node scripts/pr/review-process-metrics.test.mjs (review-process metrics collector changed)"
 
 run_gate "scripts/pr/review-process-metrics-finding-classifier.mjs"
+assert_contains "- node scripts/pr/review-process-metrics.test.mjs (review-process metrics collector changed)"
+
+run_gate "scripts/pr/review-process-metrics-finding-language.mjs"
 assert_contains "- node scripts/pr/review-process-metrics.test.mjs (review-process metrics collector changed)"
 
 run_gate "scripts/pr/review-process-metrics-finding-preflight.mjs"

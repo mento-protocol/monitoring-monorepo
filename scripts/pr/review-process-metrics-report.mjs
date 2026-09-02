@@ -1,7 +1,5 @@
-import {
-  buildPerBotEvidence,
-  REVIEW_BOT_KEYS,
-} from "./review-process-metrics-core.mjs";
+import { REVIEW_BOT_KEYS } from "./review-process-metrics-core.mjs";
+import { buildPerBotEvidence } from "./review-process-metrics-evidence.mjs";
 import {
   buildUnknownAttributionEvidence,
   hasUnknownClaudeActionsAttribution,

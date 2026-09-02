@@ -6045,7 +6045,9 @@ test("keeps every review-metrics source module under 600 physical lines", () => 
     "review-process-metrics.mjs",
     "review-process-metrics-actions.mjs",
     "review-process-metrics-core.mjs",
+    "review-process-metrics-evidence.mjs",
     "review-process-metrics-finding-classifier.mjs",
+    "review-process-metrics-finding-language.mjs",
     "review-process-metrics-finding-preflight.mjs",
     "review-process-metrics-legacy.mjs",
     "review-process-metrics-markdown.mjs",
@@ -6059,6 +6061,21 @@ test("keeps every review-metrics source module under 600 physical lines", () => 
     const lines =
       source.split(/\r?\n/u).length - (source.endsWith("\n") ? 1 : 0);
     assert.ok(lines <= 600, `${module} has ${lines} physical lines`);
+  }
+});
+
+test("keeps newly split review-metrics modules below 500 physical lines", () => {
+  const modules = [
+    "review-process-metrics-core.mjs",
+    "review-process-metrics-evidence.mjs",
+    "review-process-metrics-finding-classifier.mjs",
+    "review-process-metrics-finding-language.mjs",
+  ];
+  for (const module of modules) {
+    const source = readFileSync(join(SCRIPT_DIRECTORY, module), "utf8");
+    const lines =
+      source.split(/\r?\n/u).length - (source.endsWith("\n") ? 1 : 0);
+    assert.ok(lines <= 500, `${module} has ${lines} physical lines`);
   }
 });
 

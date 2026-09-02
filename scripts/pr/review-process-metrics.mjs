@@ -29,6 +29,7 @@ import {
 
 export * from "./review-process-metrics-actions.mjs";
 export * from "./review-process-metrics-core.mjs";
+export * from "./review-process-metrics-evidence.mjs";
 export * from "./review-process-metrics-legacy.mjs";
 export * from "./review-process-metrics-output.mjs";
 export * from "./review-process-metrics-report.mjs";
