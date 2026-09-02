@@ -3,7 +3,7 @@ title: PR Ready State
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-31
+last_verified: 2026-09-02
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -445,21 +445,16 @@ Field expectations:
    near twice the baseline, and do not pause solely for cycle count before five
    review-triggered patch cycles are complete. Pause for reclassification before
    starting a sixth.
-3. Before invoking the gate, ensure that no direct validation, dashboard server,
-   or browser suite outside the coordinator is active on the same machine.
-   Concurrent `--run` gates from other worktrees can continue through the
-   coordinator. They share weighted machine capacity. From invocation until
-   this gate exits, do not start uncoordinated work there. Use same-machine spare
-   workers only for read-only work. Run the gate or gates from operating-card
-   step 3. Local PRs and hosted non-fork PRs targeting `origin/main` run one
-   pass. Hosted fork and stacked PRs run the resolved-base pass and the separate
-   `origin/main` hook warm. Run validation outside the coordinator from a fully
-   hydrated checkout on another machine.
+3. Apply the direct author-check table from step 3 of the
+   [operating card](pr-operating-card.md) before the ready handoff. Re-run each
+   applicable check after a material fix changes its surface. Record every
+   result in the validation record as the card requires. Do not substitute the
+   legacy diagnostic gate for these checks.
 4. For non-trivial behavioral, workflow, security, data-flow, or UI batches,
    run `pnpm agent:autoreview` as a structured source-review closeout at the
    batch boundary rather than as an inner loop. Verify accepted findings before
-   editing and rerun focused checks plus autoreview if those fixes change the
-   batch. The exact target, prepared-bundle, isolation, and trust contracts live
+   editing and rerun applicable author checks plus autoreview if those fixes
+   change the batch. The exact target, prepared-bundle, isolation, and trust contracts live
    in [`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md);
    keep behavioral and runtime verification in the validation record.
 5. Run the suggested invocation pair above: `pnpm --silent pr:feedback-state`

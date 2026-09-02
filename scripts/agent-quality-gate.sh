@@ -7797,6 +7797,9 @@ is_fresh_success_stamp() {
 }
 
 echo "Agent quality gate"
+echo "Retained diagnostic only."
+echo "Normal path: use /ship author checks and required CI."
+echo "Retirement requires the completed #2128 canary and separate human approval."
 echo
 echo "Base: ${base_ref}"
 echo "Head: ${head_ref}"

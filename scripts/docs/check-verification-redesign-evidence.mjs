@@ -25,11 +25,16 @@ const RETAINED = new Set(Object.keys(DISPOSITION_FIELDS).slice(0, 3));
 const REQUIRED_RISKS = new Set(Array.from({ length: 13 }, (_, i) => i + 1));
 const DUPLICATE_TARGET_RULE = "duplicate_of needs an acyclic retained target.";
 const GIT_OPTIONS = { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 };
-const WHOLE_FILE_PATHS = new Set(
-  ".trunk/hooks/pre-push docs/adr/0007-agent-quality-gate-and-merge-oracle.md docs/adr/0069-gate-routing-table-as-data.md docs/adr/0076-fair-quality-gate-coordinator.md docs/notes/agent-quality-gate-mechanics.md scripts/agent-quality-gate.sh scripts/agent-quality-gate.test.sh scripts/check-agent-quality-gate-package-scripts.mjs".split(
+const OPTIONAL_WHOLE_FILE_PATHS = new Set([".trunk/hooks/pre-push"]);
+const REQUIRED_WHOLE_FILE_PATHS = new Set(
+  "docs/adr/0007-agent-quality-gate-and-merge-oracle.md docs/adr/0069-gate-routing-table-as-data.md docs/adr/0076-fair-quality-gate-coordinator.md docs/notes/agent-quality-gate-mechanics.md scripts/agent-quality-gate.sh scripts/agent-quality-gate.test.sh scripts/check-agent-quality-gate-package-scripts.mjs".split(
     " ",
   ),
 );
+const WHOLE_FILE_PATHS = new Set([
+  ...OPTIONAL_WHOLE_FILE_PATHS,
+  ...REQUIRED_WHOLE_FILE_PATHS,
+]);
 const SCOPED_REFERENCE_PATTERN =
   /^(?:(?:\.agents\/skills\/backlog-sweep\/SKILL\.md|\.claude\/skills\/backlog-sweep\/SKILL\.md|docs\/adr\/0077-operator-triggered-backlog-sweep\.md|docs\/notes\/backlog-sweep\.md):.*run\.lock|docs\/adr\/(?:0064-scripts-module-directories|0073-guardrail-prose-pinned-in-ci)\.md:.*\b(?:lockfile-scope|arms-packages|pins\.test|routing-table\.test|engine\.test|arms-scripts|arms-agent-modules)\.mjs\b|scripts\/sentry\/ci-wiring\/check-sentry-suites-in-ci-gate-probe\.mjs:.*\bfacts\.mjs\b|(?:\.agents\/roles\/verifier\.md|(?:\.agents|\.claude)\/skills\/backlog-sweep\/SKILL\.md|docs\/notes\/(?:backlog-sweep|pr-ready-state)\.md|docs\/pr-checklists\/review-prompt-exclusions\.md):.*--run(?!-)|docs\/notes\/pr-operating-card\.md:.*--(?:run|base)(?!-)|scripts\/pr\/check-adr-reminder\.mjs:.*(?:\bgate.*--(?:head|changed-paths-file)(?!-)|--(?:head|changed-paths-file)(?!-).*\bgate)|scripts\/agent-autoreview\.sh:.*\bgate_stat\b|(?!(?:scripts\/sentry\/ci-wiring\/check-sentry-suites-in-ci-gate-job\.test\.mjs|scripts\/sentry\/gate\/sentry-suite-gate-integrity\.mjs):)[^:]+:.*\bGATE_[A-Z0-9_]+)/u;
 const EXCLUDED_REFERENCE_PATH =
@@ -160,14 +165,40 @@ function countReferenceLines(path, content) {
     if (matchesReference(path, line)) selected.add(index);
   });
   if (path === ".trunk/trunk.yaml") {
+    const legacyMarker =
+      /trunk-check-pre-push|agent-quality-gate-pre-push|git_hooks:\s*\[pre-push\]|agent-quality-gate\.sh.*(?:--skip-if-fresh|--pre-push)/u;
+    const legacyMarkerIndexes = lines.flatMap((line, index) =>
+      legacyMarker.test(line) ? [index] : [],
+    );
+    if (legacyMarkerIndexes.length === 0) return selected.size;
+
     const start = lines.findIndex((line) =>
       line.includes("- trunk-check-pre-push"),
+    );
+    const definition = lines.findIndex(
+      (line) => line.trim() === "- id: agent-quality-gate-pre-push",
+    );
+    const run = lines.findIndex((line) =>
+      /run: .*agent-quality-gate\.sh.*(?:--skip-if-fresh|--pre-push)/u.test(
+        line,
+      ),
+    );
+    const trigger = lines.findIndex((line) =>
+      /git_hooks:\s*\[pre-push\]/u.test(line),
     );
     const end = lines.findLastIndex(
       (line) => line.trim() === "- agent-quality-gate-pre-push",
     );
-    if (start < 0 || end < start)
-      fail("Cannot locate the Trunk quality-gate action block.");
+    if (
+      start < 0 ||
+      definition <= start ||
+      run <= definition ||
+      trigger <= run ||
+      end <= trigger
+    )
+      fail(
+        "Trunk quality-gate action block is partially removed or malformed.",
+      );
     for (let index = start; index <= end; index += 1) selected.add(index);
   }
   if (path === "turbo.json") {
@@ -195,7 +226,7 @@ export function buildManifest({ repoRoot = DEFAULT_ROOT, source }) {
     .map((entry) => entry.match(/^\d+ blob [0-9a-f]+\t(.+)$/u)?.[1])
     .filter(Boolean)
     .sort();
-  for (const path of WHOLE_FILE_PATHS)
+  for (const path of REQUIRED_WHOLE_FILE_PATHS)
     if (!paths.includes(path)) fail(`Missing manifest path: ${path}`);
   const entries = [];
   for (const path of paths) {

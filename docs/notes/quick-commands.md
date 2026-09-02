@@ -3,7 +3,7 @@ title: Quick Commands
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-01
+last_verified: 2026-09-02
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -45,15 +45,12 @@ pnpm code-health:history           # CodeScene-style git history → reports/cod
 pnpm code-health:duplication       # jscpd duplication → reports/jscpd/; advisory, never blocks
 pnpm code-health:schema-diff       # GraphQL breaking-change diff vs origin/main; advisory, never blocks
 pnpm code-health                   # Run knip + deps; exclude history + duplication
-pnpm agent:quality-gate            # Map changed paths to required local checks and PR checklists
-pnpm agent:quality-gate --run      # Local: run mapped checks; resolve non-main PR bases per operating-card step 3
-./scripts/agent-quality-gate.sh --run --parallel 3 --base origin/main  # Hosted: warm the hook after resolved-base validation
-# Package scripts, package-manager settings, and lockfiles can change install code. Review before acknowledgment:
-pnpm agent:quality-gate --run --allow-package-script-changes  # Local
-git config agent.qualityGate.allowPackageScriptChanges true   # Hosted, before the direct warm command
+# Normal delivery uses the direct author checks in pr-operating-card step 3.
+pnpm agent:quality-gate            # Optional legacy diagnostic: inspect its retained mapping
+pnpm agent:quality-gate --run      # Optional legacy diagnostic: execute its retained mapping
 pnpm agent:context-check           # Validate repo-visible agent instructions, links, and routing
 pnpm agent:review-materiality      # Classify review depth + context-update signals for current diff
-pnpm agent:autoreview              # Isolated closeout; multi-pass uses --prepare-bundle-dir DIR + a fresh reviewer; gate owns tests
+pnpm agent:autoreview              # Isolated closeout; multi-pass uses --prepare-bundle-dir DIR + a fresh reviewer; author checks and CI stay separate
 pnpm agent:autoreview:test         # Full regressions; defaults to up to 3 workers with progress + timings
 pnpm agent:autoreview:test -- --jobs 1  # Sequential full closeout for autoreview runtime changes
 pnpm agent:autoreview --verify-bundle-dir DIR  # Pre-review rehash; retain the printed manifest digest
@@ -72,7 +69,7 @@ pnpm docs:navigation-eval -- --validate <result.json>  # Recompute authority, ev
 pnpm ci:contract:test             # Test fixed CI, protected no-skip admission and drift, cache, base, and aggregate contracts
 bash scripts/bootstrap/agent-setup-contract.test.sh  # Test retained SessionEnd, setup-marker, and package-policy behavior
 node --test scripts/agent-autoreview-indexer-invariant-contract.test.mjs  # Test retained indexer autoreview owners and schema
-# After M4 reaches main and before each approved proof, read the current immutable inputs:
+# For each approved #2128 post-cutover canary proof, read the current immutable inputs:
 gh pr view <pr> --json number,state,headRefOid,baseRefName,baseRefOid,headRepositoryOwner
 # The audit refuses a stale baseRefOid. Update or rebase the PR branch, then read fresh inputs.
 # Do not dispatch no-skip for package-execution or evidence-instrument drift. Package drift can use ordinary-force-all evidence. Instrument drift cannot count.

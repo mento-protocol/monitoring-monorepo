@@ -13,10 +13,10 @@ garden_lane: adrs-architecture
 
 # ADR 0078 — staged replacement of the mandatory local gate with existing CI
 
-**Status:** Accepted (Aug 2026), amended 2026-09-02. The migration is in force.
-The operator approved an early local cutover before the original pre-cutover
-sample. The current gate stays mandatory until the approved cutover change
-lands.
+**Status:** Accepted (Aug 2026), amended 2026-09-02. The M5 early local cutover
+is in force. The operator approved it before the original pre-cutover sample.
+The legacy gate remains callable as a diagnostic and remains covered in
+required CI. Issue #2128 owns the post-cutover canary and retirement evidence.
 [ADR 0007](0007-agent-quality-gate-and-merge-oracle.md) remains active for the
 hosted two-projection all-clear and Codex approval gate. This ADR supersedes
 only its mandatory-local-gate target state. [ADR
@@ -286,9 +286,9 @@ cohort would prolong a local bottleneck that the operator already had to skip.
 It would also measure an intermediate local workflow that the approved cutover
 removes.
 
-Issue #2127 may therefore remove repository verification from pre-push after
-the graph-pin repair reaches protected `main`, protected-main CI passes, and
-strict current-base checking is active. The cutover must keep staged formatting
+Issue #2127 therefore removes repository verification from pre-push after the
+graph-pin repair reaches protected `main`, protected-main CI passes, and strict
+current-base checking is active. The cutover keeps staged formatting
 on pre-commit. It must add the fixed `/ship` author-check trigger table. It must
 also keep the full legacy gate available in required CI and as a diagnostic.
 Required CI remains merge authority.
@@ -399,8 +399,9 @@ shadow evidence stays in GitHub runs and the later Markdown evidence record.
 
 ## Rollback
 
-Before legacy deletion, restore the recorded ruleset first and revert the
-cutover commit. The retained gate runtime then resumes the mandatory hook.
+Before legacy deletion, keep required CI and strict current-base protection.
+Revert the cutover commit. The retained gate runtime then resumes the mandatory
+hook.
 
 After legacy deletion, first revert the retirement commit. Restore the gate
 runtime, coordinator, aliases, tests, and mixed-version lock behavior before

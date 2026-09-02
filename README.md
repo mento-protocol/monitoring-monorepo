@@ -2,7 +2,7 @@
 
 Real-time monitoring infrastructure for Mento v3 on-chain pools — a multichain [Envio HyperIndex](https://docs.envio.dev/) indexer paired with a Next.js 16 + Plotly.js dashboard.
 
-<!-- agent-context: title="Mento Monitoring Monorepo" status=active owner=eng canonical=true last_verified=2026-08-28 doc_type=reference scope=repo-wide review_interval_days=90 garden_lane=package-readmes-reference -->
+<!-- agent-context: title="Mento Monitoring Monorepo" status=active owner=eng canonical=true last_verified=2026-09-02 doc_type=reference scope=repo-wide review_interval_days=90 garden_lane=package-readmes-reference -->
 
 **Live dashboard:** [monitoring.mento.org](https://monitoring.mento.org)
 
@@ -81,8 +81,8 @@ production-cutover matrix is
 - [pnpm](https://pnpm.io/) 11.x
 - Docker (for local indexer dev — runs Postgres + Hasura)
 - On macOS, the Xcode Command Line Tools. Install them with
-  `xcode-select --install`. The quality gate uses their selected macOS SDK and
-  Clang toolchain for exact Darwin process identity.
+  `xcode-select --install`. The optional legacy gate uses their selected macOS
+  SDK and Clang toolchain for exact Darwin process identity.
 
 ### Install
 
@@ -117,8 +117,9 @@ local `~/.agents` directory, so the repo vendors its required autoreview helper.
 The helper trust boundary, prepared-bundle workflow, external-runtime procedure,
 and fail-closed checks live in
 [`docs/notes/agent-quality-gate-mechanics.md`](./docs/notes/agent-quality-gate-mechanics.md).
-Autoreview remains source review, so the quality gate and applicable browser or
-runtime verification are still required.
+Autoreview remains source review. Apply the direct author checks in step 3 of
+the [PR operating card](./docs/notes/pr-operating-card.md), plus applicable
+browser or runtime verification.
 
 The maintenance path runs after Codex checks out the task branch in a cached
 container; it refreshes `origin/main`, verifies the autoreview helper, syncs
@@ -204,8 +205,8 @@ pnpm --filter @mento-protocol/ui-dashboard test:browser
 
 The browser suite starts the Next.js app with a local GraphQL fixture server so
 it can exercise routing, focus, hydration, and degraded query states without
-hitting hosted Hasura/Envio. The agent quality gate installs Playwright
-Chromium before running it; for direct fresh-checkout runs, install it once with
+hitting hosted Hasura/Envio. The setup script attempts to install Playwright
+Chromium. If a fresh checkout still lacks it, install it once with
 `pnpm --filter @mento-protocol/ui-dashboard exec playwright install chromium`.
 
 ### Targeted Mutation Baseline

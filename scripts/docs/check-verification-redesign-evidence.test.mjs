@@ -282,7 +282,7 @@ function withGitFixture(run) {
         "        Runs the path-aware agent quality gate before push. The gate maps the",
         "        branch diff to the required local checks instead of always running the",
         "        full monorepo pre-push suite.",
-        "      run: ./scripts/agent-quality-gate.sh --run --skip-if-fresh",
+        "      run: ./scripts/agent-quality-gate.sh --run --skip-if-fresh --pre-push --base origin/main",
         "      triggers:",
         "        - git_hooks: [pre-push]",
         "  enabled:",
@@ -439,6 +439,91 @@ test("buildManifest counts whole files and matching reference lines", () => {
     const rendered = renderManifest(manifest);
     assert.equal(rendered, `${JSON.stringify(manifest, null, 2)}\n`);
     assert.equal(renderManifest(JSON.parse(rendered)), rendered);
+  });
+});
+
+test("buildManifest accepts complete pre-push removal", () => {
+  withGitFixture((repoRoot) => {
+    fs.rmSync(join(repoRoot, ".trunk/hooks/pre-push"));
+    fs.writeFileSync(
+      join(repoRoot, ".trunk/trunk.yaml"),
+      [
+        "actions:",
+        "  disabled:",
+        "    - trunk-announce",
+        "  enabled:",
+        "    - trunk-fmt-pre-commit",
+        "    - trunk-upgrade-available",
+        "",
+      ].join("\n"),
+    );
+    execFileSync("git", ["-C", repoRoot, "add", "-A"]);
+    execFileSync("git", ["-C", repoRoot, "commit", "-qm", "remove pre-push"]);
+
+    const manifest = buildManifest({ repoRoot, source: "HEAD" });
+    assert.equal(
+      manifest.entries.some(
+        ({ path }) =>
+          path === ".trunk/hooks/pre-push" || path === ".trunk/trunk.yaml",
+      ),
+      false,
+    );
+  });
+});
+
+test("buildManifest rejects partial pre-push removal", () => {
+  withGitFixture((repoRoot) => {
+    fs.writeFileSync(
+      join(repoRoot, ".trunk/trunk.yaml"),
+      [
+        "actions:",
+        "  definitions:",
+        "    - id: agent-quality-gate-pre-push",
+        "      triggers:",
+        "        - git_hooks: [pre-push]",
+        "",
+      ].join("\n"),
+    );
+    execFileSync("git", ["-C", repoRoot, "add", ".trunk/trunk.yaml"]);
+    execFileSync("git", [
+      "-C",
+      repoRoot,
+      "commit",
+      "-qm",
+      "partially remove pre-push",
+    ]);
+
+    assert.throws(
+      () => buildManifest({ repoRoot, source: "HEAD" }),
+      /partially removed or malformed/u,
+    );
+  });
+});
+
+test("buildManifest rejects malformed pre-push run residue", () => {
+  withGitFixture((repoRoot) => {
+    fs.writeFileSync(
+      join(repoRoot, ".trunk/trunk.yaml"),
+      [
+        "actions:",
+        "  definitions:",
+        "    - run: ./scripts/agent-quality-gate.sh --run --pre-push --base origin/main",
+        "",
+      ].join("\n"),
+    );
+    execFileSync("git", ["-C", repoRoot, "add", ".trunk/trunk.yaml"]);
+    execFileSync("git", [
+      "-C",
+      repoRoot,
+      "commit",
+      "-qm",
+      "leave malformed pre-push run",
+    ]);
+
+    assert.throws(
+      () => buildManifest({ repoRoot, source: "HEAD" }),
+      /partially removed or malformed/u,
+    );
   });
 });
 

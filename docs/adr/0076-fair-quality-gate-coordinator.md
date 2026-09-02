@@ -3,7 +3,7 @@ title: Fair local quality-gate coordination across worktrees
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-30
+last_verified: 2026-09-02
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -13,7 +13,10 @@ garden_lane: adrs-architecture
 
 # ADR 0076 — Fair local quality-gate coordination across worktrees
 
-**Status:** Accepted (Aug 2026). In force on branches that contain this change.
+**Status:** Accepted (Aug 2026), narrowed by the M5 cutover on 2026-09-02. The
+coordinator remains in force for the callable legacy diagnostic and rollback
+compatibility. Normal `/ship` author checks do not use it. Pre-push starts no
+repository verification, lock, or wait.
 **Scope:** ci/process
 
 ## Context

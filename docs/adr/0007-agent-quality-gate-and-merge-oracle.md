@@ -3,7 +3,7 @@ title: Local agent quality gate plus two-projection PR all-clear and Codex gate
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-31
+last_verified: 2026-09-02
 scope: ci/process
 date: 2026-05
 doc_type: adr
@@ -13,11 +13,11 @@ garden_lane: adrs-architecture
 
 # ADR 0007 — Local agent quality gate + two-projection PR all-clear + Codex approval gate
 
-**Status:** Accepted (Apr–Jun 2026), in force during the staged transition.
+**Status:** Accepted (Apr–Jun 2026), amended by the M5 cutover on 2026-09-02.
 [ADR 0078](0078-staged-verification-redesign.md) supersedes the mandatory local
-gate as the target state. The current gate remains mandatory until the approved
-cutover. The hosted two-projection all-clear and Codex approval gate remain in
-force.
+gate. The gate remains a callable diagnostic and a required-CI regression
+suite. The direct `/ship` author checks replace it in normal local delivery.
+The hosted two-projection all-clear and Codex approval gate remain in force.
 **Scope:** ci/process
 
 ## Context
@@ -29,7 +29,7 @@ definition of "ready to merge".
 
 ## Decision
 
-Two layers:
+The original decision had two layers:
 
 - **Local agent quality gate** (`pnpm agent:quality-gate`) maps changed paths to
   the exact package checks + checklists and runs them locally before push. It is
@@ -42,6 +42,11 @@ Two layers:
   lag does not block unless branch protection requires it. Actionable feedback
   blocks through the feedback ledger, and any aggregate `CHANGES_REQUESTED`
   review verdict blocks readiness.
+
+The M5 amendment retires the first layer as a mandatory local control. Step 3
+of the [PR operating card](../notes/pr-operating-card.md) now owns bounded
+direct author checks. Pre-push runs no repository verification. Required CI
+remains merge authority.
 
 ## Alternatives considered
 

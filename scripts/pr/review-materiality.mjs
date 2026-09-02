@@ -324,20 +324,20 @@ function classifyBySize(fileCount, lineChanges) {
 function recommendedReview(tier) {
   if (tier === "trivial") {
     return [
-      "Run the quality gate from operating-card step 3.",
+      "Run the applicable direct author checks from docs/notes/pr-operating-card.md step 3.",
       "Skip semantic autoreview unless the change is deceptively risky.",
     ];
   }
 
   if (tier === "standard") {
     return [
-      "Run the quality gate from operating-card step 3.",
+      "Run the applicable direct author checks from docs/notes/pr-operating-card.md step 3.",
       "Run pnpm agent:autoreview before pushing.",
     ];
   }
 
   return [
-    "Run the quality gate from operating-card step 3.",
+    "Run the applicable direct author checks from docs/notes/pr-operating-card.md step 3.",
     "Run pnpm agent:autoreview before pushing.",
     "Read any mapped checklist and audit sibling surfaces before the next push.",
   ];

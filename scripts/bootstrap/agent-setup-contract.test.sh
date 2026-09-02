@@ -201,6 +201,43 @@ web_deps_marker_block="$(
 grep -q 'shared-config/scripts/build.mjs' <<< "$web_deps_marker_block" ||
   fail "scripts/bootstrap/claude-code-web-setup.sh no longer invalidates its dependency marker when the clean-build wrapper changes"
 
+# M5 keeps staged formatting on pre-commit and removes all repository
+# verification from pre-push. Pin the tracked hook surface and every hosted
+# setup writer so a later setup edit cannot silently restore the old block.
+[[ -x .trunk/hooks/pre-commit ]] ||
+  fail ".trunk/hooks/pre-commit must remain executable"
+[[ ! -e .trunk/hooks/pre-push ]] ||
+  fail ".trunk/hooks/pre-push must stay absent after local cutover"
+grep -Fq -- "- trunk-fmt-pre-commit" .trunk/trunk.yaml ||
+  fail ".trunk/trunk.yaml must keep trunk-fmt-pre-commit enabled"
+for removed_pre_push_marker in \
+  "trunk-check-pre-push" \
+  "agent-quality-gate-pre-push" \
+  "git_hooks: [pre-push]" \
+  "--pre-push"; do
+  if grep -Fq -- "$removed_pre_push_marker" .trunk/trunk.yaml; then
+    fail ".trunk/trunk.yaml retained pre-push marker: $removed_pre_push_marker"
+  fi
+done
+
+for hosted_setup in \
+  scripts/bootstrap/claude-code-web-setup.sh \
+  scripts/bootstrap/codex-cloud-maintenance.sh \
+  scripts/bootstrap/codex-cloud-setup.sh; do
+  grep -Fq -- "git config core.hooksPath .trunk/hooks" "$hosted_setup" ||
+    fail "$hosted_setup no longer installs the tracked pre-commit hook path"
+  if grep -Fq -- "agent.qualityGate.cloudPrePushRequireFresh" "$hosted_setup"; then
+    fail "$hosted_setup restored hosted pre-push freshness"
+  fi
+done
+if grep -Fq -- "agent.qualityGate.cloudPrePushRequireFresh" \
+  .claude/hooks/session-start.sh; then
+  fail ".claude/hooks/session-start.sh restored hosted pre-push freshness"
+fi
+if grep -Fq -- "Before every push from a server/worktree" scripts/setup.sh; then
+  fail "scripts/setup.sh restored the mandatory manual pre-push checklist"
+fi
+
 # The pre-install validator must reject a changed trusted alias. This fixture
 # proves the validator itself fails closed without running pnpm install.
 validator_repo="$(mktemp -d)"

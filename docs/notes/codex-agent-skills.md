@@ -3,7 +3,7 @@ title: Codex Agent Skills
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-26
+last_verified: 2026-09-02
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -56,7 +56,8 @@ The target-selection, engine-isolation, sensitive-input, runtime-trust,
 prepared-bundle, and runtime-changing-PR contracts live in
 [`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md). Keep that
 note as their single owner instead of copying implementation details here.
-Autoreview is source review only: mapped quality gates, browser checks,
+Autoreview is source review only. The direct author checks selected by step 3
+of the [PR operating card](pr-operating-card.md), browser checks,
 generated-artifact checks, runtime verification, and final PR readiness remain
 separate.
 
@@ -136,8 +137,8 @@ and maintenance behavior live in
 
 The repo-local `ship` and `babysit-pr` skills under `.agents/skills/` have exact
 `.claude/skills/` mirrors. They preserve the familiar workflow names while
-backing behavior with repo-visible commands such as `pnpm agent:quality-gate`,
-`pnpm agent:autoreview`, and `pnpm pr:ready-state`.
+backing behavior with the repo-visible PR operating card and commands such as
+`pnpm agent:autoreview` and `pnpm pr:ready-state`.
 
 The `doc-garden` skill uses the same exact-mirror contract. It turns a generated
 bounded packet into evidence-backed dispositions, guarded semantic edits,
@@ -165,8 +166,9 @@ report contract live in [`backlog-sweep.md`](backlog-sweep.md).
 
 The `.agents/skills/` ↔ `.claude/skills/` mirror is enforced, not just
 documented: `scripts/repo-health/check-skills-mirror.mjs` byte-compares the two
-trees and fails on any drift, and the Agent Quality Gate runs it automatically
-whenever either tree changes. Symlinking the trees was rejected — repo files
+trees and fails on any drift. The optional legacy gate also selects it for
+those changes. Symlinking the trees was
+rejected — repo files
 pushed via the GitHub Contents API and hosted/web checkouts are not guaranteed
 to preserve symlinks, so a check script is the safer default. Run
 `node scripts/repo-health/check-skills-mirror.mjs` after editing either copy.

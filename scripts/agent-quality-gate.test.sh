@@ -1129,10 +1129,10 @@ assert_turbo_task_has_input "react-doctor:score" '$TURBO_ROOT$/.npmrc'
 assert_turbo_task_has_input "react-doctor:score" '$TURBO_ROOT$/.node-version'
 assert_turbo_task_has_input "react-doctor:score" '$TURBO_ROOT$/turbo.json'
 
-# The public command must reach the protected Bash shebang before any inherited
-# startup control can run. Pin both the prologue and the direct Trunk hook so a
-# later wrapper or explicit `bash` invocation cannot silently remove that
-# boundary while the dynamic cases below continue to pass for another reason.
+# The public diagnostic must reach the protected Bash shebang before any
+# inherited startup control can run. Pin the local-cutover boundary separately:
+# pre-commit formatting stays active, no tracked pre-push entry remains, and
+# hosted setup does not restore the dormant freshness policy.
 node - <<'NODE' ||
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -1142,30 +1142,6 @@ const hostedSetups = [
   "scripts/bootstrap/claude-code-web-setup.sh",
   "scripts/bootstrap/codex-cloud-maintenance.sh",
   "scripts/bootstrap/codex-cloud-setup.sh",
-];
-const hostedGateEntryPoints = [
-  ".agents/skills/ship/SKILL.md",
-  ".claude/skills/ship/SKILL.md",
-  ".agents/roles/verifier.md",
-  ".github/ISSUE_TEMPLATE/agent-task.yml",
-  "docs/notes/quick-commands.md",
-  "scripts/docs/docs-garden-issue-helpers.mjs",
-];
-const sweepWorkerEntryPoints = [
-  ".agents/skills/backlog-sweep/SKILL.md",
-  ".claude/skills/backlog-sweep/SKILL.md",
-];
-const resolvedBaseEntryPoints = [
-  ".agents/skills/ship/SKILL.md",
-  ".claude/skills/ship/SKILL.md",
-  ".agents/roles/verifier.md",
-  "docs/notes/pr-operating-card.md",
-  "docs/notes/pr-ready-state.md",
-];
-const sweepLockEntryPoints = [
-  ".agents/skills/backlog-sweep/SKILL.md",
-  ".claude/skills/backlog-sweep/SKILL.md",
-  "docs/notes/backlog-sweep.md",
 ];
 const activeTrunkLines = trunk
   .split("\n")
@@ -1180,77 +1156,50 @@ const prologue = [
   "",
 ].join("\n");
 assert.ok(gate.startsWith(prologue), "quality-gate public Bash prologue drifted");
+assert.ok(
+  fs.existsSync(".trunk/hooks/pre-commit"),
+  "tracked pre-commit formatter hook is missing",
+);
+assert.ok(
+  !fs.existsSync(".trunk/hooks/pre-push"),
+  "tracked pre-push hook must stay absent after local cutover",
+);
 assert.match(
   activeTrunkLines,
-  /^[ \t]*run: git fetch --quiet origin main && \.\/scripts\/agent-quality-gate\.sh --run --parallel 3 --skip-if-fresh --pre-push --base origin\/main[ \t]*$/mu,
-  "Trunk pre-push must execute the protected gate entry directly",
+  /^[ \t]*- trunk-fmt-pre-commit[ \t]*$/mu,
+  "Trunk staged pre-commit formatting must stay enabled",
 );
 assert.doesNotMatch(
   activeTrunkLines,
-  /(?:^|[^\w./])(?:(?:\/bin\/)?bash[ \t]+(?:\.\/)?scripts\/agent-quality-gate\.sh|scripts\/agent-quality-gate\.sh)/mu,
-  "Trunk pre-push must not bypass or CDPATH-resolve the protected gate entry",
+  /trunk-check-pre-push|agent-quality-gate-pre-push|git_hooks:\s*\[pre-push\]|--pre-push/u,
+  "Trunk must not retain a pre-push repository-verification action",
 );
 for (const setupPath of hostedSetups) {
   const setup = fs.readFileSync(setupPath, "utf8");
   assert.match(
     setup,
-    /^git config core\.hooksPath \.trunk\/hooks\ngit config agent\.qualityGate\.cloudPrePushRequireFresh true$/mu,
-    `${setupPath} must require a fresh hosted pre-push stamp`,
+    /^git config core\.hooksPath \.trunk\/hooks$/mu,
+    `${setupPath} must retain the tracked pre-commit hook path`,
   );
-}
-for (const entryPointPath of hostedGateEntryPoints) {
-  const entryPoint = fs.readFileSync(entryPointPath, "utf8");
-  assert.match(
-    entryPoint,
-    /\.\/scripts\/agent-quality-gate\.sh --run --parallel 3 --base origin\/main/u,
-    `${entryPointPath} must use the exact hosted pre-push warm command`,
-  );
-}
-for (const entryPointPath of sweepWorkerEntryPoints) {
-  const entryPoint = fs.readFileSync(entryPointPath, "utf8");
-  assert.match(
-    entryPoint,
-    /After `\.\/scripts\/setup\.sh` in each fresh or resumed\n  clone, set `agent\.qualityGate\.cloudPrePushRequireFresh=true` when that boolean\n  is hosted\. Unset the key when it is local\./u,
-    `${entryPointPath} must propagate the setup type into every worker clone`,
-  );
-}
-for (const entryPointPath of resolvedBaseEntryPoints) {
-  const entryPoint = fs.readFileSync(entryPointPath, "utf8");
-  assert.match(
-    entryPoint,
-    /resolved base[\s\S]{0,120}not[\s\S]{0,40}`origin\/main`|hosted fork and stacked PRs/iu,
-    `${entryPointPath} must preserve fork and stacked resolved-base validation`,
+  assert.doesNotMatch(
+    setup,
+    /agent\.qualityGate\.cloudPrePushRequireFresh/u,
+    `${setupPath} must not restore hosted pre-push freshness`,
   );
 }
 const claudeSessionStart = fs.readFileSync(
   ".claude/hooks/session-start.sh",
   "utf8",
 );
-const claudeHostedConfigIndex = claudeSessionStart.indexOf(
-  "git -C \"$REPO_ROOT\" config agent.qualityGate.cloudPrePushRequireFresh true",
-);
-const claudeSourceFilterIndex = claudeSessionStart.indexOf('case "$SOURCE" in');
-assert.ok(claudeHostedConfigIndex >= 0, "Claude resume hosted config is missing");
-assert.ok(
-  claudeHostedConfigIndex < claudeSourceFilterIndex,
-  "Claude resume hosted config must precede the source filter",
-);
-for (const entryPointPath of sweepLockEntryPoints) {
-  const entryPoint = fs.readFileSync(entryPointPath, "utf8");
-  assert.match(
-    entryPoint,
-    /Local workers wait with `--lock-wait 3600`\.[\s\S]{0,140}Hosted workers use[\s\S]{0,80}1,800-second default/u,
-    `${entryPointPath} must preserve local and hosted sweep lock waits`,
-  );
-}
-const gateMechanics = fs.readFileSync(
-  "docs/notes/agent-quality-gate-mechanics.md",
-  "utf8",
+assert.doesNotMatch(
+  claudeSessionStart,
+  /agent\.qualityGate\.cloudPrePushRequireFresh/u,
+  "Claude SessionStart must not restore hosted pre-push freshness",
 );
 assert.match(
-  gateMechanics,
-  /so a warm\n`\.\/scripts\/agent-quality-gate\.sh --run --parallel 3 --base origin\/main` satisfies/u,
-  "gate mechanics must name the exact reusable pre-push warm command",
+  gate,
+  /echo "Retained diagnostic only\."[\s\S]*echo "Normal path: use \/ship author checks and required CI\."[\s\S]*echo "Retirement requires the completed #2128 canary and separate human approval\."/u,
+  "retained gate must state its diagnostic status and retirement boundary",
 );
 const freshnessSkipIndex = gate.indexOf(
   'echo "Previous successful agent quality gate run is still fresh; skipping mapped commands."',
@@ -1262,13 +1211,8 @@ const lockAcquisitionIndex = gate.lastIndexOf("\nacquire_gate_run_lock\n");
 assert.ok(freshnessSkipIndex >= 0, "quality-gate freshness skip is missing");
 assert.ok(hostedRefusalIndex > freshnessSkipIndex, "hosted refusal must follow freshness reuse");
 assert.ok(lockAcquisitionIndex > hostedRefusalIndex, "hosted refusal must precede lock acquisition");
-assert.match(
-  gate,
-  /start '\.\/scripts\/agent-quality-gate\.sh --run --parallel 3 --base origin\/main' as an observable background task\./u,
-  "hosted refusal must warm the exact hook launcher, base, and parallelism",
-);
 NODE
-  fail "expected the public quality-gate entry contract to remain pinned"
+  fail "expected the public diagnostic and local-cutover contract to remain pinned"
 
 # The public pnpm entry executes the gate by its `#!/bin/bash -p` shebang. A
 # caller-controlled non-interactive startup file must not run before the gate

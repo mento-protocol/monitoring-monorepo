@@ -3,7 +3,7 @@ title: PR Operating Card
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-01
+last_verified: 2026-09-02
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -51,83 +51,49 @@ even when you never open an authority.
    same PR. When a change adds or alters a command, script, env var, hook, or
    ordered runbook, audit every live entry point and runbook in the same PR.
    Adding, renaming, or removing a doc needs `pnpm docs:index --write` in
-   the same PR, or the gate's `docs:index --check` fails.
+   the same PR, or the required `docs:index --check` fails.
    Before touching or moving docs, read
    [`../context-standards.md`](../context-standards.md).
 
-3. **Gate.** Before opening or updating an agent-authored PR, inspect then run
-   the mapped local-only checks. **Resolve the target and remotes first** when
-   this run will reach step 5 — the repo-identity preflight in
-   [`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md) governs
-   any adapter call that trusts repository identity, and this gate is one. In a
-   Claude cloud session, where `origin` is a credential-proxy URL that can
-   never satisfy the canonical-origin requirement, the content-based cloud
-   binding in
-   [`github-tooling-surfaces.md`](github-tooling-surfaces.md) replaces that
-   preflight for every such call — gate, ship, and babysit alike. On a
-   branch with no PR yet and an unambiguous `origin`, the local checks below are
-   safe to run first; in a fork or ambiguous-remote checkout they are not, and
-   step 5's resolution comes before this step rather than after it:
+3. **Author checks.** Apply every matching row below after the change is
+   coherent and before the first ready-for-review publication. Invoke the
+   existing commands directly. Do not add a selector or wrapper. First run
+   `./tools/trunk fmt <changed-files>` on every intended changed file. Start
+   the checks only after formatting is complete.
 
-   ```bash
-   pnpm agent:quality-gate          # inspect mapped commands and checklists
-   pnpm agent:quality-gate --run    # execute the safe local mapped commands
-   ```
+   | Change trigger                                                           | Required direct author checks                                                                                                                                                                                                                                                                    |
+   | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+   | Source in a workspace package                                            | Run each script that exists for that package: `pnpm --filter <package-name> lint`, `pnpm --filter <package-name> typecheck`, and its normal unit-test command. Governance Watchdog uses `pnpm --filter @mento-protocol/governance-watchdog test:unit`; its generic `test` needs a local service. |
+   | Dashboard React or client source                                         | Also run `pnpm dashboard:react-doctor:diff` against the resolved PR base.                                                                                                                                                                                                                        |
+   | New or changed dashboard route or interaction                            | Also run `pnpm dashboard:build`, then follow [`dashboard-verification.md`](dashboard-verification.md) for the changed route, console, interaction, breakpoints, and applicable auth states.                                                                                                      |
+   | Indexer schema, configuration, ABI, entry point, or handler reachability | Run each affected code-generation variant from [`../../indexer-envio/AGENTS.md`](../../indexer-envio/AGENTS.md). Run affected non-mainnet variants first and `pnpm indexer:codegen` last. Inspect the generated diff before indexer package checks.                                              |
+   | Dashboard GraphQL query or schema consumer                               | Run `pnpm dashboard:codegen` and inspect the generated diff.                                                                                                                                                                                                                                     |
+   | Manifest, lockfile, pnpm configuration, or patch                         | Inspect lifecycle and install effects before any package-manager command. Then run the applicable package rows.                                                                                                                                                                                  |
+   | Root tooling, control plane, or standalone service                       | Run the focused existing contract named by the nearest scoped `AGENTS.md`. Do not add a root selector.                                                                                                                                                                                           |
 
-   `--run` maps changed paths to the safe local checks (lint, typecheck, tests,
-   browser suite) and stamps freshness so a later pre-push `--skip-if-fresh`
-   cache-hits. Every base ref below lives on the **resolved base remote** —
-   `BASE_REMOTE` from step 5's resolution when it ran first, plain `origin`
-   only in the non-fork single-remote case above; in a fork checkout `origin`
-   serves the fork, so an `origin/...` base diffs the wrong repository and
-   real changes skip their mapped checks. Fetch every base the gate will diff
-   against first — `git fetch <base-remote> main`, plus `<baseRefName>` for a
-   stacked PR, whose tracking ref is otherwise stale or absent: an unfetched
-   base diffs against history the branch has already moved past, and the hook
-   fetches before it runs the gate in any case. The freshness stamp binds the
-   **merge-base**, not the base tip, so an advance of `main` that leaves the
-   merge-base alone keeps a warm stamp; a rebase moves the merge-base and
-   still costs a full re-run. That applies only to plans that never read the
-   base: a plan naming the base ref or its tip — `react-doctor:diff`, the ADR
-   reminder, and the peg registry check — keeps tip binding, so any base
-   advance re-runs it. A bare invocation
-   diffs against `origin/main`; a fork checkout must pass
-   `--base <base-remote>/main`, and a stacked PR (base not `main`) must
-   resolve `baseRefName` and pass `--base <base-remote>/<baseRefName>` — a
-   child change that reverses a parent-introduced path can vanish from the
-   `main`-based diff, scheduling no checks for it. It does not run `trunk fmt` — run
-   `./tools/trunk fmt` (the checked-in launcher; a global `trunk` may not exist)
-   before committing so the required Code Quality CI stays green. The gate never
-   deploys and never applies Terraform. It **refuses package-script,
-   package-manager, or lockfile changes until their lifecycle risk is reviewed
-   and explicitly acknowledged** — do not bypass the refusal; review the surface
-   and pass `--allow-package-script-changes`. Before invoking a full gate,
-   ensure that no direct validation, dashboard server, or browser suite outside
-   the coordinator is active on the same machine. From invocation until the
-   gate exits, do not start uncoordinated work there. Use same-machine spare
-   workers only for read-only work. Run concurrent validation outside the
-   coordinator from a fully hydrated checkout on another machine. Concurrent
-   `--run` gates from different worktrees share weighted machine capacity. The
-   default capacity is 3. Evidence-backed heavy dashboard commands form fair
-   barriers and run alone. Requests from the same worktree remain serialized.
-   Exact matching requests share one exact terminal result. A Trunk-qualified
-   result reaches active followers but is never retained or
-   reused. Background the `--run` gate and the `git push`; a 600s foreground
-   kill discards the freshness stamp. Hosted setup requires this fresh stamp
-   before pre-push. A cold hosted pre-push exits before scheduler registration
-   or mapped work. Fetch `origin/main`, then run
-   `./scripts/agent-quality-gate.sh --run --parallel 3 --base origin/main` as an
-   observable background task. The launcher, base, and parallelism must match
-   the hook's freshness key. This hook warm does not replace validation against
-   the resolved PR base. When the resolved base tracking ref is not
-   `origin/main`, including fork and stacked PRs, run the required resolved-base
-   gate first. Then warm this separate `origin/main` stamp. Retry the push after
-   both gates pass. Local setup keeps the normal cold pre-push run. If the hosted
-   branch has package-script risk, review it first. Then set
-   `git config agent.qualityGate.allowPackageScriptChanges true` before the warm
-   run so the hook uses the same acknowledgement.
-   Authority:
-   [`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md).
+   Resolve and fetch the PR base before React Doctor. The root alias uses
+   `origin/main`. For another base, run
+   `REACT_DOCTOR_BASE_REF=<base-remote>/<base-ref> pnpm --filter
+@mento-protocol/ui-dashboard react-doctor:diff`.
+
+   Run mutable checks in this order: inspect package-manager changes; run code
+   generation; run package lint, typecheck, and tests; run React Doctor, build,
+   and browser checks; then run step 4. Record each applicable result in the
+   PR's `## Validation` section as `passed`, `failed`, or `not run: <reason>`.
+   A failed author check blocks the ready handoff. An unavailable tool can be
+   `not run`; a failed command cannot be relabeled. Required CI remains merge
+   authority.
+
+   Apply only the rows affected by a material fix before publishing the new
+   head. Apply the table again after base integration because conflict
+   resolution creates a new tree. Do not run the table on every commit or
+   push. Pre-commit keeps staged formatting only. Pre-push starts no repository
+   check, fetch, lock, or wait. A manual push can omit author checks. It cannot
+   omit required CI.
+
+   If pre-commit changes any file during commit, stop before push. Apply the
+   affected author-check rows and step 4 to the committed tree. Do not publish
+   formatter-changed bytes that the checks and reviewer did not inspect.
 
 4. **Autoreview.** Freeze the scope baseline first — the initial request,
    target/owner, changed-file set, and non-test changed-line count — as the
@@ -167,7 +133,7 @@ even when you never open an authority.
    post-review check above so bundle replacement or drift during review
    cannot go undetected. Autoreview reviews the complete branch-local
    target without truncation, but it is **source review only**: it runs no
-   tests and proves no behavior, so the mapped gate, browser,
+   tests and proves no behavior, so the direct author checks, browser,
    generated-artifact, and runtime checks still apply. One fresh-context
    reviewer must inspect every prepared-bundle pass, with manifest
    verification before and after review. Capture, bundle-integrity,
@@ -197,7 +163,7 @@ even when you never open an authority.
    auto-review (`.coderabbit.yaml` keeps `reviews.auto_review.drafts` false)
    and the `pr-description.yml` CI check, which skips draft PRs; drafting is
    skipping review, not a staging step. A ship that updates an **existing draft** converts it to ready once
-   the gate passes — `pr:ready-state` holds draft state as a required blocker,
+   the author checks and closeout review pass — `pr:ready-state` holds draft state as a required blocker,
    so an unconverted draft never reaches all-clear. Use or keep draft only
    when the user asks or required validation is intentionally pending, and
    state that reason in the body. Link
@@ -245,7 +211,8 @@ even when you never open an authority.
    scan is developer-installed and Claude Code only; this repo does not declare
    it. Where the diff touches authn/authz, secrets handling, injection surfaces,
    network-facing handlers, deploy/CI paths, or onchain code and the plugin is
-   unavailable, aim the gate and the closeout review at those surfaces instead,
+   unavailable, aim the direct author checks and closeout review at those
+   surfaces instead,
    and record `Claude Security scan: skipped (<surface>)` in the final summary so
    the deep pass can be run later from a session that has it. Never imitate or
    install it to fill the gap.
@@ -277,8 +244,8 @@ even when you never open an authority.
 
    **Integrating the base produces a new, unvalidated head.** Steps 3-4 ran
    against the pre-merge tree, so either integrate the base before step 3 or
-   rerun the gate and the closeout review against the merged head before
-   pushing. A conflict resolution is exercised, not assumed.
+   rerun the applicable author checks and the closeout review against the
+   merged head before pushing. A conflict resolution is exercised, not assumed.
 
    Either way, re-read the PR after pushing and require its `headRefOid` to
    equal local `HEAD` before treating anything as published. A fork checkout
@@ -290,9 +257,9 @@ even when you never open an authority.
    the target as step 5 defines: the target-PR precedence, `BASE_REPO`, both
    remotes, and
    `number,url,headRefName,headRefOid,baseRefName,headRepository,headRepositoryOwner,isCrossRepository`.
-   **Stop a fork head at that resolution, before the first repo-local probe,
-   gate, or fix** — the `.claude/babysit-pr.sh` refusal at gate time is the
-   backstop, not the first line. Sweep every feedback
+   **Stop a fork head at that resolution, before the first repo-local probe or
+   fix** — the `.claude/babysit-pr.sh` refusal is the backstop, not the first
+   line. Sweep every feedback
    surface:
    top-level comments, review bodies, inline comments and threads, annotations,
    and failing logs. **Reply before resolving**, on the correct surface, in
@@ -323,6 +290,11 @@ even when you never open an authority.
    left alone — check whether the same failure appears off this PR before
    attributing it. Chasing an unrelated failure puts unrelated changes on the
    branch.
+
+   After a material fix, rerun the step 3 rows whose inputs or surface changed.
+   Run step 4 again when its materiality rule applies. Publish the new head only
+   after each applicable author check is `passed` or truthfully recorded as
+   `not run: <reason>`.
 
    **A user correction updates the request baseline**: update the PR
    description before the next push, or current-head reviewers enforce the
@@ -485,7 +457,7 @@ These bind regardless of which step you are on:
 - **Knowingly deferred work needs a GitHub issue first**, linked from
   `## Deferrals`. An evidence-backed won't-fix is not a deferral.
 - **Never weaken a control that is blocking your own work.** Do not widen,
-  disable, or soften the quality gate, the sandbox or permission config, branch
+  disable, or soften the author-check contract, the sandbox or permission config, branch
   protection, or a safety-boundary rule to unblock the change you are making
   now — an agent that can widen its own gate has no gate. Stop and hand the
   control change to an independent session through a brief or an agent-ready
@@ -501,19 +473,13 @@ These bind regardless of which step you are on:
   operator's explicit consent to the specific repair, recorded on the issue or
   PR, and the repair stays narrowly scoped to restoring the control. It is
   still reviewed: use the last independently reviewed pre-change runtime for
-  the gate, or an independent reviewer for the diff. Widening the control
+  an executable control, or an independent reviewer for the diff. Widening the control
   beyond the repair, or using this path for anything the control was correctly
   refusing, is the thing this rule exists to prevent.
 
-- **Package-script, package-manager, and lockfile changes require explicit
-  acknowledgement** through the gate; never bypass the refusal.
-- **Background long `--run` gates and pushes**; do not run them in a 600s
-  foreground that a kill would truncate, and do not start an uncoordinated
-  direct validation command, dashboard server, or browser suite alongside a
-  gate. Use same-machine spare workers only for read-only work. Run concurrent
-  validation outside the coordinator from another machine. Let the gate
-  coordinator schedule concurrent gate work. Do not use `--no-lock` to bypass
-  its capacity, worktree lease, or named resources.
+- **Inspect package-script, package-manager, lockfile, and patch changes before
+  any package-manager command.** Record the applicable author-check results.
+  Never treat a failed or unavailable command as a pass.
 - **Secrets are IaC-owned and Terraform apply needs human approval** — plan
   first, never one-off `gh secret set` / `vercel env add` /
   `gcloud secrets versions add`.
@@ -523,7 +489,8 @@ These bind regardless of which step you are on:
 | Step                     | Authority doc                                                                                                  |
 | ------------------------ | -------------------------------------------------------------------------------------------------------------- |
 | Claim, defer, merge-sync | [`agent-issue-workflow.md`](agent-issue-workflow.md)                                                           |
-| Gate, autoreview         | [`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md)                                           |
+| Author checks            | step 3 here                                                                                                    |
+| Autoreview               | step 4 here and [`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md)                           |
 | Ready-state              | [`pr-ready-state.md`](pr-ready-state.md)                                                                       |
 | Docs and drift           | [`../context-standards.md`](../context-standards.md)                                                           |
 | Ship                     | steps 2-9 here; entry points in [`codex-agent-skills.md`](codex-agent-skills.md#claude-global-store-shadowing) |

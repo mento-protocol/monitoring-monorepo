@@ -3,7 +3,7 @@ title: Architectural decisions are recorded as ADRs, enforced by a reminder gate
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-11
+last_verified: 2026-09-02
 scope: ci/process
 date: 2026-07
 doc_type: adr
@@ -13,7 +13,9 @@ garden_lane: adrs-architecture
 
 # ADR 0033 — Architectural decisions are recorded as ADRs, enforced by a reminder gate
 
-**Status:** Accepted (Jul 2026), in force.
+**Status:** Accepted (Jul 2026), amended by M3 and M5 in 2026-09. The reminder
+now runs in the existing required root-scripts CI job. Direct author checks
+also route control-plane changes to the focused contract.
 **Scope:** ci/process
 
 ## Context
@@ -32,11 +34,12 @@ is enforced, not just documented:
 
 - **When** to write one is defined by a three-part test and a trigger-surface
   list in [`docs/pr-checklists/architecture-decisions.md`](../pr-checklists/architecture-decisions.md).
-- **A reminder gate** — `scripts/pr/check-adr-reminder.mjs` (`pnpm adr:check`) —
+- **A reminder check** — `scripts/pr/check-adr-reminder.mjs` (`pnpm adr:check`) —
   detects high-signal architectural changes (new package/service, new Terraform
   stack, new CI/deploy workflow) that ship without an ADR and prints a reminder.
-  The agent quality gate runs it on those surfaces, so a normal pre-push flow
-  surfaces it automatically.
+  The required `Lint + test root scripts` CI job runs it and its tests. The
+  operating card's root control-plane row also requires its focused contract
+  during author checks.
 - **The PR template** asks "Architecture decision?" so authors consciously
   answer yes (link the ADR) or no (why).
 
@@ -53,10 +56,9 @@ for a trigger without an accompanying ADR.
   PRs are threshold tweaks or reorders, not decisions; false positives would
   train everyone to ignore the gate. Advisory + self-suppressing keeps the signal
   credible, with `--strict` available when a team opts in.
-- **A dedicated CI required check** — deferred: required checks carry no `paths:`
-  filters here (ADR 0010) and hard-gating on "did you decide something?" is
-  false-positive-prone; the local gate + PR-template prompt is the right altitude
-  for now.
+- **A dedicated CI context** — rejected: the existing required root-scripts job
+  runs the reminder without adding another required context. The PR-template
+  prompt retains the explicit author decision.
 
 ## Consequences
 

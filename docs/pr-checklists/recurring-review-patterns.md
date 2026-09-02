@@ -3,7 +3,7 @@ title: Recurring PR Review Patterns
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-28
+last_verified: 2026-09-02
 doc_type: checklist
 scope: repo-wide
 review_interval_days: 90
@@ -47,7 +47,7 @@ tldr: if a PR makes an architectural decision (constrains future work · had a
 real alternative · the why isn't obvious from the code), it records an ADR under
 `docs/adr/` in the same PR. High-signal triggers — a new package/service, a new
 Terraform stack, a new CI/deploy workflow — are flagged by `pnpm adr:check` and
-the agent quality gate. A won't-record needs a one-line reason on the PR's
+required CI. A won't-record needs a one-line reason on the PR's
 "Architecture decision?" line. Full rules in the linked checklist.
 
 ### Prompt exclusions — [checklist](review-prompt-exclusions.md)
@@ -233,12 +233,18 @@ tldr: **ruleset-required** workflows (`ci`, `Code Quality`, `Sentry suites`, the
 - Files near the line budget are tracked in `docs/notes/file-size-watch.md`; refresh with `node scripts/repo-health/file-size-watchlist.mjs` before starting a split so growth doesn't slip past unnoticed. `.github/workflows/file-size-watchlist.yml` owns the monthly issue-only check against current `main`; keep external copies disabled, use `--format issue` for GitHub Issues, and never route reports to `BACKLOG.md`.
 - Why this exists: PR #263 split `ui-dashboard/src/app/pool/[poolId]/page.tsx` from 2,831 → 470 lines after a year of unchecked growth. The refactor was a 4-day project; appending one more tab inline was a 30-minute task. Each individual decision was rational; the cumulative drift was not.
 
-### New source modules — routing and coverage
+### New source modules — focused coverage
 
-- After adding a module, verify its quality-gate routing by dry-running **that module's path on its own**. A sibling path in the same commit pulls the suites in anyway and masks a module that matches no case at all: `sentry-autofix-second-look.mjs` and `sentry-autofix-decisions.mjs` shipped matching nothing, so a change touching only one of them ran zero suites.
-- Check whether a constant the new module owns is a term in another suite's assertion, and route to both. `MAX_HANDLED_ID_QUERIES` feeds the finalize suite's timeout pin while living in a module routed only to the selector suite.
+- After adding a module, run its owning focused suite directly. Confirm that
+  the fixed required CI job includes that suite or its manifest. Do not add a
+  route to the legacy local selector.
+- Check whether a constant the new module owns is a term in another suite's
+  assertion. Run and update both suites when it is. `MAX_HANDLED_ID_QUERIES`
+  feeds the finalize suite's timeout pin as well as the selector behavior.
 - Add the module to the machine-enforced file-size test covering its area. If review is what catches a cap breach, the machinery didn't — the autofix modules were absent from that list while the triage ones were on it.
-- Sentry legs only: do NOT add a new `scripts/sentry-*.test.mjs` for a split. A new suite file triggers the registration cascade (manifest floor, a `ci.yml` step, gate routing). Put the tests in an existing suite.
+- Sentry legs only: do NOT add a new `scripts/sentry-*.test.mjs` for a split. A
+  new suite file triggers the registration cascade for the manifest floor and
+  `ci.yml`. Put the tests in an existing suite.
 - For a pure split, prove behaviour is unchanged rather than asserting it, with a harness suited to the subsystem. **CLI or script splits:** drive the entry point across its paths against a stub binary, run the identical harness against `git archive` of the pre-split tree, and diff stdout, stderr, exit codes and every generated file. **UI, library or Terraform splits:** the equivalent is the suite the module already owns — visual snapshots, a type surface, or `terraform plan` showing no diff. The requirement is a before/after comparison a reviewer can re-run, not a particular tool.
 
 ### Security / CSP
@@ -296,13 +302,15 @@ tldr: `generateMetadata` reading access-controlled data must gate on `isPublic =
 
 ### Sibling-audit rule for multi-component flows
 
-- When fixing a hazard in one component of a flow that has parallel siblings (form ↔ report editor; modal ↔ detail page; index "+ Add" modal ↔ row-edit modal), audit each sibling for the same hazard class before pushing. Cross-flow / cross-mount / cross-surface races usually need symmetric fixes. PR #345 had ~5 review rounds because each fix landed in one surface while the symmetric surface still had the same bug — saving on the form needed a fix, then deletion needed the same fix, then the report editor needed it, then the modal flow needed it, then the add-new modal needed it. Audit once per round; don't ship a half-fix that obviously asks for a re-raise
+- When fixing a hazard in one component of a flow that has parallel siblings (form ↔ report editor; modal ↔ detail page; index "+ Add" modal ↔ row-edit modal), audit each sibling for the same hazard class before review handoff. Cross-flow / cross-mount / cross-surface races usually need symmetric fixes. PR #345 had ~5 review rounds because each fix landed in one surface while the symmetric surface still had the same bug — saving on the form needed a fix, then deletion needed the same fix, then the report editor needed it, then the modal flow needed it, then the add-new modal needed it. Audit once per round; don't ship a half-fix that obviously asks for a re-raise
 
 ### Code health budgets — [checklist](code-health.md)
 
 Use the linked checklist for package boundaries, dead code, lint and type
 budgets, coverage, duplication, bundle size, schema diff, and advisory
 reports. Use the [mutation-testing checklist](mutation-testing.md) for
-mutation scope, cadence, and break floors. The agent quality gate owns
-changed-path routing and command selection; keep volatile counts, scores, and
-workflow details in their canonical owners instead of duplicating them here.
+mutation scope, cadence, and break floors. Step 3 of the
+[PR operating card](../notes/pr-operating-card.md) owns direct author-check
+selection. Required CI owns the full affected suite. Keep volatile counts,
+scores, and workflow details in their canonical owners instead of duplicating
+them here.

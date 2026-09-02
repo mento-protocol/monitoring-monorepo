@@ -575,12 +575,12 @@
     </nav>
     <main id="main">
       <header id="top" class="shell">
-        <p class="eyebrow">Monitoring monorepo · Phase 1 trust hardening</p>
+        <p class="eyebrow">Monitoring monorepo · M5 early local cutover</p>
         <h1>Remove the queue. Keep the quality bar.</h1>
         <p class="lede">
-          Replace the mandatory local gate with direct package feedback and
-          hardened existing CI. Add no app, cloud project, scheduler, task
-          graph, or verdict store.
+          M5 removes the mandatory local gate from the push path. Direct package
+          feedback and hardened existing CI keep the quality bar. The design
+          adds no app, cloud project, scheduler, task graph, or verdict store.
         </p>
         <div class="facts" aria-label="Current baseline">
           <div class="fact">
@@ -894,7 +894,7 @@
             command.
           </div>
           <div class="callout">
-            <strong>Shadow spend is approved:</strong> allow at most 45
+            <strong>Canary spend is capped:</strong> allow at most 45
             runner-minutes per no-skip run and 450 cumulative runner-minutes.
             Stop after a run exceeds 45 minutes. Do not start another run when
             it could exceed the cumulative ceiling. The first cold proof on PR
@@ -904,14 +904,14 @@
             credit. The repair extracts the retained setup, package-policy, and
             autoreview assertions into two focused suites. It excludes only the
             four legacy selector steps. Retained generated-output and workflow
-            safeguards still run in fixed CI. The repaired cohort starts after
-            this change reaches protected <code>main</code>. Audit-eligible pull
+            safeguards still run in fixed CI. The post-cutover canary starts
+            after M5 reaches protected <code>main</code>. Audit-eligible pull
             requests use ordinary CI plus no-skip for the same immutable head.
             Package, dependency, and toolchain pull requests use ordinary CI
             only when the protected filter selects the full fixed job set and
             every retained job succeeds. Evidence-instrument changes cannot
-            count. At least 10 pull requests over at least 7 calendar days must
-            pass these rules. The no-skip ceiling has 43.48 of 450
+            count. At least 10 merged pull requests over at least 7 calendar
+            days must pass these rules. The no-skip ceiling has 43.48 of 450
             runner-minutes recorded.
           </div>
           <div class="callout">
@@ -952,7 +952,10 @@
             </div>
             <div class="layer">
               <strong>No-skip audit</strong
-              ><span>Detect selection omissions before and after cutover.</span>
+              ><span
+                >Detect selection omissions during the post-cutover
+                canary.</span
+              >
             </div>
             <div class="layer">
               <strong>Review and consent</strong
@@ -977,8 +980,8 @@
           <div class="section-head">
             <h2>Evidence earns each deletion.</h2>
             <p>
-              The gate stays mandatory until shadow evidence passes and a human
-              approves a separate cutover.
+              The M5 early local cutover is active. Ten merged PRs over seven
+              days must pass the post-cutover canary before deletion.
             </p>
           </div>
           <div class="contract" style="margin-bottom: 16px">
@@ -1029,25 +1032,24 @@
               >
             </li>
             <li>
-              <strong>No-skip and shadow · #2126</strong
+              <strong>No-skip audit · #2126</strong
               ><span
-                >Repair the retained target. Compare at least 10 distinct PRs
-                over 7 days through same-head audit or ordinary force-all
-                evidence within approved spend.</span
+                >Implement the protected manual audit and archive its incident
+                evidence. The cohort moved to #2128.</span
               >
             </li>
             <li>
               <strong>Cut over · #2127</strong
               ><span
-                >Extend the after-manifest generator, then use human approval to
-                remove pre-push verification. Keep the diagnostic runtime.</span
+                >Use the recorded human approval to remove pre-push
+                verification. Keep the diagnostic runtime and required CI.</span
               >
             </li>
             <li>
               <strong>Soak and delete · #2128</strong
               ><span
-                >After another 10 merged PRs over 7 days, retire only proved
-                gate-only code.</span
+                >Observe at least 10 merged PRs over 7 days, then retire only
+                proved gate-only code with separate approval.</span
               >
             </li>
             <li>
@@ -1066,7 +1068,7 @@
           </div>
           <div class="numbers">
             <div class="number">
-              <strong>10 PRs</strong><span>minimum shadow sample</span>
+              <strong>10 PRs</strong><span>minimum post-cutover canary</span>
             </div>
             <div class="number">
               <strong>7 days</strong><span>minimum calendar window</span>
@@ -1077,7 +1079,7 @@
             </div>
             <div class="number">
               <strong>2 approvals</strong
-              ><span>cutover and later deletion</span>
+              ><span>recorded cutover and separate deletion</span>
             </div>
           </div>
           <p class="evidence-note">
@@ -1090,8 +1092,9 @@
             <article class="card">
               <h3>Rollback before deletion</h3>
               <p>
-                Stop merges, restore the recorded ruleset, then revert the
-                cutover commit. The retained runtime resumes the hook.
+                On a confirmed author-check mapping omission, stop merge
+                handoffs and revert the cutover commit. Keep required CI and
+                strict current-base protection.
               </p>
             </article>
             <article class="card">

@@ -3,7 +3,7 @@ title: Agent Quality Gate — Mechanics
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-01
+last_verified: 2026-09-02
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -12,25 +12,33 @@ garden_lane: operator-runbooks
 
 # Agent Quality Gate — Mechanics
 
-This runbook owns gate invocation, path mapping, parallelism, caching, and the
-package-script refusal guard. Root `AGENTS.md` routes here.
+This runbook owns the retained legacy gate runtime, its path mapping,
+parallelism, caching, and package-script refusal guard. Normal delivery uses
+the direct author checks in
+[`pr-operating-card.md`](pr-operating-card.md#the-loop) plus required CI.
+Pre-push starts no repository verification. The complete gate remains callable
+as a diagnostic and remains covered in required CI. Issue #2128 owns its
+post-cutover observation and retirement receipt. Deletion needs separate human
+approval.
+
+Any pre-push or hosted hook-warm behavior below describes the dormant retained
+mode for diagnostic and rollback compatibility. No installed repository hook
+invokes that mode after M5.
 
 ## Invocation contract
 
-Before opening or updating an agent-authored PR:
+For an optional legacy diagnostic:
 
 ```bash
 pnpm agent:quality-gate          # inspect mapped commands and checklists
 pnpm agent:quality-gate --run    # execute the safe local mapped commands
-pnpm agent:autoreview            # required for a non-trivial completed batch
-pnpm agent:autoreview:test -- --jobs 1  # sequential full regression closeout for autoreview runtime changes
 ```
 
-The local-only gate never deploys or applies Terraform. Run it explicitly;
-do not assume the pre-push hook exists.
+The local-only diagnostic never deploys or applies Terraform. Run it only when
+the retained mapping is useful for diagnosis. It is not an author checkpoint.
 
-The package command and Trunk hook execute `./scripts/agent-quality-gate.sh`
-directly. This preserves the script's Bash `-p` startup boundary; it does not
+The package command executes `./scripts/agent-quality-gate.sh` directly. This
+preserves the script's Bash `-p` startup boundary; it does not
 grant operating-system privileges. The prologue clears the remaining inherited
 Bash controls before it resolves a path or parses an argument. Do not invoke the
 gate as `bash scripts/agent-quality-gate.sh`; that bypasses the shebang boundary.
@@ -65,8 +73,7 @@ eligible successes keep per-command stamps, so the later gate can avoid
 repeating them. Running a command directly proves it but records no per-command
 stamp.
 
-For a manual full-repository reproduction of the server-side pre-push baseline,
-including when hooks are absent or uncertain, use:
+For a manual full-repository legacy diagnostic, use:
 
 ```bash
 git fetch origin main:refs/remotes/origin/main
@@ -2432,12 +2439,12 @@ live fixture. A new fixture whose liveness the suite asserts takes the same
 `$((RANDOM % 900 + 100))-$$` suffix the lock-race fixtures use, and every scan
 for it is scoped to that exact name.
 
-The pre-push hook reaches neither bypass. It runs a fixed command line, and
-Trunk strips these variables. If coordination fails, the hook exits non-zero.
-After the reported recovery or compatibility blocker clears, fetch the hook's
-base and warm the matching stamp with `git fetch --quiet origin main &&
+The dormant pre-push mode reaches neither bypass. It uses a fixed command line,
+and Trunk strips these variables. If coordination fails, the mode exits
+non-zero. After the reported recovery or compatibility blocker clears, fetch
+the old hook base and warm the matching stamp with `git fetch --quiet origin main &&
 ./scripts/agent-quality-gate.sh --run --parallel 3 --base origin/main`. A
-verified matching success lets the hook's `--skip-if-fresh` path exit before it
+verified matching success lets the dormant `--skip-if-fresh` path exit before it
 registers another request.
 
 Set `AGENT_QUALITY_GATE_DEBUG_STAMP=1` to print the active freshness-stamp
@@ -2447,7 +2454,7 @@ the v4 `coordinatorContext`. The output therefore follows the active base
 binding instead of assuming whether it is a tip or merge-base. It prints only
 the stored identifiers and hashes. It does not print raw environment values.
 The switch does not change the stamp or stdout. To diagnose a miss, capture the
-warm command and the hook's exact fetch-and-run command back to back. The first
+warm command and the dormant hook's exact fetch-and-run command back to back. The first
 changed line names the input that prevented reuse.
 
 **Heavy suites form barriers.** Dashboard coverage, its scoped `vitest related`
@@ -2921,9 +2928,9 @@ pnpm agent:review-materiality
 The command reports `trivial`, `standard`, or `full` materiality from changed
 path risk and diff size, plus whether the change likely needs AGENTS, README,
 runbook, checklist, or skill context updates. It is advisory and does not
-replace the applicable gate command from step 3 of the
-[PR operating card](pr-operating-card.md),
-`pnpm agent:autoreview`, or `pnpm pr:ready-state`.
+replace the applicable author checks from step 3 of the
+[PR operating card](pr-operating-card.md), `pnpm agent:autoreview`, or
+`pnpm pr:ready-state`.
 
 To warm Turbo's local cache for the Turbo-backed package tasks mapped by the
 same gate without running deploy, Terraform, mutation, codegen, or install
@@ -2941,8 +2948,11 @@ Turbo commands with bounded parallelism too (`--parallel <n>`, default `2`, or
 concurrent logs do not interleave. The same dashboard `.next` serialization rule
 applies to prewarm.
 
-The Trunk pre-push hook delegates to this same path-aware gate with
-`--parallel 3 --skip-if-fresh --pre-push`. Independent ordinary commands can run
+## Dormant pre-push compatibility
+
+Before M5, the Trunk pre-push hook delegated to this path-aware gate with
+`--parallel 3 --skip-if-fresh --pre-push`. The retained diagnostic mode keeps
+the same behavior for rollback compatibility. Independent ordinary commands can run
 concurrently within the global capacity. An all-capacity command runs after the
 active pool drains. The hook reuses a recent successful manual gate run when
 the whole-run freshness key is unchanged and the recorded success is no older
@@ -2959,8 +2969,8 @@ script/lifecycle diff first, then set
 both the manual warm run and the hook) so a just-passed acknowledged manual gate
 can satisfy the `--skip-if-fresh` check.
 
-Hosted setup sets `agent.qualityGate.cloudPrePushRequireFresh=true` in the
-repository git config. A hosted pre-push with a fresh exact stamp exits through
+Before M5, hosted setup set `agent.qualityGate.cloudPrePushRequireFresh=true` in
+the repository git config. A hosted pre-push with a fresh exact stamp exits through
 the normal freshness path. A cold or invalid stamp exits with status 2 before
 scheduler registration, lock acquisition, or mapped work. Fetch `origin/main`,
 run `./scripts/agent-quality-gate.sh --run --parallel 3 --base origin/main` as
@@ -2969,8 +2979,8 @@ launcher, base, and parallelism match the hook's freshness key. A `pnpm`
 launcher adds material lifecycle environment values and cannot warm this exact
 hook stamp. This hook warm does not replace validation against the resolved PR
 base. A stacked PR must pass its resolved-base gate first, then warm the separate
-`origin/main` hook stamp. Local setup leaves this option unset, so a cold local
-pre-push still runs the mapped gate.
+`origin/main` hook stamp. Before M5, local setup left this option unset, so a
+cold local pre-push ran the mapped gate.
 
 Coordinator coalescing and retained-result reuse use the complete execution key
 described above, including HEAD. The leader recomputes it before execution and

@@ -3,7 +3,7 @@ title: Envio Indexer Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-09-02
 doc_type: agent-instructions
 scope: indexer-envio
 review_interval_days: 90
@@ -60,8 +60,13 @@ types, rollout behavior, and representative browser/query tests agree.
 
 Use the root `pnpm indexer:*` commands or package scripts documented in the
 README. After changing schema, config, entry-point imports, or handler module
-reachability, run `pnpm indexer:codegen`; after dashboard queries change, also
-run `pnpm dashboard:codegen`.
+reachability, run each affected code-generation variant. Use
+`pnpm indexer:testnet:codegen` for testnet inputs and
+`pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen` for
+bridge-only inputs. Shared schema or ABI changes affect all variants. Run
+non-mainnet variants first and `pnpm indexer:codegen` last because the variants
+share one generated tree. After dashboard queries change, also run
+`pnpm dashboard:codegen`.
 
 The wrapper reads `.env`, not named legacy env files. `.env.example` is the
 variable reference, including Polygon's per-chain RPC and start-block

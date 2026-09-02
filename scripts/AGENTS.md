@@ -3,7 +3,7 @@ title: Scripts Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-01
+last_verified: 2026-09-02
 doc_type: agent-instructions
 scope: scripts
 review_interval_days: 90
@@ -153,14 +153,15 @@ in the same PR.
   before mutation. `deploy-indexer:promote` acts on a registered remote
   deployment; use it through the `deploy-indexer` skill after its clean-tree
   preflight, verification, and production approval.
-- Do not add `--no-verify` to normal Git commands. `deploy-indexer.sh` uses it
-  only for `envio` trigger-ref pushes, which intentionally skip redundant
-  pre-push hooks; never generalize it.
+- Do not add `--no-verify` to normal Git commands. `deploy-indexer.sh` retains
+  it only for the isolated `envio` trigger-ref push. Do not copy it into a
+  developer workflow.
 - New deploy scripts print target, commit, and rollback/verification around
   mutation.
-- New Node root scripts need `pnpm lint:scripts` coverage; new shell scripts must
-  pass `bash -n`. Add a focused command to `scripts/agent-quality-gate.sh` for
-  behavior syntax and lint cannot verify.
+- New Node root scripts need `pnpm lint:scripts` coverage. New shell scripts
+  must pass `bash -n`. Add a focused test command for behavior that syntax and
+  lint cannot verify. Add required CI wiring when no existing fixed job owns
+  that test.
 - No ESLint `max-lines` reaches this tree. The file-size watchlist reports it
   instead — tests aside, three trust-root files exempt:
   [ADR 0065](../docs/adr/0065-scripts-file-size-watchlist-scope.md).
@@ -176,8 +177,9 @@ in the same PR.
 
 ## Verification
 
-Run the gate from operating-card step 3. It routes `bash -n`,
-`pnpm lint:scripts`, and focused tests. Add
-`pnpm agent:quality-gate:test` for gate routing changes,
-`node scripts/check-deploy-root-anchors.test.mjs` for deploy wrappers, and
-`pnpm agent:context-check` plus `pnpm docs:index` after a move.
+Apply step 3 of the [PR operating card](../docs/notes/pr-operating-card.md).
+Run `bash -n <changed-shell-script>`, `pnpm lint:scripts`, and the focused test
+for each changed root tool. Run `pnpm agent:quality-gate:test` only for a
+deliberate legacy-gate change. Run
+`node scripts/check-deploy-root-anchors.test.mjs` for deploy wrappers. Run
+`pnpm agent:context-check` and `pnpm docs:index --check` after a move.

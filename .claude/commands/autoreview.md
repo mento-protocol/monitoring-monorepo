@@ -24,7 +24,8 @@ checks and autoreview for that batch. Do not pause solely for cycle count before
 five review-triggered patch cycles are complete; pause for scope
 reclassification before starting a sixth. A clean source review is not test,
 browser, generated-artifact, CLI/API, or runtime proof, so retain every
-applicable gate.
+applicable author check from step 3 of the
+[operating card](../../docs/notes/pr-operating-card.md).
 If an autoreview runtime change triggers the owning adapter's self-review
 refusal, keep it intact and follow the trusted pre-change sequence in the owner
 note.

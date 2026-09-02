@@ -5,7 +5,7 @@ title: Backlog Sweep Skill
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-28
+last_verified: 2026-09-02
 doc_type: skill
 scope: repo-wide
 review_interval_days: 90
@@ -19,7 +19,8 @@ session they leave running — `/backlog-sweep`, or `/backlog-sweep 3` for a
 larger batch — and reads the report afterwards. Default batch size is 2.
 
 The session that runs this skill is an **orchestrator**. It ranks, picks,
-claims, and hands each issue to a dedicated worker subagent. It runs no gate,
+claims, and hands each issue to a dedicated worker subagent. It runs no author
+check,
 edits no source file, and opens no PR. Those three prohibitions keep concurrent
 workers out of each other's trees, so they bind only while separate workers
 exist: on a runtime with no way to spawn one, the session works the batch
@@ -46,7 +47,7 @@ worker works
 ## Preflight
 
 Every check here fails cheaply. Skipping one fails late, after issues are
-already claimed and a worker is mid-gate.
+already claimed and a worker is mid-validation.
 
 ```bash
 git fetch origin main
@@ -61,7 +62,7 @@ first-publish, because a cross-repository PR is one that workflow can never
 drive to ready
 ([`pr-operating-card.md`](../../../docs/notes/pr-operating-card.md)). Workers
 inherit this checkout's remote, so a sweep started from a fork would claim
-upstream issues, implement and gate all of them, and only then discover that
+upstream issues, implement and validate all of them, and only then discover that
 none of them can open a PR. Check the push URL here, where it costs one
 command.
 
@@ -69,21 +70,11 @@ A dirty session worktree is a stop, not a warning. The orchestrator does not
 commit, so nothing it does would clear those changes, and a sweep that runs
 beside unfinished work makes the two indistinguishable in the report.
 
-**Do not probe the gate's lock, and never stop on it.** Gate `--run` requests
-share a transient machine-wide coordinator that admits independent work from
-different worktrees under a weighted capacity, so a new gate **joins** a
-compatible coordinator rather than queueing behind it
-([`agent-quality-gate-mechanics.md`](../../../docs/notes/agent-quality-gate-mechanics.md)).
-The coordinator adopts the legacy `run.lock` while scheduled or recovery work
-exists, which makes `run.lock/owner` name a live pid for as long as anyone on
-the machine is gating — hours, routinely, during ordinary parallel work. A
-sweep that read that record as a busy signal would refuse to start in the
-normal case. Local workers wait with `--lock-wait 3600`. Hosted workers use the
-hook's exact 1,800-second default. Both cover scheduler admission, a command
-lease, a coalesced result, and an older legacy holder. Never pass `--no-lock`
-and never delete the lock directory: the gate owns its own reclaim rules, and a
-record that looks stale from outside is routinely a live holder inside a long
-browser suite.
+**Do not probe or change the legacy gate's lock.** Workers run the direct author
+checks from operating-card step 3 in isolated checkouts. The batch cap remains
+the CPU and memory bound. Run no more than three command-heavy check sets at
+once. A browser check that finds its fixed port in use must fail and report the
+conflict. It must not wait for, stop, or reuse another worker's process.
 
 **State the usage reality before starting.** One shipped PR costs roughly 3% of
 the weekly usage window, and every push to it triggers another round of bot
@@ -179,8 +170,8 @@ Take the top N — default 2 — that satisfy **all** of:
   That label is the repo's own ownership area, so it settles "same subsystem"
   by lookup rather than per-batch judgement. Two workers editing one package
   produce PRs whose diffs conflict and whose reviewers see a base moving under
-  them, and the second PR then pays for a merge, a re-gate, and a fresh review
-  round it did not need.
+  them, and the second PR then pays for a merge, repeated author checks, and a
+  fresh review round it did not need.
 
 If fewer than N issues qualify, take fewer and say so in the report. Never
 relax a rule to fill the batch. Zero qualifying issues is a valid result: write
@@ -356,10 +347,10 @@ Then spawn one worker subagent per issue. Give each a brief containing:
 
   **`$dir` is the working directory for every later command, not just the
   clone.** `git clone` does not move the shell, and a worker can inherit the
-  orchestrator's directory, so setup, the branch, the edits, the gate, and the
-  push would all run in the orchestrator's checkout — the one tree this whole
-  scheme exists to keep workers out of, and the one the preflight requires to
-  stay clean. A shell that does not persist between calls does not make this
+  orchestrator's directory, so setup, the branch, the edits, the author checks,
+  and the push would all run in the orchestrator's checkout — the one tree this
+  whole scheme exists to keep workers out of, and the one the preflight requires
+  to stay clean. A shell that does not persist between calls does not make this
   optional: every fresh shell re-enters `$dir` first, and no worker command is
   ever issued from an unstated directory.
 
@@ -367,7 +358,7 @@ Then spawn one worker subagent per issue. Give each a brief containing:
   fixed once and passed to every worker beside `sweep_id`. Take the **push**
   URL specifically: `git clone` copies no remote config, `pushurl` included, so
   where a checkout's fetch and push URLs differ a worker cloned from the fetch
-  URL gates cleanly and then pushes somewhere nobody is watching. `--push`
+  URL passes its checks and then pushes somewhere nobody is watching. `--push`
   returns `pushurl` when one is set and the fetch URL otherwise, so it is right
   either way. Do not hard-code the public HTTPS URL. A worker must push, not
   merely clone, and the transport that
@@ -375,7 +366,7 @@ Then spawn one worker subagent per issue. Give each a brief containing:
   using — often SSH, while `gh auth status` says nothing about git's credential
   helper. Cloning over a transport nobody has credentials for succeeds on a
   public repository and then fails at the push, after the whole issue has been
-  implemented and gated.
+  implemented and validated.
 
   `worker_dir` is set only on a respawn, to the path the orchestrator recorded
   for this worker. Use it verbatim; do not re-derive. A worker displaced to a
@@ -416,22 +407,12 @@ Then spawn one worker subagent per issue. Give each a brief containing:
   clone or a worktree — that its own runtime can actually write to, because two
   workers in one checkout is the failure this is preventing. Then run
   `./scripts/setup.sh` unsandboxed in **every** new clone, not conditionally.
-  It is what sets `core.hooksPath` to `.trunk/hooks`, so a checkout that only
-  ran `pnpm install` has no pre-push hook — and a worker there could push
-  without the gate the boundaries below forbid bypassing. Run it on **resumed**
-  checkouts too, not just fresh ones: the marker is written straight after the
-  clone, so an interruption between the two leaves an owned checkout with no
-  hooks, and a resume that trusted the marker would push from it. Rerunning is
-  free — the script owns codegen and the browser dependencies and skips its own
-  work when the inputs are unchanged — which is why this is a blanket rule
-  rather than a condition to evaluate.
-
-  Before spawning workers, read the orchestrator checkout's
-  `agent.qualityGate.cloudPrePushRequireFresh` value and pass one hosted/local
-  boolean to every worker. After `./scripts/setup.sh` in each fresh or resumed
-  clone, set `agent.qualityGate.cloudPrePushRequireFresh=true` when that boolean
-  is hosted. Unset the key when it is local. A clone does not inherit local git
-  config, so never infer its setup type from the clone before this propagation.
+  It sets `core.hooksPath` for the retained staged formatter and prepares the
+  dependencies, code generation, and browser runtime that author checks use.
+  Run it on **resumed** checkouts too, not just fresh ones: the marker is written
+  straight after the clone, so an interruption between the two leaves an owned
+  checkout without completed setup. Rerunning is cheap because the script owns
+  its setup markers and skips unchanged work.
 
   Branch as **the exact name the orchestrator passed to `issue:claim
 --branch`**, from `origin/main`. That name is already in the Project `Branch`
@@ -446,8 +427,8 @@ Then spawn one worker subagent per issue. Give each a brief containing:
   issue that was released and later re-selected. Resume it only on proof it is
   this sweep's own, which is what the `sweep-owner` comparison above decides.
   Keep the marker inside `.git/` — a file at the clone root would be untracked
-  in every worker checkout, where a clean-worktree check can refuse the gate or
-  the push and broad staging can commit the marker into the PR. Remote and
+  in every worker checkout, where a clean-worktree check can refuse shipping or
+  broad staging can commit the marker into the PR. Remote and
   branch are not proof — a second sweep of the same issue reproduces both, so
   that test also accepts a checkout a live worker is committing from, and two
   workers would then push from one tree. Anything else gets a
@@ -459,69 +440,21 @@ Then spawn one worker subagent per issue. Give each a brief containing:
   steps 2-7, end to end. Implement surgically — touch only what the issue
   needs, and read the scoped `AGENTS.md` for the package first.
 - **Formatting before the commit:** `./tools/trunk fmt <changed files>`. The
-  gate does not run it, and the required Code Quality check does.
-- **The gate**, unsandboxed, backgrounded, and polled inside the turn:
+  retained pre-commit hook formats staged files, and the required Code Quality
+  check enforces formatting in CI.
+- **The author checks:** Apply step 3 of the
+  [operating card](../../../docs/notes/pr-operating-card.md). Inspect any
+  manifest, lockfile, pnpm configuration, or patch change before the first
+  package-manager command. Run the selected direct commands in the order that
+  step defines. Record every result as `passed`, `failed`, or `not run` with its
+  reason. The legacy quality gate is diagnostic and is not the normal worker
+  path.
 
-  ```bash
-  pnpm agent:quality-gate                                # inspect first
-  ./scripts/agent-quality-gate.sh --run --parallel 3 --base origin/main  # hosted
-  pnpm agent:quality-gate --run --lock-wait 3600                     # local
-  ```
-
-  Run only the command for the current setup. Before a hosted run, fetch
-  `origin/main`. A hosted setup has
-  `agent.qualityGate.cloudPrePushRequireFresh=true` in local git config. Its
-  launcher, base, and parallelism must match the pre-push hook.
-
-  Inspect before running, as the operating card's step 3 requires: the bare
-  form prints the mapped commands **and the checklists to apply**, and the
-  checklists are the half that `--run` never surfaces.
-
-  Invoke the script directly. The `pnpm agent:quality-gate -- --run` spelling
-  mangles the arguments on the way through the package manager. Every worker
-  gate goes through the machine's gate coordinator and counts against its
-  capacity — 3 by default, `AGENT_QUALITY_GATE_CAPACITY`. Gates from different
-  worktrees run together under that capacity. Local sweeps keep the hour-long
-  `--lock-wait`. Hosted sweeps use the hook's exact 1,800-second default so the
-  push can reuse their stamp. Both budgets span scheduler admission, a command
-  lease, a coalesced result, and an older legacy holder.
-
-  **A package-manifest change needs the gate's acknowledgement, not a
-  hand-off.** When the issue touches a package manifest, `pnpm-lock.yaml`, pnpm
-  configuration, or `patches/**`, that invocation exits 2 before running any
-  check: `Refusing to run because package manifests, patches, or lockfile
-changed.` Review the lifecycle and install scripts in the diff first, then
-  record the acknowledgement in local git config and re-run:
-
-  ```bash
-  git config agent.qualityGate.allowPackageScriptChanges true
-  ./scripts/agent-quality-gate.sh --run --parallel 3 --base origin/main  # hosted
-  pnpm agent:quality-gate --run --lock-wait 3600                     # local
-  ```
-
-  Run only the command for the current setup.
-
-  The **config**, not the `--allow-package-script-changes` flag, is what lets
-  the push through. The pre-push hook runs the gate without that flag
-  (`.trunk/trunk.yaml`), and on a package-risk push the acknowledgement is part
-  of the freshness key — so a run acknowledged only on the command line cannot
-  be reused by the hook, which then refuses the push with the same message.
-  Local git config is read by both the manual run and the hook
-  ([`agent-quality-gate-mechanics.md`](../../../docs/notes/agent-quality-gate-mechanics.md)).
-  This is the gate's own designed path for that change class, so it is not the
-  blocked-control hand-off in the boundaries below: the acknowledgement records
-  a diff the worker has read, and setting it without reading one is the
-  dishonest version. Without this step a `risk:low` issue that edits a manifest
-  can never finish — it gates, then cannot push, and `--no-verify` is forbidden.
-
-  **Background it with the runtime's own mechanism, then poll within the
-  turn.** The command above is written foreground; do not run it that way for a
-  full gate. Start it the way the runtime backgrounds work — in Claude Code the
-  Bash tool's background mode, not a trailing `&` — and poll it to completion
-  inside the same turn. Judge the run by its exit status, never by the tail of
-  its log. A worker that instead ends its turn to wait never wakes: subagents
-  die at turn end, and a backgrounded process they were waiting on has no one
-  left to notice it finished.
+  Start a long author check with the runtime's background mechanism and poll it
+  to completion inside the same turn. Judge the command by its exit status,
+  never by the tail of its log. A worker that ends its turn while a check is
+  still running has no one left to record the result. A failed required check
+  blocks the ready handoff as the operating card specifies.
 
 - **The closeout**, chosen by the runtime the worker is in. Outside an active
   Codex session, bare `pnpm agent:autoreview`; when the codex engine is
@@ -562,11 +495,11 @@ changed.` Review the lifecycle and install scripts in the diff first, then
 These duties belong to the orchestrator. They are the reason this skill has an
 orchestrator at all.
 
-**Re-invoke a worker that has gone quiet.** Each worker polls its own gate and
-push inside its turn, so the orchestrator holds no timers and watches no pids —
-it never learns their pids in the first place. What it owns is the case
-in-turn polling cannot reach: a worker whose task notification shows it parked
-at a turn end, or whose last report has gone stale while its siblings advance.
+**Re-invoke a worker that has gone quiet.** Each worker polls its own author
+checks and push inside its turn, so the orchestrator holds no timers and watches
+no pids. It owns the case in-turn polling cannot reach: a worker whose task
+notification shows it parked at a turn end, or whose last report has gone stale
+while its siblings advance.
 Send that worker a message naming where it stopped and what to do next. Nothing
 else re-invokes a subagent that has already ended its turn.
 
@@ -578,17 +511,11 @@ as it arrives. A worker that finished without one is not done: ask it for the
 missing facts before writing the report, because nothing on disk reconstructs
 them afterwards.
 
-**Keep concurrent gates within the coordinator's capacity.** The coordinator
-schedules gate work across worktrees under a weighted capacity, 3 by default,
-so a batch of 4 runs at most three gates at once — hold the fourth worker at
-its gate step until one finishes rather than letting all four queue. The
-non-gate part of a worker's turn stays outside the coordinator, and that is
-sound on the axis the operating card warns about: each worker owns its own tmp
-clone, so no package-manager process can recreate or invalidate another's
-`node_modules`. It is not free on CPU and memory, which is why the batch cap
-and the coordinator's capacity both stay small. The card's read-only rule for
-spare same-machine workers governs _uncoordinated_ validation; every validation
-a worker runs here goes through the coordinator instead.
+**Keep concurrent author checks within the local resource bound.** A batch of
+four runs at most three command-heavy check sets at once. Hold the fourth until
+one finishes. Each worker owns its own clone, so no package-manager process can
+recreate or invalidate another's `node_modules`. Browser checks still fail on a
+fixed-port conflict; they never stop another worker's process.
 
 **Serialize the instructions so two workers never share a checkout.** Each
 worker owns exactly one clone and one branch, and no instruction ever names
@@ -597,8 +524,8 @@ wrong branch, and the worker that owns it will not notice.
 
 **Resume workers after a usage-limit interruption; never restart them.** The
 worker's clone still holds its branch, its claim, and often an open PR. A
-restart re-claims an issue that is already `agent-active`, re-runs a gate that
-already passed, and can open a second PR for the same branch. Wait for the
+restart re-claims an issue that is already `agent-active`, repeats completed
+author checks, and can open a second PR for the same branch. Wait for the
 limit to reset, then wake the existing worker where it stopped.
 
 **Record each worker's allocated path, and pass it back as `worker_dir` on any
@@ -628,12 +555,12 @@ crossed without anyone watching.
 - **MUST NOT weaken or widen a control that blocks the run.** Root
   [`AGENTS.md`](../../../AGENTS.md) states it: never weaken a control that
   blocks your own work, because an agent that can widen its own gate has no
-  gate. A gate refusal, a failing hook, a denied permission, or a sandbox block
-  is reported and handed to an independent session — never edited away by the
-  worker it is blocking. Reclassifying the blocking change as a separate task
-  does not qualify.
-- **MUST NOT bypass hooks.** No `--no-verify`, no hook-skipping environment
-  variable, no direct push that dodges the pre-push gate.
+  gate. A required author-check or CI failure, a failing hook, a denied
+  permission, or a sandbox block is reported and handed to an independent
+  session — never edited away by the worker it is blocking. Reclassifying the
+  blocking change as a separate task does not qualify.
+- **MUST NOT bypass retained hooks.** No `--no-verify` or hook-skipping
+  environment variable.
 - **MUST release a bad pick honestly.** An issue that turns out misgroomed, or
   a worker that stalls with no path forward, releases the issue rather than
   leaving it parked in `agent-active`:
