@@ -22,7 +22,6 @@ const OPTIONAL_CHECK_NAMES = new Set([
   // ran. Report its lag, but read review evidence instead of its conclusion.
   "CodeRabbit",
   "Core Web Vitals + accessibility (ui-dashboard)",
-  "Cursor Bugbot",
   "GraphQL schema diff",
   "jscpd",
 ]);
