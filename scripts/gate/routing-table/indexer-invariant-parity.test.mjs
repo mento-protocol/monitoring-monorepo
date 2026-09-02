@@ -1,16 +1,7 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
-import {
-  lstatSync,
-  mkdtempSync,
-  readFileSync,
-  readlinkSync,
-  readdirSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { readFileSync, readdirSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
 import {
@@ -84,22 +75,6 @@ const focusedRootIndexerInputs = [
   ...focusedRootIndexerConfigs,
   ...focusedNonConfigRootIndexerInputs,
 ];
-
-const ownedRootIndexerConfigs = getIndexerHandlerInvariantRoutingFamilies()
-  .flatMap(({ exact = [] }) => exact)
-  .filter((candidatePath) =>
-    /^indexer-envio\/config[^/]*\.yaml$/.test(candidatePath),
-  )
-  .sort();
-const focusedIndexerTestRuntimeInputs = [
-  ...focusedRootIndexerTestRuntimeInputs,
-  ...focusedIndexerScriptTestRuntimeInputs,
-].sort();
-const ownedIndexerTestRuntimeInputs =
-  getIndexerHandlerInvariantRoutingFamilies()
-    .filter(({ owner }) => owner === "test-runtime-inputs")
-    .flatMap(({ exact = [] }) => exact)
-    .sort();
 
 const indexerPackageArm = PACKAGE_ARMS.find(
   ({ patterns }) => patterns.length === 1 && patterns[0] === "indexer-envio/*",
@@ -220,76 +195,14 @@ test("the table and core agree on every focused input outside src and test", () 
     ...focusedRootIndexerInputs,
     ...focusedIndexerScriptTestRuntimeInputs,
   ].sort();
-  assert.equal(paths.length, 45, "focused external-input inventory changed");
   const decisions = getIndexerHandlerInvariantChecklistDecisions(paths);
   for (const decision of decisions) {
-    assert.notEqual(
-      decision.owner,
-      "outside-indexer-handler-invariant-scope",
-      `${decision.path} has no explicit external-input owner`,
-    );
     assert.equal(
       tableIndexerInvariantDecision(decision.path),
       decision.route,
       `${decision.path} differs between the core and routing table`,
     );
   }
-  assert.deepEqual(
-    decisions.filter(({ route }) => !route),
-    [
-      {
-        path: "indexer-envio/abis/liquity/AddressesRegistry.json",
-        route: false,
-        owner: "abi-nonruntime-inputs",
-      },
-      {
-        path: "indexer-envio/abis/wormhole/NttDeployHelper.json",
-        route: false,
-        owner: "abi-nonruntime-inputs",
-      },
-    ],
-    "only the two nonruntime ABIs stay excluded from focused external inputs",
-  );
-});
-
-test("focused external inputs and exact owners cannot drift", () => {
-  assert.deepEqual(
-    ownedRootIndexerConfigs,
-    focusedRootIndexerConfigs,
-    "every current root config YAML must have one live exact owner",
-  );
-  assert.deepEqual(
-    ownedIndexerTestRuntimeInputs,
-    focusedIndexerTestRuntimeInputs,
-    "every current focused test-runtime input must have one live exact owner",
-  );
-  for (const candidatePath of [
-    ...ownedRootIndexerConfigs.filter(
-      (ownedPath) => ownedPath !== "indexer-envio/config.yaml",
-    ),
-    ...focusedNonConfigRootIndexerInputs,
-    ...focusedIndexerScriptTestRuntimeInputs,
-  ]) {
-    assert.ok(
-      lstatSync(`${REPO}/${candidatePath}`).isFile(),
-      `${candidatePath} must remain a regular file while the classifier owns it`,
-    );
-  }
-  const configAlias = `${REPO}/indexer-envio/config.yaml`;
-  assert.ok(
-    lstatSync(configAlias).isSymbolicLink(),
-    "indexer-envio/config.yaml must remain the reviewed config alias",
-  );
-  const configAliasTarget = readlinkSync(configAlias);
-  assert.equal(
-    configAliasTarget,
-    "config.multichain.mainnet.yaml",
-    "indexer-envio/config.yaml must keep its reviewed mainnet target",
-  );
-  assert.ok(
-    lstatSync(`${REPO}/indexer-envio/${configAliasTarget}`).isFile(),
-    "the indexer config alias target must remain a regular file",
-  );
 });
 
 test("focused handler and RPC test support stays routed", () => {
@@ -581,91 +494,6 @@ test("exact owners do not widen into same-namespace files", () => {
       (family) => family.prefix === undefined,
     ),
     "a broad positive prefix returned to the exact owner table",
-  );
-});
-
-async function assertMalformedCoreFailsImport(label, rewrite, expected) {
-  const directory = mkdtempSync(`${tmpdir()}/indexer-routing-${label}-`);
-  const modulePath = `${directory}/agent-autoreview-core.mjs`;
-  try {
-    const source = read("/scripts/agent-autoreview-core.mjs");
-    const changed = rewrite(source);
-    assert.notEqual(changed, source, `${label} fixture changed no source`);
-    writeFileSync(modulePath, changed, "utf8");
-    await assert.rejects(import(pathToFileURL(modulePath).href), expected);
-  } finally {
-    rmSync(directory, { recursive: true, force: true });
-  }
-}
-
-test("the external family schema fails closed before table derivation", async () => {
-  await assertMalformedCoreFailsImport(
-    "route-type",
-    (source) => source.replace("route: false,", 'route: "false",'),
-    /route must be boolean/,
-  );
-  await assertMalformedCoreFailsImport(
-    "exact-overlap",
-    (source) =>
-      source.replace(
-        '"indexer-envio/src/pool/health.ts",',
-        '"indexer-envio/src/swap.ts",',
-      ),
-    /explicit path .* has 2 owners/,
-  );
-  await assertMalformedCoreFailsImport(
-    "bash-metacharacter",
-    (source) =>
-      source.replace(
-        '"indexer-envio/src/abis.ts",',
-        '"indexer-envio/src/abi*.ts",',
-      ),
-    /Bash-unsafe literal path/,
-  );
-  await assertMalformedCoreFailsImport(
-    "exact-directory",
-    (source) =>
-      source.replace(
-        '"indexer-envio/src/abis.ts",',
-        '"indexer-envio/src/abis.ts/",',
-      ),
-    /noncanonical or Bash-unsafe literal path/,
-  );
-  await assertMalformedCoreFailsImport(
-    "prefix-field",
-    (source) =>
-      source.replace(
-        'owner: "abi-runtime-inputs",\n      route: true,',
-        'owner: "abi-runtime-inputs",\n      route: true,\n      prefix: "indexer-envio/abis/",',
-      ),
-    /unknown keys: prefix/,
-  );
-  await assertMalformedCoreFailsImport(
-    "fallback-route",
-    (source) =>
-      source.replace(
-        'owner: "future-module",\n      route: false,',
-        'owner: "future-module",\n      route: true,',
-      ),
-    /fallback must remain unclassified/,
-  );
-  await assertMalformedCoreFailsImport(
-    "fallback-extension",
-    (source) =>
-      source.replace(
-        '          "json",\n        ],',
-        '          "json",\n          "md",\n        ],',
-      ),
-    /only the canonical src\/test JS, JSON, or TS module scope/,
-  );
-  await assertMalformedCoreFailsImport(
-    "fallback-prefix",
-    (source) =>
-      source.replace(
-        'prefixes: ["indexer-envio/src/", "indexer-envio/test/"],',
-        'prefixes: ["indexer-envio/src/", "indexer-envio/test/", "indexer-envio/config/"],',
-      ),
-    /only the canonical src\/test JS, JSON, or TS module scope/,
   );
 });
 

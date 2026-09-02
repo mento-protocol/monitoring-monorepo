@@ -850,6 +850,16 @@
                   reject every skip.
                 </li>
                 <li>
+                  Reject package-execution and evidence-instrument drift before
+                  fan-out. Protect both focused contract definitions. Package
+                  drift can use full ordinary CI. Instrument drift cannot count
+                  as evidence.
+                </li>
+                <li>
+                  Run two focused retained-contract suites. Skip only the four
+                  remaining legacy local-gate steps.
+                </li>
+                <li>
                   Forward no repository or environment secrets. Called jobs keep
                   a scoped read-only <code>GITHUB_TOKEN</code>.
                 </li>
@@ -887,23 +897,22 @@
             <strong>Shadow spend is approved:</strong> allow at most 45
             runner-minutes per no-skip run and 450 cumulative runner-minutes.
             Stop after a run exceeds 45 minutes. Do not start another run when
-            it could exceed the cumulative ceiling. The Phase 0 cold planning
-            estimate is 41.18 runner-minutes. It is not an upper bound. The
-            first all-cache-disabled proof runs only after M4 reaches protected
-            <code>main</code>. It counts as one of the 10 sampled PRs when it
-            meets the sample rules. M4 adds no schedule and spends no shadow
-            minutes. The Phase 0 sample selects one <code>CI</code> workflow run
-            for each of 10 immutable PR heads. It counts every non-skipped job
-            across all 13 attempts, including <code>Sentry suites</code> and the
-            <code>ci</code> aggregate. It excludes the separate
-            <code>Code Quality</code> workflow and the external
-            <code>Vercel</code> and <code>Vercel Preview Comments</code>
-            results. Included jobs use Blacksmith
-            <code>blacksmith-2vcpu-ubuntu-2404-arm</code>,
-            <code>blacksmith-2vcpu-ubuntu-2404</code>, and
-            <code>blacksmith-4vcpu-ubuntu-2404</code>, plus GitHub-hosted
-            <code>ubuntu-latest</code>. This is selected-workflow elapsed job
-            time, not total PR spend or provider-billed minutes.
+            it could exceed the cumulative ceiling. The first cold proof on PR
+            #2199 used 43.48 runner-minutes. It exposed a wrong target: the
+            audit repeated the full 20-job ordinary graph and included four
+            legacy-heavy steps. The operator stopped it. It gives no cohort
+            credit. The repair extracts the retained setup, package-policy, and
+            autoreview assertions into two focused suites. It excludes only the
+            four legacy selector steps. Retained generated-output and workflow
+            safeguards still run in fixed CI. The repaired cohort starts after
+            this change reaches protected <code>main</code>. Audit-eligible pull
+            requests use ordinary CI plus no-skip for the same immutable head.
+            Package, dependency, and toolchain pull requests use ordinary CI
+            only when the protected filter selects the full fixed job set and
+            every retained job succeeds. Evidence-instrument changes cannot
+            count. At least 10 pull requests over at least 7 calendar days must
+            pass these rules. The no-skip ceiling has 43.48 of 450
+            runner-minutes recorded.
           </div>
           <div class="callout">
             <strong>Trusted-candidate limit:</strong> GitHub gives dispatched
@@ -1022,8 +1031,9 @@
             <li>
               <strong>No-skip and shadow · #2126</strong
               ><span
-                >Add the bounded audit. Compare at least 10 distinct PRs over 7
-                days within approved spend.</span
+                >Repair the retained target. Compare at least 10 distinct PRs
+                over 7 days through same-head audit or ordinary force-all
+                evidence within approved spend.</span
               >
             </li>
             <li>

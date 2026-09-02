@@ -218,7 +218,10 @@ with the mechanisms that already operate:
 - Contract tests that pin required jobs, filters, command aliases, workflow
   trust boundaries, and aggregate behavior.
 - GitHub merge with explicit operator authority.
-- A full no-skip shadow run for control-plane changes.
+- A same-head no-skip run for audit-eligible changes.
+- A full ordinary CI run for package-execution changes that audit admission
+  rejects.
+- No evidence credit for an evidence-instrument change.
 
 The protected surface includes workflows, repository-owned actions, required
 job sets, command aliases, lifecycle and toolchain configuration, path filters,
@@ -484,16 +487,32 @@ display name. A moved pull request head makes the recorded result historical.
 
 M4 adds the manual protected-`main` dispatcher and reuses `ci.yml` through a
 same-commit workflow call. The caller passes the admitted source and base SHAs.
+After exact candidate checkout, a protected inline step compares
+package-execution and evidence-instrument paths between the admitted base and
+source trees. A candidate with either type of drift does not enter the no-skip
+audit. Package-execution drift can use ordinary CI when the protected path
+filter selects the full fixed job set and every retained job succeeds.
+Evidence-instrument drift cannot count through either evidence form. The
+protected set includes both focused retained-contract definitions. The
+comparison uses the admitted Git objects. It needs no content hash registry.
 The called workflow resolves its local actions from the running protected
 commit. It bypasses change selection, forces every conditional job, checks out
 the candidate by full SHA in each executing job, and rejects every job skip in
 the audit aggregate. It normalizes ESLint baselines, React Doctor, Peg policy
 lineage, the ADR reminder, and Terraform selection to the admitted base.
 
+The retained SessionEnd, setup-marker, package-policy, autoreview owner, and
+autoreview schema assertions run in two focused suites. The no-skip audit runs
+both suites. It excludes only the four legacy Bash, routing-table, and routing
+parity steps. Those routing-table suites test the legacy selector. Fixed CI
+runs the retained generated-output and workflow safeguards that the selector
+also routes.
+
 M4 does not add a schedule and does not run the shadow. The approved later
 execution ceiling is 45 runner-minutes per run and 450 runner-minutes total.
-The eligible cold proof counts as one sampled pull request. Stop after any run
-exceeds 45 runner-minutes or before cumulative use would exceed 450 minutes.
+The eligible cold proof counts as one sampled pull request only when its target
+and measurement instrument are valid. Stop after any run exceeds 45
+runner-minutes or before cumulative use would exceed 450 minutes.
 
 ## Cache Policy
 
@@ -846,22 +865,35 @@ The approved execution ceiling is 45 runner-minutes for one run and 450
 runner-minutes for the initial sample. Stop after a run exceeds 45 minutes.
 Do not start another run when it could exceed the cumulative ceiling.
 
-Run the existing path-gated CI and the distinct no-skip shadow on selected pull
-request heads. Compare at least one recorded head from each of at least 10
-distinct pull requests over at least 7 calendar days, subject to the approved
-spend ceiling. Multiple heads from one pull request do not increase the pull
-request count. The sample must include every inventory risk class that can
-appear in a pull request, including one dashboard and indexer cross-layer
-change.
+Record at least 10 distinct pull requests over at least 7 calendar days,
+subject to the approved spend ceiling. Multiple heads from one pull request do
+not increase the pull-request count. Use one of these evidence forms:
+
+- For a pull request without package-execution or evidence-instrument drift,
+  record ordinary CI and the distinct no-skip audit for the same immutable
+  head.
+- For a package, dependency, or toolchain pull request that no-skip admission
+  rejects, record ordinary CI only. The protected package path filter must
+  select every retained job. Every job must succeed. The pull request must not
+  change `ci.yml`, the no-skip dispatcher or checker closure, or a protected
+  local action.
+- Do not count a pull request that changes the evidence instrument through
+  either evidence form.
+
+The sample must include every risk class that its evidence form can support.
+It must include package, dependency, or toolchain coverage through the
+ordinary-force-all form. It must also include one dashboard and indexer
+cross-layer change through the same-head audit form.
 
 For every head, record:
 
 - The path-gated CI result and selected jobs.
-- The no-skip result and failed job.
+- The no-skip result and failed job, or `N/A` for an ordinary-force-all row.
 - Any product failure found only by no-skip CI because path-gated CI omitted
   the failing job.
-- Wall time, time to first failure, runner minutes, and retry reason for the
-  path-gated `CI` run and no-skip run as separate observations.
+- Wall time, time to first failure, runner minutes, and retry reason for each
+  workflow that the evidence form uses. Report no-skip aggregates with their
+  observed numerator and cohort denominator.
 - Any product failure, flake, cancellation, or infrastructure failure.
 
 Record a local gate result when it is available for the same SHA. Do not make

@@ -33,6 +33,7 @@ The word "required" means **enforced by the `main` branch ruleset**, not "feels 
 - `ci` (the CI sentinel job)
 - `Code Quality` (the Trunk workflow's job)
 - `Vercel` and `Vercel Preview Comments` (the Vercel platform)
+- `Sentry suites` (the credential-safe Sentry regression job)
 
 Verify the live list before relying on this:
 
@@ -84,7 +85,9 @@ The command checks these contracts without defining a second runtime router:
   command. It pins permissions, credential access, cache restores, cache saves,
   cleanup, and required-command ordering.
 - The no-skip audit suite pins protected-main admission, exact candidate and
-  base SHAs, zero skipped jobs, cold cache policy, and normalized PR-only checks.
+  base SHAs, the protected package and evidence-instrument drift comparison,
+  zero skipped jobs, the retained-command boundary, cold cache policy, and
+  normalized PR-only checks.
 
 ### Manual no-skip audit
 
@@ -94,16 +97,47 @@ full current head SHA, and full current protected-main SHA. Admission fails if
 the pull request, either SHA, repository identity, base branch, or live `main`
 has moved.
 
+After the exact checkout, protected inline admission code compares the admitted
+base and source Git trees. It rejects changes to package manifests, pnpm
+workspace files, pnpm lockfiles, package patches, the Node and pnpm selections,
+`.npmrc`, `.pnpmfile.cjs`, `pnpmfile.cjs`, and tracked `node_modules` paths.
+It also rejects changes to `ci.yml`, the no-skip dispatcher, its checker and
+runtime parser, both focused retained-contract definitions, and either
+protected local action. The reusable audit starts only after this comparison
+succeeds. Package-execution drift can use the ordinary-force-all evidence form
+when the protected filter selects every retained job and every job succeeds.
+Evidence-instrument drift cannot count through either evidence form. The
+comparison needs no content hash registry.
+
 Admission requires the pull request base SHA, dispatch `GITHUB_SHA`, and live
 `main` SHA to be equal. An older pull request with a stale base SHA is
 intentionally ineligible. Update or rebase its branch, then read fresh immutable
 inputs. Treat this refusal as fail-closed admission, not a workflow failure.
+
+The audit runs every retained deterministic CI job. It runs the focused agent
+setup and package-policy contract and the focused indexer autoreview invariant
+contract. It does not execute the legacy local-gate Bash regression suite,
+routing-table suites, or indexer route parity suite. Ordinary CI keeps those
+legacy steps while the mandatory local gate remains active. The audit still
+runs the retained package-script validator before dependency installation.
 
 - [ ] Keep the dispatcher read-only. Do not forward repository or environment
       secrets. Do not use `secrets: inherit`. Called jobs still receive GitHub's
       scoped read-only `GITHUB_TOKEN`.
 - [ ] Call `$/.github/workflows/ci.yml` only after admission. Keep the call job
       dependent on `admit`.
+- [ ] Run the protected candidate-execution and evidence-instrument comparison
+      after exact checkout and before the admission summary. Compare the
+      admitted base and source objects. Do not invoke candidate code or pnpm
+      during admission.
+- [ ] Keep package manifests, workspace files, lockfiles, package patches, Node
+      selection, pnpm configuration, and tracked `node_modules` in the
+      comparison path set. Do not add a content hash registry for data already
+      bound by the two Git objects.
+- [ ] Keep the semantic retained `ci.yml` graph pin current. Treat any pin
+      update as an explicit target change during the evidence window.
+- [ ] Keep audit inputs limited to `ci.yml` and the protected dispatcher. Do not
+      add a second workflow caller that can bypass admission.
 - [ ] In audit mode, skip checkout and `dorny/paths-filter` in `changes`. The
       protected workflow must set `forceAll`; it must not resolve a mutable branch.
 - [ ] Every candidate-executing job must check out the admitted source SHA with
@@ -119,6 +153,29 @@ inputs. Treat this refusal as fail-closed admission, not a workflow failure.
 - [ ] Skip Codecov, UI failure artifacts, and timeline actions in audit mode.
 - [ ] Use the separate audit aggregate with no `allowed-skips`. Keep the normal
       pull request aggregate and its reviewed conditional skips unchanged.
+- [ ] Keep the exact legacy local-gate steps conditional on
+      `!inputs.no_skip_audit`. Do not exclude a retained package, policy, trust,
+      documentation, browser, build, generation, or test command.
+- [ ] Reject package-execution path drift during the evidence window. Ordinary
+      CI remains the validation path for package, dependency, and toolchain PRs.
+- [ ] Reject evidence-instrument drift during admission. Protect `ci.yml`, the
+      dispatcher, the no-skip checker and runtime parser, both focused contract
+      definitions, and both protected local action trees. Do not count
+      instrument-changing pull requests.
+- [ ] Keep every package-execution admission path family in the ordinary
+      `controlPlane` filter. A qualifying ordinary-force-all proof must run
+      every retained job to success.
+- [ ] Keep the focused setup/package-policy and indexer autoreview invariant
+      steps exact, unconditional, and blocking in audit mode.
+- [ ] Keep the audit step-skip allowlist closed. Every retained command must
+      execute and remain blocking. Reject equivalent legacy entry points.
+- [ ] Keep both routing-table suite invocations outside the retained target.
+      Their assertions test the legacy selector. Fixed CI runs the retained
+      generated-output and workflow safeguards that the selector also routes.
+- [ ] Keep the same-repository candidate inside the accepted threat model. The
+      audit controls workflow selection and package execution configuration. It
+      does not sandbox deliberate process creation inside retained candidate
+      product, test, or dependency code.
 - [ ] Do not add a schedule until the eligible cold proof passes. Stop after a
       run exceeds 45 runner-minutes. Do not exceed 450 cumulative runner-minutes.
 

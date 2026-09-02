@@ -384,11 +384,10 @@ must update the canonical structure, which forces it to be re-proven in review
 rather than absorbed silently. Dependabot bumps to either action SHA need a
 paired edit. That is the same trade the suite-set equality already makes.
 
-The residual that remains is narrower: `ci` is the only required Actions context,
-so a diff that deletes both the job and its pin is still green. Adding
-`Sentry suites` as a required status check in the branch ruleset is the only
-close, and it is an out-of-repo settings change. If it is made, the job must
-never acquire an `if:` — GitHub treats a skipped required check as satisfied.
+The branch ruleset now requires `Sentry suites`. A diff that deletes both the
+job and its pin cannot merge because the required context does not report. The
+job must never acquire an `if:`. GitHub treats a skipped required check as
+satisfied.
 
 Assertion count is not assertion strength. A suite of `assert(true)` calls
 satisfies every leg. Closing that needs assertion-depth counting and, beyond it,
@@ -421,8 +420,8 @@ reshaped several suites.
    recorded above.
 3. **PR D.** Gate-probe robustness pass, with the manifest as the single source
    for `sentry:*` alias-to-suite resolution.
-4. **Operator, out of repo.** Add `Sentry suites` to the branch ruleset's
-   required checks.
+4. **Completed out of repo.** The live branch ruleset requires the
+   `Sentry suites` context.
 
 Each red path is proven to fail before it is trusted. This PR ships those proofs
 as `scripts/sentry/gate/sentry-suite-gate.test.mjs`: an emptied suite fails the summary

@@ -68,6 +68,55 @@ jobs:
           ref: ${{ inputs.source_sha }}
           fetch-depth: 0
           persist-credentials: false
+      - name: Reject candidate execution or evidence-instrument drift
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          BASE_SHA: ${{ inputs.base_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          protected_paths=(
+            .node-version
+            package.json
+            ":(glob)**/package.json"
+            package.json5
+            ":(glob)**/package.json5"
+            package.yaml
+            ":(glob)**/package.yaml"
+            pnpm-workspace.yaml
+            ":(glob)**/pnpm-workspace.yaml"
+            pnpm-lock.yaml
+            ":(glob)**/pnpm-lock.yaml"
+            .npmrc
+            ":(glob)**/.npmrc"
+            .pnpmfile.cjs
+            ":(glob)**/.pnpmfile.cjs"
+            pnpmfile.cjs
+            ":(glob)**/pnpmfile.cjs"
+            patches
+            ":(glob)**/patches"
+            ":(glob)**/patches/**"
+            node_modules
+            ":(glob)**/node_modules"
+            ":(glob)**/node_modules/**"
+            .github/workflows/ci.yml
+            .github/workflows/no-skip-audit.yml
+            scripts/bootstrap/agent-setup-contract.test.sh
+            scripts/agent-autoreview-indexer-invariant-contract.test.mjs
+            scripts/workflows/check-no-skip-audit.mjs
+            scripts/workflows/check-no-skip-audit.test.mjs
+            scripts/lib/workflow-yaml.mjs
+            .github/actions/pnpm-install
+            ":(glob).github/actions/pnpm-install/**"
+            .github/actions/resolve-eslint-baseline
+            ":(glob).github/actions/resolve-eslint-baseline/**"
+          )
+          if git diff --quiet "$BASE_SHA" "$SOURCE_SHA" -- "${protected_paths[@]}"; then
+            exit 0
+          fi
+          echo "Candidate execution or evidence-instrument files differ from the admitted base:" >&2
+          git diff --name-status "$BASE_SHA" "$SOURCE_SHA" -- "${protected_paths[@]}" >&2
+          exit 1
       - name: Verify exact source and base objects
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
@@ -90,7 +139,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   audit:
-    name: Full deterministic no-skip audit
+    name: Retained deterministic no-skip audit
     needs: admit
     permissions:
       actions: read

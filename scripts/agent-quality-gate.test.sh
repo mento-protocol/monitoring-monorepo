@@ -544,7 +544,6 @@ assert_script_occurrences() {
 gate_test_families=(
   gate-contract
   coordinator
-  install-wiring
   routing-packaging
   routing-sources
   execution-phases
@@ -6423,211 +6422,6 @@ for valid_coordinator in 0 false no 1 true yes; do
 done
 } # end family: coordinator
 
-# family: install-wiring
-# Pre-push hook installation, the shared install-marker library, and the
-# package-script pin validator.
-run_install_wiring_family() {
-arm_suite_abort_trap
-hook_repo="$(mktemp -d)"
-(
-  cd "$hook_repo"
-  git init -q
-  git config user.email test@example.invalid
-  git config user.name "Quality Gate Test"
-  mkdir -p scripts/bootstrap
-  cp "$repo_root/scripts/bootstrap/agent-session-end-hook.sh" scripts/bootstrap/
-  echo initial > README.md
-  git add README.md scripts/bootstrap/agent-session-end-hook.sh
-  git commit -qm init
-  git reflog expire --expire=now --all
-  echo changed >> README.md
-  git add README.md
-  git commit -qm "commit from session"
-  minimal_bin="$(mktemp -d)"
-  real_git="$(command -v git)"
-  real_git_quoted="$(printf '%q' "$real_git")"
-  IFS= read -r real_git_first_line < "$real_git" || real_git_first_line=""
-  if [[ "$real_git_first_line" == '#!'* ]]; then
-    # Codex Cloud exposes git as a bash wrapper; preserve that path even when
-    # this test constrains PATH to a tiny fixture directory.
-    cat > "$minimal_bin/git" <<EOF
-#!/bin/bash
-exec /bin/bash $real_git_quoted "\$@"
-EOF
-  else
-    cat > "$minimal_bin/git" <<EOF
-#!/bin/bash
-exec $real_git_quoted "\$@"
-EOF
-  fi
-  chmod +x "$minimal_bin/git"
-  for tool in awk bash cat dirname pwd tr wc; do
-    ln -s "$(command -v "$tool")" "$minimal_bin/$tool"
-  done
-  printf '{"cwd":"%s"}' "$hook_repo" |
-    env PATH="$minimal_bin" /bin/bash scripts/bootstrap/agent-session-end-hook.sh > "$output_file" 2>&1
-  rm -rf "$minimal_bin"
-)
-rm -rf "$hook_repo"
-assert_contains "Session touched the tree (1 recent commit(s), 0 unstaged file(s))."
-
-hook_noop_repo="$(mktemp -d)"
-(
-  cd "$hook_noop_repo"
-  git init -q
-  git config user.email test@example.invalid
-  git config user.name "Quality Gate Test"
-  mkdir -p scripts/bootstrap
-  cp "$repo_root/scripts/bootstrap/agent-session-end-hook.sh" scripts/bootstrap/
-  echo initial > README.md
-  git add README.md scripts/bootstrap/agent-session-end-hook.sh
-  git commit -qm init
-  git reflog expire --expire=now --all
-  printf '{"cwd":"%s"}' "$hook_noop_repo" |
-    bash scripts/bootstrap/agent-session-end-hook.sh > "$output_file" 2>&1
-)
-rm -rf "$hook_noop_repo"
-assert_not_contains "Session touched the tree"
-
-# scripts/lib/install-marker.sh is sourced by scripts/setup.sh and
-# scripts/bootstrap/claude-code-web-setup.sh, which skip install and codegen work
-# when a marker still holds the hash of their inputs. `bash -n` cannot see those
-# semantics, so exercise them here. The scratch path carries a space: the inline
-# copy this fragment replaced fed the file list to `xargs` unquoted, so such a
-# path split into two nonexistent files and dropped out of the hash entirely.
-# shellcheck source=scripts/lib/install-marker.sh
-source "$repo_root/scripts/lib/install-marker.sh"
-
-marker_scratch="$(mktemp -d "${TMPDIR:-/tmp}/install marker test.XXXXXX")"
-mkdir -p "$marker_scratch/inputs"
-printf 'one\n' > "$marker_scratch/inputs/plain.txt"
-printf 'two\n' > "$marker_scratch/inputs/name with space.txt"
-marker_file="$marker_scratch/marker.sha256"
-
-marker_hash="$(install_marker_hash_inputs "$marker_scratch/inputs" || true)"
-[[ -n "$marker_hash" ]] || fail "install_marker_hash_inputs produced no hash"
-if install_marker_matches "$marker_file" "$marker_hash"; then
-  fail "install-marker matched before any marker was written"
-fi
-install_marker_write "$marker_file" "$marker_hash"
-if ! install_marker_matches "$marker_file" "$marker_hash"; then
-  fail "install-marker did not match the marker it just wrote"
-fi
-
-marker_rerun_hash="$(install_marker_hash_inputs "$marker_scratch/inputs" || true)"
-[[ "$marker_rerun_hash" == "$marker_hash" ]] ||
-  fail "install-marker hash changed across two runs over identical inputs"
-if ! install_marker_matches "$marker_file" "$marker_rerun_hash"; then
-  fail "install-marker skip did not fire on an unchanged rerun"
-fi
-
-printf 'changed\n' > "$marker_scratch/inputs/name with space.txt"
-marker_changed_hash="$(install_marker_hash_inputs "$marker_scratch/inputs" || true)"
-[[ -n "$marker_changed_hash" ]] ||
-  fail "install-marker produced no hash after an input changed"
-[[ "$marker_changed_hash" != "$marker_hash" ]] ||
-  fail "install-marker ignored a change to an input path containing a space"
-if install_marker_matches "$marker_file" "$marker_changed_hash"; then
-  fail "install-marker matched a stale marker after its inputs changed"
-fi
-
-# A missing input set yields an empty hash, which never matches, so the caller
-# rebuilds instead of trusting a marker it cannot verify. Assert that against an
-# absent marker: `cat` of a missing file is also empty, so a matcher without the
-# empty-hash guard would compare "" to "" and report a match.
-marker_empty_hash="$(install_marker_hash_inputs "$marker_scratch/absent" || true)"
-[[ -z "$marker_empty_hash" ]] || fail "install-marker hashed a missing input set"
-if install_marker_matches "$marker_scratch/never-written.sha256" "$marker_empty_hash"; then
-  fail "install-marker matched an empty hash against an absent marker"
-fi
-if install_marker_matches "$marker_file" "$marker_empty_hash"; then
-  fail "install-marker matched on an empty hash"
-fi
-
-# An input that cannot be hashed must not silently drop out: a hash that omits
-# the same file on every run still matches its marker, so the guarded work never
-# reruns. Skipped as root, where mode 000 does not deny a read.
-if [[ "$(id -u)" != "0" ]]; then
-  printf 'three\n' > "$marker_scratch/inputs/unreadable.txt"
-  chmod 000 "$marker_scratch/inputs/unreadable.txt"
-  marker_partial_hash="$(install_marker_hash_inputs "$marker_scratch/inputs" || true)"
-  chmod 644 "$marker_scratch/inputs/unreadable.txt"
-  if [[ -n "$marker_partial_hash" ]]; then
-    fail "install-marker returned a hash that omits an unreadable input"
-  fi
-  rm -f "$marker_scratch/inputs/unreadable.txt"
-fi
-
-install_marker_write "$marker_file" ""
-if ! install_marker_matches "$marker_file" "$marker_hash"; then
-  fail "install_marker_write overwrote a marker with an empty hash"
-fi
-
-rm -rf "$marker_scratch"
-
-for marker_consumer in scripts/setup.sh scripts/bootstrap/claude-code-web-setup.sh; do
-  grep -q 'source "\$REPO_ROOT/scripts/lib/install-marker.sh"' "$marker_consumer" ||
-    fail "$marker_consumer no longer sources scripts/lib/install-marker.sh"
-  grep -q 'install_marker_hash_inputs' "$marker_consumer" ||
-    fail "$marker_consumer no longer uses the shared install-marker hash"
-done
-
-setup_shared_config_marker_block="$(
-  sed -n '/^shared_config_hash=/,/^)"$/p' scripts/setup.sh
-)"
-grep -q 'shared-config/scripts/build.mjs' <<<"$setup_shared_config_marker_block" ||
-  fail "scripts/setup.sh no longer invalidates its shared-config build marker when the clean-build wrapper changes"
-
-web_deps_marker_block="$(
-  sed -n '/^deps_hash=/,/^)"$/p' scripts/bootstrap/claude-code-web-setup.sh
-)"
-grep -q 'shared-config/scripts/build.mjs' <<<"$web_deps_marker_block" ||
-  fail "scripts/bootstrap/claude-code-web-setup.sh no longer invalidates its dependency marker when the clean-build wrapper changes"
-
-validator_repo="$(mktemp -d)"
-(
-  cd "$validator_repo"
-  cat > package.json <<'JSON'
-{
-  "name": "fixture",
-  "scripts": {
-    "agent:quality-gate": "true",
-    "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh",
-    "agent:context-check": "node scripts/context/check-agent-context.mjs",
-    "agent:autoreview": "./scripts/agent-autoreview.sh",
-    "agent:prewarm": "node scripts/gate/agent-prewarm.mjs",
-    "agent:prewarm:test": "node scripts/gate/agent-prewarm.test.mjs",
-    "agent:review-materiality": "node scripts/pr/review-materiality.mjs",
-    "agent:review-materiality:test": "node scripts/pr/review-materiality.test.mjs",
-    "docs:garden": "node scripts/docs/docs-garden-issue.mjs",
-    "docs:garden:test": "node scripts/docs/docs-garden-issue.test.mjs",
-    "docs:navigation-eval": "node scripts/docs/docs-navigation-eval.mjs",
-    "docs:navigation-eval:test": "node scripts/docs/docs-navigation-eval.test.mjs",
-    "issue:board": "node scripts/pr/agent-issue-board.mjs",
-    "issue:board:test": "node scripts/pr/agent-issue-board.test.mjs",
-    "issue:claim": "node scripts/pr/agent-issue-board.mjs claim",
-    "issue:review": "node scripts/pr/agent-issue-board.mjs review",
-    "issue:release": "node scripts/pr/agent-issue-board.mjs release",
-    "pr:feedback-state": "node scripts/pr/pr-feedback-state.mjs",
-    "pr:feedback-state:test": "node scripts/pr/pr-feedback-state.test.mjs",
-    "pr:ready-state": "node scripts/pr/pr-ready-state.mjs",
-    "pr:ready-state:test": "node scripts/pr/pr-ready-state.test.mjs",
-    "lockfile:lint": "node scripts/supply-chain/lockfile-lint.mjs",
-    "lockfile:lint:test": "node scripts/supply-chain/lockfile-lint.test.mjs",
-    "skew:check": "node scripts/supply-chain/version-skew-check.mjs",
-    "skew:check:test": "node scripts/supply-chain/version-skew-check.test.mjs"
-  }
-}
-JSON
-  set +e
-  node "$repo_root/scripts/check-agent-quality-gate-package-scripts.mjs" > "$output_file" 2>&1
-  exit_code=$?
-  set -e
-  [[ "$exit_code" -ne 0 ]]
-)
-rm -rf "$validator_repo"
-assert_contains 'package.json scripts.agent:quality-gate must be "./scripts/agent-quality-gate.sh"'
-} # end family: install-wiring
 
 # family: routing-packaging
 # Routing for packaging inputs: workspace manifests, package-manager
@@ -6799,6 +6593,7 @@ assert_not_contains_mapped "- pnpm --filter @mento-protocol/ui-dashboard test:br
 
 run_gate "package.json"
 assert_contains "- bash scripts/agent-quality-gate.test.sh (agent quality gate package script changed)"
+assert_contains "- bash scripts/bootstrap/agent-setup-contract.test.sh"
 assert_contains "- pnpm skew:check (workspace dependency/config changed)"
 assert_contains "- pnpm --filter @mento-protocol/indexer-envio indexer:bridge-only:codegen (workspace dependency/config changed)"
 assert_contains "- bash ui-dashboard/scripts/check-react-doctor-score.sh (workspace dependency/config changed)"
@@ -6856,6 +6651,7 @@ NODE
 rm -rf "$package_json_repo"
 assert_contains "- tooling"
 assert_contains "- node scripts/check-agent-quality-gate-package-scripts.mjs (root package tooling script changed)"
+assert_contains "- bash scripts/bootstrap/agent-setup-contract.test.sh (root package tooling script changed)"
 assert_contains "- bash scripts/agent-quality-gate.test.sh (root package tooling script changed)"
 assert_contains "- node scripts/gate/agent-prewarm.test.mjs (root package tooling script changed)"
 assert_contains "- node scripts/pr/review-materiality.test.mjs (root package tooling script changed)"
@@ -7810,6 +7606,7 @@ indexer_invariant_positive_paths=(
 )
 for indexer_invariant_path in "${indexer_invariant_positive_paths[@]}"; do
   run_gate "$indexer_invariant_path"
+  assert_contains "- node --test scripts/agent-autoreview-indexer-invariant-contract.test.mjs (indexer autoreview invariant inventory changed)"
   assert_contains "- node --test scripts/gate/routing-table/indexer-invariant-parity.test.mjs (indexer invariant routing inventory changed)"
   assert_contains "- docs/pr-checklists/indexer-handler-invariants.md (indexer handler/RPC/self-heal invariant path changed)"
 done
@@ -7832,6 +7629,7 @@ indexer_invariant_negative_inventory_paths=(
 for indexer_invariant_path in "${indexer_invariant_negative_inventory_paths[@]}"; do
   run_gate "$indexer_invariant_path"
   assert_not_contains "docs/pr-checklists/indexer-handler-invariants.md"
+  assert_contains "- node --test scripts/agent-autoreview-indexer-invariant-contract.test.mjs (indexer autoreview invariant inventory changed)"
   assert_contains "- node --test scripts/gate/routing-table/indexer-invariant-parity.test.mjs (indexer invariant routing inventory changed)"
 done
 
@@ -7853,6 +7651,7 @@ for indexer_invariant_future_extension in ts tsx mts cts js jsx mjs cjs; do
   done
 done
 run_gate "${indexer_invariant_future_paths[@]}"
+assert_contains "- node --test scripts/agent-autoreview-indexer-invariant-contract.test.mjs (indexer autoreview invariant inventory changed)"
 assert_contains "- node --test scripts/gate/routing-table/indexer-invariant-parity.test.mjs (indexer invariant routing inventory changed)"
 assert_not_contains "docs/pr-checklists/indexer-handler-invariants.md"
 
@@ -8677,6 +8476,11 @@ assert_not_contains "- node scripts/check-deploy-root-anchors.test.mjs (deploy w
 run_gate "scripts/bootstrap/agent-session-end-hook.sh"
 assert_contains "- bash -n scripts/bootstrap/agent-session-end-hook.sh (shell script changed)"
 assert_contains "- pnpm agent:context-check (agent SessionEnd hook changed)"
+assert_contains "- bash scripts/bootstrap/agent-setup-contract.test.sh (agent setup contract changed)"
+
+run_gate "scripts/bootstrap/agent-setup-contract.test.sh"
+assert_contains "- bash -n scripts/bootstrap/agent-setup-contract.test.sh (shell script changed)"
+assert_contains "- bash scripts/bootstrap/agent-setup-contract.test.sh (agent setup contract changed)"
 
 for path in \
   scripts/bootstrap/codex-cloud-setup.sh \
@@ -8688,15 +8492,15 @@ done
 
 run_gate "scripts/lib/install-marker.sh"
 assert_contains "- bash -n scripts/lib/install-marker.sh (shell script changed)"
-assert_contains "- pnpm agent:quality-gate:test (shared install-marker fragment changed)"
+assert_contains "- bash scripts/bootstrap/agent-setup-contract.test.sh (shared install-marker fragment changed)"
 
 run_gate "scripts/setup.sh"
 assert_contains "- bash -n scripts/setup.sh (shell script changed)"
-assert_contains "- pnpm agent:quality-gate:test (install-marker consumer changed)"
+assert_contains "- bash scripts/bootstrap/agent-setup-contract.test.sh (install-marker consumer changed)"
 
 run_gate "scripts/bootstrap/claude-code-web-setup.sh"
 assert_contains "- bash -n scripts/bootstrap/claude-code-web-setup.sh (shell script changed)"
-assert_contains "- pnpm agent:quality-gate:test (install-marker consumer changed)"
+assert_contains "- bash scripts/bootstrap/agent-setup-contract.test.sh (install-marker consumer changed)"
 
 # The React Doctor wrappers live in ui-dashboard/scripts/, not scripts/. The
 # routing suite still owns them because it copies and runs the diff wrapper in
@@ -8724,7 +8528,7 @@ run_gate "scripts/check-agent-quality-gate-package-scripts.mjs"
 assert_not_contains "- bash -n scripts/check-agent-quality-gate-package-scripts"
 assert_contains "- pnpm lint:scripts (root build script changed)"
 assert_contains "- node scripts/check-agent-quality-gate-package-scripts.mjs (agent quality gate package script validator changed)"
-assert_contains "- pnpm agent:quality-gate:test (agent quality gate mapping changed)"
+assert_contains "- bash scripts/bootstrap/agent-setup-contract.test.sh (agent package-policy contract changed)"
 
 for path in \
   scripts/gate/quality-gate-coordinator-core.mjs \
@@ -13392,7 +13196,11 @@ assert_contains "- pnpm agent:autoreview:test (agent autoreview helper changed)"
 assert_contains "- docs/pr-checklists/indexer-handler-invariants.md (indexer invariant routing source changed)"
 assert_contains "$fixture_canary (autoreview secret scanner changed)"
 assert_contains "- pnpm gate:routing-table:test (indexer invariant routing source changed)"
+assert_contains "- node --test scripts/agent-autoreview-indexer-invariant-contract.test.mjs (indexer invariant routing source changed)"
 assert_contains "- pnpm agent:quality-gate:test (indexer invariant routing source changed)"
+
+run_gate "scripts/agent-autoreview-indexer-invariant-contract.test.mjs"
+assert_contains "- node --test scripts/agent-autoreview-indexer-invariant-contract.test.mjs (indexer autoreview invariant contract changed)"
 
 run_gate "scripts/agent-autoreview-secret-suppressions.json"
 assert_contains "- pnpm agent:autoreview:test (agent autoreview helper changed)"

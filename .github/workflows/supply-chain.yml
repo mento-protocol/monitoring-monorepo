@@ -53,8 +53,9 @@ name: Supply Chain
 on:
   workflow_dispatch:
   # Advisory workflow — NOT in the branch ruleset's required checks (only
-  # `ci`, `Code Quality`, and the Vercel checks are), so a `paths:` filter
-  # is safe here: a skipped run cannot leave a *required* check pending.
+  # `ci`, `Code Quality`, `Sentry suites`, and the Vercel checks are), so a
+  # `paths:` filter is safe here: a skipped run cannot leave a *required* check
+  # pending.
   #
   # Both gates only have new information to add when the dependency graph
   # changes: `pnpm audit` scans the whole lockfile (a PR that doesn't touch
