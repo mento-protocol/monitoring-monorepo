@@ -522,7 +522,7 @@ const readyState = {
       ready: false,
       required: false,
       state: "stale",
-      fallbackAction: "request_review_once_for_head_after_optional_check",
+      fallbackAction: "request_review_once_for_head",
     },
     reviewCommentReplies: {
       ready: false,

@@ -111,7 +111,8 @@ reviews:
     # once when it opens, and the head-bound `@coderabbitai review` request in
     # `docs/notes/pr-ready-state.md` buys the final head one more review.
     # Intermediate pushes lose CodeRabbit only: Codex and Claude still review
-    # them, and the merge oracle gates on the final head.
+    # them. No required gate changes, because CodeRabbit's check was already
+    # advisory; ADR 0066 records the residual this does cost.
     auto_incremental_review: false
     # The vendor default of 5, kept. It now only matters if incremental
     # reviews are re-enabled; the org-level global override pins it too.

@@ -273,9 +273,14 @@ polled. Do not foreground-poll and never sleep-poll.
      after paging. If MCP cannot prove complete pagination, the current file
      count, or an unchanged head, fail closed and treat the skip as no current
      review signal. Generic no-file, incremental no-change, rate-limit, and
-     free-tier replies never count. Incremental auto-review is off, so a push
-     starts no automatic CodeRabbit review: refresh once the head is stable
-     instead of waiting for a run. If the signal is missing or stale and no
+     free-tier replies never count. Before deciding whether to wait, read
+     `reviews.auto_review.auto_incremental_review` from the PR head's
+     `.coderabbit.yaml` — CodeRabbit reads that file from the source branch, so
+     a branch predating the 2026-09-02 change still has it `true`. When it is
+     `true`, wait for the automatic attempt to become terminal as before; when
+     it is `false`, a push onto an already-open PR starts no automatic review —
+     only the opening push does — so refresh once the head is stable instead of
+     waiting. If the signal is missing or stale and no
      trusted top-level comment contains both `@coderabbitai review` and
      `<!-- coderabbit-final-head-review:<full-head-sha> -->`, use
      `add_issue_comment` to post `@coderabbitai review`, a blank line, and that
@@ -286,7 +291,12 @@ polled. Do not foreground-poll and never sleep-poll.
      require the request comment to be at or after it, and recheck the current
      full head immediately before the write. The marker detects completed
      requests and provides best-effort duplicate suppression; the issue-comment
-     API has no atomic claim.
+     API has no atomic claim. After posting, wait for that closeout attempt to
+     become terminal before the final feedback sweep, bounded by the babysit
+     deadline, and handle any findings it posts. That wait is procedural: the
+     readiness contract still never blocks on the CodeRabbit signal, and a
+     review that never starts or is still pending at the deadline is optional
+     lag.
 4. **A fork head stops the run on this surface too.** The repo gate that refuses
    fork heads (`.claude/babysit-pr.sh`) cannot run here, so establish
    `isCrossRepository` from the PR payload before the first repo command and

@@ -195,6 +195,13 @@ and stay in place as history.
 - **The add-on was enabled, not deferred.** It runs in Automatic mode with a
   $500/month cap. The enabling date was not recorded; the billing page showed
   it active on 2026-09-02.
+- **The vendor renamed the plan tiers.** Checked 2026-09-02,
+  docs.coderabbit.ai/management/plans calls the tier this org holds **Team**
+  (formerly Pro+): $48/developer/month annual, $60 month-to-month, 8 PR
+  reviews/hour, 300 files per review. Pro is now Essentials. The rate-limit
+  notice on PR #2236 reported `Plan: Team` for that reason — the same seat
+  under a new name, not a downgrade. Sections above this amendment keep the
+  Pro+ name they were written with.
 - **The cap was reached on 2026-09-02**, sixteen days before the cycle resets
   on 2026-09-18. Past the cap only the free refill runs — 1 review/hour for
   the sole PR author, who sits permanently in the 90+ reviews/7-days tier —
@@ -211,10 +218,11 @@ and stay in place as history.
   `@coderabbitai review` request that
   [`../notes/pr-ready-state.md`](../notes/pr-ready-state.md) already defines.
   Intermediate pushes get no automatic CodeRabbit review; Codex and Claude
-  still review them, and the merge oracle gates only on the final head, so
-  merge-time coverage is unchanged. Expected: review events per PR fall from
-  ~3.9 to ~2, each changed file bills at most twice per PR, and spend lands at
-  an estimated $200–$250/month at current volume.
+  still review them. No required gate changes, because CodeRabbit's own check
+  was already advisory — but read the accepted residual below for what this
+  does cost. Expected: review events per PR fall from ~3.9 to ~2, each changed
+  file bills at most twice per PR, and spend lands at an estimated
+  $200–$250/month at current volume.
 - **The repository file governs this key.** The organization-level Global
   overrides applied on 2026-09-02 pin `reviews.profile`,
   `request_changes_workflow`, `auto_review.enabled`, `auto_review.drafts`, and
@@ -227,9 +235,23 @@ and stay in place as history.
   duplicate reviews; tightening `path_filters` saves little because the billed
   unit is an already-small push delta. The $0 OSS tier stays the fallback if
   spend must return to zero.
+- **Accepted residual:** the closeout request is now the final head's only
+  chance at a CodeRabbit review, and readiness never waits for it.
+  `summarizeCodeRabbitReviewGate` returns `required: false`, `ready` is
+  `required.ready` in `scripts/pr/pr-ready-state-core.mjs`, and
+  `pr-ready-state.test.mjs` pins "never awaits a pending CodeRabbit check for
+  readiness" — so a head can reach all-clear with its CodeRabbit signal still
+  `requested`. That was already true before this change; incremental review
+  only made it unlikely to bite, because the final head usually already
+  carried an automatic review. The partial cover stays as
+  [`../notes/pr-ready-state.md`](../notes/pr-ready-state.md) states it: if the
+  requested review lands while the PR is still under watch, rerun
+  `pr:feedback-state` and handle its findings before all-clear. Making the
+  CodeRabbit signal blocking is a separate decision this ADR does not take.
 - **Revisit trigger:** closeout-only coverage missing defects that incremental
-  reviews would have caught, or spend still tracking toward the cap after the
-  2026-09-18 reset.
+  reviews would have caught, heads merging with the closeout review still only
+  `requested`, or spend still tracking toward the cap after the 2026-09-18
+  reset.
 
 ## Alternatives considered
 

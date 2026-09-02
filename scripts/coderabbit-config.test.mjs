@@ -10,9 +10,11 @@
  * `drafts`, `auto_pause_after_reviewed_commits`) above the repository file
  * (ADR 0066). They do not pin `auto_incremental_review`, so the repository
  * file governs it; `path_filters` and `path_instructions` stay
- * repository-owned. For all three, this pin is the only guard. Now that
- * CodeRabbit findings feed the `pr:feedback-state` ledger — the repo's merge
- * oracle — that is a trust boundary, not a preference.
+ * repository-owned. This pin is the only guard for those three
+ * repository-owned keys: `auto_incremental_review`, `path_filters`, and
+ * `path_instructions`. Now that CodeRabbit findings feed the
+ * `pr:feedback-state` ledger — the repo's merge oracle — that is a trust
+ * boundary, not a preference.
  *
  * The committed config must parse and be EXACTLY equal to EXPECTED_CONFIG
  * below. Spot checks would let an added key (`early_access`, a `tools` block,
