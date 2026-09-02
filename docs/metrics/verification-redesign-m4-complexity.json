@@ -705,8 +705,8 @@
       "name": "retained-graph-pin-incident-receipt",
       "pr": 2218,
       "baseSha": "2222f4a3fa78a0cb905cdbcae998206e631f6b67",
-      "sourceSha": "83996f31a06827b90330c935b075b315e1a98acd",
-      "trackedCommand": "git diff --numstat 2222f4a3fa78a0cb905cdbcae998206e631f6b67 83996f31a06827b90330c935b075b315e1a98acd -- . ':!docs/metrics/verification-redesign-m4-complexity.json'",
+      "sourceSha": "a1e187b2c78f550f58d3815fbdd4eeaab439fdad",
+      "trackedCommand": "git diff --numstat 2222f4a3fa78a0cb905cdbcae998206e631f6b67 a1e187b2c78f550f58d3815fbdd4eeaab439fdad -- . ':!docs/metrics/verification-redesign-m4-complexity.json'",
       "files": [
         {
           "path": "docs/README.md",
@@ -723,20 +723,20 @@
         {
           "path": "docs/metrics/verification-redesign-m4-shadow-evidence.md",
           "category": "doc",
-          "additions": 126,
-          "deletions": 36
+          "additions": 130,
+          "deletions": 39
         }
       ],
       "totals": {
         "doc": {
-          "additions": 183,
-          "deletions": 63,
-          "net": 120
+          "additions": 187,
+          "deletions": 66,
+          "net": 121
         },
         "all": {
-          "additions": 183,
-          "deletions": 63,
-          "net": 120
+          "additions": 187,
+          "deletions": 66,
+          "net": 121
         }
       },
       "replacementSpecific": {
@@ -773,9 +773,9 @@
         "net": 660
       },
       "doc": {
-        "additions": 910,
-        "deletions": 188,
-        "net": 722
+        "additions": 914,
+        "deletions": 191,
+        "net": 723
       },
       "package": {
         "additions": 1,
@@ -783,9 +783,9 @@
         "net": 0
       },
       "all": {
-        "additions": 2834,
-        "deletions": 785,
-        "net": 2049
+        "additions": 2838,
+        "deletions": 788,
+        "net": 2050
       }
     },
     "replacementSpecific": {
