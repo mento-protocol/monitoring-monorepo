@@ -3,7 +3,7 @@ title: Verification Redesign M4 Shadow Evidence
 status: draft
 owner: eng
 canonical: false
-last_verified: 2026-09-01
+last_verified: 2026-09-02
 doc_type: report
 scope: ci/process
 review_interval_days: 30
@@ -14,8 +14,8 @@ garden_lane: notes-plans-archive
 
 This receipt records the evidence window for
 [issue #2126](https://github.com/mento-protocol/monitoring-monorepo/issues/2126).
-It freezes the sample and cost rules. It also records the first eligible run's
-retained-target scope and cost incident.
+It freezes the sample and cost rules. It also records the first two eligible
+runs' retained-target and evidence-instrument incidents.
 
 This receipt authorizes no cutover, schedule, ruleset change, local-gate
 removal, legacy deletion, or merge. Each action needs the separate approval
@@ -30,7 +30,9 @@ remains merge authority during this evidence window.
 - [M4 additive complexity receipt](verification-redesign-m4-complexity.json)
 - [M4 implementation PR #2186](https://github.com/mento-protocol/monitoring-monorepo/pull/2186)
 - [No-skip permission repair PR #2197](https://github.com/mento-protocol/monitoring-monorepo/pull/2197)
+- [Retained audit boundary repair PR #2207](https://github.com/mento-protocol/monitoring-monorepo/pull/2207)
 - [Approved spend ceiling and stop condition](https://github.com/mento-protocol/monitoring-monorepo/issues/2126#issuecomment-5490125645)
+- [PR #2205 incident timeline record](https://github.com/mento-protocol/monitoring-monorepo/issues/2126#issuecomment-5506845017)
 
 GitHub retains the raw Actions job and log detail for 90 days. This committed
 receipt retains the derived result and source links. `eng` owns collection and
@@ -157,7 +159,7 @@ consumed that one-shot authority. Later sample runs remain subject to the linked
 conditions, and explicit operator selection and coordination. This receipt
 adds no schedule.
 
-### Identity and classification
+### PR #2199 identity and classification
 
 | Field                      | Value                                                                                      |
 | -------------------------- | ------------------------------------------------------------------------------------------ |
@@ -172,7 +174,7 @@ adds no schedule.
 | Purposive-selection reason | First eligible post-permission-repair cold proof; exercises a root or control-plane change |
 | Observation snapshot       | Terminal no-skip run `updatedAt` 2026-09-01T15:59:23Z                                      |
 
-### Ordinary path-gated CI
+### PR #2199 ordinary path-gated CI
 
 | Field                                  | Value                                                                                                    |
 | -------------------------------------- | -------------------------------------------------------------------------------------------------------- |
@@ -190,7 +192,7 @@ adds no schedule.
 | Cancellations                          | None                                                                                                     |
 | Infrastructure failures                | None observed                                                                                            |
 
-### No-skip audit
+### PR #2199 no-skip audit
 
 | Field                                   | Value                                                                                                    |
 | --------------------------------------- | -------------------------------------------------------------------------------------------------------- |
@@ -282,6 +284,85 @@ dispatch.
 | Local gate result for the same SHA                                                      | Not collected and not required for this incident record; the repair delivery uses the exact user-approved legacy-gate waiver, focused checks, and exact-head CI |
 | Credentialed publication, deployment, Terraform apply or plan, and live-provider checks | Excluded from no-skip; record the applicable separate assurance path before cutover                                                                             |
 
+## Cold-proof attempt on PR #2205: workflow graph pin incident
+
+This run used the repaired retained-target boundary from PR #2207. Immutable
+admission passed and every audit job started. The run then found that PR #2206
+had changed the protected `ci.yml` graph without updating its semantic graph
+pin. Frozen rule 9 excludes this run from the acceptance cohort and stops new
+samples until the approved repair reaches reviewed protected `main`.
+
+### PR #2205 identity and classification
+
+| Field                      | Value                                                                                                  |
+| -------------------------- | ------------------------------------------------------------------------------------------------------ |
+| Incident status            | Eligible evidence-instrument incident; excluded from the repaired acceptance cohort                    |
+| Pull request               | [#2205](https://github.com/mento-protocol/monitoring-monorepo/pull/2205)                               |
+| Incident UTC date          | 2026-09-02 from the no-skip run's `createdAt`                                                          |
+| Coverage class             | Root or control-plane and workflow supply chain; incident evidence only                                |
+| Workflow revision          | `46a1e871788b2b13376e367d0fc008a348713a85`                                                             |
+| Source SHA                 | `27dde8cdccca7f302d38a7e538a2d65a10b05397`                                                             |
+| Base SHA                   | `46a1e871788b2b13376e367d0fc008a348713a85`                                                             |
+| Purposive-selection reason | First post-boundary-repair cold proof on an eligible same-repository workflow dependency update        |
+| Observation snapshot       | Terminal no-skip run `updatedAt` 2026-09-02T08:35:13Z and ordinary CI `updatedAt` 2026-09-02T08:58:06Z |
+
+### PR #2205 ordinary path-gated CI
+
+| Field                                  | Value                                                                                                    |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Workflow run and attempt IDs           | [33608437874](https://github.com/mento-protocol/monitoring-monorepo/actions/runs/33608437874), attempt 1 |
+| Selected jobs                          | All 20 ordinary `CI` jobs, including the aggregate                                                       |
+| Result                                 | Failure                                                                                                  |
+| Failed job                             | `Production infrastructure contract`; aggregate `ci` also failed                                         |
+| Wall time                              | 34 minutes 45 seconds                                                                                    |
+| Time to first terminal required result | 9 seconds; Vercel Preview Comments completed at 2026-09-02T08:23:30Z                                     |
+| Time to first useful failure           | 2 minutes 2 seconds; the production contract completed at 2026-09-02T08:25:23Z                           |
+| Runner minutes                         | 64.77 across 20 non-skipped job windows                                                                  |
+| Retries and reasons                    | None; attempt 1 only                                                                                     |
+| Product failures                       | None observed                                                                                            |
+| Flakes                                 | None observed; root scripts passed in 33 minutes 58 seconds                                              |
+| Cancellations                          | None                                                                                                     |
+| Infrastructure failures                | None observed                                                                                            |
+
+### PR #2205 no-skip audit
+
+| Field                                   | Value                                                                                                    |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Workflow run and attempt IDs            | [33608642694](https://github.com/mento-protocol/monitoring-monorepo/actions/runs/33608642694), attempt 1 |
+| Created                                 | 2026-09-02T08:25:38Z                                                                                     |
+| Completed                               | 2026-09-02T08:35:13Z                                                                                     |
+| Executed jobs                           | Admission plus every retained reusable-CI job; 21 total job windows                                      |
+| Result                                  | Failure                                                                                                  |
+| Failed job                              | `Production infrastructure contract`; aggregate `ci` also failed                                         |
+| Wall time                               | 9 minutes 35 seconds                                                                                     |
+| Time to first useful failure            | 2 minutes 8 seconds; the production contract completed at 2026-09-02T08:27:46Z                           |
+| Runner minutes                          | 30.25                                                                                                    |
+| Cumulative no-skip runner minutes       | 73.73 of 450                                                                                             |
+| Retries and reasons                     | None; attempt 1 only                                                                                     |
+| Product failures                        | None observed                                                                                            |
+| Product failure found only by no-skip   | None observed                                                                                            |
+| Flakes, cancellations, infrastructure   | None observed                                                                                            |
+| Retained-boundary timing                | Root scripts passed in 81 seconds with the four legacy local-gate steps excluded                         |
+| Per-run and cumulative ceiling decision | 30.25 is below 45 and 73.73 is below 450; the instrument defect stopped the window before either ceiling |
+
+### Evidence-instrument incident
+
+PR #2206 changed the root-scripts timeout in `ci.yml` from 40 to 55 minutes.
+It updated the fixed CI timeout contract but left `CI_GRAPH_HASH` at
+`98fb0c2945d78059147cfe7b9ccbd8d00e3b2be9a2bb9edc76c104a4c9ca7eef`.
+The intended combined graph hashes to
+`f6ca3dcc0d25bfafb4e9da11df0bb1d380e5373db5b0cfcd17aaafc53df2d530`.
+
+PR #2206 was tested against protected `main` before PR #2207 introduced the
+graph pin. GitHub then created the squash result on top of PR #2207 without PR
+CI on that combined tree. Protected-main CI, PR #2205 ordinary CI, and the
+no-skip audit all failed with `retained audit workflow graph changed`.
+
+The operator approved the exact one-line graph-pin repair and its evidence
+receipts. The repair changes no workflow, admission rule, permission, schedule,
+hook, or legacy gate. No later sample can start until that repair merges and
+protected-main CI passes.
+
 ## Coverage ledger
 
 The live sample must fill every row before cutover. One pull request can cover
@@ -289,31 +370,31 @@ more than one row. Same-head audit rows cover product and cross-layer selection
 risk. Ordinary-force-all rows cover package, dependency, toolchain, and
 supply-chain execution risk.
 
-| Required coverage                               | Evidence form      | Status        | Sample or evidence                           |
-| ----------------------------------------------- | ------------------ | ------------- | -------------------------------------------- |
-| Dashboard-only                                  | Same-head audit    | Pending       | Pending for the repaired cohort              |
-| Indexer-only                                    | Same-head audit    | Pending       | Pending for the repaired cohort              |
-| Dashboard and indexer cross-layer               | Same-head audit    | Pending       | Pending for the repaired cohort              |
-| Root or control-plane                           | Same-head audit    | Incident only | PR #2199; no repaired-cohort coverage credit |
-| Package, dependency, toolchain, or supply-chain | Ordinary force-all | Pending       | Pending for the repaired cohort              |
-| Required risk-class union                       | Both forms         | Pending       | PR #2199 remains incident evidence only      |
+| Required coverage                               | Evidence form      | Status        | Sample or evidence                             |
+| ----------------------------------------------- | ------------------ | ------------- | ---------------------------------------------- |
+| Dashboard-only                                  | Same-head audit    | Pending       | Pending for the repaired cohort                |
+| Indexer-only                                    | Same-head audit    | Pending       | Pending for the repaired cohort                |
+| Dashboard and indexer cross-layer               | Same-head audit    | Pending       | Pending for the repaired cohort                |
+| Root or control-plane                           | Same-head audit    | Incident only | PRs #2199 and #2205; no repaired-cohort credit |
+| Package, dependency, toolchain, or supply-chain | Ordinary force-all | Pending       | Pending for the repaired cohort                |
+| Required risk-class union                       | Both forms         | Pending       | PRs #2199 and #2205 remain incident evidence   |
 
 ## Window summary
 
-| Measure                                | Current value                                          |
-| -------------------------------------- | ------------------------------------------------------ |
-| Evidence window status                 | Stopped for a retained-target scope and cost defect    |
-| Eligible incident pull requests        | 1                                                      |
-| Accepted repaired-cohort pull requests | 0 of at least 10                                       |
-| First accepted UTC date                | Pending                                                |
-| Last accepted UTC date                 | Pending                                                |
-| Inclusive accepted UTC date span       | 0 of at least 7 dates                                  |
-| No-skip cumulative runner minutes      | 43.48 of 450                                           |
-| Ordinary CI median and maximum         | Pending; no accepted repaired-cohort sample            |
-| No-skip median and maximum             | Pending; report observed numerator over cohort size    |
-| p95                                    | Not reported for a cohort of at least 10 pull requests |
-| Selection-only product failures        | None observed                                          |
-| Retained-target scope/cost incidents   | 1                                                      |
+| Measure                                 | Current value                                          |
+| --------------------------------------- | ------------------------------------------------------ |
+| Evidence window status                  | Stopped for an evidence-instrument graph-pin defect    |
+| Eligible incident pull requests         | 2                                                      |
+| Accepted repaired-cohort pull requests  | 0 of at least 10                                       |
+| First accepted UTC date                 | Pending                                                |
+| Last accepted UTC date                  | Pending                                                |
+| Inclusive accepted UTC date span        | 0 of at least 7 dates                                  |
+| No-skip cumulative runner minutes       | 73.73 of 450                                           |
+| Ordinary CI median and maximum          | Pending; no accepted repaired-cohort sample            |
+| No-skip median and maximum              | Pending; report observed numerator over cohort size    |
+| p95                                     | Not reported for a cohort of at least 10 pull requests |
+| Selection-only product failures         | None observed                                          |
+| Retained-target or instrument incidents | 2                                                      |
 
 The receipt remains draft until the frozen sample contract passes. Passing the
 receipt supports a separate human cutover decision. It does not make that
