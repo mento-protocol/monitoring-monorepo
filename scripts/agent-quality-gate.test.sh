@@ -6494,6 +6494,36 @@ run_drain_refresh_barrier_selection_regression() {
       fail "an unreadable drain refresh barrier name armed anyway"
   fi
   chmod 600 "${barrier}.command"
+
+  # A name that resolves nowhere, or to something that is not a file, is still
+  # a name a fixture asked for. `-e` alone is false for a dangling symlink, so
+  # both of these used to fall through to arming on the first drain.
+  for broken in dangling directory; do
+    rm -f "${barrier}.used" "${barrier}.ready" "${barrier}.command"
+    rm -rf "${barrier}.command.dir"
+    : > "${barrier}.release"
+    if [[ "$broken" == dangling ]]; then
+      ln -s "${barrier}.command.absent" "${barrier}.command"
+    else
+      mkdir -p "${barrier}.command.dir"
+      ln -s "${barrier}.command.dir" "${barrier}.command"
+    fi
+    rc=0
+    (
+      # shellcheck disable=SC2034
+      drain_refresh_test_barrier="$barrier"
+      # shellcheck disable=SC2034
+      gate_drain_active_mapped_command="pnpm agent:prewarm:test"
+      eval "$source_body"
+      gate_drain_test_refresh_barrier
+    ) 2>/dev/null || rc=$?
+    [[ "$rc" -eq 2 ]] ||
+      fail "a ${broken} drain refresh barrier name returned ${rc}, expected 2"
+    [[ ! -e "${barrier}.ready" && ! -e "${barrier}.used" ]] ||
+      fail "a ${broken} drain refresh barrier name armed anyway"
+  done
+  rm -f "${barrier}.command"
+  rm -rf "${barrier}.command.dir"
   unset -f barrier_case
   rm -rf "$fixture_root"
 }

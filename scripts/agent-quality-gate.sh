@@ -3614,11 +3614,14 @@ gate_drain_test_refresh_barrier() {
   local expected=""
   local attempt
   [[ -n "$barrier" && ! -e "${barrier}.used" ]] || return 0
-  if [[ -e "${barrier}.command" ]]; then
-    # `-e` then `-r`, not `-r` alone: `-r` is false for a file that exists and
-    # cannot be read, which would make an unreadable name indistinguishable
-    # from no name at all.
-    [[ -r "${barrier}.command" ]] || {
+  if [[ -e "${barrier}.command" || -L "${barrier}.command" ]]; then
+    # Presence first, then readability — not `-r` alone, which is false both
+    # for a name that is absent and for one that exists and cannot be read,
+    # collapsing a refusal into "unnamed" and arming anywhere. `-L` joins `-e`
+    # because a dangling symlink is a name a fixture asked for and this cannot
+    # resolve; `-e` alone is false for one. `-f` because a directory or a FIFO
+    # at this path is not a name either.
+    [[ -f "${barrier}.command" && -r "${barrier}.command" ]] || {
       echo "error: the test-only drain refresh barrier name is unreadable." >&2
       return 2
     }
