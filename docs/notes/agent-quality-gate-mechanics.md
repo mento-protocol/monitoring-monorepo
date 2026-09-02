@@ -2345,8 +2345,11 @@ active control.
   it means to meet in a `.command` sibling of the barrier path, and the barrier
   arms only there. The name is optional — an unnamed barrier keeps arming on the
   first drain — but a name that was asked for and cannot be resolved fails the
-  drain closed rather than arming everywhere: present but unreadable, empty, or
-  unreadable by any other cause. A name needs no trailing newline. The command
+  drain closed rather than arming everywhere: unreadable, empty, dangling, or
+  not a regular file. Presence and validity are deliberately different tests —
+  presence does not follow a symlink, so a name pointing nowhere is still a name
+  that was asked for, while validity does, so a symlink to a regular file is a
+  valid name. Both copies of the selector, shell and Darwin, follow that rule. A name needs no trailing newline. The command
   is named for the barrier at three shell sites, because a parallel command's
   `run_with_timeout` runs inside the worker subshell while the parent reaps that
   worker and runs the drain; naming it only in the child would make a parallel

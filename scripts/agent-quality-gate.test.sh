@@ -6522,7 +6522,25 @@ run_drain_refresh_barrier_selection_regression() {
     [[ ! -e "${barrier}.ready" && ! -e "${barrier}.used" ]] ||
       fail "a ${broken} drain refresh barrier name armed anyway"
   done
-  rm -f "${barrier}.command"
+  # The mirror of those two: a symlink that resolves to a regular file is a
+  # valid name, because `-f` follows the link and the read succeeds. The Darwin
+  # seam has to accept the same thing, so this pins the contract both copy.
+  rm -f "${barrier}.used" "${barrier}.ready" "${barrier}.command"
+  rm -rf "${barrier}.command.dir"
+  : > "${barrier}.release"
+  printf '%s\n' "pnpm agent:prewarm:test" > "${barrier}.command.target"
+  ln -s "${barrier}.command.target" "${barrier}.command"
+  (
+    # shellcheck disable=SC2034
+    drain_refresh_test_barrier="$barrier"
+    # shellcheck disable=SC2034
+    gate_drain_active_mapped_command="pnpm agent:prewarm:test"
+    eval "$source_body"
+    gate_drain_test_refresh_barrier
+  ) || fail "a symlinked drain refresh barrier name was refused"
+  [[ -e "${barrier}.ready" ]] ||
+    fail "a symlinked drain refresh barrier name did not arm"
+  rm -f "${barrier}.command" "${barrier}.command.target"
   rm -rf "${barrier}.command.dir"
   unset -f barrier_case
   rm -rf "$fixture_root"

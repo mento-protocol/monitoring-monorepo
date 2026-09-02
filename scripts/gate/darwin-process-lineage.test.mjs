@@ -3791,6 +3791,15 @@ test("the Darwin census barrier arms only on the drain a fixture named", async (
       arms: true,
       raw: named,
     },
+    // A symlink to a regular file is a valid name: the shell selector's `-f`
+    // follows the link and reads it, so refusing it here would diverge.
+    {
+      name: "symlinked",
+      command: named,
+      active: named,
+      arms: true,
+      link: true,
+    },
   ];
   try {
     const observed = [];
@@ -3799,7 +3808,10 @@ test("the Darwin census barrier arms only on the drain a fixture named", async (
       // Pre-created so an arming case returns on its first poll rather than
       // spending the seam's twenty-second budget.
       writeFileSync(`${barrier}.release`, "");
-      if (item.raw !== undefined) {
+      if (item.link) {
+        writeFileSync(`${barrier}.command.target`, `${item.command}\n`);
+        symlinkSync(`${barrier}.command.target`, `${barrier}.command`);
+      } else if (item.raw !== undefined) {
         writeFileSync(`${barrier}.command`, item.raw);
       } else if (item.command !== undefined) {
         writeFileSync(`${barrier}.command`, `${item.command}\n`);
@@ -3951,7 +3963,13 @@ test("every Darwin settlement route carries the active mapped command", () => {
     moduleSource,
     "waitAtDarwinCensusTestBarrier",
   );
-  assert.match(barrierCall, /descriptors\.length === 1/u);
+  // Not just that the singleton check exists: an inverted ternary would keep a
+  // single lineage from selecting its named barrier and let a cohort select
+  // one, so both branch values are pinned.
+  assert.match(
+    barrierCall,
+    /descriptors\.length === 1\s*\?\s*activeMappedCommand\s*:\s*null/u,
+  );
   // Both CLI branches read the option, and each shell invocation passes it.
   assert.equal(
     moduleSource.split('options.get("--active-mapped-command")').length - 1,

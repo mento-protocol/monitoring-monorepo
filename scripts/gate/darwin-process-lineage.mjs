@@ -1,6 +1,12 @@
 #!/usr/bin/env node
 
-import { existsSync, lstatSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { constants as osConstants } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
@@ -691,21 +697,34 @@ function uidMatches(record) {
 }
 
 // The mapped command a fixture named for this barrier, or null when it named
-// none. Presence decides that a name was asked for: an unresolvable one is
-// still a request, so a dangling symlink or a directory must not read as
-// "unnamed". `lstat` rather than `existsSync` because the latter follows the
-// link and is false when its target is absent. A name that was asked for and
-// cannot be resolved fails the drain closed, matching the shell contract —
-// arming everywhere instead is the wrong-drain race the name exists to close.
+// none. This mirrors the shell selector exactly, and the two tests are
+// deliberately different ones.
+//
+// Presence is `lstat`, matching `-e || -L`: an unresolvable name is still a
+// name that was asked for, so a dangling symlink must not read as "unnamed".
+// `existsSync` follows the link and would.
+//
+// Validity is `stat`, matching `-f`, which also follows: a symlink to a regular
+// file is a valid name and reading it works, so rejecting it here would refuse
+// something the shell accepts. `stat` throws for a dangling link and reports a
+// directory or FIFO as not a file, so both still fail closed.
+//
+// A name that was asked for and cannot be resolved fails the drain closed.
+// Arming everywhere instead is the wrong-drain race the name exists to close.
 function readDrainRefreshBarrierCommand(barrier) {
   const path = `${barrier}.command`;
-  let named;
   try {
-    named = lstatSync(path);
+    lstatSync(path);
   } catch {
     return null;
   }
-  if (!named.isFile()) {
+  let resolved;
+  try {
+    resolved = statSync(path);
+  } catch {
+    resolved = undefined;
+  }
+  if (resolved?.isFile() !== true) {
     fail("the test-only drain refresh barrier name is not a regular file");
   }
   let contents;
