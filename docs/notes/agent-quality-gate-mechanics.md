@@ -578,8 +578,14 @@ walk excludes only named dependency, tool-cache, generated-build, coverage,
 documentation, and local-evidence directories:
 `.git`, `.cache`, `.investigations`, `.next`, `.pnpm-store`, `.rankings`,
 `.reviews`, `.tmp`, `.trunk`, `.turbo`, `coverage`, `dist`, `docs`,
-`node_modules`, and `vendor`. Its exact allowlist contains only reviewed local
-protocols that cannot request an external process. Static inspection cannot
+`node_modules`, and `vendor`. Its exact allowlist holds reviewed local protocols
+that cannot request an external process, plus one operator-run installer.
+`scripts/review/install-review-eval-launchd.sh` calls `launchctl` to install the
+review-eval scheduler. It is never a mapped command, and it refuses to start
+when the gate exports `AGENTQG_RUN` or `AGENTQG_REQUEST`, so it cannot create a
+process during a gate run that lineage tracking would miss. A source hash binds
+every entry, so one changed byte fails closed until a new capability review.
+Static inspection cannot
 detect arbitrary runtime-built broker calls or calls hidden in excluded
 dependencies and system executables. The coalition mismatch exclusion
 classifies external-service processes only within this preflight contract.
