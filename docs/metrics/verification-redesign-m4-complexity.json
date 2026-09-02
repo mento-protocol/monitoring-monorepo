@@ -704,9 +704,9 @@
     {
       "name": "retained-graph-pin-incident-receipt",
       "pr": 2218,
-      "baseSha": "a115d0039d7b54de3d926c9686340f2065692e5f",
-      "sourceSha": "f13b2a9e62bc21f3dbd348ddd2e8ddfcdab72330",
-      "trackedCommand": "git diff --numstat a115d0039d7b54de3d926c9686340f2065692e5f f13b2a9e62bc21f3dbd348ddd2e8ddfcdab72330 -- . ':!docs/metrics/verification-redesign-m4-complexity.json'",
+      "baseSha": "1a42df0a0fbabdb9d2ac8c5dd8c8d63ba4d83fb6",
+      "sourceSha": "f3c1e45e31101f598156c26448da58b6bf2a5bec",
+      "trackedCommand": "git diff --numstat 1a42df0a0fbabdb9d2ac8c5dd8c8d63ba4d83fb6 f3c1e45e31101f598156c26448da58b6bf2a5bec -- . ':!docs/metrics/verification-redesign-m4-complexity.json'",
       "files": [
         {
           "path": "docs/README.md",
