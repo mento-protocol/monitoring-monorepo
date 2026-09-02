@@ -1075,6 +1075,12 @@ active_worker_start_identities=()
 # use the contract that was selected before the worker started. It must not
 # infer a contract from mutable state-file presence.
 active_worker_lifecycle_contracts=()
+# Mapped command names align with the same registry. The EXIT/INT/TERM teardown
+# drains registered workers after the normal reaping loop is gone, so it cannot
+# recover a name from that loop's locals. Without one it would compare the
+# test-only refresh barrier against whatever the last sequential command left in
+# `gate_drain_active_mapped_command`.
+active_worker_mapped_commands=()
 
 # A signal can arrive after Bash creates a parallel worker but before the parent
 # records its process group. Defer INT/TERM handling across that short registry
@@ -1087,6 +1093,10 @@ if [[ -n "$worker_registration_test_barrier" && "${NODE_ENV:-}" != "test" ]]; th
   echo "AGENT_QUALITY_GATE_TEST_WORKER_REGISTRATION_BARRIER: test-only override requires NODE_ENV=test" >&2
   exit 2
 fi
+# The mapped command whose drains are running right now, for the test-only
+# refresh barrier's `.command` rendezvous. Declared here so it is always defined
+# under `set -u`, including for a drain that runs outside any mapped command.
+gate_drain_active_mapped_command=""
 drain_refresh_test_barrier="${AGENT_QUALITY_GATE_TEST_DRAIN_REFRESH_BARRIER:-}"
 if [[ -n "$drain_refresh_test_barrier" && "${NODE_ENV:-}" != "test" ]]; then
   echo "AGENT_QUALITY_GATE_TEST_DRAIN_REFRESH_BARRIER: test-only override requires NODE_ENV=test" >&2
@@ -1480,7 +1490,11 @@ teardown_active_timeouts() {
   local -a worker_drain_identities=("${active_worker_drain_identities[@]+"${active_worker_drain_identities[@]}"}")
   local -a worker_start_identities=("${active_worker_start_identities[@]+"${active_worker_start_identities[@]}"}")
   local -a worker_lifecycle_contracts=("${active_worker_lifecycle_contracts[@]+"${active_worker_lifecycle_contracts[@]}"}")
+  local -a worker_mapped_commands=("${active_worker_mapped_commands[@]+"${active_worker_mapped_commands[@]}"}")
   local -a darwin_cohort_tokens=()
+  # Mapped command names aligned with darwin_cohort_tokens. A one-token cohort
+  # is one identifiable command and keeps its name; see the cohort drain below.
+  local -a darwin_cohort_commands=()
   local -a fallback_args=()
   for record in "${timeout_records[@]+"${timeout_records[@]}"}"; do
     pid="${record%%|*}"
@@ -1496,10 +1510,12 @@ teardown_active_timeouts() {
     -n "${worker_drain_identities[*]-}" ||
     -n "${worker_start_identities[*]-}" ||
     -n "${worker_lifecycle_contracts[*]-}" ||
+    -n "${worker_mapped_commands[*]-}" ||
     -n "$timeout_drain_identity" ]] || return 0
   if ! [[ "${#worker_pgids[@]}" -eq "${#worker_drain_identities[@]}" &&
     "${#worker_pgids[@]}" -eq "${#worker_start_identities[@]}" &&
-    "${#worker_pgids[@]}" -eq "${#worker_lifecycle_contracts[@]}" ]]; then
+    "${#worker_pgids[@]}" -eq "${#worker_lifecycle_contracts[@]}" &&
+    "${#worker_pgids[@]}" -eq "${#worker_mapped_commands[@]}" ]]; then
     echo "error: parallel worker cleanup registry is inconsistent." >&2
     case "$gate_lock_enabled" in
       0|false|no)
@@ -1524,6 +1540,9 @@ teardown_active_timeouts() {
     if [[ -n "$timeout_drain_identity" &&
       "$timeout_lifecycle_contract" == darwin-coherent-lineage-v2 ]]; then
       darwin_cohort_tokens+=("$timeout_drain_identity")
+      # The sequential command in flight. `run_with_timeout` named it in this
+      # same process, so its name is the one already carried here.
+      darwin_cohort_commands+=("${gate_drain_active_mapped_command:-}")
       darwin_timeout_settled=1
     fi
     worker_index=0
@@ -1532,13 +1551,26 @@ teardown_active_timeouts() {
         darwin-coherent-lineage-v2 ]]; then
         case " ${darwin_cohort_tokens[*]-} " in
           *" ${drain_identity} "*) ;;
-          *) darwin_cohort_tokens+=("$drain_identity") ;;
+          *)
+            darwin_cohort_tokens+=("$drain_identity")
+            darwin_cohort_commands+=("${worker_mapped_commands[$worker_index]}")
+            ;;
         esac
         darwin_workers_settled=1
       fi
       worker_index=$((worker_index + 1))
     done
     if [[ "${#darwin_cohort_tokens[@]}" -gt 0 ]]; then
+      # A cohort of several commands settles them at once, so no single name
+      # describes its drain: clear the name rather than leave a stale one, so a
+      # named barrier cannot rendezvous with a drain it cannot identify. One
+      # token is not that case — it is one identifiable command taking the
+      # cohort route because Darwin teardown always does — so it keeps its name.
+      if [[ "${#darwin_cohort_tokens[@]}" -eq 1 ]]; then
+        gate_drain_active_mapped_command="${darwin_cohort_commands[0]}"
+      else
+        gate_drain_active_mapped_command=""
+      fi
       drain_completed_darwin_command_cohort \
         "${darwin_cohort_tokens[@]}" || return $?
     fi
@@ -1587,6 +1619,10 @@ teardown_active_timeouts() {
       continue
     fi
     worker_index=$((worker_index + 1))
+    # Name the command for the test-only refresh barrier, as the normal reaping
+    # loop does. This teardown runs from EXIT/INT/TERM after that loop is gone,
+    # so the name has to come from the registry rather than its locals.
+    gate_drain_active_mapped_command="${worker_mapped_commands[$((worker_index - 1))]}"
     drain_completed_parallel_command \
       "$drain_identity" "$pgid" "$worker_start" \
       "${worker_lifecycle_contracts[$((worker_index - 1))]}" || drain_status=$?
@@ -1640,6 +1676,7 @@ teardown_active_timeouts() {
     active_worker_drain_identities=()
     active_worker_start_identities=()
     active_worker_lifecycle_contracts=()
+    active_worker_mapped_commands=()
     return 0
   fi
   # Snapshot every descendant BEFORE signalling: TERM kills intermediate
@@ -1768,6 +1805,7 @@ teardown_active_timeouts() {
   active_worker_drain_identities=()
   active_worker_start_identities=()
   active_worker_lifecycle_contracts=()
+  active_worker_mapped_commands=()
 }
 
 # ---------------------------------------------------------------------------
@@ -3586,10 +3624,52 @@ gate_lock_test_crash() {
   kill -9 $$
 }
 
+# Pause one drain so a fixture can inspect the tree while it is held open.
+#
+# The barrier arms once per run, which is what a fixture wants: it rendezvouses
+# with a single drain. But "once" alone says nothing about WHICH drain, and a
+# drain runs after any mapped command with something to settle — including one
+# that only ever saw a short-lived helper enter the durable capture. The first
+# such drain consumed the barrier, the fixture was still waiting at a rendezvous
+# that had already happened, and twenty seconds later the gate failed the wrong
+# command (issue 2212).
+#
+# A fixture therefore names the mapped command it means to synchronize with, in
+# a `.command` sibling of the barrier path. Naming it is optional and the file
+# is read, never written, here: an unnamed barrier keeps the old arm-anywhere
+# behaviour, so this cannot change a run that does not opt in — and no run
+# outside NODE_ENV=test can set the barrier at all.
+#
+# Every failure to resolve a name that was asked for is fatal rather than a
+# fall back to arming anywhere: a present-but-unreadable file, an empty one, or
+# a read that fails. Treating any of those as "unnamed" would hand the fixture
+# the first drain instead of the one it asked for, which is the defect.
 gate_drain_test_refresh_barrier() {
   local barrier="$drain_refresh_test_barrier"
+  local expected=""
   local attempt
   [[ -n "$barrier" && ! -e "${barrier}.used" ]] || return 0
+  if [[ -e "${barrier}.command" || -L "${barrier}.command" ]]; then
+    # Presence first, then readability — not `-r` alone, which is false both
+    # for a name that is absent and for one that exists and cannot be read,
+    # collapsing a refusal into "unnamed" and arming anywhere. `-L` joins `-e`
+    # because a dangling symlink is a name a fixture asked for and this cannot
+    # resolve; `-e` alone is false for one. `-f` because a directory or a FIFO
+    # at this path is not a name either.
+    [[ -f "${barrier}.command" && -r "${barrier}.command" ]] || {
+      echo "error: the test-only drain refresh barrier name is unreadable." >&2
+      return 2
+    }
+    # No `|| expected=""`. `read` fills the variable and THEN reports failure
+    # at EOF-without-newline, so the fallback would discard a name a fixture
+    # wrote with `printf '%s'` and turn it into the empty-name refusal below.
+    IFS= read -r expected < "${barrier}.command" || true
+    [[ -n "$expected" ]] || {
+      echo "error: the test-only drain refresh barrier name is empty." >&2
+      return 2
+    }
+    [[ "$expected" == "${gate_drain_active_mapped_command:-}" ]] || return 0
+  fi
   : > "${barrier}.used" || return 2
   : > "${barrier}.ready" || return 2
   for ((attempt = 0; attempt < 1000; attempt++)); do
@@ -9230,6 +9310,11 @@ gate_run_darwin_lineage_watcher_after_barrier() {
   local action_file="$7"
   local armed_file="$8"
   local timeout_seconds="$9"
+  # Which mapped command this watcher will settle, for the test-only refresh
+  # barrier's `.command` rendezvous. Passed rather than read from the caller's
+  # locals: this function `exec`s into node, so the value has to be an argument
+  # anyway, and an implicit read would stop matching silently on a rename.
+  local active_mapped_command="${10:-}"
   local action
 
   trap - EXIT INT TERM HUP
@@ -9279,6 +9364,7 @@ gate_run_darwin_lineage_watcher_after_barrier() {
       --controller-identity "$controller_identity" \
       --cancel-file "$action_file" \
       --armed-file "$armed_file" \
+      --active-mapped-command "$active_mapped_command" \
       --timeout-seconds "$timeout_seconds"
 }
 
@@ -9287,6 +9373,12 @@ run_with_timeout() {
   local deferred_lease_file="${2:-}"
   local command_drain_identity="${3:-}"
   local trunk_probe_handshake_file="${4:-}"
+  # Which mapped command the drains below belong to. Set explicitly rather than
+  # read from this function's own `command` local: bash would make that local
+  # visible to every callee by dynamic scope, and a rename four frames away
+  # would then silently stop matching instead of failing. Only the test-only
+  # refresh barrier reads it.
+  gate_drain_active_mapped_command="$command"
   local cmd_pid
   local cmd_start
   local watchdog_pid
@@ -9881,6 +9973,7 @@ run_with_timeout() {
         "$gate_darwin_controller_exact_identity" \
         "$lineage_watcher_action_file" "$lineage_watcher_armed_file" \
         "$lineage_watcher_timeout_seconds" \
+        "$gate_drain_active_mapped_command" \
         >"$lineage_watcher_output_file" \
         2>"$lineage_watcher_stderr_file" &
       lineage_watcher_pid=$!
@@ -11180,10 +11273,12 @@ unregister_active_parallel_worker() {
   local -a kept_identities=()
   local -a kept_starts=()
   local -a kept_lifecycle_contracts=()
+  local -a kept_mapped_commands=()
   gate_lifecycle_contract_is_supported "$target_lifecycle_contract" || return 2
   [[ "${#active_worker_pgids[@]}" -eq "${#active_worker_drain_identities[@]}" &&
     "${#active_worker_pgids[@]}" -eq "${#active_worker_start_identities[@]}" &&
-    "${#active_worker_pgids[@]}" -eq "${#active_worker_lifecycle_contracts[@]}" ]] ||
+    "${#active_worker_pgids[@]}" -eq "${#active_worker_lifecycle_contracts[@]}" &&
+    "${#active_worker_pgids[@]}" -eq "${#active_worker_mapped_commands[@]}" ]] ||
     return 2
   for index in "${!active_worker_pgids[@]}"; do
     if [[ "${active_worker_pgids[$index]}" == "$target_pgid" &&
@@ -11197,12 +11292,14 @@ unregister_active_parallel_worker() {
     kept_identities+=("${active_worker_drain_identities[$index]}")
     kept_starts+=("${active_worker_start_identities[$index]}")
     kept_lifecycle_contracts+=("${active_worker_lifecycle_contracts[$index]}")
+    kept_mapped_commands+=("${active_worker_mapped_commands[$index]}")
   done
   [[ "$found" -eq 1 ]] || return 2
   active_worker_pgids=("${kept_pgids[@]+"${kept_pgids[@]}"}")
   active_worker_drain_identities=("${kept_identities[@]+"${kept_identities[@]}"}")
   active_worker_start_identities=("${kept_starts[@]+"${kept_starts[@]}"}")
   active_worker_lifecycle_contracts=("${kept_lifecycle_contracts[@]+"${kept_lifecycle_contracts[@]}"}")
+  active_worker_mapped_commands=("${kept_mapped_commands[@]+"${kept_mapped_commands[@]}"}")
 }
 
 run_mapped_entries_parallel() {
@@ -11331,7 +11428,8 @@ run_mapped_entries_parallel() {
       "${#active_pids[@]}" -eq "${#active_worker_pgids[@]}" &&
       "${#active_pids[@]}" -eq "${#active_worker_drain_identities[@]}" &&
       "${#active_pids[@]}" -eq "${#active_worker_start_identities[@]}" &&
-      "${#active_pids[@]}" -eq "${#active_worker_lifecycle_contracts[@]}" ]]; then
+      "${#active_pids[@]}" -eq "${#active_worker_lifecycle_contracts[@]}" &&
+      "${#active_pids[@]}" -eq "${#active_worker_mapped_commands[@]}" ]]; then
       echo "error: parallel worker lifecycle registry is inconsistent." >&2
       fail_command_scheduler_infrastructure \
         "parallel worker settlement" || return $?
@@ -11409,6 +11507,15 @@ run_mapped_entries_parallel() {
       # Capture and drain the exact command identity before signalling the
       # worker or its descendants. A detached child can leave the worker group.
       # The drain retains durable evidence for every process while signals run.
+      #
+      # Name the command for the test-only refresh barrier here as well as in
+      # run_with_timeout. For a parallel command that function runs inside the
+      # worker subshell — a different process — so its assignment never reaches
+      # this one. Without this the parent would carry whatever the last
+      # sequential command left behind, which both makes a named parallel
+      # rendezvous impossible and lets a stale name match a drain the fixture
+      # never asked for: the same wrong-drain race, one process boundary over.
+      gate_drain_active_mapped_command="$command"
       if ! drain_completed_parallel_command \
         "$drain_identity" "$pid" "$worker_start" \
         "$worker_lifecycle_contract"; then
@@ -11556,6 +11663,7 @@ run_mapped_entries_parallel() {
     active_worker_drain_identities=("${next_active_drain_identities[@]+"${next_active_drain_identities[@]}"}")
     active_worker_start_identities=("${next_active_start_identities[@]+"${next_active_start_identities[@]}"}")
     active_worker_lifecycle_contracts=("${next_active_lifecycle_contracts[@]+"${next_active_lifecycle_contracts[@]}"}")
+    active_worker_mapped_commands=("${next_active_commands[@]+"${next_active_commands[@]}"}")
     finish_worker_settlement
 
     # Process every completion observed above before opening another pool slot.
@@ -11886,6 +11994,7 @@ run_mapped_entries_parallel() {
       active_worker_drain_identities+=("$drain_identity")
       active_worker_start_identities+=("$worker_start")
       active_worker_lifecycle_contracts+=("$worker_lifecycle_contract")
+      active_worker_mapped_commands+=("$command")
       active_commands+=("$command")
       active_output_files+=("$output_file")
       active_status_files+=("$status_file")
