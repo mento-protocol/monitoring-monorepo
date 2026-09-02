@@ -81,7 +81,8 @@ report covers the `agent-ready` rule above; it does not check `kind:*`.
    `terraform/**` or any `*.tf`; `.github/workflows/**`; `scripts/deploy*`,
    `**/deploy.sh`, `cloudbuild*`; `scripts/agent-quality-gate.sh` and
    `scripts/gate/**`; `scripts/agent-autoreview*` and any autoreview runtime;
-   `scripts/pr/issue-board-*` and `scripts/pr/pr-ready-state*`; `.trunk/**`;
+   `scripts/pr/agent-issue-board*`, `scripts/pr/issue-board-*`, and
+   `scripts/pr/pr-ready-state*`; `.trunk/**`;
    `.claude/hooks` or settings; `package.json`, `pnpm-lock.yaml`,
    `pnpm-workspace.yaml`, `patches/**`; `indexer-envio/schema.graphql`;
    `alerts/rules/**`; anything named `*secret*` or touching IAM, WIF, or
