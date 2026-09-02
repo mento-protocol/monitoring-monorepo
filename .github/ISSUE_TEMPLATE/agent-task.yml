@@ -78,3 +78,15 @@ body:
       placeholder: "A PR may use `Closes #123` only when ..."
     validations:
       required: true
+  - type: markdown
+    attributes:
+      value: |
+        **Labels are not part of this form.** GitHub cannot set them from your answers, so submitting applies only `needs-grooming`.
+
+        Before anyone promotes this issue to `agent-ready`, add:
+
+        - a `kind:*` label
+        - at least one `pkg:*` label
+        - exactly one `risk:*` label, decided by the [Low-risk rule](https://github.com/mento-protocol/monitoring-monorepo/blob/main/docs/notes/agent-issue-workflow.md#low-risk-rule)
+
+        `pnpm issue:board sync` reports an `agent-ready` issue that lacks exactly one `risk:*` or lacks any `pkg:*` as incompletely groomed, and the backlog sweep skips it. The `kind:*` label is a filing rule the sync does not check.

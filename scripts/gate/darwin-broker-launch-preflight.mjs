@@ -315,6 +315,14 @@ const APPROVED_ALLOWLIST_SHAPE = new Map([
         "This executable test passes broker-shaped text only to the preflight scanner and uses no process broker. Its exact source hash requires a new capability review after any change.",
     },
   ],
+  [
+    "scripts/review/install-review-eval-launchd.sh",
+    {
+      rules: ["shell-process-broker"],
+      reason:
+        "This operator-run installer calls launchctl to install the review-eval scheduler. It is never a mapped command, and it refuses to start when the gate exports AGENTQG_RUN or AGENTQG_REQUEST, so it cannot create a process during a gate run that Darwin lineage tracking would miss. Its exact source hash requires a new capability review after any change.",
+    },
+  ],
 ]);
 
 // A hash binds each exception to reviewed source bytes. A source change must
@@ -351,8 +359,16 @@ export const BROKER_CLIENT_ALLOWLIST = [
       "node-net-dynamic-client",
       "javascript-process-broker",
     ],
-    sha256: "995cd00e61c956a6d77bf36bf366533cec0d493af1e4f7ba9a454b5274a05ae9",
+    sha256: "b870bba633792c5c723f798771dcb5cd0864842f279d603292e14a50cf9c78e9",
     reason: APPROVED_ALLOWLIST_SHAPE.get(TEST_PATH).reason,
+  },
+  {
+    path: "scripts/review/install-review-eval-launchd.sh",
+    rules: ["shell-process-broker"],
+    sha256: "c15a37879035ef1e97a68b5b6fd3b039b000883bb2cfc2c3112da89743c36789",
+    reason: APPROVED_ALLOWLIST_SHAPE.get(
+      "scripts/review/install-review-eval-launchd.sh",
+    ).reason,
   },
 ];
 
