@@ -46,8 +46,7 @@ ADR 0064 keeps `redrive-onchain-deadletter.{mjs,test.mjs}` flat in
 (Actions/shell), `pnpm-override-selector.mjs` (pnpm overrides), and
 `gh-issue-lifecycle.mjs`; ADR 0064 lists readers. Creation keeps `agent-ready`;
 closed repair keeps lifecycle labels. `peg-policy-digest.mjs` defines both
-validators' peg version digest. Keep inventories, hashes, and identities in
-their domain.
+validators' peg version digest. Keep each in its domain.
 
 ## Why Files Stay Flat
 
