@@ -115,6 +115,7 @@ const { spawnSync } = require("node:child_process");
 const {
   chmodSync,
   closeSync,
+  constants,
   existsSync,
   fstatSync,
   lstatSync,
@@ -261,6 +262,44 @@ function trunk(args, baseStdio = ["ignore", "pipe", "pipe"], timeout = 30_000) {
       const value = process.env[`AGENTQG_MARKER_PATH_${descriptor}`];
       return typeof value === "string" && value !== "" ? value : undefined;
     };
+    // Opening the declared name proves nothing by itself: it may land on a
+    // directory, a device, a FIFO that would park this process waiting for a
+    // writer, or a regular file that is no longer the marker. Authenticate on
+    // the same terms the gate uses for its own marker opens — regular file,
+    // this user, and the inode the name still resolves to — and close a
+    // descriptor that fails rather than passing a stranger to the child.
+    const reopenMarker = (path) => {
+      let reopened;
+      try {
+        reopened = openSync(
+          path,
+          constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+        );
+        const opened = fstatSync(reopened);
+        const named = lstatSync(path);
+        const uid =
+          typeof process.getuid === "function" ? process.getuid() : undefined;
+        if (
+          opened.isFile() &&
+          named.isFile() &&
+          opened.dev === named.dev &&
+          opened.ino === named.ino &&
+          (uid === undefined || opened.uid === uid)
+        ) {
+          return reopened;
+        }
+      } catch {
+        // An unopenable or unstattable path is a marker that did not resolve.
+      }
+      if (reopened !== undefined) {
+        try {
+          closeSync(reopened);
+        } catch {
+          // Nothing to release.
+        }
+      }
+      return undefined;
+    };
     // Inspect every declared descriptor BEFORE reopening any path: an open
     // takes the lowest free descriptor, which can be one a later declaration
     // still names, and inspecting it afterwards would read the reopened
@@ -277,13 +316,10 @@ function trunk(args, baseStdio = ["ignore", "pipe", "pipe"], timeout = 30_000) {
       if (inspection.regular) return { ...inspection, source: descriptor };
       const path = markerPath(descriptor);
       if (path === undefined) return inspection;
-      try {
-        const reopened = openSync(path, "r");
-        reopenedMarkers.push(reopened);
-        return { descriptor, regular: true, source: reopened };
-      } catch {
-        return inspection;
-      }
+      const reopened = reopenMarker(path);
+      if (reopened === undefined) return inspection;
+      reopenedMarkers.push(reopened);
+      return { descriptor, regular: true, source: reopened };
     });
     const unexpectedError = descriptorStates.find(
       ({ error, source }) =>

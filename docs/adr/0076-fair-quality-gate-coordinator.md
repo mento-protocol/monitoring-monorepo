@@ -1190,12 +1190,16 @@ its capacity and named resources until a token-scoped drainer acknowledges
   `AGENTQG_MARKER_PATH_<fd>`, and the spawn adapter resolves a descriptor
   either as an inherited open regular file or by reopening that path. It
   inspects every declared descriptor before reopening any, because an open
-  takes the lowest free descriptor. It ignores a declaration only when no
-  declared descriptor resolves either way, and rejects a partially resolving
-  set. Linux rejects every unresolvable declaration because its marker can be
-  the only remaining containment handle. Reopening tightens the check rather
-  than relaxing it: an fstat proves a descriptor is some regular file, never
-  that it is the marker.
+  takes the lowest free descriptor. A reopen is authenticated before it counts:
+  opened `O_RDONLY|O_NOFOLLOW|O_NONBLOCK`, and accepted only as a regular file
+  owned by this user carrying the inode the declared name still resolves to. A
+  descriptor failing any of that is closed, not passed to the child. The
+  adapter ignores a declaration only when no declared descriptor resolves
+  either way, and rejects a partially resolving set. Linux rejects every
+  unresolvable declaration because its marker can be the only remaining
+  containment handle. An inherited descriptor is the stronger of the two and is
+  always preferred: it is the inode the gate opened before any runtime ran,
+  where a reopen can only attest to what the name resolves to now.
 - A process broker that existed before the baseline can hide causality. The
   broker-launch preflight rejects opaque executables and known unapproved
   repository clients. The toolchain boundary, lexical-policy limit, and

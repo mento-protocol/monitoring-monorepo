@@ -1,4 +1,11 @@
-import { closeSync, fstatSync, openSync } from "node:fs";
+import { closeSync, constants, fstatSync, lstatSync, openSync } from "node:fs";
+
+// The same flags the gate itself opens a marker with (gate_run_marker_verify in
+// scripts/gate/run-handles.sh). O_NOFOLLOW refuses a symlink planted at the
+// declared name, and O_NONBLOCK keeps a FIFO left there from parking this
+// process forever waiting for a writer that never comes.
+const MARKER_OPEN_FLAGS =
+  constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
 
 const GATE_MARKER_FDS = Object.freeze([6, 8, 9]);
 const GATE_MARKER_FD_SET = new Set(GATE_MARKER_FDS);
@@ -54,6 +61,49 @@ function declaredMarkerPath(environment, fd) {
 }
 
 /**
+ * Reopen a declared marker path, or refuse it.
+ *
+ * Opening a path proves nothing on its own: a readable object at the declared
+ * name may be a directory, a device, a FIFO, or a regular file that is no
+ * longer the marker. Any of those would let the child inherit a stranger while
+ * this helper reported full containment, so the descriptor is authenticated
+ * before it becomes a source, on the same terms the gate uses when it opens a
+ * marker itself: a regular file, owned by this user, and the same inode the
+ * declared name still resolves to. That last comparison is what closes the
+ * window between the open and the check — a name swapped underneath us fails
+ * it. A descriptor that does not earn its place is closed here, not passed on.
+ */
+function reopenDeclaredMarker(path, openMarker, descriptorStat, pathStat) {
+  let reopened;
+  try {
+    reopened = openMarker(path, MARKER_OPEN_FLAGS);
+    const opened = descriptorStat(reopened);
+    const named = pathStat(path);
+    const uid =
+      typeof process.getuid === "function" ? process.getuid() : undefined;
+    if (
+      opened?.isFile?.() === true &&
+      named?.isFile?.() === true &&
+      opened.dev === named.dev &&
+      opened.ino === named.ino &&
+      (uid === undefined || opened.uid === uid)
+    ) {
+      return reopened;
+    }
+  } catch {
+    // An unopenable or unstattable path is a marker that did not resolve.
+  }
+  if (reopened !== undefined) {
+    try {
+      closeSync(reopened);
+    } catch {
+      // Nothing to release.
+    }
+  }
+  return undefined;
+}
+
+/**
  * Keep the gate's command, request, and coordinator marker files open in a
  * detached child from its first instruction.
  *
@@ -65,13 +115,20 @@ function declaredMarkerPath(environment, fd) {
  *
  * A descriptor resolves one of two ways. It is still an open regular file, so
  * it is passed through; or it is not, and the declared path is reopened. The
- * second case is not a fallback for the first, it is what keeps the guarantee
- * through a runtime that reuses low descriptors for its own handles: pnpm
- * takes 6, 8, and 9 for pipes and an eventfd, which left every mapped pnpm
- * command on Linux refusing to start (issue 2189). Reopening the declared path
- * is also strictly stronger evidence than the descriptor check it backs up —
- * fstat proves only that a descriptor is some regular file, never that it is
- * the marker.
+ * second case exists because a runtime between the gate and a mapped command
+ * reuses low descriptors for its own handles: pnpm takes 6, 8, and 9 for pipes
+ * and an eventfd, which left every mapped pnpm command on Linux refusing to
+ * start (issue 2189).
+ *
+ * The two are not equal evidence, and the weaker one is the new one. An
+ * inherited descriptor is the marker — the gate opened that exact inode before
+ * any runtime ran, so nothing since can have substituted it. A reopen only
+ * proves that the declared name resolves, right now, to a regular file owned
+ * by this user; between the gate's open and this one, something with write
+ * access to the marker's directory could have replaced the file the name
+ * points at. Authentication narrows that gap but does not close it, so an
+ * inherited descriptor is always preferred and a reopen is never used to
+ * replace one.
  *
  * Darwin binds a mapped root to its exact kernel lineage before START, so a
  * nested runtime that closed every marker can discard a declaration that
@@ -87,6 +144,7 @@ export function inheritGateMarkerStdio(
     environment = process.env,
     descriptorStat = fstatSync,
     openMarker = openSync,
+    pathStat = lstatSync,
     platform = process.platform,
   } = {},
 ) {
@@ -112,15 +170,17 @@ export function inheritGateMarkerStdio(
     if (inspection.regular) return { ...inspection, source: fd };
     const path = declaredMarkerPath(environment, fd);
     if (path === undefined) return inspection;
-    try {
-      const reopened = openMarker(path, "r");
-      reopenedMarkerDescriptors.add(reopened);
-      // Reopening answers the inspection, including an EBADF that only means
-      // the runtime closed the inherited copy.
-      return { fd, regular: true, source: reopened };
-    } catch {
-      return inspection;
-    }
+    const reopened = reopenDeclaredMarker(
+      path,
+      openMarker,
+      descriptorStat,
+      pathStat,
+    );
+    if (reopened === undefined) return inspection;
+    reopenedMarkerDescriptors.add(reopened);
+    // An authenticated reopen answers the inspection, including an EBADF that
+    // only means the runtime closed the inherited copy.
+    return { fd, regular: true, source: reopened };
   });
 
   const unexpectedError = descriptorStates.find(

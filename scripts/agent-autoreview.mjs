@@ -2452,33 +2452,41 @@ function detectPrBase(repo, branch) {
         "failed to inspect repository owner: gh omitted owner.login",
       );
     }
-    const result = spawnTrustedSync(
-      gh,
-      [
-        "pr",
-        "list",
-        "--repo",
-        repositorySlug,
-        "--head",
-        branch,
-        "--state",
-        "open",
-        "--limit",
-        "2",
-        "--json",
-        "baseRefName,headRepositoryOwner",
-      ],
-      {
-        cwd: repo,
-        env,
-        encoding: "utf8",
-        stdio: inheritGateMarkerStdio(["ignore", "pipe", "pipe"]),
-        timeout: GH_LOOKUP_TIMEOUT_MS,
-        killSignal: "SIGKILL",
-        detached: true,
-      },
-    );
-    closeReopenedGateMarkers();
+    // The cleanup belongs in a finally, not after the call: inheriting the
+    // markers can reopen some and then refuse the declaration, and the spawn
+    // itself can throw, either of which would otherwise leak every descriptor
+    // already reopened.
+    let result;
+    try {
+      result = spawnTrustedSync(
+        gh,
+        [
+          "pr",
+          "list",
+          "--repo",
+          repositorySlug,
+          "--head",
+          branch,
+          "--state",
+          "open",
+          "--limit",
+          "2",
+          "--json",
+          "baseRefName,headRepositoryOwner",
+        ],
+        {
+          cwd: repo,
+          env,
+          encoding: "utf8",
+          stdio: inheritGateMarkerStdio(["ignore", "pipe", "pipe"]),
+          timeout: GH_LOOKUP_TIMEOUT_MS,
+          killSignal: "SIGKILL",
+          detached: true,
+        },
+      );
+    } finally {
+      closeReopenedGateMarkers();
+    }
     if (result.error?.code === "ETIMEDOUT" || result.signal === "SIGKILL") {
       killProcessGroup(result.pid);
       throw new Error(

@@ -2577,10 +2577,17 @@ could use. A declared descriptor resolves either as an inherited open regular
 file or by reopening its declared path, and the helper inspects every declared
 descriptor before it reopens any path, because an open takes the lowest free
 descriptor and could otherwise land on a slot a later declaration still names.
-Reopening is the stronger evidence of the two: an fstat proves a descriptor is
-some regular file, never that it is the marker. A declaration is stale only
-when no declared descriptor resolves either way. Any partial survivor fails
-closed. Linux rejects an all-stale declaration because its marker can be the
+A reopen is authenticated before it counts as a marker: opened
+`O_RDONLY|O_NOFOLLOW|O_NONBLOCK`, so a symlink at the declared name is refused
+and a FIFO cannot park the open waiting for a writer, then accepted only as a
+regular file owned by this user carrying the inode the declared name still
+resolves to. That last comparison closes the window between the open and the
+check. A descriptor failing any of it is closed rather than handed to the
+child. An inherited descriptor is still the stronger of the two and is always
+preferred: it is the inode the gate opened before any runtime ran, so nothing
+since can have substituted it, where a reopen attests only to what the declared
+name resolves to now. A declaration is stale only when no declared descriptor
+resolves either way. Any partial survivor fails closed. Linux rejects an all-stale declaration because its marker can be the
 only remaining containment handle; Darwin discards one because it binds a
 mapped root to its exact kernel lineage before START. A caller that spawns
 repeatedly releases the parent's reopened copies with

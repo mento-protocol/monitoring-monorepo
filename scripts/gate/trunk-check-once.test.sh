@@ -219,6 +219,34 @@ rm -f "$marker_report"
 [[ "$(cat "$fixture_root/repo/log")" == $'check\nshutdown' ]]
 [[ "$(cat "$marker_report")" == $'8\n9' ]]
 
+# A declared path that opens but is not the marker resolves nowhere either.
+# A directory opens cleanly on Linux and a symlink would redirect the name, so
+# opening is not the test — the guardian authenticates what it opened and
+# refuses anything that is not a regular file the declared name still resolves
+# to.
+echo stopped > "$fixture_root/repo/state"
+: > "$fixture_root/repo/log"
+rm -f "$fixture_root/repo/cleanup-error"
+mkdir -p "$fixture_root/repo/marker-directory"
+ln -sfn "$fixture_root/repo/state" "$fixture_root/repo/marker-link"
+for declared in marker-directory marker-link; do
+  set +e
+  (
+    exec 9< <(printf 'reused\n')
+    AGENTQG_RUN=agentqg:trunk-reopen-identity-test \
+      AGENTQG_MARKER_FDS=9 \
+      AGENTQG_MARKER_PATH_9="$fixture_root/repo/$declared" \
+      run_wrapper >/dev/null 2> "$fixture_root/repo/cleanup-error"
+  )
+  status=$?
+  set -e
+  if [[ "$(uname -s)" != Darwin ]]; then
+    [[ "$status" -eq 2 ]]
+    grep -q 'Trunk guardian marker 9 is not regular' \
+      "$fixture_root/repo/cleanup-error"
+  fi
+done
+
 # A declared path that cannot be opened leaves the declaration resolving
 # nowhere, so the guardian still refuses on Linux rather than starting without
 # marker containment.
