@@ -1,6 +1,6 @@
 ---
 title: Verification Redesign M4 Shadow Evidence
-status: draft
+status: archived
 owner: eng
 canonical: false
 last_verified: 2026-09-02
@@ -18,9 +18,9 @@ It freezes the sample and cost rules. It also records the first two eligible
 runs' retained-target and evidence-instrument incidents.
 
 This receipt authorizes no cutover, schedule, ruleset change, local-gate
-removal, legacy deletion, or merge. Each action needs the separate approval
-defined in [ADR 0078](../adr/0078-staged-verification-redesign.md). Required CI
-remains merge authority during this evidence window.
+removal, legacy deletion, or merge. The operator separately approved an early
+local cutover on 2026-09-02. Issue #2128 now owns the 10-PR, seven-day
+post-cutover canary. Required CI remains merge authority.
 
 ## Sources
 
@@ -31,6 +31,9 @@ remains merge authority during this evidence window.
 - [M4 implementation PR #2186](https://github.com/mento-protocol/monitoring-monorepo/pull/2186)
 - [No-skip permission repair PR #2197](https://github.com/mento-protocol/monitoring-monorepo/pull/2197)
 - [Retained audit boundary repair PR #2207](https://github.com/mento-protocol/monitoring-monorepo/pull/2207)
+- [Graph-pin repair PR #2214](https://github.com/mento-protocol/monitoring-monorepo/pull/2214)
+- [Protected-main repair proof](https://github.com/mento-protocol/monitoring-monorepo/actions/runs/33616693328)
+- [Early-cutover approval](https://github.com/mento-protocol/monitoring-monorepo/issues/2127#issuecomment-5507740185)
 - [Approved spend ceiling and stop condition](https://github.com/mento-protocol/monitoring-monorepo/issues/2126#issuecomment-5490125645)
 - [PR #2205 incident timeline record](https://github.com/mento-protocol/monitoring-monorepo/issues/2126#issuecomment-5506845017)
 
@@ -359,9 +362,13 @@ CI on that combined tree. Protected-main CI, PR #2205 ordinary CI, and the
 no-skip audit all failed with `retained audit workflow graph changed`.
 
 The operator approved the exact one-line graph-pin repair and its evidence
-receipts. The repair changes no workflow, admission rule, permission, schedule,
-hook, or legacy gate. No later sample can start until that repair merges and
-protected-main CI passes.
+receipts. PR #2214 merged the repair as
+`78c0e9e448b3c03ab4190b7f2daa03bf9f0febb4`. Protected `main` at
+`2222f4a3fa78a0cb905cdbcae998206e631f6b67` then passed run
+[33616693328](https://github.com/mento-protocol/monitoring-monorepo/actions/runs/33616693328),
+including the fixed CI contract. The repair changed no workflow, admission
+rule, permission, schedule, hook, or legacy gate. PR #2218 records the incident
+receipt and corrected complexity attribution.
 
 ## Coverage ledger
 
@@ -383,7 +390,7 @@ supply-chain execution risk.
 
 | Measure                                 | Current value                                          |
 | --------------------------------------- | ------------------------------------------------------ |
-| Evidence window status                  | Stopped for an evidence-instrument graph-pin defect    |
+| Evidence window status                  | Closed; measurement moved to post-cutover issue #2128  |
 | Eligible incident pull requests         | 2                                                      |
 | Accepted repaired-cohort pull requests  | 0 of at least 10                                       |
 | First accepted UTC date                 | Pending                                                |
@@ -396,6 +403,7 @@ supply-chain execution risk.
 | Selection-only product failures         | None observed                                          |
 | Retained-target or instrument incidents | 2                                                      |
 
-The receipt remains draft until the frozen sample contract passes. Passing the
-receipt supports a separate human cutover decision. It does not make that
-decision.
+The pre-cutover receipt closed with zero accepted samples. The two incident
+rows remain evidence. The separately approved cutover moves acceptance
+measurement to issue #2128. Legacy deletion still needs that completed receipt
+and separate approval.
