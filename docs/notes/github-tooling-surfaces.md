@@ -273,9 +273,10 @@ polled. Do not foreground-poll and never sleep-poll.
      after paging. If MCP cannot prove complete pagination, the current file
      count, or an unchanged head, fail closed and treat the skip as no current
      review signal. Generic no-file, incremental no-change, rate-limit, and
-     free-tier replies never count. After the optional CodeRabbit check becomes
-     terminal, refresh once. If the signal is missing or stale and no trusted
-     top-level comment contains both `@coderabbitai review` and
+     free-tier replies never count. Incremental auto-review is off, so a push
+     starts no automatic CodeRabbit review: refresh once the head is stable
+     instead of waiting for a run. If the signal is missing or stale and no
+     trusted top-level comment contains both `@coderabbitai review` and
      `<!-- coderabbit-final-head-review:<full-head-sha> -->`, use
      `add_issue_comment` to post `@coderabbitai review`, a blank line, and that
      exact marker. A marker comment is trusted only when its author association

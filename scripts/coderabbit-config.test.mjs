@@ -6,10 +6,13 @@
  * request it reviews, so a PR can weaken or replace the profile that reviews
  * it for every key the org-level Global overrides do not pin. Since
  * 2026-09-02 those overrides pin `reviews.profile`,
- * `request_changes_workflow`, and the three `auto_review` keys above the
- * repository file (ADR 0066); `path_filters` and `path_instructions` stay
- * repository-owned, and this pin is their only guard. Now that CodeRabbit findings feed the `pr:feedback-state` ledger — the
- * repo's merge oracle — that is a trust boundary, not a preference.
+ * `request_changes_workflow`, and three `auto_review` keys (`enabled`,
+ * `drafts`, `auto_pause_after_reviewed_commits`) above the repository file
+ * (ADR 0066). They do not pin `auto_incremental_review`, so the repository
+ * file governs it; `path_filters` and `path_instructions` stay
+ * repository-owned. For all three, this pin is the only guard. Now that
+ * CodeRabbit findings feed the `pr:feedback-state` ledger — the repo's merge
+ * oracle — that is a trust boundary, not a preference.
  *
  * The committed config must parse and be EXACTLY equal to EXPECTED_CONFIG
  * below. Spot checks would let an added key (`early_access`, a `tools` block,
@@ -88,7 +91,7 @@ const EXPECTED_CONFIG = {
       enabled: true,
       base_branches: [],
       drafts: false,
-      auto_incremental_review: true,
+      auto_incremental_review: false,
       auto_pause_after_reviewed_commits: 5,
     },
   },
@@ -149,9 +152,13 @@ test("the pin rejects a weakened config (negative control)", () => {
   assert.throws(() => assert.deepEqual(extended, EXPECTED_CONFIG));
 });
 
-test("auto-review stays on with the measured five-commit burst guard", () => {
+test("auto-review runs on open only, with the burst guard still pinned", () => {
   const { auto_review: autoReview } = EXPECTED_CONFIG.reviews;
   assert.equal(autoReview.enabled, true);
+  // Off since 2026-09-02: CodeRabbit bills per push delta, so incremental
+  // reviews re-bill the same files on every agent fix round (ADR 0066). The
+  // head-bound closeout request covers the final head instead.
+  assert.equal(autoReview.auto_incremental_review, false);
   assert.equal(autoReview.auto_pause_after_reviewed_commits, 5);
 });
 

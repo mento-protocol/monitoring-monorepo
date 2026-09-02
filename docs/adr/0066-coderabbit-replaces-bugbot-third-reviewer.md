@@ -14,7 +14,8 @@ garden_lane: adrs-architecture
 # ADR 0066 — CodeRabbit replaces Cursor BugBot as the third PR review bot
 
 **Status:** Accepted (Aug 2026) — BugBot disabled on 2026-08-31; the live
-compatibility paths retired on 2026-09-02.
+compatibility paths retired on 2026-09-02; amended 2026-09-02 (usage add-on
+enabled, incremental reviews off).
 **Scope:** ci/process
 
 ## Context
@@ -114,6 +115,10 @@ BugBot after reviewing these results.
 | Graphite Agent      | Flat $20–40/month, unlimited reviews          | $20–40                                                   |
 | Drop to two bots    | —                                             | $0, minus third-bot coverage                             |
 
+The CodeRabbit row records the 2026-08-18 estimate. The add-on was later
+enabled and its real cost overran that row — see the 2026-09-02 amendment
+below.
+
 CodeRabbit's public-repo terms were verified against the vendor's docs and
 the installed org's billing page on 2026-08-18. The Open Source tier gives
 public repos **Pro+ features free**, with no application step and no license
@@ -148,9 +153,10 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
    deferred: the operator decided on 2026-08-18 to feel the rate-limit
    friction first, at flat seat cost, and enable the add-on only if that
    friction proves annoying. Until then, over-limit reviews wait instead of
-   billing. The $0 OSS tier (Pro+ features, ~1/hour, manual-trigger-only
-   under 10 stars, no add-on) remains the documented fallback if spend must
-   return to zero.
+   billing. **Superseded 2026-09-02** — the add-on was enabled in Automatic
+   mode with a $500/month cap; see the amendment below. The $0 OSS tier (Pro+
+   features, ~1/hour, manual-trigger-only under 10 stars, no add-on) remains
+   the documented fallback if spend must return to zero.
 2. **Commit `.coderabbit.yaml`** (done 2026-08-19 in PR #1927): use the `chill`
    profile, `path_filters` that exclude lockfiles and generated trees, and
    `auto_pause_after_reviewed_commits: 5`. The initial value of 2 paused normal
@@ -159,6 +165,10 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
    normal fix round as active development. The ship and babysit closeout
    requests one manual review for an exact head when the automatic review is
    stale or missing after the optional check becomes terminal.
+   **Amended 2026-09-02** — `auto_incremental_review: false` means no
+   automatic review follows a push, so the closeout request no longer waits
+   for one; the pause threshold now only matters if incremental reviews
+   return.
 3. **Run both reviewers for two weeks** (complete 2026-08-31). Compare their
    findings on the same PRs. Use the result to confirm or reverse the decision.
 4. **Disable BugBot** (complete 2026-08-31) and **retire the compatibility
@@ -175,6 +185,51 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
    `scripts/pr/review-process-metrics.mjs`. Use before and after cohorts to
    assess future review changes. Do not erase historical evidence when the
    live compatibility path retires.
+
+## Amendment 2026-09-02 — usage add-on enabled, incremental reviews off
+
+This corrects the "add-on deferred" record above. Decision step 1, the cost
+table, and the first Consequences bullet describe the state as of 2026-08-18
+and stay in place as history.
+
+- **The add-on was enabled, not deferred.** It runs in Automatic mode with a
+  $500/month cap. The enabling date was not recorded; the billing page showed
+  it active on 2026-09-02.
+- **The cap was reached on 2026-09-02**, sixteen days before the cycle resets
+  on 2026-09-18. Past the cap only the free refill runs — 1 review/hour for
+  the sole PR author, who sits permanently in the 90+ reviews/7-days tier —
+  and every other push is blocked.
+- **30-day Review usage, team view, read 2026-09-02:** 672 review events, 365
+  continued with credits (billed), 48 blocked, 3.9 review events per PR, ~5.5
+  billed files per continued review. CodeRabbit meters pushes, not commits or
+  files: each push past the hourly refill bills every file in that push's
+  delta at 25¢, so agent fix rounds re-bill the same files several times per
+  PR.
+- **Decision:** set `reviews.auto_review.auto_incremental_review: false` in
+  `.coderabbit.yaml`. CodeRabbit then reviews a PR once when it opens and once
+  more at closeout, when the ready-state flow posts the head-bound
+  `@coderabbitai review` request that
+  [`../notes/pr-ready-state.md`](../notes/pr-ready-state.md) already defines.
+  Intermediate pushes get no automatic CodeRabbit review; Codex and Claude
+  still review them, and the merge oracle gates only on the final head, so
+  merge-time coverage is unchanged. Expected: review events per PR fall from
+  ~3.9 to ~2, each changed file bills at most twice per PR, and spend lands at
+  an estimated $200–$250/month at current volume.
+- **The repository file governs this key.** The organization-level Global
+  overrides applied on 2026-09-02 pin `reviews.profile`,
+  `request_changes_workflow`, `auto_review.enabled`, `auto_review.drafts`, and
+  `auto_review.auto_pause_after_reviewed_commits`. They do not set
+  `auto_incremental_review`, so `.coderabbit.yaml` decides it and
+  `scripts/coderabbit-config.test.mjs` is its only guard. **Follow-up:** if a
+  second push on a PR still triggers an automatic review, the operator adds
+  `auto_incremental_review: false` to the Global overrides.
+- **Rejected here:** raising the cap keeps the per-push meter and buys more
+  duplicate reviews; tightening `path_filters` saves little because the billed
+  unit is an already-small push delta. The $0 OSS tier stays the fallback if
+  spend must return to zero.
+- **Revisit trigger:** closeout-only coverage missing defects that incremental
+  reviews would have caught, or spend still tracking toward the cap after the
+  2026-09-18 reset.
 
 ## Alternatives considered
 
@@ -218,6 +273,8 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
   ~$180/month in heavy months, with path filters shrinking the file counts.
   BugBot's per-run meter, which scaled with agent iteration, is gone from the
   default path either way, and the $0 OSS fallback caps downside.
+  **Superseded 2026-09-02**: the add-on was on, and add-on spend reached its
+  $500/month cap rather than staying under ~$180. See the amendment below.
 - The stack's third seat changes character from precision-quiet to
   high-recall. CodeRabbit's known weakness is verbosity; the quiet/chill
   profiles, path filters, and pause-after-reviewed-commits are the levers, and
@@ -231,7 +288,10 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
   the add-on. Keep `auto_pause_after_reviewed_commits` at 5 and request one
   head-bound `@coderabbitai review` at closeout when the automatic review is
   stale or missing. This spends the ladder on review rounds that matter while
-  preventing duplicate requests for the same head.
+  preventing duplicate requests for the same head. **Amended 2026-09-02**:
+  agent fix bursts now do neither — incremental auto-review is off, so they
+  get no CodeRabbit review at all and the closeout request is the second and
+  last one per PR.
   `@coderabbitai rate limit` reports remaining capacity without consuming
   a review.
 - The 2026-08-31 open-PR sweep found one current-head Cursor finding, on PR
@@ -317,6 +377,10 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
   add-on availability (paid plans only). The installed org's billing page
   confirmed the default Pro+ trial and the 2026-08-18 paid upgrade. All
   checked 2026-08-18.
+- Usage add-on state and spend: the installed org's CodeRabbit Subscription
+  and Usage pages, read 2026-09-02 — add-on Automatic with a $500/month cap,
+  cap reached that day, cycle reset 2026-09-18, and the 30-day Review usage
+  figures (672 / 365 / 48 / 3.9 / ~5.5) in the amendment above.
 - Post-rollout pause sample, queried from GitHub on 2026-08-21: 16 of the 29
   PRs created after `.coderabbit.yaml` merged carried CodeRabbit's generated
   pause marker. Six of those PRs had only 2-4 total commits. Two of the 29 PRs

@@ -158,14 +158,14 @@ Only a request from an `OWNER`, `MEMBER`, or `COLLABORATOR`, or from a
 recognized repository agent bot, counts as `requested`. A marker quoted by an
 outside commenter does not suppress the real closeout request.
 
-After the optional CodeRabbit check becomes terminal, refresh the projection
-once. Batch fixes before the push and wait for that automatic review attempt
-before requesting another review. That wait is bounded by the babysit deadline:
-a check that never starts, or is still pending when the deadline arrives, is
-optional lag, not a reason to keep waiting. If the signal is `missing` or
-`stale`, re-resolve `headRefOid` immediately before posting and require it to
-equal the marker head. Post at most one marked request for that head. A
-`requested`, `reviewed`, or `not_applicable` signal suppresses another post.
+`.coderabbit.yaml` sets `auto_incremental_review: false`, so a push starts no
+automatic CodeRabbit review and there is no review attempt to wait for. Batch
+fixes into one push, then refresh the projection once the head is stable. If
+the signal is `missing` or `stale`, post the closeout request rather than
+waiting for a run that will not start: re-resolve `headRefOid` immediately
+before posting and require it to equal the marker head. Post at most one
+marked request for that head. A `requested`, `reviewed`, or `not_applicable`
+signal suppresses another post.
 GitHub's issue-comment API has no conditional-create operation, so the marker is
 a detection and best-effort suppression mechanism rather than an atomic claim.
 The CodeRabbit check and review remain advisory: report a pending or
@@ -475,13 +475,14 @@ Field expectations:
    context; deployment/status bot comments may be informational.
 7. If ready-state `ready` is false, fix or wait only on `required.blockers` and
    required `gates`.
-8. After a batched fix push, wait for the optional automatic CodeRabbit check
-   to become terminal, then refresh once. Stop waiting at the babysit deadline,
-   or as soon as it is clear no run started: the check is advisory and never
-   gates readiness, so an absent or still-pending result is optional lag. If
-   `gates.codeRabbitReviewSignal.state` is `missing` or `stale`, recheck the
-   head and post at most one marked closeout request for that head. Do not post
-   when the state is `requested`, `reviewed`, or `not_applicable`.
+8. After a batched fix push, refresh once the head is stable. Incremental
+   auto-review is off, so no automatic CodeRabbit run follows the push and
+   there is nothing to wait for. If `gates.codeRabbitReviewSignal.state` is
+   `missing` or `stale`, recheck the head and post at most one marked closeout
+   request for that head. Do not post when the state is `requested`,
+   `reviewed`, or `not_applicable`. Any CodeRabbit check still in flight from
+   the opening review is advisory and never gates readiness, so an absent or
+   pending result is optional lag.
 9. Report visibly in-progress review-producing workflows as optional lag. If
    you are still watching the PR when one finishes, rerun `pr:feedback-state`
    to catch late feedback; do not treat the optional workflow status itself as
