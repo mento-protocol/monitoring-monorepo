@@ -183,6 +183,7 @@ edit limited to root tooling scripts such as `scripts.agent:quality-gate`,
 `scripts.agent:prewarm:test`, `scripts.agent:review-materiality`,
 `scripts.agent:review-materiality:test`, `scripts.agent:context-check`,
 `scripts.agent:context-budget`, `scripts.agent:context-budget:test`,
+`scripts.agent:closeout-review`, `scripts.agent:closeout-review:test`,
 `scripts.agent:autoreview`, `scripts.agent:autoreview:test`, `scripts.issue:board`,
 `scripts.issue:board:test`, `scripts.issue:claim`, `scripts.issue:review`,
 `scripts.issue:release`, every `scripts.sentry:*` entry (the runners and their

@@ -174,10 +174,11 @@ even when you never open an authority.
    because nested `codex exec` is unavailable; run the closeout from a Claude
    session or an operator shell.
 
-   The measured pipeline (`docs/evals/review-skill.md`) inlines the report
-   text into the reviewer's prompt. Handing over a file path instead is an
-   unmeasured deviation, which is why the read-the-whole-file instruction is
-   explicit. The closeout is **source review only**: it runs no tests and
+   The measured pipeline
+   ([`../evals/review-skill.md`](../evals/review-skill.md): 44-48% recall
+   against 32% for the solo reviewer) inlines the report text into the
+   reviewer's prompt. Handing over a file path instead is an unmeasured
+   deviation, which is why the read-the-whole-file instruction is explicit. The closeout is **source review only**: it runs no tests and
    proves no behavior, so the mapped gate, browser, generated-artifact, and
    runtime checks still apply.
 
