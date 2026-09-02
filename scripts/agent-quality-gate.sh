@@ -9269,6 +9269,9 @@ gate_run_darwin_lineage_watcher_after_barrier() {
     -u AGENTQG_RUN \
     -u AGENTQG_REQUEST \
     -u AGENTQG_MARKER_FDS \
+    -u AGENTQG_MARKER_PATH_9 \
+    -u AGENTQG_MARKER_PATH_8 \
+    -u AGENTQG_MARKER_PATH_6 \
     "$node_bin" "$module" watch-settle \
       --state "$state_file" \
       --state-directory "$state_directory" \
@@ -9652,6 +9655,17 @@ run_with_timeout() {
       IFS= read -r gate_action <&21 || exit 127
       [[ "$gate_action" == start ]] || exit 127
       marker_fds=""
+      # Where each declared marker lives, one variable per descriptor. A
+      # runtime between this wrapper and a detached grandchild can take these
+      # low descriptors for its own handles — pnpm takes all three — and the
+      # path is what lets the grandchild still hold the marker open (issue
+      # 2189). The descriptor list stays the authority for which markers
+      # exist; these only say where to find them. One variable per descriptor
+      # rather than one packed list because a marker path may contain any
+      # byte a separator could use.
+      marker_path_9=""
+      marker_path_8=""
+      marker_path_6=""
       if [[ -n "$3" ]]; then
         # A marker this wrapper was given but cannot hold open is a refusal,
         # not a shrug: without the descriptor, a replacement this command
@@ -9662,6 +9676,7 @@ run_with_timeout() {
         fi
         exec 9< "$3"
         marker_fds=9
+        marker_path_9="$3"
       fi
       if [[ -n "$4" && "$4" != "$3" ]]; then
         if [[ ! -r "$4" ]]; then
@@ -9670,6 +9685,7 @@ run_with_timeout() {
         fi
         exec 8< "$4"
         marker_fds="${marker_fds:+${marker_fds},}8"
+        marker_path_8="$4"
       fi
       if [[ -n "$5" && "$5" != "$3" && "$5" != "$4" ]]; then
         if [[ ! -r "$5" ]]; then
@@ -9678,8 +9694,12 @@ run_with_timeout() {
         fi
         exec 6< "$5"
         marker_fds="${marker_fds:+${marker_fds},}6"
+        marker_path_6="$5"
       fi
       export AGENTQG_MARKER_FDS="$marker_fds"
+      export AGENTQG_MARKER_PATH_9="$marker_path_9"
+      export AGENTQG_MARKER_PATH_8="$marker_path_8"
+      export AGENTQG_MARKER_PATH_6="$marker_path_6"
       if [[ "$6" == 1 ]]; then
         exec 7>&-
       fi
