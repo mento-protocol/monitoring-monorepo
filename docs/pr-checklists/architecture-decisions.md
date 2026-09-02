@@ -75,6 +75,13 @@ supply-chain control, or context rule).
 6. Add or confirm the one-line `docs/adr/` pointer in the owning package's
    `AGENTS.md`.
 
+Before every commit or push, after every observed base advance, and before
+merge, recheck the ADR number against the current base. If a base update
+creates a collision, renumber the ADR and update the filename, numbered
+heading, catalog entries, body links, textual references, and frontmatter
+pointers such as `superseded_by`. Run the documentation checks after the
+renumbering.
+
 ## Superseding a decision
 
 Do not silently rewrite an ADR when reality changes. Add a **new** ADR that makes
