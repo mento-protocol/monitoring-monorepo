@@ -657,16 +657,16 @@
     },
     {
       "name": "retained-graph-pin",
-      "pr": 2218,
+      "pr": 2214,
       "baseSha": "46a1e871788b2b13376e367d0fc008a348713a85",
-      "sourceSha": "a601331c25183add3d811c55997310448532e1ab",
-      "trackedCommand": "git diff --numstat 46a1e871788b2b13376e367d0fc008a348713a85 a601331c25183add3d811c55997310448532e1ab -- . ':!docs/metrics/verification-redesign-m4-complexity.json'",
+      "sourceSha": "47586abd500424442848d94ec78d1e4f96e41ab0",
+      "trackedCommand": "git diff --numstat 46a1e871788b2b13376e367d0fc008a348713a85 47586abd500424442848d94ec78d1e4f96e41ab0 -- . ':!docs/metrics/verification-redesign-m4-complexity.json'",
       "files": [
         {
-          "path": "docs/metrics/verification-redesign-m4-shadow-evidence.md",
+          "path": "docs/adr/0072-md-only-docs-checks-job.md",
           "category": "doc",
-          "additions": 109,
-          "deletions": 28
+          "additions": 3,
+          "deletions": 3
         },
         {
           "path": "scripts/workflows/check-no-skip-audit.mjs",
@@ -682,14 +682,14 @@
           "net": 0
         },
         "doc": {
-          "additions": 109,
-          "deletions": 28,
-          "net": 81
+          "additions": 3,
+          "deletions": 3,
+          "net": 0
         },
         "all": {
-          "additions": 110,
-          "deletions": 29,
-          "net": 81
+          "additions": 4,
+          "deletions": 4,
+          "net": 0
         }
       },
       "replacementSpecific": {
@@ -700,10 +700,51 @@
         "testAdditionsUnderTwiceImplementationAdditions": true,
         "budgetEvaluation": "informational segment; evaluate the initial implementation limit on cumulativeM4"
       }
+    },
+    {
+      "name": "retained-graph-pin-incident-receipt",
+      "pr": 2218,
+      "baseSha": "2222f4a3fa78a0cb905cdbcae998206e631f6b67",
+      "sourceSha": "2e1dfc88fc748814d3661a1d65439014a345e558",
+      "trackedCommand": "git diff --numstat 2222f4a3fa78a0cb905cdbcae998206e631f6b67 2e1dfc88fc748814d3661a1d65439014a345e558 -- . ':!docs/metrics/verification-redesign-m4-complexity.json'",
+      "files": [
+        {
+          "path": "docs/README.md",
+          "category": "doc",
+          "additions": 1,
+          "deletions": 1
+        },
+        {
+          "path": "docs/metrics/verification-redesign-m4-shadow-evidence.md",
+          "category": "doc",
+          "additions": 125,
+          "deletions": 36
+        }
+      ],
+      "totals": {
+        "doc": {
+          "additions": 126,
+          "deletions": 37,
+          "net": 89
+        },
+        "all": {
+          "additions": 126,
+          "deletions": 37,
+          "net": 89
+        }
+      },
+      "replacementSpecific": {
+        "implementationAdditions": 0,
+        "testAdditions": 0,
+        "testToImplementationRatio": 0,
+        "twiceImplementationAdditions": 0,
+        "testAdditionsUnderTwiceImplementationAdditions": true,
+        "budgetEvaluation": "informational segment; evaluate the initial implementation limit on cumulativeM4"
+      }
     }
   ],
   "cumulativeM4": {
-    "method": "Sum the initial segment and five repair segments. These additive activity counts preserve each reviewed diff. They are not a direct diff across unrelated main-branch merges.",
+    "method": "Sum the initial segment and six repair segments. These additive activity counts preserve each reviewed diff. They are not a direct diff across unrelated main-branch merges.",
     "totals": {
       "action": {
         "additions": 26,
@@ -726,9 +767,9 @@
         "net": 660
       },
       "doc": {
-        "additions": 833,
-        "deletions": 150,
-        "net": 683
+        "additions": 853,
+        "deletions": 162,
+        "net": 691
       },
       "package": {
         "additions": 1,
@@ -736,9 +777,9 @@
         "net": 0
       },
       "all": {
-        "additions": 2757,
-        "deletions": 747,
-        "net": 2010
+        "additions": 2777,
+        "deletions": 759,
+        "net": 2018
       }
     },
     "replacementSpecific": {
