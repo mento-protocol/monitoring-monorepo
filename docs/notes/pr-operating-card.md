@@ -22,6 +22,18 @@ even when you never open an authority.
 
 ## The loop
 
+**Run the repository preflight first.** Before step 1 or any repo-local
+formatter, package-manager command, script, or autoreview, resolve
+`CURRENT_REPO`, `BASE_REPO`, the target PR when one exists, `BASE_REMOTE`,
+`HEAD_REMOTE`, and the PR base with the exact step 5 rules. Read
+`headRepository`, `headRepositoryOwner`, and `isCrossRepository` for an
+existing PR. With no PR, require a non-fork checkout whose `origin` serves
+`CURRENT_REPO`. Stop on a fork checkout, a cross-repository head, an ambiguous
+target, or a failed identity lookup before executing repository code. Fetch
+the base only after its repository and remote are bound. Keep these values as
+the authority for author checks and publication, and re-read them before each
+mutation.
+
 1. **Claim.** Before substantive edits, claim from the ready queue:
 
    ```bash
@@ -61,15 +73,15 @@ even when you never open an authority.
    `./tools/trunk fmt <changed-files>` on every intended changed file. Start
    the checks only after formatting is complete.
 
-   | Change trigger                                                           | Required direct author checks                                                                                                                                                                                                                                                                    |
-   | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-   | Source in a workspace package                                            | Run each script that exists for that package: `pnpm --filter <package-name> lint`, `pnpm --filter <package-name> typecheck`, and its normal unit-test command. Governance Watchdog uses `pnpm --filter @mento-protocol/governance-watchdog test:unit`; its generic `test` needs a local service. |
-   | Dashboard React or client source                                         | Also run `pnpm dashboard:react-doctor:diff` against the resolved PR base.                                                                                                                                                                                                                        |
-   | New or changed dashboard route or interaction                            | Also run `pnpm dashboard:build`, then follow [`dashboard-verification.md`](dashboard-verification.md) for the changed route, console, interaction, breakpoints, and applicable auth states.                                                                                                      |
-   | Indexer schema, configuration, ABI, entry point, or handler reachability | Run each affected code-generation variant from [`../../indexer-envio/AGENTS.md`](../../indexer-envio/AGENTS.md). Run affected non-mainnet variants first and `pnpm indexer:codegen` last. Inspect the generated diff before indexer package checks.                                              |
-   | Dashboard GraphQL query or schema consumer                               | Run `pnpm dashboard:codegen` and inspect the generated diff.                                                                                                                                                                                                                                     |
-   | Manifest, lockfile, pnpm configuration, or patch                         | Inspect lifecycle and install effects before any package-manager command. Then run the applicable package rows.                                                                                                                                                                                  |
-   | Root tooling, control plane, or standalone service                       | Run the focused existing contract named by the nearest scoped `AGENTS.md`. Do not add a root selector.                                                                                                                                                                                           |
+   | Change trigger                                                                                    | Required direct author checks                                                                                                                                                                                                                                                                    |
+   | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+   | Source in a workspace package                                                                     | Run each script that exists for that package: `pnpm --filter <package-name> lint`, `pnpm --filter <package-name> typecheck`, and its normal unit-test command. Governance Watchdog uses `pnpm --filter @mento-protocol/governance-watchdog test:unit`; its generic `test` needs a local service. |
+   | Dashboard React or client source                                                                  | Also run `pnpm dashboard:react-doctor:diff` against the resolved PR base.                                                                                                                                                                                                                        |
+   | Dashboard UI or visual output, route or interaction, browser test, or frontend build/runtime path | Also run `pnpm dashboard:build`, then follow [`dashboard-verification.md`](dashboard-verification.md) for the changed UI or runtime path, console, interaction, breakpoints, and applicable auth states.                                                                                         |
+   | Indexer schema, configuration, ABI, entry point, or handler reachability                          | Run each affected code-generation variant from [`../../indexer-envio/AGENTS.md`](../../indexer-envio/AGENTS.md). Run affected non-mainnet variants first and `pnpm indexer:codegen` last. Inspect the generated diff before indexer package checks.                                              |
+   | Dashboard GraphQL query or schema consumer                                                        | Run `pnpm dashboard:codegen` and inspect the generated diff.                                                                                                                                                                                                                                     |
+   | Manifest, lockfile, pnpm configuration, or patch                                                  | Inspect lifecycle and install effects before any package-manager command. Then run the applicable package rows.                                                                                                                                                                                  |
+   | Root tooling, control plane, or standalone service                                                | Run the focused existing contract named by the nearest scoped `AGENTS.md`. Do not add a root selector.                                                                                                                                                                                           |
 
    Resolve and fetch the PR base before React Doctor. The root alias uses
    `origin/main`. For another base, run
@@ -177,8 +189,9 @@ even when you never open an authority.
    old Branch. Do not pass `--branch` to review. Authority:
    [`agent-issue-workflow.md`](agent-issue-workflow.md).
 
-   **Resolve the repository identities first.** Before any PR lookup, resolve
-   the checkout repository and its upstream base —
+   **Re-read the repository identities.** The preflight before step 1 resolves
+   the checkout repository and its upstream base. Before any publication
+   lookup or mutation, resolve them again —
    `gh repo view --json nameWithOwner,parent` locally, the session-attached
    repository metadata in a Claude cloud session. `CURRENT_REPO` is the
    checkout's own repository; a fork checkout uses its parent as `BASE_REPO`,

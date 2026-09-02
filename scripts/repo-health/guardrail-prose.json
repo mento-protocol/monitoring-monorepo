@@ -12,12 +12,13 @@
     "**Forensic drafts stay local.** Use the `forensic-report` skill"
   ],
   "docs/notes/pr-operating-card.md": [
+    "**Run the repository preflight first.** Before step 1 or any repo-local",
     "**Agent sessions never merge a PR without the user's explicit, direct approval of that specific merge.**",
     "**Agent sessions never merge without explicit approval** for that specific merge",
     "**Knowingly deferred work needs a GitHub issue first**, linked from `## Deferrals`.",
     "| Source in a workspace package | Run each script that exists for that package: `pnpm --filter <package-name> lint`, `pnpm --filter <package-name> typecheck`, and its normal unit-test command. Governance Watchdog uses `pnpm --filter @mento-protocol/governance-watchdog test:unit`; its generic `test` needs a local service. |",
     "| Dashboard React or client source | Also run `pnpm dashboard:react-doctor:diff` against the resolved PR base. |",
-    "| New or changed dashboard route or interaction | Also run `pnpm dashboard:build`, then follow [`dashboard-verification.md`](dashboard-verification.md) for the changed route, console, interaction, breakpoints, and applicable auth states. |",
+    "| Dashboard UI or visual output, route or interaction, browser test, or frontend build/runtime path | Also run `pnpm dashboard:build`, then follow [`dashboard-verification.md`](dashboard-verification.md) for the changed UI or runtime path, console, interaction, breakpoints, and applicable auth states. |",
     "| Indexer schema, configuration, ABI, entry point, or handler reachability | Run each affected code-generation variant from [`../../indexer-envio/AGENTS.md`](../../indexer-envio/AGENTS.md). Run affected non-mainnet variants first and `pnpm indexer:codegen` last. Inspect the generated diff before indexer package checks. |",
     "| Dashboard GraphQL query or schema consumer | Run `pnpm dashboard:codegen` and inspect the generated diff. |",
     "| Manifest, lockfile, pnpm configuration, or patch | Inspect lifecycle and install effects before any package-manager command. Then run the applicable package rows. |",
