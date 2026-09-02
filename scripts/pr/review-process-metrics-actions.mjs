@@ -18,6 +18,10 @@ const UNKNOWN_CLAUDE_ACTIONS_ATTRIBUTION = Symbol(
   "unknown-claude-actions-attribution",
 );
 
+export function hasUnknownClaudeActionsAttribution(record) {
+  return record?.[UNKNOWN_CLAUDE_ACTIONS_ATTRIBUTION]?.status === "unknown";
+}
+
 function runTimestamp(value) {
   const timestamp = typeof value === "string" ? Date.parse(value) : Number.NaN;
   return Number.isFinite(timestamp) ? timestamp : null;
@@ -390,7 +394,9 @@ export function buildUnknownAttributionEvidence({
   const append = (records, surface) => {
     for (const record of records) {
       const attribution = record?.[UNKNOWN_CLAUDE_ACTIONS_ATTRIBUTION];
-      if (attribution?.status !== "unknown" || seen.has(record)) continue;
+      if (!hasUnknownClaudeActionsAttribution(record) || seen.has(record)) {
+        continue;
+      }
       seen.add(record);
       evidence.push({
         ...baseEvidence(record, { prUrl, surface }),

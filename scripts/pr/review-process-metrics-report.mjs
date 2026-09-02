@@ -2,7 +2,10 @@ import {
   buildPerBotEvidence,
   REVIEW_BOT_KEYS,
 } from "./review-process-metrics-core.mjs";
-import { buildUnknownAttributionEvidence } from "./review-process-metrics-actions.mjs";
+import {
+  buildUnknownAttributionEvidence,
+  hasUnknownClaudeActionsAttribution,
+} from "./review-process-metrics-actions.mjs";
 import {
   aggregateMetrics,
   summarizePullRequestMetrics,
@@ -49,6 +52,15 @@ export function summarizePullRequestMetricsV2({
   collectedAt = new Date().toISOString(),
 }) {
   assertCompletePagination(pagination);
+  const legacyIssueComments = issueComments.filter(
+    (record) => !hasUnknownClaudeActionsAttribution(record),
+  );
+  const legacyReviews = reviews.filter(
+    (record) => !hasUnknownClaudeActionsAttribution(record),
+  );
+  const legacyReviewComments = reviewComments.filter(
+    (record) => !hasUnknownClaudeActionsAttribution(record),
+  );
   const normalizedPr = {
     number: pr.number,
     title: pr.title,
@@ -58,13 +70,13 @@ export function summarizePullRequestMetricsV2({
     changedFiles: pr.changed_files ?? pr.changedFiles,
     additions: pr.additions,
     deletions: pr.deletions,
-    comments: issueComments,
-    reviews,
+    comments: legacyIssueComments,
+    reviews: legacyReviews,
     commits,
   };
   const summary = summarizePullRequestMetrics({
     pr: normalizedPr,
-    reviewComments,
+    reviewComments: legacyReviewComments,
     collectedAt,
   });
   const prUrl = normalizedPr.url;

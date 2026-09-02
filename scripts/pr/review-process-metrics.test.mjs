@@ -4518,6 +4518,13 @@ test("records canonical manual Claude workflow events as unknown", () => {
     assert.equal(summary.evidence.byBot.claude.surfaces[surface].records, 0);
     assert.equal(summary.evidence.byBot.claude.surfaces[surface].findings, 0);
   }
+  assert.equal(summary.reviews.submissions, 0);
+  assert.equal(summary.reviews.byBots, 0);
+  assert.equal(summary.reviews.byHumans, 0);
+  assert.equal(summary.comments.topLevel, 0);
+  assert.equal(summary.comments.reviewInlineRoots, 0);
+  assert.equal(summary.botReviewSignals.findingLikeInline, 0);
+  assert.equal(summary.botReviewSignals.candidateFindings, 0);
   assert.deepEqual(
     {
       botReviewSubmissions: summary.reviews.byBots,
