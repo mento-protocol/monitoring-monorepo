@@ -7209,6 +7209,8 @@ implementation_signature() {
     scripts/gate/routing-table/groups-head.mjs \
     scripts/gate/routing-table/groups-tail.mjs \
     scripts/gate/routing-table/index.mjs \
+    scripts/gate/routing-table/indexer-handler-invariant-contract.mjs \
+    scripts/gate/routing-table/indexer-handler-invariant-families.mjs \
     scripts/gate/routing-table/indexer-invariant-parity.test.mjs \
     scripts/gate/routing-table/pattern-oracle.test.mjs \
     scripts/gate/routing-table/pattern.mjs \

@@ -7,7 +7,7 @@ import { test } from "node:test";
 import {
   getIndexerHandlerInvariantChecklistDecisions,
   getIndexerHandlerInvariantRoutingFamilies,
-} from "../../agent-autoreview-core.mjs";
+} from "./indexer-handler-invariant-contract.mjs";
 import { bashFunctionSource } from "../../sentry/ci-wiring/check-sentry-suites-in-ci-gate-extract.mjs";
 import { AGENT_MODULE_ARMS } from "./arms-agent-modules.mjs";
 import { PACKAGE_ARMS } from "./arms-packages.mjs";
@@ -131,7 +131,7 @@ const tableIndexerInvariantDecision = (candidatePath) => {
   return matchesAny(indexerInvariantRoutedArm.patterns, candidatePath);
 };
 
-test("the core-source arm preserves the checklist across classifier version skew", () => {
+test("the contract-source arm preserves the checklist across classifier drift", () => {
   const protectedDecisions = getIndexerHandlerInvariantChecklistDecisions([
     "indexer-envio/src/futureProtectedSkew.ts",
     "indexer-envio/src/rpc/log.ts",
@@ -142,22 +142,27 @@ test("the core-source arm preserves the checklist across classifier version skew
     "the skew controls must remain unrouted in the protected classifier",
   );
 
-  const coreArm = AGENT_MODULE_ARMS.find(({ patterns }) =>
-    patterns.includes("scripts/agent-autoreview-core.mjs"),
+  const contractArm = AGENT_MODULE_ARMS.find(({ patterns }) =>
+    patterns.includes(
+      "scripts/gate/routing-table/indexer-handler-invariant-contract.mjs",
+    ),
   );
-  assert.ok(coreArm, "the agent module table has no autoreview-core arm");
   assert.ok(
-    coreArm.effects.some(
+    contractArm,
+    "the agent module table has no invariant-contract arm",
+  );
+  assert.ok(
+    contractArm.effects.some(
       (effect) =>
         effect.checklist ===
           "docs/pr-checklists/indexer-handler-invariants.md" &&
         effect.reason === "indexer invariant routing source changed",
     ),
-    "the core-source arm does not conservatively route the invariant checklist",
+    "the contract-source arm does not conservatively route the invariant checklist",
   );
 });
 
-test("the table and core agree on every current indexer module path", () => {
+test("the table and contract agree on every current indexer module path", () => {
   const paths = [
     ...walkIndexerModuleFiles(`${REPO}/indexer-envio/src`),
     ...walkIndexerModuleFiles(`${REPO}/indexer-envio/test`),
@@ -168,7 +173,7 @@ test("the table and core agree on every current indexer module path", () => {
     assert.equal(
       tableIndexerInvariantDecision(decision.path),
       decision.route,
-      `${decision.path} differs between the core and routing table`,
+      `${decision.path} differs between the contract and routing table`,
     );
     assert.notEqual(
       decision.owner,
@@ -188,7 +193,7 @@ test("the table and core agree on every current indexer module path", () => {
   );
 });
 
-test("the table and core agree on every focused input outside src and test", () => {
+test("the table and contract agree on every focused input outside src and test", () => {
   const paths = [
     ...walkFiles(`${REPO}/indexer-envio/abis`),
     ...walkFiles(`${REPO}/indexer-envio/config`),
@@ -200,7 +205,7 @@ test("the table and core agree on every focused input outside src and test", () 
     assert.equal(
       tableIndexerInvariantDecision(decision.path),
       decision.route,
-      `${decision.path} differs between the core and routing table`,
+      `${decision.path} differs between the contract and routing table`,
     );
   }
 });
@@ -510,7 +515,9 @@ test("freshness, CI routes, and Turbo inputs pin the external family source", ()
     .split(/\s+/)
     .filter(Boolean);
   assert.ok(
-    signatureEntries?.includes("scripts/agent-autoreview-core.mjs"),
+    signatureEntries?.includes(
+      "scripts/gate/routing-table/indexer-handler-invariant-families.mjs",
+    ),
     "implementation_signature() does not list the external family source",
   );
   assert.ok(

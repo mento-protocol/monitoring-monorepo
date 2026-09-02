@@ -115,8 +115,12 @@ export const AGENT_MODULE_ARMS = [
     ],
   },
   {
-    why: "The autoreview core exports the indexer-family source that arms-packages.mjs compiles. Autoreview executes the protected-main core, so it cannot see a candidate revision's new owner or false-to-true reclassification. The core path conservatively routes the checklist in both autoreview and the local gate. This intentionally overroutes unrelated core edits to preserve the trust boundary. A core-only edit must also exercise both the data-table parity suite and the live gate regression suite, in addition to its autoreview consumers.",
-    patterns: ["scripts/agent-autoreview-core.mjs"],
+    why: "The invariant contract exports the indexer-family source that arms-packages.mjs compiles. The gate routes from the source in its own checkout, so it cannot see a candidate revision's new owner or false-to-true reclassification before that source lands. A change to the families or contract source therefore routes the checklist unconditionally. This intentionally overroutes unrelated edits to keep the classifier and the checklist in step. Such an edit must also exercise the data-table parity suite and the live gate regression suite. The autoreview core still holds a duplicate copy of the same data until the removal PR, so it stays on this arm with its own consumers.",
+    patterns: [
+      "scripts/agent-autoreview-core.mjs",
+      "scripts/gate/routing-table/indexer-handler-invariant-contract.mjs",
+      "scripts/gate/routing-table/indexer-handler-invariant-families.mjs",
+    ],
     effects: [
       {
         command: "pnpm agent:autoreview:test",
@@ -137,7 +141,7 @@ export const AGENT_MODULE_ARMS = [
       },
       {
         command:
-          "node --test scripts/agent-autoreview-indexer-invariant-contract.test.mjs",
+          "node --test scripts/indexer-handler-invariant-contract.test.mjs",
         reason: "indexer invariant routing source changed",
       },
       {
@@ -147,12 +151,12 @@ export const AGENT_MODULE_ARMS = [
     ],
   },
   {
-    patterns: ["scripts/agent-autoreview-indexer-invariant-contract.test.mjs"],
+    patterns: ["scripts/indexer-handler-invariant-contract.test.mjs"],
     effects: [
       {
         command:
-          "node --test scripts/agent-autoreview-indexer-invariant-contract.test.mjs",
-        reason: "indexer autoreview invariant contract changed",
+          "node --test scripts/indexer-handler-invariant-contract.test.mjs",
+        reason: "indexer handler invariant contract changed",
       },
     ],
   },
