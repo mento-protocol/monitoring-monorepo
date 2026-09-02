@@ -14959,6 +14959,7 @@ done
   active_worker_pgids=(101)
   active_worker_drain_identities=(fixture-worker-1)
   active_worker_start_identities=(fixture-start-1)
+  active_worker_mapped_commands=("pnpm lint:scripts")
   active_worker_lifecycle_contracts=()
   if unregister_active_parallel_worker \
     101 fixture-worker-1 fixture-start-1 portable-marker-v1; then
@@ -14971,13 +14972,23 @@ done
     exit 1
   fi
 
+  # The mapped command registry aligns with the same four, so a gap there is
+  # the same fail-closed case as a missing lifecycle contract.
   active_worker_lifecycle_contracts=(portable-marker-v1)
+  active_worker_mapped_commands=()
+  if unregister_active_parallel_worker \
+    101 fixture-worker-1 fixture-start-1 portable-marker-v1; then
+    exit 1
+  fi
+
+  active_worker_mapped_commands=("pnpm lint:scripts")
   unregister_active_parallel_worker \
     101 fixture-worker-1 fixture-start-1 portable-marker-v1
   [[ "${#active_worker_pgids[@]}" -eq 0 ]]
   [[ "${#active_worker_drain_identities[@]}" -eq 0 ]]
   [[ "${#active_worker_start_identities[@]}" -eq 0 ]]
   [[ "${#active_worker_lifecycle_contracts[@]}" -eq 0 ]]
+  [[ "${#active_worker_mapped_commands[@]}" -eq 0 ]]
 )
 rm -rf "$parallel_contract_fixture"
 
