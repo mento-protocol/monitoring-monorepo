@@ -31,6 +31,7 @@ import {
   captureDarwinExactChildOrGone,
   captureDarwinExactParent,
   classifyDarwinLineageCandidates,
+  darwinLineageCensusBarrierForTest,
   darwinLineageConstantsForTest,
   darwinLineageTransitionForTest,
   darwinNativeHelperTrustForTest,
@@ -3752,3 +3753,243 @@ test(
     }
   },
 );
+
+// The census barrier is the ONLY drain refresh barrier consumer on a Darwin
+// lineage contract: `drain_condemned_run_commands` returns at its lineage arm
+// before reaching the shell barrier. So it has to do the selection itself — a
+// named fixture that this seam declines gets no rendezvous at all and waits out
+// the gate's budget. Selection is plain file inspection, so it is verifiable
+// here even though the census around it is Darwin only.
+test("the Darwin census barrier arms only on the drain a fixture named", async () => {
+  const { waitAtDarwinCensusTestBarrier } = darwinLineageCensusBarrierForTest;
+  const directory = mkdtempSync(join(tmpdir(), "darwin-census-barrier-"));
+  const previousNodeEnv = process.env.NODE_ENV;
+  const previousBarrier =
+    process.env.AGENT_QUALITY_GATE_TEST_DRAIN_REFRESH_BARRIER;
+  process.env.NODE_ENV = "test";
+  const named = "pnpm agent:prewarm:test";
+  const cases = [
+    // Opting out of naming is unchanged: the seam arms on the first drain.
+    { name: "unnamed", active: named, arms: true },
+    // The drain the fixture asked for.
+    { name: "match", command: named, active: named, arms: true },
+    // An earlier drain passes straight through. This is the case the race lost.
+    {
+      name: "other",
+      command: named,
+      active: "./tools/trunk check --ci x",
+      arms: false,
+    },
+    // A cohort settles several commands at once and passes no name, so it can
+    // never be the drain a fixture meant.
+    { name: "cohort", command: named, active: null, arms: false },
+    // A name written without a trailing newline still names that command.
+    {
+      name: "unterminated",
+      command: named,
+      active: named,
+      arms: true,
+      raw: named,
+    },
+    // A symlink to a regular file is a valid name: the shell selector's `-f`
+    // follows the link and reads it, so refusing it here would diverge.
+    {
+      name: "symlinked",
+      command: named,
+      active: named,
+      arms: true,
+      link: true,
+    },
+  ];
+  try {
+    const observed = [];
+    for (const item of cases) {
+      const barrier = join(directory, item.name);
+      // Pre-created so an arming case returns on its first poll rather than
+      // spending the seam's twenty-second budget.
+      writeFileSync(`${barrier}.release`, "");
+      if (item.link) {
+        writeFileSync(`${barrier}.command.target`, `${item.command}\n`);
+        symlinkSync(`${barrier}.command.target`, `${barrier}.command`);
+      } else if (item.raw !== undefined) {
+        writeFileSync(`${barrier}.command`, item.raw);
+      } else if (item.command !== undefined) {
+        writeFileSync(`${barrier}.command`, `${item.command}\n`);
+      }
+      process.env.AGENT_QUALITY_GATE_TEST_DRAIN_REFRESH_BARRIER = barrier;
+      await waitAtDarwinCensusTestBarrier(item.active);
+      observed.push([
+        item.name,
+        existsSync(`${barrier}.used`),
+        existsSync(`${barrier}.ready`),
+      ]);
+    }
+    assert.deepEqual(
+      observed,
+      cases.map(({ name, arms }) => [name, arms, arms]),
+    );
+  } finally {
+    if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previousNodeEnv;
+    if (previousBarrier === undefined) {
+      delete process.env.AGENT_QUALITY_GATE_TEST_DRAIN_REFRESH_BARRIER;
+    } else {
+      process.env.AGENT_QUALITY_GATE_TEST_DRAIN_REFRESH_BARRIER =
+        previousBarrier;
+    }
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+// A name that was asked for and cannot be resolved must fail the drain closed.
+// Falling back to arming everywhere is the wrong-drain race itself, reached
+// through the mechanism added to close it.
+test("the Darwin census barrier fails closed on an unresolvable name", async () => {
+  const { waitAtDarwinCensusTestBarrier } = darwinLineageCensusBarrierForTest;
+  const directory = mkdtempSync(join(tmpdir(), "darwin-census-barrier-bad-"));
+  const previousNodeEnv = process.env.NODE_ENV;
+  const previousBarrier =
+    process.env.AGENT_QUALITY_GATE_TEST_DRAIN_REFRESH_BARRIER;
+  process.env.NODE_ENV = "test";
+  try {
+    for (const broken of ["empty", "dangling", "directory", "unreadable"]) {
+      const barrier = join(directory, broken);
+      writeFileSync(`${barrier}.release`, "");
+      if (broken === "empty") {
+        writeFileSync(`${barrier}.command`, "\n");
+      } else if (broken === "dangling") {
+        symlinkSync(`${barrier}.command.absent`, `${barrier}.command`);
+      } else if (broken === "directory") {
+        mkdirSync(`${barrier}.command.dir`);
+        symlinkSync(`${barrier}.command.dir`, `${barrier}.command`);
+      } else {
+        writeFileSync(`${barrier}.command`, "pnpm agent:prewarm:test\n");
+        chmodSync(`${barrier}.command`, 0o000);
+        if (
+          (() => {
+            try {
+              readFileSync(`${barrier}.command`);
+              return true;
+            } catch {
+              return false;
+            }
+          })()
+        ) {
+          // Running as a user whose reads bypass the permission bits, so the
+          // case cannot be posed. Skipping silently would look like coverage.
+          console.log(
+            "note: skipping unreadable Darwin barrier name case (reads bypass mode 000)",
+          );
+          chmodSync(`${barrier}.command`, 0o600);
+          continue;
+        }
+      }
+      process.env.AGENT_QUALITY_GATE_TEST_DRAIN_REFRESH_BARRIER = barrier;
+      await assert.rejects(
+        () => waitAtDarwinCensusTestBarrier("pnpm agent:prewarm:test"),
+        /drain refresh barrier name/,
+        `a ${broken} Darwin barrier name did not fail closed`,
+      );
+      assert.equal(
+        existsSync(`${barrier}.used`) || existsSync(`${barrier}.ready`),
+        false,
+        `a ${broken} Darwin barrier name armed anyway`,
+      );
+    }
+  } finally {
+    if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previousNodeEnv;
+    if (previousBarrier === undefined) {
+      delete process.env.AGENT_QUALITY_GATE_TEST_DRAIN_REFRESH_BARRIER;
+    } else {
+      process.env.AGENT_QUALITY_GATE_TEST_DRAIN_REFRESH_BARRIER =
+        previousBarrier;
+    }
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+// Every settlement route has to name the drain it is running, or a named
+// barrier meets none of them. Two exist — `watch-settle` for a mapped command
+// that completes normally, `settle` for recovery — and each was missed once
+// during review, so this checks the wiring rather than trusting it. Each call
+// site's arguments are read to its balanced close paren, so reformatting the
+// file cannot make this pass by accident.
+test("every Darwin settlement route carries the active mapped command", () => {
+  const gateDirectory = dirname(fileURLToPath(import.meta.url));
+  const repoRoot = dirname(gateDirectory);
+  const moduleSource = readFileSync(
+    join(gateDirectory, "darwin-process-lineage.mjs"),
+    "utf8",
+  );
+  const callArguments = (source, callee) => {
+    const calls = [];
+    const opener = new RegExp(`(?<![\\w.])${callee}\\(`, "gu");
+    let match;
+    while ((match = opener.exec(source)) !== null) {
+      const before = source.slice(0, match.index);
+      // Skip the declaration itself; only calls have to pass the name.
+      if (/function\s+$/u.test(before)) continue;
+      let depth = 0;
+      let index = match.index + match[0].length - 1;
+      for (; index < source.length; index += 1) {
+        if (source[index] === "(") depth += 1;
+        else if (source[index] === ")") {
+          depth -= 1;
+          if (depth === 0) break;
+        }
+      }
+      calls.push(source.slice(match.index, index + 1));
+    }
+    return calls;
+  };
+  for (const callee of [
+    "settleDarwinLineage",
+    "settleWatchedDarwinLineage",
+    "settleDarwinLineageCohort",
+  ]) {
+    const calls = callArguments(moduleSource, callee);
+    assert.ok(calls.length > 0, `no call to ${callee} was found`);
+    for (const call of calls) {
+      assert.ok(
+        call.includes("activeMappedCommand"),
+        `a call to ${callee} does not carry the active mapped command: ${call}`,
+      );
+    }
+  }
+  // The barrier only sees a name when exactly one lineage is settling. A real
+  // cohort has no single name and must decline a named barrier.
+  const [barrierCall] = callArguments(
+    moduleSource,
+    "waitAtDarwinCensusTestBarrier",
+  );
+  // Not just that the singleton check exists: an inverted ternary would keep a
+  // single lineage from selecting its named barrier and let a cohort select
+  // one, so both branch values are pinned.
+  assert.match(
+    barrierCall,
+    /descriptors\.length === 1\s*\?\s*activeMappedCommand\s*:\s*null/u,
+  );
+  // Both CLI branches read the option, and each shell invocation passes it.
+  assert.equal(
+    moduleSource.split('options.get("--active-mapped-command")').length - 1,
+    3,
+    "the settle, watch-settle and settle-cohort CLI branches must read it",
+  );
+  for (const [file, cliCommand] of [
+    ["gate/darwin-process-lineage.sh", "settle"],
+    ["gate/darwin-process-lineage.sh", "settle-cohort"],
+    ["agent-quality-gate.sh", "watch-settle"],
+  ]) {
+    const source = readFileSync(join(repoRoot, file), "utf8");
+    const index = source.indexOf(`"$module" ${cliCommand} \\`);
+    assert.ok(index !== -1, `${file} does not invoke ${cliCommand}`);
+    // The invocation ends at the first line that is not a continuation.
+    const rest = source.slice(index);
+    const invocation = rest.slice(0, rest.indexOf("\n\n"));
+    assert.ok(
+      invocation.includes("--active-mapped-command"),
+      `${file} invokes ${cliCommand} without --active-mapped-command`,
+    );
+  }
+});
