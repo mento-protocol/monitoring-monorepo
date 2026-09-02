@@ -93,17 +93,33 @@ Two additions, neither of which changes the decision above. Eligibility keeps
 every clause it had, the sweep still stops at READY, and it still never merges.
 
 **A grooming pass inside the sweep.** It runs after the batch is claimed and
-every worker is spawned, and before the report. It reads each candidate's body
-and the paths that body names, applies `pkg:*`, `risk:*`, and `kind:*` from what
-the tree holds, moves an unlabeled issue to `needs-grooming` and never to
-`agent-ready`, posts one `sweep-groomed:v1` marker comment per issue, and is
-capped at 10 candidates a run. Its position in the loop is the safety property:
+every worker is spawned, and before the report — including on an empty batch,
+which is the case it exists for. It reads each candidate's body and the paths
+that body names, applies `pkg:*`, `kind:*`, and a narrowing `risk:*` from what
+the tree holds, posts one `sweep-groomed:v1` marker comment per issue, and is
+capped at 10 candidates a run. Its position in the loop is one safety property:
 this run's eligibility step has already finished, so no label the pass writes
 can select work for this run. Grooming first and then selecting was the
 alternative, and it is one night faster; it was rejected because it lets one
 unattended session grant itself `risk:low` and immediately work the issue,
 which is the root [`AGENTS.md`](../../AGENTS.md) rule against weakening a
 control that blocks your own work, applied to the sweep's own gate.
+
+**Ordering alone was not enough, so the pass never writes `risk:low` and never
+writes a state label.** `risk:low` is the only label that widens what a sweep
+may claim; `risk:medium` and `risk:high` only narrow it. A run boundary plus a
+passive veto still ends with the same agent population treating its own label
+as authorization twelve hours later, on an issue no human read. The pass
+therefore records `risk:low` in the marker's `proposed` list with the rule
+clause behind it, and one human label supplies the acknowledgement that
+ordering cannot. State labels are withheld for a different reason:
+[ADR 0082](0082-persistent-issue-board-mutation-mutex.md) serializes queue-state
+writes behind the per-issue mutex, `gh issue edit` does not take it, and a raw
+write against a roster snapshot can land `needs-grooming` beside an
+`agent-active` a claim added moments earlier. Both stay proposals an operator or
+a mutex-owning helper applies. The cost is that repairing the queue completely
+still needs one human pass; the pass removes the labeling work, not the
+judgement.
 
 The marker also carries a 12-hour veto window. An issue a sweep groomed is
 ineligible until it closes, which gives a human a bounded chance to disagree
@@ -138,8 +154,9 @@ share a `pkg:*` label" assumes a label maps to a collision surface. It does for
 files, no path either names equals or contains a path the other names, and
 neither names a shared root file or control root. Containment rather than a
 fixed-depth prefix, because `docs/` and `docs/notes/` differ at every prefix
-length yet overlap on every file. A candidate with no path list conflicts with
-every other. The refinement is scoped to that
+length yet overlap on every file. The mirrored skill trees normalize to one
+path first, since the mirror check makes every edit land in both. A candidate
+with no path list conflicts with every other. The refinement is scoped to that
 one label; every other area keeps the label test. `pnpm issue:claim
 --sweep-eligible` enforces neither form and needs no change: it grades one
 issue's own labels and never sees the batch, so batch independence stays the

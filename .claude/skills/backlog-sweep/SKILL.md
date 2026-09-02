@@ -225,6 +225,10 @@ names, compared on whole path segments (`scripts/pr/` against
 neither names a shared root file or control root —
 `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `.trunk/**`,
 `.github/workflows/**`, `scripts/agent-quality-gate.sh`, or `scripts/gate/**`.
+Normalize the mirrored skill trees first, reading `.claude/skills/<x>/` as
+`.agents/skills/<x>/`: they are one collision surface, so an issue naming one
+and an issue naming the other would pass a literal containment test and then
+produce two PRs touching the same files.
 A candidate with no path list conflicts with every other `pkg:tooling`
 candidate: nothing to compare is not evidence that the paths are disjoint. Name
 the independence basis in the printed batch for every pair that relied on this,
@@ -670,13 +674,14 @@ but neither does an unfixed defect.
 ## Groom The Queue For The Next Run
 
 Run this after the batch is claimed and every worker is spawned, and before the
-report. Nothing this pass labels can be selected by this run — the eligibility
-step has already finished — and that ordering is the only reason the pass is
-safe unattended. An agent that labels an issue `risk:low` and then works it in
-the same run has no risk gate, which is the root
-[`AGENTS.md`](../../../AGENTS.md) rule against weakening a control that blocks
-your own work. Never move this pass earlier, and never re-run selection after
-it.
+report — including when the batch came out empty, which is the case grooming
+exists for. Nothing this pass labels can be selected by this run: the
+eligibility step has already finished. Never move the pass earlier and never
+re-run selection after it. Ordering alone is not the whole guard, though, which
+is why the pass never writes `risk:low`: that is the one label that widens what
+a sweep may claim, the veto is passive, and the next run is the same agent
+population. Writing it would be the root [`AGENTS.md`](../../../AGENTS.md) rule
+against widening a control that blocks your own work, one run later.
 
 The full procedure is
 [`backlog-sweep.md`](../../../docs/notes/backlog-sweep.md). The operative steps:
@@ -688,28 +693,38 @@ The full procedure is
    issues with no queue-state label read from the roster the ranking already
    fetched. Drop every bot record — anything authored by `app/github-actions`
    or carrying `drift-detection`, `sentry-triage`, a `sentry:*` label,
-   `dependencies`, `security-advisories`, or `file-size-watchlist`.
+   `dependencies`, `security-advisories`, or `file-size-watchlist`. Skip a
+   candidate whose body digest still matches the one in its newest trusted
+   marker: the verdict is read off the body, so an unchanged body repeats it,
+   and a body that names no path would otherwise hold a cap slot for ever.
+   Compare the body, never `updatedAt` — posting the marker updates the issue,
+   so a timestamp test would compare the pass against its own write. Count the
+   skip in the report.
 2. **Read the body, then read the paths it names.** The labels come from what
    the checkout holds, not from what the body claims.
 3. **Decide the labels.**
    - `pkg:*` — every area the named paths fall in. Several labels when the
      issue genuinely spans packages, which keeps it correctly labeled and
      sweep-ineligible; none when the body names no path.
-   - `risk:*` — exactly one, and only when the issue carries none. `risk:low`
-     only when the
+   - `risk:*` — one, only when the issue carries none, and **never
+     `risk:low`.** Write `risk:medium`, or `risk:high` for secrets, IAM, a
+     production apply, or deploy identity; both only narrow what a sweep may
+     claim. Put `risk:low` in the marker's `proposed` list with the
      [Low-risk rule](../../../docs/notes/agent-issue-workflow.md#low-risk-rule)
-     holds against paths you verified exist, `risk:medium` otherwise,
-     `risk:high` for secrets, IAM, a production apply, or deploy identity. Never
-     remove or downgrade an existing risk label, and never add a second: an
-     issue already carrying two is a conflict this pass records in the marker
-     comment and leaves for a human.
+     clause behind it, and let a human apply it. Read that rule at its anchor,
+     never from memory; when it cannot be read, propose nothing and say so.
+     Never remove or downgrade an existing risk label. Write nothing at all on
+     two issues, naming the reason in the marker: one already carrying two risk
+     labels, and one carrying `risk:low` whose verified paths touch secrets,
+     IAM, a production apply, or deploy identity — completing its `pkg:*`
+     routing would hand a worker the issue that label misdescribes.
    - `kind:*` — one, when the work type is obvious.
-   - State — `needs-grooming` for an unlabeled candidate, never `agent-ready`;
-     promotion is the human judgement that the issue is implementable as
-     written, and an agent that could grant it would widen its own intake. An
-     already `agent-ready` candidate keeps its state label. Write no Project
-     field, and never touch the state label of an issue carrying `agent-active`
-     or `in-pr`.
+   - State — write none. Queue-state labels are serialized behind the ADR 0082
+     per-issue mutex and `gh issue edit` does not take it, so a raw write
+     against a roster snapshot can land `needs-grooming` beside an
+     `agent-active` a claim added a moment earlier. Propose the state instead —
+     `needs-grooming` for an unlabeled candidate, never `agent-ready` — and let
+     an operator or a mutex-owning helper apply it. Write no Project field.
 
 4. **Post the marker comment, then write the labels — in that order, on every
    issue.** The two writes are separate API calls, and a label that lands with
@@ -719,19 +734,23 @@ The full procedure is
    posted, write no label for that issue.
 
    ```text
-   <!-- sweep-groomed:v1 {"sweep":"<sweep_id>","at":"<ISO-8601 UTC>","applied":[...],"proposed":[...]} -->
+   <!-- sweep-groomed:v1 {"sweep":"<sweep_id>","at":"<ISO-8601 UTC>","body":"<sha256>","applied":[...],"proposed":[...]} -->
    ```
 
-   `applied` lists the labels the next call writes; `proposed` lists what the
-   pass judged right and will not write — the `agent-ready` promotion only an
-   operator can make, and a risk label withheld from an issue already carrying
-   two. `at` records when the pass ran, for a human reading the comment; the
-   veto window is measured from GitHub's `createdAt` instead, on a trusted
-   author's comment only. Then, in prose: the labels applied, the paths
-   checked, the Low-risk rule clause that decided the risk label, and — for an
-   unlabeled issue — whether the body already meets the agent-ready bar of
-   goal, acceptance criteria, expected files, and a verification command. An
-   operator reads that line before promoting the issue.
+   `body` is the SHA-256 of the issue body this pass read, and the next run
+   skips the candidate while it still matches. `applied` lists the labels the
+   next call writes; `proposed` lists everything
+   the pass judged right and will not write itself — a `risk:low`, the state
+   label the mutex owns, the `agent-ready` promotion, workboard enrollment, and
+   a risk label withheld from a contradicted or double-labeled issue. `at`
+   records when the pass ran, for a human reading the comment; the veto window
+   is measured from GitHub's `createdAt` instead, on a trusted author's comment
+   only. Then, in prose: the labels applied, the paths checked, the Low-risk
+   rule clause behind the risk verdict, and — for an unlabeled issue — whether
+   the body already meets the agent-ready bar of goal, acceptance criteria,
+   expected files, and a verification command. Say there too when the issue is
+   absent from the workboard: `hasSweepClaimAttributes` needs an exact
+   non-Blocked Project status, so promotion alone would not make it claimable.
 
    ```bash
    gh issue edit <n> --repo mento-protocol/monitoring-monorepo \
@@ -896,16 +915,18 @@ board.
    that something is still sitting there.
 6. **Anything needing the operator's decision** — a blocked control, a
    misgroomed issue, a finding the worker could not adjudicate.
-7. **Groomed for the next run**, a table of
-   `Issue | Labels applied | Rule basis | Veto ends`. `Rule basis` names the
-   Low-risk rule clause that decided the risk label; `Veto ends` is the end of
-   that issue's 12-hour veto window. It says when the window closes, not when
-   the issue becomes selectable — a `needs-grooming` issue still needs a human
-   to promote it, and `risk:medium` or several `pkg:*` labels keep it
-   ineligible whatever the clock says. Name the remaining requirement beside
-   the time whenever one applies. Write the section with a `none` row when the
-   pass groomed nothing — an empty candidate set and a pass that never ran read
-   identically once the section is missing.
+7. **Groomed for the next run**, a table of `Issue | Labels applied | Proposed
+for a human | Rule basis | Veto ends`. `Proposed for a human` is the column
+   an operator acts on — a `risk:low` the pass may not write, the state label
+   the mutex owns, workboard enrollment, an `agent-ready` promotion the body
+   already deserves. `Veto ends` says when the window closes, not when the
+   issue becomes selectable: an unapplied proposal, a `risk:medium`, or several
+   `pkg:*` labels keep it ineligible whatever the clock says. Name the
+   remaining requirement beside the time whenever one applies. List candidates
+   skipped as unchanged since their last marker, so a stuck issue is visible.
+   Write the section with a `none` row when the pass groomed nothing — an empty
+   candidate set and a pass that never ran read identically once the section is
+   missing.
 
 Print the same summary to the terminal; the file is the artifact, the terminal
 output is its summary.

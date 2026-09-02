@@ -232,6 +232,11 @@ Fewer qualifying issues than the batch size is a normal result: take fewer and
 say so. Zero is also a result — write the report with an empty table rather
 than relaxing a rule to fill it.
 
+**Zero eligible issues does not end the run.** An empty batch is the case
+grooming exists for, so the pass below still runs, and the report is written
+after it. A sweep that returned early on an empty batch would leave the queue
+exactly as it found it and the next run would find the same nothing.
+
 ### Trusting a veto marker
 
 The marker is a comment, and anyone who can comment on an issue can write one.
@@ -291,6 +296,12 @@ Two `pkg:tooling` candidates are independent when all three hold:
 - neither names a shared root file or a control root: `package.json`,
   `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `.trunk/**`, `.github/workflows/**`,
   `scripts/agent-quality-gate.sh`, or `scripts/gate/**`.
+
+Normalize the mirrored skill trees before comparing: read
+`.claude/skills/<x>/` as `.agents/skills/<x>/`. The two are one collision
+surface — the mirror check makes every edit land in both — so an issue naming
+one and an issue naming the other would pass a literal containment test and
+then produce two PRs touching the same files.
 
 A candidate with no path list conflicts with every other `pkg:tooling`
 candidate. Nothing to compare is not evidence that the paths are disjoint, and
@@ -424,6 +435,22 @@ by age alone and sits behind every scored candidate. Two sets qualify:
   own lifecycles, and labeling their output into the human queue would bury
   the issues a person wrote.
 
+**Skip a candidate the pass cannot improve.** Every marker records the SHA-256
+of the issue body the pass read. Skip a candidate whose current body digest
+equals the digest in its newest trusted marker: the verdict is read off the body
+and the paths it names, so an unchanged body reaches the same verdict. Without
+that rule an `agent-ready` issue whose body names no path stays a candidate for
+ever — it can never earn a `pkg:*` label, and ten such issues would hold the cap
+every run and starve everything below them. Count the skip in the report so a
+stuck issue is visible rather than silent.
+
+Compare the body, not `updatedAt`: posting the marker updates the issue, so a
+timestamp test would compare the pass against its own write and never skip
+anything. The digest is the same primitive `pnpm issue:claim --body-sha256`
+already pins a sweep claim with. It also states the limit — a body edit reopens
+the candidate, and so does deleting the marker, but a verdict that would change
+only because the tree changed underneath it does not.
+
 ### What the pass applies
 
 Read the body, then read the paths it names in the checkout. Every label below
@@ -433,24 +460,50 @@ comes from what the tree holds, not from what the body claims.
   paths sit in one area; several when the issue genuinely spans packages, which
   leaves it correctly labeled and still sweep-ineligible. When the body names
   no path, apply none and say so in the marker comment.
-- **`risk:*`** — exactly one, and only when the issue carries none.
-  `risk:low` only when the
-  [Low-risk rule](agent-issue-workflow.md#low-risk-rule) holds against paths the
-  pass verified exist; `risk:medium` otherwise; `risk:high` when the issue
-  touches secrets, IAM, a production apply, or deploy identity. Leave a risk
-  label the issue already carries: the pass never removes one and never
-  downgrades one. An issue already carrying two is a conflict the pass cannot
-  repair, because removing a label is the human judgement it is not making —
-  apply no risk label and name the conflict in the marker comment.
+- **`risk:*`** — one, and only when the issue carries none, and **never
+  `risk:low`.** The pass writes `risk:medium`, or `risk:high` when the issue
+  touches secrets, IAM, a production apply, or deploy identity. Both of those
+  only narrow what the sweep may claim. `risk:low` is the one label that widens
+  it, so the pass records it in the marker's `proposed` list, citing the
+  [Low-risk rule](agent-issue-workflow.md#low-risk-rule) clause it relied on,
+  and a human applies it. Deciding the run boundary was enough was the first
+  design and it is not: the veto is passive, the next run is the same agent
+  population, and an issue nobody looked at would become claimable on a timer.
+  One human label is the acknowledgement that ordering cannot supply.
+
+  Read that rule at its anchor rather than from memory, and when it cannot be
+  read, propose nothing and say so: an agent that reconstructs the criterion for
+  its own `risk:low` is choosing its own gate.
+
+  Leave a risk label the issue already carries — the pass never removes one and
+  never downgrades one. Two cases stop the pass on that issue instead, with the
+  reason in the marker and no label written at all: an issue already carrying
+  two risk labels, because removing one is the human judgement the pass is not
+  making; and an issue carrying `risk:low` whose verified paths touch secrets,
+  IAM, a production apply, or deploy identity, because completing its `pkg:*`
+  routing would hand an unattended worker exactly the issue the risk label
+  misdescribes.
+
 - **`kind:*`** — one, when the work type is obvious from the body: `kind:bug`,
   `kind:refactor`, `kind:hardening`, or `kind:workflow`.
-- **State** — an unlabeled candidate gets `needs-grooming`, never `agent-ready`.
-  Promotion to `agent-ready` is a human judgement that an issue is implementable
-  as written, and an agent that could grant it would be widening its own intake.
-  When the body already meets the ready bar — goal, acceptance criteria,
-  expected files, and a verification command — say so in the marker comment, so
-  an operator can promote it with one label change. An already `agent-ready`
-  candidate keeps its state label untouched.
+- **State** — the pass writes no state label at all. `agent-ready`,
+  `needs-grooming`, `agent-active`, and `in-pr` are mutually exclusive, and
+  [ADR 0082](../adr/0082-persistent-issue-board-mutation-mutex.md) serializes
+  every queue-state write behind the per-issue mutex. `gh issue edit` does not
+  take that mutex, so a raw write against a roster snapshot can land
+  `needs-grooming` beside an `agent-active` a claim added a moment earlier. The
+  pass proposes the state instead — `needs-grooming` for an unlabeled candidate,
+  never `agent-ready` — and an operator or a mutex-owning helper applies it.
+
+  Promotion to `agent-ready` was never the pass's to make: it is the human
+  judgement that an issue is implementable as written. When the body already
+  meets that bar — goal, acceptance criteria, expected files, and a verification
+  command — say so in the marker comment so an operator sees it at a glance.
+
+  Say in the same comment that an issue absent from the workboard needs adding
+  to it. `hasSweepClaimAttributes` requires an exact non-Blocked selected
+  Project status, so an issue with no Project item stays unclaimable by a sweep
+  however it is labeled, and promotion alone would not be enough.
 
 **Post the marker comment before the first label write, on every issue.** The
 two writes are separate API calls, and a label that lands without a marker is an
@@ -472,14 +525,17 @@ field, and it never touches the state label of an owned issue — one carrying
 One comment per groomed issue, opening with a machine-readable marker:
 
 ```text
-<!-- sweep-groomed:v1 {"sweep":"<sweep_id>","at":"<ISO-8601 UTC>","applied":[...],"proposed":[...]} -->
+<!-- sweep-groomed:v1 {"sweep":"<sweep_id>","at":"<ISO-8601 UTC>","body":"<sha256>","applied":[...],"proposed":[...]} -->
 ```
 
-`applied` lists the labels the pass writes immediately after posting this
-comment; the comment is written first, so the field names an intent that the
-label call then carries out. `proposed` lists what the pass judged right and
-will not write: the `agent-ready` promotion only an operator can make, and the
-risk label it withheld from an issue already carrying two.
+`body` is the SHA-256 of the issue body this pass read, and the next run skips
+the candidate while it still matches. `applied` lists the labels the pass writes
+immediately after posting this comment; the comment is written first, so the field names an intent that the
+label call then carries out. `proposed` lists everything the pass judged right
+and will not write itself: a `risk:low` it is not allowed to apply, the state
+label the mutex owns, the `agent-ready` promotion only an operator can make,
+workboard enrollment, and a risk label withheld from an issue already carrying
+two or contradicted by its own paths.
 
 `at` records when the pass ran, for a human reading the comment. The veto window
 is measured from GitHub's `createdAt` on the comment instead, and only on a
@@ -599,16 +655,19 @@ Two properties make the table worth reading:
   the ready queue, `--needs-grooming` takes it out of reach until a human
   settles something.
 
-The grooming section is its own table, `Issue | Labels applied | Rule basis |
-Veto ends`. `Rule basis` names the Low-risk rule clause that decided the risk
-label; `Veto ends` is the end of that issue's 12-hour veto window. The column
-says when the window closes, not when the issue becomes selectable: an issue
-the pass moved to `needs-grooming` still needs a human to promote it, one it
-labeled `risk:medium` or gave several `pkg:*` labels stays ineligible whatever
-the clock says, and a failed label write leaves it where it was. Write the
-remaining requirement beside the time whenever one applies. Zero groomed issues
-is a valid line and gets written rather than omitted — an empty candidate set
-and a pass that never ran read identically once the section is missing.
+The grooming section is its own table, `Issue | Labels applied | Proposed for a
+human | Rule basis | Veto ends`. `Proposed for a human` is the column an
+operator acts on: a `risk:low` the pass may not write, the state label the mutex
+owns, workboard enrollment, an `agent-ready` promotion the body already
+deserves. `Rule basis` names the Low-risk rule clause behind the risk verdict.
+`Veto ends` is the end of that issue's 12-hour window, and it says when the
+window closes rather than when the issue becomes selectable — a proposal nobody
+has applied, a `risk:medium`, or several `pkg:*` labels all keep it ineligible
+whatever the clock says. Name the remaining requirement beside the time whenever
+one applies. Zero groomed issues is a valid line and gets written rather than
+omitted — an empty candidate set and a pass that never ran read identically once
+the section is missing. Candidates skipped as unchanged since their last marker
+get a line too, so a permanently stuck issue is visible.
 
 The report ends with one URL for each READY PR. A human can open each link and
 merge in the GitHub UI. Listing a link is not merge approval. The sweep never
