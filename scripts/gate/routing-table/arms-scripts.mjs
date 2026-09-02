@@ -242,12 +242,6 @@ export const SCRIPT_ARMS = [
                 command: "pnpm agent:autoreview:test",
                 reason: "agent autoreview adapter changed",
               },
-              {
-                why: "merge-pr.test.mjs parses `running_inside_codex_sandbox()` out of this file and fails when the merge wrapper's AUTOMATION_ENV_MARKERS no longer covers every marker it reads. Without this effect the drift guard never runs on the edit that causes the drift.",
-                command: "pnpm pr:merge:test",
-                reason:
-                  "autoreview holds the Codex-session detector the merge wrapper mirrors",
-              },
             ],
           },
           {
@@ -281,11 +275,18 @@ export const SCRIPT_ARMS = [
             ],
           },
           {
-            patterns: ["scripts/bootstrap/agent-session-end-hook.sh"],
+            patterns: [
+              "scripts/bootstrap/agent-session-end-hook.sh",
+              "scripts/bootstrap/agent-setup-contract.test.sh",
+            ],
             effects: [
               {
                 command: "pnpm agent:context-check",
                 reason: "agent SessionEnd hook changed",
+              },
+              {
+                command: "bash scripts/bootstrap/agent-setup-contract.test.sh",
+                reason: "agent setup contract changed",
               },
             ],
           },
@@ -306,7 +307,7 @@ export const SCRIPT_ARMS = [
             effects: [
               {
                 why: "Sourced by scripts/setup.sh and scripts/bootstrap/claude-code-web-setup.sh. `bash -n` cannot see the skip semantics, so route the suite that exercises them.",
-                command: "pnpm agent:quality-gate:test",
+                command: "bash scripts/bootstrap/agent-setup-contract.test.sh",
                 reason: "shared install-marker fragment changed",
               },
             ],
@@ -319,7 +320,7 @@ export const SCRIPT_ARMS = [
             effects: [
               {
                 why: "The two install-marker consumers. The suite pins that both still source the shared fragment and use its hash, which `bash -n` cannot see, and re-runs the fragment's own behavioral checks.",
-                command: "pnpm agent:quality-gate:test",
+                command: "bash scripts/bootstrap/agent-setup-contract.test.sh",
                 reason: "install-marker consumer changed",
               },
             ],

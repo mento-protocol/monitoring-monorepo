@@ -147,7 +147,8 @@ Cases that are not a verdict:
 - A closed queue issue never rests on `sentry:needs-triage`. Stages may write
   that pairing transiently; ingest reopens it on its next run.
 - Closing a queue issue never resolves or archives its Sentry issue.
-- Autofix opens a PR only. Required CI, review, and merge remain human gates.
+- Autofix opens a PR only. Required CI and review remain gates. Merge requires
+  explicit operator approval.
 - Archiving requires an explicit human-applied
   `sentry:approved-archive` label and a separate write-scoped credential.
 - Sentry read, projection, autofix, and archive credentials stay isolated and

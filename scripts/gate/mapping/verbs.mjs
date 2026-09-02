@@ -349,6 +349,7 @@ export const addSentrySuiteGateCommands = (plan, reason) => {
 /** The suites a root tooling-script change re-runs, in the gate's order. */
 const ROOT_TOOLING_SCRIPT_COMMANDS = [
   "node scripts/check-agent-quality-gate-package-scripts.mjs",
+  "bash scripts/bootstrap/agent-setup-contract.test.sh",
   "bash scripts/agent-quality-gate.test.sh",
   "node scripts/gate/agent-prewarm.test.mjs",
   "node scripts/pr/review-materiality.test.mjs",

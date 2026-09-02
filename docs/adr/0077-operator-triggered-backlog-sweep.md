@@ -50,7 +50,7 @@ replies and often another push.
 
 A sweep is an operator-started session that ranks, picks the eligible top N,
 claims each issue by number, and drives each through its own worker to a
-ready-for-review PR. It stops at READY and prints the operator's merge commands.
+ready-for-review PR. It stops at READY and prints the PR links for the operator.
 
 - **The operator starts every run.** No schedule, no self-triggering.
 - **The session is an orchestrator.** It runs no gate, edits no source file, and
@@ -138,9 +138,9 @@ PR it opens.
 - The concurrency bound is the gate coordinator's own capacity, default 3,
   recorded in [ADR 0076](0076-fair-quality-gate-coordinator.md) and
   [`docs/notes/agent-quality-gate-mechanics.md`](../notes/agent-quality-gate-mechanics.md).
-- The never-merge boundary rests on the sanctioned merge wrapper of
-  [ADR 0075](0075-pr-merge.md), which refuses outside an interactive human
-  session.
+- The never-merge boundary rests on the operating card and
+  [ADR 0084](0084-github-ui-operator-merge.md). The sweep stops at READY. A
+  human can merge through the GitHub UI.
 
 ## References
 

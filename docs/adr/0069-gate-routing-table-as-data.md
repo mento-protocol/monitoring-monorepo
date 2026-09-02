@@ -309,7 +309,7 @@ side that can change them and one of them is also in the required `ci` job:
   `implementation_signature()` pins, split into `pins.test.mjs` when D5c took
   `routing-table.test.mjs` to the 1,000-line cap.
 - `node --test scripts/gate/mapping/engine.test.mjs` — dedupe and
-  first-reason-wins, the alias pairs, prepend, bucket order, the five post-passes
+  first-reason-wins, the alias pairs, prepend, bucket order, the six post-passes
   and the root-manifest classifier.
 
 **One residual, deliberately kept.** The gate still runs the routing-sensitive
@@ -448,11 +448,11 @@ gate is not a trust root.
   With the guard gone there is nothing for it to drive, so it went with the arms.
 - **The engine's behaviour is pinned by its own tests.**
   `scripts/gate/mapping/engine.test.mjs` covers dedupe and first-reason-wins, the
-  alias pairs, prepend, bucket order, the five post-passes including the 15/16
-  scoped-test threshold and every disqualifier, and the root-manifest
-  classifier's four classes. It was written at D5b precisely so that D5c would
-  not delete the only thing pinning those rules in the same commit that removes
-  the arms.
+  alias pairs, prepend, bucket order, the six post-passes including the 15/16
+  scoped-test threshold, every disqualifier and the dep-cruiser scope narrowing,
+  and the root-manifest classifier's four classes. It was written at D5b
+  precisely so that D5c would not delete the only thing pinning those rules in
+  the same commit that removes the arms.
 - **The root-manifest classifier became an import.**
   `check-sentry-suites-in-ci-gate-probe.mjs` used to lift the gate's
   `classify_root_package_json_changes` out of the script and re-run it under an

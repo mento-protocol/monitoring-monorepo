@@ -19,7 +19,7 @@ garden_lane: adrs-architecture
 ## Context
 
 The `rootScripts` paths-filter carried `*.md` and `**/*.md`, so any Markdown
-edit fired the `scripts` job: 44 steps, a long timeout, a full-history
+edit fired the `scripts` job: 51 steps, a long timeout, a full-history
 checkout, and a whole-workspace `pnpm install`. A one-line typo fix in a note
 under `docs/notes/` paid the same CI bill as a rewrite of the quality gate.
 
@@ -154,10 +154,11 @@ over a Markdown-only diff was two cosmetic wording findings across eleven PRs,
 and neither came from a CI step.
 
 **Make the `scripts` job faster instead.** Rejected: it is not slow by
-accident. Its 44 steps are load-bearing regression suites for gate routing,
+accident. Its 51 steps are load-bearing regression suites for gate routing,
 supply-chain policy, workflow trust, and alert rules, and its own comment
-records that the quality-gate routing regression suite reached 24m37s. Cutting
-the job to fit Markdown PRs would weaken it for the code PRs it exists to guard.
+records that the quality-gate routing regression suite reached 39m02s in main
+CI run `33535970973`, attempt 1, job `99950409872`. Cutting the job to fit
+Markdown PRs would weaken it for the code PRs it exists to guard.
 
 **Put a workflow-level `paths:` filter on `ci.yml`, or promote a separate
 required `docs` workflow with one.** Rejected by
@@ -278,8 +279,8 @@ costs a duplicate run on mixed diffs and nothing else.
 
 ## Evidence
 
-- `.github/workflows/ci.yml`: the `scripts` job carries 44 steps and
-  `timeout-minutes: 40`; `docs-checks` carries 13 steps and
+- `.github/workflows/ci.yml`: the `scripts` job carries 51 steps and
+  `timeout-minutes: 55`; `docs-checks` carries 13 steps and
   `timeout-minutes: 10`.
 - `stalenessSubjects(ROUTING_GROUPS)` from `scripts/gate/routing-table/`
   returns 799 path subjects, 631 distinct, of which 23 are Markdown files —

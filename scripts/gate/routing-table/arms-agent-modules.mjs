@@ -100,8 +100,8 @@ export const AGENT_MODULE_ARMS = [
         reason: "agent quality gate package script validator changed",
       },
       {
-        command: "pnpm agent:quality-gate:test",
-        reason: "agent quality gate mapping changed",
+        command: "bash scripts/bootstrap/agent-setup-contract.test.sh",
+        reason: "agent package-policy contract changed",
       },
     ],
   },
@@ -136,8 +136,23 @@ export const AGENT_MODULE_ARMS = [
         reason: "indexer invariant routing source changed",
       },
       {
+        command:
+          "node --test scripts/agent-autoreview-indexer-invariant-contract.test.mjs",
+        reason: "indexer invariant routing source changed",
+      },
+      {
         command: "pnpm agent:quality-gate:test",
         reason: "indexer invariant routing source changed",
+      },
+    ],
+  },
+  {
+    patterns: ["scripts/agent-autoreview-indexer-invariant-contract.test.mjs"],
+    effects: [
+      {
+        command:
+          "node --test scripts/agent-autoreview-indexer-invariant-contract.test.mjs",
+        reason: "indexer autoreview invariant contract changed",
       },
     ],
   },

@@ -396,6 +396,132 @@ at that hour about half the time, and launchd runs a missed calendar interval
 on the next wake while cron drops it. `--kind auto` reads the ledger and picks
 `full` when the last full run is more than 100 days old, otherwise `canary`.
 
+## Lightweight experiment lane
+
+Use this lane to reject weak review-skill changes before a canonical run. It
+compares one candidate with one incumbent. It never reads or writes
+`review-skill-ledger.jsonl`. It cannot update the baseline or freshness clock.
+Its only statuses are `PROMISING`, `REJECT`, and `INCONCLUSIVE`.
+
+Planning and validation do not call a model. Both modes validate local inputs
+and probe the provider CLI versions. Planning writes `plan.json` with the
+complete campaign and canonical 24-cell rerun manifest before paid work can
+start.
+
+```bash
+experiment_root="$HOME/.cache/mento-review-eval-experiments/manual-$(date -u +%Y%m%dT%H%M%SZ)"
+
+pnpm review:eval:experiment -- --plan \
+  --candidate candidate-a=/absolute/path/to/review-candidate \
+  --out "$experiment_root" \
+  --live-paired \
+  --json
+
+pnpm review:eval:experiment -- --validate-plan "$experiment_root" --json
+pnpm review:eval:experiment -- --run "$experiment_root" \
+  --stage screen --dry-run --json
+pnpm review:eval:experiment -- --run "$experiment_root" \
+  --stage screen --json
+```
+
+`--run` is the only mode that can call a model. `--dry-run` prints the
+planned fixture lanes and treatment order. It does not call a model or estimate
+cost.
+
+The plan binds these inputs:
+
+- Contract digest; fixture head and base SHAs; and truth, frozen finder-report,
+  and prompt digests.
+- Incumbent and candidate skill digests.
+- Finder, verifier, control, and judge model and effort settings.
+- Claude and Codex CLI versions, scorer identity, and the five-module experiment
+  harness digest.
+- Stage lanes, treatment order, and the canonical rerun manifest.
+
+The screen uses the first frozen report for PRs 1990, 1995, and 1999. It runs
+six verifier arms. Each fixture lane runs the two arms sequentially in its
+planned `AB` or `BA` order. At most three fixture lanes run at once.
+
+The screen returns `PROMISING` only when the candidate has at least two net
+known matches, no net P1 loss, and a non-negative known-match delta on at least
+two PRs. A known-match net of minus two or less, any P1 net loss, an empty
+candidate arm, or a candidate hard leak returns `REJECT`. Other misses return
+`INCONCLUSIVE`. If claim inflation requires classification, more than one extra
+wrong claim also returns `REJECT`.
+
+Run the holdout only after a `PROMISING` screen:
+
+```bash
+pnpm review:eval:experiment -- --run "$experiment_root" \
+  --stage holdout --json
+```
+
+The holdout uses the complementary frozen report for each grid fixture. It adds
+six verifier arms. Its decision combines those arms with the six screen arms. A
+finalist needs at least three net known matches, at least 9 of 12 candidate P1
+matches, at least two net P1 matches, gains on at least two PRs, and no more
+than one extra wrong claim. A known-match net of minus two or less, any net P1
+loss, or more than one extra wrong claim returns `REJECT`. Other threshold
+misses return `INCONCLUSIVE`.
+
+Claim extraction and known-defect matching run first. Novel-claim
+classification runs only when claim inflation requires it or the candidate
+reaches the holdout finalist decision. Claim inflation needs at least three
+extra claims and a ratio of at least 1.25. Deferred `wrong_claims` fields stay
+absent from the arm records.
+
+When planned, `live-paired` requires a `PROMISING` holdout:
+
+```bash
+pnpm review:eval:experiment -- --run "$experiment_root" \
+  --stage live-paired --json
+```
+
+The live stage generates one current finder output for each grid fixture. It
+delivers the same final UTF-8 suffix of at most 30,000 bytes to both verifier
+arms. It applies the screen thresholds to its own six arms. It confirms the
+experiment only. It is not the canonical pipeline score.
+
+The artifact root must be outside the repository. Completed artifacts use these
+paths:
+
+- `plan.json` contains the immutable campaign plan.
+- `cache/raw/<digest>.json` contains one verifier response.
+- `cache/score/<digest>.json` contains extracted claims, known matches, and
+  leak evidence for one raw response.
+- `cache/novel/<digest>.json` contains optional novel-claim classification for
+  one scored response.
+- `cache/stage/<digest>.json` contains the complete stage records and decision.
+
+Each cache identity includes the plan digest. Live raw identities also include
+the delivered finder-report digest. Score and novelty identities chain the raw
+and score artifact digests. The runner validates identities and content digests
+before reuse. It publishes a complete JSON file through a temporary file and an
+exclusive hard link to the final name. Readers ignore incomplete temporary
+files.
+
+A failed stage writes no completed stage entry. Cell-level raw, score, or
+novelty entries completed before the failure remain available. Run the same
+stage again to reuse exact entries and repeat missing or changed work. A new
+live finder output changes the raw identity unless its delivered digest is the
+same. The experiment runner does not provide crash-lineage recovery, retry
+journals, a campaign lock, calibration receipts, host sandboxing, or
+process-group control. Run one command for a campaign at a time. This is an
+operator-started local experiment.
+
+The plan contains a `canonical-full-rerun` manifest with
+`experiment_artifact_reuse_allowed: false`. No importer exists. Experiment
+results and caches never qualify as canonical evidence. Run the selected
+candidate through the canonical 24-cell runner:
+
+```bash
+pnpm review:eval:run --skill-ref /absolute/path/to/review-candidate \
+  --kind full
+```
+
+The current visible fixtures are development data. They do not prove broad
+generalization.
+
 ## Read the verdict
 
 | verdict        | it means                                                                                                                                                                                                                      | do this                                                                   |

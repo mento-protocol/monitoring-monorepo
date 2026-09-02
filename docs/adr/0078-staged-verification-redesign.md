@@ -17,7 +17,9 @@ garden_lane: adrs-architecture
 stays mandatory until the approved cutover stage completes.
 [ADR 0007](0007-agent-quality-gate-and-merge-oracle.md) remains active for the
 hosted two-projection all-clear and Codex approval gate. This ADR supersedes
-only its mandatory-local-gate target state.
+only its mandatory-local-gate target state. [ADR
+0084](0084-github-ui-operator-merge.md) supersedes this ADR's original
+operator merge-path assumption.
 
 **Scope:** ci/process
 
@@ -32,8 +34,9 @@ mandatory push path now slows local and hosted development.
 
 The repository already has fixed GitHub Actions jobs, path filters, a
 fail-closed `CI / ci` aggregate, automated review, two readiness projections,
-and exact-head human merge consent. Replacing those controls with a new remote
-execution platform would add another policy and operations surface.
+and explicit merge approval after current-head all-clear. Replacing those
+controls with a new remote execution platform would add another policy and
+operations surface.
 
 The repository has one active human maintainer. A required second approval for
 every control-plane change would stop routine delivery. This decision therefore
@@ -190,7 +193,32 @@ manual push can omit author checks, but it cannot omit required CI.
 The no-skip audit is a protected default-branch `workflow_dispatch` entry
 point. Its input identifies one pull request, an immutable source SHA, and an
 immutable base SHA. It verifies that the pull request still names those SHAs,
-normalizes pull-request-only semantics, and runs every deterministic CI job.
+checks protected candidate execution and evidence-instrument paths with inline
+code, normalizes pull-request-only semantics, and runs every retained
+deterministic CI job. Before the reusable audit starts, the dispatcher compares
+the admitted base and source trees for package manifests, pnpm workspace and
+lock files, package patches, the Node and pnpm selections, pnpm configuration,
+tracked `node_modules`, `ci.yml`, the dispatcher, the no-skip checker and its
+runtime parser, both focused retained-contract definitions, and both protected
+local action trees. A candidate that changes these paths does not enter the
+no-skip audit. Package-execution drift can use an ordinary full-job CI
+observation. Evidence-instrument drift cannot count through either evidence
+form. The comparison uses the admitted Git objects and needs no content hash
+registry.
+The audit excludes legacy local-gate self-tests from the replacement target.
+
+The repair extracts retained SessionEnd, setup-marker, package-policy,
+autoreview owner, and autoreview schema assertions into two focused suites.
+The no-skip audit runs both. It excludes only the four legacy Bash,
+routing-table, and routing parity steps. The routing-table suites test the
+legacy selector. The retained generated-output and workflow safeguards execute
+in their fixed CI jobs and remain inside the pinned audit graph.
+
+The audit contract pins the semantic `ci.yml` graph during the evidence window.
+It also allows only the protected dispatcher and `ci.yml` to contain audit
+inputs. A semantic target change needs an explicit protected-main graph-pin
+update. Package-environment changes fail the base-to-source admission
+comparison without creating a recurring pin update.
 It excludes deployment, apply, publication, live-provider, and other
 credentialed effects. It publishes a distinct non-required result. It must not
 publish a candidate-head pull request check. GitHub binds the protected-branch
@@ -230,10 +258,11 @@ Phase 0 records a 41.18-runner-minute cold planning estimate from comparable
 retained runs. It is not an upper bound or an observed current all-cache-miss
 run. The approved later execution ceiling is 45 runner-minutes per run and 450
 runner-minutes total. The first eligible cold proof counts as one of the ten
-sampled pull requests. Stop after any run exceeds 45 runner-minutes. Do not
-start another run when it could exceed 450 cumulative runner-minutes. M4 adds
-no schedule and spends no shadow minutes. A scheduled run uses the same
-deterministic no-skip coverage only after the cold proof passes.
+sampled pull requests only when its target and measurement instrument are
+valid. Stop after any run exceeds 45 runner-minutes. Do not start another run
+when it could exceed 450 cumulative runner-minutes. M4 adds no schedule and
+spends no shadow minutes. A scheduled run uses the same deterministic no-skip
+coverage only after the cold proof passes.
 
 The Phase 0 cost baseline selects one `CI` workflow run for each of ten
 immutable pull request heads. It counts every non-skipped job execution and
@@ -253,8 +282,10 @@ The migration has these gates:
 1. Inventory every current safeguard and record the Phase 0 baseline.
 2. Remove pull request credential and cache-write authority.
 3. Add fixed CI selection and aggregate contracts.
-4. Compare path-gated CI with no-skip CI on at least 10 distinct pull requests
-   over at least 7 calendar days.
+4. Record at least 10 distinct pull requests over at least 7 calendar days.
+   Use same-head ordinary CI plus no-skip evidence for audit-eligible changes.
+   Use full-graph ordinary CI evidence for package-execution changes that the
+   protected audit must reject. Do not count evidence-instrument changes.
 5. Require explicit human approval before removing the mandatory local gate.
    A separate human-approved administration step applies any ruleset change.
 6. Observe at least 10 distinct merged pull requests over at least 7 calendar
@@ -312,11 +343,15 @@ whole-file lines. The wholly retained package-script pin checker contributes
 another 159 lines. Subtracting both leaves 83,113 lines as an upper-bound
 deletion candidate.
 
-This upper bound is not the final gate-specific deletion denominator. The gate
-test suite mixes retained package-policy coverage with gate-only tests. The
-routing-table family mixes retained workflow-pin and generated-drift behavior
-with deferred local routing. Issues #2127 and #2128 must allocate or migrate
-these retained components and publish the reviewed final denominator.
+This upper bound is not the final gate-specific deletion denominator. M4 moves
+the known retained setup and package-policy assertions out of the gate test
+suite. It also moves the retained autoreview owner and schema assertions out of
+the routing parity suite. The remaining routing-table family still mixes some
+retained workflow-pin and generated-drift behavior with deferred local routing.
+Issues #2127 and #2128 must allocate or migrate those components and publish
+the reviewed final denominator. This source-allocation work does not put the
+legacy selector's self-tests in the replacement target. Fixed CI already runs
+the retained safeguards during the no-skip audit.
 Replacement additions must be smaller than the gate-specific code they replace
 at each cutover stage. Final retirement must remove at least 80% of the final
 denominator.
@@ -378,7 +413,7 @@ would recreate the local gate.
 
 - M1 inventory and M2 authority hardening do not change required contexts,
   path filters, hooks, rulesets, or local gate behavior.
-- Required CI, review, readiness, merge consent, deployment proof, Terraform
+- Required CI, review, readiness, operator merge, deployment proof, Terraform
   approval, and secret ownership remain separate controls.
 - Local author feedback becomes faster after cutover, but a developer can first
   discover an omitted local check in CI.
@@ -400,5 +435,5 @@ would recreate the local gate.
 - ADRs [0007](0007-agent-quality-gate-and-merge-oracle.md),
   [0069](0069-gate-routing-table-as-data.md),
   [0072](0072-md-only-docs-checks-job.md),
-  [0075](0075-pr-merge.md), and
+  [0084](0084-github-ui-operator-merge.md), and
   [0076](0076-fair-quality-gate-coordinator.md)

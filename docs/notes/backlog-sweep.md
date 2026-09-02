@@ -306,10 +306,8 @@ survive the night:
 Four rules bind every sweep, and they are MUST-level because nobody is watching
 while it runs:
 
-- **Never merge.** The sweep ends at READY. `pnpm pr:merge` refuses outside an
-  interactive human session, so a sweep cannot merge even by accident — the
-  wrapper mechanizes the rule rather than replacing it, and the rule holds where
-  the wrapper does not reach.
+- **Never merge.** The sweep ends at READY and reports the PR links. A human can
+  open those links and merge in the GitHub UI.
 - **Never weaken or widen a control that blocks the run.** Root
   [`AGENTS.md`](../../AGENTS.md) states it, and the hand-off procedure and its
   one narrow exception are in the
@@ -387,14 +385,9 @@ Two properties make the table worth reading:
   the ready queue, `--needs-grooming` takes it out of reach until a human
   settles something.
 
-The report ends with the exact merge commands for the READY PRs, one line each:
-
-```bash
-pnpm pr:merge --pr <number>
-```
-
-Listing them is not approval to run them. The operator runs them from their own
-terminal, and the wrapper asks again there.
+The report ends with one URL for each READY PR. A human can open each link and
+merge in the GitHub UI. Listing a link is not merge approval. The sweep never
+merges.
 
 The sweep then announces the report through the fallback ladder in
 [`spoken-attention-nudge.md`](spoken-attention-nudge.md), which owns the

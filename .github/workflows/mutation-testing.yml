@@ -8,8 +8,8 @@ on:
     # per-commit regression, so a weekly backstop is the industry norm and
     # keeps it off the per-PR hot path. This workflow is advisory — it is
     # NOT in the branch ruleset's required checks (only `ci`, `Code Quality`,
-    # and the Vercel checks are), so it has no per-PR trigger. Run it against
-    # a specific branch on demand via the "Run workflow" button.
+    # `Sentry suites`, and the Vercel checks are), so it has no per-PR trigger.
+    # Run it against a specific branch on demand via the "Run workflow" button.
     - cron: 17 5 * * 1
 
 concurrency:

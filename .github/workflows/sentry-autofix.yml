@@ -6,7 +6,7 @@ name: Sentry Autofix
 # `agent` job (issue #1373), which hands its whole working tree to a separate
 # TRUSTED `finalize` job that re-validates the diff, commits, pushes a branch,
 # and opens a PR via a GitHub App token. PR-ONLY — nothing ever merges
-# automatically; merge stays human (ADR 0036).
+# automatically; merge requires explicit operator approval (ADR 0036).
 #
 # Prompt-injection containment is the whole design point (the verdict is
 # second-order UNTRUSTED Sentry data):
@@ -583,7 +583,7 @@ jobs:
           # path; the agent can only read + edit files. It reads the verdict from
           # the pre-fetched snapshot, so it needs no gh tool or GitHub token in
           # env. Verification is not the agent's job; the fix PR runs the repo's
-          # full required CI + independent review, which is why merge stays human.
+          # full required CI + independent review before any operator-authorized merge.
           claude_args: |
             --model claude-sonnet-5
             --max-turns 60

@@ -26,7 +26,7 @@ subdirectories.
 
 - `deploy/`: deploy wrappers and Node helpers
 - `workflows/`: Actions workflow support
-- `bootstrap/`: container and hosted-session setup
+- `bootstrap/`: setup scripts and retained setup/package-policy contract
 - `context/`: agent context, budget, doc catalog
 - `docs/`: audit, garden, navigation, verification evidence
 - `pr/`: PR and issue state projections
@@ -78,8 +78,6 @@ feedback-runtime pins.
   `repo-health/check-guardrail-prose{,.test}.mjs` and
   `repo-health/guardrail-prose.json` route the guardrail suite. `ci.yml`,
   quick-commands, and the manifest pin it (ADR 0073).
-  `pr/merge-pr*`, both PR-state helpers, and `agent-autoreview.sh` (Codex
-  markers) route `pnpm pr:merge:test`.
 - **Gate runtime pins.** Before `cd`, `agent-quality-gate.sh` resolves
   `gate/run-handles.sh`, coordinator files,
   `docs/docs-navigation-eval-helpers.mjs`, and `gate/lockfile-scope.mjs` from
@@ -89,18 +87,17 @@ feedback-runtime pins.
 - **Gate mapping pins.** Signatures and Turbo inputs pin
   `gate/routing-table/**`, `gate/mapping*`, the autoreview core, and sealed
   policy. Runtime hashes use `$script_source_dir`; suites use `$repo_root`.
-  Core edits route both suites; policy edits route autoreview. Missing pins
-  freeze the stamp (ADRs 0069 and 0079).
-- **Review-eval pins.** `docs/evals/review-skill.md` tracks
-  `scripts/review/run-eval.sh`,
-  `scripts/review/run-eval-source-snapshot.sh`,
-  `scripts/review/run-eval-lifecycle.sh`,
-  `scripts/review/run-eval-runtime.sh`,
-  `scripts/review/install-review-eval-launchd.sh`,
-  `scripts/review/launchd/org.mento.review-eval.plist`,
-  `scripts/review/review-eval.test.mjs`, and
-  `scripts/review/install-review-eval-launchd.test.mjs`.
-  `review/review-eval-*publication*` pins both tests.
+  Core and inventory edits route autoreview and parity suites.
+  Setup, marker, SessionEnd, and package-policy edits route focused setup
+  suite. Missing pins freeze the stamp (ADRs 0069 and 0079). Three exact pins:
+  `.dependency-cruiser.cjs` and root `package.json` both name
+  `gate/mapping/engine.test.mjs` (scanned roots);
+  `gate/mapping/post-passes.mjs` schedules `code-health:deps` itself.
+- **Review-eval pins.** The runbook tracks `scripts/review/run-eval*.sh`,
+  `install-review-eval-launchd*`, the launchd plist, and
+  `review-eval-*publication*` with their tests. Its file table,
+  `review:eval:experiment`, and ADR 0083 pin
+  `scripts/review/review-eval-experiment*.mjs`.
 - **Navigation-eval pin.** `forbidden_sources` in
   `docs/evals/documentation-navigation-fixtures.json` names its source.
 - **Verification evidence.** `.gitattributes` pins
@@ -111,8 +108,9 @@ feedback-runtime pins.
 - **Workflow pins.** Workflows pin `scripts/`. Terraform uses
   `terraform.stacks.json` `workflowAdmissionPatterns`.
   `check-ci-contract{,.test}.mjs` pins CI.
-  `check-no-skip-audit{,.test}.mjs` pins admission, SHAs, cold cache, and zero
-  skips. Moves update ADR 0064, routing, globs, and eval pins.
+  `check-no-skip-audit{,.test}.mjs` pins admission, SHAs, cache, skips, protected
+  drift, focused contracts, and the retained workflow graph. Moves update
+  ADR 0064, routing, globs, and pins.
 - **Terraform stack registry.** `terraform.stacks.json` `changedPathPatterns`
   pins exact `scripts/` paths per stack. The broad workflow admission boundary
   covers the directory; `pnpm tf:test` enforces subsumption.
