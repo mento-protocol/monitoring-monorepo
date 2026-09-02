@@ -26,6 +26,8 @@ const REQUIRED_RISKS = new Set(Array.from({ length: 13 }, (_, i) => i + 1));
 const DUPLICATE_TARGET_RULE = "duplicate_of needs an acyclic retained target.";
 const GIT_OPTIONS = { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 };
 const OPTIONAL_WHOLE_FILE_PATHS = new Set([".trunk/hooks/pre-push"]);
+const TRUNK_PRE_PUSH_MARKER =
+  /trunk-check-pre-push|agent-quality-gate-pre-push|git_hooks:\s*\[pre-push\]|agent-quality-gate\.sh.*(?:--skip-if-fresh|--pre-push)/u;
 const REQUIRED_WHOLE_FILE_PATHS = new Set(
   "docs/adr/0007-agent-quality-gate-and-merge-oracle.md docs/adr/0069-gate-routing-table-as-data.md docs/adr/0076-fair-quality-gate-coordinator.md docs/notes/agent-quality-gate-mechanics.md scripts/agent-quality-gate.sh scripts/agent-quality-gate.test.sh scripts/check-agent-quality-gate-package-scripts.mjs".split(
     " ",
@@ -165,10 +167,8 @@ function countReferenceLines(path, content) {
     if (matchesReference(path, line)) selected.add(index);
   });
   if (path === ".trunk/trunk.yaml") {
-    const legacyMarker =
-      /trunk-check-pre-push|agent-quality-gate-pre-push|git_hooks:\s*\[pre-push\]|agent-quality-gate\.sh.*(?:--skip-if-fresh|--pre-push)/u;
     const legacyMarkerIndexes = lines.flatMap((line, index) =>
-      legacyMarker.test(line) ? [index] : [],
+      TRUNK_PRE_PUSH_MARKER.test(line) ? [index] : [],
     );
     if (legacyMarkerIndexes.length === 0) return selected.size;
 
@@ -228,6 +228,15 @@ export function buildManifest({ repoRoot = DEFAULT_ROOT, source }) {
     .sort();
   for (const path of REQUIRED_WHOLE_FILE_PATHS)
     if (!paths.includes(path)) fail(`Missing manifest path: ${path}`);
+  const hookPresent = paths.includes(".trunk/hooks/pre-push");
+  const trunkConfig = paths.includes(".trunk/trunk.yaml")
+    ? git(repoRoot, ["show", `${sourceSha}:.trunk/trunk.yaml`])
+    : "";
+  const trunkActionPresent = TRUNK_PRE_PUSH_MARKER.test(trunkConfig);
+  if (hookPresent !== trunkActionPresent)
+    fail(
+      "The pre-push hook and Trunk quality-gate action must be retained or removed together.",
+    );
   const entries = [];
   for (const path of paths) {
     const wholeFile =

@@ -471,6 +471,33 @@ test("buildManifest accepts complete pre-push removal", () => {
   });
 });
 
+for (const [name, removeOneSide] of [
+  [
+    "buildManifest rejects a retained hook without the Trunk action",
+    (repoRoot) =>
+      fs.writeFileSync(
+        join(repoRoot, ".trunk/trunk.yaml"),
+        "actions:\n  enabled: []\n",
+      ),
+  ],
+  [
+    "buildManifest rejects a retained Trunk action without the hook",
+    (repoRoot) => fs.rmSync(join(repoRoot, ".trunk/hooks/pre-push")),
+  ],
+]) {
+  test(name, () => {
+    withGitFixture((repoRoot) => {
+      removeOneSide(repoRoot);
+      execFileSync("git", ["-C", repoRoot, "add", "-A"]);
+      execFileSync("git", ["-C", repoRoot, "commit", "-qm", name]);
+      assert.throws(
+        () => buildManifest({ repoRoot, source: "HEAD" }),
+        /must be retained or removed together/u,
+      );
+    });
+  });
+}
+
 test("buildManifest rejects partial pre-push removal", () => {
   withGitFixture((repoRoot) => {
     fs.writeFileSync(
