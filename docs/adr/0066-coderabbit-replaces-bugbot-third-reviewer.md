@@ -217,9 +217,12 @@ and stay in place as history.
   more at closeout, when the ready-state flow posts the head-bound
   `@coderabbitai review` request that
   [`../notes/pr-ready-state.md`](../notes/pr-ready-state.md) already defines.
-  Intermediate pushes get no automatic CodeRabbit review; Codex and Claude
-  still review them. No required gate changes, because CodeRabbit's own check
-  was already advisory — but read the accepted residual below for what this
+  Intermediate pushes get no automatic CodeRabbit review. Codex still reviews
+  every push automatically, but Claude does not: `.github/workflows/claude.yml`
+  triggers on `opened` and `ready_for_review` only, so a Claude re-review is
+  opt-in via `@claude review`. The coverage an intermediate push keeps is
+  therefore Codex alone. No required gate changes, because CodeRabbit's own
+  check was already advisory — but read the accepted residual below for what this
   does cost. Expected: review events per PR fall from ~3.9 to ~2, each changed
   file bills at most twice per PR, and spend lands at an estimated
   $200–$250/month at current volume.

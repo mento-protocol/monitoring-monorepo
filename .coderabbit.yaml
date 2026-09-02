@@ -107,12 +107,19 @@ reviews:
     # with 16 days left in the cycle. The 30-day team view read that day: 672
     # review events, 365 billed, 3.9 review events per PR, ~5.5 billed files
     # per billed push. CodeRabbit bills per push delta, so every agent fix
-    # round re-bills the same files. With this off, CodeRabbit reviews a PR
-    # once when it opens, and the head-bound `@coderabbitai review` request in
-    # `docs/notes/pr-ready-state.md` buys the final head one more review.
-    # Intermediate pushes lose CodeRabbit only: Codex and Claude still review
-    # them. No required gate changes, because CodeRabbit's check was already
-    # advisory; ADR 0066 records the residual this does cost.
+    # round re-bills the same files. With this off, CodeRabbit should review a
+    # PR once when it opens, and the head-bound `@coderabbitai review` request
+    # in `docs/notes/pr-ready-state.md` buys the final head one more review.
+    # Observed on PR #2236, though: every push still started a run, four
+    # pushes for four Run IDs, all refused by the spending cap. Until that is
+    # explained, treat "no run on an intermediate push" as the intent rather
+    # than the measured behaviour; ADR 0066 records the evidence and the
+    # organization-level override that follows from it.
+    # Intermediate pushes lose CodeRabbit's review. Codex still reviews every
+    # push automatically; Claude is opt-in via `@claude review`, because
+    # `.github/workflows/claude.yml` triggers only on `opened` and
+    # `ready_for_review`. No required gate changes, because CodeRabbit's check
+    # was already advisory; ADR 0066 records the residual this does cost.
     auto_incremental_review: false
     # The vendor default of 5, kept. It now only matters if incremental
     # reviews are re-enabled; the org-level global override pins it too.

@@ -203,8 +203,13 @@ per-PR allowance.
 [ADR 0066](../adr/0066-coderabbit-replaces-bugbot-third-reviewer.md) records
 the two tiers: the free OSS tier meters per repository on a star-scaled 1–10
 reviews/hour, and a paid seat meters per developer identity across every PR
-that identity opened. This org runs a paid Pro+ seat, so the ceiling is the
-identity's, currently about 4 reviews/hour at this repo's review volume.
+that identity opened. This org runs a paid seat on the plan the vendor renamed
+from Pro+ to **Team** (checked 2026-09-02), nominally 8 reviews/hour. Do not
+plan a wait against that nominal figure: the sustained rate falls with the
+identity's 7-day volume, and past roughly 90 reviews in 7 days — where the sole
+PR author sits — it is 1/hour. Past the usage add-on's monthly spending cap,
+that 1/hour free refill is the whole allowance and every other attempt is
+refused outright, which is the state observed on 2026-09-02.
 Either way, watching several PRs at once draws down one allowance, so a
 re-request inside the window queues or no-ops on whichever PR reaches the
 limit first — do not tight-loop `@coderabbitai review` posts waiting for a
