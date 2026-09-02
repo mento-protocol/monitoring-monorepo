@@ -2337,7 +2337,57 @@ active control.
   validated test-control preflight establishes the worktree runtime capability
   receipt before the gate creates a parallel worker.
 - `AGENT_QUALITY_GATE_TEST_DRAIN_REFRESH_BARRIER` pauses once between a drain's
-  refreshed tag capture and its process census.
+  refreshed tag capture and its process census. "Once" does not by itself say
+  which drain: one runs after any mapped command with something to settle,
+  including a command that only saw a short-lived helper enter the durable
+  capture, so the first of them consumed the barrier and left a fixture waiting
+  at a rendezvous that had already happened. A fixture names the mapped command
+  it means to meet in a `.command` sibling of the barrier path, and the barrier
+  arms only there. The name is optional — an unnamed barrier keeps arming on the
+  first drain — but a name that was asked for and cannot be resolved fails the
+  drain closed rather than arming everywhere: unreadable, empty, dangling, or
+  not a regular file. Presence and validity are deliberately different tests —
+  presence does not follow a symlink, so a name pointing nowhere is still a name
+  that was asked for, while validity does, so a symlink to a regular file is a
+  valid name. Both copies of the selector, shell and Darwin, follow that rule. A name needs no trailing newline. The command
+  is named for the barrier at three shell sites, because a parallel command's
+  `run_with_timeout` runs inside the worker subshell while the parent reaps that
+  worker and runs the drain; naming it only in the child would make a parallel
+  rendezvous impossible and let a stale sequential name match a drain no fixture
+  asked for. The third is `teardown_active_timeouts`, which drains registered
+  workers on EXIT/INT/TERM after the reaping loop is gone, so it takes each name
+  from the `active_worker_mapped_commands` registry that aligns with the worker
+  identities. A cohort drain of several commands settles them at once and clears
+  the name instead: no single name describes it, and a named barrier must not
+  meet a drain it cannot identify. A cohort of one keeps its name — Darwin
+  teardown takes the cohort route even for a single command, so "cohort" there
+  does not imply "unidentifiable".
+
+  A fourth site is the Darwin census seam, `waitAtDarwinCensusTestBarrier` in
+  `scripts/gate/darwin-process-lineage.mjs`. It is not a redundant consumer: on
+  a Darwin lineage contract `drain_condemned_run_commands` returns at its
+  lineage arm before reaching the shell barrier, so the seam is the _only_
+  consumer on that path and does its own selection. The name reaches it as an
+  `--active-mapped-command` argument — an argument rather than an environment
+  variable, so the mapped-child environment policy stays untouched — and it
+  applies the same rules: unnamed arms on the first drain, a name arms only on
+  its own command, and an unresolvable name fails the drain closed.
+
+  Three helper routes settle a lineage and **all** must pass that argument:
+  `watch-settle`, which a mapped command takes when it completes normally;
+  `settle`, the recovery route; and `settle-cohort`, which Darwin teardown takes
+  on EXIT/INT/TERM. A cohort of one is one identifiable command and keeps its
+  name — the helper honours a name only when exactly one state settles, and the
+  shell teardown clears it only for a cohort of several, where no single name
+  describes the drain. Adding a fourth route without the argument would silently
+  strand a named rendezvous, so `darwin-process-lineage.test.mjs` asserts every
+  settlement call site carries it.
+
+  A fixture must also write `.release` on every terminal path, including its
+  cleanup trap: a barrier left unreleased parks the gate for the full 20-second
+  budget and then reports the barrier as the failure, burying the assertion that
+  actually failed.
+
 - `AGENT_QUALITY_GATE_TEST_PARALLEL_RELEASE_FAILURE_AT` accepts a positive
   integer and injects failure at that parallel lease-release attempt.
 - `AGENT_QUALITY_GATE_TEST_OWNER_WITNESS_BARRIER`,
