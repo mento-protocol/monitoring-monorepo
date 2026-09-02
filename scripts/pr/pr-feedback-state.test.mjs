@@ -591,7 +591,7 @@ test("normalizes feedback surfaces into findings with state flags", () => {
           line: 12,
           isResolved: false,
           isOutdated: true,
-          author: "cursor[bot]",
+          author: "coderabbitai[bot]",
           url: "https://github.example/thread-1",
           body: "[P2] Fix stale thread",
         },
@@ -679,7 +679,7 @@ test("keeps top-level bot finding fingerprints stable across repeated comments",
     topLevelBotComments: [
       {
         id: 456,
-        author: "cursor[bot]",
+        author: "chatgpt-codex-connector[bot]",
         updatedAt: "2026-06-05T16:31:00Z",
         body: "**High Severity**\nFix the parser branch.",
       },
@@ -690,7 +690,7 @@ test("keeps top-level bot finding fingerprints stable across repeated comments",
     topLevelBotComments: [
       {
         id: 789,
-        author: "cursor[bot]",
+        author: "chatgpt-codex-connector[bot]",
         updatedAt: "2026-06-05T16:45:00Z",
         body: "**High Severity**\nFix the parser branch.",
       },
@@ -867,9 +867,9 @@ test("does not mark feedback clear while current-head review bot feedback remain
     topLevelBotComments: [
       {
         id: 456,
-        author: "cursor[bot]",
+        author: "coderabbitai[bot]",
         updatedAt: "2026-06-05T16:31:00Z",
-        body: "Medium Severity\n<!-- BUGBOT_BUG_ID: example -->",
+        body: "Medium Severity\n<!-- cr-indicator-types:potential_issue -->",
       },
     ],
   });
@@ -933,9 +933,9 @@ test("does not block on bot comments tied to another head commit", () => {
     topLevelBotComments: [
       {
         id: 456,
-        author: "cursor[bot]",
+        author: "coderabbitai[bot]",
         updatedAt: "2026-06-05T16:31:00Z",
-        body: `High Severity\n<!-- BUGBOT_BUG_ID: example -->\nReviewed for commit ${oldHead}.`,
+        body: `High Severity\n<!-- cr-indicator-types:potential_issue -->\nReviewed for commit ${oldHead}.`,
       },
     ],
   });
@@ -965,9 +965,9 @@ test("does not treat contract-shaped hex tokens as commit references", () => {
     topLevelBotComments: [
       {
         id: 456,
-        author: "cursor[bot]",
+        author: "coderabbitai[bot]",
         updatedAt: "2026-06-05T16:31:00Z",
-        body: `High Severity\n<!-- BUGBOT_BUG_ID: example -->\nContract ${"a".repeat(40)} is affected.`,
+        body: `High Severity\n<!-- cr-indicator-types:potential_issue -->\nContract ${"a".repeat(40)} is affected.`,
       },
     ],
   });
@@ -1032,9 +1032,9 @@ test("does not block on actionable bot comments when head freshness is unknown",
     topLevelBotComments: [
       {
         id: 456,
-        author: "cursor[bot]",
+        author: "coderabbitai[bot]",
         updatedAt: "2026-06-05T16:31:00Z",
-        body: "High Severity\n<!-- BUGBOT_BUG_ID: example -->",
+        body: "High Severity\n<!-- cr-indicator-types:potential_issue -->",
       },
     ],
   });
@@ -1065,9 +1065,9 @@ test("blocks on actionable bot comments that name the current head without a fre
     topLevelBotComments: [
       {
         id: 456,
-        author: "cursor[bot]",
+        author: "coderabbitai[bot]",
         updatedAt: "2026-06-05T16:31:00Z",
-        body: `High Severity\n<!-- BUGBOT_BUG_ID: example -->\nReviewed for commit ${currentHead}.`,
+        body: `High Severity\n<!-- cr-indicator-types:potential_issue -->\nReviewed for commit ${currentHead}.`,
       },
     ],
   });
@@ -3257,6 +3257,12 @@ test("classifies clean and actionable Claude review variants", () => {
       preface(`${label}\nMalformed input crashes requests.`),
     ),
     before("Roll-up", "Action items: restore validation."),
+    before("Roll-up", "<!-- cr-indicator-types:potential_issue -->"),
+    // The retired `BUGBOT_BUG_ID` marker must still read as actionable here.
+    // Dropping it from EXPLICIT_SEVERITY is safe because the clean-review scan
+    // fails closed on any roll-up line it does not positively recognize; this
+    // entry pins that, and the cleanBodies half above proves the harness can
+    // still return ready=true, so the assertion is not vacuous.
     before("Roll-up", "<!-- BUGBOT_BUG_ID: malformed-input -->"),
     PR_1431_CLEAN_CLAUDE_REVIEW.body.replace(
       "1. [P3] No-action: override selector is correctly bounded and matches repo convention.",
@@ -3327,7 +3333,7 @@ test("blocks on bot review bodies tied to the current commit", () => {
     topLevelBotComments: [
       {
         id: "review-1",
-        author: "cursor[bot]",
+        author: "chatgpt-codex-connector[bot]",
         commitOid: currentHead,
         createdAt: "2026-06-05T16:31:00Z",
         body: "Failure handling is correct only for reads; writes remain unauthenticated.",
@@ -3587,16 +3593,16 @@ test("clears once the CodeRabbit inline finding has a reply and only acks remain
   assertEqual(summary.findings.filter((finding) => finding.blocking).length, 0);
 });
 
-test("leaves Cursor, Codex, and Claude classification unchanged beside CodeRabbit", () => {
-  // The OLD path. Adding CodeRabbit to the roster must not move any existing
-  // bot's verdict, so this asserts all four in one ledger.
+test("leaves Codex and Claude classification unchanged beside CodeRabbit", () => {
+  // Adding CodeRabbit to the roster must not move any other bot's
+  // verdict, so this asserts all three in one ledger.
   const summary = summarizeFeedbackState(
     coderabbitReadyState([
       {
         id: 456,
-        author: "cursor[bot]",
+        author: "coderabbitai[bot]",
         updatedAt: "2026-06-05T16:31:00Z",
-        body: "Medium Severity\n<!-- BUGBOT_BUG_ID: example -->",
+        body: "Medium Severity\n<!-- cr-indicator-types:potential_issue -->",
       },
       {
         id: 457,
@@ -3615,11 +3621,37 @@ test("leaves Cursor, Codex, and Claude classification unchanged beside CodeRabbi
   );
 
   assertEqual(summary.ready, false);
-  // Only the current-head BugBot comment blocks: the Claude summary is stale,
-  // the Codex approval is not finding-shaped, and CodeRabbit's walkthrough is
-  // machinery.
+  // Only the current-head CodeRabbit finding blocks: the Claude summary is
+  // stale, the Codex approval is not finding-shaped, and CodeRabbit's
+  // walkthrough is machinery.
   assertEqual(summary.counts.blockingTopLevelBotComments, 1);
-  assertEqual(summary.blockingTopLevelBotComments[0].author, "cursor[bot]");
+  assertEqual(
+    summary.blockingTopLevelBotComments[0].author,
+    "coderabbitai[bot]",
+  );
+  assertEqual(summary.blockingTopLevelBotComments[0].id, 456);
+});
+
+test("ignores a retired cursor[bot] comment carrying BUGBOT_BUG_ID", () => {
+  // ADR 0066 step 4: the live Cursor compatibility path retired on
+  // 2026-09-02. `cursor[bot]` left the review-bot roster and
+  // `BUGBOT_BUG_ID` left the actionable-marker regex, so a stray legacy
+  // comment is no longer a finding and no longer holds the ledger.
+  const summary = summarizeFeedbackState(
+    coderabbitReadyState([
+      {
+        id: 460,
+        author: "cursor[bot]",
+        updatedAt: "2026-06-05T16:31:00Z",
+        body: "High Severity\n<!-- BUGBOT_BUG_ID: example -->\nRestore bounds validation.",
+      },
+    ]),
+  );
+
+  assertEqual(summary.ready, true);
+  assertEqual(summary.counts.blockingTopLevelBotComments, 0);
+  assertEqual(summary.counts.topLevelBotComments, 1);
+  assertEqual(summary.findings.filter((finding) => finding.blocking).length, 0);
 });
 
 if (failed > 0) {

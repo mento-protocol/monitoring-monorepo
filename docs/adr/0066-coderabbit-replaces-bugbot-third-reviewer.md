@@ -3,7 +3,7 @@ title: CodeRabbit replaces Cursor BugBot as the third PR review bot
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-31
+last_verified: 2026-09-02
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -13,7 +13,8 @@ garden_lane: adrs-architecture
 
 # ADR 0066 — CodeRabbit replaces Cursor BugBot as the third PR review bot
 
-**Status:** Accepted (Aug 2026) — BugBot disabled on 2026-08-31.
+**Status:** Accepted (Aug 2026) — BugBot disabled on 2026-08-31; the live
+compatibility paths retired on 2026-09-02.
 **Scope:** ci/process
 
 ## Context
@@ -28,13 +29,15 @@ narrow workflow pair does not use a review bot as an eligibility input. The
 current review stack replaces BugBot with CodeRabbit. Codex and Claude continue
 to run on subscriptions that the team pays for other reasons.
 
-BugBot was disabled in the Cursor dashboard on 2026-08-31. Legacy feedback
-still uses its original policy. `pr:feedback-state` continues to recognize
-`BUGBOT_BUG_ID` and `cursor[bot]` until every open legacy PR is terminal. The
-open-PR sweep on 2026-08-31 found one active case: PR #2036 has a current-head,
-unresolved, unreplied Cursor finding. The `Cursor Bugbot` check also remains an
-optional context during this compatibility period. These compatibility paths
-do not trigger new BugBot reviews.
+BugBot was disabled in the Cursor dashboard on 2026-08-31. Its compatibility
+paths retired on 2026-09-02, once the last legacy PR closed. Two carried real
+weight: `cursor[bot]` in the feedback-state bot roster, and `Cursor Bugbot` in
+the optional-check allowlist. The third, `BUGBOT_BUG_ID` in the two
+actionable-marker regexes, was already unreachable and enforced nothing —
+`reviewContradictionBody` strips `_` before the top-level regex sees a body, and
+the Claude clean-review caller short-circuits before its own severity rule. Its
+removal is therefore inert. None of the three ever triggered a new BugBot
+review.
 
 That bill changed shape. Cursor announced on 2026-05-11 (effective at each
 customer's first renewal after 2026-06-08) that BugBot dropped its flat
@@ -158,11 +161,16 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
    stale or missing after the optional check becomes terminal.
 3. **Run both reviewers for two weeks** (complete 2026-08-31). Compare their
    findings on the same PRs. Use the result to confirm or reverse the decision.
-4. **Disable BugBot** (complete 2026-08-31). Stop new reviews and preserve
-   legacy feedback enforcement for open PRs. The live sweep found that PR
-   #2036 still needs this compatibility. Remove it only after every PR with a
-   legacy Cursor feedback or check surface is terminal. Issue #2178 owns the
-   related readiness projection update.
+4. **Disable BugBot** (complete 2026-08-31) and **retire the compatibility
+   paths** (complete 2026-09-02). Disabling stopped new reviews while legacy
+   feedback enforcement stayed live for open PRs. PR #2036, the last PR
+   carrying a legacy Cursor finding, merged on 2026-09-01. The live sweep on
+   2026-09-02 covered all four open PRs and found no cursor[bot] comment or
+   review on any of them, so the live paths came out of
+   `scripts/pr/pr-feedback-state-core.mjs`,
+   `scripts/pr/pr-feedback-state-claude.mjs`, and
+   `scripts/pr/pr-ready-state-core.mjs`. Issue #2178 owns the related
+   readiness projection update.
 5. **Keep measurement repeatable.** Preserve historical Cursor recognition in
    `scripts/pr/review-process-metrics.mjs`. Use before and after cohorts to
    assess future review changes. Do not erase historical evidence when the
@@ -226,12 +234,20 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
   preventing duplicate requests for the same head.
   `@coderabbitai rate limit` reports remaining capacity without consuming
   a review.
-- The 2026-08-31 open-PR sweep found one current-head Cursor finding on PR
-  #2036. Keep `cursor[bot]`, `BUGBOT_BUG_ID`, and the optional `Cursor Bugbot`
-  check classification until that PR and any other open legacy PR are
-  terminal. Retire these paths only after another live sweep returns no active
-  legacy feedback. Preserve Cursor recognition in historical metrics and
-  frozen review fixtures after the live path retires.
+- The 2026-08-31 open-PR sweep found one current-head Cursor finding, on PR
+  #2036; that PR merged on 2026-09-01. The follow-up sweep on 2026-09-02 read
+  all four open PRs and found no Cursor comment or review, so `cursor[bot]`,
+  `BUGBOT_BUG_ID`, and the optional `Cursor Bugbot` check classification came
+  out the same day. Scope the effect narrowly: only the top-level comment and
+  review-body ledger consults the bot roster, so only a stray **top-level**
+  Cursor comment is ignored — an unresolved Cursor review thread or unreplied
+  root inline comment still blocks like any other author's, and every Cursor
+  finding this repo recorded was inline. A stray `Cursor Bugbot` check reads as
+  an unrecognized context: optional when branch protection reports required
+  contexts that do not name it, required in the fallback path that runs when
+  those contexts are unavailable — a path that already reports its own
+  `branch-protection` blocker. Cursor recognition stays in historical metrics
+  (`scripts/pr/review-process-metrics.mjs`) and in frozen review fixtures.
 - CodeRabbit is a new third-party GitHub App with repo read access and PR
   comment/review write access, steered by `.coderabbit.yaml` — and CodeRabbit
   resolves that file from the **source branch** of the PR under review,
@@ -256,8 +272,19 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
   review, and a same-patch edit to config plus pin is visible rather than
   impossible (any in-repo policy is PR-editable; comparing against a
   trusted ref would freeze legitimate config changes and recurse the same
-  loophole). The out-of-repo close is CodeRabbit's org-level override
-  layer, recorded as an operator step in issue #1917.
+  loophole). The out-of-repo close is set: on 2026-09-02 the operator
+  applied CodeRabbit's organization-level **Global overrides**, which the
+  vendor ranks above a repository's `.coderabbit.yaml`, so a PR can no
+  longer weaken these keys from its source branch. The override pins
+  `reviews.profile: chill`, `reviews.request_changes_workflow: false`,
+  `reviews.auto_review.enabled: true`, `reviews.auto_review.drafts: false`,
+  and `reviews.auto_review.auto_pause_after_reviewed_commits: 5`. It omits
+  `path_filters` and `path_instructions` on purpose: both are tuned in-repo
+  against evidence, and the vendor docs do not state whether an override
+  replaces or merges list values. Those two keys keep the fail-loud in-repo
+  pin above and its residual — a weakened path filter still shapes the
+  review of the PR that weakens it, because CodeRabbit reads the source
+  branch before CI runs.
 - Watch item: `claude[bot]` review currently rides existing Max
   subscription spend. Anthropic's separate metered "Code Review" product bills
   $15–25/review — ruinous at this volume. If the GitHub Action review path is
@@ -276,6 +303,11 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
   opt-in), cursor.com/docs/bugbot (default full-PR re-review per push; no
   spend cap). Iteration-cost reports: forum.cursor.com thread
   "usage-based Bugbot pricing punishes iterative workflows" (May 2026).
+- CodeRabbit configuration precedence: docs.coderabbit.ai/guides/configuration-overview
+  (checked 2026-09-02) ranks organization-level global overrides above a
+  repository's `.coderabbit.yaml`. The applied override was read back in the
+  CodeRabbit UI on 2026-09-02 under Organization settings → View mode →
+  Global overrides.
 - CodeRabbit pricing and public-repo terms: coderabbit.ai/pricing,
   docs.coderabbit.ai/management/plans, docs.coderabbit.ai/management/seat-assignment
   (seat = PR-opener; pushes free), kb.coderabbit.ai article 8856795235
@@ -316,5 +348,7 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
   `gh api pulls/<n>/comments` (26/26 findings fixed; per-bot split above);
   merged-PR volume from `git log --first-parent` (280 in 30 days, 850 in 90);
   BugBot's not-required check status per ADR 0007 and
-  `docs/pr-checklists/ci-workflow-gates.md`; its `BUGBOT_BUG_ID` feedback-gate
-  role per `scripts/pr/pr-feedback-state-core.mjs`.
+  `docs/pr-checklists/ci-workflow-gates.md`; its `BUGBOT_BUG_ID` marker as it
+  stood before the 2026-09-02 retirement, per `scripts/pr/pr-feedback-state-core.mjs`
+  at that revision, and still live for historical measurement in
+  `scripts/pr/review-process-metrics.mjs`.
