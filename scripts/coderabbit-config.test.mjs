@@ -4,7 +4,11 @@
  *
  * CodeRabbit resolves `.coderabbit.yaml` from the SOURCE branch of the pull
  * request it reviews, so a PR can weaken or replace the profile that reviews
- * it. Now that CodeRabbit findings feed the `pr:feedback-state` ledger — the
+ * it for every key the org-level Global overrides do not pin. Since
+ * 2026-09-02 those overrides pin `reviews.profile`,
+ * `request_changes_workflow`, and the three `auto_review` keys above the
+ * repository file (ADR 0066); `path_filters` and `path_instructions` stay
+ * repository-owned, and this pin is their only guard. Now that CodeRabbit findings feed the `pr:feedback-state` ledger — the
  * repo's merge oracle — that is a trust boundary, not a preference.
  *
  * The committed config must parse and be EXACTLY equal to EXPECTED_CONFIG
