@@ -222,6 +222,11 @@ test("classifies non-canonical plan-only edits as trivial", () => {
     report.recommendedReview[0],
     "Run the quality gate from operating-card step 3.",
   );
+  // Pinned so the advice cannot drift back to a command the repo no longer has.
+  assertEqual(
+    report.recommendedReview[1],
+    "Skip the closeout review unless the change is deceptively risky.",
+  );
   assertEqual(report.contextUpdateRequired, false);
   assertEqual(report.contextUpdateMissing, false);
 });
@@ -240,6 +245,11 @@ test("classifies root script changes as full and requiring context", () => {
   });
 
   assertEqual(report.tier, "full");
+  // Pinned so the advice cannot drift back to a command the repo no longer has.
+  assertEqual(
+    report.recommendedReview[1],
+    "Run pnpm agent:closeout-review before pushing.",
+  );
   assertEqual(report.contextUpdateRequired, true);
   assertEqual(report.contextUpdatesPresent, false);
   assertEqual(report.contextUpdateMissing, true);

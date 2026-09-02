@@ -325,20 +325,20 @@ function recommendedReview(tier) {
   if (tier === "trivial") {
     return [
       "Run the quality gate from operating-card step 3.",
-      "Skip semantic autoreview unless the change is deceptively risky.",
+      "Skip the closeout review unless the change is deceptively risky.",
     ];
   }
 
   if (tier === "standard") {
     return [
       "Run the quality gate from operating-card step 3.",
-      "Run pnpm agent:autoreview before pushing.",
+      "Run pnpm agent:closeout-review before pushing.",
     ];
   }
 
   return [
     "Run the quality gate from operating-card step 3.",
-    "Run pnpm agent:autoreview before pushing.",
+    "Run pnpm agent:closeout-review before pushing.",
     "Read any mapped checklist and audit sibling surfaces before the next push.",
   ];
 }

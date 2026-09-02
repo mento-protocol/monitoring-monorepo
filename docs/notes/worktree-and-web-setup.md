@@ -136,8 +136,8 @@ denied path in a hosted or sandboxed session.
 Repo-local `ship` and `babysit-pr` skill adapters live under `.claude/skills/`
 (mirrored under `.agents/skills/` for Codex), so the familiar `/ship` and
 `/babysit-pr` workflows resolve to repo-visible commands (`pnpm
-agent:quality-gate`, `pnpm agent:autoreview`, `pnpm pr:ready-state`) without
-needing a developer's personal skills present.
+agent:quality-gate`, `pnpm agent:closeout-review`, `pnpm pr:ready-state`)
+without needing a developer's personal skills present.
 
 ### GitHub access in hosted sessions: gh is unreliable
 

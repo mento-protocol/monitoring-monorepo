@@ -523,20 +523,18 @@ changed.` Review the lifecycle and install scripts in the diff first, then
   die at turn end, and a backgrounded process they were waiting on has no one
   left to notice it finished.
 
-- **The closeout**, chosen by the runtime the worker is in. Outside an active
-  Codex session, bare `pnpm agent:autoreview`; when the codex engine is
-  unavailable, `pnpm agent:autoreview --engine claude`, with the `claude` CLI's
-  install directory prepended to `PATH` — a worker subagent does not always
-  inherit the interactive shell's `PATH`, and the fallback engine then reports
-  as unavailable too. **Inside an active Codex session the bare command is not
-  the closeout**: it silently selects the local deterministic engine, so no
-  separate reviewer sees the bundle. Use the prepared-bundle fresh-context flow
-  with its manifest checks before and after review, which
-  [`pr-operating-card.md`](../../../docs/notes/pr-operating-card.md) owns — this
-  skill defers to it rather than carrying a second copy of the commands.
+- **The closeout:** `pnpm agent:closeout-review`, then hand its printed report
+  path to the `review` skill. Exit 1 means the report carries findings; exit 2
+  means the tool did not run, so there is no review to hand over. Prepend the
+  `codex` CLI's install directory to `PATH` — a worker subagent does not always
+  inherit the interactive shell's `PATH`. With no `codex` on PATH, run the
+  `review` skill alone and disclose the single-source coverage; inside an active
+  Codex session the script refuses, because nested `codex exec` is unavailable.
+  [`pr-operating-card.md`](../../../docs/notes/pr-operating-card.md) step 4 owns
+  the flow — this skill defers to it rather than carrying a second copy.
   Address the real findings; an unexplained strengthening of a validation claim
   is itself a finding, and testing those claims is the worker's own job, not
-  the bundled reviewer's.
+  the reviewer's.
 - **The ship:** full repo PR template, all four sections, **ready for review,
   never a draft**. A draft disables CodeRabbit auto-review and the PR
   description check, so it is skipping review rather than staging it. Then

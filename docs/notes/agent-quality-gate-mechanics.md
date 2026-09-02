@@ -22,9 +22,11 @@ Before opening or updating an agent-authored PR:
 ```bash
 pnpm agent:quality-gate          # inspect mapped commands and checklists
 pnpm agent:quality-gate --run    # execute the safe local mapped commands
-pnpm agent:autoreview            # required for a non-trivial completed batch
-pnpm agent:autoreview:test -- --jobs 1  # sequential full regression closeout for autoreview runtime changes
+pnpm agent:closeout-review       # required for a non-trivial completed batch
 ```
+
+The closeout review is owned by
+[`pr-operating-card.md`](pr-operating-card.md) step 4, not by this runbook.
 
 The local-only gate never deploys or applies Terraform. Run it explicitly;
 do not assume the pre-push hook exists.
@@ -39,11 +41,8 @@ The checked-in Claude permission grants approval-free execution only for
 `./scripts/agent-quality-gate.sh`. It does not grant the `pnpm` package alias
 because the active branch controls that alias before the gate can validate it.
 
-`pnpm agent:autoreview` reviews source only. `pnpm agent:autoreview:test` runs
-all families with at most three workers and bounded progress/timings, which the
-mapped gate preserves. `-- --jobs 1` changes only scheduling. CI uses that mode
-on `ubuntu-latest` for runtime or fixture changes; required `ci` demands success
-when selected.
+`pnpm agent:closeout-review` reviews source only, so the mapped gate still owns
+tests, browser checks, and generated-artifact checks.
 
 Background `--run` gates and `git push`: a 600s foreground kill writes no
 freshness stamp, so the next run cannot use `--skip-if-fresh`. Each run appends
@@ -2742,6 +2741,10 @@ refetch, including a conflict-triggered base refresh, restarts this preflight an
 refreshes both pins before another adapter call.
 
 ### The two review axes
+
+Superseded: [`pr-operating-card.md`](pr-operating-card.md) step 4 owns the
+closeout review. The autoreview sections below describe machinery the removal
+PR retires; read them as history, not instruction.
 
 A conflict repair is reviewed against **two** axes, because either alone can miss a
 regression the other catches. Pin both inputs as immutable commit IDs before merging:
