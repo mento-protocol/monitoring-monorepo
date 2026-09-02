@@ -8,6 +8,7 @@
  */
 
 import {
+  incompleteGroomingFinding,
   ISSUE_STATE_LABELS,
   labelNames,
   labelsForState,
@@ -481,6 +482,23 @@ async function syncIssue(options, project, listedIssue, operations) {
   );
 }
 
+async function syncListedIssue(options, project, listedIssue, operations) {
+  const stable = await operations.preflightStableSyncIssue(
+    options,
+    project,
+    listedIssue,
+    operations,
+  );
+  if (stable) return stable;
+  return runLockedSyncIssue(
+    options,
+    project,
+    listedIssue,
+    operations,
+    syncIssue,
+  );
+}
+
 export async function sync(options, dependencies = {}) {
   const operations = {
     addIssueLabels,
@@ -510,30 +528,52 @@ export async function sync(options, dependencies = {}) {
   const results = [];
   const failures = [];
   for (const listedIssue of byNumber.values()) {
+    let synced = true;
     try {
-      const stable = await operations.preflightStableSyncIssue(
+      const result = await syncListedIssue(
         options,
         project,
         listedIssue,
         operations,
-      );
-      if (stable) {
-        results.push(stable);
-        continue;
-      }
-      const result = await runLockedSyncIssue(
-        options,
-        project,
-        listedIssue,
-        operations,
-        syncIssue,
       );
       if (result) results.push(result);
     } catch (error) {
+      synced = false;
       failures.push({
         number: listedIssue.number,
         title: listedIssue.title,
         error,
+      });
+    }
+    // Label hygiene rides the same repo-wide enumeration. It runs after the
+    // projection, so a thinly labeled issue still reaches the Project, and a
+    // per-issue sync failure leaves its grooming gap to the next run.
+    if (!synced) continue;
+    // The enumeration snapshot is stale by now: this issue may have been
+    // claimed or relabelled while its own sync ran. Use the snapshot only to
+    // decide whether a read is worth spending, then report solely on what that
+    // read proves. An issue promoted into a bare `agent-ready` mid-run is
+    // reported by the next run rather than guessed at here.
+    if (!incompleteGroomingFinding(listedIssue)) continue;
+    try {
+      const finding = incompleteGroomingFinding(
+        await operations.getIssue(options, listedIssue.number),
+      );
+      if (finding) {
+        failures.push({
+          number: listedIssue.number,
+          title: listedIssue.title,
+          error: new Error(finding),
+        });
+      }
+    } catch (error) {
+      failures.push({
+        number: listedIssue.number,
+        title: listedIssue.title,
+        error: new Error(
+          `Issue #${listedIssue.number} looked incompletely groomed, but its confirming read failed: ${error instanceof Error ? error.message : String(error)}`,
+          { cause: error },
+        ),
       });
     }
   }
