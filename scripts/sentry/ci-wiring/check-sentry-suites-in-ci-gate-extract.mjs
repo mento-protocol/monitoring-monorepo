@@ -30,7 +30,10 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { inheritGateMarkerStdio } from "../../gate/mapped-command-process-identity.mjs";
+import {
+  closeReopenedGateMarkers,
+  inheritGateMarkerStdio,
+} from "../../gate/mapped-command-process-identity.mjs";
 
 /**
  * How long any probe shell may run before it is killed and reported.
@@ -148,28 +151,37 @@ export const runProbeShell = (
   let result;
   try {
     const interpreter = resolveInterpreter(bash);
-    result = spawnSync(
-      interpreter,
-      [
-        "-c",
-        PROBE_SUPERVISOR,
-        "sentry-gate-probe-supervisor",
-        timeoutMarker,
-        completionMarker,
-        controlFifo,
-        String(timeoutSeconds),
+    // bashFunctionSource runs this probe four times per extraction and the
+    // suites extract repeatedly, so the parent's reopened copies are released
+    // rather than accrued toward EMFILE. The release sits in a finally because
+    // inheriting the markers can reopen some and then refuse the declaration,
+    // and the spawn itself can throw; either would leak what was already open.
+    try {
+      result = spawnSync(
         interpreter,
-        ...args,
-      ],
-      {
-        ...options,
-        stdio: inheritGateMarkerStdio(options.stdio),
-        encoding: "utf8",
-        cwd: dirs.empty,
-        env: probeEnv(dirs),
-        detached: true,
-      },
-    );
+        [
+          "-c",
+          PROBE_SUPERVISOR,
+          "sentry-gate-probe-supervisor",
+          timeoutMarker,
+          completionMarker,
+          controlFifo,
+          String(timeoutSeconds),
+          interpreter,
+          ...args,
+        ],
+        {
+          ...options,
+          stdio: inheritGateMarkerStdio(options.stdio),
+          encoding: "utf8",
+          cwd: dirs.empty,
+          env: probeEnv(dirs),
+          detached: true,
+        },
+      );
+    } finally {
+      closeReopenedGateMarkers();
+    }
     if (existsSync(timeoutMarker)) {
       const error = new Error(`probe shell timed out after ${timeout}ms`);
       error.code = "ETIMEDOUT";
