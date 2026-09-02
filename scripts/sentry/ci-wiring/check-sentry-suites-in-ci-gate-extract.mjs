@@ -30,7 +30,10 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { inheritGateMarkerStdio } from "../../gate/mapped-command-process-identity.mjs";
+import {
+  closeReopenedGateMarkers,
+  inheritGateMarkerStdio,
+} from "../../gate/mapped-command-process-identity.mjs";
 
 /**
  * How long any probe shell may run before it is killed and reported.
@@ -170,6 +173,10 @@ export const runProbeShell = (
         detached: true,
       },
     );
+    // bashFunctionSource runs this probe four times per extraction and the
+    // suites extract repeatedly, so the parent's reopened copies are released
+    // here rather than accrued toward EMFILE.
+    closeReopenedGateMarkers();
     if (existsSync(timeoutMarker)) {
       const error = new Error(`probe shell timed out after ${timeout}ms`);
       error.code = "ETIMEDOUT";

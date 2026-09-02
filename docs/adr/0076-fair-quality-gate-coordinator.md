@@ -1184,11 +1184,18 @@ its capacity and named resources until a token-scoped drainer acknowledges
   process identity survives those changes. Stable parent-row reads and a
   coherent census preserve fail-closed classification. Atomic audit-token
   signals remove the numeric check-to-signal gap.
-- A Darwin nested runtime can retain a stale marker declaration after it closes
-  every declared descriptor. The spawn adapter ignores that declaration only
-  when no declared descriptor is an open regular file. It rejects a partially
-  surviving set. Linux rejects every all-stale declaration because its marker
-  can be the only remaining containment handle.
+- A nested runtime can retain a marker declaration after it closes every
+  declared descriptor, and can reuse those numbers for its own handles; pnpm
+  takes all three. The gate declares each marker's path in
+  `AGENTQG_MARKER_PATH_<fd>`, and the spawn adapter resolves a descriptor
+  either as an inherited open regular file or by reopening that path. It
+  inspects every declared descriptor before reopening any, because an open
+  takes the lowest free descriptor. It ignores a declaration only when no
+  declared descriptor resolves either way, and rejects a partially resolving
+  set. Linux rejects every unresolvable declaration because its marker can be
+  the only remaining containment handle. Reopening tightens the check rather
+  than relaxing it: an fstat proves a descriptor is some regular file, never
+  that it is the marker.
 - A process broker that existed before the baseline can hide causality. The
   broker-launch preflight rejects opaque executables and known unapproved
   repository clients. The toolchain boundary, lexical-policy limit, and

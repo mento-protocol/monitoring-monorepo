@@ -2478,12 +2478,23 @@ deadline. Expiry preserves the lineage state and recovery barrier.
 The Sentry broker probe and CI-gate extractor each use a detached Bash
 group-leader supervisor. Their children inherit every declared quality-gate
 marker descriptor before their first instruction when the declaration is still
-active. A Darwin runtime can close every marker descriptor while it retains the
-environment declaration and then reuse those descriptor numbers for pipes. The
-spawn helper treats that declaration as stale only when no declared descriptor
-is an open regular file. Any partial survivor fails closed. Linux rejects an
-all-stale declaration because its marker can be the only remaining containment
-handle. The extractor's in-group watchdog writes a private timeout marker, then
+active. A runtime can close every marker descriptor while it retains the
+environment declaration and then reuse those descriptor numbers for its own
+handles; pnpm takes all three for pipes and an eventfd. The gate therefore
+declares where each marker lives in `AGENTQG_MARKER_PATH_<fd>`, one variable
+per descriptor because a marker path may contain any byte a packed separator
+could use. A declared descriptor resolves either as an inherited open regular
+file or by reopening its declared path, and the helper inspects every declared
+descriptor before it reopens any path, because an open takes the lowest free
+descriptor and could otherwise land on a slot a later declaration still names.
+Reopening is the stronger evidence of the two: an fstat proves a descriptor is
+some regular file, never that it is the marker. A declaration is stale only
+when no declared descriptor resolves either way. Any partial survivor fails
+closed. Linux rejects an all-stale declaration because its marker can be the
+only remaining containment handle; Darwin discards one because it binds a
+mapped root to its exact kernel lineage before START. A caller that spawns
+repeatedly releases the parent's reopened copies with
+`closeReopenedGateMarkers()`, since the child keeps its own. The extractor's in-group watchdog writes a private timeout marker, then
 signals `-$$` while the supervisor is still the live group leader. The broker
 probe gives its watchdog a private control pipe that the target does not
 inherit. A stop request, parent pipe EOF, or target exit settles the group while

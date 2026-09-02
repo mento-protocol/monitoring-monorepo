@@ -92,13 +92,22 @@ export function inheritGateMarkerStdio(
 ) {
   if (!carriesGateIdentity(environment)) return stdio;
 
-  const descriptorStates = declaredMarkerDescriptors(environment).map((fd) => {
-    let inspection;
+  // Inspect every declared descriptor BEFORE reopening any path. Opening
+  // allocates the lowest free descriptor, which can be one a later declaration
+  // still names: for a `9,8` declaration with 8 closed, reopening marker 9
+  // lands on 8, and inspecting 8 afterwards would read marker 9's file and
+  // call it a survivor. Both child slots would then carry marker 9 and marker
+  // 8 would never open, silently dropping it from the containment evidence.
+  const inspections = declaredMarkerDescriptors(environment).map((fd) => {
     try {
-      inspection = { fd, regular: descriptorStat(fd)?.isFile?.() === true };
+      return { fd, regular: descriptorStat(fd)?.isFile?.() === true };
     } catch (error) {
-      inspection = { error, fd, regular: false };
+      return { error, fd, regular: false };
     }
+  });
+
+  const descriptorStates = inspections.map((inspection) => {
+    const { fd } = inspection;
     // An inherited descriptor that is still the marker costs nothing to keep.
     if (inspection.regular) return { ...inspection, source: fd };
     const path = declaredMarkerPath(environment, fd);

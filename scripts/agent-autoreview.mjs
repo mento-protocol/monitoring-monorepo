@@ -2478,6 +2478,7 @@ function detectPrBase(repo, branch) {
         detached: true,
       },
     );
+    closeReopenedGateMarkers();
     if (result.error?.code === "ETIMEDOUT" || result.signal === "SIGKILL") {
       killProcessGroup(result.pid);
       throw new Error(
@@ -3580,12 +3581,21 @@ function runCommandWithInput(
   return new Promise((resolve, reject) => {
     revalidateAllTrustedExecutableSnapshots();
     assertAllAttestedNodeLibraryPaths();
-    const child = spawn(command, commandArgs, {
-      cwd,
-      detached: process.platform !== "win32",
-      env,
-      stdio: inheritGateMarkerStdio(["pipe", "pipe", "pipe"]),
-    });
+    let child;
+    try {
+      child = spawn(command, commandArgs, {
+        cwd,
+        detached: process.platform !== "win32",
+        env,
+        stdio: inheritGateMarkerStdio(["pipe", "pipe", "pipe"]),
+      });
+    } finally {
+      // spawn()'s fork/exec completes before it returns, so the child already
+      // holds its own copies. This path runs several times per review — two
+      // isolation probes, the review call, and one per Codex launcher
+      // candidate — so the parent's copies are released here.
+      closeReopenedGateMarkers();
+    }
     activeReviewerChildren.add(child);
     if (pendingTerminationSignal) terminateActiveReviewerChildren();
     let stdout = "";
@@ -3750,6 +3760,8 @@ function engineVersionProbeFailure(executable, cwd, env) {
     });
   } catch (error) {
     return `its --version probe could not start: ${error.message}`;
+  } finally {
+    closeReopenedGateMarkers();
   }
   if (probe.error?.code === "ETIMEDOUT" || probe.signal === "SIGKILL") {
     killProcessGroup(probe.pid);

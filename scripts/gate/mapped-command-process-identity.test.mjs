@@ -408,3 +408,48 @@ test("closeReopenedGateMarkers releases only the parent's reopened copies", () =
   assert.equal(fstatSync(8).isFile !== undefined, true);
   closeReopenedGateMarkers();
 });
+
+test("every declared descriptor is inspected before any path is reopened", () => {
+  // Reopening allocates the lowest free descriptor, which can be one a later
+  // declaration still names. Inspecting 8 only after opening 9 into it would
+  // read marker 9's file through descriptor 8 and call it a survivor: both
+  // child slots would carry marker 9 and marker 8 would never open, silently
+  // dropping it from the containment evidence.
+  const events = [];
+  let openCount = 0;
+  const inherited = inheritGateMarkerStdio(["ignore", "pipe", "pipe"], {
+    environment: {
+      AGENTQG_RUN: "agentqg:test-run",
+      AGENTQG_MARKER_FDS: "9,8",
+      AGENTQG_MARKER_PATH_9: "/run/markers/command",
+      AGENTQG_MARKER_PATH_8: "/run/markers/request",
+    },
+    descriptorStat: (fd) => {
+      events.push(`stat:${fd}`);
+      // Descriptor 8 is closed, and would read as a regular file only once a
+      // reopen had landed on it.
+      if (fd === 8) {
+        if (openCount > 0) return regularFile;
+        closedDescriptor();
+      }
+      return reusedDescriptor;
+    },
+    openMarker: (path) => {
+      events.push(`open:${path}`);
+      openCount += 1;
+      // The first reopen takes descriptor 8, exactly the collision this guards.
+      return openCount === 1 ? 8 : 70;
+    },
+    platform: "linux",
+  });
+
+  assert.deepEqual(events, [
+    "stat:9",
+    "stat:8",
+    "open:/run/markers/command",
+    "open:/run/markers/request",
+  ]);
+  assert.equal(inherited[9], 8);
+  assert.equal(inherited[8], 70);
+  closeReopenedGateMarkers();
+});
