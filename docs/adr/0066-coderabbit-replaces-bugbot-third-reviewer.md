@@ -228,9 +228,25 @@ and stay in place as history.
   `request_changes_workflow`, `auto_review.enabled`, `auto_review.drafts`, and
   `auto_review.auto_pause_after_reviewed_commits`. They do not set
   `auto_incremental_review`, so `.coderabbit.yaml` decides it and
-  `scripts/coderabbit-config.test.mjs` is its only guard. **Follow-up:** if a
-  second push on a PR still triggers an automatic review, the operator adds
-  `auto_incremental_review: false` to the Global overrides.
+  `scripts/coderabbit-config.test.mjs` is its only guard. **Follow-up, now
+  indicated rather than conditional:** the operator adds
+  `auto_incremental_review: false` to the Global overrides. PR #2236 measured
+  the repository file on its own and it did not hold — see the next bullet.
+- **Measured on PR #2236, 2026-09-02: the repository file alone did not
+  suppress the attempt.** The second push (head `242f47afb`, `15:50:24Z`) drew
+  a fresh CodeRabbit run 75 seconds later — new Run ID
+  `5e05ac36-1445-4fa7-b78e-6e0e0f820745` against the opening review's
+  `3fdfc30d-2f46-4fc3-86de-2539b29fbcb6` — reporting all ten changed files and
+  a `CodeRabbit` check of "Review rate limited". The run read this branch's own
+  config (`Path: .coderabbit.yaml`, `Review profile: CHILL`), so
+  `auto_incremental_review: false` was in force and the trigger still fired. No
+  bill followed, because the spending cap blocked the review before it ran.
+  One confound stays open: the opening review never completed either, and
+  CodeRabbit may retry an unfinished review when the head moves regardless of
+  this key. Both runs covered the full base-to-head diff rather than an
+  incremental delta, and the second reused the same sticky comment, which fits
+  either explanation. A clean measurement needs a PR whose opening review
+  completed, so it waits for the 2026-09-18 cap reset.
 - **Rejected here:** raising the cap keeps the per-push meter and buys more
   duplicate reviews; tightening `path_filters` saves little because the billed
   unit is an already-small push delta. The $0 OSS tier stays the fallback if
