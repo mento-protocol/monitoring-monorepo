@@ -72,9 +72,11 @@ beside unfinished work makes the two indistinguishable in the report.
 
 **Do not probe or change the legacy gate's lock.** Workers run the direct author
 checks from operating-card step 3 in isolated checkouts. The batch cap remains
-the CPU and memory bound. Run no more than three command-heavy check sets at
-once. A browser check that finds its fixed port in use must fail and report the
-conflict. It must not wait for, stop, or reuse another worker's process.
+the CPU and memory bound. Run no more than three ordinary command-heavy check
+sets at once. Run dashboard coverage or scoped related tests, browser work,
+production builds, and size-limit work alone. Other workers can keep editing.
+A browser check that finds its fixed port in use must fail and report the
+conflict. It must not wait for, stop, or reuse another process.
 
 **State the usage reality before starting.** One shipped PR costs roughly 3% of
 the weekly usage window, and every push to it triggers another round of bot
@@ -512,10 +514,12 @@ missing facts before writing the report, because nothing on disk reconstructs
 them afterwards.
 
 **Keep concurrent author checks within the local resource bound.** A batch of
-four runs at most three command-heavy check sets at once. Hold the fourth until
-one finishes. Each worker owns its own clone, so no package-manager process can
-recreate or invalidate another's `node_modules`. Browser checks still fail on a
-fixed-port conflict; they never stop another worker's process.
+four runs at most three ordinary command-heavy check sets at once. Hold the
+fourth until one finishes. Run dashboard coverage or scoped related tests, browser work,
+production builds, and size-limit work without another command-heavy check set.
+Other workers can keep editing while that set runs. This is a sweep schedule,
+not a global gate lock. Each worker owns its own clone, so no package-manager
+process can recreate or invalidate another's `node_modules`.
 
 **Serialize the instructions so two workers never share a checkout.** Each
 worker owns exactly one clone and one branch, and no instruction ever names

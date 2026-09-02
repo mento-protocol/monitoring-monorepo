@@ -249,9 +249,11 @@ already claimed and a worker mid-validation.
 
 Workers apply the direct author checks from operating-card step 3 in isolated
 checkouts. The batch cap remains the CPU and memory bound. Run no more than
-three command-heavy check sets at once. A browser check that finds its fixed
-port in use fails and reports the conflict. It never waits for, stops, or reuses
-another worker's process.
+three ordinary command-heavy check sets at once. Run dashboard coverage or
+scoped related tests, browser work, production builds, and size-limit work
+alone. Other workers can keep editing. A browser check that finds its fixed
+port in use fails and reports the conflict. It never waits for, stops, or
+reuses another process.
 
 ## Resilience duties
 
@@ -268,7 +270,9 @@ survive the night:
   worker's turn. The orchestrator records each closing message as it arrives
   and asks for what is missing before writing the report.
 - **Author-check concurrency stays bounded.** A batch of four runs at most
-  three command-heavy check sets at once. Each worker owns its checkout, so no
+  three ordinary command-heavy check sets at once. Dashboard coverage or scoped
+  related tests, browser work, production builds, and size-limit work run alone.
+  Other workers can keep editing. Each worker owns its checkout, so no
   package-manager process can recreate or invalidate another's `node_modules`.
 - **Serialized instructions.** One checkout per worker, and no instruction ever
   names another worker's path.

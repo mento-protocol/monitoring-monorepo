@@ -167,8 +167,9 @@ routing-sensitive source, the shared classifier adds the offline
 scheduled evaluation. Every tracked Markdown change runs `pnpm docs:index
 --check` and `pnpm docs:navigation-eval:test`. The second command enforces the
 navigation source budgets that the Markdown-only CI job checks. Review the
-output. Then run the local or hosted gate command from step 3 of the
-[PR operating card](pr-operating-card.md).
+output. This mapping describes the optional retained diagnostic. Normal author
+work follows the matching direct checks in step 3 of the
+[PR operating card](pr-operating-card.md) and does not invoke the gate.
 
 Every non-empty candidate change set also runs the Terraform-stack suite. The
 gate spells it `pnpm tf:test`, unless a root-tooling `package.json` edit already
@@ -2526,21 +2527,22 @@ replacement provisioner map to
 `bash alerts/infra/scripts/fix-webhook-state.test.sh`; the handler test suite
 also executes that shell fixture in CI.
 
-The [PR operating card](pr-operating-card.md#the-loop) owns ordinary gate and
-closeout sequencing. A second `--run` request from another worktree joins the
-coordinator. A request from the same worktree waits for that worktree lease.
-Before a full gate starts, finish direct validation, dashboard servers, browser
-suites, and package-manager work that runs outside the coordinator on the same
-machine. Do not start uncoordinated work there until the gate exits. The
-coordinator can schedule only registered gate work. An unregistered
+The [PR operating card](pr-operating-card.md#the-loop) owns normal direct author
+checks and closeout sequencing. When an operator explicitly runs a full legacy
+diagnostic, a second `--run` request from another worktree joins the coordinator.
+A request from the same worktree waits for that worktree lease. Before the
+diagnostic starts, finish dashboard servers, browser suites, and package-manager
+work that runs outside the coordinator on the same machine. Do not start
+uncoordinated work there until the diagnostic exits. The coordinator can
+schedule only registered gate work. An unregistered
 package-manager process in the same worktree can change `node_modules`.
 Unregistered validation from another worktree can still starve the scheduled
 workers. Browser tests and size-limit can rewrite `next-env.d.ts`. Use
 same-machine spare workers only for read-only work. Run concurrent validation
-outside the coordinator only on another machine. Run focused checks first, then
-let the gate own the mapped batch. For a non-trivial batch, freeze the card's
-scope baseline and run autoreview after the gate. After accepted fixes, rerun
-focused checks and autoreview.
+outside the coordinator only on another machine. Complete normal direct checks
+before an optional diagnostic. For a non-trivial batch, freeze the card's scope
+baseline and run autoreview after the applicable direct checks. After accepted
+fixes, rerun the affected direct checks and autoreview.
 
 **Stage timing and capture deadlines.** The wrapper and helper append
 best-effort stage JSONL to `.tmp/agent-autoreview/durations.jsonl`; override
@@ -2764,12 +2766,11 @@ git merge-base --is-ancestor "$base_oid" "$final_head" || exit 1
 git merge-base --is-ancestor "$premerge_oid" "$final_head" || exit 1
 ```
 
-Then run the mapped gate against **both** axes, not just the new base:
-
-```bash
-pnpm agent:quality-gate --base "$base_oid" --head HEAD --run
-pnpm agent:quality-gate --base "$premerge_oid" --head HEAD --run
-```
+Then derive changed paths for both `base_oid..final_head` and
+`premerge_oid..final_head`. Apply every direct author-check row selected by
+either axis to `final_head`; do not invoke the legacy gate. Record each axis
+that selected a check. Run a shared check once because both axes bind to the
+same final tree.
 
 `base_oid..final_head` shows what the branch adds to the new base. `premerge_oid..final_head`
 shows what the merge changed about the branch — the axis that catches a resolution which
@@ -2914,12 +2915,12 @@ checks, so an external helper must leave no background writer behind.
 
 Autoreview answers whether the source bundle contains review findings. It does
 not prove CLI/API behavior, generated artifacts, deployment/runtime behavior,
-or a UI interaction. Keep the mapped quality gate and every applicable browser,
-generation, integration, and runtime check in the validation record. The final
-PR all-clear still comes from `pnpm pr:ready-state`, not autoreview.
+or a UI interaction. Keep every applicable direct author, browser, generation,
+integration, and runtime check in the validation record. The final PR all-clear
+still comes from `pnpm pr:ready-state`, not autoreview.
 
 To classify review depth and likely context-update requirements before or after
-the mapped gate, use:
+the direct author checks, use:
 
 ```bash
 pnpm agent:review-materiality

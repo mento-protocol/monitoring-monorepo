@@ -16,12 +16,18 @@
     "**Agent sessions never merge a PR without the user's explicit, direct approval of that specific merge.**",
     "**Agent sessions never merge without explicit approval** for that specific merge",
     "**Knowingly deferred work needs a GitHub issue first**, linked from `## Deferrals`.",
+    "First run `./tools/trunk fmt <surviving-changed-files>` on each intended changed file that exists in the final tree. Use deleted paths and both sides of a rename to select matching rows, but never pass a missing path to Trunk.",
     "| Source in a workspace package | Run each script that exists for that package: `pnpm --filter <package-name> lint`, `pnpm --filter <package-name> typecheck`, and its normal unit-test command. Governance Watchdog uses `pnpm --filter @mento-protocol/governance-watchdog test:unit`; its generic `test` needs a local service. |",
     "| Dashboard React or client source | Also run `pnpm dashboard:react-doctor:diff` against the resolved PR base. |",
     "| Dashboard UI or visual output, route or interaction, browser test, or frontend build/runtime path | Also run `pnpm dashboard:build`, then follow [`dashboard-verification.md`](dashboard-verification.md) for the changed UI or runtime path, console, interaction, breakpoints, and applicable auth states. |",
     "| Indexer schema, configuration, ABI, entry point, or handler reachability | Run each affected code-generation variant from [`../../indexer-envio/AGENTS.md`](../../indexer-envio/AGENTS.md). Run affected non-mainnet variants first and `pnpm indexer:codegen` last. Inspect the generated diff before indexer package checks. |",
     "| Dashboard GraphQL query or schema consumer | Run `pnpm dashboard:codegen` and inspect the generated diff. |",
     "| Manifest, lockfile, pnpm configuration, or patch | Inspect lifecycle and install effects before any package-manager command. Then run the applicable package rows. |",
+    "| Trunk configuration or local Git hook | Run `./tools/trunk check --ci --all`. Also run `bash scripts/bootstrap/agent-setup-contract.test.sh` when hook or Trunk action behavior changes. |",
+    "| Hosted agent setup or hook | Run `bash scripts/bootstrap/agent-setup-contract.test.sh`. |",
+    "| Root agent instruction, role, command, or skill | Run `pnpm agent:context-check` and `pnpm agent:context-budget:test`. Also run `pnpm docs:index --check` after adding, moving, or removing managed context. |",
+    "| Guardrail prose pin list or pinned normative text | Run `node scripts/repo-health/check-guardrail-prose.mjs` and `node scripts/repo-health/check-guardrail-prose.test.mjs`. |",
+    "| CI workflow or protected PR admission boundary | Run `pnpm ci:contract:test`. |",
     "| Root tooling, control plane, or standalone service | Run the focused existing contract named by the nearest scoped `AGENTS.md`. Do not add a root selector. |",
     "Record each applicable result in the",
     "as `passed`, `failed`, or `not run: <reason>`.",
@@ -37,5 +43,16 @@
     "Run the repository preflight in",
     "Apply every matching row in card",
     "Pre-push runs no repository verification."
+  ],
+  ".agents/skills/backlog-sweep/SKILL.md": [
+    "Run dashboard coverage or scoped related tests, browser work, production builds, and size-limit work without another command-heavy check set."
+  ],
+  ".claude/skills/backlog-sweep/SKILL.md": [
+    "Run dashboard coverage or scoped related tests, browser work, production builds, and size-limit work without another command-heavy check set."
+  ],
+  "docs/notes/agent-quality-gate-mechanics.md": [
+    "This mapping describes the optional retained diagnostic. Normal author work follows the matching direct checks in step 3 of the [PR operating card](pr-operating-card.md) and does not invoke the gate.",
+    "The [PR operating card](pr-operating-card.md#the-loop) owns normal direct author checks and closeout sequencing.",
+    "Apply every direct author-check row selected by either axis to `final_head`; do not invoke the legacy gate."
   ]
 }
