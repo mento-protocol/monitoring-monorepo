@@ -20,11 +20,10 @@ loads the user-global `ship` skill instead of this file
 ([`codex-agent-skills.md`](../../../docs/notes/codex-agent-skills.md#claude-global-store-shadowing)),
 so a rule written here and nowhere else would reach Codex only.
 
-Run the repository preflight in
-[`pr-operating-card.md`](../../../docs/notes/pr-operating-card.md) before any
-repo-local command. Then work card steps 2 through 9. The card owns the PR
-description shape, the ready-for-review default, `Closes` vs `Refs`, the
-babysit and ready-state contracts, merge hygiene, and production closeout.
+After bootstrap, work
+[`pr-operating-card.md`](../../../docs/notes/pr-operating-card.md) steps 2-9.
+Run its preflight before agent-invoked repository code. It does not attest
+bootstrap; setup has a separate [trust boundary](../../../docs/notes/worktree-and-web-setup.md#bootstrap-trust-boundary).
 
 | Decision                                                       | Authority                                                                                   |
 | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
@@ -38,12 +37,10 @@ babysit and ready-state contracts, merge hygiene, and production closeout.
 
 ## What this repo adds
 
-- **Repository identity before repository code**: Resolve `CURRENT_REPO`,
-  `BASE_REPO`, the target PR, both remotes, and the PR base through the card
-  preflight. Stop a fork checkout or cross-repository head before formatting,
-  package-manager commands, repo-local scripts, or autoreview. Bind every
-  `gh pr view`, feedback-state, and ready-state call with
-  `--repo <BASE_REPO>`. A failed GitHub query is not evidence that no PR exists.
+- **Repository identity before agent-invoked code**: Resolve `CURRENT_REPO`,
+  `BASE_REPO`, PR, remotes, and base after bootstrap. Stop fork and
+  cross-repository heads before agent code. Bind PR probes to `BASE_REPO`; a
+  failed query does not prove that no PR exists.
 - **Author checks before ready publication**: Apply every matching row in card
   step 3. Format every intended changed file before those checks. Record each
   result in `## Validation`. Reapply affected rows after a material fix, base

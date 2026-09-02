@@ -2717,8 +2717,9 @@ protected object. Otherwise the command fails closed with the
 separate-trusted-checkout
 instruction used for runtime-changing reviews; a wrapper nested anywhere inside
 the reviewed checkout is never treated as external. The old autoreview
-`--parallel-tests` path is removed: the mapped quality gate owns test execution
-and isolation.
+`--parallel-tests` path is removed. Step 3 of the [PR operating
+card](pr-operating-card.md) owns direct author checks; required CI owns merge
+admission.
 
 The repo command itself is executable code from the active checkout. The
 committed/pre-change runtime comparisons protect review integrity when the

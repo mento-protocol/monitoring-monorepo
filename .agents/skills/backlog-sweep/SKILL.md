@@ -402,19 +402,16 @@ Then spawn one worker subagent per issue. Give each a brief containing:
   name, and `mkdir` is the atomic claim that makes the loser take the next
   suffix instead.
 
-  In Claude Code, subagents inherit the parent session's Bash worktree pin, so
-  git in a sibling worktree under `.claude/worktrees/` is refused for them, and
-  a tmp clone is the only checkout those workers can use. The general rule
-  outlives that specific block: every worker gets an isolated checkout — a
-  clone or a worktree — that its own runtime can actually write to, because two
-  workers in one checkout is the failure this is preventing. Then run
-  `./scripts/setup.sh` unsandboxed in **every** new clone, not conditionally.
-  It sets `core.hooksPath` for the retained staged formatter and prepares the
-  dependencies, code generation, and browser runtime that author checks use.
-  Run it on **resumed** checkouts too, not just fresh ones: the marker is written
-  straight after the clone, so an interruption between the two leaves an owned
-  checkout without completed setup. Rerunning is cheap because the script owns
-  its setup markers and skips unchanged work.
+  Claude subagents cannot use sibling worktrees, so each uses an isolated tmp
+  clone. Before resumed setup, inspect `git status --short`,
+  `git diff origin/main...HEAD`, `git diff --cached`, `git diff`, and untracked
+  files. Inspect lifecycle and install effects for changed manifests, lockfiles,
+  pnpm configuration, or patches; stop if the change set is unclear.
+
+  Run `./scripts/setup.sh` in every resumed clone only after that inspection. In
+  a fresh clone, fetch and run `git switch --detach origin/main` before setup.
+  Setup prepares the staged formatter, dependencies, codegen, and browser tools;
+  its markers make unchanged reruns cheap.
 
   Branch as **the exact name the orchestrator passed to `issue:claim
 --branch`**, from `origin/main`. That name is already in the Project `Branch`

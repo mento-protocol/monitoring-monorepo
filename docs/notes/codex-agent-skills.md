@@ -119,9 +119,9 @@ actual rule is not.
 
 ## Codex Cloud routing
 
-Codex Cloud does not inherit a developer's local `~/.agents`, `~/.codex`, or
-`~/.claude` directories. Configure the environment setup and optional
-maintenance scripts as:
+Codex Cloud does not inherit local agent directories. On a trusted canonical
+branch under the [bootstrap boundary](worktree-and-web-setup.md#bootstrap-trust-boundary),
+configure setup and optional maintenance as:
 
 ```bash
 ./scripts/bootstrap/codex-cloud-setup.sh

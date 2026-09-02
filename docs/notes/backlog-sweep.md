@@ -151,12 +151,12 @@ suffix. A checkout whose contents have not been established is never deleted;
 it can hold uncommitted work, and nothing available to the sweep tells that
 apart from litter.
 
-Every checkout runs `./scripts/setup.sh`, fresh or resumed. That script sets
-`core.hooksPath` for the retained staged formatter and prepares the dependencies,
-code generation, and browser runtime that author checks use. The marker is
-written straight after the clone, so an interruption between the two leaves an
-owned checkout without completed setup. Rerunning is cheap because the script
-skips unchanged work.
+Every checkout runs `./scripts/setup.sh`. Before resuming one, inspect
+`git status --short`, committed, staged, unstaged, and untracked changes. Review
+lifecycle and install effects for any manifest, lockfile, pnpm configuration,
+or patch change before setup. Stop if the change set is unclear. Before fresh
+setup, fetch and run `git switch --detach origin/main`. Setup prepares the staged
+formatter, dependencies, codegen, and browser tools; markers skip unchanged work.
 
 The split exists because subagents cannot wait across turns. A subagent that
 ends its turn while an author check is running stalls permanently. Nothing

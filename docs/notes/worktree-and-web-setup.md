@@ -12,8 +12,13 @@ garden_lane: operator-runbooks
 
 # New Worktree / Clone Setup and Claude Code on the Web Setup
 
-The invocation pointer lives in the "Agent Tooling and Setup" section of root
-`AGENTS.md`. This note holds the underlying mechanics.
+## Bootstrap trust boundary
+
+Setup can run repository code before agent control. Disable automatic setup
+before checking out an untrusted, fork, or cross-repository head. If a platform
+cannot enforce this order, do not use automatic setup there. Inspect the diff
+without execution and apply approved changes on a trusted canonical branch.
+The later [repository preflight](pr-operating-card.md) does not attest bootstrap.
 
 ## New Worktree / Clone Setup
 

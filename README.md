@@ -86,9 +86,9 @@ production-cutover matrix is
 
 ### Install
 
-For a fresh clone or manually-created worktree, prefer the setup script so
-workspace deps, postinstall hooks, Playwright Chromium, and Envio codegen are
-handled in one place:
+From a trusted canonical clone or worktree, use the setup script for workspace
+dependencies, lifecycle hooks, Playwright, and Envio codegen. See the
+[bootstrap trust boundary](./docs/notes/worktree-and-web-setup.md#bootstrap-trust-boundary).
 
 ```bash
 ./scripts/setup.sh

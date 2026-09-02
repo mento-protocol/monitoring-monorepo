@@ -12,7 +12,7 @@
     "**Forensic drafts stay local.** Use the `forensic-report` skill"
   ],
   "docs/notes/pr-operating-card.md": [
-    "**Run the repository preflight first.** Before step 1 or any repo-local",
+    "**Run the repository preflight first.** Automatic setup can finish before agent",
     "**Agent sessions never merge a PR without the user's explicit, direct approval of that specific merge.**",
     "**Agent sessions never merge without explicit approval** for that specific merge",
     "**Knowingly deferred work needs a GitHub issue first**, linked from `## Deferrals`.",
@@ -35,13 +35,16 @@
     "Pre-push starts no repository",
     "**Inspect package-script, package-manager, lockfile, and patch changes before"
   ],
+  "docs/notes/worktree-and-web-setup.md": [
+    "Disable automatic setup before checking out an untrusted, fork, or cross-repository head."
+  ],
   ".agents/skills/ship/SKILL.md": [
-    "Run the repository preflight in",
+    "Run its preflight before agent-invoked repository code.",
     "Apply every matching row in card",
     "Pre-push runs no repository verification."
   ],
   ".claude/skills/ship/SKILL.md": [
-    "Run the repository preflight in",
+    "Run its preflight before agent-invoked repository code.",
     "Apply every matching row in card",
     "Pre-push runs no repository verification."
   ],

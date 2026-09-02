@@ -22,17 +22,18 @@ even when you never open an authority.
 
 ## The loop
 
-**Run the repository preflight first.** Before step 1 or any repo-local
-formatter, package-manager command, script, or autoreview, resolve
+**Run the repository preflight first.** Automatic setup can finish before agent
+control under a [separate trust boundary](worktree-and-web-setup.md); this
+preflight does not attest it. Before step 1 or any repository command, resolve
 `CURRENT_REPO`, `BASE_REPO`, the target PR when one exists, `BASE_REMOTE`,
 `HEAD_REMOTE`, and the PR base with the exact step 5 rules. Read
 `headRepository`, `headRepositoryOwner`, and `isCrossRepository` for an
 existing PR. With no PR, require a non-fork checkout whose `origin` serves
 `CURRENT_REPO`. Stop on a fork checkout, a cross-repository head, an ambiguous
-target, or a failed identity lookup before executing repository code. Fetch
-the base only after its repository and remote are bound. Keep these values as
-the authority for author checks and publication, and re-read them before each
-publication mutation in step 5.
+target, or a failed identity lookup before the agent executes repository code.
+Fetch the base only after its repository and remote are bound. Keep these
+values as the authority for author checks and publication, and re-read them
+before each publication mutation in step 5.
 
 1. **Claim.** Before substantive edits, claim from the ready queue:
 

@@ -153,7 +153,7 @@ Codex routing and skill ownership are in
 [`docs/notes/codex-agent-skills.md`](docs/notes/codex-agent-skills.md); Claude
 commands live under `.claude/commands/`.
 
-Run `./scripts/setup.sh` in a new clone or worktree. Hosted setup and Worktrunk
-hooks are in
+Run `./scripts/setup.sh` only from a trusted canonical branch. Hosted setup,
+Worktrunk hooks, and the trust boundary are in
 [`docs/notes/worktree-and-web-setup.md`](docs/notes/worktree-and-web-setup.md);
 service prerequisites stay in package READMEs.
