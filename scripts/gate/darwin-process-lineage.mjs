@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { existsSync, lstatSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, writeFileSync } from "node:fs";
 import { constants as osConstants } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
@@ -678,21 +678,42 @@ function uidMatches(record) {
   return [record.uid, record.realUid, record.savedUid].includes(uid);
 }
 
-// Whether a fixture named the mapped command it wants this barrier to meet.
-// Mere presence decides: an unresolvable name is still a name that was asked
-// for, so a dangling symlink or a directory must not read as "unnamed". `lstat`
-// rather than `existsSync` because the latter follows the link and is false
-// when its target is absent.
-function namedDrainRefreshBarrier(barrier) {
+// The mapped command a fixture named for this barrier, or null when it named
+// none. Presence decides that a name was asked for: an unresolvable one is
+// still a request, so a dangling symlink or a directory must not read as
+// "unnamed". `lstat` rather than `existsSync` because the latter follows the
+// link and is false when its target is absent. A name that was asked for and
+// cannot be resolved fails the drain closed, matching the shell contract —
+// arming everywhere instead is the wrong-drain race the name exists to close.
+function readDrainRefreshBarrierCommand(barrier) {
+  const path = `${barrier}.command`;
+  let named;
   try {
-    lstatSync(`${barrier}.command`);
-    return true;
+    named = lstatSync(path);
   } catch {
-    return false;
+    return null;
   }
+  if (!named.isFile()) {
+    fail("the test-only drain refresh barrier name is not a regular file");
+  }
+  let contents;
+  try {
+    contents = readFileSync(path, "utf8");
+  } catch {
+    fail("the test-only drain refresh barrier name is unreadable");
+  }
+  const expected = contents.split("\n", 1)[0];
+  if (expected === "") {
+    fail("the test-only drain refresh barrier name is empty");
+  }
+  return expected;
 }
 
-async function waitAtDarwinCensusTestBarrier() {
+// `activeMappedCommand` is the command whose drain is running, or null when the
+// caller cannot name one. A cohort of several commands settles at once and has
+// no single name, so it passes null and declines any named barrier rather than
+// picking an arbitrary member and calling it the drain.
+async function waitAtDarwinCensusTestBarrier(activeMappedCommand = null) {
   const barrier = process.env.AGENT_QUALITY_GATE_TEST_DRAIN_REFRESH_BARRIER;
   if (!barrier) return;
   if (
@@ -704,14 +725,14 @@ async function waitAtDarwinCensusTestBarrier() {
   ) {
     fail("Darwin census test barrier is unsafe");
   }
-  // A fixture that names the mapped command it means to meet cannot mean this
-  // seam. It arms inside a cohort settlement, which drains several commands at
-  // once, so no single name describes it — the same reason the shell teardown
-  // clears the active name before a cohort drain. Consuming a named barrier
-  // here would steal a rendezvous this seam can never honour and leave the
-  // fixture waiting at one that already happened, which is the race the name
-  // exists to close. An unnamed barrier still arms on the first drain.
-  if (namedDrainRefreshBarrier(barrier)) return;
+  // Which drain this is. The shell barrier never runs for a Darwin lineage
+  // contract — `drain_condemned_run_commands` returns at the lineage arm before
+  // reaching it — so this seam is the only consumer on that path and has to do
+  // the selection itself. An unnamed barrier arms on the first drain, as
+  // before. A named one arms only on its own command, and never on a cohort,
+  // which has no single name to be.
+  const expected = readDrainRefreshBarrierCommand(barrier);
+  if (expected !== null && expected !== activeMappedCommand) return;
   try {
     writeFileSync(`${barrier}.used`, "", { flag: "wx", mode: 0o600 });
   } catch (error) {
@@ -1004,6 +1025,9 @@ export async function settleDarwinLineageCohort({
   scratchDirectory,
   timeoutSeconds,
   retainState = false,
+  // Only a single-state settlement can name the command it is draining. A
+  // real cohort leaves this null, so a named test barrier declines it.
+  activeMappedCommand = null,
 }) {
   if (typeof retainState !== "boolean") {
     fail("Darwin lineage retain-state value must be boolean");
@@ -1267,7 +1291,9 @@ export async function settleDarwinLineageCohort({
 
     // Test-only crash seam. Every cohort state's classified tombstones are
     // durable before any exact identity receives a signal.
-    await waitAtDarwinCensusTestBarrier();
+    await waitAtDarwinCensusTestBarrier(
+      descriptors.length === 1 ? activeMappedCommand : null,
+    );
 
     const signalNow = Date.now();
     const successfulSignals = new Map();
@@ -1360,12 +1386,14 @@ export async function settleDarwinLineage({
   scratchDirectory,
   timeoutSeconds,
   retainState = false,
+  activeMappedCommand = null,
 }) {
   const result = await settleDarwinLineageCohort({
     statePaths: [statePath],
     scratchDirectory,
     timeoutSeconds,
     retainState,
+    activeMappedCommand,
   });
   return {
     active: result.active,
@@ -1590,11 +1618,16 @@ async function main() {
       parentPid: required(options, "--parent-pid"),
     });
   } else if (command === "settle") {
+    // Optional, and an empty value is no name: a drain can run outside any
+    // mapped command. Passed as an argument rather than an environment
+    // variable so the mapped-child environment policy stays untouched.
+    const active = options.get("--active-mapped-command");
     result = await settleDarwinLineage({
       statePath,
       scratchDirectory,
       timeoutSeconds: required(options, "--timeout-seconds"),
       retainState: parseRetainState(required(options, "--retain-state")),
+      activeMappedCommand: active ? active : null,
     });
   } else if (command === "discard-settled") {
     result = discardSettledDarwinLineage({ statePath });

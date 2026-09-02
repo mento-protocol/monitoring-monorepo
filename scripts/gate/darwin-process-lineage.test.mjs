@@ -3754,52 +3754,136 @@ test(
   },
 );
 
-// The census barrier arms inside a cohort settlement, which drains several
-// mapped commands at once. A fixture that named the one command it means to
-// meet cannot mean this seam, so consuming its barrier here would steal a
-// rendezvous the seam can never honour — the wrong-drain race the name exists
-// to close. Selection is plain file inspection, so it is verifiable here even
-// though the census around it is Darwin only.
-test("the Darwin census barrier declines a named drain refresh barrier", async () => {
+// The census barrier is the ONLY drain refresh barrier consumer on a Darwin
+// lineage contract: `drain_condemned_run_commands` returns at its lineage arm
+// before reaching the shell barrier. So it has to do the selection itself — a
+// named fixture that this seam declines gets no rendezvous at all and waits out
+// the gate's budget. Selection is plain file inspection, so it is verifiable
+// here even though the census around it is Darwin only.
+test("the Darwin census barrier arms only on the drain a fixture named", async () => {
   const { waitAtDarwinCensusTestBarrier } = darwinLineageCensusBarrierForTest;
   const directory = mkdtempSync(join(tmpdir(), "darwin-census-barrier-"));
   const previousNodeEnv = process.env.NODE_ENV;
   const previousBarrier =
     process.env.AGENT_QUALITY_GATE_TEST_DRAIN_REFRESH_BARRIER;
   process.env.NODE_ENV = "test";
+  const named = "pnpm agent:prewarm:test";
+  const cases = [
+    // Opting out of naming is unchanged: the seam arms on the first drain.
+    { name: "unnamed", active: named, arms: true },
+    // The drain the fixture asked for.
+    { name: "match", command: named, active: named, arms: true },
+    // An earlier drain passes straight through. This is the case the race lost.
+    {
+      name: "other",
+      command: named,
+      active: "./tools/trunk check --ci x",
+      arms: false,
+    },
+    // A cohort settles several commands at once and passes no name, so it can
+    // never be the drain a fixture meant.
+    { name: "cohort", command: named, active: null, arms: false },
+    // A name written without a trailing newline still names that command.
+    {
+      name: "unterminated",
+      command: named,
+      active: named,
+      arms: true,
+      raw: named,
+    },
+  ];
   try {
-    const armed = [];
-    for (const name of ["absent", "named", "dangling", "directory"]) {
-      const barrier = join(directory, name);
-      // Pre-created so the arming case returns on its first poll rather than
+    const observed = [];
+    for (const item of cases) {
+      const barrier = join(directory, item.name);
+      // Pre-created so an arming case returns on its first poll rather than
       // spending the seam's twenty-second budget.
       writeFileSync(`${barrier}.release`, "");
-      if (name === "named") {
-        writeFileSync(`${barrier}.command`, "pnpm agent:prewarm:test\n");
-      } else if (name === "dangling") {
-        symlinkSync(`${barrier}.command.absent`, `${barrier}.command`);
-      } else if (name === "directory") {
-        mkdirSync(`${barrier}.command.dir`);
-        symlinkSync(`${barrier}.command.dir`, `${barrier}.command`);
+      if (item.raw !== undefined) {
+        writeFileSync(`${barrier}.command`, item.raw);
+      } else if (item.command !== undefined) {
+        writeFileSync(`${barrier}.command`, `${item.command}\n`);
       }
       process.env.AGENT_QUALITY_GATE_TEST_DRAIN_REFRESH_BARRIER = barrier;
-      await waitAtDarwinCensusTestBarrier();
-      armed.push([
-        name,
+      await waitAtDarwinCensusTestBarrier(item.active);
+      observed.push([
+        item.name,
         existsSync(`${barrier}.used`),
         existsSync(`${barrier}.ready`),
       ]);
     }
-    assert.deepEqual(armed, [
-      // Opting out of naming is unchanged: the seam still arms on the first
-      // drain that reaches it.
-      ["absent", true, true],
-      ["named", false, false],
-      // A name that resolves nowhere is still a name that was asked for.
-      // `existsSync` follows the link and would read this as unnamed.
-      ["dangling", false, false],
-      ["directory", false, false],
-    ]);
+    assert.deepEqual(
+      observed,
+      cases.map(({ name, arms }) => [name, arms, arms]),
+    );
+  } finally {
+    if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previousNodeEnv;
+    if (previousBarrier === undefined) {
+      delete process.env.AGENT_QUALITY_GATE_TEST_DRAIN_REFRESH_BARRIER;
+    } else {
+      process.env.AGENT_QUALITY_GATE_TEST_DRAIN_REFRESH_BARRIER =
+        previousBarrier;
+    }
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+// A name that was asked for and cannot be resolved must fail the drain closed.
+// Falling back to arming everywhere is the wrong-drain race itself, reached
+// through the mechanism added to close it.
+test("the Darwin census barrier fails closed on an unresolvable name", async () => {
+  const { waitAtDarwinCensusTestBarrier } = darwinLineageCensusBarrierForTest;
+  const directory = mkdtempSync(join(tmpdir(), "darwin-census-barrier-bad-"));
+  const previousNodeEnv = process.env.NODE_ENV;
+  const previousBarrier =
+    process.env.AGENT_QUALITY_GATE_TEST_DRAIN_REFRESH_BARRIER;
+  process.env.NODE_ENV = "test";
+  try {
+    for (const broken of ["empty", "dangling", "directory", "unreadable"]) {
+      const barrier = join(directory, broken);
+      writeFileSync(`${barrier}.release`, "");
+      if (broken === "empty") {
+        writeFileSync(`${barrier}.command`, "\n");
+      } else if (broken === "dangling") {
+        symlinkSync(`${barrier}.command.absent`, `${barrier}.command`);
+      } else if (broken === "directory") {
+        mkdirSync(`${barrier}.command.dir`);
+        symlinkSync(`${barrier}.command.dir`, `${barrier}.command`);
+      } else {
+        writeFileSync(`${barrier}.command`, "pnpm agent:prewarm:test\n");
+        chmodSync(`${barrier}.command`, 0o000);
+        if (
+          (() => {
+            try {
+              readFileSync(`${barrier}.command`);
+              return true;
+            } catch {
+              return false;
+            }
+          })()
+        ) {
+          // Running as a user whose reads bypass the permission bits, so the
+          // case cannot be posed. Skipping silently would look like coverage.
+          console.log(
+            "note: skipping unreadable Darwin barrier name case (reads bypass mode 000)",
+          );
+          chmodSync(`${barrier}.command`, 0o600);
+          continue;
+        }
+      }
+      process.env.AGENT_QUALITY_GATE_TEST_DRAIN_REFRESH_BARRIER = barrier;
+      await assert.rejects(
+        () => waitAtDarwinCensusTestBarrier("pnpm agent:prewarm:test"),
+        /drain refresh barrier name/,
+        `a ${broken} Darwin barrier name did not fail closed`,
+      );
+      assert.equal(
+        existsSync(`${barrier}.used`) || existsSync(`${barrier}.ready`),
+        false,
+        `a ${broken} Darwin barrier name armed anyway`,
+      );
+    }
   } finally {
     if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
     else process.env.NODE_ENV = previousNodeEnv;

@@ -676,9 +676,15 @@ gate_darwin_lineage_settle() {
     echo "error: Darwin process-lineage helper is unavailable: ${module}" >&2
     return 2
   fi
+  # Which mapped command this drain belongs to, for the test-only refresh
+  # barrier's `.command` rendezvous. The shell barrier never runs on this path
+  # — drain_condemned_run_commands returns at the Darwin lineage arm before
+  # reaching it — so the name has to travel to the helper that does. Empty
+  # outside a mapped command, which the helper reads as no name.
   if ! "$gate_darwin_node_bin" "$module" settle \
     --state "$state" --scratch "$scratch_dir" \
     --timeout-seconds "$gate_lock_orphan_drain_bound_seconds" \
+    --active-mapped-command "${gate_drain_active_mapped_command:-}" \
     --retain-state "$retain_state" >/dev/null; then
     echo "error: Darwin process-lineage recovery did not reach an empty exact identity set." >&2
     return 2

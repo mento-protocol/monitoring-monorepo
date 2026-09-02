@@ -2347,22 +2347,30 @@ active control.
   first drain — but a name that was asked for and cannot be resolved fails the
   drain closed rather than arming everywhere: present but unreadable, empty, or
   unreadable by any other cause. A name needs no trailing newline. The command
-  is named for the barrier in three places, because a parallel command's
+  is named for the barrier at three sites in the shell, because a parallel
+  command's
   `run_with_timeout` runs inside the worker subshell while the parent reaps that
   worker and runs the drain; naming it only in the child would make a parallel
   rendezvous impossible and let a stale sequential name match a drain no fixture
   asked for. The third is `teardown_active_timeouts`, which drains registered
   workers on EXIT/INT/TERM after the reaping loop is gone, so it takes each name
   from the `active_worker_mapped_commands` registry that aligns with the worker
-  identities. A Darwin cohort drain settles several commands at once and clears
-  the name instead: no single name describes it, and a named barrier must not
-  meet a drain it cannot identify. The Darwin census seam
-  (`waitAtDarwinCensusTestBarrier`) arms inside that same cohort settlement and
-  applies the rule the other way round, since it has no name to compare: it
-  declines a named barrier outright rather than consuming a rendezvous it can
-  never honour. Mere presence of `.command` decides there, so an unresolvable
-  name does not read as unnamed. Naming a rendezvous on the Darwin census path
-  is therefore refused rather than served — see #2227.
+  identities. A cohort drain settles several commands at once and clears the
+  name instead: no single name describes it, and a named barrier must not meet a
+  drain it cannot identify.
+
+  A fourth site is the Darwin census seam, `waitAtDarwinCensusTestBarrier` in
+  `scripts/gate/darwin-process-lineage.mjs`. It is not a redundant consumer: on
+  a Darwin lineage contract `drain_condemned_run_commands` returns at its
+  lineage arm before reaching the shell barrier, so the seam is the *only*
+  consumer on that path and does its own selection. The name reaches it as the
+  `settle` helper's `--active-mapped-command` argument — an argument rather than
+  an environment variable, so the mapped-child environment policy stays
+  untouched — and it applies the same rules: unnamed arms on the first drain, a
+  name arms only on its own command, and an unresolvable name fails the drain
+  closed. `settle-cohort` passes no name and so declines any named barrier, the
+  same cohort rule as the shell side.
+
   A fixture must also write `.release` on every terminal path, including its
   cleanup trap: a barrier left unreleased parks the gate for the full 20-second
   budget and then reports the barrier as the failure, burying the assertion that
