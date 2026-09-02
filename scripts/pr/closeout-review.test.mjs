@@ -257,6 +257,46 @@ test("codex receives the pinned argv and an allowlisted environment", (t) => {
   assert.equal(env.get("GIT_TERMINAL_PROMPT"), "0");
 });
 
+test("every frozen finder report shape is read as findings", (t) => {
+  // Three of the six use the singular `Review comment:` heading. A detector
+  // that only knows `Full review comments:` reports those as clean.
+  const dir = fileURLToPath(
+    new URL("../../docs/evals/review-skill-finder-reports/", import.meta.url),
+  );
+  const reports = fs.readdirSync(dir).filter((name) => name.endsWith(".md"));
+  assert.equal(reports.length, 6);
+
+  for (const name of reports) {
+    const repo = makeRepo(t);
+    fakeCodex(repo.bin, `cat ${JSON.stringify(path.join(dir, name))}`);
+    const run = runScript(repo, ["--base", "base", "--no-fetch"]);
+    assert.equal(run.status, 1, `${name} was not read as findings`);
+  }
+});
+
+test("the printed diff size counts uncommitted work, as codex does", (t) => {
+  const repo = makeRepo(t);
+  fakeCodex(repo.bin, 'echo "clean"');
+  // Tracked and modified but not committed: `base...HEAD` would miss it.
+  fs.appendFileSync(path.join(repo.repo, ".gitignore"), "extra/\n");
+
+  const run = runScript(repo, ["--base", "base", "--no-fetch"]);
+
+  assert.match(run.stdout, /^diff: 2 files changed/m);
+});
+
+test("a failed base fetch is fatal rather than silently stale", (t) => {
+  const repo = makeRepo(t);
+  fakeCodex(repo.bin, 'echo "clean"');
+  git(repo.repo, "remote", "add", "gone", path.join(repo.root, "missing.git"));
+
+  const run = runScript(repo, ["--base", "gone/main"]);
+
+  assert.equal(run.status, 2);
+  assert.match(run.stderr, /cannot fetch gone\/main/);
+  assert.equal(run.reportPath, null);
+});
+
 test("an empty report exits 2", (t) => {
   const repo = makeRepo(t);
   fakeCodex(repo.bin, "exit 0");

@@ -159,6 +159,11 @@ even when you never open an authority.
    `AGENTS.md`, `CLAUDE.md`, `.codex`, or `.agents` needs a human read before
    its report is trusted: `codex` reads reviewer instructions from the
    checkout under review, so the branch can rewrite the policy reviewing it.
+   A diff that changes `scripts/pr/closeout-review.mjs` or its aliases runs
+   the candidate's own review tool, so review those changes from a trusted
+   checkout at the base instead. The reviewer runs under the operator's own
+   `codex` configuration and can read the operator's `HOME`: it is not an
+   isolated runtime.
 
    Then invoke the `review` skill on the same diff and pass it four
    instructions: the second-model pass already ran, so do not run the skill's

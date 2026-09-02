@@ -28,7 +28,12 @@ import path from "node:path";
 const MODEL = "gpt-5.6-sol";
 const EFFORT = "high";
 const SANDBOX = "read-only";
-const FINDINGS_MARKER = /^Full review comments:\s*$/m;
+// `codex exec review` heads its findings with either spelling, and every
+// finding is a `- [P<n>] <title> — <path>:<start>-<end>` bullet. Match both, so
+// a single-finding report cannot read as clean. The six frozen finder reports
+// in docs/evals/review-skill-finder-reports/ are the shapes under test.
+const FINDINGS_HEADING = /^(?:Full review comments|Review comments?):\s*$/m;
+const FINDING_BULLET = /^- \[P\d+\] /m;
 const DEFAULT_TIMEOUT_SECONDS = 3600;
 
 /**
@@ -225,13 +230,24 @@ function resolveBase(repoRoot) {
   return `${baseRemote}/${baseRef}`;
 }
 
-/** Fetch the base when it is a remote-tracking ref, then verify it resolves. */
+/**
+ * Fetch the base when it is a remote-tracking ref, then verify it resolves. A
+ * failed fetch is fatal: a stale tracking ref still resolves, so continuing
+ * would review the wrong base without saying so.
+ */
 function verifyBase(repoRoot, base, shouldFetch) {
   const parts = base.match(/^([^/]+)\/(.+)$/);
   if (shouldFetch && parts) {
     const remotes = run("git", ["remote"], repoRoot);
     if (remotes.ok && remotes.stdout.split("\n").includes(parts[1])) {
-      run("git", ["fetch", "--quiet", parts[1], parts[2]], repoRoot);
+      const fetched = run(
+        "git",
+        ["fetch", "--quiet", parts[1], parts[2]],
+        repoRoot,
+      );
+      if (!fetched.ok) {
+        fail(`cannot fetch ${base}: ${fetched.stderr || "git fetch failed"}`);
+      }
     }
   }
   const sha = run(
@@ -262,10 +278,15 @@ function utcStamp(date) {
   return date.toISOString().replace(/[-:]/g, "").replace(/\..*/, "");
 }
 
+/**
+ * The size codex will see. It diffs the working tree against the base, not
+ * `base...HEAD`, so this uses the same two-dot form. Untracked files appear in
+ * neither; the `dirty` header field is the flag for uncommitted work.
+ */
 function shortstat(repoRoot, base) {
   const stat = run(
     "git",
-    ["diff", "--no-ext-diff", "--shortstat", `${base}...HEAD`],
+    ["diff", "--no-ext-diff", "--shortstat", base],
     repoRoot,
   );
   return stat.ok && stat.stdout ? stat.stdout : "0 files changed";
@@ -319,6 +340,9 @@ function runCodex(repoRoot, base, reportPath, timeoutSeconds) {
       if (settled) return;
       settled = true;
       clearTimeout(deadline);
+      // codex can exit on SIGTERM while a descendant ignores it, so sweep the
+      // group again rather than trusting an unreferenced escalation timer.
+      if (outcome.timedOut) kill("SIGKILL");
       fs.closeSync(bodyFd);
       fs.closeSync(stderrFd);
       resolve(outcome);
@@ -400,7 +424,7 @@ async function main() {
     reason = `codex exited ${result.code}\n${stderrTail}`;
   } else if (body.trim() === "") {
     reason = "codex produced an empty report";
-  } else if (FINDINGS_MARKER.test(body)) {
+  } else if (FINDINGS_HEADING.test(body) || FINDING_BULLET.test(body)) {
     verdict = "findings";
     exitCode = 1;
   } else {
