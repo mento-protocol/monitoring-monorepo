@@ -4410,6 +4410,170 @@ test("attributes only canonical Claude GitHub Actions reviews", () => {
   );
   assert.equal(summary.botReviewSignals.claudeSummaryComments, 1);
   assert.equal(summary.botReviewSignals.topLevelReviewBotComments, 1);
+  assert.equal(summary.evidence.unknownAttribution.count, 0);
+  assert.deepEqual(summary.evidence.unknownAttribution.evidence, []);
+});
+
+test("records canonical manual Claude workflow events as unknown", () => {
+  const head = "a".repeat(40);
+  const workflowHead = "b".repeat(40);
+  const checkedAt = "2026-09-01T00:01:01Z";
+  const cases = [
+    {
+      collection: "issueComments",
+      event: "issue_comment",
+      headBranch: "main",
+      headSha: workflowHead,
+      id: 601,
+      runId: "301",
+      surface: "issue_comments",
+      timestamp: {
+        created_at: "2026-09-01T00:00:30Z",
+        updated_at: "2026-09-01T00:00:30Z",
+      },
+    },
+    {
+      collection: "reviews",
+      event: "pull_request_review",
+      headBranch: "feature",
+      headSha: workflowHead,
+      id: 602,
+      runId: "302",
+      surface: "review_submissions",
+      timestamp: { submitted_at: "2026-09-01T00:00:30Z" },
+    },
+    {
+      collection: "reviewComments",
+      event: "pull_request_review_comment",
+      headBranch: "feature",
+      headSha: workflowHead,
+      id: 603,
+      runId: "303",
+      surface: "review_comments",
+      timestamp: {
+        created_at: "2026-09-01T00:00:30Z",
+        updated_at: "2026-09-01T00:00:30Z",
+      },
+    },
+  ];
+  const value = structuredClone(fixture);
+  value.issueComments = [];
+  value.reviews = [];
+  value.reviewComments = [];
+
+  for (const entry of cases) {
+    value[entry.collection].push({
+      id: entry.id,
+      html_url: `https://github.com/example/repo/pull/42#manual-${entry.id}`,
+      user: { login: "github-actions[bot]", type: "Bot" },
+      body: [
+        `**Claude finished @maintainer's task in 1m 0s** —— [View job](https://github.com/example/repo/actions/runs/${entry.runId})`,
+        "### Claude finished the review",
+        "[P2] This finding has no proven pull request head binding.",
+      ].join("\n\n"),
+      ...(entry.collection === "reviews" ? { state: "COMMENTED" } : {}),
+      ...entry.timestamp,
+    });
+  }
+
+  const runs = new Map(
+    cases.map(({ event, headBranch, headSha, runId }) => [
+      runId,
+      {
+        id: Number(runId),
+        workflow_id: 77,
+        run_attempt: 1,
+        repository: { full_name: "example/repo" },
+        head_repository: { full_name: "example/repo" },
+        head_branch: headBranch,
+        path: ".github/workflows/claude.yml@main",
+        event,
+        actor: { login: "maintainer" },
+        status: "completed",
+        conclusion: "success",
+        pull_requests: [],
+        head_sha: headSha,
+        created_at: "2026-09-01T00:00:00Z",
+        run_started_at: "2026-09-01T00:00:00Z",
+        updated_at: "2026-09-01T00:01:00Z",
+      },
+    ]),
+  );
+  verifyClaudeActionsEvidence(
+    [value.issueComments, value.reviews, value.reviewComments],
+    {
+      repo: "example/repo",
+      prNumber: 42,
+      prUrl: "https://github.com/example/repo/pull/42",
+      headRepository: "example/repo",
+      headRef: "feature",
+      headShas: [head],
+      verifiedAt: checkedAt,
+      fetchRun: (runId) => structuredClone(runs.get(runId)),
+    },
+  );
+
+  const summary = summarizeFixture(value);
+  for (const { surface } of cases) {
+    assert.equal(summary.evidence.byBot.claude.surfaces[surface].records, 0);
+    assert.equal(summary.evidence.byBot.claude.surfaces[surface].findings, 0);
+  }
+  assert.deepEqual(
+    {
+      botReviewSubmissions: summary.reviews.byBots,
+      claudeSummaryComments: summary.botReviewSignals.claudeSummaryComments,
+      inlineReviewBotRoots: summary.botReviewSignals.inlineReviewBotRoots,
+      topLevelReviewBotComments:
+        summary.botReviewSignals.topLevelReviewBotComments,
+    },
+    {
+      botReviewSubmissions: 0,
+      claudeSummaryComments: 0,
+      inlineReviewBotRoots: 0,
+      topLevelReviewBotComments: 0,
+    },
+  );
+  assert.equal(summary.evidence.unknownAttribution.count, 3);
+  assert.equal(summary.evidence.unknownAttribution.evidence.length, 3);
+  assert.deepEqual(
+    summary.evidence.unknownAttribution.evidence
+      .map(
+        ({
+          id,
+          surface,
+          status,
+          reason,
+          runId,
+          runUrl,
+          event,
+          checkedAt: evidenceCheckedAt,
+        }) => ({
+          id,
+          surface,
+          status,
+          reason,
+          runId,
+          runUrl,
+          event,
+          checkedAt: evidenceCheckedAt,
+        }),
+      )
+      .sort((left, right) => left.runId.localeCompare(right.runId)),
+    cases.map(({ event, id, runId, surface }) => ({
+      id: String(id),
+      surface,
+      status: "unknown",
+      reason: "manual_workflow_event_has_no_proven_pr_head_binding",
+      runId,
+      runUrl: `https://github.com/example/repo/actions/runs/${runId}`,
+      event,
+      checkedAt,
+    })),
+  );
+  assert.equal(
+    aggregateMetricsV2([summary, summary]).evidence.unknownAttribution.count,
+    6,
+  );
 });
 
 test("binds shared GitHub Actions evidence to the Claude workflow run", () => {

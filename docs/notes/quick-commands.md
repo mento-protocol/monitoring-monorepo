@@ -90,6 +90,7 @@ pnpm --silent pr:feedback-state --pr 123 --json  # Normalize unresolved/reply-re
 pnpm pr:ready-state --pr 123 --json              # Final current-head required-readiness probe
 # Collect a manual monthly review cohort. The UTC interval is half-open: [since, until).
 # Write live reports to a new path outside the repo. Do not commit them.
+# Manual Claude Action events without a proven PR source head stay in evidence.unknownAttribution and do not enter verified Claude totals.
 node scripts/pr/review-process-metrics.mjs --since <YYYY-MM-01T00:00:00Z> --until <next-YYYY-MM-01T00:00:00Z> --output "${TMPDIR:-/tmp}/review-process-metrics-<YYYY-MM>.json"
 pnpm lockfile:lint                 # Fail-closed integrity/registry/override-floor check; no install
 pnpm skew:check                    # Fail on dependency skew vs pnpm catalog; no install

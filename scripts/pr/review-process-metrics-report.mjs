@@ -2,6 +2,7 @@ import {
   buildPerBotEvidence,
   REVIEW_BOT_KEYS,
 } from "./review-process-metrics-core.mjs";
+import { buildUnknownAttributionEvidence } from "./review-process-metrics-actions.mjs";
 import {
   aggregateMetrics,
   summarizePullRequestMetrics,
@@ -77,6 +78,12 @@ export function summarizePullRequestMetricsV2({
       byBot: buildPerBotEvidence({
         prUrl,
         prAuthorLogin,
+        issueComments,
+        reviews,
+        reviewComments,
+      }),
+      unknownAttribution: buildUnknownAttributionEvidence({
+        prUrl,
         issueComments,
         reviews,
         reviewComments,
@@ -191,6 +198,9 @@ export function aggregateMetricsV2(prs) {
     ...aggregateMetrics(prs),
     evidence: {
       byBot: aggregateBotEvidence(prs),
+      unknownAttribution: {
+        count: sum(prs, (pr) => pr.evidence.unknownAttribution.count),
+      },
       signals: aggregateSignals(prs),
     },
   };
