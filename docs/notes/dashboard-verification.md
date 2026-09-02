@@ -294,14 +294,34 @@ the final local `HEAD` OID first.
 
 Store review images outside the repository; never add them to the product
 commit unless the repository already owns screenshot fixtures for that purpose.
-Upload through the authenticated GitHub web description editor (`gh` and the
-public Issues API cannot attach local images), then reopen the description and
-verify both attachment URLs render and the labels map to the correct revisions.
-A local path, broken Markdown, or an unverified upload is not visual evidence.
+Upload with `gh` v2.99.0 or later. In the body file, reference each image by
+a relative path and put the full label in the Markdown alt text, for example
+`![Before, <route>, base <OID>, <viewport>](./before.png)`. Then pass every
+file with the repeatable `--attach` flag, using the same relative path. `gh`
+resolves the `--attach` paths from its working directory, so run it from the
+directory that holds the images and the body file. Outside the repository
+`gh` cannot infer the target from a bare PR number, so name the PR by its
+URL:
 
-If either revision cannot be rendered, or the authenticated attachment surface
-is unavailable, stop before publication and report the blocker; do not call the
-UI PR shipped or ready. The user may waive visual evidence for a specific PR.
+```bash
+cd "$EVIDENCE_DIR" # outside the repository; holds body.md, before.png, after.png
+gh pr edit "$PR_URL" --body-file body.md --attach ./before.png --attach ./after.png
+```
+
+`gh` uploads each file and rewrites the body reference in place to the
+uploaded asset URL, keeping the alt text written in the body. A file attached
+but never referenced in the body is appended at the end; only for such a file
+does `#text` after the path (`--attach './after.png#After, …'`) set the alt
+text. Images are capped at 10 MB, and the upload needs write access to the
+repository. When one upload fails, `gh` still writes the body with the files
+that succeeded and exits non-zero; treat that exit as failed evidence. Then
+reopen the description and verify every attachment URL renders and each label
+maps to its recorded revision. A local path, broken Markdown, or an unverified
+upload is not visual evidence.
+
+If any revision cannot be rendered, or any uploaded image does not render,
+stop before publication and report the blocker; do not call the UI PR shipped
+or ready. The user may waive visual evidence for a specific PR.
 
 ## Dynamic social-preview verification
 
