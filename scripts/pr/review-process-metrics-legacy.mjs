@@ -118,6 +118,15 @@ export function selectMergedInUtcWindow(prs, since, until) {
     .sort((a, b) => timestamp(a.mergedAt) - timestamp(b.mergedAt));
 }
 
+export function assertMergedPrCohortStable(initial, final) {
+  const snapshot = (pullRequests) =>
+    pullRequests.map(({ number, mergedAt }) => ({ number, mergedAt }));
+  if (JSON.stringify(snapshot(initial)) !== JSON.stringify(snapshot(final))) {
+    throw new Error("merged pull request cohort changed during collection");
+  }
+  return final;
+}
+
 export function assertCompleteCohort(cohort, { direction, limit, boundary }) {
   if (cohort.length >= limit) return cohort;
   throw new Error(

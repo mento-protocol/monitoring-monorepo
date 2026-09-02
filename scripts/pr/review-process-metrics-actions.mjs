@@ -185,14 +185,20 @@ export function verifyClaudeActionsEvidence(
     headRepository,
     headRef,
     headShas = [],
-    verifiedAt,
+    verifiedAt = null,
+    now = () => new Date().toISOString(),
     fetchRun,
     fetchPullRequestsByHead,
     beforeFinalize = () => {},
   },
 ) {
-  if (runTimestamp(verifiedAt) === null) {
-    throw new Error("Claude Actions verification requires verifiedAt");
+  if (
+    (verifiedAt !== null && runTimestamp(verifiedAt) === null) ||
+    typeof now !== "function"
+  ) {
+    throw new Error(
+      "Claude Actions verification requires a valid clock or timestamp",
+    );
   }
   const heads = new Set(
     headShas
@@ -242,10 +248,7 @@ export function verifyClaudeActionsEvidence(
       },
     );
     if (association !== null) {
-      matchedRecords.set(
-        record,
-        attributionProof(reference, run, association, verifiedAt),
-      );
+      matchedRecords.set(record, { reference, run, association });
     }
   }
 
@@ -268,9 +271,19 @@ export function verifyClaudeActionsEvidence(
       );
     }
   }
-  for (const [record, proof] of matchedRecords) {
+  const finalizedAt = verifiedAt ?? now();
+  const finalizedTime = runTimestamp(finalizedAt);
+  if (
+    finalizedTime === null ||
+    [...matchedRecords.values()].some(
+      ({ run }) => finalizedTime < runTimestamp(run.updatedAt),
+    )
+  ) {
+    throw new Error("Claude Actions verification time precedes its evidence");
+  }
+  for (const [record, { reference, run, association }] of matchedRecords) {
     Object.defineProperty(record, VERIFIED_CLAUDE_ACTIONS_EVIDENCE, {
-      value: proof,
+      value: attributionProof(reference, run, association, finalizedAt),
     });
   }
   return collections;

@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { verifyClaudeActionsEvidence } from "./review-process-metrics-actions.mjs";
 import {
   assertCompleteCohort,
+  assertMergedPrCohortStable,
   selectMergedAfter,
   selectMergedBefore,
   selectMergedInUtcWindow,
@@ -371,7 +372,7 @@ function fetchEvidenceSurfaces(repo, number, pr) {
   return { issueComments, reviews, reviewComments, timeline, commits };
 }
 
-function fetchPrEvidence(repo, number, collectedAt, options) {
+function fetchPrEvidence(repo, number, options) {
   const pr = fetchPrMetadata(repo, number, options);
   const surfaces = fetchEvidenceSurfaces(repo, number, pr);
   const { issueComments, reviews, reviewComments, timeline, commits } =
@@ -402,6 +403,7 @@ function fetchPrEvidence(repo, number, collectedAt, options) {
       `PR #${number} force-push proof conflicts with the REST timeline: ${JSON.stringify(enrichedTimeline.conflicts)}`,
     );
   }
+  let collectedAt = null;
   verifyClaudeActionsEvidence(
     [issueComments.items, reviews.items, reviewComments.items],
     {
@@ -415,7 +417,10 @@ function fetchPrEvidence(repo, number, collectedAt, options) {
         commits.items,
         enrichedTimeline.items,
       ),
-      verifiedAt: collectedAt,
+      now: () => {
+        collectedAt = new Date().toISOString();
+        return collectedAt;
+      },
       fetchRun: (runId) =>
         ghJson(["api", `repos/${repo}/actions/runs/${runId}`]),
       fetchPullRequestsByHead: (owner, headRef) =>
@@ -441,6 +446,9 @@ function fetchPrEvidence(repo, number, collectedAt, options) {
       },
     },
   );
+  if (collectedAt === null) {
+    throw new Error(`PR #${number} verification did not produce a timestamp`);
+  }
   return summarizePullRequestMetricsV2({
     pr,
     issueComments: issueComments.items,
@@ -474,14 +482,14 @@ function fetchBoundary(repo, number) {
   );
 }
 
-function resolveCohort(args) {
+function resolveCohort(args, mergedPrList) {
   if (args.prs.length > 0) {
     return {
       mode: "explicit",
       pullRequests: args.prs.map((number) => ({ number })),
     };
   }
-  const list = fetchMergedPrList(args.repo);
+  const list = mergedPrList;
   if (args.since !== null) {
     return {
       mode: "utc-window",
@@ -516,7 +524,7 @@ export function buildReport({ args, cohort, pullRequests, collectedAt }) {
     collection: {
       complete: pullRequests.every((pr) => pr.collection.complete),
       paginationPolicy:
-        "Every REST list follows all next links. Available GitHub counts must match exactly.",
+        "Every REST list follows all next links. Available GitHub counts must match exactly. Non-explicit cohorts require identical ordered PR and mergedAt snapshots before and after evidence collection.",
     },
     cohort: {
       mode: cohort.mode,
@@ -553,15 +561,23 @@ async function main() {
     process.stdout.write(usage());
     return;
   }
-  const collectedAt = new Date().toISOString();
-  const cohort = resolveCohort(args);
+  const initialMergedPrList =
+    args.prs.length === 0 ? fetchMergedPrList(args.repo) : null;
+  const cohort = resolveCohort(args, initialMergedPrList);
   const requireMerged = cohort.mode !== "explicit";
   const pullRequests = cohort.pullRequests.map(({ number }, index) => {
     process.stderr.write(
       `Collecting PR #${number} (${index + 1}/${cohort.pullRequests.length})\n`,
     );
-    return fetchPrEvidence(args.repo, number, collectedAt, { requireMerged });
+    return fetchPrEvidence(args.repo, number, { requireMerged });
   });
+  if (initialMergedPrList !== null) {
+    assertMergedPrCohortStable(
+      initialMergedPrList,
+      fetchMergedPrList(args.repo),
+    );
+  }
+  const collectedAt = new Date().toISOString();
   const output = `${JSON.stringify(
     buildReport({ args, cohort, pullRequests, collectedAt }),
     null,

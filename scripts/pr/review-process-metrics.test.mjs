@@ -18,6 +18,7 @@ import {
   aggregateMetrics,
   aggregateMetricsV2,
   assertEvidenceSnapshotStable,
+  assertMergedPrCohortStable,
   assertPullRequestSnapshotStable,
   assertPullRequestMetadata,
   assertCompleteCohort,
@@ -878,6 +879,33 @@ test("rejects incomplete boundary cohorts instead of reporting partial data", ()
         boundary: { number: 1 },
       }),
     /only found 1 merged PR\(s\) after PR #1; requested 2/,
+  );
+});
+
+test("rejects a merged PR cohort that changes during collection", () => {
+  const merged = (pages) =>
+    assertCompletePaginatedSurface(pages, {
+      surface: "merged pull request list",
+      id: (pullRequest) => pullRequest.number,
+    })
+      .items.filter((pullRequest) => pullRequest.merged_at !== null)
+      .map((pullRequest) => ({
+        number: pullRequest.number,
+        mergedAt: pullRequest.merged_at,
+      }));
+  const a = { number: 3, merged_at: "2026-07-03T15:00:00Z" };
+  const reopened = { number: 2, merged_at: null };
+  const b = { number: 1, merged_at: "2026-07-03T12:00:00Z" };
+  const c = { number: 0, merged_at: "2026-07-03T10:00:00Z" };
+  const initial = merged([[a, reopened], [c]]);
+  const stable = merged([[a, b], [c]]);
+  assert.deepEqual(
+    assertMergedPrCohortStable(initial, structuredClone(initial)),
+    initial,
+  );
+  assert.throws(
+    () => assertMergedPrCohortStable(initial, stable),
+    /merged pull request cohort changed during collection/,
   );
 });
 
@@ -4491,15 +4519,28 @@ test("binds shared GitHub Actions evidence to the Claude workflow run", () => {
 
   const verified = structuredClone(value);
   let fetches = 0;
+  let verifiedOuterSnapshotChecked = false;
+  let timestampedAfterFinalChecks = false;
+  let verifiedAt = null;
   verifyClaudeActionsEvidence(
     [verified.issueComments, verified.reviews, verified.reviewComments],
     {
       ...options,
+      verifiedAt: null,
+      now: () => {
+        assert.equal(fetches, 2);
+        assert.equal(headLookups, 2);
+        assert.equal(verifiedOuterSnapshotChecked, true);
+        timestampedAfterFinalChecks = true;
+        verifiedAt = "2026-09-01T00:01:01Z";
+        return verifiedAt;
+      },
       fetchRun: () => {
         fetches += 1;
         return structuredClone(canonicalRun);
       },
       beforeFinalize: () => {
+        verifiedOuterSnapshotChecked = true;
         assert.equal(
           summarizeFixture(verified).evidence.byBot.claude.surfaces
             .issue_comments.records,
@@ -4508,6 +4549,8 @@ test("binds shared GitHub Actions evidence to the Claude workflow run", () => {
       },
     },
   );
+  assert.equal(verifiedAt, "2026-09-01T00:01:01Z");
+  assert.equal(timestampedAfterFinalChecks, true);
   assert.equal(fetches, 2);
   assert.equal(headLookups, 2);
   const verifiedSummary = summarizeFixture(verified);
