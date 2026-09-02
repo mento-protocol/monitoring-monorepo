@@ -299,11 +299,13 @@ a relative path and put the full label in the Markdown alt text, for example
 `![Before, <route>, base <OID>, <viewport>](./before.png)`. Then pass every
 file with the repeatable `--attach` flag, using the same relative path. `gh`
 resolves the `--attach` paths from its working directory, so run it from the
-directory that holds the images and the body file:
+directory that holds the images and the body file. Outside the repository
+`gh` cannot infer the target from a bare PR number, so name the PR by its
+URL:
 
 ```bash
 cd "$EVIDENCE_DIR" # outside the repository; holds body.md, before.png, after.png
-gh pr edit "$PR" --body-file body.md --attach ./before.png --attach ./after.png
+gh pr edit "$PR_URL" --body-file body.md --attach ./before.png --attach ./after.png
 ```
 
 `gh` uploads each file and rewrites the body reference in place to the
