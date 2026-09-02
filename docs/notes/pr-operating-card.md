@@ -153,7 +153,10 @@ even when you never open an authority.
 
    It prints `report: <path>` as its last line and exits 0 for a clean report,
    1 when the report carries findings, and 2 when the tool did not run — a 2
-   means there is no review, and the report is not evidence. A large diff can
+   means there is no review, and the report is not evidence. The review diffs
+   the **working tree** against the base, so uncommitted edits to tracked files
+   are covered but a file you have never added is not: `git add` new files
+   before you run it. A large diff can
    run past an hour; start it as an observable background task, never with a
    trailing `&`, and judge it by its exit status. A diff that touches
    `AGENTS.md`, `CLAUDE.md`, `.codex`, or `.agents` needs a human read before
