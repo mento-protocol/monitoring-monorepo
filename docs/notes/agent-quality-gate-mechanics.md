@@ -2347,8 +2347,7 @@ active control.
   first drain — but a name that was asked for and cannot be resolved fails the
   drain closed rather than arming everywhere: present but unreadable, empty, or
   unreadable by any other cause. A name needs no trailing newline. The command
-  is named for the barrier at three sites in the shell, because a parallel
-  command's
+  is named for the barrier at three shell sites, because a parallel command's
   `run_with_timeout` runs inside the worker subshell while the parent reaps that
   worker and runs the drain; naming it only in the child would make a parallel
   rendezvous impossible and let a stale sequential name match a drain no fixture
@@ -2362,7 +2361,7 @@ active control.
   A fourth site is the Darwin census seam, `waitAtDarwinCensusTestBarrier` in
   `scripts/gate/darwin-process-lineage.mjs`. It is not a redundant consumer: on
   a Darwin lineage contract `drain_condemned_run_commands` returns at its
-  lineage arm before reaching the shell barrier, so the seam is the *only*
+  lineage arm before reaching the shell barrier, so the seam is the _only_
   consumer on that path and does its own selection. The name reaches it as the
   `settle` helper's `--active-mapped-command` argument — an argument rather than
   an environment variable, so the mapped-child environment policy stays
@@ -2375,6 +2374,7 @@ active control.
   cleanup trap: a barrier left unreleased parks the gate for the full 20-second
   budget and then reports the barrier as the failure, burying the assertion that
   actually failed.
+
 - `AGENT_QUALITY_GATE_TEST_PARALLEL_RELEASE_FAILURE_AT` accepts a positive
   integer and injects failure at that parallel lease-release attempt.
 - `AGENT_QUALITY_GATE_TEST_OWNER_WITNESS_BARRIER`,
