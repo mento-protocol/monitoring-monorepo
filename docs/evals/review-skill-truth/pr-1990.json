@@ -69,8 +69,8 @@
   {
    "id": 3830259678,
    "author": "chatgpt-codex-connector[bot]",
-   "path": "scripts/pr/pr-ready-state-review-signals.mjs",
-   "line": 226,
+   "path": "scripts/pr/pr-ready-state-core.mjs",
+   "line": 772,
    "severity": "P2",
    "title": "Trust only authorized closeout requests",
    "acted_on": true,

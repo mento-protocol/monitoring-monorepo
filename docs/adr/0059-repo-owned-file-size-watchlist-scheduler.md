@@ -45,6 +45,14 @@ The repository owns one monthly, issue-only file-size schedule:
   determine cap status; raw counts describe growth only.
 - The durable `file-size-watchlist` label narrows lookup, and an immutable body
   marker identifies the owned issue. Multiple marked issues fail closed.
+- An actionable issue carries `agent-ready`, `kind:refactor`, `priority:p2`, one
+  `pkg:*` per package area its actionable rows touch, and one `risk:*`. Risk is
+  `risk:medium` unless the issue already carries a stricter label, which the
+  upsert keeps. The job never writes `risk:low`: `agent-ready` plus one
+  `risk:low` plus one `pkg:*` is the sweep predicate, and
+  [`docs/notes/backlog-sweep.md`](../notes/backlog-sweep.md) reserves that last
+  label for a human, so an unattended job cannot route its own issue into the
+  unattended sweep.
 - Reruns never overwrite an issue carrying `agent-active`, `in-pr`, or
   `needs-grooming`. An unclaimed issue closes when the actionable rows clear and
   reopens if drift returns.

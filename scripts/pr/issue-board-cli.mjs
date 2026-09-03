@@ -27,6 +27,7 @@ export function usage() {
   pnpm issue:release --issue 901 --claim-id <token> [--needs-grooming]
   pnpm issue:release --issue 901 --claim-id <token> --closed-unmerged-pr
   pnpm issue:release --issue 901 --claim-id <token> --merged-pr --needs-grooming
+  pnpm issue:groom --issue 901 --add-label pkg:tooling,kind:workflow
   pnpm issue:board sync --dry-run       # preview repository-wide changes
   pnpm issue:board sync                 # apply; requires explicit repository-wide authority
   pnpm issue:board backfill --issue 901 [--dry-run]
@@ -42,6 +43,7 @@ Options:
   --claim-id <token>               Stable ownership token for one explicit claim or release
   --sweep-eligible                 Require the backlog-sweep claim predicate
   --body-sha256 <digest>           Pin the body inspected for a sweep claim
+  --add-label <labels>             Routing label(s) to add for groom, comma-separated or repeated
   --pr <number-or-url>             Pull request number or URL for review moves
   --needs-grooming                 Release issues to needs-grooming instead of agent-ready
   --closed-unmerged-pr             Release a stored PR after proving it closed unmerged
@@ -133,6 +135,7 @@ export function parseArgs(argv, env = process.env) {
     backfillIssueFlags: 0,
     positionalIssueValues: [],
     issues: [],
+    addLabels: [],
     agent: defaultAgent(env),
     branch: env.AGENT_BRANCH ?? "",
     claimId: null,
@@ -187,6 +190,12 @@ export function parseArgs(argv, env = process.env) {
         break;
       case "--issues":
         options.issueValues.push(readValue());
+        break;
+      case "--add-label":
+        for (const part of readValue().split(",")) {
+          const label = part.trim();
+          if (label) options.addLabels.push(label);
+        }
         break;
       case "--agent":
         options.agent = readValue();
@@ -265,6 +274,7 @@ export function parseArgs(argv, env = process.env) {
     "release",
     "sync",
     "backfill",
+    "groom",
   ].includes(options.command);
   if (lifecycleMutation) {
     assertCanonicalGithubCliEnvironment(env);
@@ -372,6 +382,17 @@ export function parseArgs(argv, env = process.env) {
   }
   if (options.rebindBranch && options.claimId == null) {
     throw new Error("--rebind-branch requires --claim-id");
+  }
+  if (options.addLabels.length > 0 && options.command !== "groom") {
+    throw new Error("--add-label is valid only for groom");
+  }
+  if (options.command === "groom") {
+    if (options.issues.length !== 1) {
+      throw new Error("groom requires exactly one explicit --issue");
+    }
+    if (options.addLabels.length === 0) {
+      throw new Error("groom requires at least one --add-label routing label");
+    }
   }
   if (options.command === "backfill") {
     const explicitIssue = options.issueValues[0]?.trim();

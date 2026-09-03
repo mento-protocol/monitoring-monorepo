@@ -250,6 +250,11 @@ test("classifies root script changes as full and requiring context", () => {
     report.recommendedReview[1],
     "Run pnpm agent:closeout-review before pushing.",
   );
+  // The finder pass alone is not the closeout; card step 4 needs the verifier.
+  assertEqual(
+    report.recommendedReview[2],
+    "Hand that report to the review skill for the verifier pass; with no codex on PATH, run the review skill alone and say so in ## Validation.",
+  );
   assertEqual(report.contextUpdateRequired, true);
   assertEqual(report.contextUpdatesPresent, false);
   assertEqual(report.contextUpdateMissing, true);
@@ -900,6 +905,15 @@ test("line-count threshold promotes otherwise simple docs to standard", () => {
   });
 
   assertEqual(report.tier, "standard");
+  // A standard change gets the whole two-model closeout, not the finder alone.
+  assertEqual(
+    report.recommendedReview[1],
+    "Run pnpm agent:closeout-review before pushing.",
+  );
+  assertEqual(
+    report.recommendedReview[2],
+    "Hand that report to the review skill for the verifier pass; with no codex on PATH, run the review skill alone and say so in ## Validation.",
+  );
 });
 
 test("parseArgs supports base/head/json and changed-path file", () => {

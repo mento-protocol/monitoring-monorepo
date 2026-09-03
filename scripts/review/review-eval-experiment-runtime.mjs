@@ -25,6 +25,10 @@ import {
   stagePlanFor,
 } from "./review-eval-experiment-contract.mjs";
 import {
+  phaseCliVersions,
+  recordedPhaseCliVersions,
+} from "./review-eval-experiment-versions.mjs";
+import {
   assertExperimentConcurrency,
   defaultExperimentContestantExec,
   defaultExperimentFinderExec,
@@ -121,6 +125,7 @@ export function createExperimentArmExecutor({
   contract,
   artifactRoot,
   repoRoot,
+  cliVersions,
   handoffTemplate = readPinnedExperimentFile({
     repoRoot,
     record: plan.inputs.prompts.handoff,
@@ -137,12 +142,20 @@ export function createExperimentArmExecutor({
 }) {
   const judge = (request) => judgeExec({ ...request, env });
   return async ({ lane, treatment, fixture, source }) => {
+    const rawVersions = phaseCliVersions({
+      phase: "raw",
+      cliVersions,
+      source,
+    });
     const rawIdentity = rawCacheIdentity({
       plan,
       stage,
       lane,
       treatment,
       sourceDigest: source.digest,
+      // The identity is keyed on the exact set this phase stores and
+      // validates, so a judge upgrade cannot invalidate a contestant cell.
+      phaseVersions: rawVersions,
     });
     let rawEntry = readCache({
       artifactRoot,
@@ -194,9 +207,19 @@ export function createExperimentArmExecutor({
           cell_id: experimentCellId(lane, treatment),
           pr: lane.pr,
           treatment,
+          // The runtime this transcript was produced under, stored with it.
+          cli_versions: rawVersions,
           source_digest: source.digest,
           source_report: source.text,
+          // Every assistant message of the cell that fits the judge budget, in
+          // order — not the last one. The three counts are kept so a re-read of
+          // the cache can tell a multi-message session from a single-message
+          // one and see how much of the session `output` dropped, which is the
+          // same evidence the canonical cell writer stores.
           output: envelope.result,
+          assistant_messages: envelope.assistant_messages,
+          assistant_messages_kept: envelope.assistant_messages_kept,
+          stream_chars: envelope.stream_chars,
           cost_usd: Number(envelope.total_cost_usd ?? 0),
           turns: envelope.num_turns ?? null,
         },
@@ -209,9 +232,22 @@ export function createExperimentArmExecutor({
       treatment,
       source,
       cellId: experimentCellId(lane, treatment),
+      cliVersions: rawVersions,
     });
     const rawDigest = rawEntry.artifact.content_digest;
-    const scoreIdentity = scoreCacheIdentity({ plan, rawDigest });
+    // An empty transcript is scored without a judge call, so this phase records
+    // the empty provider set and a judge upgrade neither reruns it nor is
+    // charged with its drift.
+    const scoreVersions = phaseCliVersions({
+      phase: "score",
+      cliVersions,
+      invokesJudge: raw.output.trim().length > 0,
+    });
+    const scoreIdentity = scoreCacheIdentity({
+      plan,
+      rawDigest,
+      phaseVersions: scoreVersions,
+    });
     let scoreEntry = readCache({
       artifactRoot,
       kind: "score",
@@ -275,6 +311,8 @@ export function createExperimentArmExecutor({
         identity: scoreIdentity,
         payload: {
           raw_digest: rawDigest,
+          // The judge runtime that extracted and matched these claims.
+          cli_versions: scoreVersions,
           claims,
           matched_ids: matches.matchedIds,
           judge_reasoning: matches.judgeReasoning,
@@ -282,7 +320,12 @@ export function createExperimentArmExecutor({
         },
       });
     }
-    const score = validateScoreExperimentPayload(scoreEntry.payload, rawDigest);
+    const score = validateScoreExperimentPayload(
+      scoreEntry.payload,
+      rawDigest,
+      scoreVersions,
+      experimentCellId(lane, treatment),
+    );
     return {
       ok: true,
       campaign_id: plan.campaign_id,
@@ -292,11 +335,18 @@ export function createExperimentArmExecutor({
       pr: lane.pr,
       treatment,
       output: raw.output,
+      // How much of the session `output` carries, beside the text itself.
+      assistant_messages: raw.assistant_messages,
+      assistant_messages_kept: raw.assistant_messages_kept,
+      stream_chars: raw.stream_chars,
       claims: score.claims,
       claims_count: score.claims.length,
       matched_ids: score.matched_ids,
       leak: score.leak,
       empty: raw.output.trim().length === 0,
+      // Read from the artifacts, so a reused artifact reports the runtime that
+      // produced it rather than the runtime of this invocation.
+      cli_versions: { raw: raw.cli_versions, score: score.cli_versions },
       raw_digest: rawDigest,
       score_digest: scoreEntry.artifact.content_digest,
       cache_reuse: { raw: rawReused, score: scoreReused },
@@ -391,6 +441,7 @@ export async function enrichExperimentNovelty({
   contract,
   artifactRoot,
   repoRoot,
+  cliVersions,
   fixtureCacheDir,
   concurrency = MAX_FIXTURE_LANES,
   prepareFixture = defaultExperimentPrepareFixture,
@@ -433,9 +484,13 @@ export async function enrichExperimentNovelty({
       const truth = await loadTruth({ repoRoot, lane, contract });
       const enriched = [];
       for (const { lane: recordLane, record } of laneRecords) {
+        // A record's score artifact is keyed on the versions that produced it,
+        // not on today's probe: a judge upgraded between a screen and its
+        // holdout must still find the screen scores it recorded.
         const scoreIdentity = scoreCacheIdentity({
           plan,
           rawDigest: record.raw_digest,
+          phaseVersions: recordedPhaseCliVersions({ record, phase: "score" }),
         });
         const scoreEntry = readCache({
           artifactRoot,
@@ -453,16 +508,41 @@ export async function enrichExperimentNovelty({
         const score = validateScoreExperimentPayload(
           scoreEntry.payload,
           record.raw_digest,
+          scoreIdentity.cli_versions,
+          record.cell_id,
         );
-        const identity = novelCacheIdentity({
-          plan,
-          scoreDigest: record.score_digest,
-        });
-        let entry = readCache({
-          artifactRoot,
-          kind: "novel",
-          identity,
-        });
+        // A record already enriched under an earlier runtime keeps that
+        // artifact; only a novelty verdict written now carries the live judge.
+        let identity =
+          record.cli_versions?.novel === undefined
+            ? null
+            : novelCacheIdentity({
+                plan,
+                scoreDigest: record.score_digest,
+                phaseVersions: recordedPhaseCliVersions({
+                  record,
+                  phase: "novel",
+                }),
+              });
+        let entry = identity
+          ? readCache({ artifactRoot, kind: "novel", identity })
+          : null;
+        if (!entry) {
+          // `classifyNovel` returns without a judge call when no claim has
+          // text, so such a cell records the empty provider set.
+          identity = novelCacheIdentity({
+            plan,
+            scoreDigest: record.score_digest,
+            phaseVersions: phaseCliVersions({
+              phase: "novel",
+              cliVersions,
+              invokesJudge: score.claims.some(
+                (claim) => claim.trim().length > 0,
+              ),
+            }),
+          });
+          entry = readCache({ artifactRoot, kind: "novel", identity });
+        }
         const reused = entry !== null;
         if (!entry) {
           await resetExperimentFixture({
@@ -485,17 +565,26 @@ export async function enrichExperimentNovelty({
             artifactRoot,
             kind: "novel",
             identity,
-            payload: { score_digest: record.score_digest, verdict },
+            payload: {
+              score_digest: record.score_digest,
+              // The judge runtime that classified these claims, or the empty
+              // set when the classification needed no judge.
+              cli_versions: identity.cli_versions,
+              verdict,
+            },
           });
         }
         const payload = validateNovelExperimentPayload(
           entry.payload,
           record.score_digest,
+          identity.cli_versions,
+          record.cell_id,
         );
         enriched.push({
           ...record,
           wrong_claims: payload.verdict.novelWrong,
           novel_real: payload.verdict.novelReal,
+          cli_versions: { ...record.cli_versions, novel: payload.cli_versions },
           novel_digest: entry.artifact.content_digest,
           cache_reuse: { ...record.cache_reuse, novel: reused },
           artifacts: { ...record.artifacts, novel: entry.file },

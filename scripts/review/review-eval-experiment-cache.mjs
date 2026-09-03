@@ -17,7 +17,10 @@ import path from "node:path";
 import { isDeepStrictEqual, promisify } from "node:util";
 
 import { materializeFixture } from "./review-eval-fixtures.mjs";
-import { claudeArgv } from "./review-eval-run-execution.mjs";
+import {
+  claudeArgv,
+  claudeStreamEnvelope,
+} from "./review-eval-run-execution.mjs";
 import { expandHome, skillDigest } from "./review-eval-run-plan.mjs";
 import {
   digestObject,
@@ -80,22 +83,27 @@ export function experimentProviderText(value, label) {
   return text;
 }
 
+/**
+ * The contestant envelope, rebuilt from the cell's `stream-json` session.
+ *
+ * `result` is every assistant message the reviewer wrote, in order, separated
+ * by a blank line. The single-shot `--output-format json` envelope this
+ * replaced carried only the last one, so a cell that filed its report, ran one
+ * more tool call and then posted an addendum was scored on the addendum.
+ */
 export function parseExperimentContestantEnvelope(raw) {
   let envelope;
   try {
-    envelope = JSON.parse(experimentProviderText(raw, "contestant"));
+    envelope = claudeStreamEnvelope(experimentProviderText(raw, "contestant"), {
+      label: "contestant",
+      resultText: "session",
+    });
   } catch (error) {
     throw new Error(`contestant returned malformed JSON: ${error.message}`, {
       cause: error,
     });
   }
-  if (
-    !envelope ||
-    typeof envelope !== "object" ||
-    Array.isArray(envelope) ||
-    envelope.is_error !== false ||
-    typeof envelope.result !== "string"
-  ) {
+  if (envelope.is_error !== false || typeof envelope.result !== "string") {
     throw new Error("contestant returned no usable review text");
   }
   return envelope;
@@ -430,7 +438,48 @@ export function writeExperimentCache({
   }
 }
 
+/**
+ * Every artifact stores the versions of the providers its own phase invoked.
+ * Provenance is read back from these bytes, never inferred from whether the
+ * current invocation reused the artifact, so a retry cannot relabel work that
+ * an upgraded runtime produced.
+ */
+function phaseVersionSet(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * Fails closed on both sides. A caller that omits the phase versions, and a
+ * payload that stores none, both throw: an unchecked artifact would otherwise
+ * pass provenance silently and drop out of the drift report. A phase that
+ * invoked no provider passes its empty set explicitly.
+ */
+function assertPhaseCliVersions(payload, expected, label) {
+  if (!phaseVersionSet(expected)) {
+    throw new Error(`${label} cache read supplied no CLI versions to check`);
+  }
+  if (!phaseVersionSet(payload?.cli_versions)) {
+    throw new Error(`${label} cache payload records no CLI versions`);
+  }
+  if (JSON.stringify(payload.cli_versions) !== JSON.stringify(expected)) {
+    throw new Error(`${label} cache payload ran under other CLI versions`);
+  }
+}
+
+function phaseLabel(cellId, phase) {
+  return `${cellId ?? "unnamed cell"} ${phase}`;
+}
+
+function streamCount(value) {
+  return Number.isSafeInteger(value) && value >= 0;
+}
+
 export function validateRawExperimentPayload(payload, expected) {
+  assertPhaseCliVersions(
+    payload,
+    expected.cliVersions,
+    phaseLabel(expected.cellId, "raw"),
+  );
   if (
     payload?.ok !== true ||
     payload.campaign_id !== expected.plan.campaign_id ||
@@ -441,14 +490,26 @@ export function validateRawExperimentPayload(payload, expected) {
     payload.treatment !== expected.treatment ||
     payload.source_digest !== expected.source.digest ||
     payload.source_report !== expected.source.text ||
-    typeof payload.output !== "string"
+    typeof payload.output !== "string" ||
+    // A payload that lost its capture counts cannot say how much of the session
+    // `output` carries, so it is re-run rather than read as a whole session.
+    !streamCount(payload.assistant_messages) ||
+    !streamCount(payload.assistant_messages_kept) ||
+    !streamCount(payload.stream_chars) ||
+    payload.assistant_messages_kept > payload.assistant_messages
   ) {
     throw new Error("raw experiment cache payload is mismatched");
   }
   return payload;
 }
 
-export function validateScoreExperimentPayload(payload, rawDigest) {
+export function validateScoreExperimentPayload(
+  payload,
+  rawDigest,
+  cliVersions,
+  cellId = null,
+) {
+  assertPhaseCliVersions(payload, cliVersions, phaseLabel(cellId, "score"));
   const leak = payload?.leak;
   if (
     payload?.raw_digest !== rawDigest ||
@@ -466,7 +527,13 @@ export function validateScoreExperimentPayload(payload, rawDigest) {
   return payload;
 }
 
-export function validateNovelExperimentPayload(payload, scoreDigest) {
+export function validateNovelExperimentPayload(
+  payload,
+  scoreDigest,
+  cliVersions,
+  cellId = null,
+) {
+  assertPhaseCliVersions(payload, cliVersions, phaseLabel(cellId, "novel"));
   if (
     payload?.score_digest !== scoreDigest ||
     !Number.isSafeInteger(payload.verdict?.novelWrong) ||

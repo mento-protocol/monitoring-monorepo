@@ -213,6 +213,19 @@ their own merits, and seeing where they land is the point. Never Select one:
 recommend the top `agent-ready` candidate instead, and say in the Selected
 section when a higher-scoring issue was passed over for that reason.
 
+**`agent-ready` requires exactly one `risk:*` and at least one `pkg:*`. An
+`agent-ready` issue that fails either requirement ranks like a `needs-grooming`
+issue.** `agent-issue-workflow.md` calls that
+[incompletely groomed](../../../docs/notes/agent-issue-workflow.md#labels), and
+consumers treat it as `needs-grooming` until it is repaired. Score it, rank it,
+and never Select it or stand it as the runner-up. Name each one in Method with
+its routing gap: no `risk:*`, conflicting `risk:*`, or no `pkg:*`. An issue that
+also carries `needs-grooming` is counted under the conflicting queue-state rule
+above and not here, so the two Method counts stay disjoint. Ranking does not
+repair it: adding a label is a grooming decision, and which `risk:*` fits is the
+[low-risk rule](../../../docs/notes/agent-issue-workflow.md#low-risk-rule)'s
+call.
+
 ## Score Each Candidate
 
 Four factors, 0-25 each, 100 total. Break ties alphabetically by title.
@@ -246,13 +259,14 @@ rest from the list line. A reason must come from a body actually read; an issue
 whose reason rests on its title alone does not belong in the table.
 
 **Read the eventual Selected issue and its runner-up in full whatever their
-rank.** Top 15 is not the right cutoff for that pair, because only `agent-ready`
-issues can be Selected while `needs-grooming` issues are ranked alongside them.
-Fifteen higher-scoring grooming issues would push the best ready candidate and
-its runner-up off the table, and the Selected section still has to name a first
-concrete step and say why one beats the other — neither of which a list line
-supports. Read both before writing that section, even when the table never shows
-them.
+rank.** Top 15 is not the right cutoff for that pair, because only a fully
+groomed `agent-ready` issue can be Selected while `needs-grooming` and
+incompletely groomed issues are ranked alongside it. Fifteen higher-scoring
+grooming issues would push the best ready candidate
+and its runner-up off the table, and the Selected section still has to name a
+first concrete step and say why one beats the other — neither of which a list
+line supports. Read both before writing that section, even when the table never
+shows them.
 
 **Rescore from those reads, then re-check the order.** A body read exists to
 change a score, and a changed score can change which ready issue leads, so
@@ -264,7 +278,9 @@ top — but neither name the Selected section prints may rest on a list-line sco
 
 **One surviving candidate has no runner-up.** Write `Runner-up: none` and skip
 the comparison, the same way an empty ready queue writes `Selected: none`. The
-empty-queue rule covers zero candidates; this covers one.
+empty-queue rule covers zero candidates; this covers one. A candidate the rules
+bar from the runner-up slot does not count toward that one, so a roster whose
+only other survivor is incompletely groomed also writes `Runner-up: none`.
 
 ## Write The Receipt
 
@@ -290,10 +306,11 @@ Three sections:
 
 1. **Method** — fetch timestamp, open-issue count, how many of those sat outside
    the queue, roster count, the per-reason drop counts, how many bodies were read
-   in full, how many issues were scored from the list line, how many candidates
-   were held out — truncated timelines that could not be resolved, and issues
-   carrying conflicting queue-state labels, named — and any cap that applied to a
-   whole class of issues.
+   in full, how many issues were scored from the list line, how many `agent-ready`
+   candidates were incompletely groomed, each named with its routing gap, how
+   many candidates were held out — truncated timelines that could not be
+   resolved, and issues carrying conflicting queue-state labels, named — and any
+   cap that applied to a whole class of issues.
 2. **Top 15** — one table with the columns `Rank | Issue | Score | Reason`. The
    reason is one line: what the issue is, why it scores where it does, and the
    cap when one applied.
@@ -301,10 +318,10 @@ Three sections:
    runner-up. State the first concrete step and what would make it stop.
 
 **An empty ready queue is a result, not a failure.** When no `agent-ready`
-candidate survives the drops — every one claimed, parked, or awaiting grooming —
-write `Selected: none` with the reason, and skip the runner-up comparison there
-is nothing to make. Method and the table still carry the run. Never groom, claim,
-or invent a candidate to fill the section.
+candidate survives the drops — every one claimed, parked, awaiting grooming, or
+incompletely groomed — write `Selected: none` with the reason, and skip the
+runner-up comparison there is nothing to make. Method and the table still carry
+the run. Never groom, claim, or invent a candidate to fill the section.
 
 Print the Selected section, the top five rows, and the receipt path to the
 terminal. The receipt is the artifact; the terminal output is its summary.

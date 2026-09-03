@@ -14,6 +14,8 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { RUN_TIMEOUT_MS, run } from "./closeout-review-exec.mjs";
+
 const SCRIPT = fileURLToPath(new URL("./closeout-review.mjs", import.meta.url));
 
 /** The real `git`, so a case can build a PATH that holds git and nothing else. */
@@ -325,7 +327,8 @@ test("codex receives the pinned argv and an allowlisted environment", (t) => {
   assert.equal(env.get("OPENAI_API_KEY"), "secret-openai-key");
   assert.equal(env.get("GIT_CONFIG_GLOBAL"), "/dev/null");
   assert.equal(env.get("GIT_CONFIG_SYSTEM"), "/dev/null");
-  assert.equal(env.get("GIT_EXTERNAL_DIFF"), "");
+  // Absent, not empty: an empty value is a command name Git tries to run.
+  assert.equal(env.has("GIT_EXTERNAL_DIFF"), false);
   assert.equal(env.get("GIT_TERMINAL_PROMPT"), "0");
 });
 
@@ -811,4 +814,285 @@ test("an --out symlink is refused before anything is written", (t) => {
   assert.equal(run.status, 2);
   assert.match(run.stderr, /symbolic link|not ignored by Git/);
   assert.equal(fs.existsSync(target), false);
+});
+
+test("a codex symlinked into the tree under review is refused", (t) => {
+  const repo = makeRepo(t);
+  // The link sits outside the repository and points back into it, so only the
+  // resolved target says the branch supplies its own reviewer.
+  const inTree = path.join(repo.repo, "tools");
+  fs.mkdirSync(inTree, { recursive: true });
+  fakeCodex(inTree, 'echo "clean"');
+  const linkDir = path.join(repo.root, "link-bin");
+  fs.mkdirSync(linkDir, { recursive: true });
+  fs.symlinkSync(path.join(inTree, "codex"), path.join(linkDir, "codex"));
+
+  const run = runScript(
+    repo,
+    ["--base", "base", "--no-fetch"],
+    {},
+    `${linkDir}:${gitOnlyDir(repo.root)}`,
+  );
+
+  assert.equal(run.status, 2);
+  assert.match(run.stderr, /refusing the repository-controlled codex/);
+  assert.equal(run.reportPath, null);
+});
+
+test("environment-injected Git configuration does not reach the fingerprint", (t) => {
+  const repo = makeRepo(t);
+  fakeCodex(repo.bin, 'echo "clean"');
+  // A dirty tracked file, so the diff behind the fingerprint has output the
+  // injected `diff.noprefix` would reshape.
+  fs.writeFileSync(
+    path.join(repo.repo, "math.js"),
+    "export const sum = () => 2;\n",
+  );
+
+  const plain = runScript(repo, ["--base", "base", "--no-fetch"]);
+  const injected = runScript(repo, ["--base", "base", "--no-fetch"], {
+    GIT_CONFIG_COUNT: "1",
+    GIT_CONFIG_KEY_0: "diff.noprefix",
+    GIT_CONFIG_VALUE_0: "true",
+  });
+
+  assert.equal(plain.status, 0);
+  assert.equal(injected.status, 0);
+  const fingerprint = (run) =>
+    fs
+      .readFileSync(run.reportPath, "utf8")
+      .match(/^target_fingerprint: (\S+)$/m)[1];
+  assert.equal(
+    fingerprint(injected),
+    fingerprint(plain),
+    "injected Git configuration reshaped the fingerprint",
+  );
+});
+
+test("a HEAD that moves during base resolution is a stop", (t) => {
+  const repo = makeRepo(t);
+  fakeCodex(repo.bin, 'echo "clean"');
+  fakeGh(repo.bin, { defaultBranch: "trunk", pulls: [] });
+  addOrigin(repo.repo, "trunk");
+  // `gh` runs after HEAD is read and before the fingerprint is taken, so a
+  // commit landing here sits inside both fingerprints while `head_sha` still
+  // names the commit codex never saw. The fingerprints agree and only the
+  // saved HEAD differs, which is the case the fingerprint pair cannot see.
+  const ghPath = path.join(repo.bin, "gh");
+  const marker = path.join(repo.root, "committed");
+  const ghScript = fs.readFileSync(ghPath, "utf8").split("\n");
+  // Ahead of the query answers, because each branch exits before the end of
+  // the file. The marker keeps the second `gh` call from re-running the block:
+  // a second `git commit` with nothing staged writes to the stdout the script
+  // under test parses as JSON.
+  ghScript.splice(
+    1,
+    0,
+    [
+      `if [ ! -e ${JSON.stringify(marker)} ]; then`,
+      `  : > ${JSON.stringify(marker)}`,
+      `  ( cd ${JSON.stringify(repo.repo)} &&`,
+      "    echo 'export const product = () => 6;' > product.js &&",
+      "    git add -A && git commit --quiet -m mid-run ) >/dev/null 2>&1",
+      "fi",
+    ].join("\n"),
+  );
+  fs.writeFileSync(ghPath, ghScript.join("\n"));
+
+  const run = runScript(repo, ["--no-fetch"]);
+
+  assert.equal(run.status, 2);
+  assert.match(run.stderr, /the review target moved while codex read it/);
+  const report = fs.readFileSync(run.reportPath, "utf8");
+  assert.match(report, /^target_moved: yes$/m);
+  // The header names the commit the run started on and the report names the
+  // one it ended on. Without the saved-HEAD check this run reads as clean.
+  const headSha = report.match(/^head_sha: ([0-9a-f]{40})$/m)[1];
+  const atFinish = report.match(/^head_sha_at_finish: ([0-9a-f]{40})$/m)[1];
+  assert.notEqual(headSha, atFinish);
+  assert.equal(atFinish, git(repo.repo, "rev-parse", "HEAD"));
+});
+
+test("a synchronous command that hangs fails on a bounded deadline", () => {
+  const started = Date.now();
+  const stalled = run(
+    "sh",
+    ["-c", "sleep 30"],
+    process.cwd(),
+    process.env,
+    200,
+  );
+
+  assert.equal(stalled.ok, false, "a hung command reported success");
+  assert.ok(Date.now() - started < 10_000, "the deadline never fired");
+  assert.ok(Number.isFinite(RUN_TIMEOUT_MS) && RUN_TIMEOUT_MS > 0);
+  // The default must still let an ordinary command through untouched.
+  const quick = run("sh", ["-c", "echo hi"], process.cwd(), process.env);
+  assert.equal(quick.ok, true);
+  assert.equal(quick.stdout, "hi");
+});
+
+test("the sanitized PATH hands children absolute directories only", (t) => {
+  const repo = makeRepo(t);
+  const envDump = path.join(repo.root, "path-env.txt");
+  fs.mkdirSync(path.join(repo.root, "outside-bin"), { recursive: true });
+  const file = path.join(repo.bin, "codex");
+  fs.writeFileSync(
+    file,
+    [
+      "#!/bin/sh",
+      'if [ "$1" = "--version" ]; then',
+      `  env > ${JSON.stringify(envDump)}`,
+      '  echo "codex-cli 9.9.9-fake"',
+      "  exit 0",
+      "fi",
+      'echo "clean"',
+    ].join("\n") + "\n",
+  );
+  fs.chmodSync(file, 0o755);
+
+  // A relative entry that resolves outside the repository, so the filter keeps
+  // it. Whoever searches PATH resolves it: this process from its own working
+  // directory, children from the repository root `run` gives them.
+  const run_ = runScript(
+    repo,
+    ["--base", "base", "--no-fetch"],
+    {},
+    `../outside-bin:${repo.bin}:${process.env.PATH}`,
+  );
+
+  assert.equal(run_.status, 0);
+  const entries = fs
+    .readFileSync(envDump, "utf8")
+    .match(/^PATH=(.*)$/m)[1]
+    .split(path.delimiter);
+  assert.equal(
+    entries.includes("../outside-bin"),
+    false,
+    "the relative entry reached the child unresolved",
+  );
+  assert.ok(
+    entries.some(
+      (entry) =>
+        path.isAbsolute(entry) && entry.endsWith(`${path.sep}outside-bin`),
+    ),
+    `the vetted directory is missing from ${entries.join(path.delimiter)}`,
+  );
+});
+
+test("a codex hard-linked to a file inside the tree under review is refused", (t) => {
+  const repo = makeRepo(t);
+  // A hard link is a second name for one inode, and realpath reports the name
+  // it was reached by. Only the link count says the branch under review can
+  // rewrite the reviewer's own bytes.
+  const inTree = path.join(repo.repo, "tools");
+  fs.mkdirSync(inTree, { recursive: true });
+  fakeCodex(inTree, 'echo "clean"');
+  const linkDir = path.join(repo.root, "hardlink-bin");
+  fs.mkdirSync(linkDir, { recursive: true });
+  fs.linkSync(path.join(inTree, "codex"), path.join(linkDir, "codex"));
+
+  const run_ = runScript(
+    repo,
+    ["--base", "base", "--no-fetch"],
+    {},
+    `${linkDir}:${gitOnlyDir(repo.root)}`,
+  );
+
+  assert.equal(run_.status, 2);
+  assert.match(run_.stderr, /refusing the multiply-linked codex/);
+  assert.equal(run_.reportPath, null);
+});
+
+test("a codex replaced after it was resolved never runs", (t) => {
+  const repo = makeRepo(t);
+  // The `--version` probe renames another file over the approved pathname,
+  // which makes the window between resolution and execution observable.
+  const file = path.join(repo.bin, "codex");
+  const replacement = path.join(repo.root, "replacement");
+  fs.writeFileSync(replacement, '#!/bin/sh\necho "clean"\n');
+  fs.chmodSync(replacement, 0o755);
+  fs.writeFileSync(
+    file,
+    [
+      "#!/bin/sh",
+      'if [ "$1" = "--version" ]; then',
+      `  mv ${JSON.stringify(replacement)} ${JSON.stringify(file)}`,
+      '  echo "codex-cli 9.9.9-fake"',
+      "  exit 0",
+      "fi",
+      'echo "clean"',
+    ].join("\n") + "\n",
+  );
+  fs.chmodSync(file, 0o755);
+
+  const run_ = runScript(repo, ["--base", "base", "--no-fetch"]);
+
+  assert.equal(run_.status, 2);
+  assert.match(run_.stderr, /changed identity after it was resolved/);
+});
+
+test("a descendant outliving codex cannot rewrite the accepted report", (t) => {
+  const repo = makeRepo(t);
+  // The background subshell inherits both the report descriptor and the
+  // process group. codex exits 0 at once; without a sweep on every outcome the
+  // descendant writes into the report after the verdict was taken from it.
+  fakeCodex(
+    repo.bin,
+    [
+      "( sleep 1; echo 'INJECTED AFTER EXIT' ) &",
+      "echo 'No issues found in this patch.'",
+    ].join("\n"),
+  );
+
+  const run_ = runScript(repo, ["--base", "base", "--no-fetch"]);
+
+  assert.equal(run_.status, 0);
+  // Past the descendant's own sleep, so a surviving one has had its chance.
+  spawnSync("sh", ["-c", "sleep 2"]);
+  const report = fs.readFileSync(run_.reportPath, "utf8");
+  assert.doesNotMatch(report, /INJECTED AFTER EXIT/);
+  assert.match(report, /^verdict: clean$/m);
+});
+
+test("an edit inside an already-dirty submodule voids the report", (t) => {
+  const repo = makeRepo(t);
+  // To the parent repository every edit under a checked-out submodule is the
+  // same ` M <path>` status line and the same `-dirty` subproject marker, so
+  // without the nested diff both fingerprints match and this run reads clean.
+  const upstream = path.join(repo.root, "upstream");
+  fs.mkdirSync(upstream);
+  git(upstream, "init", "--quiet", "--initial-branch=main");
+  git(upstream, "config", "user.email", "test@example.invalid");
+  git(upstream, "config", "user.name", "Closeout Review Test");
+  fs.writeFileSync(path.join(upstream, "a.txt"), "one\n");
+  git(upstream, "add", "-A");
+  git(upstream, "commit", "--quiet", "-m", "upstream");
+  git(
+    repo.repo,
+    "-c",
+    "protocol.file.allow=always",
+    "submodule",
+    "add",
+    "--quiet",
+    upstream,
+    "lib",
+  );
+  git(repo.repo, "add", "-A");
+  git(repo.repo, "commit", "--quiet", "-m", "add submodule");
+  const nested = path.join(repo.repo, "lib", "a.txt");
+  fs.writeFileSync(nested, "two\n");
+  fakeCodex(
+    repo.bin,
+    [`echo 'three' > ${JSON.stringify(nested)}`, "echo 'clean'"].join("\n"),
+  );
+
+  const run_ = runScript(repo, ["--base", "base", "--no-fetch"]);
+
+  assert.equal(run_.status, 2);
+  assert.match(run_.stderr, /the review target moved while codex read it/);
+  assert.match(
+    fs.readFileSync(run_.reportPath, "utf8"),
+    /^target_moved: yes$/m,
+  );
 });

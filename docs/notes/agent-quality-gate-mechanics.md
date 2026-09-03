@@ -701,7 +701,7 @@ procedure below.
   `deploy/deploy-indexer-verify{,-analysis}{,.test}.mjs` and
   `deploy/deploy-indexer-verify-status-identity.mjs` use one any-depth arm;
   both verifier tests run. The exact `pr/agent-issue-board{,.test}.mjs`,
-  `pr/issue-board-{backfill,cli,commands,projects,state,sync,transport}.mjs`,
+  `pr/issue-board-{backfill,cli,commands,groom,projects,state,sync,transport}.mjs`,
   and `pr/issue-board-{lock,ownership,release,sync-lock,transactions}.mjs` set
   routes to `pnpm issue:board:test`. Required CI runs it after failures. ADR
   0082 owns confinement. Exact
@@ -714,7 +714,7 @@ procedure below.
   `sentry/broker/mapped-command-process-identity.mjs` bridge routes
   `pnpm sentry:broker:test`. It keeps the probe's local import on the same
   canonical helper that the workflow stages. The exact
-  `pr/closeout-review{,.test}.mjs` pair routes
+  `pr/closeout-review{,-exec,-git,.test}.mjs` set routes
   `node --test scripts/pr/closeout-review.test.mjs`; root `package.json`,
   `check-agent-quality-gate-package-scripts.mjs`, and `gate/mapping/facts.mjs`
   name both `agent:closeout-review` aliases.
