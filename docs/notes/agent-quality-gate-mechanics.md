@@ -744,8 +744,10 @@ procedure below.
   edit to either routes the handler-invariant checklist and
   `scripts/indexer-handler-invariant-contract.test.mjs`.
   Runtime hashes use `$script_source_dir`; suites use `$repo_root`. Core and
-  suppression-policy edits route the autoreview suite. Missing pins freeze the
-  stamp.
+  suppression-policy edits route the autoreview suite; the two classifier
+  modules share the core's arm and route it as well, because the core still
+  holds a duplicate copy of the same data. The removal PR retires that suite and
+  the shared arm with it. Missing pins freeze the stamp.
   [ADR 0069](../adr/0069-gate-routing-table-as-data.md) owns this contract.
 
 ### Where the plan comes from ([ADR 0069](../adr/0069-gate-routing-table-as-data.md))
