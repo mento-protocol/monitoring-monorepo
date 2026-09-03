@@ -66,9 +66,8 @@ install effects before any package-manager command, including the claim command.
    an architecture change that constrains future work records an ADR in the
    same PR. When a change adds or alters a command, script, env var, hook, or
    ordered runbook, audit every live entry point and runbook in the same PR.
-   Adding, renaming, or removing a doc, or changing catalog-visible metadata,
-   needs `pnpm docs:index --write` in the same PR, or the required
-   `docs:index --check` fails.
+   After adding, renaming, or removing a doc, or changing its catalog metadata,
+   run `pnpm docs:index --write` in the same PR or `docs:index --check` fails.
    Before touching or moving docs, read
    [`../context-standards.md`](../context-standards.md).
 
