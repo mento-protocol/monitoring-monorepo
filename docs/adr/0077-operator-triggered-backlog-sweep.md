@@ -175,14 +175,20 @@ the 10-candidate cap, so the cap bounds grooming attempts and unchanged high
 scorers cannot hold every slot; the cap bounds no reads, so the report records
 how many candidates the walk examined, and no ceiling was put on that number
 because a stable walk order plus a fixed depth never reaches the tail of the
-queue. `docs/README.md` joins the compared path set of any `pkg:tooling`
-candidate that adds, moves, or removes a Markdown surface, that changes the
-front matter of one, or that adds or removes an internal link, because
-`pnpm docs:index --check` makes the generated catalog a file both workers
-regenerate and `scripts/context/docs-index-helpers.mjs` renders it from front
-matter and link state alike. Paths resolve against `origin/main` at one pinned OID rather
-than the session checkout, since labels are repository-wide state and the pass
-may not retract a wrong one. The marker gains a `labels` snapshot, so a human
+queue. Two candidates that both regenerate `docs/README.md` conflict whatever
+`pkg:*` labels they carry, and a candidate carries that catalog when it adds,
+moves, or removes a Markdown surface, when it changes the front matter of one,
+or when it adds or removes an internal link, because `pnpm docs:index --check`
+makes the generated catalog a file both workers regenerate and
+`scripts/context/docs-index-helpers.mjs` renders it from front matter and link
+state alike. That test is pairwise and label-independent, so it runs before the
+label test rather than inside the `pkg:tooling` path test, which would read a
+cross-package pair of Markdown-adding issues as independent. Paths resolve
+against `origin/main` at one pinned OID rather than the session checkout, since
+labels are repository-wide state and the pass may not retract a wrong one; the
+pass fetches that ref from the push URL Preflight validates, so the tree it
+reads and the fork stop grade one URL. The marker gains a `labels` snapshot,
+so a human
 who fixes the labels a stop asked about reopens the candidate without editing
 the body, and a per-path blob digest, so a named file whose contents changed
 under a stable name is read again. The snapshot and the skip test read the same

@@ -181,7 +181,9 @@ Take the top N — default 2 — that satisfy **all** of:
   such issues both pass and then edit the same package. Multiple package areas
   are ambiguous and make the same independence check unreliable. Treat a
   missing or ambiguous package area as ineligible rather than as independence.
-- **Mutually independent.** No two issues in one batch share a `pkg:*` label —
+- **Mutually independent.** Two tests, in order: the label-independent
+  docs-catalog test below, then the label test. No two issues in one batch
+  share a `pkg:*` label —
   `pkg:dashboard`, `pkg:indexer`, `pkg:alerts`, `pkg:terraform`, `pkg:tooling`,
   listed in
   [`agent-issue-workflow.md`](../../../docs/notes/agent-issue-workflow.md).
@@ -189,7 +191,8 @@ Take the top N — default 2 — that satisfy **all** of:
   by lookup rather than per-batch judgement. Two workers editing one package
   produce PRs whose diffs conflict and whose reviewers see a base moving under
   them, and the second PR then pays for a merge, a re-gate, and a fresh review
-  round it did not need. `pkg:tooling` gets a path test instead, below.
+  round it did not need. `pkg:tooling` gets a path test instead of the label
+  test, below.
 - **Outside its own grooming veto window.** A candidate whose newest _trusted_
   `sweep-groomed:` marker comment is less than 12 hours old waits for the
   next run, whatever version that marker carries — the window asks whether a
@@ -224,6 +227,26 @@ Take the top N — default 2 — that satisfy **all** of:
   gh api "repos/$repo/collaborators/<login>/permission" --jq '.role_name'
   ```
 
+**The docs catalog is a pairwise conflict in every package.** Run this test
+before the label test, on every pair, whatever labels the two candidates carry.
+A candidate carries the catalog when its work adds, moves, or removes a
+Markdown surface, changes any front matter of an existing one, or adds or
+removes an internal link, because the catalog lists broken internal links
+beside an entry per file. Only a body-prose edit that leaves the front matter
+and every link alone is exempt, and a body whose documentation effect cannot be
+read carries the catalog: nothing to compare is not evidence of no conflict.
+Two candidates that both carry it are never independent.
+[`context-standards.md`](../../../docs/context-standards.md) requires that
+generated catalog to index every Markdown file and `pnpm docs:index --check`
+fails while it is stale, so both workers regenerate `docs/README.md` and their
+PRs conflict on that one file even when they share no package and no other
+path. Scoping the rule to `pkg:tooling` would miss exactly that pair: a
+`pkg:dashboard` issue adding a README beside a `pkg:indexer` issue adding one
+passes the label test and then produces two PRs regenerating one catalog. Do
+not restate which fields the catalog renders: `classifyDocumentation` and
+`catalogEntry` in `scripts/context/docs-index-helpers.mjs` decide that, and any
+list written here rots against them in silence.
+
 **`pkg:tooling` takes a path test, not a label test.** That one label covers
 `scripts/`, `docs/`, `.agents/`, `.claude/`, and the root tooling files, so two
 candidates that touch nothing in common still share it and the batch loses a
@@ -240,19 +263,9 @@ a path whose first two segments are `.claude/skills` is read with those replaced
 by `.agents/skills`, whatever follows and whether or not it ends in a slash. The
 two are one collision surface, so an issue naming one and an issue naming the
 other would otherwise pass a literal containment test and then produce two PRs
-touching the same files. Then add `docs/README.md` to the compared path set of
-any candidate whose named paths add, move, or remove a Markdown surface.
-[`context-standards.md`](../../../docs/context-standards.md) requires that
-catalog to index every Markdown file and `pnpm docs:index --check` fails while
-it is stale, so both workers regenerate the one file and their PRs conflict on
-it. Two Markdown-adding candidates are therefore never independent. A candidate
-that changes any front matter of an existing Markdown surface carries the
-catalog too, and so does one that adds or removes an internal link, because the
-catalog also lists broken internal links. Only a body-prose edit that leaves the
-front matter and every link alone is exempt. Do not restate which fields the
-catalog renders: `classifyDocumentation` and `catalogEntry` in
-`scripts/context/docs-index-helpers.mjs` decide that, and any list written here
-rots against them in silence.
+touching the same files. A candidate that carries the docs catalog above brings
+`docs/README.md` into this comparison too, so it also conflicts with a
+candidate that names that file outright.
 A candidate with no path list conflicts with every other `pkg:tooling`
 candidate: nothing to compare is not evidence that the paths are disjoint. Name
 the independence basis in the printed batch for every pair that relied on this,
@@ -721,14 +734,23 @@ The full procedure is
    Preflight's, and the marker records it.
 
    ```bash
-   git fetch origin main
+   git fetch "$(git remote get-url --push origin)" main
    oid="$(git rev-parse FETCH_HEAD)"   # the commit this fetch just wrote
    git rev-parse "$oid:<path>"         # one blob or tree id; non-zero when absent
    ```
 
-   Pin `FETCH_HEAD`, not `origin/main`: a clone made with `--single-branch` on
-   another branch has no `refs/remotes/origin/main` for the fetch to update, so
-   `git rev-parse origin/main` there fails after the batch is already claimed.
+   Fetch the validated push URL, not the remote name. Preflight grades
+   `git remote get-url --push origin`, and a remote carrying a `pushurl`
+   fetches from a different URL than it pushes to, so `git fetch origin main`
+   would resolve every path in this pass against a URL no check ever read.
+   Naming that URL here binds the read to the repository Preflight approved and
+   leaves Preflight one check on one URL, which is the check the fork stop
+   needs.
+
+   Pin `FETCH_HEAD`, not `origin/main`: a fetch by URL updates no
+   remote-tracking ref at all, and a clone made with `--single-branch` on
+   another branch has no `refs/remotes/origin/main` to read either, so
+   `git rev-parse origin/main` fails after the batch is already claimed.
    Address each path as `<oid>:<path>`, not with `git ls-tree`: a body may name
    a directory with a trailing slash, and `git ls-tree "$oid" -- docs/notes/`
    lists that directory's children rather than its one tree id, while
