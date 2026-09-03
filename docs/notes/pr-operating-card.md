@@ -153,10 +153,17 @@ even when you never open an authority.
 
    It prints `report: <path>` as its last line and exits 0 for a clean report,
    1 when the report carries findings, and 2 when the tool did not run — a 2
-   means there is no review, and the report is not evidence. The review diffs
+   means there is no review, and the report is not evidence. Exit 0 is the
+   absence of a findings heading rather than a positive clean verdict: the
+   finder prints no marker a clean run can be recognized by, so a refusal or a
+   truncated answer reads as clean too. Read the report, never the exit code
+   alone. The review diffs
    the **working tree** against the base, so uncommitted edits to tracked files
    are covered but a file you have never added is not: `git add` new files
-   before you run it. A large diff can
+   before you run it. Leave the tree alone while it runs: a commit, an edit, or
+   a fetch that moves the base ref changes what the reviewer is reading, and
+   the script exits 2 rather than hand back a report its own header
+   misdescribes. A large diff can
    run past an hour; start it as an observable background task, never with a
    trailing `&`, and judge it by its exit status. A diff that touches
    `AGENTS.md`, `CLAUDE.md`, `.codex`, or `.agents` needs a human read before

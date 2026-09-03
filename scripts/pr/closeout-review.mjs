@@ -13,15 +13,22 @@
  *   1  the review ran and reported findings
  *   2  the tool did not run, or ran and produced nothing usable
  *
+ * Exit 0 is the absence of a findings heading, not a positive clean verdict:
+ * `codex exec review` prints no marker a clean run can be recognized by, so an
+ * unrecognized body — a refusal, a truncated answer — reads as clean. Read the
+ * report, never only the exit code; operating-card step 4 says so too.
+ *
  * The report is unscanned model output. It can quote credential-shaped diff
  * content, so it must stay out of Git; `--out` is refused unless the path is
- * outside the repository or ignored by it.
+ * outside the repository or ignored by it, and both files are written 0600 so
+ * other accounts on a shared host cannot read them.
  *
  * `codex` stdout is written to the report file as it arrives, so a killed run
  * leaves the partial text instead of an empty file. The header block is
  * prepended once the run ends and the outcome is known.
  */
 import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -95,6 +102,9 @@ function run(command, args, cwd) {
   const result = spawnSync(command, args, {
     cwd,
     encoding: "utf8",
+    // A whole working-tree diff passes through here for the fingerprint below,
+    // and the 1 MiB default would report a large one as a failed command.
+    maxBuffer: 64 * 1024 * 1024,
     env: { ...process.env, ...ENV_FIXED },
   });
   return {
@@ -292,6 +302,27 @@ function shortstat(repoRoot, base) {
   return stat.ok && stat.stdout ? stat.stdout : "0 files changed";
 }
 
+/**
+ * What the reviewer is reading: HEAD, the index and working-tree state, and the
+ * tracked content that differs from HEAD. It is taken before the run and again
+ * after it, so a target that shifts under the reviewer is caught instead of
+ * being reported as reviewed. `dirty` alone cannot do this: an edit to an
+ * already-modified file leaves the flag and the status lines unchanged.
+ * Untracked content is outside the fingerprint exactly as it is outside
+ * `--base`; the status listing still names those paths.
+ */
+function treeFingerprint(repoRoot) {
+  const parts = [
+    run("git", ["rev-parse", "HEAD"], repoRoot),
+    run("git", ["status", "--porcelain"], repoRoot),
+    run("git", ["diff", "--no-ext-diff", "HEAD"], repoRoot),
+  ];
+  if (parts.some((part) => !part.ok)) return null;
+  return createHash("sha256")
+    .update(parts.map((part) => part.stdout).join("\0"))
+    .digest("hex");
+}
+
 /** Spawn codex in its own process group so a timeout can kill the whole tree. */
 function runCodex(repoRoot, base, reportPath, timeoutSeconds) {
   const env = { ...ENV_FIXED };
@@ -310,8 +341,13 @@ function runCodex(repoRoot, base, reportPath, timeoutSeconds) {
     "-c",
     `sandbox_mode="${SANDBOX}"`,
   ];
-  const bodyFd = fs.openSync(reportPath, "w");
-  const stderrFd = fs.openSync(`${reportPath}.stderr.log`, "w");
+  // Both files hold unscanned model output that can quote the diff, so keep
+  // them owner-only. The mode argument applies to a file this call creates;
+  // fchmod covers one that already exists under a re-used `--out` path.
+  const bodyFd = fs.openSync(reportPath, "w", 0o600);
+  const stderrFd = fs.openSync(`${reportPath}.stderr.log`, "w", 0o600);
+  fs.fchmodSync(bodyFd, 0o600);
+  fs.fchmodSync(stderrFd, 0o600);
   const child = spawn("codex", argv, {
     cwd: repoRoot,
     env,
@@ -386,6 +422,8 @@ async function main() {
 
   const base = options.base ?? resolveBase(repoRoot);
   const baseSha = verifyBase(repoRoot, base, options.fetch);
+  const targetBefore = treeFingerprint(repoRoot);
+  if (targetBefore === null) fail("cannot fingerprint the review target");
 
   const started = new Date();
   const defaultOut = path.join(
@@ -413,6 +451,20 @@ async function main() {
     .slice(-20)
     .join("\n");
 
+  // codex re-reads the tree and re-resolves the base ref while it runs, so a
+  // commit, an edit or a sibling fetch landing mid-run moves what the report
+  // actually covers. Compare both ends before believing the report.
+  const headAtFinish = run("git", ["rev-parse", "HEAD"], repoRoot);
+  const baseAtFinish = run(
+    "git",
+    ["rev-parse", "--verify", "--quiet", `${base}^{commit}`],
+    repoRoot,
+  );
+  const targetAfter = treeFingerprint(repoRoot);
+  const moved = headAtFinish.ok && headAtFinish.stdout !== head.stdout;
+  const baseMoved = !baseAtFinish.ok || baseAtFinish.stdout !== baseSha;
+  const targetChanged = targetAfter === null || targetAfter !== targetBefore;
+
   let verdict = "failed";
   let exitCode = 2;
   let reason = null;
@@ -424,6 +476,10 @@ async function main() {
     reason = `codex exited ${result.code}\n${stderrTail}`;
   } else if (body.trim() === "") {
     reason = "codex produced an empty report";
+  } else if (targetChanged || baseMoved) {
+    reason =
+      `the review target moved while codex read it (${targetChanged ? "head or working tree" : `base ${base}`}); ` +
+      "the report does not describe the diff in its header";
   } else if (FINDINGS_HEADING.test(body) || FINDING_BULLET.test(body)) {
     verdict = "findings";
     exitCode = 1;
@@ -431,11 +487,6 @@ async function main() {
     verdict = "clean";
     exitCode = 0;
   }
-
-  // codex re-reads the tree while it runs, so a commit landing mid-run moves
-  // what the report actually covers. Record it rather than hide it.
-  const headAtFinish = run("git", ["rev-parse", "HEAD"], repoRoot);
-  const moved = headAtFinish.ok && headAtFinish.stdout !== head.stdout;
 
   const header = renderHeader({
     tool: "scripts/pr/closeout-review.mjs",
@@ -452,12 +503,16 @@ async function main() {
     finished: new Date().toISOString(),
     codex_exit_code: result.code === null ? "none" : result.code,
     ...(moved ? { head_sha_at_finish: headAtFinish.stdout } : {}),
+    ...(baseMoved && baseAtFinish.ok
+      ? { base_sha_at_finish: baseAtFinish.stdout }
+      : {}),
+    ...(targetChanged || baseMoved ? { target_moved: "yes" } : {}),
     verdict,
   });
   const footer = result.timedOut
     ? `\n\nTIMED OUT after ${options.timeoutSeconds}s\n`
     : "";
-  fs.writeFileSync(reportPath, `${header}${body}${footer}`);
+  fs.writeFileSync(reportPath, `${header}${body}${footer}`, { mode: 0o600 });
 
   if (reason) process.stderr.write(`closeout-review: ${reason}\n`);
   process.stdout.write(`report: ${reportPath}\n`);

@@ -177,7 +177,7 @@ test("the header records the run's provenance", (t) => {
   assert.match(report, /^---$/m);
 });
 
-test("a commit landing during the run is recorded in the header", (t) => {
+test("a commit landing during the run voids the report", (t) => {
   const repo = makeRepo(t);
   // The fake codex commits while the script is waiting on it.
   fakeCodex(
@@ -193,11 +193,80 @@ test("a commit landing during the run is recorded in the header", (t) => {
 
   const run = runScript(repo, ["--base", "base", "--no-fetch"]);
 
+  assert.equal(run.status, 2);
+  assert.match(run.stderr, /the review target moved while codex read it/);
   const report = fs.readFileSync(run.reportPath, "utf8");
   assert.equal(
     report.match(/^head_sha_at_finish: ([0-9a-f]{40})$/m)[1],
     git(repo.repo, "rev-parse", "HEAD"),
   );
+  assert.match(report, /^target_moved: yes$/m);
+  assert.match(report, /^verdict: failed$/m);
+});
+
+test("an edit to an already-modified file during the run voids the report", (t) => {
+  const repo = makeRepo(t);
+  const tracked = path.join(repo.repo, "math.js");
+  // Dirty before the run, and dirty differently after it: `dirty` and the
+  // status lines are identical at both ends, so only the content fingerprint
+  // can tell that codex read something else.
+  fs.writeFileSync(tracked, "export const sum = () => 2;\n");
+  fakeCodex(
+    repo.bin,
+    [
+      `printf 'export const sum = () => 3;\\n' > ${JSON.stringify(tracked)}`,
+      'echo "clean"',
+    ].join("\n"),
+  );
+
+  const run = runScript(repo, ["--base", "base", "--no-fetch"]);
+
+  assert.equal(run.status, 2);
+  const report = fs.readFileSync(run.reportPath, "utf8");
+  assert.match(report, /^dirty: yes$/m);
+  assert.doesNotMatch(report, /^head_sha_at_finish:/m);
+  assert.match(report, /^target_moved: yes$/m);
+});
+
+test("a base ref moving during the run voids the report", (t) => {
+  const repo = makeRepo(t);
+  // The fake codex advances the base branch the header pins.
+  fakeCodex(
+    repo.bin,
+    [
+      `cd ${JSON.stringify(repo.repo)}`,
+      "git branch -f base HEAD",
+      'echo "clean"',
+    ].join("\n"),
+  );
+  const baseShaBefore = git(repo.repo, "rev-parse", "base");
+
+  const run = runScript(repo, ["--base", "base", "--no-fetch"]);
+
+  assert.equal(run.status, 2);
+  assert.match(run.stderr, /the review target moved while codex read it/);
+  const report = fs.readFileSync(run.reportPath, "utf8");
+  assert.match(report, new RegExp(`^base_sha: ${baseShaBefore}$`, "m"));
+  assert.equal(
+    report.match(/^base_sha_at_finish: ([0-9a-f]{40})$/m)[1],
+    git(repo.repo, "rev-parse", "HEAD"),
+  );
+  assert.match(report, /^target_moved: yes$/m);
+});
+
+test("the report and its transcript are readable only by their owner", (t) => {
+  const repo = makeRepo(t);
+  fakeCodex(repo.bin, 'echo "clean"');
+
+  const run = runScript(repo, ["--base", "base", "--no-fetch"]);
+
+  for (const file of [run.reportPath, `${run.reportPath}.stderr.log`]) {
+    assert.equal(
+      fs.statSync(file).mode & 0o777,
+      0o600,
+      `${file} is not owner-only`,
+    );
+  }
 });
 
 test("a dirty working tree is recorded in the header", (t) => {
