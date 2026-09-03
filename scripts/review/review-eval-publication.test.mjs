@@ -254,7 +254,7 @@ test("refuses a symlink report without rewriting plan.json", () => {
   }
 });
 
-test("raw cell transcripts stay outside Git and autoreview input", () => {
+test("raw cell transcripts stay outside Git and review input", () => {
   const ignore = readFileSync(
     new URL("../../.gitignore", import.meta.url),
     "utf8",

@@ -125,9 +125,9 @@ echo
 echo "-- Stale /private/tmp trees (report only, never deleted) --"
 tmp_count=0
 if [[ -d /private/tmp ]]; then
-  tmp_count="$( (find /private/tmp -maxdepth 1 -mindepth 1 -type d \( -iname '*monitoring*' -o -iname '*autoreview*' \) 2>/dev/null || true) | wc -l | tr -d ' ')"
+  tmp_count="$( (find /private/tmp -maxdepth 1 -mindepth 1 -type d -iname '*monitoring*' 2>/dev/null || true) | wc -l | tr -d ' ')"
 fi
-echo "Found ${tmp_count} monitoring/autoreview /private/tmp dir(s)"
+echo "Found ${tmp_count} monitoring /private/tmp dir(s)"
 echo
 
 if [[ $apply -eq 1 ]]; then

@@ -33,9 +33,8 @@ babysit_repo_gate() {
   # which return PASS. A fork PR in a checkout without package.json would
   # otherwise satisfy the gate on exactly the case this refuses: that guard returns early in a Claude cloud
   # session, and a fork head must refuse on every surface rather than depend on
-  # which one is running. `pr:ready-state`, `pr:feedback-state`, and the
-  # autoreview bundle sequence all assume the head commit is reachable through a
-  # trusted `origin` serving the base repo
+  # which one is running. `pr:ready-state` and `pr:feedback-state` both assume
+  # the head commit is reachable through a trusted `origin` serving the base repo
   # (docs/notes/agent-quality-gate-mechanics.md); a fork head breaks that, so
   # the gate refuses rather than reporting a readiness it cannot prove. This
   # lives in the hook, not a skill file, because the hook runs whichever babysit
