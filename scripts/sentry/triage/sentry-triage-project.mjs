@@ -116,10 +116,10 @@ import { parseArgs, usage } from "./sentry-triage-project-cli.mjs";
 // (the workflow restores needs-triage instead of closing).
 import { clearBriefComments } from "./sentry-triage-brief.mjs";
 import {
-  AGENT_READY_LABEL,
   createProjectedIssue,
   defaultRunGh,
-  ensureAgentReadyLabel,
+  ensureLocalProjectionLabels,
+  LOCAL_PROJECTION_LABELS,
   fetchProjectorLogin,
   findExistingProjection,
   markStubProjected,
@@ -535,10 +535,10 @@ export async function runProjection(options, deps = {}) {
   });
 
   if (localConfig) {
-    await ensureAgentReadyLabel(owningRun, owningRepo);
+    await ensureLocalProjectionLabels(owningRun, owningRepo);
   }
   const url = await createProjectedIssue(owningRun, owningRepo, title, body, {
-    labels: localConfig ? [AGENT_READY_LABEL] : [],
+    labels: localConfig ? LOCAL_PROJECTION_LABELS : [],
   });
   registerFamily({ number: Number(url.split("/").pop()), url });
   await markStubProjected(
