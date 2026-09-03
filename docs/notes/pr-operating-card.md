@@ -169,6 +169,10 @@ even when you never open an authority.
    `AGENTS.md`, `CLAUDE.md`, `.codex`, or `.agents` needs a human read before
    its report is trusted: `codex` reads reviewer instructions from the
    checkout under review, so the branch can rewrite the policy reviewing it.
+   The diff names the common case, not the whole set: `codex` reads whichever
+   instruction files the worktree holds, so an untracked one, or one a stacked
+   base already carries, shapes the report without appearing in the diff. Read
+   the instruction files the run will actually see, not only the touched ones.
    A diff that changes `scripts/pr/closeout-review.mjs` or its aliases runs
    the candidate's own review tool, so review those changes from a trusted
    checkout at the base instead. The reviewer runs under the operator's own

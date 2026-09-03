@@ -98,6 +98,63 @@ function fail(reason) {
 }
 
 /**
+ * The PATH every subprocess gets, with directories the branch under review
+ * controls removed. Under `pnpm run` the repository's own `node_modules/.bin`
+ * is the first entry on PATH, so a dependency shipping a `git` or `gh` shim
+ * would otherwise decide the base, the diff and the fingerprint this tool
+ * reports — and would see the operator's environment while doing it. Set once
+ * the repository root is known; `resolveCodex` refuses such an entry outright
+ * rather than skipping past it, because a silently different reviewer is worse
+ * than a stop.
+ */
+let SAFE_PATH = null;
+
+/** A path with its links resolved, or the path itself when that fails. */
+function realOrSelf(target) {
+  try {
+    return fs.realpathSync(target);
+  } catch {
+    return target;
+  }
+}
+
+/**
+ * The repository root, checked against the filesystem rather than taken on
+ * trust. `git rev-parse --show-toplevel` answered on the inherited PATH, so a
+ * shim could name any directory; the root has to hold this process's working
+ * directory and carry a `.git` entry of its own.
+ */
+function verifiedRoot(reported) {
+  const root = realOrSelf(reported);
+  const cwd = realOrSelf(process.cwd());
+  if (cwd !== root && !cwd.startsWith(`${root}${path.sep}`)) {
+    fail(`the reported repository root ${reported} does not contain ${cwd}`);
+  }
+  if (!fs.existsSync(path.join(root, ".git"))) {
+    fail(`the reported repository root ${reported} carries no .git`);
+  }
+  return root;
+}
+
+function sanitizedPath(root) {
+  const kept = [];
+  for (const entry of (process.env.PATH ?? "").split(path.delimiter)) {
+    if (!entry) continue;
+    let resolved;
+    try {
+      resolved = fs.realpathSync(path.resolve(entry));
+    } catch {
+      resolved = path.resolve(entry);
+    }
+    if (resolved === root || resolved.startsWith(`${root}${path.sep}`)) {
+      continue;
+    }
+    kept.push(entry);
+  }
+  return kept.join(path.delimiter);
+}
+
+/**
  * The environment `codex` gets: the allowlist above over the fixed scrub. Built
  * once and used for every `codex` call, the version probe included, so no
  * invocation of that executable ever sees the operator's whole shell.
@@ -107,6 +164,7 @@ function codexEnv() {
   for (const name of ENV_ALLOWLIST) {
     if (process.env[name] !== undefined) env[name] = process.env[name];
   }
+  if (SAFE_PATH !== null) env.PATH = SAFE_PATH;
   return env;
 }
 
@@ -122,7 +180,11 @@ function run(command, args, cwd, env) {
     // A whole working-tree diff passes through here for the fingerprint below,
     // and the 1 MiB default would report a large one as a failed command.
     maxBuffer: 64 * 1024 * 1024,
-    env: env ?? { ...process.env, ...ENV_FIXED },
+    env: env ?? {
+      ...process.env,
+      ...ENV_FIXED,
+      ...(SAFE_PATH === null ? {} : { PATH: SAFE_PATH }),
+    },
   });
   return {
     ok: !result.error && result.status === 0,
@@ -166,9 +228,34 @@ function parseArgs(argv) {
   return options;
 }
 
-/** `owner/name` for a remote URL, or null when the URL names no GitHub repo. */
+/**
+ * `owner/name` for a remote URL, or null when the URL does not name a
+ * repository on `github.com`. The host is part of the identity: a mirror at
+ * `https://mirror.example/<owner>/<name>.git` carries the same last two path
+ * segments as the GitHub repository `gh` resolved, and accepting it would let
+ * a stale or third-party copy supply the base the review diffs against.
+ */
 function repoFromRemoteUrl(url) {
-  const match = url.match(/[:/]([^/:]+)\/([^/]+?)(?:\.git)?\/?$/);
+  const scp = url.match(/^(?:[^@/]+@)?([^:/]+):(.+)$/);
+  let host;
+  let repoPath;
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(url)) {
+    let parsed;
+    try {
+      parsed = new URL(url);
+    } catch {
+      return null;
+    }
+    host = parsed.hostname;
+    repoPath = parsed.pathname;
+  } else if (scp) {
+    host = scp[1];
+    repoPath = scp[2];
+  } else {
+    return null;
+  }
+  if (host.toLowerCase() !== "github.com") return null;
+  const match = repoPath.match(/^\/?([^/]+)\/([^/]+?)(?:\.git)?\/?$/);
   return match ? `${match[1]}/${match[2]}` : null;
 }
 
@@ -323,11 +410,49 @@ function verifyBase(repoRoot, base, shouldFetch) {
 }
 
 /**
+ * Where a write to `target` actually lands. `path.resolve` is lexical, so an
+ * ignored `.reviews/link` pointing back into a tracked directory would pass
+ * the check below and then be followed by `openSync`. Resolve the deepest
+ * existing ancestor through its links, and refuse a final component that is
+ * itself a link rather than guessing what truncating it would do.
+ */
+function realDestination(target) {
+  const parent = path.dirname(target);
+  let realParent = parent;
+  const missing = [];
+  let probe = parent;
+  for (;;) {
+    try {
+      realParent = fs.realpathSync(probe);
+      break;
+    } catch {
+      const next = path.dirname(probe);
+      if (next === probe) return target;
+      missing.unshift(path.basename(probe));
+      probe = next;
+    }
+  }
+  const resolved = path.join(realParent, ...missing, path.basename(target));
+  for (const candidate of [resolved, `${resolved}.stderr.log`]) {
+    let stat;
+    try {
+      stat = fs.lstatSync(candidate);
+    } catch {
+      continue;
+    }
+    if (stat.isSymbolicLink()) {
+      fail(`--out ${target} is a symbolic link; pass a real path`);
+    }
+  }
+  return resolved;
+}
+
+/**
  * Refuse a report path that Git would track. Both the report and its sibling
  * `.stderr.log` are unscanned model output, so both have to be ignored.
  */
 function checkOutPath(repoRoot, outPath) {
-  const resolved = path.resolve(outPath);
+  const resolved = realDestination(path.resolve(outPath));
   if (!resolved.startsWith(`${repoRoot}${path.sep}`)) return resolved;
   for (const candidate of [resolved, `${resolved}.stderr.log`]) {
     if (!run("git", ["check-ignore", "-q", candidate], repoRoot).ok) {
@@ -346,11 +471,19 @@ function utcStamp(date) {
  * specified merge base", so a base holding commits HEAD does not have — a base
  * that moved after the last merge forward — must not be diffed directly: the
  * two-dot form would count those base-only changes in reverse and overstate
- * the branch. Falls back to the base itself when no merge base exists.
+ * the branch. No merge base is a stop: a shallow or single-branch checkout can
+ * resolve the base ref and still hold no common ancestry, and the header hands
+ * `merge_base_sha` to the reviewer as a commit naming the reviewed range.
  */
 function mergeBase(repoRoot, base) {
   const found = run("git", ["merge-base", "HEAD", base], repoRoot);
-  return found.ok && found.stdout ? found.stdout : base;
+  if (!found.ok || !/^[0-9a-f]{40}$/.test(found.stdout)) {
+    fail(
+      `no merge base between HEAD and ${base}; deepen the checkout ` +
+        "(git fetch --unshallow) or pass a --base that shares history",
+    );
+  }
+  return found.stdout;
 }
 
 /**
@@ -479,9 +612,34 @@ function runCodex(repoRoot, codexBin, base, reportPath, timeoutSeconds) {
       kill("SIGTERM");
       setTimeout(() => kill("SIGKILL"), 5000).unref();
     }, timeoutSeconds * 1000);
+    // The child is in its own process group, so a Ctrl-C or a SIGTERM aimed at
+    // this wrapper never reaches it: without these handlers an hour-long paid
+    // review keeps running, and keeps writing the report, after the command
+    // appears cancelled.
+    let interruptTimer = null;
+    const interrupted = (signal) => {
+      kill("SIGTERM");
+      if (interruptTimer) return;
+      // A last resort for a child that ignores SIGTERM: the normal path is the
+      // "close" event below, which settles and lets the caller report the run.
+      interruptTimer = setTimeout(() => {
+        kill("SIGKILL");
+        process.exit(signal === "SIGINT" ? 130 : 143);
+      }, 2000);
+      interruptTimer.unref();
+    };
+    const handlers = ["SIGINT", "SIGTERM", "SIGHUP"].map((signal) => {
+      const handler = () => interrupted(signal);
+      process.on(signal, handler);
+      return [signal, handler];
+    });
     const settle = (outcome) => {
       if (settled) return;
       settled = true;
+      for (const [signal, handler] of handlers) {
+        process.removeListener(signal, handler);
+      }
+      if (interruptTimer) clearTimeout(interruptTimer);
       clearTimeout(deadline);
       // codex can exit on SIGTERM while a descendant ignores it, so sweep the
       // group again rather than trusting an unreferenced escalation timer.
@@ -509,7 +667,19 @@ async function main() {
 
   const toplevel = run("git", ["rev-parse", "--show-toplevel"], process.cwd());
   if (!toplevel.ok) fail("not inside a Git repository");
-  const repoRoot = toplevel.stdout;
+  // This first call still ran on the inherited PATH, which under `pnpm run`
+  // starts with the repository's own `node_modules/.bin`. Check the answer
+  // against the filesystem, sanitize PATH against it, then read the root again
+  // through the sanitized PATH: a shim that lies about the root is caught by
+  // one of the two, and everything after this point runs on the clean PATH.
+  const repoRoot = verifiedRoot(toplevel.stdout);
+  SAFE_PATH = sanitizedPath(repoRoot);
+  const recheck = run("git", ["rev-parse", "--show-toplevel"], process.cwd());
+  if (!recheck.ok || realOrSelf(recheck.stdout) !== repoRoot) {
+    fail(
+      "the repository root disagrees between the inherited and sanitized PATH",
+    );
+  }
 
   if (process.env.CODEX_SANDBOX || process.env.CODEX_THREAD_ID) {
     fail(

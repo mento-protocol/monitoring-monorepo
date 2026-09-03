@@ -703,3 +703,90 @@ test("a repository naming no default branch refuses instead of guessing", (t) =>
   assert.equal(run.status, 2);
   assert.match(run.stderr, /names no default branch; pass --base/);
 });
+
+test("a repository-controlled git shim cannot decide what is reviewed", (t) => {
+  const repo = makeRepo(t);
+  fakeCodex(repo.bin, 'echo "clean"');
+  // What `pnpm run` puts first on PATH. This shim answers `--show-toplevel`
+  // with a directory of its own choosing and passes everything else through.
+  const shimDir = path.join(repo.repo, "node_modules", ".bin");
+  fs.mkdirSync(shimDir, { recursive: true });
+  const decoy = path.join(repo.root, "decoy");
+  fs.mkdirSync(path.join(decoy, ".git"), { recursive: true });
+  fs.writeFileSync(
+    path.join(shimDir, "git"),
+    [
+      "#!/bin/sh",
+      'if [ "$2" = "--show-toplevel" ]; then',
+      `  echo ${JSON.stringify(decoy)}`,
+      "  exit 0",
+      "fi",
+      `exec ${JSON.stringify(GIT_BIN)} "$@"`,
+    ].join("\n") + "\n",
+  );
+  fs.chmodSync(path.join(shimDir, "git"), 0o755);
+
+  const run = runScript(
+    repo,
+    ["--base", "base", "--no-fetch"],
+    {},
+    `${shimDir}:${repo.bin}:${process.env.PATH}`,
+  );
+
+  assert.equal(run.status, 2);
+  assert.match(run.stderr, /does not contain/);
+  assert.equal(run.reportPath, null);
+});
+
+test("a mirror remote is not read as the GitHub base repository", (t) => {
+  const repo = makeRepo(t);
+  fakeCodex(repo.bin, 'echo "clean"');
+  fakeGh(repo.bin, { defaultBranch: "trunk", pulls: [] });
+  // Same owner and name, different host: accepting it would let a mirror
+  // supply the base the review diffs against.
+  git(
+    repo.repo,
+    "remote",
+    "add",
+    "mirror",
+    "https://mirror.example/acme/widgets.git",
+  );
+
+  const run = runScript(repo, ["--no-fetch"]);
+
+  assert.equal(run.status, 2);
+  assert.match(run.stderr, /0 remotes serve acme\/widgets/);
+});
+
+test("no merge base is a stop rather than a base-ref merge base", (t) => {
+  const repo = makeRepo(t);
+  fakeCodex(repo.bin, 'echo "clean"');
+  // An orphan branch shares no history with HEAD, so `git merge-base` fails
+  // exactly as it does in a shallow checkout.
+  git(repo.repo, "checkout", "--quiet", "--orphan", "unrelated");
+  git(repo.repo, "commit", "--quiet", "--allow-empty", "-m", "unrelated");
+  git(repo.repo, "checkout", "--quiet", "main");
+
+  const run = runScript(repo, ["--base", "unrelated", "--no-fetch"]);
+
+  assert.equal(run.status, 2);
+  assert.match(run.stderr, /no merge base between HEAD and unrelated/);
+});
+
+test("an --out symlink is refused before anything is written", (t) => {
+  const repo = makeRepo(t);
+  fakeCodex(repo.bin, 'echo "clean"');
+  // Ignored by Git, so the lexical check passes; the link lands in a tracked
+  // directory, which is where the report would actually be written.
+  const reviews = path.join(repo.repo, ".reviews");
+  fs.mkdirSync(reviews, { recursive: true });
+  const target = path.join(repo.repo, "leaked.md");
+  const link = path.join(reviews, "link.md");
+  fs.symlinkSync(target, link);
+
+  const run = runScript(repo, ["--base", "base", "--no-fetch", "--out", link]);
+
+  assert.equal(run.status, 2);
+  assert.match(run.stderr, /symbolic link|not ignored by Git/);
+  assert.equal(fs.existsSync(target), false);
+});
