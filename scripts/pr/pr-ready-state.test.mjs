@@ -25,6 +25,7 @@ import {
 } from "./pr-ready-state-core.mjs";
 import {
   findCodeRabbitPathFilterSkipCandidate,
+  summarizeCodeRabbitReviewGate,
   validateCodeRabbitPathFilterSkip,
 } from "./pr-ready-state-review-signals.mjs";
 import { formatCompact, formatHuman } from "./pr-ready-state-format.mjs";
@@ -2741,6 +2742,28 @@ test("projects the CodeRabbit exact-head run without making it required", () => 
   assertEqual(summary.gates.codeRabbitReviewSignal.ready, true);
   assertEqual(summary.gates.codeRabbitReviewSignal.required, false);
   assertEqual(summary.gates.codeRabbitReviewSignal.fallbackAction, "wait");
+});
+
+test("emits the closeout fallback action for missing and stale signals", () => {
+  // The emitted value is a machine-readable instruction that
+  // `docs/notes/pr-ready-state.md` mirrors in prose. Nothing else pinned it
+  // before, so a rename could silently desynchronise the probe from the
+  // runbook.
+  for (const state of ["missing", "stale"]) {
+    assertEqual(
+      summarizeCodeRabbitReviewGate(state).fallbackAction,
+      "request_review_once_for_head",
+      `${state} must instruct one closeout request for the head`,
+    );
+  }
+
+  for (const state of ["reviewed", "requested", "not_applicable"]) {
+    assertEqual(
+      summarizeCodeRabbitReviewGate(state).fallbackAction,
+      "wait",
+      `${state} must not instruct another request`,
+    );
+  }
 });
 
 test("binds one CodeRabbit closeout request to the full current head", () => {
