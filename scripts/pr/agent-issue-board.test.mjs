@@ -23,6 +23,10 @@ import ts from "typescript";
 import {
   acquireIssueMutationLock,
   agentReadyRoutingGaps,
+  groom,
+  issueBoardExitCode,
+  satisfiesSweepLabelEligibility,
+  validateGroomLabels,
   buildClaimComment,
   buildBackfillPlan,
   backfill,
@@ -14425,6 +14429,390 @@ test("Project metadata writes never target the Status field", async () => {
     writes.every((write) => write.fieldId !== project.statusField.id),
     "metadata writes must not target Status",
   );
+});
+
+// ---------------------------------------------------------------------------
+// Grooming routing-label writes (pnpm issue:groom)
+// ---------------------------------------------------------------------------
+
+const GROOM_ISSUE_NUMBER = 2600;
+
+function createGroomBoard({
+  labels = [],
+  title = "Groom target",
+  state = "OPEN",
+  afterWrite = null,
+  removeFails = null,
+} = {}) {
+  const current = new Set(labels);
+  const calls = [];
+  const server = createFakeLockServer();
+  return {
+    server,
+    calls,
+    get labels() {
+      return [...current].sort();
+    },
+    dependencies: {
+      getProject: async () => ownershipProject(),
+      getIssue: async (_options, issueNumber) => {
+        assertEqual(issueNumber, GROOM_ISSUE_NUMBER, "groom issue number");
+        return {
+          number: GROOM_ISSUE_NUMBER,
+          title,
+          state,
+          labels: [...current].map((name) => ({ name })),
+        };
+      },
+      addIssueLabels: async (_options, _issue, add) => {
+        calls.push({ op: "add", labels: [...add] });
+        for (const label of add) current.add(label);
+        if (afterWrite) afterWrite(current);
+      },
+      removeIssueLabels: async (_options, _issue, remove) => {
+        calls.push({ op: "remove", labels: [...remove] });
+        if (removeFails) throw new Error(removeFails);
+        for (const label of remove) current.delete(label);
+      },
+      withIssueMutationLock: (options, issueNumber, metadata, mutation) =>
+        withIssueMutationLock(
+          options,
+          issueNumber,
+          metadata,
+          mutation,
+          server.operations,
+        ),
+    },
+  };
+}
+
+function groomOptions(addLabels) {
+  return {
+    ...LOCK_TEST_OPTIONS,
+    issues: [GROOM_ISSUE_NUMBER],
+    addLabels,
+  };
+}
+
+function lockCommitStates(server) {
+  const states = [];
+  let oid = server.refOid;
+  while (oid && server.commits.has(oid)) {
+    const commit = server.commits.get(oid);
+    states.unshift({
+      state: commit.payload.state,
+      operation: commit.payload.operation,
+    });
+    oid = commit.parentOid;
+  }
+  return states;
+}
+
+test("groom applies routing labels under the per-issue mutex", async () => {
+  const board = createGroomBoard({ labels: ["agent-ready", "risk:medium"] });
+  const results = await groom(
+    groomOptions(["pkg:tooling", "kind:workflow"]),
+    board.dependencies,
+  );
+
+  assertDeepEqual(board.calls, [
+    { op: "add", labels: ["pkg:tooling", "kind:workflow"] },
+  ]);
+  assertDeepEqual(board.labels, [
+    "agent-ready",
+    "kind:workflow",
+    "pkg:tooling",
+    "risk:medium",
+  ]);
+  assertEqual(results.length, 1, "groom result count");
+  assertEqual(results[0].state, "groomed", "groom result state");
+  assertDeepEqual(results[0].writes, [
+    { field: "label", value: "pkg:tooling" },
+    { field: "label", value: "kind:workflow" },
+  ]);
+
+  const states = lockCommitStates(board.server);
+  assert(
+    states.some(
+      (entry) => entry.state === "LOCK" && entry.operation === "groom",
+    ),
+    "groom must take the per-issue mutex",
+  );
+  assertEqual(
+    states.at(-1).state,
+    "UNLOCK",
+    "groom must release the per-issue mutex",
+  );
+});
+
+test("groom refuses a write that would complete sweep eligibility", async () => {
+  const board = createGroomBoard({ labels: ["agent-ready", "risk:low"] });
+  const err = await assertRejects(
+    () => groom(groomOptions(["pkg:tooling"]), board.dependencies),
+    /would leave .*satisfies the sweep predicate/,
+  );
+
+  assertEqual(err.code, "ISSUE_GROOM_ELIGIBILITY_REFUSED", "refusal code");
+  assertEqual(issueBoardExitCode(err), 4, "eligibility refusal exit code");
+  assertDeepEqual(board.calls, []);
+  assertDeepEqual(board.labels, ["agent-ready", "risk:low"]);
+  assertEqual(
+    lockCommitStates(board.server).at(-1).state,
+    "UNLOCK",
+    "a refusal before mutation must release the mutex",
+  );
+});
+
+test("groom refuses queue-state and non-routing labels", async () => {
+  for (const label of ISSUE_STATE_LABELS) {
+    const board = createGroomBoard({ labels: ["risk:medium"] });
+    const err = await assertRejects(
+      () => groom(groomOptions([label]), board.dependencies),
+      /refuses the queue-state label/,
+    );
+    assertEqual(err.code, "ISSUE_GROOM_LABEL_REFUSED", "state label code");
+    assertEqual(issueBoardExitCode(err), 3, "state label exit code");
+    assertDeepEqual(board.calls, []);
+  }
+
+  const board = createGroomBoard({ labels: ["risk:medium"] });
+  const err = await assertRejects(
+    () => groom(groomOptions(["source:backlog"]), board.dependencies),
+    /writes only pkg:, risk:, kind: routing labels/,
+  );
+  assertEqual(issueBoardExitCode(err), 3, "non-routing label exit code");
+  assertDeepEqual(board.calls, []);
+  assertDeepEqual(validateGroomLabels(["pkg:tooling", "pkg:tooling"]), [
+    "pkg:tooling",
+  ]);
+});
+
+// The interleaving ADR 0082 cannot serialize: a person adds a state label
+// through the GitHub UI after the in-mutex read and before the label write.
+function interleavedAgentReady() {
+  let written = false;
+  return (labels) => {
+    if (written) return;
+    written = true;
+    labels.add("agent-ready");
+  };
+}
+
+test("groom compensates a write that completes eligibility after landing", async () => {
+  const board = createGroomBoard({
+    labels: ["risk:low"],
+    afterWrite: interleavedAgentReady(),
+  });
+  const err = await assertRejects(
+    () => groom(groomOptions(["pkg:tooling"]), board.dependencies),
+    /Compensated by removing pkg:tooling/,
+  );
+
+  assertEqual(err.code, "ISSUE_GROOM_COMPENSATED", "compensation code");
+  assertEqual(issueBoardExitCode(err), 5, "compensation exit code");
+  assertDeepEqual(board.calls, [
+    { op: "add", labels: ["pkg:tooling"] },
+    { op: "remove", labels: ["pkg:tooling"] },
+  ]);
+  assertDeepEqual(board.labels, ["agent-ready", "risk:low"]);
+  assert(
+    !satisfiesSweepLabelEligibility(board.labels),
+    "compensation must leave the issue sweep-ineligible",
+  );
+  assertEqual(
+    lockCommitStates(board.server).at(-1).state,
+    "UNLOCK",
+    "a compensated write must release the mutex",
+  );
+});
+
+test("groom compensation removes only the labels it added", async () => {
+  const board = createGroomBoard({
+    labels: ["risk:low", "kind:workflow"],
+    afterWrite: interleavedAgentReady(),
+  });
+  await assertRejects(
+    () =>
+      groom(groomOptions(["pkg:tooling", "kind:workflow"]), board.dependencies),
+    /ISSUE_GROOM_COMPENSATED|Compensated by removing/,
+  );
+
+  assertDeepEqual(board.calls, [
+    { op: "add", labels: ["pkg:tooling"] },
+    { op: "remove", labels: ["pkg:tooling"] },
+  ]);
+  assertDeepEqual(board.labels, ["agent-ready", "kind:workflow", "risk:low"]);
+});
+
+// Negative control. The same interleaving fixture, driven through a write path
+// that keeps the in-mutex revalidation but drops the post-write read, must
+// leave the issue sweep-eligible. Without this the compensation test could pass
+// against a fixture whose concurrent state write never lands.
+test("negative control: no post-write read leaves the interleaved issue eligible", async () => {
+  const board = createGroomBoard({
+    labels: ["risk:low"],
+    afterWrite: interleavedAgentReady(),
+  });
+  const options = groomOptions(["pkg:tooling"]);
+  const result = await board.dependencies.withIssueMutationLock(
+    options,
+    GROOM_ISSUE_NUMBER,
+    { operation: "groom", projectId: "project", agent: options.agent },
+    async () => {
+      const issue = await board.dependencies.getIssue(
+        options,
+        GROOM_ISSUE_NUMBER,
+      );
+      const current = new Set(issue.labels.map((label) => label.name));
+      const additions = options.addLabels.filter(
+        (label) => !current.has(label),
+      );
+      assert(
+        !satisfiesSweepLabelEligibility(new Set([...current, ...additions])),
+        "the in-mutex check must pass, so only the post-write read can catch this",
+      );
+      await board.dependencies.addIssueLabels(options, issue, additions);
+      return { added: additions };
+    },
+  );
+
+  assertDeepEqual(result.added, ["pkg:tooling"]);
+  assertDeepEqual(board.calls, [{ op: "add", labels: ["pkg:tooling"] }]);
+  assertDeepEqual(board.labels, ["agent-ready", "pkg:tooling", "risk:low"]);
+  assert(
+    satisfiesSweepLabelEligibility(board.labels),
+    "the negative control must prove the interleaved state write lands",
+  );
+});
+
+test("groom keeps the mutex when compensation fails", async () => {
+  const board = createGroomBoard({
+    labels: ["risk:low"],
+    afterWrite: interleavedAgentReady(),
+    removeFails: "label removal rejected",
+  });
+  const err = await assertRejects(
+    () => groom(groomOptions(["pkg:tooling"]), board.dependencies),
+    /Compensation failed: label removal rejected/,
+  );
+
+  assert(
+    err instanceof IssueMutationLockStaleError,
+    "a failed compensation must keep the mutex and report it as stale",
+  );
+  assertEqual(issueBoardExitCode(err), 6, "compensation failure exit code");
+  assert(
+    /Remove pkg:tooling by hand/.test(err.message),
+    "the failure must name the labels to remove by hand",
+  );
+  assert(
+    satisfiesSweepLabelEligibility(board.labels),
+    "the failure case is the one that leaves the issue eligible",
+  );
+  assertEqual(
+    lockCommitStates(board.server).at(-1).state,
+    "LOCK",
+    "a failed compensation must retain LOCK",
+  );
+});
+
+test("groom skips labels the issue already carries", async () => {
+  const board = createGroomBoard({ labels: ["agent-ready", "pkg:tooling"] });
+  const results = await groom(
+    groomOptions(["pkg:tooling"]),
+    board.dependencies,
+  );
+  assertDeepEqual(board.calls, []);
+  assertDeepEqual(results[0].writes, []);
+});
+
+test("groom parses one issue and its routing labels", () => {
+  const help = usage();
+  assert(
+    help.includes("pnpm issue:groom --issue 901 --add-label"),
+    "usage must name the grooming routing-label helper",
+  );
+
+  const options = parseArgs([
+    "groom",
+    "--issue",
+    "901",
+    "--add-label",
+    "pkg:tooling,kind:workflow",
+    "--add-label",
+    "risk:medium",
+  ]);
+  assertEqual(options.command, "groom");
+  assertDeepEqual(options.issues, [901]);
+  assertDeepEqual(options.addLabels, [
+    "pkg:tooling",
+    "kind:workflow",
+    "risk:medium",
+  ]);
+
+  assertThrows(
+    () => parseArgs(["groom", "--issue", "901"]),
+    /at least one --add-label/,
+  );
+  assertThrows(
+    () => parseArgs(["groom", "--add-label", "pkg:tooling"]),
+    /exactly one explicit --issue/,
+  );
+  assertThrows(
+    () =>
+      parseArgs([
+        "groom",
+        "--issue",
+        "901",
+        "--issue",
+        "902",
+        "--add-label",
+        "pkg:tooling",
+      ]),
+    /exactly one explicit --issue/,
+  );
+  assertThrows(
+    () => parseArgs(["claim", "--issue", "901", "--add-label", "pkg:tooling"]),
+    /--add-label is valid only for groom/,
+  );
+});
+
+test("sweep label eligibility is the conjunction the grooming rule names", () => {
+  assert(
+    satisfiesSweepLabelEligibility(["agent-ready", "risk:low", "pkg:tooling"]),
+    "agent-ready with one risk:low and one pkg:* is eligible",
+  );
+  for (const labels of [
+    ["risk:low", "pkg:tooling"],
+    ["agent-ready", "risk:medium", "pkg:tooling"],
+    ["agent-ready", "risk:low", "risk:medium", "pkg:tooling"],
+    ["agent-ready", "risk:low", "pkg:tooling", "pkg:alerts"],
+    ["agent-ready", "risk:low"],
+  ]) {
+    assert(
+      !satisfiesSweepLabelEligibility(labels),
+      "expected ineligible: " + labels.join(", "),
+    );
+  }
+});
+
+// The entry point routes every failure through issueBoardExitCode, so the exit
+// code of a command that asks for none must still be the 1 it was before.
+test("issueBoardExitCode leaves every other failure at exit 1", () => {
+  assertEqual(issueBoardExitCode(new Error("plain")), 1, "a plain error");
+  assertEqual(issueBoardExitCode("not an error"), 1, "a non-error rejection");
+  const zero = new Error("zero code");
+  zero.exitCode = 0;
+  assertEqual(
+    issueBoardExitCode(zero),
+    1,
+    "a zero exitCode is not a failure code",
+  );
+  const wrapped = new Error("outer", { cause: new Error("inner") });
+  assertEqual(issueBoardExitCode(wrapped), 1, "an ordinary cause chain");
+  const cyclic = new Error("cyclic");
+  cyclic.cause = cyclic;
+  assertEqual(issueBoardExitCode(cyclic), 1, "a cyclic cause chain terminates");
 });
 
 await Promise.all(pending);

@@ -57,6 +57,11 @@ Routing labels:
 - `kind:*` — work type.
 - `risk:*` — implementation risk: low, medium, or high.
 
+`pnpm issue:groom` is the only helper that writes `pkg:*`, `risk:*`, and
+`kind:*`. It takes the same per-issue mutex, revalidates the resulting label set
+inside it, and refuses a write that would leave the issue backlog-sweep eligible.
+It never writes a state label.
+
 An issue may carry `agent-ready` only with exactly one `risk:*` and at least one
 `pkg:*`. An `agent-ready` issue missing either is **incompletely groomed**:
 consumers treat it as `needs-grooming` until it is repaired, and
@@ -185,6 +190,7 @@ Issue #2071 compatibility details for these commands.
 pnpm issue:claim --count 3 --agent codex
 pnpm issue:claim --issue 901 --agent claude
 pnpm issue:claim --issue 901 --agent codex --branch fix/901 --claim-id sweep-901 --sweep-eligible --body-sha256 <digest>
+pnpm issue:groom --issue 901 --add-label pkg:tooling,kind:workflow
 pnpm issue:review --pr 123 --issue 901
 pnpm issue:review --pr 123 --issue 901 --claim-id <claim-id> --rebind-branch
 pnpm issue:release --issue 901 --claim-id <claim-id>

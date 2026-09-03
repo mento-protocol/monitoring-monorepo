@@ -837,7 +837,8 @@ The full procedure is
      against a roster snapshot can land `needs-grooming` beside an
      `agent-active` a claim added a moment earlier. Propose the state instead —
      `needs-grooming` for an unlabeled candidate, never `agent-ready` — and let
-     an operator or a mutex-owning helper apply it. Write no Project field.
+     an operator or a mutex-owning helper apply it. `issue:groom` takes that
+     mutex for routing labels and refuses state labels. Write no Project field.
 
 4. **Post the marker comment, then write the labels — in that order, on every
    issue.** The two writes are separate API calls, and a label that lands with
@@ -872,12 +873,22 @@ The full procedure is
    non-Blocked Project status, so promotion alone would not make it claimable.
 
    ```bash
-   gh issue edit <n> --repo mento-protocol/monitoring-monorepo \
-     --add-label pkg:tooling --add-label risk:medium --add-label kind:workflow
+   pnpm issue:groom --issue <n> --add-label pkg:tooling,kind:workflow
    ```
 
-   No issue-board helper writes routing labels: `issue:claim`, `issue:review`,
-   and `issue:release` move state labels and Project ownership fields only.
+   Write routing labels only through `pnpm issue:groom`, never raw
+   `gh issue edit`. The helper takes the ADR 0082 per-issue mutex, re-reads the
+   live labels inside it, and applies the write only when the resulting set
+   still fails the sweep predicate. Step 3's check runs against a snapshot; this
+   read is what holds it against a state label that lands in between. Exit 3
+   means a requested label is a state label or not a routing label; exit 4 means
+   the write would complete eligibility and nothing was written; exit 5 means it
+   landed, completed eligibility, and was removed again. Treat 4 and 5 the same
+   way — put the label in `proposed`. Exit 6 means compensation failed: the
+   issue is sweep-eligible, the mutex is held, and the message names the labels
+   to remove by hand. Report exit 6 to the operator and never retry it.
+   `issue:claim`, `issue:review`, and `issue:release` still own state labels and
+   Project ownership fields.
 
 5. **Record a failure and continue.** A rate limit, a missing label, or a path
    read that errors is recorded against that issue; the pass moves to the next

@@ -701,7 +701,7 @@ procedure below.
   `deploy/deploy-indexer-verify{,-analysis}{,.test}.mjs` and
   `deploy/deploy-indexer-verify-status-identity.mjs` use one any-depth arm;
   both verifier tests run. The exact `pr/agent-issue-board{,.test}.mjs`,
-  `pr/issue-board-{backfill,cli,commands,projects,state,sync,transport}.mjs`,
+  `pr/issue-board-{backfill,cli,commands,groom,projects,state,sync,transport}.mjs`,
   and `pr/issue-board-{lock,ownership,release,sync-lock,transactions}.mjs` set
   routes to `pnpm issue:board:test`. Required CI runs it after failures. ADR
   0082 owns confinement. Exact

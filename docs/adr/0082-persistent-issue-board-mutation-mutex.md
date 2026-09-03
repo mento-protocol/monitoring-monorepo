@@ -193,7 +193,8 @@ Claim, recovery, compensation, review, release, and backfill pass the capability
 through every owner-field write. Sync receives a capability with an empty field
 allowlist. It does not pass the capability to Project membership writes.
 Project membership writes therefore remain outside this owner-field capability.
-Project Status remains read-only.
+Project Status remains read-only. Grooming receives a capability with an empty
+field allowlist and writes no Project field.
 
 A repository-wide text inventory scans every tracked and nonignored untracked
 file for each complete protected operation name. Each occurrence must be in the
@@ -429,6 +430,17 @@ them as empty. It rejects a mismatch that the snapshot shows and preserves
 Status. It does not roll back a direct external write because that could erase
 external state. It reads at most 100 comment pages or 10,000 comments and fails
 closed on incomplete history.
+
+Grooming routing writes take the same mutex. `issue:groom` writes `pkg:*`,
+`risk:*`, and `kind:*` labels on one explicit issue. It refuses a queue-state
+label and every other label class. It re-reads the issue's labels inside the
+serialized section and refuses the write when the resulting set would satisfy
+the backlog-sweep label predicate: `agent-ready`, exactly one `risk:*` equal to
+`risk:low`, and exactly one `pkg:*`. The mutex serializes helpers, not people,
+so the helper re-reads the labels after the write. When a state label landed in
+between and the issue is now sweep-eligible, the helper removes exactly the
+labels it added and exits nonzero. A failed removal retains `LOCK` and names the
+labels an operator must remove by hand.
 
 An operator recovers a stale lock only after proving that the original helper
 cannot resume. The operator terminates its session or process, or revokes its

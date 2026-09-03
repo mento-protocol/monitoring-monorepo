@@ -645,6 +645,8 @@ it is the same click the `agent-ready` promotion already needs.
   `needs-grooming` beside an `agent-active` a claim added a moment earlier. The
   pass proposes the state instead — `needs-grooming` for an unlabeled candidate,
   never `agent-ready` — and an operator or a mutex-owning helper applies it.
+  `issue:groom` takes that mutex for the routing labels below and refuses state
+  labels outright.
 
   Promotion to `agent-ready` was never the pass's to make: it is the human
   judgement that an issue is implementable as written. When the body already
@@ -665,10 +667,40 @@ the comment cannot be posted, write no label for that issue and record the
 failure. When a label write then fails, post one follow-up comment naming the
 label that did not land; the marker stays, so the window still holds.
 
-Label writes go through `gh issue edit --add-label`. No issue-board helper
-offers a routing-label write: `issue:claim`, `issue:review`, and `issue:release`
-move state labels and Project ownership fields only. The pass writes no Project
-field, and it never touches the state label of an owned issue — one carrying
+Label writes go through `pnpm issue:groom`, one call per issue:
+
+```bash
+pnpm issue:groom --issue <n> --add-label pkg:tooling,kind:workflow
+```
+
+The helper holds the ADR 0082 per-issue mutex, re-reads the issue's live labels
+inside the serialized section, and applies them only when the set the write
+would produce still fails the sweep predicate. The snapshot check above is the
+pass's own rule; this read is what makes it hold against a state label that
+lands between the two. The helper writes no state label and no Project field:
+`issue:claim`, `issue:review`, and `issue:release` own queue state and
+ownership. Never write routing labels with raw `gh issue edit` — that call takes
+no mutex, so its no-widening check is computed from a snapshot the write cannot
+re-check.
+
+Exit codes say what happened, and the pass records each against the issue:
+
+| Exit | Meaning                                                                 |
+| ---: | ----------------------------------------------------------------------- |
+|    0 | The labels were applied.                                                |
+|    3 | A requested label is a queue-state label or not a routing label.        |
+|    4 | The write would complete eligibility. Nothing was written.              |
+|    5 | The write landed, completed eligibility, and was removed again.         |
+|    6 | Compensation failed. The issue is sweep-eligible and the mutex is held. |
+
+Exit 4 is the ordinary refusal: put the label in the marker's `proposed` list.
+Exit 5 means a state label landed after the in-mutex read — the labels this call
+added were removed, so the issue is back where it started; treat it as exit 4 and
+propose the label. Exit 6 is the one an operator must see: the message names the
+labels to remove by hand, and the per-issue mutex stays held until that happens.
+Report it and move to the next candidate; do not retry the write.
+
+The pass never touches the state label of an owned issue — one carrying
 `agent-active` or `in-pr` belongs to a live claim.
 
 ### The marker comment
