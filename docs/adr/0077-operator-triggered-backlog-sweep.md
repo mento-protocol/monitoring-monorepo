@@ -3,7 +3,7 @@ title: Operator-triggered backlog sweep with isolated workers
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-02
+last_verified: 2026-09-03
 scope: process
 date: 2026-08
 doc_type: adr
@@ -96,8 +96,9 @@ every clause it had, the sweep still stops at READY, and it still never merges.
 every worker is spawned, and before the report — including on an empty batch,
 which is the case it exists for. It reads each candidate's body and the paths
 that body names, applies `pkg:*`, `kind:*`, and a narrowing `risk:*` from what
-the tree holds, posts one `sweep-groomed:v1` marker comment per issue, and is
-capped at 10 candidates a run. Its position in the loop is one safety property:
+the tree holds, posts one `sweep-groomed:v2` marker comment per issue, and is
+capped at 10 grooming attempts a run. Its position in the loop is one safety
+property:
 this run's eligibility step has already finished, so no label the pass writes
 can select work for this run. Grooming first and then selecting was the
 alternative, and it is one night faster; it was rejected because it lets one
@@ -168,6 +169,30 @@ one label; every other area keeps the label test. `pnpm issue:claim
 issue's own labels and never sees the batch, so batch independence stays the
 orchestrator's judgement in both shapes.
 
+**The `sweep-groomed:v2` marker contract.** Five findings from reviewing the
+pass refine it without changing the decision above. The skip key now runs before
+the 10-candidate cap, so the cap bounds grooming attempts and unchanged high
+scorers cannot hold every slot; the cap bounds no reads, so the report records
+how many candidates the walk examined, and no ceiling was put on that number
+because a stable walk order plus a fixed depth never reaches the tail of the
+queue. `docs/README.md` joins the compared path set of any `pkg:tooling`
+candidate that adds, moves, or removes a Markdown surface, that changes the
+front matter of one, or that adds or removes an internal link, because
+`pnpm docs:index --check` makes the generated catalog a file both workers
+regenerate and `scripts/context/docs-index-helpers.mjs` renders it from front
+matter and link state alike. Paths resolve against `origin/main` at one pinned OID rather
+than the session checkout, since labels are repository-wide state and the pass
+may not retract a wrong one. The marker gains a `labels` snapshot, so a human
+who fixes the labels a stop asked about reopens the candidate without editing
+the body, and a per-path blob digest, so a named file whose contents changed
+under a stable name is read again. The snapshot and the skip test read the same
+four label classes — `risk:*`, `pkg:*`, `kind:*`, and queue state — because a
+class the pass writes but the snapshot omits would make the test fail for every
+issue carrying one. Those fields are a new payload shape, so the
+marker is `sweep-groomed:v2` and the skip key matches that prefix literally:
+every `v1` marker is invalid by construction and re-grooms once. The veto window
+alone still reads any version, because it asks whether a human saw the labels.
+
 ## Alternatives considered
 
 **Shared checkout for all workers.** Cheaper to set up and avoids repeated
@@ -229,7 +254,9 @@ PR it opens.
 - Issue
   [#2209](https://github.com/mento-protocol/monitoring-monorepo/issues/2209)
   carries the 2026-09 amendment: the grooming pass, its veto window, and the
-  `pkg:tooling` path test, all documented in the two files above.
+  `pkg:tooling` path test, all documented in the two files above. Issues 2240,
+  2242, 2246, 2247, and 2256 carry the `sweep-groomed:v2` marker contract that
+  followed from reviewing it.
 - The concurrency bound is the gate coordinator's own capacity, default 3,
   recorded in [ADR 0076](0076-fair-quality-gate-coordinator.md) and
   [`docs/notes/agent-quality-gate-mechanics.md`](../notes/agent-quality-gate-mechanics.md).

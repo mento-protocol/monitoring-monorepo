@@ -100,7 +100,7 @@ implementation. **Refuse a batch size above 4.** Say that plainly and stop
 rather than clamping silently — an operator who asked for 6 needs to know they
 got a refusal, not a quiet 4. The grooming pass below is outside that model: it
 costs issue reads, label writes, and one comment each, opens no PR, and buys no
-review round. Keep its cap at 10 candidates a run.
+review round. Keep its cap at 10 grooming attempts a run.
 
 ## Rank And Pick The Batch
 
@@ -191,8 +191,12 @@ Take the top N — default 2 — that satisfy **all** of:
   them, and the second PR then pays for a merge, a re-gate, and a fresh review
   round it did not need. `pkg:tooling` gets a path test instead, below.
 - **Outside its own grooming veto window.** A candidate whose newest _trusted_
-  `sweep-groomed:v1` marker comment is less than 12 hours old waits for the
-  next run; the report names when that window closes. The window is a bounded
+  `sweep-groomed:` marker comment is less than 12 hours old waits for the
+  next run, whatever version that marker carries — the window asks whether a
+  human has seen the labels, which does not depend on the payload shape, so
+  matching `v2` only here would un-veto every issue the last run groomed. The
+  skip key below does match `v2` only. The report names when that window
+  closes. The window is a bounded
   chance for a human to disagree with a label an agent applied, before that
   label selects work for another agent. An issue a human labeled by hand
   carries no marker and is never delayed. An operator who wants to fast-track a
@@ -213,7 +217,7 @@ Take the top N — default 2 — that satisfy **all** of:
   gh issue view <n> --repo mento-protocol/monitoring-monorepo \
     --json comments \
     --jq '.comments[]
-          | select(.body | startswith("<!-- sweep-groomed:v1"))
+          | select(.body | startswith("<!-- sweep-groomed:"))
           | {login: .author.login, created: .createdAt}'
 
   repo=mento-protocol/monitoring-monorepo
@@ -236,7 +240,19 @@ a path whose first two segments are `.claude/skills` is read with those replaced
 by `.agents/skills`, whatever follows and whether or not it ends in a slash. The
 two are one collision surface, so an issue naming one and an issue naming the
 other would otherwise pass a literal containment test and then produce two PRs
-touching the same files.
+touching the same files. Then add `docs/README.md` to the compared path set of
+any candidate whose named paths add, move, or remove a Markdown surface.
+[`context-standards.md`](../../../docs/context-standards.md) requires that
+catalog to index every Markdown file and `pnpm docs:index --check` fails while
+it is stale, so both workers regenerate the one file and their PRs conflict on
+it. Two Markdown-adding candidates are therefore never independent. A candidate
+that changes any front matter of an existing Markdown surface carries the
+catalog too, and so does one that adds or removes an internal link, because the
+catalog also lists broken internal links. Only a body-prose edit that leaves the
+front matter and every link alone is exempt. Do not restate which fields the
+catalog renders: `classifyDocumentation` and `catalogEntry` in
+`scripts/context/docs-index-helpers.mjs` decide that, and any list written here
+rots against them in silence.
 A candidate with no path list conflicts with every other `pkg:tooling`
 candidate: nothing to compare is not evidence that the paths are disjoint. Name
 the independence basis in the printed batch for every pair that relied on this,
@@ -698,25 +714,70 @@ control that blocks your own work, one run later. Narrowing is free.
 The full procedure is
 [`backlog-sweep.md`](../../../docs/notes/backlog-sweep.md). The operative steps:
 
-1. **Take at most 10 candidates**, ordered by `rank-backlog` score, highest
-   first, then by issue number, newest first — the outside-the-queue set carries
-   no score and so sits behind every scored candidate. Two sets qualify:
-   `agent-ready` issues lacking exactly one `risk:*` or exactly one `pkg:*`, and
-   issues with no queue-state label read from the roster the ranking already
-   fetched. Drop every bot record — anything authored by `app/github-actions`
-   or carrying `drift-detection`, `sentry-triage`, a `sentry:*` label,
-   `dependencies`, `security-advisories`, or `file-size-watchlist`. Skip a
-   candidate only when its body digest still matches its newest trusted marker,
-   the marker's resolved path set still matches, and the issue carries every
-   label in that marker's `applied` list. All three are needed: the verdict
-   comes from the body and from what the tree holds, so a named path that did
-   not exist then and does now must be read again; and missing `applied` labels
-   mean a write failed after the comment landed, so retry rather than skip for
-   ever. Compare the body, never `updatedAt` — posting the marker updates the
-   issue, so a timestamp test would compare the pass against its own write.
-   Count the skip in the report.
-2. **Read the body, then read the paths it names.** The labels come from what
-   the checkout holds, not from what the body claims.
+1. **Pin the tree, then order, filter, and cap at 10.** Fetch `origin/main` and
+   pin one OID for the whole pass before any candidate is read; every path read
+   below, the skip key's digests included, uses that one tree. The pass runs
+   long after Preflight, so it pins its own OID rather than inheriting
+   Preflight's, and the marker records it.
+
+   ```bash
+   git fetch origin main
+   oid="$(git rev-parse origin/main)"
+   git ls-tree "$oid" -- <path>      # blob or tree SHA, empty when absent
+   ```
+
+   Order by `rank-backlog` score, highest first, then by issue number, newest
+   first; the
+   outside-the-queue set carries no score and so sits behind every scored
+   candidate. Two sets qualify: `agent-ready` issues lacking exactly one
+   `risk:*` or exactly one `pkg:*`, and issues with no queue-state label read
+   from the roster the ranking already fetched. Drop every bot record —
+   anything authored by `app/github-actions` or carrying `drift-detection`,
+   `sentry-triage`, a `sentry:*` label, `dependencies`,
+   `security-advisories`, or `file-size-watchlist`. Then walk that order and
+   test the skip key below as you reach each candidate, stopping at the first 10
+   survivors; the test costs one comment read each, so walk it lazily rather
+   than pre-filtering the whole queue. The cap bounds grooming attempts, not
+   candidates examined: capping first would let ten unchanged high scorers hold
+   every slot run after run and starve the rest of the queue. The read cost is
+   therefore bounded by the candidate set rather than by the cap, so report how
+   many candidates the walk examined beside how many it groomed. Do not add a
+   fixed ceiling on candidates examined: the walk order is stable, so a hard
+   stop at the same depth every run never reaches the tail. Count every skipped
+   candidate in the report.
+
+   **The skip key has four parts**, read from the candidate's newest trusted
+   `sweep-groomed:v2` marker. Skip only when all four hold: the body digest
+   still matches; the marker's `paths` map still matches, path for path and
+   digest for digest, at the OID pinned above; the issue carries every label in
+   the marker's `applied` list; and the issue's current `risk:*`,
+   `pkg:*`, `kind:*`, and queue-state labels equal the marker's `labels`
+   snapshot plus its `applied` list — the same four label classes on both sides,
+   because those are every class the pass writes into `applied`, and a class
+   present on one side only makes the test fail for ever. Each guards a
+   different way the verdict goes stale. The body is what the pass read. The `paths` map is the rest of it — a named path that was
+   absent then and exists now, one since deleted, and one whose contents changed
+   under a stable name all change the answer. Missing `applied` labels mean a
+   write failed after the comment landed, so retry rather than skip for ever.
+   The `labels` snapshot is what makes a human's correction reopen the issue:
+   a pass that stopped on two `risk:*` labels writes `applied: []`, and without
+   the snapshot the empty-subset check would succeed vacuously and strand the
+   issue after a human removed one of them. Compare the body, never `updatedAt`
+   — posting the marker updates the issue, so a timestamp test would compare
+   the pass against its own write. A `v1` marker never satisfies the key: it
+   carries no `labels`, no per-path digest, and no resolution ref, so every
+   issue groomed under `v1` re-grooms once.
+
+2. **Read the body, then read the paths it names against the OID pinned in
+   step 1.** Read every path with `git ls-tree` or `git cat-file` against that
+   OID, never from the session checkout. Labels are repository-wide state and
+   the checkout is session-local:
+   a sweep started from a clean feature branch would otherwise classify live
+   issues against that branch's tree, and since the pass never removes or
+   downgrades a label, a wrong `pkg:*` cannot be retracted later. The marker
+   records the ref and the OID, so a reader can tell what a verdict was based
+   on. The labels come from what that tree holds, not from what the body claims.
+
 3. **Decide the labels.**
    - `pkg:*` — every area the named paths fall in. Several labels when the
      issue genuinely spans packages, which keeps it correctly labeled and
@@ -755,13 +816,17 @@ The full procedure is
    posted, write no label for that issue.
 
    ```text
-   <!-- sweep-groomed:v1 {"sweep":"<sweep_id>","at":"<ISO-8601 UTC>","body":"<sha256>","paths":[...],"applied":[...],"proposed":[...]} -->
+   <!-- sweep-groomed:v2 {"sweep":"<sweep_id>","at":"<ISO-8601 UTC>","ref":"origin/main","oid":"<40-hex>","body":"<sha256>","paths":{"<path>":"<blob or tree sha>"},"labels":[...],"applied":[...],"proposed":[...]} -->
    ```
 
-   `body` is the SHA-256 of the issue body this pass read and `paths` the named
-   paths that existed in the checkout when it read them; the next run skips the
-   candidate only while both still match and its `applied` labels are present. `applied` lists the labels the
-   next call writes; `proposed` lists everything
+   `ref` and `oid` name the tree the paths were resolved against. `body` is the
+   SHA-256 of the issue body this pass read. `paths` maps each named path that
+   resolved at that OID to its `git ls-tree` blob or tree SHA, so a file whose
+   contents changed under a stable name invalidates the marker; only paths the
+   body names are covered. `labels` snapshots the issue's `risk:*`, `pkg:*`,
+   `kind:*`, and queue-state labels as read, before this pass writes anything —
+   every class the pass can write, so the skip key compares like with like.
+   `applied` lists the labels the next call writes; `proposed` lists everything
    the pass judged right and will not write itself — a `risk:low`, the state
    label the mutex owns, the `agent-ready` promotion, workboard enrollment, and
    a risk label withheld from a contradicted or double-labeled issue. `at`
@@ -937,18 +1002,26 @@ board.
    that something is still sitting there.
 6. **Anything needing the operator's decision** — a blocked control, a
    misgroomed issue, a finding the worker could not adjudicate.
-7. **Groomed for the next run**, a table of `Issue | Labels applied | Proposed
-for a human | Rule basis | Veto ends`. `Proposed for a human` is the column
-   an operator acts on — a `risk:low` the pass may not write, the state label
-   the mutex owns, workboard enrollment, an `agent-ready` promotion the body
-   already deserves. `Veto ends` says when the window closes, not when the
-   issue becomes selectable: an unapplied proposal, a `risk:medium`, or several
-   `pkg:*` labels keep it ineligible whatever the clock says. Name the
+7. **Groomed for the next run.** State two run-wide facts above the table: the
+   `origin/main` OID every path was read against, the same value the marker
+   carries, so a verdict is reproducible from a named ref; and how many
+   candidates the walk examined. Each is one value a run, so neither is a
+   column. The table is
+   `Issue | Labels applied | Proposed for a human | Rule basis | Veto ends`.
+   `Proposed for a human` is the column an operator acts on — a `risk:low` the pass may not write, the
+   state label the mutex owns, workboard enrollment, an `agent-ready` promotion
+   the body already deserves. `Rule basis` names the Low-risk rule clause behind
+   the risk verdict, and on a skipped or re-groomed row it carries the reason
+   instead. `Veto ends` says when the window closes, not
+   when the issue becomes selectable: an unapplied proposal, a `risk:medium`, or
+   several `pkg:*` labels keep it ineligible whatever the clock says. Name the
    remaining requirement beside the time whenever one applies. List candidates
-   skipped as unchanged since their last marker, so a stuck issue is visible.
-   Write the section with a `none` row when the pass groomed nothing — an empty
-   candidate set and a pass that never ran read identically once the section is
-   missing.
+   skipped against their last marker with the reason, and candidates re-groomed
+   because the key broke with what broke it — the changed path, the label a
+   human moved, or a `v1` marker. A stuck issue and a re-read one are both
+   visible that way. Write the section with a `none` row when the pass groomed
+   nothing — an empty candidate set and a pass that never ran read identically
+   once the section is missing.
 
 Print the same summary to the terminal; the file is the artifact, the terminal
 output is its summary.
