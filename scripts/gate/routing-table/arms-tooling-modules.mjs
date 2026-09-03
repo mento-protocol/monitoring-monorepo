@@ -52,18 +52,6 @@ export const TOOLING_MODULE_ARMS = [
     ],
   },
   {
-    patterns: [
-      "scripts/pr/review-process-metrics.mjs",
-      "scripts/pr/review-process-metrics.test.mjs",
-    ],
-    effects: [
-      {
-        command: "node scripts/pr/review-process-metrics.test.mjs",
-        reason: "review-process metrics collector changed",
-      },
-    ],
-  },
-  {
     patterns: ["scripts/coderabbit-config.test.mjs"],
     effects: [
       {
@@ -455,6 +443,19 @@ export const TOOLING_MODULE_ARMS = [
       {
         command: "node scripts/alerts/check-peg-registry-integrity.test.mjs",
         reason: "peg policy version digest changed",
+      },
+    ],
+  },
+  {
+    why: "The closeout review tool operating-card step 4 runs. Its own suite is the only check that proves the pinned codex argv, the environment allowlist, and the exit codes the card reads.",
+    patterns: [
+      "scripts/pr/closeout-review.mjs",
+      "scripts/pr/closeout-review.test.mjs",
+    ],
+    effects: [
+      {
+        command: "node --test scripts/pr/closeout-review.test.mjs",
+        reason: "closeout review tool changed",
       },
     ],
   },

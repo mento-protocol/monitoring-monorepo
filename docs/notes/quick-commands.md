@@ -3,7 +3,7 @@ title: Quick Commands
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-01
+last_verified: 2026-09-02
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -53,11 +53,9 @@ pnpm agent:quality-gate --run --allow-package-script-changes  # Local
 git config agent.qualityGate.allowPackageScriptChanges true   # Hosted, before the direct warm command
 pnpm agent:context-check           # Validate repo-visible agent instructions, links, and routing
 pnpm agent:review-materiality      # Classify review depth + context-update signals for current diff
-pnpm agent:autoreview              # Isolated closeout; multi-pass uses --prepare-bundle-dir DIR + a fresh reviewer; gate owns tests
-pnpm agent:autoreview:test         # Full regressions; defaults to up to 3 workers with progress + timings
-pnpm agent:autoreview:test -- --jobs 1  # Sequential full closeout for autoreview runtime changes
-pnpm agent:autoreview --verify-bundle-dir DIR  # Pre-review rehash; retain the printed manifest digest
-pnpm agent:autoreview --verify-bundle-dir DIR --expected-bundle-manifest DIGEST  # Bound post-review rehash
+pnpm agent:closeout-review         # Second-model source review; prints `report: <path>`; exit 1 = findings, 2 = it did not run
+pnpm agent:closeout-review --base <base-remote>/<baseRefName>  # Fork or stacked PR; otherwise it resolves the base itself
+pnpm agent:closeout-review:test    # Suite for the closeout review tool
 pnpm review:eval:experiment -- --help  # Non-ledger paired screen; canonical qualification reruns all 24 cells
 pnpm review:eval:experiment -- --validate-plan <campaign-dir> --json  # Validate one candidate campaign without a model call
 pnpm review:eval:experiment -- --run <campaign-dir> --stage screen --dry-run --json  # List paid lanes without a model call
@@ -88,7 +86,6 @@ pnpm agent:context-budget --strict # Enforce root, scoped-file, and aggregate-ro
 # /pr-ready-override gate=codex-description-approval head=<full-head-sha> reason=<why this is safe>
 pnpm --silent pr:feedback-state --pr 123 --json  # Normalize unresolved/reply-required feedback before all-clear
 pnpm pr:ready-state --pr 123 --json              # Final current-head required-readiness probe
-node scripts/pr/review-process-metrics.mjs --prs <pr1,pr2,...> --output <result.json>  # Collect a new cohort after defining its boundary and tracking issue
 pnpm lockfile:lint                 # Fail-closed integrity/registry/override-floor check; no install
 pnpm skew:check                    # Fail on dependency skew vs pnpm catalog; no install
 pnpm sanitize:test                 # Fixture-test scripts/sanitize-terraform-output.sh secret redaction
