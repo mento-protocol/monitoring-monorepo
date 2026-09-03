@@ -129,7 +129,7 @@ even when you never open an authority.
    Authority:
    [`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md).
 
-4. **Autoreview.** Freeze the scope baseline first — the initial request,
+4. **Review.** Freeze the scope baseline first — the initial request,
    target/owner, changed-file set, and non-test changed-line count — as the
    reference Babysit (step 6) checks new additions against. Then, for a
    non-trivial completed batch, run the closeout review.
@@ -140,46 +140,77 @@ even when you never open an authority.
    to write. Either way every claim names the evidence behind it and the
    nearest stronger claim that evidence does not support, and an unexplained
    strengthening of a claim is a finding. **This is the running agent's job,
-   not the bundled reviewer's**: the prepared bundle carries the diff and the
-   selected checklists, not the PR body or the command output behind a claim,
-   so a reviewer confined to it cannot see the claims to test. Do it where the
-   claims and their evidence are both in hand. Outside an active
-   Codex session — the standalone helper or `--engine claude` — a bare
-   `pnpm agent:autoreview` is the closeout, matching root
-   [`AGENTS.md`](../../AGENTS.md). The skill routers defer to this step rather
-   than defining the choice themselves, so do not read the agreement between them
-   as a second source. With no codex CLI (Claude cloud) it falls back to
-   `--engine claude` itself. Inside an active
-   Codex session, a bare
-   invocation silently selects the local deterministic engine — the `ship`
-   skill's bare closeout is NOT sufficient there; use the prepared-bundle
-   fresh-context flow so a separate reviewer inspects every pass:
+   not the reviewer's**: the reviewer sees the diff, not the PR body or the
+   command output behind a claim, so it cannot see the claims to test. Do it
+   where the claims and their evidence are both in hand.
+
+   Then run the second model over the diff:
 
    ```bash
-   pnpm agent:autoreview --prepare-bundle-dir <dir>  # publish the review bundle
-   pnpm agent:autoreview --verify-bundle-dir <dir>   # pre-review manifest check
-   pnpm agent:autoreview --verify-bundle-dir <dir> \
-     --expected-bundle-manifest <digest-from-pre-review-check>  # post-review check
+   pnpm agent:closeout-review            # resolves the base itself
+   pnpm agent:closeout-review --base <base-remote>/<baseRefName>
    ```
 
-   Prepare the bundle, run `--verify-bundle-dir` immediately before review,
-   retain its printed digest outside the bundle, and pass that digest to the
-   post-review check above so bundle replacement or drift during review
-   cannot go undetected. Autoreview reviews the complete branch-local
-   target without truncation, but it is **source review only**: it runs no
-   tests and proves no behavior, so the mapped gate, browser,
-   generated-artifact, and runtime checks still apply. One fresh-context
-   reviewer must inspect every prepared-bundle pass, with manifest
-   verification before and after review. Capture, bundle-integrity,
-   sensitive-input, runtime-trust, and explicitly-selected-unavailable-engine
-   failures all fail closed. For merge-review provenance, the `babysit-pr`
-   skill binds `origin`, the immutable base, and protected `main` before it
-   calls an absolute wrapper and helper through `/bin/bash`. If a review axis
-   changes a pinned runtime, use the last independently reviewed compatible
-   pre-change runtime. After semantic review and bound postverification, run
-   the sequential `/bin/bash` suite as behavior evidence. Exact pins and
-   authority:
-   [`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md).
+   It prints `report: <path>` as its last line and exits 0 for a clean report,
+   1 when the report carries findings, and 2 when the closeout failed — the
+   target moved, codex failed or timed out, the report came back empty, or the
+   tool never started. A 2 means there is no review and the report is not
+   evidence: block, and report the reason the script printed. Only the two
+   causes named below — no `codex` on PATH and a nested Codex session — fall
+   back to single-source coverage instead. Exit 0 is the
+   absence of a findings heading rather than a positive clean verdict: the
+   finder prints no marker a clean run can be recognized by, so a refusal or a
+   truncated answer reads as clean too. Read the report, never the exit code
+   alone. The review diffs
+   the **working tree** against the base, so uncommitted edits to tracked files
+   are covered but a file you have never added is not: `git add` new files
+   before you run it. Leave the tree alone while it runs: a commit, an edit, or
+   a fetch that moves the base ref changes what the reviewer is reading, and
+   the script exits 2 rather than hand back a report its own header
+   misdescribes. A large diff can
+   run past an hour; start it as an observable background task, never with a
+   trailing `&`, and judge it by its exit status. A diff that touches
+   `AGENTS.md`, `CLAUDE.md`, `.codex`, or `.agents` needs a human read before
+   its report is trusted: `codex` reads reviewer instructions from the
+   checkout under review, so the branch can rewrite the policy reviewing it.
+   The diff names the common case, not the whole set: `codex` reads whichever
+   instruction files the worktree holds, so an untracked one, or one a stacked
+   base already carries, shapes the report without appearing in the diff. Read
+   the instruction files the run will actually see, not only the touched ones.
+   A diff that changes `scripts/pr/closeout-review*.mjs` or its aliases runs
+   the candidate's own review tool, so review those changes from a trusted
+   checkout at the base instead. The reviewer runs under the operator's own
+   `codex` configuration and can read the operator's `HOME`: it is not an
+   isolated runtime.
+
+   Then invoke the `review` skill on the same diff and pass it four
+   instructions: the second-model pass already ran, so do not run the skill's
+   own second-model tooling; read the whole report file at `<path>` rather
+   than skimming it; the report covers merge base `<sha>` and head `<sha>`
+   (dirty: `<flag>`, `target_fingerprint: <sha256>`), so exclude it if that is
+   not the pinned target — on a dirty tree the fingerprint, not the head sha,
+   is what names the reviewed bytes; verify every claim against the code,
+   because some are wrong, and add what the report missed.
+
+   **With no `codex` on PATH** — Claude cloud sessions — skip the script, run
+   the `review` skill alone, and disclose the single-source coverage in
+   `## Validation`. **Inside an active Codex session** the script refuses,
+   because nested `codex exec` is unavailable; run the closeout from a Claude
+   session or an operator shell.
+
+   The measured pipeline
+   ([`../evals/review-skill.md`](../evals/review-skill.md): 44-48% recall
+   against 32% for the solo reviewer) inlines the report text into the
+   reviewer's prompt. Handing over a file path instead is an unmeasured
+   deviation, which is why the read-the-whole-file instruction is explicit. The closeout is **source review only**: it runs no tests and
+   proves no behavior, so the mapped gate, browser, generated-artifact, and
+   runtime checks still apply.
+
+   `~/.claude/bin/codex-review.sh` is a different operator tool with a
+   different CLI and different exit codes. In this repo the closeout is
+   `pnpm agent:closeout-review`. The global `review` skill's tooling
+   reference still names the retired `pnpm agent:autoreview`; that file lives
+   outside this repository and fixing it is a separate follow-up.
 
 5. **Ship.** Open the PR through the `ship` skill on every surface, including
    hosted sessions — do not hand-roll PR creation. The description follows the
@@ -526,7 +557,8 @@ These bind regardless of which step you are on:
 | Step                     | Authority doc                                                                                                  |
 | ------------------------ | -------------------------------------------------------------------------------------------------------------- |
 | Claim, defer, merge-sync | [`agent-issue-workflow.md`](agent-issue-workflow.md)                                                           |
-| Gate, autoreview         | [`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md)                                           |
+| Gate                     | [`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md)                                           |
+| Review closeout          | step 4 here                                                                                                    |
 | Ready-state              | [`pr-ready-state.md`](pr-ready-state.md)                                                                       |
 | Docs and drift           | [`../context-standards.md`](../context-standards.md)                                                           |
 | Ship                     | steps 2-9 here; entry points in [`codex-agent-skills.md`](codex-agent-skills.md#claude-global-store-shadowing) |

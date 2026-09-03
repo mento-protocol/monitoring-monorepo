@@ -321,24 +321,35 @@ function classifyBySize(fileCount, lineChanges) {
   return null;
 }
 
+/**
+ * The closeout script is the finder pass only. Operating-card step 4 requires
+ * the verifier pass over the same diff, so the advice names it too: half a
+ * two-model closeout is not a closeout.
+ */
+const VERIFIER_HANDOFF =
+  "Hand that report to the review skill for the verifier pass; " +
+  "with no codex on PATH, run the review skill alone and say so in ## Validation.";
+
 function recommendedReview(tier) {
   if (tier === "trivial") {
     return [
       "Run the quality gate from operating-card step 3.",
-      "Skip semantic autoreview unless the change is deceptively risky.",
+      "Skip the closeout review unless the change is deceptively risky.",
     ];
   }
 
   if (tier === "standard") {
     return [
       "Run the quality gate from operating-card step 3.",
-      "Run pnpm agent:autoreview before pushing.",
+      "Run pnpm agent:closeout-review before pushing.",
+      VERIFIER_HANDOFF,
     ];
   }
 
   return [
     "Run the quality gate from operating-card step 3.",
-    "Run pnpm agent:autoreview before pushing.",
+    "Run pnpm agent:closeout-review before pushing.",
+    VERIFIER_HANDOFF,
     "Read any mapped checklist and audit sibling surfaces before the next push.",
   ];
 }
