@@ -98,6 +98,11 @@ feedback-runtime pins.
   `review-eval-*publication*` with their tests. Its file table,
   `review:eval:experiment`, and ADR 0083 pin
   `scripts/review/review-eval-experiment*.mjs`.
+  `review-eval-run-plan.mjs` (`ORCHESTRATOR_FILES`) and
+  `run-eval-source-snapshot.sh` name `review-eval-cell-writer.mjs` and
+  `review-eval-stream.mjs` exactly: the orchestrator digest hashes them and
+  the sealed snapshot copies them beside the shell, so a move updates both
+  lists in the same PR.
 - **Navigation-eval pin.** `forbidden_sources` in
   `docs/evals/documentation-navigation-fixtures.json` names its source.
 - **Verification evidence.** `.gitattributes` pins
