@@ -3,7 +3,7 @@ title: Staged replacement of the mandatory local gate with existing CI
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-02
+last_verified: 2026-09-03
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -13,7 +13,7 @@ garden_lane: adrs-architecture
 
 # ADR 0078 — staged replacement of the mandatory local gate with existing CI
 
-**Status:** Accepted (Aug 2026), amended 2026-09-02. The M5 early local cutover
+**Status:** Accepted (Aug 2026), amended 2026-09-03. The M5 early local cutover
 is in force. The operator approved it before the original pre-cutover sample.
 The legacy gate remains callable as a diagnostic and remains covered in
 required CI. Issue #2128 owns the post-cutover canary and retirement evidence.
@@ -186,6 +186,11 @@ verification. Indexer schema, configuration, ABI, entry-point, handler-
 reachability, and dashboard GraphQL consumer changes require their applicable
 code generation. Other workspace packages use their direct lint, typecheck,
 and test commands when those scripts exist.
+
+Dashboard bundle inputs require a fresh shared-config build when applicable, a
+fresh dashboard production build, and the bundle-size check. Peg-registry
+authority inputs and shared thresholds require the existing integrity and
+cross-package parity checks in the author-check table.
 
 These local results shorten feedback. Required CI remains merge authority. A
 manual push can omit author checks, but it cannot omit required CI.

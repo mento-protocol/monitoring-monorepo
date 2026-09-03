@@ -3,7 +3,7 @@ title: Simple Verification System Plan
 status: active
 owner: eng
 canonical: false
-last_verified: 2026-09-01
+last_verified: 2026-09-03
 doc_type: plan
 scope: repo-wide
 review_interval_days: 180
@@ -275,8 +275,11 @@ command would need base resolution, cross-package routing, generated-file
 rules, timeouts, and cloud fallbacks. That design would recreate the current
 gate. A draft push must remain a fast way to start CI.
 
-Use this fixed trigger table. Invoke the commands directly. Do not add a
-repository-wide selector or quick wrapper.
+The complete current trigger table is in
+[step 3 of the PR operating card](notes/pr-operating-card.md#the-loop). The
+table below is a non-normative summary of common package and UI triggers.
+Invoke commands directly. Do not add a repository-wide selector or quick
+wrapper.
 
 | Change trigger                         | Required local checkpoint                                                                                                                                                  |
 | -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

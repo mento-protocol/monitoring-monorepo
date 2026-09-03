@@ -21,6 +21,9 @@
     "| Source in a workspace package | Run each script that exists for that package: `pnpm --filter <package-name> lint`, `pnpm --filter <package-name> typecheck`, and its normal unit-test command. Governance Watchdog uses `pnpm --filter @mento-protocol/governance-watchdog test:unit`; its generic `test` needs a local service. |",
     "| Dashboard React or client source | Also run `REACT_DOCTOR_BASE_REF=<resolved-pr-base> pnpm --filter @mento-protocol/ui-dashboard react-doctor:diff`. |",
     "| Dashboard UI or visual output, route or interaction, browser test, or frontend build/runtime path | Also run `pnpm dashboard:build`, then follow [`dashboard-verification.md`](dashboard-verification.md) for the changed UI or runtime path, console, interaction, breakpoints, and applicable auth states. |",
+    "| Dashboard bundle input listed in the `dashboard` path filter in `.github/workflows/size-limit.yml` | When `shared-config/**` changes, first run `pnpm --filter @mento-protocol/config build`. After any required install and shared-config build, run `pnpm dashboard:build`, then `pnpm dashboard:size-limit`. Run a command once if another row also selects it. |",
+    "| `metrics-bridge/peg-registry.json`, `shared-config/chain-metadata.json`, `shared-config/deployment-namespaces.json`, `shared-config/oracle-reporters.json`, `shared-config/src/chains.ts`, `shared-config/src/oracle-reporters.ts`, or `shared-config/src/tokens.ts` | Run `node scripts/alerts/check-peg-registry-integrity.mjs --base-ref <resolved-pr-base-oid>`. |",
+    "| `shared-config/src/thresholds.ts` | Run `node scripts/alerts/check-deviation-threshold-drift.mjs` and `pnpm --filter @mento-protocol/indexer-envio exec vitest run deviationThresholdSharedConfigSync`. |",
     "| Indexer schema, configuration, ABI, entry point, or handler reachability | Run each affected code-generation variant from [`../../indexer-envio/AGENTS.md`](../../indexer-envio/AGENTS.md). Run affected non-mainnet variants first and `pnpm indexer:codegen` last. Inspect the generated diff before indexer package checks. |",
     "| Dashboard GraphQL query or schema consumer, `indexer-envio/schema.graphql`, or `scripts/envio-schema-stubs.graphql` | Run `pnpm dashboard:codegen` and inspect the generated diff. |",
     "| Manifest, lockfile, pnpm configuration, or patch | Inspect lifecycle and install effects. Run `CI=true pnpm install --frozen-lockfile` from the repository root. When one of these inputs changes under `alerts/infra/onchain-event-handler`, `alerts/infra/oncall-announcer`, or `governance-watchdog`, also run `CI=true pnpm install --frozen-lockfile --ignore-scripts --lockfile-dir .` from that root. Complete the installs before code generation or the applicable package rows. |",
@@ -69,6 +72,7 @@
   ],
   ".agents/skills/backlog-sweep/SKILL.md": [
     "git remote -v # origin fetch and push must serve mento-protocol/monitoring-monorepo git status --porcelain # must print nothing git fetch origin main # only after both origin URLs pass",
+    "use the operating-card preflight to resolve and fetch the pull request base, or verified `origin/main` without a pull request. Set `BASE_REMOTE` and `baseRefName` for that base.",
     "Run dashboard coverage or scoped related tests, browser work, production builds, and size-limit work without another command-heavy check set."
   ],
   ".claude/skills/backlog-sweep/SKILL.md": [

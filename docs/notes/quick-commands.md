@@ -3,7 +3,7 @@ title: Quick Commands
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-02
+last_verified: 2026-09-03
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -70,11 +70,11 @@ pnpm ci:contract:test             # Test fixed CI, protected no-skip admission a
 bash scripts/bootstrap/agent-setup-contract.test.sh  # Test retained SessionEnd, setup-marker, and package-policy behavior
 node --test scripts/agent-autoreview-indexer-invariant-contract.test.mjs  # Test retained indexer autoreview owners and schema
 # For each approved #2128 post-cutover canary proof, read the current immutable inputs:
-gh pr view <pr> --json number,state,headRefOid,baseRefName,baseRefOid,headRepositoryOwner
+gh pr view <pr> --repo mento-protocol/monitoring-monorepo --json number,state,headRefOid,baseRefName,baseRefOid,headRepositoryOwner
 # The audit refuses a stale baseRefOid. Update or rebase the PR branch, then read fresh inputs.
 # Do not dispatch no-skip for package-execution or evidence-instrument drift. Package drift can use ordinary-force-all evidence. Instrument drift cannot count.
 # Stop after any run exceeds 45 runner-minutes. Do not exceed 450 cumulative runner-minutes.
-gh workflow run no-skip-audit.yml --ref main -f pr_number=<pr> -f source_sha=<headRefOid> -f base_sha=<baseRefOid>
+gh workflow run no-skip-audit.yml --repo mento-protocol/monitoring-monorepo --ref main -f pr_number=<pr> -f source_sha=<headRefOid> -f base_sha=<baseRefOid>
 pnpm verification:inventory:check  # Validate Phase 0 inventory schema, unique IDs, and complete dispositions
 pnpm verification:manifest:write   # Regenerate the terminal pre-M1 gate-rooted control-plane baseline manifest
 pnpm verification:manifest:check   # Recompute and compare the terminal pre-M1 baseline manifest
