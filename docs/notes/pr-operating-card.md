@@ -152,8 +152,12 @@ even when you never open an authority.
    ```
 
    It prints `report: <path>` as its last line and exits 0 for a clean report,
-   1 when the report carries findings, and 2 when the tool did not run — a 2
-   means there is no review, and the report is not evidence. Exit 0 is the
+   1 when the report carries findings, and 2 when the closeout failed — the
+   target moved, codex failed or timed out, the report came back empty, or the
+   tool never started. A 2 means there is no review and the report is not
+   evidence: block, and report the reason the script printed. Only the two
+   causes named below — no `codex` on PATH and a nested Codex session — fall
+   back to single-source coverage instead. Exit 0 is the
    absence of a findings heading rather than a positive clean verdict: the
    finder prints no marker a clean run can be recognized by, so a refusal or a
    truncated answer reads as clean too. Read the report, never the exit code

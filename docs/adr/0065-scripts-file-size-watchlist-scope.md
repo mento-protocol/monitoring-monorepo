@@ -90,7 +90,7 @@ written, all in the autoreview trust root: the `agent-autoreview.sh` wrapper,
 which hashed its own blob against a frozen-HEAD snapshot, and the two large
 helpers `agent-autoreview.mjs` and `agent-autoreview-core.mjs`, which that
 wrapper materialized under a 2 MB aggregate cap.
-[ADR 0085](0085-autoreview-removal-thin-two-model-review.md) deleted all three,
+[ADR 0086](0086-autoreview-removal-thin-two-model-review.md) deleted all three,
 so `SCRIPTS_EXEMPTIONS` is now an empty list. The mechanism above stays; only
 its contents are gone.
 
@@ -207,7 +207,7 @@ that nothing holds in place.
   `scripts/sentry/ci-wiring/check-sentry-suites-in-ci.test.mjs`, "the checker's
   own files stay under the file-size hard cap"
 - The retired trust-root pins that justified the three original exemptions:
-  [ADR 0085](0085-autoreview-removal-thin-two-model-review.md)
+  [ADR 0086](0086-autoreview-removal-thin-two-model-review.md)
 - Test-split costs behind the exclusion:
   [`scripts/sentry/gate/sentry-suite-manifest.json`](../../scripts/sentry/gate/sentry-suite-manifest.json)
   and [ADR 0062](0062-sentry-suites-self-run-gate.md); `verifyExemptRoute` in

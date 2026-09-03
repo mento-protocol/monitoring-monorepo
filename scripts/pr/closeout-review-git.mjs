@@ -266,12 +266,18 @@ export function shortstat(repoRoot, from) {
  * already-modified file leaves the flag and the status lines unchanged.
  * Untracked content is outside the fingerprint exactly as it is outside
  * `--base`; the status listing still names those paths.
+ *
+ * `--submodule=diff` is what makes this true inside a submodule too. codex
+ * reads those files like any others, but to the parent repository every edit
+ * under a checked-out submodule is the same ` M <path>` status line and the
+ * same `Subproject commit <sha>-dirty` diff marker, so without the nested diff
+ * the two fingerprints would agree over bytes that changed.
  */
 export function treeFingerprint(repoRoot) {
   const parts = [
     run("git", ["rev-parse", "HEAD"], repoRoot),
     run("git", ["status", "--porcelain"], repoRoot),
-    run("git", ["diff", "--no-ext-diff", "HEAD"], repoRoot),
+    run("git", ["diff", "--no-ext-diff", "--submodule=diff", "HEAD"], repoRoot),
   ];
   if (parts.some((part) => !part.ok)) return null;
   return (

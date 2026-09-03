@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 
+import { claudeStreamEnvelope } from "./review-eval-stream.mjs";
 import {
   aggregateDraws,
   classifyNovel,
@@ -116,6 +117,29 @@ test("mentionedLocations ignores prose without a known extension", () => {
   );
 });
 
+test("mentionedLocations rejects an extension that only starts like a known one", () => {
+  // Longest-first alternation stops `ts` from eating `.tsx`, but an extension
+  // the list does not carry at all still matched its prefix: `.json5` came back
+  // as `.json`, `.tfvars` as `.tf`, `.jsx` as `.js`, each without the line
+  // number that followed, so the judge was offered a file the review never
+  // cited and a defect on a real file could be proposed by a mistyped one.
+  for (const cited of [
+    "config/app.json5:4 is malformed",
+    "terraform/env/prod.tfvars:8 sets it twice",
+    "ui-dashboard/app/page.jsx:12 imports it twice",
+  ]) {
+    assert.deepEqual(mentionedLocations(cited), [], cited);
+  }
+  // A dot is not a word character, so a file name that ends a sentence — and a
+  // compound extension the list does carry — still match.
+  const [sentence] = mentionedLocations("see scripts/review/x.mjs.");
+  assert.equal(sentence.file, "x.mjs");
+  assert.equal(sentence.line, null);
+  const [compound] = mentionedLocations("terraform/tests/peg.tftest.hcl:9");
+  assert.equal(compound.file, "peg.tftest.hcl");
+  assert.equal(compound.line, 9);
+});
+
 test("structuralCandidates proposes only findings whose file is named", () => {
   const candidates = structuralCandidates({
     truthFindings,
@@ -135,6 +159,42 @@ test("structuralCandidates proposes only findings whose file is named", () => {
     false,
     "a bare file mention is not near",
   );
+});
+
+// Alternation order, not the extension list, is what broke here: `ts` sat
+// ahead of `tsx`, so a `.tsx` citation matched as `.ts` and lost its line
+// number with it. `js` ahead of `json` had the same shape.
+test("mentionedLocations keeps an extension that another one prefixes", () => {
+  const [tsx] = mentionedLocations(
+    "see ui-dashboard/app/x/recent-alerts.test.tsx:193",
+  );
+  assert.equal(tsx.file, "recent-alerts.test.tsx");
+  assert.equal(tsx.line, 193);
+  const [json] = mentionedLocations("scripts/review/tsconfig.json:4 is off");
+  assert.equal(json.file, "tsconfig.json");
+  assert.equal(json.line, 4);
+});
+
+test("structuralCandidates offers a .tsx truth finding the output cites", () => {
+  // The shape of truth 3830371329 in `docs/evals/review-skill-truth/pr-1999.json`.
+  const tsxFinding = {
+    id: 104,
+    path: "ui-dashboard/src/app/peg-monitoring/__tests__/recent-alerts.test.tsx",
+    line: 193,
+    severity: "P2",
+    title: "Assert the rendered alert history",
+    body: "The test never asserts the recovered row.",
+    acted_on: true,
+  };
+  const candidates = structuralCandidates({
+    truthFindings: [...truthFindings, tsxFinding],
+    output: "see ui-dashboard/app/x/recent-alerts.test.tsx:193",
+  });
+  assert.deepEqual(
+    candidates.map((candidate) => candidate.finding.id),
+    [104],
+  );
+  assert.equal(candidates[0].lineNear, true);
 });
 
 test("structuralCandidates drops a line hit outside the proximity window", () => {
@@ -767,6 +827,7 @@ test("scorerDigest covers every module that can move a recorded number", () => {
     "review-eval-run.mjs",
     "review-eval-run-plan.mjs",
     "review-eval-run-execution.mjs",
+    "review-eval-stream.mjs",
     "review-eval-run-cell.mjs",
     "review-eval-run-score.mjs",
     "review-eval-result-shape.mjs",
@@ -780,5 +841,80 @@ test("scorerDigest covers every module that can move a recorded number", () => {
   assert.notEqual(
     scorerDigest({ modules: SCORING_MODULES.slice(1) }),
     scorerDigest(),
+  );
+  // The stream module owns the capture rule — which assistant messages of a
+  // session a judge ever sees — and `scorer_digest` is what the experiment
+  // lane's plan and cache identities are keyed on, so an edit there must
+  // re-anchor them exactly as an edit to the matcher does.
+  assert.notEqual(
+    scorerDigest({
+      modules: SCORING_MODULES.filter(
+        (module) => path.basename(module) !== "review-eval-stream.mjs",
+      ),
+    }),
+    scorerDigest(),
+  );
+});
+
+test("a long session still hands both judges the report it ended on", async () => {
+  // 40 050 characters of preliminary notes before the finding. Under the old
+  // whole-session join the claim splitter saw the first 40 000 characters and
+  // the match judge the first 30 000, so both scored the notes and neither ever
+  // read the report — the review was graded on text its author retracted.
+  const preliminary = `Working through the diff. ${"noise ".repeat(6700)}`;
+  assert.ok(preliminary.length > 40000);
+  const finding =
+    "terraform/alerts/peg.tf:40 inverts the threshold comparison.";
+  const stream = [
+    {
+      type: "assistant",
+      parent_tool_use_id: null,
+      message: { content: [{ type: "text", text: preliminary }] },
+    },
+    {
+      type: "assistant",
+      parent_tool_use_id: null,
+      message: { content: [{ type: "text", text: finding }] },
+    },
+    {
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      result: finding,
+      total_cost_usd: 1.5,
+      num_turns: 9,
+    },
+  ]
+    .map((event) => JSON.stringify(event))
+    .join("\n");
+
+  const envelope = claudeStreamEnvelope(stream, { label: "contestant" });
+  assert.equal(envelope.assistant_messages, 2);
+  assert.equal(envelope.assistant_messages_kept, 1);
+  assert.equal(envelope.result, finding);
+
+  const splitter = stubExec([JSON.stringify([finding])]);
+  const claims = await extractClaims({
+    transcript: envelope.result,
+    exec: splitter,
+  });
+  assert.deepEqual(claims, [finding]);
+  assert.ok(
+    splitter.calls[0].prompt.includes(finding),
+    "the claim splitter was handed a truncated review",
+  );
+
+  const judge = stubExec([JSON.stringify({ matches: [1], reasoning: {} })]);
+  const matched = await matchClaims({
+    claims,
+    truthFindings,
+    scorableIds: [101, 102],
+    transcript: envelope.result,
+    exec: judge,
+  });
+  assert.deepEqual(matched.matchedIds, [102]);
+  assert.ok(
+    judge.calls[0].prompt.includes(finding),
+    "the match judge was handed a truncated review",
   );
 });

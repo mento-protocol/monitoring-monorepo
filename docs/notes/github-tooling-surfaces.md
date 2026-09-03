@@ -155,11 +155,16 @@ keep `pnpm pr:ready-state` and `gh pr checks` as the canonical probes.
 
 ## Issue workboard transitions
 
-`pnpm issue:claim`, `issue:review`, `issue:release`, `issue:board sync`, and
-`issue:board backfill` shell out to gh. They use GraphQL for Project #12 and the
-Git data APIs for the persistent per-issue mutex. The mutex uses GraphQL
-`updateRefs` with an exact `beforeOid` on a retained custom ref. The active
-credential needs Project write access and repository Contents write access.
+`pnpm issue:claim`, `issue:review`, `issue:release`, `issue:groom`,
+`issue:board sync`, and `issue:board backfill` shell out to gh. They use GraphQL
+for Project #12 and the Git data APIs for the persistent per-issue mutex. The
+mutex uses GraphQL `updateRefs` with an exact `beforeOid` on a retained custom
+ref and reads that ref through the REST matching-references endpoint, because
+GraphQL `Repository.ref` does not resolve the custom namespace. The active
+credential needs Project write access, repository Contents write access (the
+mutex ref), and Issues write access (`issue:claim`, `issue:review`,
+`issue:release`, `issue:groom`, and `issue:board sync` all write labels or
+comments on the issue).
 Each helper rejects a non-`github.com` `GH_HOST` and a host-qualified `GH_REPO`.
 The transport also sets `GH_HOST=github.com` and removes `GH_REPO` before every
 gh call. Explicit repository and Project flags cannot authorize another host.

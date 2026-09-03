@@ -62,6 +62,8 @@ import {
 } from "./sentry-triage-project.mjs";
 import {
   isWorkflowCreatedIssue,
+  LOCAL_PROJECTION_LABEL_DEFINITIONS,
+  LOCAL_PROJECTION_LABELS,
   WORKFLOW_ISSUE_AUTHOR,
 } from "./sentry-triage-project-route.mjs";
 import { BRIEF_COMMENT_MARKER } from "./sentry-triage-brief.mjs";
@@ -1750,7 +1752,7 @@ await test("runProjection projects config-fix as well", async () => {
   );
 });
 
-await test("runProjection creates local config work with the ambient token and agent-ready", async () => {
+await test("runProjection creates local config work with the ambient token and the full routing label set", async () => {
   const issue = queueIssue({
     comments: [
       botComment(
@@ -1783,7 +1785,7 @@ await test("runProjection creates local config work with the ambient token and a
   );
   const [labelCreate] = assertLabelDefinitionsCreatedBefore(
     calls,
-    [AGENT_READY_LABEL_DEFINITION],
+    LOCAL_PROJECTION_LABEL_DEFINITIONS,
     create,
   );
   assertEqual(labelCreate.token, null);
@@ -1792,17 +1794,27 @@ await test("runProjection creates local config work with the ambient token and a
     create.args[create.args.indexOf("-R") + 1],
     "mento-protocol/monitoring-monorepo",
   );
-  assert(
-    create.args.includes("agent-ready"),
-    "expected local work issue ready",
+  // `agent-ready` needs exactly one risk:* and at least one pkg:* beside it, or
+  // `issue:board sync` reports the projection as incompletely groomed.
+  assertDeepEqual(
+    create.args.flatMap((arg, index) =>
+      create.args[index - 1] === "--label" ? [arg] : [],
+    ),
+    ["agent-ready", "kind:bug", "pkg:dashboard", "risk:medium"],
   );
+  assertDeepEqual(LOCAL_PROJECTION_LABELS, [
+    "agent-ready",
+    "kind:bug",
+    "pkg:dashboard",
+    "risk:medium",
+  ]);
   assert(
     !calls.some((c) => c.token),
     "every local projection call must use the ambient token, never the PAT",
   );
 });
 
-await test("runProjection does not recreate an existing local agent-ready label", async () => {
+await test("runProjection does not recreate existing local routing labels", async () => {
   const issue = queueIssue({
     comments: [
       botComment(
@@ -1816,6 +1828,7 @@ await test("runProjection does not recreate an existing local agent-ready label"
   });
   const { runGh, calls } = makeRunGh({
     issue,
+    existingLabels: LOCAL_PROJECTION_LABELS,
     createdUrl:
       "https://github.com/mento-protocol/monitoring-monorepo/issues/999",
   });

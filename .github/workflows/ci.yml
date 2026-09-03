@@ -1316,7 +1316,7 @@ jobs:
         run: node scripts/pr/check-pr-description.test.mjs
       - name: Closeout review script suite
         # scripts/pr/closeout-review.mjs is the repo's second-model review
-        # entry point (ADR 0085). Its suite runs a fake `codex` on PATH, so it
+        # entry point (ADR 0086). Its suite runs a fake `codex` on PATH, so it
         # needs no network and no model. The `rootScripts` filter is
         # `scripts/**`, which already admits the script and its suite.
         run: pnpm agent:closeout-review:test

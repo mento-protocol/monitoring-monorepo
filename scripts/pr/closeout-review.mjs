@@ -32,6 +32,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import {
+  assertCodexUnchanged,
   checkOutPath,
   codexEnv,
   discoverRoot,
@@ -60,6 +61,11 @@ const SANDBOX = "read-only";
 const FINDINGS_HEADING = /^(?:Full review comments|Review comments?):\s*$/m;
 const FINDING_BULLET = /^- \[P\d+\] /m;
 const DEFAULT_TIMEOUT_SECONDS = 3600;
+// How long the process-group sweep waits for the last descendant to go before
+// the report is read. SIGKILL is not synchronous, and a descendant already
+// inside a write to the report descriptor has to finish it first.
+const GROUP_DRAIN_MS = 2000;
+const GROUP_DRAIN_STEP_MS = 10;
 
 function parseArgs(argv) {
   const options = {
@@ -151,9 +157,7 @@ function runCodex(repoRoot, codexBin, base, reportPath, timeoutSeconds) {
     // review keeps running, and keeps writing the report, after the command
     // appears cancelled.
     let interruptTimer = null;
-    let wasInterrupted = false;
     const interrupted = (signal) => {
-      wasInterrupted = true;
       kill("SIGTERM");
       if (interruptTimer) return;
       // A last resort for a child that ignores SIGTERM: the normal path is the
@@ -169,6 +173,15 @@ function runCodex(repoRoot, codexBin, base, reportPath, timeoutSeconds) {
       process.on(signal, handler);
       return [signal, handler];
     });
+    // Whether anything is left in the child's process group.
+    const groupGone = () => {
+      try {
+        process.kill(-child.pid, 0);
+        return false;
+      } catch {
+        return true;
+      }
+    };
     const settle = (outcome) => {
       if (settled) return;
       settled = true;
@@ -177,12 +190,25 @@ function runCodex(repoRoot, codexBin, base, reportPath, timeoutSeconds) {
       }
       if (interruptTimer) clearTimeout(interruptTimer);
       clearTimeout(deadline);
-      // codex can exit on SIGTERM while a descendant ignores it, so sweep the
-      // group again rather than trusting an unreferenced escalation timer.
-      if (outcome.timedOut || wasInterrupted) kill("SIGKILL");
-      fs.closeSync(bodyFd);
-      fs.closeSync(stderrFd);
-      resolve(outcome);
+      // Every descendant codex started inherited the report descriptor, and a
+      // backgrounded one keeps writing through it after codex itself exits —
+      // past the point where the caller reads the body and rewrites the file
+      // with a header and a verdict. Sweep the whole group on every outcome,
+      // not only a timeout or an interrupt, and wait for it to go before the
+      // descriptors close and the report is read.
+      kill("SIGKILL");
+      let waited = 0;
+      const finish = () => {
+        fs.closeSync(bodyFd);
+        fs.closeSync(stderrFd);
+        resolve(outcome);
+      };
+      const drain = () => {
+        if (groupGone() || waited >= GROUP_DRAIN_MS) return finish();
+        waited += GROUP_DRAIN_STEP_MS;
+        setTimeout(drain, GROUP_DRAIN_STEP_MS);
+      };
+      drain();
     };
     child.on("error", (error) =>
       settle({ code: null, timedOut: false, spawnError: error.message }),
@@ -253,6 +279,10 @@ async function main() {
     `diff: ${shortstat(repoRoot, mergeBaseSha)} against ${base} (merge base ${mergeBaseSha.slice(0, 7)})\n`,
   );
 
+  // The base fetch, the `gh` queries and the fingerprint all ran since
+  // `resolveCodex` vetted this pathname, so confirm it still names the same
+  // file before handing it the operator's credentials.
+  assertCodexUnchanged(codexBin);
   const result = await runCodex(
     repoRoot,
     codexBin,

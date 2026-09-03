@@ -66,8 +66,8 @@ Move all 14 pin classes with their files.
   `deploy/deploy-indexer-verify{,-analysis}{,.test}.mjs` and
   `deploy/deploy-indexer-verify-status-identity.mjs` share an any-depth arm;
   both run. `pr/agent-issue-board{,.test}.mjs` and
-  `pr/issue-board-{backfill,cli,commands,lock,ownership,projects,release,state,sync,sync-lock,transactions,transport}.mjs`
-  route `pnpm issue:board:test`; CI reruns it after failures (ADR 0082
+  `pr/issue-board-{backfill,cli,commands,groom,lock,ownership,projects,release,state,sync{,-lock},transactions,transport}.mjs`
+  route `pnpm issue:board:test`; CI reruns it on failure (ADR 0082
   confinement).
   `repo-health/check-guardrail-prose{,.test}.mjs` and
   `repo-health/guardrail-prose.json` route the guardrail suite. `ci.yml`,
@@ -88,10 +88,9 @@ Move all 14 pin classes with their files.
   `gate/mapping/engine.test.mjs` (scanned roots);
   `gate/mapping/post-passes.mjs` schedules `code-health:deps` itself.
 - **Review-eval pins.** The runbook tracks `scripts/review/run-eval*.sh`,
-  `install-review-eval-launchd*`, the launchd plist, and
-  `review-eval-*publication*` with their tests. Its file table,
-  `review:eval:experiment`, and ADR 0083 pin
-  `scripts/review/review-eval-experiment*.mjs`.
+  `install-review-eval-launchd*`, `review-eval-*publication*`, and the
+  sealed cell modules in `ORCHESTRATOR_FILES`. Its file table and ADR 0083
+  pin `scripts/review/review-eval-experiment*.mjs`.
 - **Navigation-eval pin.** `forbidden_sources` in
   `docs/evals/documentation-navigation-fixtures.json` names its source.
 - **Verification evidence.** `.gitattributes` pins

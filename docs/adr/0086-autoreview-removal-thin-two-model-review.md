@@ -12,7 +12,7 @@ review_interval_days: 90
 garden_lane: adrs-architecture
 ---
 
-# ADR 0085 — Remove the autoreview machinery; keep a thin two-model closeout review
+# ADR 0086 — Remove the autoreview machinery; keep a thin two-model closeout review
 
 **Status:** Accepted (Sep 2026), in force.
 **Scope:** ci/process
