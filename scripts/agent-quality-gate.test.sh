@@ -7992,10 +7992,24 @@ while IFS= read -r routing_table_module; do
 done < <(cd "$repo_root" && git ls-files 'scripts/gate/routing-table/*.mjs')
 ((${#routing_table_modules[@]} >= 15)) ||
   fail "expected the routing table to have at least 15 tracked modules, found ${#routing_table_modules[@]} — enumeration found nothing to check"
+# The two indexer handler-invariant modules are claimed by an earlier arm in
+# the agent-module table, which routes the same two commands under its own
+# reason. Enumeration still covers them: every routing-table module must route
+# the routing-table suite and the gate suite, whichever arm claims it, so the
+# expected reason is selected per module rather than dropped.
 for routing_table_module in "${routing_table_modules[@]}"; do
   run_gate "$routing_table_module"
-  assert_contains "- pnpm gate:routing-table:test (gate routing table changed)"
-  assert_contains "- pnpm agent:quality-gate:test (gate routing table is an implementation-signature input)"
+  case "$routing_table_module" in
+  scripts/gate/routing-table/indexer-handler-invariant-contract.mjs | \
+    scripts/gate/routing-table/indexer-handler-invariant-families.mjs)
+    assert_contains "- pnpm gate:routing-table:test (indexer invariant routing source changed)"
+    assert_contains "- pnpm agent:quality-gate:test (indexer invariant routing source changed)"
+    ;;
+  *)
+    assert_contains "- pnpm gate:routing-table:test (gate routing table changed)"
+    assert_contains "- pnpm agent:quality-gate:test (gate routing table is an implementation-signature input)"
+    ;;
+  esac
 done
 
 # Gate side: `implementation_signature()` lives in this file and must list every
