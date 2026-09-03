@@ -228,7 +228,14 @@ function assistantText(message) {
  * Sub-agent messages carry a `parent_tool_use_id` and are left out. They are
  * the reviewer's internal delegation, not the report it filed, and folding them
  * into the transcript would put text no reader ever saw in front of the claim
- * extractor.
+ * extractor. A sub-agent's own `result` event carries the same field and is
+ * left out for a stronger reason: it closes the delegation, not the session, so
+ * taking it would hand every consumer a sub-agent's cost, turn count and error
+ * bit — and, when the sub-agent ran last, its text as the session's answer.
+ *
+ * `chars` is the length of the stream this parse read. It is the one number
+ * that says how close a session came to the caller's output ceiling, which
+ * kills the process rather than truncating it.
  *
  * A line that opens like JSON and does not parse throws rather than being
  * skipped: truncated output must fail a cell, not be scored as a shorter
@@ -251,10 +258,8 @@ export function parseClaudeStream(raw, { label = "claude" } = {}) {
       );
     }
     if (!event || typeof event !== "object" || Array.isArray(event)) continue;
-    if (
-      event.type === "assistant" &&
-      (event.parent_tool_use_id ?? null) === null
-    ) {
+    if ((event.parent_tool_use_id ?? null) !== null) continue;
+    if (event.type === "assistant") {
       const message = assistantText(event.message);
       if (message) messages.push(message);
       continue;
@@ -262,7 +267,7 @@ export function parseClaudeStream(raw, { label = "claude" } = {}) {
     if (event.type === "result") result = event;
   }
   if (!result) throw new Error(`${label} produced no result event`);
-  return { messages, result };
+  return { messages, result, chars: text.length };
 }
 
 function finiteNumber(value) {
@@ -284,12 +289,17 @@ function finiteNumber(value) {
  * stray brace would break the slice. `final_result` and `assistant_messages`
  * are new: they keep the discarded half and the message count visible for
  * evidence, so a cell can be told from a one-message cell after the fact.
+ *
+ * `stream_chars` is the size of the stream those fields were read from. The
+ * caller kills a session that writes more than `EXEC_MAX_OUTPUT_CHARS`, so a
+ * cell that scored oddly can be checked against the ceiling it ran under
+ * instead of guessing whether it came close.
  */
 export function claudeStreamEnvelope(
   raw,
   { label = "claude", resultText = "session" } = {},
 ) {
-  const { messages, result } = parseClaudeStream(raw, { label });
+  const { messages, result, chars } = parseClaudeStream(raw, { label });
   const finalText =
     typeof result.result === "string" && result.result.trim()
       ? result.result
@@ -298,6 +308,7 @@ export function claudeStreamEnvelope(
     result: resultText === "final" ? finalText : messages.join("\n\n"),
     final_result: finalText,
     assistant_messages: messages.length,
+    stream_chars: chars,
     total_cost_usd: finiteNumber(result.total_cost_usd) ?? 0,
     num_turns: Number.isInteger(result.num_turns) ? result.num_turns : null,
     // A result event that does not say it succeeded is an error. The CLI always

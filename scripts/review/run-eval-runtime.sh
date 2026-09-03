@@ -471,7 +471,7 @@ run_cell() {
     claude_args+=(--append-system-prompt "$preamble")
   fi
 
-  local raw other_file claude_status=0
+  local raw other_file claude_status=0 envelope_status=0
   raw="$(mktemp "$TMPROOT/review-eval-cell.XXXXXX")"
   other_file="$(mktemp "$TMPROOT/review-eval-other.XXXXXX")"
   printf '%s' "$other_review" >"$other_file"
@@ -495,7 +495,7 @@ run_cell() {
 
   mkdir -p "$out_dir"
   # shellcheck disable=SC2016  # the single-quoted block is node source
-  if ! REVIEW_EVAL_CELL="$cell_id" REVIEW_EVAL_PR="$pr" \
+  REVIEW_EVAL_CELL="$cell_id" REVIEW_EVAL_PR="$pr" \
     REVIEW_EVAL_CONDITION="$condition" REVIEW_EVAL_DRAW="$draw" \
     REVIEW_EVAL_MODEL="$model" REVIEW_EVAL_EFFORT="$effort" \
     REVIEW_EVAL_FINDER="$finder" REVIEW_EVAL_FIXTURE="$fixture" \
@@ -506,8 +506,14 @@ run_cell() {
       import { readFileSync, writeFileSync } from "node:fs";
       import { pathToFileURL } from "node:url";
       // The same parser the experiment lane and the judges use, so one fix
-      // covers both exec paths.
-      const { claudeStreamEnvelope } = await import(pathToFileURL(process.argv[4]).href);
+      // covers both exec paths. A parser that will not load is a harness fault
+      // and not a bad review: exit 4 keeps the paid cell, where the exit 3
+      // below is a stream the cell broke. The write is synchronous because
+      // `process.exit` drops a queued asynchronous one.
+      const { claudeStreamEnvelope } = await import(pathToFileURL(process.argv[4]).href).catch((error) => {
+        writeFileSync(2, `the stream parser at ${process.argv[4]} did not load: ${error.message}\n`);
+        process.exit(4);
+      });
       const raw = readFileSync(process.argv[1], "utf8");
       let envelope;
       try { envelope = claudeStreamEnvelope(raw, { label: "contestant" }); } catch { process.exit(3); }
@@ -526,6 +532,7 @@ run_cell() {
         ok: true,
         output: envelope.result,
         assistant_messages: envelope.assistant_messages,
+        stream_chars: envelope.stream_chars,
         other_review: other,
         finder_chars: Number(process.env.REVIEW_EVAL_FINDER_CHARS),
         seconds: Number(process.env.REVIEW_EVAL_SECONDS),
@@ -533,9 +540,16 @@ run_cell() {
         turns: envelope.num_turns ?? null,
       }, null, 1)}\n`);
     ' "$raw" "$other_file" "$out_dir/result.json" \
-    "$SPEC/scripts/review/review-eval-run-execution.mjs"; then
-    rm -rf "$out_dir"
-    log "  $cell_id FAILED — claude reported an error; not cached"
+    "$SPEC/scripts/review/review-eval-run-execution.mjs" || envelope_status=$?
+  if [[ $envelope_status -ne 0 ]]; then
+    # Exit 4 is the harness failing to load its own stream parser: nothing the
+    # cell did, so its directory survives and the log names the real fault.
+    if [[ $envelope_status -eq 4 ]]; then
+      log "  $cell_id FAILED — harness fault, cell kept; the stream parser did not load"
+    else
+      rm -rf "$out_dir"
+      log "  $cell_id FAILED — claude reported an error; not cached"
+    fi
     log_stderr_tail "$raw.err"
     rm -f "$raw" "$raw.err" "$other_file"
     return 1

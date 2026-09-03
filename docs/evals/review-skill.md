@@ -92,7 +92,9 @@ addendum was scored on the addendum alone. Each lane captures the session stream
 instead and records the message count beside the transcript. A sub-agent's own
 messages stay out: they are the reviewer's internal delegation, not the report
 it filed. Judge calls keep last-message semantics, because a judge's answer is
-its final message.
+its final message. Scoring the whole session also means an interim note the
+reviewer later retracted is extracted as a claim like any other: a move in
+`wrong_claims` after this change can come from that, not from the skill.
 
 A condition counts a PR as zero-finding only when every draw that completed
 for that PR emitted no parseable claim. One empty draw beside a productive one
@@ -215,15 +217,14 @@ partial report, because a truncated review cached is a permanent zero-recall
 score. A cached cell is reused only when its stored
 fingerprint — skill digest, kind, contract digest, the two CLI versions, the
 finder argv digest and the orchestrator digest — matches the current run. The
-one cache-compatibility rule accepts the recorded pre-split orchestrator digest
-only when the current digest is the exact reviewed four-source split with
-the sealed source-snapshot provenance guard. It requires one complete,
-historically valid legacy treatment pair: `installed` with `dirty: false`, or a
-normalized absolute candidate path with `dirty: true`. Raw-cell reuse stays
-keyed to the recorded skill bytes. The tests reconstruct the pre-split
-bytes from the extracted payloads and exercise the stable-source behavior of the
-final wrapper. An edit to the wrapper or any of the three helpers changes the
-current digest and disables this rule. The
+one cache-compatibility rule that once accepted the recorded pre-split
+orchestrator digest is closed: the stream-capture change moved the wrapper's
+digest, and a cell cached under the old runtime recorded only the reviewer's
+final message, so folding it into a run that scores whole sessions would mix
+two capture regimes in one row. The audited transition pair stays in
+`review-eval-run-cell.mjs` as the record of what was permitted, and the tests
+assert the path is closed. The 24 pre-split cells re-run under the current
+runtime. The
 scorer preserves that fingerprint and a separate installed-or-candidate
 treatment identity in every result and in `calibration.json`. Local validation
 and CI check both records against the plan. Changing only the row and plan

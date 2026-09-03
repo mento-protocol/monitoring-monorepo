@@ -209,7 +209,7 @@ test("the shell split no longer reconstructs the pre-split cell runtime", () => 
   // so this pin still catches an unintended shell edit.
   assert.equal(
     reconstructed,
-    "809911903aa6c3b9a0717cac24fa1e5d5f1d4444853a5066efc9cf9b3939b839",
+    "e05de6191a9710fef1ec40e3a56e7ad5ccfc79bec5cf3e8c9e58a99cfe5fb46f",
   );
   // It is no longer the pre-split monolith. Capturing the whole session instead
   // of the CLI's last-message envelope changed what a cell records, so the 24
@@ -818,7 +818,7 @@ test("comparabilityKey moves with the contract, the prompts, and the scorer", ()
 
 test("orchestratorSourceDigest binds the wrapper and three helpers", () => {
   const expected =
-    "27650a4a1a7f96e6b19878d0e92062365e6c8251b47d138b106e325a7b36482f";
+    "94ca6ba00b776ac483cb1950284b35267dcad83ca1faec1d83e6f2c6fdf56c95";
   assert.equal(orchestratorSourceDigest(), expected);
   assert.deepEqual(
     ORCHESTRATOR_FILES.map((file) => path.basename(file)),
@@ -4538,6 +4538,21 @@ test("a model call captures the session, not its last message", async () => {
       session_id: "session-1",
       duration_ms: 1200,
     },
+    // A sub-agent closes its delegation with a `result` event of its own,
+    // carrying its own cost, turn count and error bit. It is not the session's
+    // result, and it may arrive after the session's: taking it would report a
+    // sub-agent's answer as the reviewer's.
+    {
+      type: "result",
+      subtype: "success",
+      parent_tool_use_id: "toolu_1",
+      is_error: true,
+      result: "sub-agent answer.",
+      total_cost_usd: 9.99,
+      num_turns: 40,
+      session_id: "session-sub",
+      duration_ms: 99,
+    },
   ]
     .map((event) => JSON.stringify(event))
     .join("\n");
@@ -4553,6 +4568,9 @@ test("a model call captures the session, not its last message", async () => {
   assert.equal(session.is_error, false);
   assert.equal(session.session_id, "session-1");
   assert.equal(session.duration_ms, 1200);
+  // The stream's own size, so a cell that scored oddly can be checked against
+  // the output ceiling that kills a session rather than truncating it.
+  assert.equal(session.stream_chars, stream.length);
   assert.throws(
     () => claudeStreamEnvelope('{"is_error":false,"result":"Final addendum."}'),
     /no result event/,
@@ -4584,11 +4602,121 @@ process.stdout.write(${JSON.stringify(`${stream}\n`)});
     assert.equal(envelope.result, "Final addendum.");
     assert.equal(envelope.assistant_messages, 2);
     assert.equal(envelope.total_cost_usd, 0.25);
+    assert.equal(envelope.stream_chars, stream.length + 1);
     const spawned = JSON.parse(readFileSync(argvLog, "utf8"));
     assert.equal(spawned.includes("json"), false);
     assert.equal(spawned.includes("stream-json"), true);
   } finally {
     rmSync(shim, { recursive: true, force: true });
+  }
+});
+
+test("the cell writer tells a harness fault from a broken stream", () => {
+  // The node block the orchestrator runs on a finished cell: it loads the
+  // shared stream parser out of the private source snapshot, then writes the
+  // cell's `result.json`.
+  const runtime = runEvalSource("runtime");
+  const writer = runtime.slice(runtime.indexOf('mkdir -p "$out_dir"'));
+  const block = writer.match(
+    /node --input-type=module -e '\n([\s\S]*?)\n\s*' "\$raw" "\$other_file" "\$out_dir\/result\.json"/,
+  );
+  assert.ok(block, "the cell writer's node block moved");
+  // Exit 4 keeps the cell; every other failure still deletes it.
+  const faultAt = writer.indexOf("envelope_status -eq 4");
+  assert.notEqual(faultAt, -1, "the cell writer does not branch on exit 4");
+  const faultBranch = writer.slice(
+    faultAt,
+    writer.indexOf("\n    else\n", faultAt),
+  );
+  assert.match(faultBranch, /harness fault, cell kept/);
+  assert.equal(faultBranch.includes('rm -rf "$out_dir"'), false);
+  assert.match(writer.slice(faultAt), /else\n\s+rm -rf "\$out_dir"/);
+
+  const dir = mkdtempSync(path.join(tmpdir(), "review-eval-cell-writer-"));
+  try {
+    const rawFile = path.join(dir, "stream.jsonl");
+    const otherFile = path.join(dir, "other.md");
+    const resultFile = path.join(dir, "result.json");
+    const stream = [
+      {
+        type: "assistant",
+        parent_tool_use_id: null,
+        message: { content: [{ type: "text", text: "run-eval.sh:150." }] },
+      },
+      {
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        result: "run-eval.sh:150.",
+        total_cost_usd: 0.5,
+        num_turns: 3,
+      },
+    ]
+      .map((event) => JSON.stringify(event))
+      .join("\n");
+    writeFileSync(rawFile, `${stream}\n`);
+    writeFileSync(otherFile, "the other review");
+    const runWriter = (module) =>
+      spawnSync(
+        process.execPath,
+        [
+          "--input-type=module",
+          "-e",
+          block[1],
+          rawFile,
+          otherFile,
+          resultFile,
+          module,
+        ],
+        {
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            REVIEW_EVAL_CELL: "pr-1990-pipeline-draw1",
+            REVIEW_EVAL_PR: "1990",
+            REVIEW_EVAL_CONDITION: "pipeline",
+            REVIEW_EVAL_DRAW: "1",
+            REVIEW_EVAL_MODEL: "claude-opus-5",
+            REVIEW_EVAL_EFFORT: "high",
+            REVIEW_EVAL_FINDER: "codex",
+            REVIEW_EVAL_FIXTURE: dir,
+            REVIEW_EVAL_SECONDS: "12",
+            REVIEW_EVAL_FINDER_CHARS: "40",
+            REVIEW_EVAL_FINGERPRINT: "{}",
+          },
+        },
+      );
+    const parser = path.join(
+      repoRoot,
+      "scripts/review/review-eval-run-execution.mjs",
+    );
+    const ok = runWriter(parser);
+    assert.equal(ok.status, 0, ok.stderr);
+    // The cell records how much stream it wrote, so a run can be checked
+    // against the output ceiling that kills a session instead of truncating it.
+    assert.equal(
+      JSON.parse(readFileSync(resultFile, "utf8")).stream_chars,
+      stream.length + 1,
+    );
+    rmSync(resultFile);
+
+    // A parser that cannot be loaded says nothing about the cell. Before this
+    // exit code the import threw outside the `try`, node exited 1, and the
+    // caller deleted the paid cell under "claude reported an error".
+    const missing = `${parser.slice(0, -4)}-gone.mjs`;
+    const fault = runWriter(missing);
+    assert.equal(fault.status, 4);
+    assert.match(
+      fault.stderr,
+      /the stream parser at .*-gone\.mjs did not load/,
+    );
+    assert.equal(existsSync(resultFile), false);
+
+    // A truncated stream is still the cell's own failure, and still exits 3.
+    writeFileSync(rawFile, stream.slice(0, 40));
+    assert.equal(runWriter(parser).status, 3);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 
