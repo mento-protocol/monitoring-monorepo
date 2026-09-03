@@ -3,7 +3,7 @@ title: Staged replacement of the mandatory local gate with existing CI
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-01
+last_verified: 2026-09-02
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -13,8 +13,10 @@ garden_lane: adrs-architecture
 
 # ADR 0078 — staged replacement of the mandatory local gate with existing CI
 
-**Status:** Accepted (Aug 2026). The migration is in force. The current gate
-stays mandatory until the approved cutover stage completes.
+**Status:** Accepted (Aug 2026), amended 2026-09-02. The migration is in force.
+The operator approved an early local cutover before the original pre-cutover
+sample. The current gate stays mandatory until the approved cutover change
+lands.
 [ADR 0007](0007-agent-quality-gate-and-merge-oracle.md) remains active for the
 hosted two-projection all-clear and Codex approval gate. This ADR supersedes
 only its mandatory-local-gate target state. [ADR
@@ -277,20 +279,44 @@ precedes that attempt's creation time.
 
 ### Use staged evidence and separate approvals
 
-The migration has these gates:
+On 2026-09-02, the operator approved one change to the original rollout order.
+The pre-cutover evidence window closed with zero accepted samples after
+retained-target and graph-pin incidents. Waiting for a repaired pre-cutover
+cohort would prolong a local bottleneck that the operator already had to skip.
+It would also measure an intermediate local workflow that the approved cutover
+removes.
+
+Issue #2127 may therefore remove repository verification from pre-push after
+the graph-pin repair reaches protected `main`, protected-main CI passes, and
+strict current-base checking is active. The cutover must keep staged formatting
+on pre-commit. It must add the fixed `/ship` author-check trigger table. It must
+also keep the full legacy gate available in required CI and as a diagnostic.
+Required CI remains merge authority.
+
+Issue #2128 owns the deferred acceptance window. It must observe at least 10
+distinct merged pull requests over at least 7 calendar days after cutover. A
+confirmed required pull-request CI, no-skip CI, or protected-main CI result
+that finds a safeguard omission caused by the new author-check mapping requires
+rollback. Use the procedure below. This amendment does not authorize legacy
+deletion or weaken a required check.
+
+The amended migration has these gates:
 
 1. Inventory every current safeguard and record the Phase 0 baseline.
 2. Remove pull request credential and cache-write authority.
 3. Add fixed CI selection and aggregate contracts.
-4. Record at least 10 distinct pull requests over at least 7 calendar days.
-   Use same-head ordinary CI plus no-skip evidence for audit-eligible changes.
-   Use full-graph ordinary CI evidence for package-execution changes that the
-   protected audit must reject. Do not count evidence-instrument changes.
-5. Require explicit human approval before removing the mandatory local gate.
-   A separate human-approved administration step applies any ruleset change.
-6. Observe at least 10 distinct merged pull requests over at least 7 calendar
-   days after cutover.
-7. Require separate human approval before deleting the legacy implementation.
+4. Repair the retained graph pin and require green protected-main CI.
+5. Apply strict current-base checking in a separate human-approved
+   administration step.
+6. Require explicit human approval before removing repository verification
+   from pre-push. The operator granted this approval on 2026-09-02 under the
+   conditions above.
+7. Observe at least 10 distinct merged pull requests over at least 7 calendar
+   days after cutover. Use same-head ordinary CI plus no-skip evidence for
+   audit-eligible changes. Use full-graph ordinary CI evidence for
+   package-execution changes that the protected audit must reject. Do not count
+   evidence-instrument changes.
+8. Require separate human approval before deleting the legacy implementation.
 
 Shadow execution also needs a human-approved spend ceiling and stop condition.
 A selection omission, false success, or accepted cost breach stops the rollout.
@@ -309,11 +335,12 @@ Darwin process identity, coherent lineage, autoreview provenance, and Sentry
 process identity. Retain that closure and its tests. PR #2134 advances the
 terminal pre-M1 source to `a5692c4570d7fe33255c2ce863d7f79264a9ddb0`. It
 changes gate-specific drain recovery and adds 46 gate-specific whole-file
-lines. It changes none of the retained shared files. Before cutover, relocation,
-or deletion, issues #2127 and #2128 must re-audit the shared consumers at the
-#2042 terminal commit and the gate-specific candidates through the current
-pre-M1 source. Gate-only coordinator, routing, prewarm, and Trunk wrapper or
-check components remain deferred retirement candidates.
+lines. It changes none of the retained shared files. The #2127 cutover keeps
+the shared closure and gate runtime unchanged. Before any relocation or
+deletion, #2128 must re-audit the shared consumers at the #2042 terminal commit
+and the gate-specific candidates through the current pre-M1 source. Gate-only
+coordinator, routing, prewarm, and Trunk wrapper or check components remain
+deferred retirement candidates.
 
 The process contract never signals a bare PID or process-group ID without a
 matching non-reusable identity. It settles coherent lineage before release and
@@ -348,10 +375,11 @@ the known retained setup and package-policy assertions out of the gate test
 suite. It also moves the retained autoreview owner and schema assertions out of
 the routing parity suite. The remaining routing-table family still mixes some
 retained workflow-pin and generated-drift behavior with deferred local routing.
-Issues #2127 and #2128 must allocate or migrate those components and publish
-the reviewed final denominator. This source-allocation work does not put the
-legacy selector's self-tests in the replacement target. Fixed CI already runs
-the retained safeguards during the no-skip audit.
+Issue #2127 records only its cutover delta and keeps this mixed family
+unchanged. Before deletion, #2128 must allocate or migrate those components and
+publish the reviewed final denominator. This source-allocation work does not
+put the legacy selector's self-tests in the replacement target. Fixed CI
+already runs the retained safeguards during the no-skip audit.
 Replacement additions must be smaller than the gate-specific code they replace
 at each cutover stage. Final retirement must remove at least 80% of the final
 denominator.
@@ -380,9 +408,11 @@ re-enabling the hook by reverting the cutover commit. Never restore the hook
 while its runtime is absent. Never clear coordinator state during rollback.
 
 A false success stops merges through the normal human ruleset administration
-path. Add a regression fixture, correct the inventory or CI contract, and
-repeat shadow evidence for the affected risk class. Do not bypass a required
-check to regain throughput.
+path. A confirmed safeguard omission caused by the new author-check mapping
+also requires reverting the cutover commit while the legacy implementation is
+available. Add a regression fixture, correct the author-check mapping,
+inventory, or CI contract, and repeat evidence for the affected risk class. Do
+not bypass a required check to regain throughput.
 
 ## Alternatives considered
 
@@ -420,7 +450,7 @@ would recreate the local gate.
 - Filter and aggregate correctness become explicit tested contracts.
 - A trusted administrator can still weaken candidate-controlled workflow code
   and use the existing bypass. This is an accepted threat-model limit.
-- Legacy deletion waits for two evidence windows and its own approval.
+- Legacy deletion waits for the post-cutover canary and its own approval.
 
 ## Evidence
 

@@ -305,9 +305,9 @@ even when you never open an authority.
    inner edit loop. Never force-push or amend while babysitting,
    and `git fetch` before every push because reviewers push mid-session. Check
    new additions against the scope baseline frozen at step 4; classify each as
-   in-scope, follow-up, or stop; **file a GitHub issue before deferring any valid
-   follow-up** and link it from the PR's `## Deferrals` section. Warn as the
-   diff approaches twice the baseline. Do not pause solely for cycle count
+   in-scope, follow-up, or stop; **file a labeled GitHub issue before deferring
+   any valid follow-up** and link it from the PR's `## Deferrals` section. Warn
+   as the diff approaches twice the baseline. Do not pause solely for cycle count
    before five review-triggered patch cycles are complete; pause for
    reclassification before starting a sixth. Authority:
    [`agent-issue-workflow.md`](agent-issue-workflow.md) for the deferral and
@@ -483,7 +483,10 @@ These bind regardless of which step you are on:
   clear reply stops re-raising bots from looping.
 - **`Closes #N` only when Done means is fully met**, else `Refs #N`.
 - **Knowingly deferred work needs a GitHub issue first**, linked from
-  `## Deferrals`. An evidence-backed won't-fix is not a deferral.
+  `## Deferrals`. Every issue an agent files carries a state label, a `kind:*`,
+  at least one `pkg:*`, and exactly one `risk:*` set by the
+  [Low-risk rule](agent-issue-workflow.md#low-risk-rule). An evidence-backed
+  won't-fix is not a deferral.
 - **Never weaken a control that is blocking your own work.** Do not widen,
   disable, or soften the quality gate, the sandbox or permission config, branch
   protection, or a safety-boundary rule to unblock the change you are making

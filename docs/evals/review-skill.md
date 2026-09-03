@@ -368,7 +368,9 @@ current `PATH` after the installer verifies `node`, `git`, `codex`, and
 `claude`). launchd does not inherit values that a login startup file exports.
 The installed job uses fixed `/bin/zsh` and `/bin/bash` interpreters. The login
 shell loads model credentials, then the command restores the captured path
-before it invokes the runner. Run this from the root of your checkout.
+before it invokes the runner. Run this from the root of your checkout, in your
+own shell. The installer refuses to start inside a quality-gate run, because the
+Darwin broker preflight allowlists it only on that condition.
 
 ```bash
 ./scripts/review/install-review-eval-launchd.sh

@@ -321,7 +321,7 @@ export function summarizeCodeRabbitReviewGate(state, pathFilterSkip = null) {
     required: false,
     state,
     fallbackAction: ["missing", "stale"].includes(state)
-      ? "request_review_once_for_head_after_optional_check"
+      ? "request_review_once_for_head"
       : "wait",
     ...(state === "not_applicable" ? pathFilterSkip : {}),
   };

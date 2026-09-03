@@ -4,8 +4,17 @@
  *
  * CodeRabbit resolves `.coderabbit.yaml` from the SOURCE branch of the pull
  * request it reviews, so a PR can weaken or replace the profile that reviews
- * it. Now that CodeRabbit findings feed the `pr:feedback-state` ledger — the
- * repo's merge oracle — that is a trust boundary, not a preference.
+ * it for every key the org-level Global overrides do not pin. Since
+ * 2026-09-02 those overrides pin `reviews.profile`,
+ * `request_changes_workflow`, and three `auto_review` keys (`enabled`,
+ * `drafts`, `auto_pause_after_reviewed_commits`) above the repository file
+ * (ADR 0066). Those overrides do not pin `auto_incremental_review`, so the
+ * repository file governs it — and this test pins it; `path_filters` and `path_instructions` stay
+ * repository-owned. This pin is the only guard for those three
+ * repository-owned keys: `auto_incremental_review`, `path_filters`, and
+ * `path_instructions`. Now that CodeRabbit findings feed the
+ * `pr:feedback-state` ledger — the repo's merge oracle — that is a trust
+ * boundary, not a preference.
  *
  * The committed config must parse and be EXACTLY equal to EXPECTED_CONFIG
  * below. Spot checks would let an added key (`early_access`, a `tools` block,
@@ -84,7 +93,7 @@ const EXPECTED_CONFIG = {
       enabled: true,
       base_branches: [],
       drafts: false,
-      auto_incremental_review: true,
+      auto_incremental_review: false,
       auto_pause_after_reviewed_commits: 5,
     },
   },
@@ -145,9 +154,16 @@ test("the pin rejects a weakened config (negative control)", () => {
   assert.throws(() => assert.deepEqual(extended, EXPECTED_CONFIG));
 });
 
-test("auto-review stays on with the measured five-commit burst guard", () => {
+test("pins auto-review on, incremental off, and the burst guard at five", () => {
   const { auto_review: autoReview } = EXPECTED_CONFIG.reviews;
   assert.equal(autoReview.enabled, true);
+  // This asserts the committed configuration, not the provider's runtime
+  // behaviour: PR #2236 observed a run on every push with this key `false`,
+  // and ADR 0066 holds that open question. Off since 2026-09-02 because
+  // CodeRabbit bills per push delta, so incremental reviews re-bill the same
+  // files on every agent fix round. The head-bound closeout request covers
+  // the final head instead.
+  assert.equal(autoReview.auto_incremental_review, false);
   assert.equal(autoReview.auto_pause_after_reviewed_commits, 5);
 });
 

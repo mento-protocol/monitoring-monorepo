@@ -3,7 +3,7 @@ title: Quick Commands
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-01
+last_verified: 2026-09-02
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -88,7 +88,6 @@ pnpm agent:context-budget --strict # Enforce root, scoped-file, and aggregate-ro
 # /pr-ready-override gate=codex-description-approval head=<full-head-sha> reason=<why this is safe>
 pnpm --silent pr:feedback-state --pr 123 --json  # Normalize unresolved/reply-required feedback before all-clear
 pnpm pr:ready-state --pr 123 --json              # Final current-head required-readiness probe
-node scripts/pr/review-process-metrics.mjs --prs <pr1,pr2,...> --output <result.json>  # Collect a new cohort after defining its boundary and tracking issue
 pnpm lockfile:lint                 # Fail-closed integrity/registry/override-floor check; no install
 pnpm skew:check                    # Fail on dependency skew vs pnpm catalog; no install
 pnpm sanitize:test                 # Fixture-test scripts/sanitize-terraform-output.sh secret redaction
@@ -130,7 +129,7 @@ pnpm issue:review --pr 123 --issue 901 --claim-id <id> --rebind-branch # Prove a
 pnpm issue:release --issue 901 --claim-id <id> # Release the matching claim back to agent-ready
 pnpm issue:release --issue 901 --claim-id <id> --closed-unmerged-pr # Release after the stored PR closes unmerged
 pnpm issue:release --issue 901 --claim-id <id> --merged-pr --needs-grooming # Continue a still-open issue after its stored PR merges
-pnpm issue:board sync --dry-run                # Preview the repository-wide queue-label and Project projection
+pnpm issue:board sync --dry-run                # Preview the repository-wide projection; reports incompletely groomed agent-ready issues
 pnpm issue:board sync                          # Apply the authorized projection; preserve Project Status
 pnpm issue:board backfill --issue 901 --dry-run # Preview fill-only ownership-field recovery from a trusted claim comment
 pnpm issue:board:test                          # Offline tests for the issue-board helper

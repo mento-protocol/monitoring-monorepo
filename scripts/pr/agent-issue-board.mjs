@@ -59,11 +59,13 @@ export {
   withIssueMutationLock,
 } from "./issue-board-lock.mjs";
 export {
+  agentReadyRoutingGaps,
   chooseUntriedCandidate,
   DEFAULT_PROJECT_NUMBER,
   DEFAULT_PROJECT_OWNER,
   DEFAULT_REPO,
   hasSweepClaimAttributes,
+  incompleteGroomingFinding,
   issueBodySha256,
   IssueClaimCandidateLossError,
   IssueOwnershipConflictError,

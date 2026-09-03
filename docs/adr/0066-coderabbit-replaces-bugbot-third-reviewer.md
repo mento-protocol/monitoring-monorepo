@@ -3,7 +3,7 @@ title: CodeRabbit replaces Cursor BugBot as the third PR review bot
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-31
+last_verified: 2026-09-03
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -13,7 +13,9 @@ garden_lane: adrs-architecture
 
 # ADR 0066 — CodeRabbit replaces Cursor BugBot as the third PR review bot
 
-**Status:** Accepted (Aug 2026) — BugBot disabled on 2026-08-31.
+**Status:** Accepted (Aug 2026) — BugBot disabled on 2026-08-31; the live
+compatibility paths retired on 2026-09-02; amended 2026-09-02 (usage add-on
+enabled, incremental reviews off).
 **Scope:** ci/process
 
 ## Context
@@ -28,13 +30,15 @@ narrow workflow pair does not use a review bot as an eligibility input. The
 current review stack replaces BugBot with CodeRabbit. Codex and Claude continue
 to run on subscriptions that the team pays for other reasons.
 
-BugBot was disabled in the Cursor dashboard on 2026-08-31. Legacy feedback
-still uses its original policy. `pr:feedback-state` continues to recognize
-`BUGBOT_BUG_ID` and `cursor[bot]` until every open legacy PR is terminal. The
-open-PR sweep on 2026-08-31 found one active case: PR #2036 has a current-head,
-unresolved, unreplied Cursor finding. The `Cursor Bugbot` check also remains an
-optional context during this compatibility period. These compatibility paths
-do not trigger new BugBot reviews.
+BugBot was disabled in the Cursor dashboard on 2026-08-31. Its compatibility
+paths retired on 2026-09-02, once the last legacy PR closed. Two carried real
+weight: `cursor[bot]` in the feedback-state bot roster, and `Cursor Bugbot` in
+the optional-check allowlist. The third, `BUGBOT_BUG_ID` in the two
+actionable-marker regexes, was already unreachable and enforced nothing —
+`reviewContradictionBody` strips `_` before the top-level regex sees a body, and
+the Claude clean-review caller short-circuits before its own severity rule. Its
+removal is therefore inert. None of the three ever triggered a new BugBot
+review.
 
 That bill changed shape. Cursor announced on 2026-05-11 (effective at each
 customer's first renewal after 2026-06-08) that BugBot dropped its flat
@@ -111,6 +115,10 @@ BugBot after reviewing these results.
 | Graphite Agent      | Flat $20–40/month, unlimited reviews          | $20–40                                                   |
 | Drop to two bots    | —                                             | $0, minus third-bot coverage                             |
 
+The CodeRabbit row records the 2026-08-18 estimate. The add-on was later
+enabled and its real cost overran that row — see the 2026-09-02 amendment
+below.
+
 CodeRabbit's public-repo terms were verified against the vendor's docs and
 the installed org's billing page on 2026-08-18. The Open Source tier gives
 public repos **Pro+ features free**, with no application step and no license
@@ -145,9 +153,10 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
    deferred: the operator decided on 2026-08-18 to feel the rate-limit
    friction first, at flat seat cost, and enable the add-on only if that
    friction proves annoying. Until then, over-limit reviews wait instead of
-   billing. The $0 OSS tier (Pro+ features, ~1/hour, manual-trigger-only
-   under 10 stars, no add-on) remains the documented fallback if spend must
-   return to zero.
+   billing. **Superseded 2026-09-02** — the add-on was enabled in Automatic
+   mode with a $500/month cap; see the amendment below. The $0 OSS tier (Pro+
+   features, ~1/hour, manual-trigger-only under 10 stars, no add-on) remains
+   the documented fallback if spend must return to zero.
 2. **Commit `.coderabbit.yaml`** (done 2026-08-19 in PR #1927): use the `chill`
    profile, `path_filters` that exclude lockfiles and generated trees, and
    `auto_pause_after_reviewed_commits: 5`. The initial value of 2 paused normal
@@ -156,17 +165,149 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
    normal fix round as active development. The ship and babysit closeout
    requests one manual review for an exact head when the automatic review is
    stale or missing after the optional check becomes terminal.
+   **Amended 2026-09-02** — `auto_incremental_review: false` means no
+   automatic review follows a push, so the closeout request no longer waits
+   for one; the pause threshold now only matters if incremental reviews
+   return.
 3. **Run both reviewers for two weeks** (complete 2026-08-31). Compare their
    findings on the same PRs. Use the result to confirm or reverse the decision.
-4. **Disable BugBot** (complete 2026-08-31). Stop new reviews and preserve
-   legacy feedback enforcement for open PRs. The live sweep found that PR
-   #2036 still needs this compatibility. Remove it only after every PR with a
-   legacy Cursor feedback or check surface is terminal. Issue #2178 owns the
-   related readiness projection update.
-5. **Keep measurement repeatable.** Preserve historical Cursor recognition in
-   `scripts/pr/review-process-metrics.mjs`. Use before and after cohorts to
-   assess future review changes. Do not erase historical evidence when the
-   live compatibility path retires.
+4. **Disable BugBot** (complete 2026-08-31) and **retire the compatibility
+   paths** (complete 2026-09-02). Disabling stopped new reviews while legacy
+   feedback enforcement stayed live for open PRs. PR #2036, the last PR
+   carrying a legacy Cursor finding, merged on 2026-09-01. The live sweep on
+   2026-09-02 covered all four open PRs and found no cursor[bot] comment or
+   review on any of them, so the live paths came out of
+   `scripts/pr/pr-feedback-state-core.mjs`,
+   `scripts/pr/pr-feedback-state-claude.mjs`, and
+   `scripts/pr/pr-ready-state-core.mjs`. Issue #2178 owns the related
+   readiness projection update.
+5. **Use CodeRabbit's native monthly report** (configured 2026-09-02). The
+   `Monthly CodeRabbit value review` report runs on day 1 at 09:00
+   Europe/Berlin, filters to `monitoring-monorepo`, and delivers by email. It
+   uses CodeRabbit's organization statistics and bot comments to report review
+   coverage, suggestions, accepted suggestions, noise, a value verdict, and up
+   to three evidence-linked improvements. It replaces the local metrics
+   collector, and the repository carries no replacement schedule. Historical
+   cohort artifacts stay under `docs/metrics/`. If a future decision needs
+   cross-bot forensic evidence, create a narrow issue-scoped query for that
+   decision.
+
+## Amendment 2026-09-02 — usage add-on enabled, incremental reviews off
+
+This corrects the "add-on deferred" record above. Decision step 1, the cost
+table, and the first Consequences bullet describe the state as of 2026-08-18
+and stay in place as history.
+
+- **The add-on was enabled, not deferred.** It runs in Automatic mode with a
+  $500/month cap. The enabling date was not recorded; the billing page showed
+  it active on 2026-09-02.
+- **The vendor renamed the plan tiers.** Checked 2026-09-02,
+  docs.coderabbit.ai/management/plans calls the tier this org holds **Team**
+  (formerly Pro+): $48/developer/month annual, $60 month-to-month, 8 PR
+  reviews/hour, 300 files per review. Pro is now Essentials. The rate-limit
+  notice on PR #2236 reported `Plan: Team` for that reason — the same seat
+  under a new name, not a downgrade. Sections above this amendment keep the
+  Pro+ name they were written with.
+- **The cap was reached on 2026-09-02**, sixteen days before the cycle resets
+  on 2026-09-18. Past the cap only the free refill runs — 1 review/hour for
+  the sole PR author, who sits permanently in the 90+ reviews/7-days tier —
+  and every other push is blocked.
+- **30-day Review usage, team view, read 2026-09-02:** 672 review events, 365
+  continued with credits (billed), 48 blocked, 3.9 review events per PR, ~5.5
+  billed files per continued review. CodeRabbit meters pushes, not commits or
+  files: each push past the hourly refill bills every file in that push's
+  delta at 25¢, so agent fix rounds re-bill the same files several times per
+  PR.
+- **Decision:** set `reviews.auto_review.auto_incremental_review: false` in
+  `.coderabbit.yaml`. CodeRabbit then reviews a PR once when it opens and once
+  more at closeout, when the ready-state flow posts the head-bound
+  `@coderabbitai review` request that
+  [`../notes/pr-ready-state.md`](../notes/pr-ready-state.md) already defines.
+  Intermediate pushes get no automatic CodeRabbit review. Codex still reviews
+  every push automatically, but Claude does not: `.github/workflows/claude.yml`
+  triggers on `opened` and `ready_for_review` only, so a Claude re-review is
+  opt-in via `@claude review`. The coverage an intermediate push keeps is
+  therefore Codex alone. No required gate changes, because CodeRabbit's own
+  check was already advisory — but read the accepted residual below for what this
+  does cost. Expected: review events per PR fall from ~3.9 to ~2, each changed
+  file bills at most twice per PR, and spend lands at an estimated
+  $200–$250/month at current volume.
+- **The repository file governs this key.** The organization-level Global
+  overrides applied on 2026-09-02 pin `reviews.profile`,
+  `request_changes_workflow`, `auto_review.enabled`, `auto_review.drafts`, and
+  `auto_review.auto_pause_after_reviewed_commits`. They do not set
+  `auto_incremental_review`, so `.coderabbit.yaml` decides it and
+  `scripts/coderabbit-config.test.mjs` is its only guard. **Follow-up, now
+  indicated rather than conditional:** the operator adds
+  `auto_incremental_review: false` to the Global overrides. PR #2236 measured
+  the repository file on its own and it did not hold — see the next bullet.
+- **Measured on PR #2236: the repository file alone did not suppress the
+  attempt.** This bullet is the single tally; the runbooks point here rather
+  than carrying their own counts, which went stale every time the PR pushed.
+  As of 2026-09-03, five pushes each drew a CodeRabbit run within roughly 75
+  seconds, with `auto_incremental_review: false` in force on the branch the
+  runs read (`Path: .coderabbit.yaml`, `Review profile: CHILL`):
+
+  | Push          | Head        | Run ID      | Observed             |
+  | ------------- | ----------- | ----------- | -------------------- |
+  | 1, opening    | `733fa0b83` | `3fdfc30d…` | 2026-09-02 14:40:44Z |
+  | 2             | `242f47afb` | `5e05ac36…` | 2026-09-02 15:51:39Z |
+  | 3             | `cb273d4e2` | `9739f061…` | 2026-09-02 15:57:49Z |
+  | 4             | `32b60c787` | `beabff8f…` | 2026-09-02 16:51:26Z |
+  | 5, base merge | `95c3b6dc7` | `c21f85af…` | 2026-09-03 06:43:23Z |
+
+  All five runs were refused by the spending cap, so nothing was billed. What
+  set run 5 apart was its scope, not its outcome: runs 1-4 each reported the
+  full base-to-head diff, while run 5 reported an incremental
+  `4aef1be09`..`95c3b6dc7` delta, the first to do so. One confound stays open:
+  the opening review never completed either, and CodeRabbit may retry an
+  unfinished review when the head moves regardless of this key. A clean
+  measurement needs a PR whose opening review completed, so it waits for the
+  2026-09-18 cap reset.
+
+- **The closeout request is the vendor-documented path here, checked
+  2026-09-02.** docs.coderabbit.ai/configuration/auto-review states that
+  `auto_incremental_review: false` reviews "only when a PR is first opened.
+  Subsequent pushes will be ignored until you trigger the review manually", and
+  names `@coderabbitai review` as that manual trigger.
+  docs.coderabbit.ai/reference/review-commands lists "when automatic reviews
+  are disabled" as a use case for the same command, describes it as triggering
+  "an incremental review of new changes only", and notes it spends one review
+  from the allowance. The "applicable only when automatic reviews are paused"
+  line in PR #2236's refusal came attached to a rate-limited command, so it is
+  not evidence against the documented path.
+- **Confirmed 2026-09-02: the closeout request works.** The head-bound request
+  posted against `4aef1be09` at `21:24:54Z` produced a completed CodeRabbit
+  review at `21:31:58Z` carrying four inline findings — the first review this
+  PR obtained. That settles the open question above: the command is applicable
+  under `auto_incremental_review: false`, and the "applicable only when
+  automatic reviews are paused" line really was boilerplate on a rate-limited
+  refusal. One question remains for the 2026-09-18 re-measure: why pushes
+  still trigger runs at all when the documentation says they are ignored. The
+  incremental range on run 5 is the sharpest clue — it is the shape an
+  incremental review takes, not the shape of a retry of an unfinished opening
+  review.
+- **Rejected here:** raising the cap keeps the per-push meter and buys more
+  duplicate reviews; tightening `path_filters` saves little because the billed
+  unit is an already-small push delta. The $0 OSS tier stays the fallback if
+  spend must return to zero.
+- **Accepted residual:** the closeout request is now the final scheduled
+  request in the ready-state flow, and readiness never waits for it.
+  `summarizeCodeRabbitReviewGate` returns `required: false`, `ready` is
+  `required.ready` in `scripts/pr/pr-ready-state-core.mjs`, and
+  `pr-ready-state.test.mjs` pins "never awaits a pending CodeRabbit check for
+  readiness" — so a head can reach all-clear with its CodeRabbit signal still
+  `requested`. That was already true before this change; incremental review
+  only made it unlikely to bite, because the final head usually already
+  carried an automatic review. The partial cover stays as
+  [`../notes/pr-ready-state.md`](../notes/pr-ready-state.md) states it: if the
+  requested review lands while the PR is still under watch, rerun
+  `pr:feedback-state` and handle its findings before all-clear. Making the
+  CodeRabbit signal blocking is a separate decision this ADR does not take.
+- **Revisit trigger:** closeout-only coverage missing defects that incremental
+  reviews would have caught, heads merging with the closeout review still only
+  `requested`, or spend still tracking toward the cap after the 2026-09-18
+  reset.
 
 ## Alternatives considered
 
@@ -210,6 +351,8 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
   ~$180/month in heavy months, with path filters shrinking the file counts.
   BugBot's per-run meter, which scaled with agent iteration, is gone from the
   default path either way, and the $0 OSS fallback caps downside.
+  **Superseded 2026-09-02**: the add-on was on, and add-on spend reached its
+  $500/month cap rather than staying under ~$180. See the amendment below.
 - The stack's third seat changes character from precision-quiet to
   high-recall. CodeRabbit's known weakness is verbosity; the quiet/chill
   profiles, path filters, and pause-after-reviewed-commits are the levers, and
@@ -223,15 +366,26 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
   the add-on. Keep `auto_pause_after_reviewed_commits` at 5 and request one
   head-bound `@coderabbitai review` at closeout when the automatic review is
   stale or missing. This spends the ladder on review rounds that matter while
-  preventing duplicate requests for the same head.
+  preventing duplicate requests for the same head. **Amended 2026-09-02**:
+  agent fix bursts now do neither — incremental auto-review is off, so they
+  get no CodeRabbit review at all and the closeout request is the second and
+  last one per PR.
   `@coderabbitai rate limit` reports remaining capacity without consuming
   a review.
-- The 2026-08-31 open-PR sweep found one current-head Cursor finding on PR
-  #2036. Keep `cursor[bot]`, `BUGBOT_BUG_ID`, and the optional `Cursor Bugbot`
-  check classification until that PR and any other open legacy PR are
-  terminal. Retire these paths only after another live sweep returns no active
-  legacy feedback. Preserve Cursor recognition in historical metrics and
-  frozen review fixtures after the live path retires.
+- The 2026-08-31 open-PR sweep found one current-head Cursor finding, on PR
+  #2036; that PR merged on 2026-09-01. The follow-up sweep on 2026-09-02 read
+  all four open PRs and found no Cursor comment or review, so `cursor[bot]`,
+  `BUGBOT_BUG_ID`, and the optional `Cursor Bugbot` check classification came
+  out the same day. Scope the effect narrowly: only the top-level comment and
+  review-body ledger consults the bot roster, so only a stray **top-level**
+  Cursor comment is ignored — an unresolved Cursor review thread or unreplied
+  root inline comment still blocks like any other author's, and every Cursor
+  finding this repo recorded was inline. A stray `Cursor Bugbot` check reads as
+  an unrecognized context: optional when branch protection reports required
+  contexts that do not name it, required in the fallback path that runs when
+  those contexts are unavailable — a path that already reports its own
+  `branch-protection` blocker. Historical Cursor evidence stays in this ADR,
+  prior measurement artifacts, and frozen review fixtures.
 - CodeRabbit is a new third-party GitHub App with repo read access and PR
   comment/review write access, steered by `.coderabbit.yaml` — and CodeRabbit
   resolves that file from the **source branch** of the PR under review,
@@ -244,8 +398,8 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
   (`pnpm coderabbit:config:test`), so a source-branch edit to
   `.coderabbit.yaml` fails the build instead of silently weakening the
   reviewer; and the feedback-ledger roster
-  (`scripts/pr/pr-feedback-state-core.mjs`, `scripts/pr/pr-feedback-state-claude.mjs`,
-  `scripts/pr/review-process-metrics.mjs`) carries marker-recognition tests
+  (`scripts/pr/pr-feedback-state-core.mjs` and
+  `scripts/pr/pr-feedback-state-claude.mjs`) carries marker-recognition tests
   for CodeRabbit's finding markers (`cr-indicator-types`, the severity badge)
   and its non-finding machinery (rate-limit, summary, trigger-ack,
   thread-resolved-ack). CodeRabbit's inline findings now feed
@@ -256,8 +410,19 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
   review, and a same-patch edit to config plus pin is visible rather than
   impossible (any in-repo policy is PR-editable; comparing against a
   trusted ref would freeze legitimate config changes and recurse the same
-  loophole). The out-of-repo close is CodeRabbit's org-level override
-  layer, recorded as an operator step in issue #1917.
+  loophole). The out-of-repo close is set: on 2026-09-02 the operator
+  applied CodeRabbit's organization-level **Global overrides**, which the
+  vendor ranks above a repository's `.coderabbit.yaml`, so a PR can no
+  longer weaken these keys from its source branch. The override pins
+  `reviews.profile: chill`, `reviews.request_changes_workflow: false`,
+  `reviews.auto_review.enabled: true`, `reviews.auto_review.drafts: false`,
+  and `reviews.auto_review.auto_pause_after_reviewed_commits: 5`. It omits
+  `path_filters` and `path_instructions` on purpose: both are tuned in-repo
+  against evidence, and the vendor docs do not state whether an override
+  replaces or merges list values. Those two keys keep the fail-loud in-repo
+  pin above and its residual — a weakened path filter still shapes the
+  review of the PR that weakens it, because CodeRabbit reads the source
+  branch before CI runs.
 - Watch item: `claude[bot]` review currently rides existing Max
   subscription spend. Anthropic's separate metered "Code Review" product bills
   $15–25/review — ruinous at this volume. If the GitHub Action review path is
@@ -276,6 +441,15 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
   opt-in), cursor.com/docs/bugbot (default full-PR re-review per push; no
   spend cap). Iteration-cost reports: forum.cursor.com thread
   "usage-based Bugbot pricing punishes iterative workflows" (May 2026).
+- CodeRabbit configuration precedence: docs.coderabbit.ai/guides/configuration-overview
+  (checked 2026-09-02) ranks organization-level global overrides above a
+  repository's `.coderabbit.yaml`. The applied override was read back in the
+  CodeRabbit UI on 2026-09-02 under Organization settings → View mode →
+  Global overrides.
+- CodeRabbit Reports UI, read back on 2026-09-02: the active
+  `Monthly CodeRabbit value review` report filters to `monitoring-monorepo`,
+  runs monthly on day 1 at 09:00 Europe/Berlin, includes organization statistics
+  and bot comments, and has email delivery configured.
 - CodeRabbit pricing and public-repo terms: coderabbit.ai/pricing,
   docs.coderabbit.ai/management/plans, docs.coderabbit.ai/management/seat-assignment
   (seat = PR-opener; pushes free), kb.coderabbit.ai article 8856795235
@@ -285,6 +459,10 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
   add-on availability (paid plans only). The installed org's billing page
   confirmed the default Pro+ trial and the 2026-08-18 paid upgrade. All
   checked 2026-08-18.
+- Usage add-on state and spend: the installed org's CodeRabbit Subscription
+  and Usage pages, read 2026-09-02 — add-on Automatic with a $500/month cap,
+  cap reached that day, cycle reset 2026-09-18, and the 30-day Review usage
+  figures (672 / 365 / 48 / 3.9 / ~5.5) in the amendment above.
 - Post-rollout pause sample, queried from GitHub on 2026-08-21: 16 of the 29
   PRs created after `.coderabbit.yaml` merged carried CodeRabbit's generated
   pause marker. Six of those PRs had only 2-4 total commits. Two of the 29 PRs
@@ -316,5 +494,7 @@ Replace BugBot with CodeRabbit as the third advisory reviewer.
   `gh api pulls/<n>/comments` (26/26 findings fixed; per-bot split above);
   merged-PR volume from `git log --first-parent` (280 in 30 days, 850 in 90);
   BugBot's not-required check status per ADR 0007 and
-  `docs/pr-checklists/ci-workflow-gates.md`; its `BUGBOT_BUG_ID` feedback-gate
-  role per `scripts/pr/pr-feedback-state-core.mjs`.
+  `docs/pr-checklists/ci-workflow-gates.md`; and its `BUGBOT_BUG_ID` marker as
+  it stood before the 2026-09-02 retirement, per
+  `scripts/pr/pr-feedback-state-core.mjs` at that revision. Retained
+  `docs/metrics/` artifacts preserve prior measurements.

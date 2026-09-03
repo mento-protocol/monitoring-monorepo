@@ -257,15 +257,53 @@ function hasNativeBlocker(issue) {
   return blockedBy.totalCount > 0 || blockedBy.nodes.filter(Boolean).length > 0;
 }
 
+function labelsWithPrefix(issue, prefix) {
+  return [...labelNames(issue)].filter((label) => label.startsWith(prefix));
+}
+
 function hasSweepRouting(issue) {
-  const labels = [...labelNames(issue)];
-  const riskLabels = labels.filter((label) => label.startsWith("risk:"));
-  const packageLabels = labels.filter((label) => label.startsWith("pkg:"));
+  const riskLabels = labelsWithPrefix(issue, "risk:");
   return (
     riskLabels.length === 1 &&
     riskLabels[0] === "risk:low" &&
-    packageLabels.length === 1
+    labelsWithPrefix(issue, "pkg:").length === 1
   );
+}
+
+/**
+ * Routing-label gaps that make an `agent-ready` issue incompletely groomed.
+ *
+ * `agent-ready` promises an agent can implement the issue without further
+ * grooming. Consumers route on exactly one `risk:*` and at least one `pkg:*`,
+ * so an issue missing either is not yet ready however complete its body reads.
+ * Multiple `pkg:*` labels are correct for cross-package work; the backlog sweep
+ * narrows further to exactly one, and that narrowing is the sweep's own rule.
+ */
+export function agentReadyRoutingGaps(issue) {
+  const riskLabels = labelsWithPrefix(issue, "risk:").sort();
+  const gaps = [];
+  if (riskLabels.length === 0) gaps.push("no risk:* label");
+  if (riskLabels.length > 1) {
+    gaps.push(`conflicting risk labels (${riskLabels.join(", ")})`);
+  }
+  if (labelsWithPrefix(issue, "pkg:").length === 0) {
+    gaps.push("no pkg:* label");
+  }
+  return gaps;
+}
+
+/**
+ * The incomplete-grooming finding, or null when the issue is well formed.
+ *
+ * Reporting only. Nothing here refuses a claim: manual work on a thinly
+ * labeled issue stays possible, and the finding names the repair instead.
+ */
+export function incompleteGroomingFinding(issue) {
+  if (String(issue.state ?? "").toUpperCase() !== "OPEN") return null;
+  if (!labelNames(issue).has("agent-ready")) return null;
+  const gaps = agentReadyRoutingGaps(issue);
+  if (gaps.length === 0) return null;
+  return `Issue #${issue.number} is agent-ready but incompletely groomed: ${gaps.join("; ")}`;
 }
 
 export function hasSweepClaimAttributes(issue, project) {

@@ -3,7 +3,7 @@ title: Agent Issue Workflow
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-30
+last_verified: 2026-09-02
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -57,10 +57,52 @@ Routing labels:
 - `kind:*` — work type.
 - `risk:*` — implementation risk: low, medium, or high.
 
+An issue may carry `agent-ready` only with exactly one `risk:*` and at least one
+`pkg:*`. An `agent-ready` issue missing either is **incompletely groomed**:
+consumers treat it as `needs-grooming` until it is repaired, and
+`pnpm issue:board sync` reports it as a per-issue failure. `pnpm issue:claim`
+still claims it, so manual work stays possible. The backlog sweep narrows
+further to exactly one `pkg:*`, so a correctly labeled multi-package issue is
+never sweep-eligible and stays manual.
+
+Every issue an agent files, a PR deferral included, carries a state label,
+exactly one `risk:*`, at least one `pkg:*`, and a `kind:*` at creation. The sync
+report covers the `agent-ready` rule above; it does not check `kind:*`.
+
+### Low-risk rule
+
+`risk:low` requires all four:
+
+1. Every path the issue names or clearly implies lies inside one package area —
+   the `pkg:*` vocabulary: aegis, alerts, dashboard, governance-watchdog,
+   indexer, integration-probes, metrics-bridge, shared-config, terraform,
+   tooling.
+2. None of those paths is a control, deploy, or money-path surface:
+   `terraform/**` or any `*.tf`; `.github/workflows/**`; `scripts/deploy*`,
+   `**/deploy.sh`, `cloudbuild*`; `scripts/agent-quality-gate.sh` and
+   `scripts/gate/**`; `scripts/agent-autoreview*` and any autoreview runtime;
+   `scripts/pr/agent-issue-board*`, `scripts/pr/issue-board-*`, and
+   `scripts/pr/pr-ready-state*`; `.trunk/**`;
+   `.claude/hooks` or settings; `package.json`, `pnpm-lock.yaml`,
+   `pnpm-workspace.yaml`, `patches/**`; `indexer-envio/schema.graphql`;
+   `alerts/rules/**`; anything named `*secret*` or touching IAM, WIF, or
+   credentials; anything that writes production data through Upstash, Sentry
+   archive and unarchive, or Hasura.
+3. The body names a verification path: a command, a test file, or a browser
+   check.
+4. It needs no product, policy, or provider-console decision.
+
+Otherwise use `risk:medium`. Use `risk:high` for secrets, IAM, a production
+apply, or deploy identity. Docs-only, test-only, and skill or prose-only changes
+that satisfy all four are `risk:low`. `docs/notes/**`, `docs/adr/**`,
+`.agents/skills/**`, and `.claude/skills/**` are not control surfaces for this
+rule, even when they describe one.
+
 ## Lifecycle
 
 1. Create or migrate the issue with the Agent Task issue form.
-2. Add routing/risk labels and exactly one state label.
+2. Add exactly one state label plus the routing labels the Labels section
+   requires. `agent-ready` needs exactly one `risk:*` and at least one `pkg:*`.
 3. Put ready issues in `agent-ready`; put unclear issues in `needs-grooming`.
 4. When an agent starts work, run `pnpm issue:claim --count <n> --agent <name>`
    before substantive edits. It moves the issue to `agent-active`, records
@@ -95,9 +137,13 @@ Routing labels:
    claim, review, or release authority. A concurrent conflict with a fallback
    `needs-grooming` label stays visible and fails closed for manual resolution.
    It fails if a closed issue retains a queue label or if state does not settle
-   within the bounded attempts. A per-issue failure does not stop later issues.
-   The command exits nonzero after it lists the successful and failed issue
-   numbers. When Done means still requires post-merge production proof, use
+   within the bounded attempts. It also reports each incompletely groomed
+   `agent-ready` issue as a per-issue failure, after that issue's own
+   projection and confirmed by a fresh read, so the report never withholds a
+   Project item and never fires on a stale enumeration snapshot. A per-issue failure
+   does not stop later issues. The command exits nonzero after it lists the
+   successful and failed issue numbers.
+   When Done means still requires post-merge production proof, use
    `Refs`, keep the issue open and `in-pr`, and retain its current owner through
    the live checks. Close and sync only after acceptance passes.
    When the closed issue is listed in an editable canonical parent or tracker,
