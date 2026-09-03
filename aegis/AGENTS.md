@@ -36,11 +36,7 @@ garden_lane: agent-entry-points
 
 ## Verification
 
-Run `pnpm aegis:lint`, `pnpm aegis:typecheck`, and `pnpm aegis:test` for Aegis
-source. Also run `pnpm aegis:agent:test` for `aegis/grafana-agent/**`. Run
-`pnpm aegis:build` for build or runtime changes. Run Terraform fmt/init/validate
-for `aegis/terraform` when relevant. Required CI runs `test:cov` and enforces
-the coverage floors below.
+Run `pnpm aegis:lint`, `pnpm aegis:typecheck`, and `pnpm aegis:test`. Also run `pnpm aegis:agent:test` for `aegis/grafana-agent/**`, and `pnpm aegis:build` for build/runtime changes. Run Terraform fmt/init/validate for `aegis/terraform` when relevant. Required CI runs `test:cov` and enforces the coverage floors below.
 
 Coverage floors are enforced by `coverageThreshold` in `aegis/package.json`:
 statements 85, branches 77, functions 87, lines 85.

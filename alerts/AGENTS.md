@@ -53,10 +53,8 @@ routing.
 
 - `pnpm tf validate alerts-rules` / `pnpm tf validate alerts-delivery`; Peg test: `docs/notes/peg-monitoring.md`.
 - `pnpm alerts:rules:plan` and `pnpm alerts:infra:plan` — must show 0 changes against existing state unless the PR intentionally changes the stack.
-- Run the onchain-event-handler package lint, typecheck, and normal test on
-  handler changes.
-- Run the oncall-announcer package lint, typecheck, and normal test on on-call
-  announcer changes.
+- On handler changes, run the onchain-event-handler package lint, typecheck, and normal test.
+- On on-call announcer changes, run the oncall-announcer package lint, typecheck, and normal test.
 - `pnpm alerts:watcher:test` — required on `alerts/infra/sentry-ingest-watcher/` changes.
 - `bash alerts/infra/scripts/fix-webhook-state.test.sh` — required when changing the shared QuickNode state-ID parser, repair tool, or listener replacement provisioner.
 - For a combined edit, apply every matching direct author check in step 3 of
