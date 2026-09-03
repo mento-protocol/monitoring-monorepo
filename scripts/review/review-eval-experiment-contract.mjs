@@ -12,6 +12,13 @@ import {
   skillDigest as canonicalSkillDigest,
 } from "./review-eval-run-plan.mjs";
 import { scorerDigest as canonicalScorerDigest } from "./review-eval-score.mjs";
+import {
+  cliVersionDrift,
+  cliVersionIdentity,
+  isObject,
+  nonempty,
+  phaseVersionsFor,
+} from "./review-eval-experiment-versions.mjs";
 
 export const EXPERIMENT_SCHEMA_VERSION = 1;
 export const EXPERIMENT_NAMESPACE = "review-skill-experiments/v1";
@@ -33,6 +40,7 @@ export const EXPERIMENT_SOURCE_FILES = Object.freeze([
   "scripts/review/review-eval-experiment-decision.mjs",
   "scripts/review/review-eval-experiment-cache.mjs",
   "scripts/review/review-eval-experiment-runtime.mjs",
+  "scripts/review/review-eval-experiment-versions.mjs",
 ]);
 
 export const DEFAULT_EXPERIMENT_POLICY = Object.freeze({
@@ -58,10 +66,6 @@ export const DEFAULT_EXPERIMENT_POLICY = Object.freeze({
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const CANDIDATE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const experimentRepoRoot = fileURLToPath(new URL("../../", import.meta.url));
-
-function isObject(value) {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
 
 function stableValue(value) {
   if (Array.isArray(value)) return value.map(stableValue);
@@ -125,13 +129,6 @@ function assertDigest(value, label) {
   return digest;
 }
 
-function nonempty(value, label) {
-  if (typeof value !== "string" || value.trim().length === 0) {
-    throw new Error(`${label} must be a non-empty string`);
-  }
-  return value;
-}
-
 function treatment(value, { incumbent = false } = {}) {
   if (!isObject(value)) {
     throw new Error(`${incumbent ? "incumbent" : "candidate"} is missing`);
@@ -160,20 +157,6 @@ function oneCandidate(candidate, candidates) {
     throw new Error("an experiment campaign requires exactly one candidate");
   }
   return selected;
-}
-
-function cliIdentity(cliVersions, identities) {
-  const supplied = cliVersions ?? {
-    claude: identities?.claude_cli,
-    codex: identities?.codex_cli,
-    judge: identities?.judge_cli,
-  };
-  const claude = nonempty(supplied?.claude, "cliVersions.claude");
-  return {
-    claude,
-    codex: nonempty(supplied?.codex, "cliVersions.codex"),
-    judge: nonempty(supplied?.judge ?? claude, "cliVersions.judge"),
-  };
 }
 
 function modelIdentity(contract) {
@@ -339,7 +322,7 @@ export function canonicalRerunManifest({
     scorer_digest: assertDigest(scorerDigest, "scorerDigest"),
     skill_digest: assertDigest(skillDigest, "skillDigest"),
     finder_argv_digest: assertDigest(finderArgvDigest, "finderArgvDigest"),
-    cli_versions: cliIdentity(cliVersions),
+    cli_versions: cliVersionIdentity(cliVersions),
     cell_count: cells.length,
     cells: structuredClone(cells),
   };
@@ -362,7 +345,7 @@ export function buildExperimentPlan({
   const contractIdentity = assertDigest(contractDigest, "contractDigest");
   const incumbentIdentity = treatment(incumbent, { incumbent: true });
   const candidateIdentity = treatment(oneCandidate(candidate, candidates));
-  const versions = cliIdentity(cliVersions, identities);
+  const versions = cliVersionIdentity(cliVersions, identities);
   const models = modelIdentity(contract);
   const scorerIdentity = canonicalScorerDigest();
   const finderIdentity = canonicalFinderArgvDigest(contract);
@@ -422,13 +405,53 @@ export function stagePlanFor({ plan, stage }) {
   return stagePlan;
 }
 
+const MAX_PLAN_DIFFERENCES = 8;
+
+/** Name the paths where a stored plan and its rebuild disagree. */
+function planDifferences(actual, expected, path = "", out = []) {
+  if (out.length >= MAX_PLAN_DIFFERENCES) return out;
+  if (JSON.stringify(actual) === JSON.stringify(expected)) return out;
+  if (isObject(actual) && isObject(expected)) {
+    for (const key of new Set([
+      ...Object.keys(actual),
+      ...Object.keys(expected),
+    ])) {
+      planDifferences(
+        actual[key],
+        expected[key],
+        path ? `${path}.${key}` : key,
+        out,
+      );
+    }
+    return out;
+  }
+  if (
+    Array.isArray(actual) &&
+    Array.isArray(expected) &&
+    actual.length === expected.length
+  ) {
+    for (const [index, item] of actual.entries()) {
+      planDifferences(item, expected[index], `${path}[${index}]`, out);
+    }
+    return out;
+  }
+  out.push(path || "plan");
+  return out;
+}
+
+/**
+ * Rebuild the plan from its own recorded inputs, including the CLI versions it
+ * was planned under, so a stored plan stays internally consistent forever. A
+ * live probe passed as `cliVersions` is reported as drift, not as a problem.
+ */
 export function validateExperimentPlan({
   plan,
   contract,
   contractDigest = plan?.contract_digest,
-  cliVersions = plan?.inputs?.cli_versions,
+  cliVersions = null,
 }) {
   const problems = [];
+  let drift = null;
   try {
     if (!isObject(plan)) throw new Error("plan must be an object");
     const rebuilt = buildExperimentPlan({
@@ -437,18 +460,29 @@ export function validateExperimentPlan({
       plannedAt: plan.planned_at,
       incumbent: plan.incumbent,
       candidate: plan.candidate,
-      cliVersions,
+      cliVersions: plan?.inputs?.cli_versions,
       includeLivePaired: plan.stages?.["live-paired"]?.enabled === true,
     });
-    if (JSON.stringify(plan) !== JSON.stringify(rebuilt)) {
+    const differences = planDifferences(
+      stableValue(plan),
+      stableValue(rebuilt),
+    );
+    if (differences.length > 0) {
       problems.push(
-        "plan differs from the complete deterministic campaign plan",
+        "plan differs from the complete deterministic campaign plan at " +
+          differences.join(", "),
       );
+    } else if (JSON.stringify(plan) !== JSON.stringify(rebuilt)) {
+      problems.push("plan key order differs from the deterministic plan");
     }
+    drift = cliVersionDrift({
+      planned: rebuilt.inputs.cli_versions,
+      live: cliVersions,
+    });
   } catch (error) {
     problems.push(error.message);
   }
-  return { ok: problems.length === 0, problems };
+  return { ok: problems.length === 0, problems, drift };
 }
 
 function treatmentFor(plan, name) {
@@ -461,12 +495,15 @@ function withDigest(identity) {
   return { ...identity, digest: digestObject(identity) };
 }
 
+/** `phaseVersionsFor` states how a cache identity is keyed on versions. */
 export function rawCacheIdentity({
   plan,
   stage,
   lane,
   treatment: treatmentName,
   sourceDigest = null,
+  cliVersions,
+  phaseVersions = null,
 }) {
   const plannedStage = stagePlanFor({ plan, stage });
   const plannedLane = plannedStage.lanes.find(
@@ -500,7 +537,11 @@ export function rawCacheIdentity({
     treatment: treatmentName,
     skill_digest: selectedTreatment.skill_digest,
     contract_digest: plan.contract_digest,
-    cli_version: plan.inputs.cli_versions.claude,
+    cli_versions: phaseVersionsFor("raw", {
+      cliVersions,
+      phaseVersions,
+      source,
+    }),
     model: plan.inputs.models.verifier,
     prompt: plan.inputs.prompts.handoff,
     fixture: plannedLane.fixture,
@@ -508,7 +549,12 @@ export function rawCacheIdentity({
   });
 }
 
-export function scoreCacheIdentity({ plan, rawDigest }) {
+export function scoreCacheIdentity({
+  plan,
+  rawDigest,
+  cliVersions,
+  phaseVersions = null,
+}) {
   return withDigest({
     schema_version: EXPERIMENT_SCHEMA_VERSION,
     namespace: EXPERIMENT_NAMESPACE,
@@ -517,11 +563,16 @@ export function scoreCacheIdentity({ plan, rawDigest }) {
     raw_digest: assertDigest(rawDigest, "rawDigest"),
     scorer_digest: plan.inputs.scorer_digest,
     judge: plan.inputs.models.judge,
-    judge_cli_version: plan.inputs.cli_versions.judge,
+    cli_versions: phaseVersionsFor("score", { cliVersions, phaseVersions }),
   });
 }
 
-export function novelCacheIdentity({ plan, scoreDigest }) {
+export function novelCacheIdentity({
+  plan,
+  scoreDigest,
+  cliVersions,
+  phaseVersions = null,
+}) {
   return withDigest({
     schema_version: EXPERIMENT_SCHEMA_VERSION,
     namespace: EXPERIMENT_NAMESPACE,
@@ -530,7 +581,7 @@ export function novelCacheIdentity({ plan, scoreDigest }) {
     score_digest: assertDigest(scoreDigest, "scoreDigest"),
     scorer_digest: plan.inputs.scorer_digest,
     judge: plan.inputs.models.judge,
-    judge_cli_version: plan.inputs.cli_versions.judge,
+    cli_versions: phaseVersionsFor("novel", { cliVersions, phaseVersions }),
   });
 }
 
