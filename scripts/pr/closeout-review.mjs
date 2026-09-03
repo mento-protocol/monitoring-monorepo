@@ -169,7 +169,7 @@ function codexEnv() {
 }
 
 /**
- * Git and Gate variables that redirect what Git reads and writes. `codex` runs
+ * Variables that redirect what Git and `gh` read and write. `codex` runs
  * under an allowlist that omits them, so leaving them in this process's own
  * Git environment would let the header and the fingerprint describe a
  * different index or object store from the one the reviewer sees.
@@ -183,6 +183,10 @@ const GIT_AMBIENT = [
   "GIT_OBJECT_DIRECTORY",
   "GIT_ALTERNATE_OBJECT_DIRECTORIES",
   "GIT_CEILING_DIRECTORIES",
+  // `gh` reads these to address a repository other than the checkout, which
+  // would make the base come from somewhere the branch was never on.
+  "GH_REPO",
+  "GH_HOST",
 ];
 
 /** The environment local `git` and `gh` calls run under. */
@@ -283,14 +287,19 @@ function repoFromRemoteUrl(url) {
   return match ? `${match[1]}/${match[2]}` : null;
 }
 
-/** The one configured remote serving `repo`. More than one is a stop. */
+/**
+ * The one configured remote serving `repo`. More than one is a stop. Only the
+ * `(fetch)` URL counts: a remote can carry a separate push URL, and the fetch
+ * side is the one the base is read through.
+ */
 function remoteForRepo(repoRoot, repo) {
   const remotes = run("git", ["remote", "-v"], repoRoot);
   if (!remotes.ok) fail("cannot read the configured remotes");
   const names = new Set();
   for (const line of remotes.stdout.split("\n")) {
-    const [name, url] = line.split(/\s+/);
-    if (!name || !url) continue;
+    const parsed = line.match(/^(\S+)\s+(\S+)\s+\((fetch|push)\)$/);
+    if (!parsed || parsed[3] !== "fetch") continue;
+    const [, name, url] = parsed;
     if (repoFromRemoteUrl(url)?.toLowerCase() === repo.toLowerCase()) {
       names.add(name);
     }
@@ -420,10 +429,19 @@ function defaultBranchOf(repoRoot, baseRepo, currentRepo, repoInfo) {
  * would review the wrong base without saying so.
  */
 function verifyBase(repoRoot, base, shouldFetch) {
-  const parts = base.match(/^([^/]+)\/(.+)$/);
-  if (shouldFetch && parts) {
+  if (shouldFetch) {
     const remotes = run("git", ["remote"], repoRoot);
-    if (remotes.ok && remotes.stdout.split("\n").includes(parts[1])) {
+    // A remote name may itself hold slashes, so take the longest configured
+    // name the base starts with rather than splitting on the first one.
+    let remote = null;
+    if (remotes.ok) {
+      for (const name of remotes.stdout.split("\n")) {
+        if (!name || !base.startsWith(`${name}/`)) continue;
+        if (remote === null || name.length > remote.length) remote = name;
+      }
+    }
+    if (remote !== null) {
+      const branch = base.slice(remote.length + 1);
       // An explicit refspec, because a bare `git fetch <remote> <branch>` can
       // exit 0 having updated only FETCH_HEAD — a single-branch clone whose
       // configured mapping does not cover this branch leaves the
@@ -433,8 +451,8 @@ function verifyBase(repoRoot, base, shouldFetch) {
         [
           "fetch",
           "--quiet",
-          parts[1],
-          `+refs/heads/${parts[2]}:refs/remotes/${parts[1]}/${parts[2]}`,
+          remote,
+          `+refs/heads/${branch}:refs/remotes/${remote}/${branch}`,
         ],
         repoRoot,
       );
