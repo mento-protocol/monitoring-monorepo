@@ -157,9 +157,7 @@ function runCodex(repoRoot, codexBin, base, reportPath, timeoutSeconds) {
     // review keeps running, and keeps writing the report, after the command
     // appears cancelled.
     let interruptTimer = null;
-    let wasInterrupted = false;
     const interrupted = (signal) => {
-      wasInterrupted = true;
       kill("SIGTERM");
       if (interruptTimer) return;
       // A last resort for a child that ignores SIGTERM: the normal path is the
