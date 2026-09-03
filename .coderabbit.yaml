@@ -110,11 +110,10 @@ reviews:
     # round re-bills the same files. With this off, CodeRabbit should review a
     # PR once when it opens, and the head-bound `@coderabbitai review` request
     # in `docs/notes/pr-ready-state.md` buys the final head one more review.
-    # Observed on PR #2236, though: every push still started a run, four
-    # pushes for four Run IDs, all refused by the spending cap. Until that is
-    # explained, treat "no run on an intermediate push" as the intent rather
-    # than the measured behaviour; ADR 0066 records the evidence and the
-    # organization-level override that follows from it.
+    # Observed on PR #2236, though: every push still started a run. Until
+    # that is explained, treat "no run on an intermediate push" as the intent
+    # rather than the measured behaviour; ADR 0066 holds the dated tally, the
+    # evidence, and the organization-level override that follows from it.
     # Intermediate pushes lose CodeRabbit's review. Codex still reviews every
     # push automatically; Claude is opt-in via `@claude review`, because
     # `.github/workflows/claude.yml` triggers only on `opened` and

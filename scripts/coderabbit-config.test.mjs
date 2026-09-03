@@ -8,8 +8,8 @@
  * 2026-09-02 those overrides pin `reviews.profile`,
  * `request_changes_workflow`, and three `auto_review` keys (`enabled`,
  * `drafts`, `auto_pause_after_reviewed_commits`) above the repository file
- * (ADR 0066). They do not pin `auto_incremental_review`, so the repository
- * file governs it; `path_filters` and `path_instructions` stay
+ * (ADR 0066). Those overrides do not pin `auto_incremental_review`, so the
+ * repository file governs it — and this test pins it; `path_filters` and `path_instructions` stay
  * repository-owned. This pin is the only guard for those three
  * repository-owned keys: `auto_incremental_review`, `path_filters`, and
  * `path_instructions`. Now that CodeRabbit findings feed the
@@ -154,12 +154,15 @@ test("the pin rejects a weakened config (negative control)", () => {
   assert.throws(() => assert.deepEqual(extended, EXPECTED_CONFIG));
 });
 
-test("auto-review runs on open only, with the burst guard still pinned", () => {
+test("pins auto-review on, incremental off, and the burst guard at five", () => {
   const { auto_review: autoReview } = EXPECTED_CONFIG.reviews;
   assert.equal(autoReview.enabled, true);
-  // Off since 2026-09-02: CodeRabbit bills per push delta, so incremental
-  // reviews re-bill the same files on every agent fix round (ADR 0066). The
-  // head-bound closeout request covers the final head instead.
+  // This asserts the committed configuration, not the provider's runtime
+  // behaviour: PR #2236 observed a run on every push with this key `false`,
+  // and ADR 0066 holds that open question. Off since 2026-09-02 because
+  // CodeRabbit bills per push delta, so incremental reviews re-bill the same
+  // files on every agent fix round. The head-bound closeout request covers
+  // the final head instead.
   assert.equal(autoReview.auto_incremental_review, false);
   assert.equal(autoReview.auto_pause_after_reviewed_commits, 5);
 });

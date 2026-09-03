@@ -283,8 +283,9 @@ polled. Do not foreground-poll and never sleep-poll.
      waiting. One exception to that second branch: if this PR's opening review
      never completed, coming back as a rate-limit or cap notice rather than a
      review, CodeRabbit may still run and possibly retry it, so wait the
-     bounded time as in the `true` branch before posting (PR #2236 observed
-     three runs across three pushes with `false` in force). If the signal is missing or stale and no
+     bounded time as in the `true` branch before posting (PR #2236 observed a
+     run on every push with `false` in force; ADR 0066 holds the dated tally).
+     If the signal is missing or stale and no
      trusted top-level comment contains both `@coderabbitai review` and
      `<!-- coderabbit-final-head-review:<full-head-sha> -->`, use
      `add_issue_comment` to post `@coderabbitai review`, a blank line, and that

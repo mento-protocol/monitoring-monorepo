@@ -241,21 +241,29 @@ and stay in place as history.
   indicated rather than conditional:** the operator adds
   `auto_incremental_review: false` to the Global overrides. PR #2236 measured
   the repository file on its own and it did not hold — see the next bullet.
-- **Measured on PR #2236, 2026-09-02: the repository file alone did not
-  suppress the attempt.** The second push (head `242f47afb`, `15:50:24Z`) drew
-  a fresh CodeRabbit run 75 seconds later — new Run ID
-  `5e05ac36-1445-4fa7-b78e-6e0e0f820745` against the opening review's
-  `3fdfc30d-2f46-4fc3-86de-2539b29fbcb6` — reporting all ten changed files and
-  a `CodeRabbit` check of "Review rate limited". The run read this branch's own
-  config (`Path: .coderabbit.yaml`, `Review profile: CHILL`), so
-  `auto_incremental_review: false` was in force and the trigger still fired. No
-  bill followed, because the spending cap blocked the review before it ran.
-  One confound stays open: the opening review never completed either, and
-  CodeRabbit may retry an unfinished review when the head moves regardless of
-  this key. Both runs covered the full base-to-head diff rather than an
-  incremental delta, and the second reused the same sticky comment, which fits
-  either explanation. A clean measurement needs a PR whose opening review
-  completed, so it waits for the 2026-09-18 cap reset.
+- **Measured on PR #2236: the repository file alone did not suppress the
+  attempt.** This bullet is the single tally; the runbooks point here rather
+  than carrying their own counts, which went stale every time the PR pushed.
+  As of 2026-09-03, five pushes each drew a CodeRabbit run within roughly 75
+  seconds, with `auto_incremental_review: false` in force on the branch the
+  runs read (`Path: .coderabbit.yaml`, `Review profile: CHILL`):
+
+  | Push          | Head        | Run ID      | Observed             |
+  | ------------- | ----------- | ----------- | -------------------- |
+  | 1, opening    | `733fa0b83` | `3fdfc30d…` | 2026-09-02 14:40:44Z |
+  | 2             | `242f47afb` | `5e05ac36…` | 2026-09-02 15:51:39Z |
+  | 3             | `cb273d4e2` | `9739f061…` | 2026-09-02 15:57:49Z |
+  | 4             | `32b60c787` | `beabff8f…` | 2026-09-02 16:51:26Z |
+  | 5, base merge | `95c3b6dc7` | `c21f85af…` | 2026-09-03 06:43:23Z |
+
+  Runs 1-4 were refused by the spending cap, so nothing was billed. Runs 1-4
+  each reported the full base-to-head diff; run 5 reported an incremental
+  `4aef1be09`..`95c3b6dc7` delta, the first to do so. One confound stays open:
+  the opening review never completed either, and CodeRabbit may retry an
+  unfinished review when the head moves regardless of this key. A clean
+  measurement needs a PR whose opening review completed, so it waits for the
+  2026-09-18 cap reset.
+
 - **The closeout request is the vendor-documented path here, checked
   2026-09-02.** docs.coderabbit.ai/configuration/auto-review states that
   `auto_incremental_review: false` reviews "only when a PR is first opened.
@@ -266,16 +274,24 @@ and stay in place as history.
   "an incremental review of new changes only", and notes it spends one review
   from the allowance. The "applicable only when automatic reviews are paused"
   line in PR #2236's refusal came attached to a rate-limited command, so it is
-  not evidence against the documented path. Two things stay open for the
-  2026-09-18 re-measure: the runs that fired on pushes two and three, which the
-  documentation says should have been ignored, and whether the closeout command
-  completes once the allowance permits it.
+  not evidence against the documented path.
+- **Confirmed 2026-09-02: the closeout request works.** The head-bound request
+  posted against `4aef1be09` at `21:24:54Z` produced a completed CodeRabbit
+  review at `21:31:58Z` carrying four inline findings — the first review this
+  PR obtained. That settles the open question above: the command is applicable
+  under `auto_incremental_review: false`, and the "applicable only when
+  automatic reviews are paused" line really was boilerplate on a rate-limited
+  refusal. One question remains for the 2026-09-18 re-measure: why pushes
+  still trigger runs at all when the documentation says they are ignored. The
+  incremental range on run 5 is the sharpest clue — it is the shape an
+  incremental review takes, not the shape of a retry of an unfinished opening
+  review.
 - **Rejected here:** raising the cap keeps the per-push meter and buys more
   duplicate reviews; tightening `path_filters` saves little because the billed
   unit is an already-small push delta. The $0 OSS tier stays the fallback if
   spend must return to zero.
-- **Accepted residual:** the closeout request is now the final head's only
-  chance at a CodeRabbit review, and readiness never waits for it.
+- **Accepted residual:** the closeout request is now the final scheduled
+  request in the ready-state flow, and readiness never waits for it.
   `summarizeCodeRabbitReviewGate` returns `required: false`, `ready` is
   `required.ready` in `scripts/pr/pr-ready-state-core.mjs`, and
   `pr-ready-state.test.mjs` pins "never awaits a pending CodeRabbit check for

@@ -175,10 +175,12 @@ governs this PR is the one at its head, not the one on `main`. Read
   back as a rate-limit or cap notice rather than a review, CodeRabbit may
   still run — possibly retrying that unfinished review — and a request posted
   into the middle of it recreates the duplicate review and bill. PR #2236
-  observed exactly that: three pushes with `false` in force produced three
-  runs, each within about 75 seconds of its push. So when no opening review
-  completed, wait the bounded time for an automatic attempt first, exactly as
-  in the `true` branch.
+  observed exactly that: every push drew a run within roughly 75 seconds while
+  `false` was in force.
+  [ADR 0066](../adr/0066-coderabbit-replaces-bugbot-third-reviewer.md) holds
+  the dated tally — do not restate a count here, because a live count goes
+  stale on the next push. So when no opening review completed, wait the bounded
+  time for an automatic attempt first, exactly as in the `true` branch.
 
 Either way, batch fixes into one push. If the signal is then `missing` or
 `stale`, re-resolve `headRefOid` immediately before posting and require it to
