@@ -119,21 +119,21 @@ function realOrSelf(target) {
 }
 
 /**
- * The repository root, checked against the filesystem rather than taken on
- * trust. `git rev-parse --show-toplevel` answered on the inherited PATH, so a
- * shim could name any directory; the root has to hold this process's working
- * directory and carry a `.git` entry of its own.
+ * The repository root, found on the filesystem rather than by running a
+ * program. Nothing may execute off the inherited PATH before it is sanitized:
+ * under `pnpm run` the repository's own `node_modules/.bin` comes first, and a
+ * shim there would otherwise receive the operator's whole environment on the
+ * very first call. Walk up from the working directory to the nearest `.git`
+ * instead — a directory in a normal clone, a file in a worktree or submodule.
  */
-function verifiedRoot(reported) {
-  const root = realOrSelf(reported);
-  const cwd = realOrSelf(process.cwd());
-  if (cwd !== root && !cwd.startsWith(`${root}${path.sep}`)) {
-    fail(`the reported repository root ${reported} does not contain ${cwd}`);
+function discoverRoot() {
+  let directory = realOrSelf(process.cwd());
+  for (;;) {
+    if (fs.existsSync(path.join(directory, ".git"))) return directory;
+    const parent = path.dirname(directory);
+    if (parent === directory) fail("not inside a Git repository");
+    directory = parent;
   }
-  if (!fs.existsSync(path.join(root, ".git"))) {
-    fail(`the reported repository root ${reported} carries no .git`);
-  }
-  return root;
 }
 
 function sanitizedPath(root) {
@@ -169,6 +169,31 @@ function codexEnv() {
 }
 
 /**
+ * Git and Gate variables that redirect what Git reads and writes. `codex` runs
+ * under an allowlist that omits them, so leaving them in this process's own
+ * Git environment would let the header and the fingerprint describe a
+ * different index or object store from the one the reviewer sees.
+ */
+const GIT_AMBIENT = [
+  "GIT_DIR",
+  "GIT_WORK_TREE",
+  "GIT_INDEX_FILE",
+  "GIT_COMMON_DIR",
+  "GIT_NAMESPACE",
+  "GIT_OBJECT_DIRECTORY",
+  "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+  "GIT_CEILING_DIRECTORIES",
+];
+
+/** The environment local `git` and `gh` calls run under. */
+function localGitEnv() {
+  const env = { ...process.env, ...ENV_FIXED };
+  for (const name of GIT_AMBIENT) delete env[name];
+  if (SAFE_PATH !== null) env.PATH = SAFE_PATH;
+  return env;
+}
+
+/**
  * Run a command and capture its output. Never throws on a non-zero exit.
  * `env` defaults to the operator's environment plus the Git scrub, which is
  * right for `git` and `gh`; `codex` is passed `codexEnv()` instead.
@@ -180,14 +205,13 @@ function run(command, args, cwd, env) {
     // A whole working-tree diff passes through here for the fingerprint below,
     // and the 1 MiB default would report a large one as a failed command.
     maxBuffer: 64 * 1024 * 1024,
-    env: env ?? {
-      ...process.env,
-      ...ENV_FIXED,
-      ...(SAFE_PATH === null ? {} : { PATH: SAFE_PATH }),
-    },
+    env: env ?? localGitEnv(),
   });
   return {
     ok: !result.error && result.status === 0,
+    // The trimmed form is what every caller reads; `raw` is for the target
+    // fingerprint, where trailing whitespace is part of what codex sees.
+    raw: result.stdout ?? "",
     stdout: (result.stdout ?? "").trim(),
     stderr: (result.stderr ?? "").trim(),
   };
@@ -319,6 +343,11 @@ function resolveBase(repoRoot) {
       branch.stdout,
       "--state",
       "open",
+      "--limit",
+      // `gh pr list` pages at 30 by default. A branch name shared across forks
+      // could push this repository's own PR off that page and read as "no PR",
+      // so ask for more than any real branch attracts and refuse a full page.
+      "100",
       "--json",
       "baseRefName,headRepositoryOwner",
     ],
@@ -330,6 +359,11 @@ function resolveBase(repoRoot) {
     pulls = JSON.parse(list.stdout);
   } catch {
     fail("cannot resolve base: gh pr list returned no JSON; pass --base");
+  }
+  if (pulls.length >= 100) {
+    fail(
+      `cannot resolve base: ${pulls.length} open PRs match ${branch.stdout}; pass --base`,
+    );
   }
   const headOwner = currentRepo.split("/")[0].toLowerCase();
   const mine = pulls.filter(
@@ -390,9 +424,18 @@ function verifyBase(repoRoot, base, shouldFetch) {
   if (shouldFetch && parts) {
     const remotes = run("git", ["remote"], repoRoot);
     if (remotes.ok && remotes.stdout.split("\n").includes(parts[1])) {
+      // An explicit refspec, because a bare `git fetch <remote> <branch>` can
+      // exit 0 having updated only FETCH_HEAD — a single-branch clone whose
+      // configured mapping does not cover this branch leaves the
+      // remote-tracking ref stale, and the review would run on the old base.
       const fetched = run(
         "git",
-        ["fetch", "--quiet", parts[1], parts[2]],
+        [
+          "fetch",
+          "--quiet",
+          parts[1],
+          `+refs/heads/${parts[2]}:refs/remotes/${parts[1]}/${parts[2]}`,
+        ],
         repoRoot,
       );
       if (!fetched.ok) {
@@ -517,9 +560,13 @@ function treeFingerprint(repoRoot) {
     run("git", ["diff", "--no-ext-diff", "HEAD"], repoRoot),
   ];
   if (parts.some((part) => !part.ok)) return null;
-  return createHash("sha256")
-    .update(parts.map((part) => part.stdout).join("\0"))
-    .digest("hex");
+  return (
+    createHash("sha256")
+      // Raw, not trimmed: a trailing space gained or lost on the last changed
+      // line is a byte codex reads, and trimming would hide that edit.
+      .update(parts.map((part) => part.raw).join("\0"))
+      .digest("hex")
+  );
 }
 
 /**
@@ -617,7 +664,9 @@ function runCodex(repoRoot, codexBin, base, reportPath, timeoutSeconds) {
     // review keeps running, and keeps writing the report, after the command
     // appears cancelled.
     let interruptTimer = null;
+    let wasInterrupted = false;
     const interrupted = (signal) => {
+      wasInterrupted = true;
       kill("SIGTERM");
       if (interruptTimer) return;
       // A last resort for a child that ignores SIGTERM: the normal path is the
@@ -643,7 +692,7 @@ function runCodex(repoRoot, codexBin, base, reportPath, timeoutSeconds) {
       clearTimeout(deadline);
       // codex can exit on SIGTERM while a descendant ignores it, so sweep the
       // group again rather than trusting an unreferenced escalation timer.
-      if (outcome.timedOut) kill("SIGKILL");
+      if (outcome.timedOut || wasInterrupted) kill("SIGKILL");
       fs.closeSync(bodyFd);
       fs.closeSync(stderrFd);
       resolve(outcome);
@@ -665,19 +714,16 @@ function renderHeader(fields) {
 async function main() {
   const options = parseArgs(process.argv.slice(2));
 
+  // The root comes off the filesystem, so PATH is sanitized before this
+  // process runs anything at all. Git then confirms the directory really is
+  // the top level, on the clean PATH.
+  const repoRoot = discoverRoot();
+  SAFE_PATH = sanitizedPath(repoRoot);
   const toplevel = run("git", ["rev-parse", "--show-toplevel"], process.cwd());
   if (!toplevel.ok) fail("not inside a Git repository");
-  // This first call still ran on the inherited PATH, which under `pnpm run`
-  // starts with the repository's own `node_modules/.bin`. Check the answer
-  // against the filesystem, sanitize PATH against it, then read the root again
-  // through the sanitized PATH: a shim that lies about the root is caught by
-  // one of the two, and everything after this point runs on the clean PATH.
-  const repoRoot = verifiedRoot(toplevel.stdout);
-  SAFE_PATH = sanitizedPath(repoRoot);
-  const recheck = run("git", ["rev-parse", "--show-toplevel"], process.cwd());
-  if (!recheck.ok || realOrSelf(recheck.stdout) !== repoRoot) {
+  if (realOrSelf(toplevel.stdout) !== repoRoot) {
     fail(
-      "the repository root disagrees between the inherited and sanitized PATH",
+      `the nearest .git is at ${repoRoot} but Git reports ${toplevel.stdout}`,
     );
   }
 
@@ -708,7 +754,10 @@ async function main() {
   const defaultOut = path.join(
     repoRoot,
     ".reviews",
-    `closeout-review-${utcStamp(started)}-${head.stdout.slice(0, 7)}.md`,
+    // The pid keeps two runs started in the same second on the same commit
+    // from opening each other's report with "w" and reading back the wrong
+    // body.
+    `closeout-review-${utcStamp(started)}-${head.stdout.slice(0, 7)}-${process.pid}.md`,
   );
   const reportPath = checkOutPath(repoRoot, options.out ?? defaultOut);
   fs.mkdirSync(path.dirname(reportPath), { recursive: true });

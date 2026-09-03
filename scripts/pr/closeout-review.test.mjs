@@ -704,23 +704,20 @@ test("a repository naming no default branch refuses instead of guessing", (t) =>
   assert.match(run.stderr, /names no default branch; pass --base/);
 });
 
-test("a repository-controlled git shim cannot decide what is reviewed", (t) => {
+test("a repository-controlled git shim never runs at all", (t) => {
   const repo = makeRepo(t);
   fakeCodex(repo.bin, 'echo "clean"');
-  // What `pnpm run` puts first on PATH. This shim answers `--show-toplevel`
-  // with a directory of its own choosing and passes everything else through.
+  // What `pnpm run` puts first on PATH. The shim records every call it gets,
+  // so the marker proves whether it was consulted — including on the first
+  // call, before the script knows where the repository root is.
   const shimDir = path.join(repo.repo, "node_modules", ".bin");
   fs.mkdirSync(shimDir, { recursive: true });
-  const decoy = path.join(repo.root, "decoy");
-  fs.mkdirSync(path.join(decoy, ".git"), { recursive: true });
+  const marker = path.join(repo.root, "shim-ran.txt");
   fs.writeFileSync(
     path.join(shimDir, "git"),
     [
       "#!/bin/sh",
-      'if [ "$2" = "--show-toplevel" ]; then',
-      `  echo ${JSON.stringify(decoy)}`,
-      "  exit 0",
-      "fi",
+      `echo "$@" >> ${JSON.stringify(marker)}`,
       `exec ${JSON.stringify(GIT_BIN)} "$@"`,
     ].join("\n") + "\n",
   );
@@ -733,9 +730,34 @@ test("a repository-controlled git shim cannot decide what is reviewed", (t) => {
     `${shimDir}:${repo.bin}:${process.env.PATH}`,
   );
 
-  assert.equal(run.status, 2);
-  assert.match(run.stderr, /does not contain/);
-  assert.equal(run.reportPath, null);
+  assert.equal(run.status, 0);
+  assert.equal(fs.existsSync(marker), false, "the shim was executed");
+});
+
+test("a default report path is unique per process", (t) => {
+  const repo = makeRepo(t);
+  fakeCodex(repo.bin, 'echo "clean"');
+
+  const run = runScript(repo, ["--base", "base", "--no-fetch"]);
+
+  assert.equal(run.status, 0);
+  assert.match(path.basename(run.reportPath), /-[0-9a-f]{7}-\d+\.md$/);
+});
+
+test("ambient Git redirection does not reach the fingerprint", (t) => {
+  const repo = makeRepo(t);
+  fakeCodex(repo.bin, 'echo "clean"');
+  // An alternate index the reviewer would never see. Left in place, Git would
+  // read and write it here, and the header would describe a tree codex did
+  // not read.
+  const index = path.join(repo.root, "alternate-index");
+
+  const run = runScript(repo, ["--base", "base", "--no-fetch"], {
+    GIT_INDEX_FILE: index,
+  });
+
+  assert.equal(run.status, 0);
+  assert.equal(fs.existsSync(index), false, "Git used the alternate index");
 });
 
 test("a mirror remote is not read as the GitHub base repository", (t) => {
