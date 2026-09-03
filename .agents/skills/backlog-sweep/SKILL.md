@@ -495,13 +495,12 @@ Then spawn one worker subagent per issue. Give each a brief containing:
   name, and `mkdir` is the atomic claim that makes the loser take the next
   suffix instead.
 
-  Claude subagents cannot use sibling worktrees, so each uses an isolated tmp
-  clone. Before resumed setup, use the operating-card preflight to resolve and
-  fetch the pull request base, or verified `origin/main` without a pull request.
-  Set `BASE_REMOTE` and `baseRefName` for that base. Inspect `git status --short`,
+  Claude subagents cannot use sibling worktrees, so use isolated tmp clones. Use
+  the operating-card preflight to bind `BASE_REMOTE` and `baseRefName` to the
+  fetched PR base, or verified `origin/main` without a PR. Inspect `git status --short`,
   `git diff "$BASE_REMOTE/$baseRefName"...HEAD`, `git diff --cached`, `git diff`,
-  and untracked files. Inspect lifecycle and install effects for changed manifests,
-  lockfiles, pnpm configuration, or patches; stop if the change set is unclear.
+  and untracked files. Inspect lifecycle and install effects for manifests,
+  lockfiles, pnpm configuration, or patches; stop if the scope is unclear.
 
   Run `./scripts/setup.sh` in every resumed clone only after that inspection. In
   a fresh clone, fetch and run `git switch --detach origin/main` before setup.

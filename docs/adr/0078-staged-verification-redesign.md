@@ -190,7 +190,11 @@ and test commands when those scripts exist.
 Dashboard bundle inputs require a fresh shared-config build when applicable, a
 fresh dashboard production build, and the bundle-size check. Peg-registry
 authority inputs and shared thresholds require the existing integrity and
-cross-package parity checks in the author-check table.
+cross-package parity checks in the author-check table. Reserve-yield inputs,
+alert and schema cross-consumers, deployable QuickNode filters, Safe event-hash
+sources, and Upstash MCP trust surfaces use their focused existing contracts.
+Coverage, Knip, broad dependency and supply-chain audits, full-browser suites,
+and legacy-gate self-tests remain CI-only.
 
 These local results shorten feedback. Required CI remains merge authority. A
 manual push can omit author checks, but it cannot omit required CI.
