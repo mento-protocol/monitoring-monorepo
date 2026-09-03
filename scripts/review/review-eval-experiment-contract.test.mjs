@@ -15,20 +15,22 @@ import { fileURLToPath } from "node:url";
 import {
   buildExperimentPlan,
   canonicalRerunManifest,
-  cliVersionDrift,
   digestObject,
   EXPERIMENT_SOURCE_FILES,
   experimentSourceDigest,
   novelCacheIdentity,
-  phaseCliVersions,
   rawCacheIdentity,
-  recordedPhaseCliVersions,
-  recordRuntimeDrift,
-  runtimeDriftReason,
   scoreCacheIdentity,
   stagePlanFor,
   validateExperimentPlan,
 } from "./review-eval-experiment-contract.mjs";
+import {
+  cliVersionDrift,
+  phaseCliVersions,
+  recordedPhaseCliVersions,
+  recordRuntimeDrift,
+  runtimeDriftReason,
+} from "./review-eval-experiment-versions.mjs";
 import { evaluateExperimentDecision } from "./review-eval-experiment-decision.mjs";
 import {
   finderArgvDigest,
@@ -108,13 +110,14 @@ test("digestObject and plan validation are stable across persistence", () => {
   );
 });
 
-test("harness source identity binds five exact paths and their bytes", () => {
+test("harness source identity binds six exact paths and their bytes", () => {
   assert.deepEqual(EXPERIMENT_SOURCE_FILES, [
     "scripts/review/review-eval-experiment.mjs",
     "scripts/review/review-eval-experiment-contract.mjs",
     "scripts/review/review-eval-experiment-decision.mjs",
     "scripts/review/review-eval-experiment-cache.mjs",
     "scripts/review/review-eval-experiment-runtime.mjs",
+    "scripts/review/review-eval-experiment-versions.mjs",
   ]);
   const virtualRoot = "/virtual-review-experiment";
   const bytes = new Map([
@@ -399,6 +402,21 @@ test("cache identities key on the live version of each phase's providers", () =>
   assert.notEqual(
     scoreCacheIdentity({ plan, rawDigest, phaseVersions: {} }).digest,
     scoreCacheIdentity({ plan, rawDigest, cliVersions }).digest,
+  );
+
+  // A raw identity keys on the set the cell stores and validates as well, so a
+  // provider the raw phase never invoked cannot re-key a contestant cell.
+  assert.equal(
+    rawCacheIdentity({
+      plan,
+      stage: "screen",
+      lane: screenLane,
+      treatment: "candidate",
+      sourceDigest: null,
+      cliVersions: upgradedClaude,
+      phaseVersions: { claude: cliVersions.claude },
+    }).digest,
+    rawFor(cliVersions).digest,
   );
 });
 

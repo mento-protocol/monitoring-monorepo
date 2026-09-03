@@ -20,13 +20,17 @@ import { DEFAULT_SKILL_DIR, expandHome } from "./review-eval-run-plan.mjs";
 import { scrubbedEnv, sourceCheckouts } from "./review-eval-run-execution.mjs";
 import {
   buildExperimentPlan,
-  cliVersionDrift,
   digestObject,
   EXPERIMENT_STAGES,
-  recordRuntimeDrift,
   stagePlanFor,
   validateExperimentPlan,
 } from "./review-eval-experiment-contract.mjs";
+import {
+  recordRuntimeDrift,
+  stageProbeProviders,
+  stageRuntimeChange,
+  stageRuntimeChangeReason,
+} from "./review-eval-experiment-versions.mjs";
 import { evaluateExperimentDecision } from "./review-eval-experiment-decision.mjs";
 import {
   readExperimentCache,
@@ -229,56 +233,6 @@ function writePlan(file, plan) {
   });
 }
 
-/**
- * The providers whose live version moved between the probe that opened the
- * stage and a probe taken after its cells ran.
- *
- * Cells are keyed on the versions probed at stage start. A provider that
- * auto-updates while the stage runs therefore leaves the cells that ran after
- * the update recorded and keyed under the earlier version. Probing once per
- * artifact would not close that window — the probe still precedes the spawn —
- * and it would fragment the phase cache, so the stage reports the change over
- * the whole stage instead of attributing it to individual cells.
- *
- * Each probe is compared with the stage-start versions rather than with the
- * probe before it, so an update that lands during scoring is still named when a
- * second update follows it.
- */
-export function stageRuntimeChange(start, probed) {
-  const seen = new Map();
-  for (const live of probed) {
-    for (const entry of cliVersionDrift({ planned: start, live })?.providers ??
-      []) {
-      seen.set(`${entry.provider}\u0000${entry.live}`, {
-        provider: entry.provider,
-        start: entry.planned,
-        end: entry.live,
-      });
-    }
-  }
-  if (seen.size === 0) return null;
-  const providers = [...seen.values()].sort(
-    (left, right) =>
-      left.provider.localeCompare(right.provider) ||
-      left.end.localeCompare(right.end),
-  );
-  return {
-    providers,
-    summary: providers
-      .map((entry) => `${entry.provider} ${entry.start} -> ${entry.end}`)
-      .join(", "),
-  };
-}
-
-/** One line naming a provider CLI that changed while the stage was running. */
-export function stageRuntimeChangeReason(change) {
-  return (
-    `runtime changed during the stage: ${change.summary}; ` +
-    "cells that ran after the change may have used the later version and " +
-    "are keyed on the earlier one"
-  );
-}
-
 /** One line naming an upgrade between the planned and the live provider CLI. */
 function driftWarning(drift) {
   return (
@@ -360,7 +314,10 @@ function validateLoadedCampaign(options) {
   });
   if (!fixtureCheck.ok) throw new Error(fixtureCheck.problems.join(" | "));
   const env = scrubbedEnv({ roots: [options.repoRoot] });
-  const liveCliVersions = {
+  // The versions at campaign load. They report drift against the plan and
+  // nothing else: a stage keys its cells on its own stage-start probe, which
+  // can differ from these on a campaign loaded before the stage runs.
+  const loadCliVersions = {
     claude: providerVersion("claude", env),
     codex: providerVersion("codex", env),
   };
@@ -368,7 +325,7 @@ function validateLoadedCampaign(options) {
     plan,
     contract,
     contractDigest,
-    cliVersions: liveCliVersions,
+    cliVersions: loadCliVersions,
   });
   if (!validation.ok) throw new Error(validation.problems.join(" | "));
   return {
@@ -377,7 +334,6 @@ function validateLoadedCampaign(options) {
     plan,
     contract,
     env,
-    liveCliVersions,
     drift: validation.drift,
   };
 }
@@ -410,16 +366,37 @@ function requirePrerequisite({ artifactRoot, plan, stage }) {
   }
 }
 
-function recordsByStage({ artifactRoot, plan, stage, records }) {
-  const output = { [stage]: records };
-  if (stage === "holdout") {
-    output.screen = readStageResult({
-      artifactRoot,
-      plan,
-      stage: "screen",
-    }).payload.records;
-  }
-  return output;
+/** The earlier stage whose stored result this stage's decision folds in. */
+function foldedStage(stage) {
+  return stage === "holdout" ? "screen" : null;
+}
+
+/**
+ * The records this decision reads, and the runtime change the stage they came
+ * from recorded. A holdout decision folds in the screen records, so it must
+ * also carry what the screen saw change while it ran: dropping it would present
+ * a combined result over a pair that straddled an upgrade as a clean one.
+ */
+function stageInputs({ artifactRoot, plan, stage, records }) {
+  const grouped = { [stage]: records };
+  const folded = foldedStage(stage);
+  if (folded === null) return { grouped, foldedChange: null };
+  const { payload } = readStageResult({ artifactRoot, plan, stage: folded });
+  grouped[folded] = payload.records;
+  return {
+    grouped,
+    foldedChange: payload.runtime_change_during_stage ?? null,
+  };
+}
+
+/**
+ * Every runtime change this stage result carries, keyed by the stage that saw
+ * it, so a holdout reports the screen's change beside its own.
+ */
+function stageChanges(foldedChange, stage, change) {
+  const merged = { ...(foldedChange ?? {}) };
+  if (change) merged[stage] = change;
+  return Object.keys(merged).length === 0 ? null : merged;
 }
 
 /**
@@ -480,6 +457,14 @@ export async function runStage(options, campaign, overrides = {}) {
     options.repoRoot,
     "experiment fixture cache",
   );
+  // The versions every cell of this stage is keyed on, probed here rather than
+  // at campaign load: a provider that updates between the two would otherwise
+  // key the cells on a version no cell ran under. Both providers are probed
+  // because a cell identity is built from the complete version set.
+  const stageCliVersions = {
+    claude: probe("claude", campaign.env),
+    codex: probe("codex", campaign.env),
+  };
   const runtimeOptions = {
     plan,
     stage: options.stage,
@@ -488,16 +473,19 @@ export async function runStage(options, campaign, overrides = {}) {
     contract,
     fixtureCacheDir,
     concurrency: options.concurrency,
-    cliVersions: campaign.liveCliVersions,
+    cliVersions: stageCliVersions,
     ...runtimeOverrides,
   };
-  const probeLive = () => ({
-    claude: probe("claude", campaign.env),
-    codex: probe("codex", campaign.env),
-  });
+  // Only the providers this stage invokes: a frozen-report stage never spawns
+  // the finder, so a Codex release during it reached no cell.
+  const changeProviders = stageProbeProviders(stagePlan);
+  const probeLive = () =>
+    Object.fromEntries(
+      changeProviders.map((name) => [name, probe(name, campaign.env)]),
+    );
   const base = await runExperimentRuntimeStage(runtimeOptions);
   const probed = [probeLive()];
-  let grouped = recordsByStage({
+  let { grouped, foldedChange } = stageInputs({
     artifactRoot,
     plan,
     stage: options.stage,
@@ -525,13 +513,19 @@ export async function runStage(options, campaign, overrides = {}) {
       runtimeDrift,
     });
   }
-  const runtimeChange = stageRuntimeChange(campaign.liveCliVersions, probed);
+  const runtimeChange = stageChanges(
+    foldedChange,
+    options.stage,
+    stageRuntimeChange(stageCliVersions, probed),
+  );
   if (runtimeChange) {
-    const reason = stageRuntimeChangeReason(runtimeChange);
-    process.stderr.write(`warning: ${reason}\n`);
+    const reasons = Object.entries(runtimeChange).map(([stage, change]) =>
+      stageRuntimeChangeReason(stage, change),
+    );
+    for (const reason of reasons) process.stderr.write(`warning: ${reason}\n`);
     decision = {
       ...decision,
-      reasons: [reason, ...decision.reasons],
+      reasons: [...reasons, ...decision.reasons],
       runtime_change_during_stage: runtimeChange,
     };
   }

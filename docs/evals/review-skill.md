@@ -469,7 +469,7 @@ The plan binds these inputs:
   and prompt digests.
 - Incumbent and candidate skill digests.
 - Finder, verifier, control, and judge model and effort settings.
-- Scorer identity and the five-module experiment harness digest.
+- Scorer identity and the six-module experiment harness digest.
 - Stage lanes, treatment order, and the canonical rerun manifest.
 
 The plan records the Claude and Codex CLI versions instead of binding them.
@@ -495,12 +495,21 @@ reports the runtime that produced each artifact rather than the runtime of the
 retry. The stage decision names every transition with the cells it touched,
 screen cells included once a holdout decision folds them in, so a flip on a
 straddling pair reads as a possible runtime change rather than a skill change.
-Every cell of one stage is keyed on the versions probed when that stage started,
-so a CLI that auto-updates while the stage runs leaves the cells that ran after
-the update keyed on the earlier version; `--run` re-probes after the arms and
-after novelty, and a change between those probes is written to stderr and named
-in the decision and the stage payload as `runtime_change_during_stage` for the
-stage as a whole, never per cell.
+Every cell of one stage is keyed on the versions `--run` probes when that stage
+starts, immediately before its first arm, not on the versions probed when the
+campaign loaded: a provider that ships between the two would otherwise key the
+cells on a version no cell ran under. The load-time probe reports plan drift and
+nothing else. A CLI that auto-updates while the stage runs leaves the cells that
+ran after the update keyed on the earlier version; `--run` re-probes after the
+arms and after novelty, and a change between those probes is written to stderr
+and named in the decision and the stage payload as
+`runtime_change_during_stage`, keyed by the stage that saw it, for the stage as
+a whole and never per cell. A holdout decision reads the screen records, so it
+carries the screen's recorded change beside its own. Each re-probe reads only
+the providers that stage can invoke: every stage runs the contestant and the
+judge through the Claude CLI, and only a `live-paired` stage spawns Codex, so a
+Codex release during a frozen-report stage is not reported as a change no cell
+could have used.
 
 What the canonical lane keeps free of the two versions is its ledger
 comparability key, not its cell fingerprint. `claude` and `codex` ship far more

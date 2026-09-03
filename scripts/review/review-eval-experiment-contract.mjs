@@ -12,6 +12,13 @@ import {
   skillDigest as canonicalSkillDigest,
 } from "./review-eval-run-plan.mjs";
 import { scorerDigest as canonicalScorerDigest } from "./review-eval-score.mjs";
+import {
+  cliVersionDrift,
+  cliVersionIdentity,
+  isObject,
+  nonempty,
+  phaseVersionsFor,
+} from "./review-eval-experiment-versions.mjs";
 
 export const EXPERIMENT_SCHEMA_VERSION = 1;
 export const EXPERIMENT_NAMESPACE = "review-skill-experiments/v1";
@@ -33,6 +40,7 @@ export const EXPERIMENT_SOURCE_FILES = Object.freeze([
   "scripts/review/review-eval-experiment-decision.mjs",
   "scripts/review/review-eval-experiment-cache.mjs",
   "scripts/review/review-eval-experiment-runtime.mjs",
+  "scripts/review/review-eval-experiment-versions.mjs",
 ]);
 
 export const DEFAULT_EXPERIMENT_POLICY = Object.freeze({
@@ -58,10 +66,6 @@ export const DEFAULT_EXPERIMENT_POLICY = Object.freeze({
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const CANDIDATE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const experimentRepoRoot = fileURLToPath(new URL("../../", import.meta.url));
-
-function isObject(value) {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
 
 function stableValue(value) {
   if (Array.isArray(value)) return value.map(stableValue);
@@ -125,13 +129,6 @@ function assertDigest(value, label) {
   return digest;
 }
 
-function nonempty(value, label) {
-  if (typeof value !== "string" || value.trim().length === 0) {
-    throw new Error(`${label} must be a non-empty string`);
-  }
-  return value;
-}
-
 function treatment(value, { incumbent = false } = {}) {
   if (!isObject(value)) {
     throw new Error(`${incumbent ? "incumbent" : "candidate"} is missing`);
@@ -160,210 +157,6 @@ function oneCandidate(candidate, candidates) {
     throw new Error("an experiment campaign requires exactly one candidate");
   }
   return selected;
-}
-
-function cliIdentity(cliVersions, identities) {
-  const supplied = cliVersions ?? {
-    claude: identities?.claude_cli,
-    codex: identities?.codex_cli,
-    judge: identities?.judge_cli,
-  };
-  const claude = nonempty(supplied?.claude, "cliVersions.claude");
-  return {
-    claude,
-    codex: nonempty(supplied?.codex, "cliVersions.codex"),
-    judge: nonempty(supplied?.judge ?? claude, "cliVersions.judge"),
-  };
-}
-
-const CLI_PROVIDERS = Object.freeze(["claude", "codex", "judge"]);
-
-/** Normalize probed or recorded provider versions into the plan identity. */
-export function cliVersionIdentity(cliVersions, identities = null) {
-  return cliIdentity(cliVersions, identities);
-}
-
-/**
- * Compare the versions a plan recorded with the versions probed now. A plan
- * keeps its recorded versions forever, so an upgrade mid-campaign is drift to
- * label, never a reason to refuse the plan.
- */
-export function cliVersionDrift({ planned, live }) {
-  if (live === null || live === undefined) return null;
-  const recorded = cliVersionIdentity(planned);
-  const current = cliVersionIdentity(live);
-  const providers = CLI_PROVIDERS.filter(
-    (provider) => recorded[provider] !== current[provider],
-  ).map((provider) => ({
-    provider,
-    planned: recorded[provider],
-    live: current[provider],
-  }));
-  if (providers.length === 0) return null;
-  return {
-    providers,
-    planned: recorded,
-    live: current,
-    summary: providers
-      .map((entry) => `${entry.provider} ${entry.planned} -> ${entry.live}`)
-      .join(", "),
-  };
-}
-
-/** The providers each cache phase can invoke, in the order it records them. */
-const PHASE_PROVIDERS = Object.freeze({
-  raw: Object.freeze(["claude", "codex"]),
-  score: Object.freeze(["judge"]),
-  novel: Object.freeze(["judge"]),
-});
-
-function phaseProviders(phase) {
-  if (!Object.hasOwn(PHASE_PROVIDERS, phase)) {
-    throw new Error(`unknown experiment cache phase ${JSON.stringify(phase)}`);
-  }
-  return PHASE_PROVIDERS[phase];
-}
-
-/**
- * Normalize one phase's provider set. Every key must name a provider that phase
- * can invoke and every value a non-empty version. An empty set is valid: it
- * says the phase reached its answer without calling a provider.
- */
-function normalizePhaseCliVersions(phase, versions, label) {
-  if (!Object.hasOwn(PHASE_PROVIDERS, phase)) {
-    throw new Error(
-      `${label} names unknown cache phase ${JSON.stringify(phase)}`,
-    );
-  }
-  const providers = PHASE_PROVIDERS[phase];
-  if (!isObject(versions)) {
-    throw new Error(`${label} ${phase} CLI versions must be an object`);
-  }
-  for (const [provider, version] of Object.entries(versions)) {
-    if (!providers.includes(provider)) {
-      throw new Error(
-        `${label} names ${phase} provider ${JSON.stringify(provider)}, ` +
-          "which that phase never invokes",
-      );
-    }
-    nonempty(version, `${label} ${phase}.${provider}`);
-  }
-  return Object.fromEntries(
-    providers
-      .filter((provider) => Object.hasOwn(versions, provider))
-      .map((provider) => [provider, versions[provider]]),
-  );
-}
-
-/**
- * The providers one cache phase invokes, at the versions it invokes them at.
- * A frozen-report lane never spawns the finder, so `codex` belongs to a
- * live-finder raw phase alone; scoring and novelty classification are judge
- * calls only when they have something to send the judge. Pass
- * `invokesJudge: false` for the deterministic cases the caller short-circuits —
- * an empty reviewer transcript to score, a cell with no claims to classify — so
- * the phase records the empty provider set it actually used. These versions go
- * into the phase's cache identity and into the artifact it writes, so a phase
- * can never be attributed to a provider it did not run or to a version it did
- * not run under.
- */
-export function phaseCliVersions({
-  phase,
-  cliVersions,
-  source = null,
-  invokesJudge = true,
-}) {
-  phaseProviders(phase);
-  const live = cliVersionIdentity(cliVersions);
-  if (phase === "raw") {
-    return source?.kind === "live-finder"
-      ? { claude: live.claude, codex: live.codex }
-      : { claude: live.claude };
-  }
-  return invokesJudge === false ? {} : { judge: live.judge };
-}
-
-/**
- * The versions one record's own artifact stored for a phase. A later phase
- * rebuilds an earlier artifact's identity from these bytes rather than from the
- * live probe, so a judge upgrade between a screen and its holdout still finds
- * the screen scores instead of failing to match them.
- */
-export function recordedPhaseCliVersions({ record, phase }) {
-  const label = record?.cell_id ? `record ${record.cell_id}` : "record";
-  const versions = record?.cli_versions?.[phase];
-  if (versions === undefined || versions === null) {
-    throw new Error(
-      `${label} stores no ${phase} runtime provenance; re-run the cell`,
-    );
-  }
-  return normalizePhaseCliVersions(phase, versions, label);
-}
-
-/**
- * Read the versions every record actually ran under out of the records
- * themselves, and name each transition away from the planned versions with the
- * cells it touched. Records carry what their artifacts stored, so a stage
- * retried later reports the runtime that produced each artifact rather than the
- * runtime of the retry. Pass every record the decision reads, including screen
- * records folded into a holdout decision.
- *
- * Broken provenance throws rather than being skipped. A record whose versions
- * cannot be read is a record whose drift cannot be reported, and skipping it
- * would present an unattributed upgrade as a clean run.
- */
-export function recordRuntimeDrift({ planned, records }) {
-  const recorded = cliVersionIdentity(planned);
-  const transitions = new Map();
-  for (const record of records ?? []) {
-    const label = record?.cell_id ? `record ${record.cell_id}` : "record";
-    if (!isObject(record?.cli_versions)) {
-      throw new Error(`${label} stores no runtime provenance; re-run the cell`);
-    }
-    for (const [phaseName, stored] of Object.entries(record.cli_versions)) {
-      const phase = normalizePhaseCliVersions(phaseName, stored, label);
-      for (const [provider, version] of Object.entries(phase)) {
-        if (version === recorded[provider]) continue;
-        const key = `${provider}\u0000${version}`;
-        if (!transitions.has(key)) {
-          transitions.set(key, {
-            provider,
-            planned: recorded[provider],
-            live: version,
-            cells: new Set(),
-          });
-        }
-        transitions.get(key).cells.add(record.cell_id);
-      }
-    }
-  }
-  if (transitions.size === 0) return null;
-  const providers = [...transitions.values()]
-    .sort(
-      (left, right) =>
-        left.provider.localeCompare(right.provider) ||
-        left.live.localeCompare(right.live),
-    )
-    .map(({ cells, ...entry }) => ({ ...entry, cell_ids: [...cells].sort() }));
-  return {
-    providers,
-    cell_ids: [...new Set(providers.flatMap((entry) => entry.cell_ids))].sort(),
-    summary: providers
-      .map((entry) => `${entry.provider} ${entry.planned} -> ${entry.live}`)
-      .join(", "),
-  };
-}
-
-/** One reason string naming each transition and the cells that ran under it. */
-export function runtimeDriftReason(drift) {
-  if (!isObject(drift) || !Array.isArray(drift.providers)) return null;
-  if (drift.providers.length === 0) return null;
-  const transitions = drift.providers.map((entry) => {
-    const move = `${entry.provider} ${entry.planned} -> ${entry.live}`;
-    const cells = [...new Set(entry.cell_ids ?? [])].sort();
-    return cells.length === 0 ? move : `${move} on ${cells.join(", ")}`;
-  });
-  return `runtime drift: ${transitions.join("; ")}`;
 }
 
 function modelIdentity(contract) {
@@ -529,7 +322,7 @@ export function canonicalRerunManifest({
     scorer_digest: assertDigest(scorerDigest, "scorerDigest"),
     skill_digest: assertDigest(skillDigest, "skillDigest"),
     finder_argv_digest: assertDigest(finderArgvDigest, "finderArgvDigest"),
-    cli_versions: cliIdentity(cliVersions),
+    cli_versions: cliVersionIdentity(cliVersions),
     cell_count: cells.length,
     cells: structuredClone(cells),
   };
@@ -552,7 +345,7 @@ export function buildExperimentPlan({
   const contractIdentity = assertDigest(contractDigest, "contractDigest");
   const incumbentIdentity = treatment(incumbent, { incumbent: true });
   const candidateIdentity = treatment(oneCandidate(candidate, candidates));
-  const versions = cliIdentity(cliVersions, identities);
+  const versions = cliVersionIdentity(cliVersions, identities);
   const models = modelIdentity(contract);
   const scorerIdentity = canonicalScorerDigest();
   const finderIdentity = canonicalFinderArgvDigest(contract);
@@ -702,12 +495,7 @@ function withDigest(identity) {
   return { ...identity, digest: digestObject(identity) };
 }
 
-/**
- * Cache identities carry the LIVE version of every provider the phase invokes,
- * exactly as the canonical lane's cell fingerprint does. An artifact produced
- * under another runtime is therefore never found, the cell reruns, and no
- * decision ever mixes two runtimes inside one phase.
- */
+/** `phaseVersionsFor` states how a cache identity is keyed on versions. */
 export function rawCacheIdentity({
   plan,
   stage,
@@ -715,6 +503,7 @@ export function rawCacheIdentity({
   treatment: treatmentName,
   sourceDigest = null,
   cliVersions,
+  phaseVersions = null,
 }) {
   const plannedStage = stagePlanFor({ plan, stage });
   const plannedLane = plannedStage.lanes.find(
@@ -748,27 +537,16 @@ export function rawCacheIdentity({
     treatment: treatmentName,
     skill_digest: selectedTreatment.skill_digest,
     contract_digest: plan.contract_digest,
-    cli_versions: phaseCliVersions({ phase: "raw", cliVersions, source }),
+    cli_versions: phaseVersionsFor("raw", {
+      cliVersions,
+      phaseVersions,
+      source,
+    }),
     model: plan.inputs.models.verifier,
     prompt: plan.inputs.prompts.handoff,
     fixture: plannedLane.fixture,
     source,
   });
-}
-
-/**
- * `phaseVersions` names the exact provider set to key on. A caller that already
- * knows the versions — read back from the artifact's own record — passes them
- * here; a caller starting a new phase passes the live `cliVersions` instead.
- */
-function identityPhaseVersions({ phase, cliVersions, phaseVersions }) {
-  return phaseVersions === null || phaseVersions === undefined
-    ? phaseCliVersions({ phase, cliVersions })
-    : normalizePhaseCliVersions(
-        phase,
-        phaseVersions,
-        `${phase} cache identity`,
-      );
 }
 
 export function scoreCacheIdentity({
@@ -785,11 +563,7 @@ export function scoreCacheIdentity({
     raw_digest: assertDigest(rawDigest, "rawDigest"),
     scorer_digest: plan.inputs.scorer_digest,
     judge: plan.inputs.models.judge,
-    cli_versions: identityPhaseVersions({
-      phase: "score",
-      cliVersions,
-      phaseVersions,
-    }),
+    cli_versions: phaseVersionsFor("score", { cliVersions, phaseVersions }),
   });
 }
 
@@ -807,11 +581,7 @@ export function novelCacheIdentity({
     score_digest: assertDigest(scoreDigest, "scoreDigest"),
     scorer_digest: plan.inputs.scorer_digest,
     judge: plan.inputs.models.judge,
-    cli_versions: identityPhaseVersions({
-      phase: "novel",
-      cliVersions,
-      phaseVersions,
-    }),
+    cli_versions: phaseVersionsFor("novel", { cliVersions, phaseVersions }),
   });
 }
 

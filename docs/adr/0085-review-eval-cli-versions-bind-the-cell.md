@@ -76,17 +76,21 @@ included once a holdout decision folds them in.
 - A pair that straddles an upgrade is labelled, never refused. The operator
   reads the label and decides whether the comparison stands.
 - A provider that auto-updates mid-stage still leaves the cells that ran after
-  the update keyed on the versions probed at stage start. `--run` re-probes
-  after the arms and after novelty and names any change in the decision and the
-  stage payload as `runtime_change_during_stage`, without attributing it to
-  individual cells.
+  the update keyed on the versions probed at stage start — probed by `--run`
+  when the stage starts, not when the campaign loaded, so a release between the
+  two cannot key a cell on a version no cell ran under. `--run` re-probes after
+  the arms and after novelty, reading only the providers that stage can invoke,
+  and names any change in the decision and the stage payload as
+  `runtime_change_during_stage`, keyed by the stage that saw it and never
+  attributed to individual cells. A holdout decision folds in the screen
+  records, so it carries the screen's change beside its own.
 - Stored plans survive provider releases, so a paused campaign resumes.
 - ADR 0083 stays active. Only its plan-binding clause is superseded.
 
 ## Evidence
 
-- `phaseCliVersions` and `recordRuntimeDrift` in
-  `scripts/review/review-eval-experiment-contract.mjs` enforce this decision.
+- `phaseCliVersions`, `recordRuntimeDrift`, and `stageProbeProviders` in
+  `scripts/review/review-eval-experiment-versions.mjs` enforce this decision.
 - `scripts/review/review-eval-experiment-contract.test.mjs` and
   `scripts/review/review-eval-experiment-runtime.test.mjs` cover the retry,
   provider-attribution, novelty, and combined-stage cases.

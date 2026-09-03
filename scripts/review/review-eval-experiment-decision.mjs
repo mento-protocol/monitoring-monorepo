@@ -1,9 +1,7 @@
 // Deterministic decisions for the lightweight review-skill experiment.
 
-import {
-  runtimeDriftReason,
-  stagePlanFor,
-} from "./review-eval-experiment-contract.mjs";
+import { stagePlanFor } from "./review-eval-experiment-contract.mjs";
+import { runtimeDriftReason } from "./review-eval-experiment-versions.mjs";
 
 function isObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);

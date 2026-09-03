@@ -20,12 +20,14 @@ import {
 import {
   MAX_FIXTURE_LANES,
   novelCacheIdentity,
-  phaseCliVersions,
   rawCacheIdentity,
-  recordedPhaseCliVersions,
   scoreCacheIdentity,
   stagePlanFor,
 } from "./review-eval-experiment-contract.mjs";
+import {
+  phaseCliVersions,
+  recordedPhaseCliVersions,
+} from "./review-eval-experiment-versions.mjs";
 import {
   assertExperimentConcurrency,
   defaultExperimentContestantExec,
@@ -151,7 +153,9 @@ export function createExperimentArmExecutor({
       lane,
       treatment,
       sourceDigest: source.digest,
-      cliVersions,
+      // The identity is keyed on the exact set this phase stores and
+      // validates, so a judge upgrade cannot invalidate a contestant cell.
+      phaseVersions: rawVersions,
     });
     let rawEntry = readCache({
       artifactRoot,
