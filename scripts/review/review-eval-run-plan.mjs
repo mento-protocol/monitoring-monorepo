@@ -43,11 +43,19 @@ const DEFAULT_CALIBRATION_FILE = fileURLToPath(
 export const ORCHESTRATOR_FILE = fileURLToPath(
   new URL("./run-eval.sh", import.meta.url),
 );
+// The two node modules are in the list for the same reason the shell is: the
+// cell writer decides what a paid cell records, and the stream module decides
+// which assistant messages of a session it records at all. Both are copied into
+// the orchestrator's sealed source snapshot and loaded from there, so binding
+// them here is what stops a parser edit between two cells of one run from
+// leaving every cell fingerprint unchanged.
 export const ORCHESTRATOR_FILES = Object.freeze([
   ORCHESTRATOR_FILE,
   fileURLToPath(new URL("./run-eval-source-snapshot.sh", import.meta.url)),
   fileURLToPath(new URL("./run-eval-lifecycle.sh", import.meta.url)),
   fileURLToPath(new URL("./run-eval-runtime.sh", import.meta.url)),
+  fileURLToPath(new URL("./review-eval-cell-writer.mjs", import.meta.url)),
+  fileURLToPath(new URL("./review-eval-stream.mjs", import.meta.url)),
 ]);
 export const DEFAULT_RUNS_DIR = "docs/evals/review-skill-runs";
 export const DEFAULT_SKILL_DIR = "~/.claude/skills/review";

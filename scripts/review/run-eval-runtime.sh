@@ -95,6 +95,26 @@ run_in_fixture() {
   "${CELL_ENV[@]}" "$@"
 }
 
+# The contestant stream ceiling, mirroring the 64 MiB `claudeExec` enforces on
+# the node path: `run_bounded` bounds time alone, and the cell writer reads the
+# whole stream back. Overridable for the tests that prove it, never off. Bash
+# counts `ulimit -f` in 1024-byte blocks, POSIX in 512 — half this, safe either
+# way. Round up.
+CELL_STREAM_MAX_BYTES="${REVIEW_EVAL_MAX_STREAM_BYTES:-67108864}"
+if [[ ! $CELL_STREAM_MAX_BYTES =~ ^[1-9][0-9]*$ ]]; then
+  fail "REVIEW_EVAL_MAX_STREAM_BYTES must be a positive number of bytes"
+fi
+CELL_STREAM_MAX_BLOCKS=$(((CELL_STREAM_MAX_BYTES + 1023) / 1024))
+
+# One capped model call inside one fixture. `run_bounded` starts it as a
+# background job, in a subshell of its own, so the limit binds the cell's
+# processes and not the operator's shell. Past the ceiling: SIGXFSZ, no cache.
+# shellcheck disable=SC2329  # started by name from run_bounded
+run_capped_in_fixture() {
+  ulimit -f "$CELL_STREAM_MAX_BLOCKS" || return 1
+  run_in_fixture "$@"
+}
+
 # --- skill staging -----------------------------------------------------------
 
 SKILL_SRC="${SKILL_REF:-${REVIEW_EVAL_SKILL_DIR:-$HOME/.claude/skills/review}}"
@@ -351,6 +371,14 @@ fi
 
 CLAUDE_TOOLS=(Read Write Edit Bash Grep Glob Agent TodoWrite)
 
+# The cell writer, and the stream parser it imports, are sealed beside the shell
+# in the private source snapshot and bound by the plan's orchestrator digest.
+# Loading either from `$SPEC` — live under a candidate run — let the parser
+# change between two cells with every cell fingerprint unchanged. The wrapper
+# sets that variable, so only the frozen equivalence harness reaches the
+# fallback.
+CELL_WRITER="${RUN_EVAL_SCRIPT_DIR:-$SPEC/scripts/review}/review-eval-cell-writer.mjs"
+
 run_cell() {
   local cell_id="$1" pr="$2" condition="$3" draw="$4" model="$5" effort="$6"
   local finder="$7" finder_report="$8" prompt_kind="$9"
@@ -365,6 +393,13 @@ run_cell() {
       log "  $cell_id reused"
       return 0
     fi
+  fi
+
+  # Until this check, a writer that would not load was found after the paid
+  # call. `--preflight` imports it first, so that fault costs nothing.
+  if ! node "$CELL_WRITER" --preflight; then
+    log "  $cell_id FAILED — harness fault before any cost; $CELL_WRITER did not load"
+    return 1
   fi
 
   local fixture fixture_head
@@ -453,8 +488,11 @@ run_cell() {
     prompt="$(cat "$SPEC/scripts/review/prompts/request.md")"
   fi
 
+  # `stream-json` because a cell is scored on the messages it wrote, not on the
+  # last alone: `--output-format json` reports that one, so a reviewer that
+  # filed its report and then posted an addendum was scored on the addendum.
   local -a claude_args=(-p "$prompt" --model "$model" --effort "$effort"
-    --setting-sources "" --output-format json
+    --setting-sources "" --output-format stream-json --verbose
     --permission-mode bypassPermissions
     --allowed-tools "${CLAUDE_TOOLS[@]}" --max-turns 80)
   if [[ $condition != "control" ]]; then
@@ -467,7 +505,7 @@ run_cell() {
     claude_args+=(--append-system-prompt "$preamble")
   fi
 
-  local raw other_file claude_status=0
+  local raw other_file claude_status=0 envelope_status=0
   raw="$(mktemp "$TMPROOT/review-eval-cell.XXXXXX")"
   other_file="$(mktemp "$TMPROOT/review-eval-other.XXXXXX")"
   printf '%s' "$other_review" >"$other_file"
@@ -475,7 +513,7 @@ run_cell() {
   # is: a contestant that stalls at a session limit would otherwise hold the
   # whole run open past the deadline it advertises.
   run_bounded "$raw" "$(remaining_seconds "$MATRIX_DEADLINE")" \
-    run_in_fixture "$fixture" claude "${claude_args[@]}" || claude_status=$?
+    run_capped_in_fixture "$fixture" claude "${claude_args[@]}" || claude_status=$?
   if [[ $claude_status -ne 0 ]]; then
     purge_skill "$fixture"
     if [[ $claude_status -eq 124 ]]; then
@@ -490,44 +528,28 @@ run_cell() {
   purge_skill "$fixture"
 
   mkdir -p "$out_dir"
-  # shellcheck disable=SC2016  # the single-quoted block is node source
-  if ! REVIEW_EVAL_CELL="$cell_id" REVIEW_EVAL_PR="$pr" \
+  REVIEW_EVAL_CELL="$cell_id" REVIEW_EVAL_PR="$pr" \
     REVIEW_EVAL_CONDITION="$condition" REVIEW_EVAL_DRAW="$draw" \
     REVIEW_EVAL_MODEL="$model" REVIEW_EVAL_EFFORT="$effort" \
     REVIEW_EVAL_FINDER="$finder" REVIEW_EVAL_FIXTURE="$fixture" \
     REVIEW_EVAL_SECONDS="$(($(date +%s) - started))" \
     REVIEW_EVAL_FINDER_CHARS="$codex_chars" \
     REVIEW_EVAL_FINGERPRINT="$FINGERPRINT_JSON" \
-    node -e '
-      const fs = require("node:fs");
-      const raw = fs.readFileSync(process.argv[1], "utf8");
-      let envelope;
-      try { envelope = JSON.parse(raw); } catch { envelope = { is_error: true, result: raw.slice(-4000) }; }
-      const ok = !envelope.is_error && typeof envelope.result === "string" && envelope.result.trim() !== "";
-      if (!ok) process.exit(3);
-      const other = fs.readFileSync(process.argv[2], "utf8");
-      fs.writeFileSync(process.argv[3], `${JSON.stringify({
-        cell_id: process.env.REVIEW_EVAL_CELL,
-        pr: Number(process.env.REVIEW_EVAL_PR),
-        condition: process.env.REVIEW_EVAL_CONDITION,
-        draw: Number(process.env.REVIEW_EVAL_DRAW),
-        model: process.env.REVIEW_EVAL_MODEL,
-        effort: process.env.REVIEW_EVAL_EFFORT,
-        finder: process.env.REVIEW_EVAL_FINDER || null,
-        fixture_path: process.env.REVIEW_EVAL_FIXTURE,
-        fingerprint: JSON.parse(process.env.REVIEW_EVAL_FINGERPRINT),
-        ok: true,
-        output: envelope.result,
-        other_review: other,
-        finder_chars: Number(process.env.REVIEW_EVAL_FINDER_CHARS),
-        seconds: Number(process.env.REVIEW_EVAL_SECONDS),
-        cost_usd: envelope.total_cost_usd ?? 0,
-        turns: envelope.num_turns ?? null,
-      }, null, 1)}\n`);
-    ' "$raw" "$other_file" "$out_dir/result.json"; then
-    rm -rf "$out_dir"
-    log "  $cell_id FAILED — claude reported an error; not cached"
+    node "$CELL_WRITER" "$raw" "$other_file" "$out_dir/result.json" ||
+    envelope_status=$?
+  if [[ $envelope_status -ne 0 ]]; then
     log_stderr_tail "$raw.err"
+    if [[ $envelope_status -eq 4 ]]; then
+      # Exit 4 is the harness failing to load its own stream parser: nothing the
+      # cell did, so its directory survives and the paid stream moves into it
+      # rather than being deleted. Re-running the cell is the retry.
+      mv "$raw" "$out_dir/stream.jsonl" || true
+      mv "$raw.err" "$out_dir/stream.err" || true
+      log "  $cell_id FAILED — harness fault, cell kept with its stream; the stream parser did not load"
+    else
+      rm -rf "$out_dir"
+      log "  $cell_id FAILED — claude reported an error; not cached"
+    fi
     rm -f "$raw" "$raw.err" "$other_file"
     return 1
   fi

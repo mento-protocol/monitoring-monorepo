@@ -17,6 +17,8 @@ import {
   experimentCacheFile,
   mapExperimentLimit,
   readExperimentCache,
+  validateNovelExperimentPayload,
+  validateScoreExperimentPayload,
   writeExperimentCache,
 } from "./review-eval-experiment-cache.mjs";
 
@@ -253,3 +255,68 @@ test("generic cache accepts a stage result identity", () =>
     });
     assert.deepEqual(entry.payload.records, []);
   }));
+
+test("payload provenance checks fail closed on both sides", () => {
+  const rawDigest = "a".repeat(64);
+  const scored = {
+    raw_digest: rawDigest,
+    cli_versions: { judge: "judge 1" },
+    claims: [],
+    matched_ids: [],
+    leak: { suspected: false, hard: [], advisory: [] },
+  };
+  assert.equal(
+    validateScoreExperimentPayload(scored, rawDigest, { judge: "judge 1" }, "c")
+      .raw_digest,
+    rawDigest,
+  );
+
+  // An omitted expected set used to skip the check and pass any provenance.
+  assert.throws(
+    () =>
+      validateScoreExperimentPayload(scored, rawDigest, undefined, "cell-1"),
+    /cell-1 score cache read supplied no CLI versions to check/,
+  );
+  assert.throws(
+    () => validateScoreExperimentPayload(scored, rawDigest, null, "cell-1"),
+    /cell-1 score cache read supplied no CLI versions to check/,
+  );
+
+  // A payload that stores no provenance is unattributable, so it is refused.
+  assert.throws(
+    () =>
+      validateScoreExperimentPayload(
+        { ...scored, cli_versions: undefined },
+        rawDigest,
+        { judge: "judge 1" },
+        "cell-1",
+      ),
+    /cell-1 score cache payload records no CLI versions/,
+  );
+  const scoreDigest = "b".repeat(64);
+  assert.throws(
+    () =>
+      validateNovelExperimentPayload(
+        { score_digest: scoreDigest, verdict: { novelWrong: 0, novelReal: 0 } },
+        scoreDigest,
+        { judge: "judge 1" },
+        "cell-1",
+      ),
+    /cell-1 novel cache payload records no CLI versions/,
+  );
+
+  // An empty provider set stays a valid recording on both sides.
+  assert.equal(
+    validateNovelExperimentPayload(
+      {
+        score_digest: scoreDigest,
+        cli_versions: {},
+        verdict: { novelWrong: 0, novelReal: 0 },
+      },
+      scoreDigest,
+      {},
+      "cell-1",
+    ).score_digest,
+    scoreDigest,
+  );
+});

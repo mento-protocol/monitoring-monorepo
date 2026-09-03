@@ -1,6 +1,7 @@
 // Deterministic decisions for the lightweight review-skill experiment.
 
 import { stagePlanFor } from "./review-eval-experiment-contract.mjs";
+import { runtimeDriftReason } from "./review-eval-experiment-versions.mjs";
 
 function isObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -295,7 +296,7 @@ function recallFailures(metrics, stage, policy) {
     .map(([, label]) => `${label} missed`);
 }
 
-export function evaluateExperimentDecision({
+function stageDecision({
   plan,
   candidateId: suppliedCandidateId,
   stage,
@@ -396,4 +397,26 @@ export function evaluateExperimentDecision({
         : "novelty classification is not required",
     },
   });
+}
+
+/**
+ * Decide one stage. A campaign resumed under an upgraded provider CLI keeps its
+ * thresholds; the drift is named in the reasons so a flip is never read as the
+ * skill when it may be the runtime.
+ */
+export function evaluateExperimentDecision({
+  runtimeDrift = null,
+  ...options
+}) {
+  const result = stageDecision(options);
+  const reason = runtimeDriftReason(runtimeDrift);
+  if (reason === null) return result;
+  return {
+    ...result,
+    reasons: [reason, ...result.reasons],
+    runtime_drift: {
+      providers: runtimeDrift.providers,
+      cell_ids: [...new Set(runtimeDrift.cell_ids ?? [])].sort(),
+    },
+  };
 }
