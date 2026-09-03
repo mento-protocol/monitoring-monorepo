@@ -232,8 +232,9 @@ function writePlan(file, plan) {
 function driftWarning(drift) {
   return (
     `runtime drift: ${drift.summary}; ` +
-    "artifacts from the planned versions are not reused, and every cell that " +
-    "runs now records the live versions"
+    "a cache entry whose phase invokes a changed provider is not reused, " +
+    "while a completed stage result and an entry independent of that provider " +
+    "still are, and every cell that runs now records the live versions"
   );
 }
 

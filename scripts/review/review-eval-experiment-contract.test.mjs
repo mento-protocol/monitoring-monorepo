@@ -22,6 +22,7 @@ import {
   novelCacheIdentity,
   phaseCliVersions,
   rawCacheIdentity,
+  recordedPhaseCliVersions,
   recordRuntimeDrift,
   runtimeDriftReason,
   scoreCacheIdentity,
@@ -378,6 +379,74 @@ test("cache identities key on the live version of each phase's providers", () =>
   assert.throws(
     () => phaseCliVersions({ phase: "stage", cliVersions }),
     /unknown experiment cache phase/,
+  );
+
+  // A phase that answers without a provider keys on the empty set, and an
+  // identity rebuilt from a record's own bytes keys on what that record ran.
+  assert.deepEqual(
+    phaseCliVersions({ phase: "score", cliVersions, invokesJudge: false }),
+    {},
+  );
+  assert.equal(
+    scoreCacheIdentity({ plan, rawDigest, phaseVersions: { judge: "judge 1" } })
+      .digest,
+    scoreCacheIdentity({
+      plan,
+      rawDigest,
+      cliVersions: { ...cliVersions, judge: "judge 1" },
+    }).digest,
+  );
+  assert.notEqual(
+    scoreCacheIdentity({ plan, rawDigest, phaseVersions: {} }).digest,
+    scoreCacheIdentity({ plan, rawDigest, cliVersions }).digest,
+  );
+});
+
+test("a record's recorded phase provenance is read strictly", () => {
+  const record = {
+    cell_id: "screen-pr-1990-candidate",
+    cli_versions: { raw: { claude: "claude 1" }, score: { judge: "judge 1" } },
+  };
+  assert.deepEqual(recordedPhaseCliVersions({ record, phase: "score" }), {
+    judge: "judge 1",
+  });
+  assert.deepEqual(
+    recordedPhaseCliVersions({
+      record: {
+        ...record,
+        cli_versions: { ...record.cli_versions, score: {} },
+      },
+      phase: "score",
+    }),
+    {},
+  );
+  assert.throws(
+    () => recordedPhaseCliVersions({ record, phase: "novel" }),
+    /screen-pr-1990-candidate stores no novel runtime provenance/,
+  );
+  assert.throws(
+    () =>
+      recordedPhaseCliVersions({
+        record: { ...record, cli_versions: { score: "judge 1" } },
+        phase: "score",
+      }),
+    /score CLI versions must be an object/,
+  );
+  assert.throws(
+    () =>
+      recordedPhaseCliVersions({
+        record: { ...record, cli_versions: { score: { claude: "claude 1" } } },
+        phase: "score",
+      }),
+    /names score provider "claude", which that phase never invokes/,
+  );
+  assert.throws(
+    () =>
+      recordedPhaseCliVersions({
+        record: { ...record, cli_versions: { score: { judge: "" } } },
+        phase: "score",
+      }),
+    /score\.judge must be a non-empty string/,
   );
 });
 

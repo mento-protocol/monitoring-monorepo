@@ -16,6 +16,7 @@ import {
   rawCacheIdentity,
   digestObject,
   recordRuntimeDrift,
+  runtimeDriftReason,
 } from "./review-eval-experiment-contract.mjs";
 import {
   readExperimentCache,
@@ -785,4 +786,239 @@ test("a novelty judge stores its own runtime and keeps it on reuse", async (t) =
       cell_ids: reused.map((record) => record.cell_id).sort(),
     },
   ]);
+});
+
+function holdoutStage(harness) {
+  const lanes = harness.lanes.map((lane) => ({
+    ...structuredClone(lane),
+    lane_id: `holdout-pr-${lane.pr}`,
+  }));
+  harness.plan.stages.holdout = { stage: "holdout", enabled: true, lanes };
+  return lanes;
+}
+
+function noveltyOptions(harness, records, overrides = {}) {
+  return {
+    plan: harness.plan,
+    records,
+    contract: harness.contract,
+    artifactRoot: harness.artifactRoot,
+    repoRoot: harness.repoRoot,
+    fixtureCacheDir: harness.fixtureCacheDir,
+    prepareFixture: harness.prepareFixture,
+    reset: async () => true,
+    cliVersions: harness.plan.inputs.cli_versions,
+    scorerDigestNow: () => harness.plan.inputs.scorer_digest,
+    judgeExec: judgeExec(),
+    ...overrides,
+  };
+}
+
+test("a judge upgraded after the screen still loads the screen's own scores", async (t) => {
+  // The defect this replaced: enrichment rebuilt every record's score identity
+  // from the live judge, so screen scores recorded under judge 1 were
+  // unreachable under judge 2. Enrichment threw and the campaign produced no
+  // holdout decision at all.
+  const harness = makeHarness({ laneCount: 1 });
+  t.after(harness.cleanup);
+  const planned = harness.plan.inputs.cli_versions;
+  const judgeOne = { ...planned, judge: "judge-1" };
+  const judgeTwo = { ...planned, judge: "judge-2" };
+  const screen = await runExperimentRuntimeStage(
+    baseOptions(harness, { cliVersions: judgeOne }),
+  );
+  holdoutStage(harness);
+  const holdout = await runExperimentRuntimeStage(
+    baseOptions(harness, { stage: "holdout", cliVersions: judgeTwo }),
+  );
+  const enriched = await enrichExperimentNovelty(
+    noveltyOptions(harness, [...screen.records, ...holdout.records], {
+      cliVersions: judgeTwo,
+    }),
+  );
+  assert.equal(enriched.length, 4);
+  for (const record of enriched) {
+    assert.deepEqual(record.cli_versions, {
+      raw: { claude: planned.claude },
+      // Each phase reports the judge that ran it, not the judge probed now.
+      score: { judge: record.stage === "screen" ? "judge-1" : "judge-2" },
+      novel: { judge: "judge-2" },
+    });
+    assert.equal(record.wrong_claims, 1);
+  }
+
+  // The stage decision embeds this drift, so it names both provenances.
+  const drift = recordRuntimeDrift({ planned: judgeOne, records: enriched });
+  assert.deepEqual(
+    drift.providers.map((entry) => [entry.provider, entry.planned, entry.live]),
+    [["judge", "judge-1", "judge-2"]],
+  );
+  assert.deepEqual(
+    drift.cell_ids,
+    enriched.map((record) => record.cell_id).sort(),
+  );
+  assert.match(runtimeDriftReason(drift), /judge judge-1 -> judge-2 on /);
+});
+
+test("a retried novelty pass reuses every artifact under its recorded version", async (t) => {
+  const harness = makeHarness({ laneCount: 1 });
+  t.after(harness.cleanup);
+  const planned = harness.plan.inputs.cli_versions;
+  const judgeTwo = { ...planned, judge: "judge-2" };
+  const judgeThree = { ...planned, judge: "judge-3" };
+  const base = await runExperimentRuntimeStage(
+    baseOptions(harness, { cliVersions: judgeTwo }),
+  );
+
+  // The pass classifies the first cell, then loses the judge on the second.
+  let novelCalls = 0;
+  await assert.rejects(
+    enrichExperimentNovelty(
+      noveltyOptions(harness, base.records, {
+        cliVersions: judgeTwo,
+        judgeExec: async (request) => {
+          novelCalls += 1;
+          if (novelCalls > 1) throw new Error("novel judge lost its session");
+          return judgeExec()(request);
+        },
+      }),
+    ),
+    /novel judge lost its session/,
+  );
+  assert.equal(novelCalls, 2);
+
+  // The retry judges only the cell that has no artifact yet.
+  const retryCalls = [];
+  const enriched = await enrichExperimentNovelty(
+    noveltyOptions(harness, base.records, {
+      cliVersions: judgeTwo,
+      judgeExec: judgeExec(retryCalls),
+    }),
+  );
+  assert.deepEqual(retryCalls, ["novel"]);
+  assert.deepEqual(
+    enriched.map((record) => record.cache_reuse.novel),
+    [true, false],
+  );
+
+  // A later pass under a third judge still finds each score and each novelty
+  // artifact through the version its own record stored.
+  const reused = await enrichExperimentNovelty(
+    noveltyOptions(harness, enriched, {
+      cliVersions: judgeThree,
+      judgeExec: async () => {
+        throw new Error("cached novel judge ran again");
+      },
+    }),
+  );
+  for (const record of reused) {
+    // Reaching this line at all means the score artifact was found through the
+    // record's own judge version rather than the version probed now.
+    assert.equal(record.cache_reuse.novel, true);
+    assert.deepEqual(record.cli_versions, {
+      raw: { claude: planned.claude },
+      score: { judge: "judge-2" },
+      novel: { judge: "judge-2" },
+    });
+  }
+});
+
+test("an empty transcript is scored with no judge and records no judge", async (t) => {
+  // ADR 0085: an artifact records only the providers its own phase invoked.
+  const harness = makeHarness({ laneCount: 1 });
+  t.after(harness.cleanup);
+  const planned = harness.plan.inputs.cli_versions;
+  const upgraded = { ...planned, judge: "judge-2" };
+  const events = [];
+  const result = await runExperimentRuntimeStage(
+    baseOptions(harness, {
+      cliVersions: upgraded,
+      judgeExec: judgeExec(events),
+      contestantExec: async ({ treatment }) =>
+        contestantStream([
+          treatment === "candidate" ? "   " : "file.js:1 has a defect",
+        ]),
+    }),
+  );
+  const candidate = result.records.find(
+    (record) => record.treatment === "candidate",
+  );
+  const incumbent = result.records.find(
+    (record) => record.treatment === "incumbent",
+  );
+  assert.equal(candidate.empty, true);
+  // The empty cell reaches its score without a judge call, upgrade or not.
+  assert.deepEqual(events, ["extract", "match"]);
+  assert.deepEqual(candidate.cli_versions.score, {});
+  assert.deepEqual(incumbent.cli_versions.score, { judge: "judge-2" });
+  assert.deepEqual(
+    JSON.parse(readFileSync(candidate.artifacts.score, "utf8")).payload
+      .cli_versions,
+    {},
+  );
+
+  // The upgrade is therefore attributed to the cell that ran the judge alone.
+  assert.deepEqual(recordRuntimeDrift({ planned, records: result.records }), {
+    providers: [
+      {
+        provider: "judge",
+        planned: planned.judge,
+        live: "judge-2",
+        cell_ids: [incumbent.cell_id],
+      },
+    ],
+    cell_ids: [incumbent.cell_id],
+    summary: `judge ${planned.judge} -> judge-2`,
+  });
+
+  const reused = await runExperimentRuntimeStage(
+    baseOptions(harness, {
+      cliVersions: upgraded,
+      contestantExec: async () => {
+        throw new Error("cached contestant ran again");
+      },
+      judgeExec: async () => {
+        throw new Error("cached judge ran again");
+      },
+    }),
+  );
+  assert.equal(
+    reused.records.every((record) => record.cache_reuse.score),
+    true,
+  );
+});
+
+test("novelty names the judge only on the records that invoked it", async (t) => {
+  const harness = makeHarness({ laneCount: 1 });
+  t.after(harness.cleanup);
+  const planned = harness.plan.inputs.cli_versions;
+  const upgraded = { ...planned, judge: "judge-2" };
+  const base = await runExperimentRuntimeStage(
+    baseOptions(harness, {
+      cliVersions: upgraded,
+      contestantExec: async ({ treatment }) =>
+        contestantStream([
+          treatment === "candidate" ? "   " : "file.js:1 has a defect",
+        ]),
+    }),
+  );
+  const events = [];
+  const enriched = await enrichExperimentNovelty(
+    noveltyOptions(harness, base.records, {
+      cliVersions: upgraded,
+      judgeExec: judgeExec(events),
+    }),
+  );
+  // A cell with no claim is classified without a judge call.
+  assert.deepEqual(events, ["novel"]);
+  const candidate = enriched.find((record) => record.treatment === "candidate");
+  const incumbent = enriched.find((record) => record.treatment === "incumbent");
+  assert.deepEqual(candidate.cli_versions.novel, {});
+  assert.equal(candidate.wrong_claims, 0);
+  assert.deepEqual(incumbent.cli_versions.novel, { judge: "judge-2" });
+  assert.equal(incumbent.wrong_claims, 1);
+  assert.deepEqual(
+    recordRuntimeDrift({ planned, records: enriched }).cell_ids,
+    [incumbent.cell_id],
+  );
 });

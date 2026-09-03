@@ -22,6 +22,7 @@ import {
   novelCacheIdentity,
   phaseCliVersions,
   rawCacheIdentity,
+  recordedPhaseCliVersions,
   scoreCacheIdentity,
   stagePlanFor,
 } from "./review-eval-experiment-contract.mjs";
@@ -144,7 +145,6 @@ export function createExperimentArmExecutor({
       cliVersions,
       source,
     });
-    const scoreVersions = phaseCliVersions({ phase: "score", cliVersions });
     const rawIdentity = rawCacheIdentity({
       plan,
       stage,
@@ -227,7 +227,19 @@ export function createExperimentArmExecutor({
       cliVersions: rawVersions,
     });
     const rawDigest = rawEntry.artifact.content_digest;
-    const scoreIdentity = scoreCacheIdentity({ plan, rawDigest, cliVersions });
+    // An empty transcript is scored without a judge call, so this phase records
+    // the empty provider set and a judge upgrade neither reruns it nor is
+    // charged with its drift.
+    const scoreVersions = phaseCliVersions({
+      phase: "score",
+      cliVersions,
+      invokesJudge: raw.output.trim().length > 0,
+    });
+    const scoreIdentity = scoreCacheIdentity({
+      plan,
+      rawDigest,
+      phaseVersions: scoreVersions,
+    });
     let scoreEntry = readCache({
       artifactRoot,
       kind: "score",
@@ -429,8 +441,6 @@ export async function enrichExperimentNovelty({
   env = scrubbedEnv({ roots: [repoRoot] }),
 }) {
   assertExperimentConcurrency(concurrency);
-  const scoreVersions = phaseCliVersions({ phase: "score", cliVersions });
-  const novelVersions = phaseCliVersions({ phase: "novel", cliVersions });
   const groups = new Map();
   for (const record of records) {
     const lane = stagePlanFor({ plan, stage: record.stage }).lanes.find(
@@ -461,10 +471,13 @@ export async function enrichExperimentNovelty({
       const truth = await loadTruth({ repoRoot, lane, contract });
       const enriched = [];
       for (const { lane: recordLane, record } of laneRecords) {
+        // A record's score artifact is keyed on the versions that produced it,
+        // not on today's probe: a judge upgraded between a screen and its
+        // holdout must still find the screen scores it recorded.
         const scoreIdentity = scoreCacheIdentity({
           plan,
           rawDigest: record.raw_digest,
-          cliVersions,
+          phaseVersions: recordedPhaseCliVersions({ record, phase: "score" }),
         });
         const scoreEntry = readCache({
           artifactRoot,
@@ -482,18 +495,40 @@ export async function enrichExperimentNovelty({
         const score = validateScoreExperimentPayload(
           scoreEntry.payload,
           record.raw_digest,
-          scoreVersions,
+          scoreIdentity.cli_versions,
         );
-        const identity = novelCacheIdentity({
-          plan,
-          scoreDigest: record.score_digest,
-          cliVersions,
-        });
-        let entry = readCache({
-          artifactRoot,
-          kind: "novel",
-          identity,
-        });
+        // A record already enriched under an earlier runtime keeps that
+        // artifact; only a novelty verdict written now carries the live judge.
+        let identity =
+          record.cli_versions?.novel === undefined
+            ? null
+            : novelCacheIdentity({
+                plan,
+                scoreDigest: record.score_digest,
+                phaseVersions: recordedPhaseCliVersions({
+                  record,
+                  phase: "novel",
+                }),
+              });
+        let entry = identity
+          ? readCache({ artifactRoot, kind: "novel", identity })
+          : null;
+        if (!entry) {
+          // `classifyNovel` returns without a judge call when no claim has
+          // text, so such a cell records the empty provider set.
+          identity = novelCacheIdentity({
+            plan,
+            scoreDigest: record.score_digest,
+            phaseVersions: phaseCliVersions({
+              phase: "novel",
+              cliVersions,
+              invokesJudge: score.claims.some(
+                (claim) => claim.trim().length > 0,
+              ),
+            }),
+          });
+          entry = readCache({ artifactRoot, kind: "novel", identity });
+        }
         const reused = entry !== null;
         if (!entry) {
           await resetExperimentFixture({
@@ -518,8 +553,9 @@ export async function enrichExperimentNovelty({
             identity,
             payload: {
               score_digest: record.score_digest,
-              // The judge runtime that classified these claims.
-              cli_versions: novelVersions,
+              // The judge runtime that classified these claims, or the empty
+              // set when the classification needed no judge.
+              cli_versions: identity.cli_versions,
               verdict,
             },
           });
@@ -527,7 +563,7 @@ export async function enrichExperimentNovelty({
         const payload = validateNovelExperimentPayload(
           entry.payload,
           record.score_digest,
-          novelVersions,
+          identity.cli_versions,
         );
         enriched.push({
           ...record,

@@ -210,23 +210,89 @@ export function cliVersionDrift({ planned, live }) {
   };
 }
 
+/** The providers each cache phase can invoke, in the order it records them. */
+const PHASE_PROVIDERS = Object.freeze({
+  raw: Object.freeze(["claude", "codex"]),
+  score: Object.freeze(["judge"]),
+  novel: Object.freeze(["judge"]),
+});
+
+function phaseProviders(phase) {
+  if (!Object.hasOwn(PHASE_PROVIDERS, phase)) {
+    throw new Error(`unknown experiment cache phase ${JSON.stringify(phase)}`);
+  }
+  return PHASE_PROVIDERS[phase];
+}
+
+/**
+ * Normalize one phase's provider set. Every key must name a provider that phase
+ * can invoke and every value a non-empty version. An empty set is valid: it
+ * says the phase reached its answer without calling a provider.
+ */
+function normalizePhaseCliVersions(phase, versions, label) {
+  const providers = phaseProviders(phase);
+  if (!isObject(versions)) {
+    throw new Error(`${label} ${phase} CLI versions must be an object`);
+  }
+  for (const [provider, version] of Object.entries(versions)) {
+    if (!providers.includes(provider)) {
+      throw new Error(
+        `${label} names ${phase} provider ${JSON.stringify(provider)}, ` +
+          "which that phase never invokes",
+      );
+    }
+    nonempty(version, `${label} ${phase}.${provider}`);
+  }
+  return Object.fromEntries(
+    providers
+      .filter((provider) => Object.hasOwn(versions, provider))
+      .map((provider) => [provider, versions[provider]]),
+  );
+}
+
 /**
  * The providers one cache phase invokes, at the versions it invokes them at.
  * A frozen-report lane never spawns the finder, so `codex` belongs to a
  * live-finder raw phase alone; scoring and novelty classification are judge
- * calls. These versions go into the phase's cache identity and into the
- * artifact it writes, so a phase can never be attributed to a provider it did
- * not run or to a version it did not run under.
+ * calls only when they have something to send the judge. Pass
+ * `invokesJudge: false` for the deterministic cases the caller short-circuits —
+ * an empty reviewer transcript to score, a cell with no claims to classify — so
+ * the phase records the empty provider set it actually used. These versions go
+ * into the phase's cache identity and into the artifact it writes, so a phase
+ * can never be attributed to a provider it did not run or to a version it did
+ * not run under.
  */
-export function phaseCliVersions({ phase, cliVersions, source = null }) {
+export function phaseCliVersions({
+  phase,
+  cliVersions,
+  source = null,
+  invokesJudge = true,
+}) {
+  phaseProviders(phase);
   const live = cliVersionIdentity(cliVersions);
   if (phase === "raw") {
     return source?.kind === "live-finder"
       ? { claude: live.claude, codex: live.codex }
       : { claude: live.claude };
   }
-  if (phase === "score" || phase === "novel") return { judge: live.judge };
-  throw new Error(`unknown experiment cache phase ${JSON.stringify(phase)}`);
+  return invokesJudge === false ? {} : { judge: live.judge };
+}
+
+/**
+ * The versions one record's own artifact stored for a phase. A later phase
+ * rebuilds an earlier artifact's identity from these bytes rather than from the
+ * live probe, so a judge upgrade between a screen and its holdout still finds
+ * the screen scores instead of failing to match them.
+ */
+export function recordedPhaseCliVersions({ record, phase }) {
+  const label = record?.cell_id ? `record ${record.cell_id}` : "record";
+  const versions = record?.cli_versions?.[phase];
+  if (versions === undefined || versions === null) {
+    throw new Error(
+      `${label} stores no ${phase} runtime provenance; re-run the cell`,
+    );
+  }
+  return normalizePhaseCliVersions(phase, versions, label);
 }
 
 /**
@@ -679,7 +745,27 @@ export function rawCacheIdentity({
   });
 }
 
-export function scoreCacheIdentity({ plan, rawDigest, cliVersions }) {
+/**
+ * `phaseVersions` names the exact provider set to key on. A caller that already
+ * knows the versions — read back from the artifact's own record — passes them
+ * here; a caller starting a new phase passes the live `cliVersions` instead.
+ */
+function identityPhaseVersions({ phase, cliVersions, phaseVersions }) {
+  return phaseVersions === null || phaseVersions === undefined
+    ? phaseCliVersions({ phase, cliVersions })
+    : normalizePhaseCliVersions(
+        phase,
+        phaseVersions,
+        `${phase} cache identity`,
+      );
+}
+
+export function scoreCacheIdentity({
+  plan,
+  rawDigest,
+  cliVersions,
+  phaseVersions = null,
+}) {
   return withDigest({
     schema_version: EXPERIMENT_SCHEMA_VERSION,
     namespace: EXPERIMENT_NAMESPACE,
@@ -688,11 +774,20 @@ export function scoreCacheIdentity({ plan, rawDigest, cliVersions }) {
     raw_digest: assertDigest(rawDigest, "rawDigest"),
     scorer_digest: plan.inputs.scorer_digest,
     judge: plan.inputs.models.judge,
-    cli_versions: phaseCliVersions({ phase: "score", cliVersions }),
+    cli_versions: identityPhaseVersions({
+      phase: "score",
+      cliVersions,
+      phaseVersions,
+    }),
   });
 }
 
-export function novelCacheIdentity({ plan, scoreDigest, cliVersions }) {
+export function novelCacheIdentity({
+  plan,
+  scoreDigest,
+  cliVersions,
+  phaseVersions = null,
+}) {
   return withDigest({
     schema_version: EXPERIMENT_SCHEMA_VERSION,
     namespace: EXPERIMENT_NAMESPACE,
@@ -701,7 +796,11 @@ export function novelCacheIdentity({ plan, scoreDigest, cliVersions }) {
     score_digest: assertDigest(scoreDigest, "scoreDigest"),
     scorer_digest: plan.inputs.scorer_digest,
     judge: plan.inputs.models.judge,
-    cli_versions: phaseCliVersions({ phase: "novel", cliVersions }),
+    cli_versions: identityPhaseVersions({
+      phase: "novel",
+      cliVersions,
+      phaseVersions,
+    }),
   });
 }
 

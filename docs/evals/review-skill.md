@@ -458,14 +458,20 @@ versions separately. A live difference is a warning: `--validate-plan` reports
 Cell identity follows the canonical lane exactly. Every cache identity carries
 the live version of each provider its own phase invokes — the contestant CLI for
 a raw cell, the finder CLI as well on a `live-paired` lane, the judge CLI for a
-score or novelty cell. An artifact produced under another runtime is never
-found, so the cell reruns and no phase mixes runtimes. Each artifact stores the
-versions it ran under and each record reads those bytes, so a stage retried
-after a failure reports the runtime that produced each artifact rather than the
-runtime of the retry. The stage decision names every transition with the cells
-it touched, screen cells included once a holdout decision folds them in, so a
-flip on a straddling pair reads as a possible runtime change rather than a skill
-change.
+score or novelty cell that calls the judge. A phase that reaches its answer
+without a provider records the empty set instead: an empty reviewer transcript
+is scored with no judge call, and a cell with no claim is classified with none,
+so a judge upgrade neither reruns those cells nor is charged with their drift.
+A cache entry whose phase invokes a changed provider is never found, so that
+cell reruns and no phase mixes runtimes; a completed stage result and an entry
+independent of the changed provider are still reused. Each artifact stores the
+versions it ran under, and a later phase rebuilds an earlier artifact's identity
+from the record's stored versions, so a judge upgraded between a screen and its
+holdout still loads the screen scores, and a stage retried after a failure
+reports the runtime that produced each artifact rather than the runtime of the
+retry. The stage decision names every transition with the cells it touched,
+screen cells included once a holdout decision folds them in, so a flip on a
+straddling pair reads as a possible runtime change rather than a skill change.
 
 What the canonical lane keeps free of the two versions is its ledger
 comparability key, not its cell fingerprint. `claude` and `codex` ship far more

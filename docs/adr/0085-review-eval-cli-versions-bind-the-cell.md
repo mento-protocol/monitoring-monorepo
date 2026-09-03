@@ -39,14 +39,21 @@ stays valid across a provider upgrade.
 
 Every cache identity instead carries the live version of the provider its own
 phase invokes: the contestant CLI for a raw cell, the finder CLI as well on a
-`live-paired` lane, and the judge CLI for a score or novelty cell. This matches
-the canonical cell fingerprint in `scripts/review/review-eval-run-cell.mjs`. An
-artifact produced under another runtime is never found, the cell reruns, and no
-phase mixes runtimes.
+`live-paired` lane, and the judge CLI for a score or novelty cell that calls the
+judge. This matches the canonical cell fingerprint in
+`scripts/review/review-eval-run-cell.mjs`. A phase that reaches its answer
+without a provider records the empty set — an empty reviewer transcript is
+scored with no judge call, and a cell with no claim is classified with none — so
+no artifact names a provider its phase never ran. A cache entry whose phase
+invokes a changed provider is never found, that cell reruns, and no phase mixes
+runtimes; a completed stage result and an entry independent of the changed
+provider stay reusable.
 
 Each artifact stores the versions it ran under, and each record reads those
-bytes. A stage retried after a failure reports the runtime that produced each
-artifact, not the runtime of the retry.
+bytes. A later phase rebuilds an earlier artifact's identity from the record's
+stored versions, so a judge upgraded between a screen and its holdout still
+loads the screen scores. A stage retried after a failure reports the runtime
+that produced each artifact, not the runtime of the retry.
 
 `--validate-plan` reports a live difference as `cli_version_drift`, a warning
 rather than a problem. `--run` writes one warning line to stderr. The stage
