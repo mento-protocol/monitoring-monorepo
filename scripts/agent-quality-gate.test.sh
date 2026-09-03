@@ -11473,7 +11473,7 @@ STUB
       --skip-if-fresh \
       > "$output_file" 2>&1
   [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "10" ]] ||
-    fail "fresh gate stamp was reused after the indexer routing source changed"
+    fail "fresh gate stamp was reused after the pinned autoreview core changed"
 
   # The signature has two path roots. Runtime modules come from the gate's own
   # checkout, while commands and configuration come from the repository under
