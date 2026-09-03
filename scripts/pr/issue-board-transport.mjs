@@ -37,7 +37,7 @@ export function githubProjectScopeHint(stderr, env = process.env, args = []) {
   const lockApi = args.some((arg) => {
     const value = String(arg);
     return (
-      /\/git\/(?:commits|refs)(?:\/|$)/.test(value) ||
+      /\/git\/(?:commits|refs|matching-refs)(?:\/|$)/.test(value) ||
       /\bupdateRefs\b/.test(value)
     );
   });
@@ -208,8 +208,11 @@ export async function ghGraphql(query, variables = {}, opts = {}) {
   const args = ["api", "graphql", "-f", `query=${query}`];
   for (const [key, value] of Object.entries(variables)) {
     if (value == null) continue;
-    const flag = typeof value === "number" ? "-F" : "-f";
-    args.push(flag, `${key}=${value}`);
+    const field = Array.isArray(value) ? `${key}[]` : key;
+    for (const item of Array.isArray(value) ? value : [value]) {
+      const flag = typeof item === "number" ? "-F" : "-f";
+      args.push(flag, `${field}=${item}`);
+    }
   }
   return ghJson(args, opts);
 }
@@ -269,7 +272,7 @@ export async function listReadyIssues(options) {
 export async function listIssuesByLabels(
   options,
   labels,
-  { state = "open", json = ghJson } = {},
+  { state = "open", json = ghJson, graphql = ghGraphql } = {},
 ) {
   const stateQualifier = state === "all" ? "" : ` is:${state}`;
   const issues = await json([
@@ -286,7 +289,60 @@ export async function listIssuesByLabels(
     "--json",
     "id,number,title,url,labels,state,projectItems",
   ]);
-  return issues ?? [];
+  return attachExactProjectItems(issues ?? [], graphql);
+}
+
+// `gh issue list --json projectItems` reports Project titles only. One batched
+// node read per 100 issues replaces them with exact item and Project node IDs
+// and marks the snapshot complete, so a stable issue needs no per-issue read.
+// An incomplete or missing page keeps the title-only snapshot, which consumers
+// treat as untrusted and re-read.
+async function attachExactProjectItems(issues, graphql) {
+  const exactItems = new Map();
+  for (let start = 0; start < issues.length; start += 100) {
+    const response = await graphql(
+      `
+        query ($ids: [ID!]!) {
+          nodes(ids: $ids) {
+            ... on Issue {
+              id
+              projectItems(first: 50) {
+                nodes {
+                  id
+                  project {
+                    id
+                    title
+                  }
+                }
+                pageInfo {
+                  hasNextPage
+                }
+              }
+            }
+          }
+        }
+      `,
+      { ids: issues.slice(start, start + 100).map((issue) => issue.id) },
+    );
+    for (const node of response?.data?.nodes ?? []) {
+      const items = node?.projectItems;
+      if (
+        Array.isArray(items?.nodes) &&
+        items.pageInfo?.hasNextPage === false
+      ) {
+        exactItems.set(node.id, items.nodes);
+      }
+    }
+  }
+  return issues.map((issue) =>
+    exactItems.has(issue.id)
+      ? {
+          ...issue,
+          projectItems: exactItems.get(issue.id),
+          projectItemsPageInfo: { hasNextPage: false },
+        }
+      : issue,
+  );
 }
 
 export async function getIssue(

@@ -107,7 +107,7 @@
       "tag_head": "eval/review-skill/v1/pr-1990/head",
       "tag_base": "eval/review-skill/v1/pr-1990/base",
       "truth_file": "docs/evals/review-skill-truth/pr-1990.json",
-      "truth_sha256": "03c802f0573c85fb79a8c2e5877a5322d6689522d2bc5a772e34e798a391782b",
+      "truth_sha256": "886782ea3995b4c05b484bc87d7aa83532317043d60e8ec49d9dee0c742ec9cb",
       "scorable_ids": [
         3829654081,
         3829659544,

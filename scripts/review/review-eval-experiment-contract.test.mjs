@@ -25,6 +25,14 @@ import {
   validateExperimentPlan,
 } from "./review-eval-experiment-contract.mjs";
 import {
+  cliVersionDrift,
+  phaseCliVersions,
+  recordedPhaseCliVersions,
+  recordRuntimeDrift,
+  runtimeDriftReason,
+} from "./review-eval-experiment-versions.mjs";
+import { evaluateExperimentDecision } from "./review-eval-experiment-decision.mjs";
+import {
   finderArgvDigest,
   planCells,
   skillDigest,
@@ -92,6 +100,7 @@ test("digestObject and plan validation are stable across persistence", () => {
   assert.deepEqual(validateExperimentPlan({ plan, contract, contractDigest }), {
     ok: true,
     problems: [],
+    drift: null,
   });
   const tampered = structuredClone(plan);
   tampered.stages.screen.lanes[0].source.sha256 = "f".repeat(64);
@@ -101,13 +110,14 @@ test("digestObject and plan validation are stable across persistence", () => {
   );
 });
 
-test("harness source identity binds five exact paths and their bytes", () => {
+test("harness source identity binds six exact paths and their bytes", () => {
   assert.deepEqual(EXPERIMENT_SOURCE_FILES, [
     "scripts/review/review-eval-experiment.mjs",
     "scripts/review/review-eval-experiment-contract.mjs",
     "scripts/review/review-eval-experiment-decision.mjs",
     "scripts/review/review-eval-experiment-cache.mjs",
     "scripts/review/review-eval-experiment-runtime.mjs",
+    "scripts/review/review-eval-experiment-versions.mjs",
   ]);
   const virtualRoot = "/virtual-review-experiment";
   const bytes = new Map([
@@ -241,12 +251,14 @@ test("raw, score, and novel identities drift on every dependent input", () => {
     stage: "screen",
     lane: screenLane,
     treatment: "incumbent",
+    cliVersions,
   });
   const candidateIdentity = rawCacheIdentity({
     plan,
     stage: "screen",
     lane: screenLane,
     treatment: "candidate",
+    cliVersions,
   });
   assert.notEqual(incumbent.digest, candidateIdentity.digest);
   assert.throws(
@@ -257,6 +269,7 @@ test("raw, score, and novel identities drift on every dependent input", () => {
         lane: screenLane,
         treatment: "candidate",
         sourceDigest: "f".repeat(64),
+        cliVersions,
       }),
     /frozen report digest differs/,
   );
@@ -268,6 +281,7 @@ test("raw, score, and novel identities drift on every dependent input", () => {
     lane: liveLane,
     treatment: "candidate",
     sourceDigest: "a".repeat(64),
+    cliVersions,
   });
   const liveB = rawCacheIdentity({
     plan,
@@ -275,6 +289,7 @@ test("raw, score, and novel identities drift on every dependent input", () => {
     lane: liveLane,
     treatment: "candidate",
     sourceDigest: "b".repeat(64),
+    cliVersions,
   });
   assert.notEqual(liveA.digest, liveB.digest);
 
@@ -286,7 +301,6 @@ test("raw, score, and novel identities drift on every dependent input", () => {
     (copy) => (copy.candidate.skill_digest = "3".repeat(64)),
     (copy) => (copy.inputs.models.verifier.model = "changed-model"),
     (copy) => (copy.inputs.models.verifier.effort = "changed-effort"),
-    (copy) => (copy.inputs.cli_versions.claude = "claude changed"),
     (copy) => (copy.inputs.prompts.handoff.sha256 = "4".repeat(64)),
     (copy) =>
       (copy.stages.screen.lanes[0].fixture.truth_sha256 = "5".repeat(64)),
@@ -300,16 +314,157 @@ test("raw, score, and novel identities drift on every dependent input", () => {
       stage: "screen",
       lane: changed.stages.screen.lanes[0],
       treatment: "candidate",
+      cliVersions,
     });
     assert.notEqual(changedIdentity.digest, candidateIdentity.digest);
   }
   assert.notEqual(
-    scoreCacheIdentity({ plan, rawDigest: "1".repeat(64) }).digest,
-    scoreCacheIdentity({ plan, rawDigest: "2".repeat(64) }).digest,
+    scoreCacheIdentity({ plan, rawDigest: "1".repeat(64), cliVersions }).digest,
+    scoreCacheIdentity({ plan, rawDigest: "2".repeat(64), cliVersions }).digest,
   );
   assert.notEqual(
-    novelCacheIdentity({ plan, scoreDigest: "3".repeat(64) }).digest,
-    novelCacheIdentity({ plan, scoreDigest: "4".repeat(64) }).digest,
+    novelCacheIdentity({ plan, scoreDigest: "3".repeat(64), cliVersions })
+      .digest,
+    novelCacheIdentity({ plan, scoreDigest: "4".repeat(64), cliVersions })
+      .digest,
+  );
+});
+
+test("cache identities key on the live version of each phase's providers", () => {
+  const plan = makePlan({ includeLivePaired: true });
+  const screenLane = plan.stages.screen.lanes[0];
+  const liveLane = plan.stages["live-paired"].lanes[0];
+  const rawFor = (versions, lane = screenLane, stage = "screen") =>
+    rawCacheIdentity({
+      plan,
+      stage,
+      lane,
+      treatment: "candidate",
+      sourceDigest: stage === "screen" ? null : "a".repeat(64),
+      cliVersions: versions,
+    });
+  const upgradedClaude = { ...cliVersions, claude: "claude 2.1.259" };
+  const upgradedCodex = { ...cliVersions, codex: "codex 0.152.1" };
+  const upgradedJudge = { ...cliVersions, judge: "judge 2.1.259" };
+
+  // An upgraded contestant CLI never finds the artifact the old one wrote.
+  assert.notEqual(rawFor(upgradedClaude).digest, rawFor(cliVersions).digest);
+  assert.deepEqual(rawFor(cliVersions).cli_versions, {
+    claude: cliVersions.claude,
+  });
+  // A frozen-report lane spawns no finder, so Codex is not part of its cell.
+  assert.equal(rawFor(upgradedCodex).digest, rawFor(cliVersions).digest);
+  // The live-paired lane does spawn the finder, so Codex is part of that cell.
+  const liveBase = rawFor(cliVersions, liveLane, "live-paired");
+  assert.deepEqual(liveBase.cli_versions, {
+    claude: cliVersions.claude,
+    codex: cliVersions.codex,
+  });
+  assert.notEqual(
+    rawFor(upgradedCodex, liveLane, "live-paired").digest,
+    liveBase.digest,
+  );
+  const rawDigest = "1".repeat(64);
+  const scoreDigest = "2".repeat(64);
+  assert.notEqual(
+    scoreCacheIdentity({ plan, rawDigest, cliVersions: upgradedJudge }).digest,
+    scoreCacheIdentity({ plan, rawDigest, cliVersions }).digest,
+  );
+  assert.notEqual(
+    novelCacheIdentity({ plan, scoreDigest, cliVersions: upgradedJudge })
+      .digest,
+    novelCacheIdentity({ plan, scoreDigest, cliVersions }).digest,
+  );
+  assert.deepEqual(
+    scoreCacheIdentity({ plan, rawDigest, cliVersions }).cli_versions,
+    { judge: cliVersions.judge },
+  );
+  assert.throws(
+    () => phaseCliVersions({ phase: "stage", cliVersions }),
+    /unknown experiment cache phase/,
+  );
+
+  // A phase that answers without a provider keys on the empty set, and an
+  // identity rebuilt from a record's own bytes keys on what that record ran.
+  assert.deepEqual(
+    phaseCliVersions({ phase: "score", cliVersions, invokesJudge: false }),
+    {},
+  );
+  assert.equal(
+    scoreCacheIdentity({ plan, rawDigest, phaseVersions: { judge: "judge 1" } })
+      .digest,
+    scoreCacheIdentity({
+      plan,
+      rawDigest,
+      cliVersions: { ...cliVersions, judge: "judge 1" },
+    }).digest,
+  );
+  assert.notEqual(
+    scoreCacheIdentity({ plan, rawDigest, phaseVersions: {} }).digest,
+    scoreCacheIdentity({ plan, rawDigest, cliVersions }).digest,
+  );
+
+  // A raw identity keys on the set the cell stores and validates as well, so a
+  // provider the raw phase never invoked cannot re-key a contestant cell.
+  assert.equal(
+    rawCacheIdentity({
+      plan,
+      stage: "screen",
+      lane: screenLane,
+      treatment: "candidate",
+      sourceDigest: null,
+      cliVersions: upgradedClaude,
+      phaseVersions: { claude: cliVersions.claude },
+    }).digest,
+    rawFor(cliVersions).digest,
+  );
+});
+
+test("a record's recorded phase provenance is read strictly", () => {
+  const record = {
+    cell_id: "screen-pr-1990-candidate",
+    cli_versions: { raw: { claude: "claude 1" }, score: { judge: "judge 1" } },
+  };
+  assert.deepEqual(recordedPhaseCliVersions({ record, phase: "score" }), {
+    judge: "judge 1",
+  });
+  assert.deepEqual(
+    recordedPhaseCliVersions({
+      record: {
+        ...record,
+        cli_versions: { ...record.cli_versions, score: {} },
+      },
+      phase: "score",
+    }),
+    {},
+  );
+  assert.throws(
+    () => recordedPhaseCliVersions({ record, phase: "novel" }),
+    /screen-pr-1990-candidate stores no novel runtime provenance/,
+  );
+  assert.throws(
+    () =>
+      recordedPhaseCliVersions({
+        record: { ...record, cli_versions: { score: "judge 1" } },
+        phase: "score",
+      }),
+    /score CLI versions must be an object/,
+  );
+  assert.throws(
+    () =>
+      recordedPhaseCliVersions({
+        record: { ...record, cli_versions: { score: { claude: "claude 1" } } },
+        phase: "score",
+      }),
+    /names score provider "claude", which that phase never invokes/,
+  );
+  assert.throws(
+    () =>
+      recordedPhaseCliVersions({
+        record: { ...record, cli_versions: { score: { judge: "" } } },
+        phase: "score",
+      }),
+    /score\.judge must be a non-empty string/,
   );
 });
 
@@ -331,4 +486,221 @@ test("the qualification manifest is the canonical 24-cell rerun", () => {
     treatmentId: "candidate-a",
   });
   assert.deepEqual(plan.qualification, direct);
+});
+
+test("a stored plan validates against its own recorded CLI versions", () => {
+  const plan = JSON.parse(JSON.stringify(makePlan()));
+  const upgraded = { claude: "claude 2.1.259", codex: cliVersions.codex };
+  const validation = validateExperimentPlan({
+    plan,
+    contract,
+    contractDigest,
+    cliVersions: upgraded,
+  });
+  assert.deepEqual(validation.problems, []);
+  assert.equal(validation.ok, true);
+  assert.deepEqual(validation.drift.providers, [
+    { provider: "claude", planned: cliVersions.claude, live: "claude 2.1.259" },
+    { provider: "judge", planned: cliVersions.judge, live: "claude 2.1.259" },
+  ]);
+  assert.equal(
+    validateExperimentPlan({ plan, contract, contractDigest }).drift,
+    null,
+  );
+  const tampered = replacePlanField(plan, (copy) => {
+    copy.inputs.finder_argv_digest = "9".repeat(64);
+  });
+  const broken = validateExperimentPlan({
+    plan: tampered,
+    contract,
+    contractDigest,
+    cliVersions: upgraded,
+  });
+  assert.equal(broken.ok, false);
+  assert.match(broken.problems[0], /inputs\.finder_argv_digest/);
+});
+
+function armRecords(plan, stage, versionsFor) {
+  return plan.stages[stage].lanes.flatMap((lane) =>
+    lane.sequence.map((treatment) => ({
+      ok: true,
+      campaign_id: plan.campaign_id,
+      candidate_id: plan.candidate.id,
+      stage,
+      cell_id: `${lane.lane_id}-${treatment}`,
+      pr: lane.pr,
+      treatment,
+      claims_count: 1,
+      matched_ids: [],
+      leak: { suspected: false },
+      empty: false,
+      cli_versions: versionsFor({ lane, treatment }),
+    })),
+  );
+}
+
+test("drift is read from the records, and only from phases that ran", () => {
+  const plan = makePlan();
+  const planned = plan.inputs.cli_versions;
+  const onPlan = {
+    raw: { claude: planned.claude },
+    score: { judge: planned.judge },
+  };
+  const steady = armRecords(plan, "screen", () => onPlan);
+  assert.equal(recordRuntimeDrift({ planned, records: steady }), null);
+
+  // A frozen-report lane spawns no finder, so a Codex upgrade during the
+  // screen is attributed to nothing.
+  const codexDrifted = cliVersionDrift({
+    planned,
+    live: { ...planned, codex: "codex 0.152.9" },
+  });
+  assert.equal(codexDrifted.providers.length, 1);
+  assert.equal(recordRuntimeDrift({ planned, records: steady }), null);
+
+  const upgraded = "claude 2.1.259";
+  const records = armRecords(plan, "screen", ({ lane, treatment }) =>
+    lane.pr === 1990 && treatment === "candidate"
+      ? { raw: { claude: upgraded }, score: { judge: planned.judge } }
+      : onPlan,
+  );
+  const drift = recordRuntimeDrift({ planned, records });
+  assert.deepEqual(drift.providers, [
+    {
+      provider: "claude",
+      planned: planned.claude,
+      live: upgraded,
+      cell_ids: ["screen-pr-1990-candidate"],
+    },
+  ]);
+  const decision = evaluateExperimentDecision({
+    plan,
+    stage: "screen",
+    recordsByStage: { screen: records },
+    runtimeDrift: drift,
+  });
+  assert.equal(
+    decision.reasons[0],
+    `runtime drift: claude ${planned.claude} -> ${upgraded} ` +
+      "on screen-pr-1990-candidate",
+  );
+  assert.equal(decision.reasons.length > 1, true);
+  assert.deepEqual(decision.runtime_drift.cell_ids, [
+    "screen-pr-1990-candidate",
+  ]);
+  const clean = evaluateExperimentDecision({
+    plan,
+    stage: "screen",
+    recordsByStage: { screen: steady },
+  });
+  assert.equal(Object.hasOwn(clean, "runtime_drift"), false);
+  assert.equal(runtimeDriftReason(null), null);
+});
+
+test("drift reporting fails closed on a record it cannot read", () => {
+  const plan = makePlan();
+  const planned = plan.inputs.cli_versions;
+  const upgraded = { raw: { claude: "claude 2.1.259" } };
+  const broken = (cliVersions) => [
+    { cell_id: "screen-pr-1990-candidate", cli_versions: upgraded },
+    { cell_id: "screen-pr-1990-incumbent", cli_versions: cliVersions },
+  ];
+  // Skipping any of these would report the first cell's upgrade as the whole
+  // story and present the second cell as a clean, on-plan run.
+  for (const [cliVersions, message] of [
+    [undefined, /screen-pr-1990-incumbent stores no runtime provenance/],
+    [null, /screen-pr-1990-incumbent stores no runtime provenance/],
+    ["claude 2.1.259", /screen-pr-1990-incumbent stores no runtime provenance/],
+    [{ stage: { claude: "claude 2" } }, /names unknown cache phase "stage"/],
+    [{ raw: "claude 2" }, /raw CLI versions must be an object/],
+    [
+      { score: { claude: "claude 2" } },
+      /names score provider "claude", which that phase never invokes/,
+    ],
+    [{ raw: { claude: "" } }, /raw\.claude must be a non-empty string/],
+  ]) {
+    assert.throws(
+      () => recordRuntimeDrift({ planned, records: broken(cliVersions) }),
+      message,
+    );
+  }
+  assert.deepEqual(
+    recordRuntimeDrift({
+      planned,
+      records: broken({ raw: { claude: planned.claude }, score: {} }),
+    }).cell_ids,
+    ["screen-pr-1990-candidate"],
+  );
+});
+
+test("a novelty judge that drifts alone still names its cell", () => {
+  const plan = makePlan();
+  const planned = plan.inputs.cli_versions;
+  const upgraded = "judge 2.1.259";
+  const records = armRecords(plan, "screen", ({ lane, treatment }) => ({
+    raw: { claude: planned.claude },
+    score: { judge: planned.judge },
+    ...(lane.pr === 1995 && treatment === "incumbent"
+      ? { novel: { judge: upgraded } }
+      : { novel: { judge: planned.judge } }),
+  }));
+  const drift = recordRuntimeDrift({ planned, records });
+  assert.deepEqual(drift.providers, [
+    {
+      provider: "judge",
+      planned: planned.judge,
+      live: upgraded,
+      cell_ids: ["screen-pr-1995-incumbent"],
+    },
+  ]);
+  assert.equal(
+    runtimeDriftReason(drift),
+    `runtime drift: judge ${planned.judge} -> ${upgraded} ` +
+      "on screen-pr-1995-incumbent",
+  );
+});
+
+test("a combined decision names every transition across both stages", () => {
+  const plan = makePlan();
+  const planned = plan.inputs.cli_versions;
+  const screenClaude = "claude 2.1.259";
+  const holdoutClaude = "claude 2.1.260";
+  const screen = armRecords(plan, "screen", ({ lane, treatment }) => ({
+    raw: {
+      claude:
+        lane.pr === 1990 && treatment === "candidate"
+          ? screenClaude
+          : planned.claude,
+    },
+    score: { judge: planned.judge },
+  }));
+  const holdout = armRecords(plan, "holdout", () => ({
+    raw: { claude: holdoutClaude },
+    score: { judge: planned.judge },
+  }));
+  const drift = recordRuntimeDrift({
+    planned,
+    records: [...screen, ...holdout],
+  });
+  assert.deepEqual(
+    drift.providers.map((entry) => [entry.live, entry.cell_ids.length]),
+    [
+      [screenClaude, 1],
+      [holdoutClaude, 6],
+    ],
+  );
+  const decision = evaluateExperimentDecision({
+    plan,
+    stage: "holdout",
+    recordsByStage: { screen, holdout },
+    runtimeDrift: drift,
+  });
+  assert.equal(
+    decision.reasons[0],
+    `runtime drift: claude ${planned.claude} -> ${screenClaude} ` +
+      "on screen-pr-1990-candidate; " +
+      `claude ${planned.claude} -> ${holdoutClaude} on ` +
+      drift.providers[1].cell_ids.join(", "),
+  );
+  assert.equal(decision.runtime_drift.cell_ids.length, 7);
 });

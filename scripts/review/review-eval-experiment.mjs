@@ -25,6 +25,12 @@ import {
   stagePlanFor,
   validateExperimentPlan,
 } from "./review-eval-experiment-contract.mjs";
+import {
+  recordRuntimeDrift,
+  stageProbeProviders,
+  stageRuntimeChange,
+  stageRuntimeChangeReason,
+} from "./review-eval-experiment-versions.mjs";
 import { evaluateExperimentDecision } from "./review-eval-experiment-decision.mjs";
 import {
   readExperimentCache,
@@ -227,6 +233,16 @@ function writePlan(file, plan) {
   });
 }
 
+/** One line naming an upgrade between the planned and the live provider CLI. */
+function driftWarning(drift) {
+  return (
+    `runtime drift: ${drift.summary}; ` +
+    "a cache entry whose phase invokes a changed provider is not reused, " +
+    "while a completed stage result and an entry independent of that provider " +
+    "still are, and every cell that runs now records the live versions"
+  );
+}
+
 function readPlan(campaignDir) {
   const file = path.join(campaignDir, "plan.json");
   let plan;
@@ -298,17 +314,28 @@ function validateLoadedCampaign(options) {
   });
   if (!fixtureCheck.ok) throw new Error(fixtureCheck.problems.join(" | "));
   const env = scrubbedEnv({ roots: [options.repoRoot] });
+  // The versions at campaign load. They report drift against the plan and
+  // nothing else: a stage keys its cells on its own stage-start probe, which
+  // can differ from these on a campaign loaded before the stage runs.
+  const loadCliVersions = {
+    claude: providerVersion("claude", env),
+    codex: providerVersion("codex", env),
+  };
   const validation = validateExperimentPlan({
     plan,
     contract,
     contractDigest,
-    cliVersions: {
-      claude: providerVersion("claude", env),
-      codex: providerVersion("codex", env),
-    },
+    cliVersions: loadCliVersions,
   });
   if (!validation.ok) throw new Error(validation.problems.join(" | "));
-  return { artifactRoot, planFile: file, plan, contract };
+  return {
+    artifactRoot,
+    planFile: file,
+    plan,
+    contract,
+    env,
+    drift: validation.drift,
+  };
 }
 
 function stageIdentity(plan, stage) {
@@ -339,16 +366,48 @@ function requirePrerequisite({ artifactRoot, plan, stage }) {
   }
 }
 
-function recordsByStage({ artifactRoot, plan, stage, records }) {
-  const output = { [stage]: records };
-  if (stage === "holdout") {
-    output.screen = readStageResult({
-      artifactRoot,
-      plan,
-      stage: "screen",
-    }).payload.records;
-  }
-  return output;
+/** The earlier stage whose stored result this stage's decision folds in. */
+function foldedStage(stage) {
+  return stage === "holdout" ? "screen" : null;
+}
+
+/**
+ * The records this decision reads, and the runtime change the stage they came
+ * from recorded. A holdout decision folds in the screen records, so it must
+ * also carry what the screen saw change while it ran: dropping it would present
+ * a combined result over a pair that straddled an upgrade as a clean one.
+ */
+function stageInputs({ artifactRoot, plan, stage, records }) {
+  const grouped = { [stage]: records };
+  const folded = foldedStage(stage);
+  if (folded === null) return { grouped, foldedChange: null };
+  const { payload } = readStageResult({ artifactRoot, plan, stage: folded });
+  grouped[folded] = payload.records;
+  return {
+    grouped,
+    foldedChange: payload.runtime_change_during_stage ?? null,
+  };
+}
+
+/**
+ * Every runtime change this stage result carries, keyed by the stage that saw
+ * it, so a holdout reports the screen's change beside its own.
+ */
+function stageChanges(foldedChange, stage, change) {
+  const merged = { ...(foldedChange ?? {}) };
+  if (change) merged[stage] = change;
+  return Object.keys(merged).length === 0 ? null : merged;
+}
+
+/**
+ * Drift named by every record the decision reads — a holdout decision folds in
+ * the screen records, and each record carries what its own artifacts stored.
+ */
+function stageRuntimeDrift(plan, grouped) {
+  return recordRuntimeDrift({
+    planned: plan.inputs.cli_versions,
+    records: Object.values(grouped).flat(),
+  });
 }
 
 function splitRecords(records) {
@@ -359,7 +418,12 @@ function splitRecords(records) {
   return output;
 }
 
-async function runStage(options, campaign) {
+/**
+ * Run one planned stage. `overrides` carries the version probe and the runtime
+ * hooks a test replaces; the CLI passes none.
+ */
+export async function runStage(options, campaign, overrides = {}) {
+  const { probe = providerVersion, ...runtimeOverrides } = overrides;
   const { artifactRoot, plan, contract } = campaign;
   const stagePlan = stagePlanFor({ plan, stage: options.stage });
   if (!stagePlan.enabled) {
@@ -393,6 +457,14 @@ async function runStage(options, campaign) {
     options.repoRoot,
     "experiment fixture cache",
   );
+  // The versions every cell of this stage is keyed on, probed here rather than
+  // at campaign load: a provider that updates between the two would otherwise
+  // key the cells on a version no cell ran under. Both providers are probed
+  // because a cell identity is built from the complete version set.
+  const stageCliVersions = {
+    claude: probe("claude", campaign.env),
+    codex: probe("codex", campaign.env),
+  };
   const runtimeOptions = {
     plan,
     stage: options.stage,
@@ -401,18 +473,30 @@ async function runStage(options, campaign) {
     contract,
     fixtureCacheDir,
     concurrency: options.concurrency,
+    cliVersions: stageCliVersions,
+    ...runtimeOverrides,
   };
+  // Only the providers this stage invokes: a frozen-report stage never spawns
+  // the finder, so a Codex release during it reached no cell.
+  const changeProviders = stageProbeProviders(stagePlan);
+  const probeLive = () =>
+    Object.fromEntries(
+      changeProviders.map((name) => [name, probe(name, campaign.env)]),
+    );
   const base = await runExperimentRuntimeStage(runtimeOptions);
-  let grouped = recordsByStage({
+  const probed = [probeLive()];
+  let { grouped, foldedChange } = stageInputs({
     artifactRoot,
     plan,
     stage: options.stage,
     records: base.records,
   });
+  let runtimeDrift = stageRuntimeDrift(plan, grouped);
   let decision = evaluateExperimentDecision({
     plan,
     stage: options.stage,
     recordsByStage: grouped,
+    runtimeDrift,
   });
   if (decision.novelty?.required === true) {
     const enriched = await enrichExperimentNovelty({
@@ -420,16 +504,42 @@ async function runStage(options, campaign) {
       records: Object.values(grouped).flat(),
     });
     grouped = splitRecords(enriched);
+    probed.push(probeLive());
+    runtimeDrift = stageRuntimeDrift(plan, grouped);
     decision = evaluateExperimentDecision({
       plan,
       stage: options.stage,
       recordsByStage: grouped,
+      runtimeDrift,
     });
+  }
+  const runtimeChange = stageChanges(
+    foldedChange,
+    options.stage,
+    stageRuntimeChange(stageCliVersions, probed),
+  );
+  if (runtimeChange) {
+    const reasons = Object.entries(runtimeChange).map(([stage, change]) =>
+      stageRuntimeChangeReason(stage, change),
+    );
+    for (const reason of reasons) process.stderr.write(`warning: ${reason}\n`);
+    decision = {
+      ...decision,
+      reasons: [...reasons, ...decision.reasons],
+      runtime_change_during_stage: runtimeChange,
+    };
   }
   const payload = {
     schema_version: 1,
     plan_digest: plan.plan_digest,
     stage: options.stage,
+    cli_versions: {
+      planned: plan.inputs.cli_versions,
+      drift: runtimeDrift,
+    },
+    ...(runtimeChange
+      ? { runtime_change_during_stage: runtimeChange }
+      : undefined),
     records: grouped[options.stage],
     records_by_stage: grouped,
     decision,
@@ -459,6 +569,9 @@ export async function main(argv = process.argv.slice(2)) {
   if (options.mode === "plan") value = await planCampaign(options);
   else {
     const campaign = validateLoadedCampaign(options);
+    if (campaign.drift && options.mode === "run") {
+      process.stderr.write(`warning: ${driftWarning(campaign.drift)}\n`);
+    }
     value =
       options.mode === "validate-plan"
         ? {
@@ -466,6 +579,8 @@ export async function main(argv = process.argv.slice(2)) {
             artifact_root: campaign.artifactRoot,
             plan_file: campaign.planFile,
             plan_digest: campaign.plan.plan_digest,
+            cli_version_drift: campaign.drift,
+            warnings: campaign.drift ? [driftWarning(campaign.drift)] : [],
           }
         : await runStage(options, campaign);
   }
