@@ -118,8 +118,9 @@ install effects before any package-manager command, including the claim command.
    `not run: <reason>`.
    A failed author check blocks the ready handoff and cannot be relabeled.
    Record an unavailable tool as `not run`. Required CI remains merge authority
-   and owns coverage, Knip, broad dependency and supply-chain audits,
-   full-browser suites, and legacy-gate self-tests.
+   and owns routine coverage and Knip, broad dependency and supply-chain
+   audits, full-browser suites, and legacy-gate self-tests. A table row or
+   triggered checklist can require a focused policy or configuration check.
 
    Apply only the rows affected by a material fix before publishing the new
    head. Apply the table again after base integration because conflict

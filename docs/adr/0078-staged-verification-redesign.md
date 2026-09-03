@@ -193,8 +193,10 @@ authority inputs and shared thresholds require the existing integrity and
 cross-package parity checks in the author-check table. Reserve-yield inputs,
 alert and schema cross-consumers, deployable QuickNode filters, Safe event-hash
 sources, and Upstash MCP trust surfaces use their focused existing contracts.
-Coverage, Knip, broad dependency and supply-chain audits, full-browser suites,
-and legacy-gate self-tests remain CI-only.
+Routine coverage and Knip, broad dependency and supply-chain audits,
+full-browser suites, and legacy-gate self-tests remain CI-only. A focused policy
+or configuration check stays local only when the table or a triggered checklist
+selects it.
 
 These local results shorten feedback. Required CI remains merge authority. A
 manual push can omit author checks, but it cannot omit required CI.

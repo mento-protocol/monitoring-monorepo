@@ -60,9 +60,11 @@ flag the concrete regression and cite the evidence.
 
 - Do not ask for another ad hoc quality command when the PR records every
   applicable author check from step 3 of the
-  [PR operating card](../notes/pr-operating-card.md) and every extra check from
-  the scoped `AGENTS.md`. Flag a missing check only when a matching trigger or
-  scoped instruction has no recorded result.
+  [PR operating card](../notes/pr-operating-card.md) and every explicit focused
+  exception from a scoped instruction or triggered checklist. Flag a missing
+  check only when its matching trigger has no recorded result. Routine coverage,
+  Knip, broad dependency and supply-chain audits, full-browser suites, and
+  legacy-gate self-tests remain CI-owned.
 - Do not flag a missing context-doc update solely because a file under
   `docs/PLAN-*` changed. Flag context drift when the diff introduces or changes
   commands, scripts, env vars, hooks, deploy/codegen steps, ownership routing,

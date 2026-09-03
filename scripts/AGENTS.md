@@ -176,7 +176,7 @@ in the same PR.
 
 Apply [PR operating card step 3](../docs/notes/pr-operating-card.md) to each
 changed root tool: `bash -n <changed-shell-script>`, `pnpm lint:scripts`, and
-its focused test. Run `pnpm agent:quality-gate:test` only for legacy-gate
-changes. Deploy wrappers also run
+its focused test. Required CI owns the legacy gate self-test. Deploy wrappers
+also run
 `node scripts/check-deploy-root-anchors.test.mjs`. After a move, run
 `pnpm agent:context-check` and `pnpm docs:index --check`.
