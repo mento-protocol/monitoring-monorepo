@@ -14570,6 +14570,30 @@ test("groom applies routing labels under the per-issue mutex", async () => {
   );
 });
 
+test("groom refuses an issue a claim won after the roster snapshot", async () => {
+  for (const [state, labels] of [
+    ["active", ["agent-active", "risk:low"]],
+    ["review", ["in-pr", "risk:low"]],
+  ]) {
+    const board = createGroomBoard({ labels });
+    const err = await assertRejects(
+      () => groom(groomOptions(["pkg:tooling"]), board.dependencies),
+      /is owned/,
+    );
+
+    assert(
+      new RegExp(`state: ${state}`).test(err.message),
+      "the refusal must name the owning state it saw",
+    );
+    assertDeepEqual(board.calls, [], "an owned issue must not be written to");
+    assertEqual(
+      lockCommitStates(board.server).at(-1).state,
+      "UNLOCK",
+      "a refusal before mutation must release the mutex",
+    );
+  }
+});
+
 test("groom refuses a write that would complete sweep eligibility", async () => {
   const board = createGroomBoard({ labels: ["agent-ready", "risk:low"] });
   const err = await assertRejects(
@@ -14681,26 +14705,55 @@ test("groom compensation removes only the labels it added", async () => {
 
 // The post-write read is what catches the interleave, so the control drives the
 // real module with that read made stale: the fixture's concurrent `agent-ready`
-// still lands, the module sees the pre-write snapshot, and the issue is left
-// sweep-eligible. Restore the read to a live one and the same fixture reaches
-// compensation instead, which is the test above.
-test("a stale post-write read leaves the interleaved issue sweep-eligible", async () => {
+// still lands, but a stale read also cannot see this call's own addition, and
+// the missing-addition check refuses to trust it — an ambiguous outcome, not a
+// false "groomed" success, and the mutex stays held for an operator. Restore
+// the read to a live one and the same fixture reaches compensation instead,
+// which is the test above.
+test("a stale post-write read is refused as ambiguous, not reported as success", async () => {
   const board = createGroomBoard({
     labels: ["risk:low"],
     afterWrite: interleavedAgentReady(),
     stalePostWriteRead: true,
   });
-  const results = await groom(
-    groomOptions(["pkg:tooling"]),
-    board.dependencies,
+  const err = await assertRejects(
+    () => groom(groomOptions(["pkg:tooling"]), board.dependencies),
+    /pkg:tooling is not on the issue after the write/,
   );
 
-  assertEqual(results[0].state, "groomed", "the stale read reports success");
+  assertEqual(issueBoardExitCode(err), 1, "an ambiguous outcome exits 1");
   assertDeepEqual(board.calls, [{ op: "add", labels: ["pkg:tooling"] }]);
   assertDeepEqual(board.labels, ["agent-ready", "pkg:tooling", "risk:low"]);
   assert(
     satisfiesSweepLabelEligibility(board.labels),
-    "the control must prove the interleaved state write lands",
+    "the control must prove the interleaved state write lands: the real board is eligible even though the stale read could not see it",
+  );
+  assertEqual(
+    lockCommitStates(board.server).at(-1).state,
+    "LOCK",
+    "an ambiguous post-write read must not release the mutex",
+  );
+});
+
+// A live (not stale) post-write read can still miss this call's own addition:
+// a human, or the monthly file-size watchlist job, can remove it in the window
+// between the write and this read. The success branch must not report every
+// addition as applied when the live board disagrees.
+test("groom refuses success when a concurrent actor removes its own addition", async () => {
+  const board = createGroomBoard({
+    labels: ["risk:low"],
+    afterWrite: (labels) => labels.delete("pkg:tooling"),
+  });
+  const err = await assertRejects(
+    () => groom(groomOptions(["pkg:tooling"]), board.dependencies),
+    /pkg:tooling is not on the issue after the write/,
+  );
+
+  assertEqual(issueBoardExitCode(err), 1, "an ambiguous outcome exits 1");
+  assertEqual(
+    lockCommitStates(board.server).at(-1).state,
+    "LOCK",
+    "an ambiguous outcome must not release the mutex",
   );
 });
 
@@ -14732,6 +14785,28 @@ test("groom keeps the mutex when compensation fails", async () => {
     lockCommitStates(board.server).at(-1).state,
     "LOCK",
     "a failed compensation must retain LOCK",
+  );
+});
+
+test("a removal that reports success but leaves the label names it by hand", async () => {
+  const board = createGroomBoard({
+    labels: ["risk:low"],
+    afterWrite: interleavedAgentReady(),
+    afterRemove: (labels) => labels.add("pkg:tooling"),
+  });
+  const err = await assertRejects(
+    () => groom(groomOptions(["pkg:tooling"]), board.dependencies),
+    /the removal call returned success but pkg:tooling is still on the issue/,
+  );
+
+  assertEqual(issueBoardExitCode(err), 6, "compensation failure exit code");
+  assert(
+    /Remove pkg:tooling by hand/.test(err.message),
+    "a label the removal call could not clear is still the one to name",
+  );
+  assert(
+    !/is already off the issue/.test(err.message),
+    "pkg:tooling is not off the issue in this case; the message must not say it is",
   );
 });
 
@@ -14811,6 +14886,17 @@ test("compensation that leaves the issue eligible keeps the mutex", async () => 
     lockCommitStates(board.server).at(-1).state,
     "LOCK",
     "a compensation that did not clear the predicate must retain LOCK",
+  );
+  // pkg:tooling is already off the issue (the removal call succeeded); a
+  // different label, pkg:indexer, is what still satisfies the predicate.
+  // Telling the operator to remove pkg:tooling again would be wrong.
+  assert(
+    /pkg:tooling is already off the issue/.test(err.message),
+    "the recovery text must not tell the operator to remove a label already gone",
+  );
+  assert(
+    !/Remove pkg:tooling by hand/.test(err.message),
+    "the recovery text must not repeat the generic 'remove additions' instruction here",
   );
 });
 

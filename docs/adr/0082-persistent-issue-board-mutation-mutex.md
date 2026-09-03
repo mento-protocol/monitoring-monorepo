@@ -433,20 +433,27 @@ closed on incomplete history.
 
 Grooming routing writes take the same mutex. `issue:groom` writes `pkg:*`,
 `risk:*`, and `kind:*` labels on one explicit issue. It refuses a queue-state
-label and every other label class. It re-reads the issue's labels inside the
+label and every other label class, and refuses an issue the in-mutex read
+finds already owned (`agent-active` or `in-pr`) — a claim can win the mutex
+between the sweep's roster snapshot and this call, and the read is the first
+point this command can see that. It re-reads the issue's labels inside the
 serialized section and refuses the write when the resulting set would satisfy
 the backlog-sweep label predicate: `agent-ready`, exactly one `risk:*` equal to
 `risk:low`, and exactly one `pkg:*`. The mutex serializes helpers, not people,
-so the helper re-reads the labels after the write. When a label landed in
-between and the issue is now sweep-eligible, the helper asks whether its own
-write caused that. When removing exactly the labels it added would clear the
-predicate, it removes them and exits nonzero. When the predicate holds without
-them the write was not the cause: the helper keeps the labels and exits with a
-distinct code, because undoing a correct label would leave the issue eligible
-anyway and report the opposite. A removal that fails, or that leaves the issue
-eligible, retains `LOCK` and names the labels an operator must remove by hand.
-Every path before the write releases the mutex, so a failed read cannot strand a
-`LOCK` that only ref surgery clears.
+so the helper re-reads the labels after the write, and treats any addition
+missing from that read as an ambiguous outcome rather than a success — a
+concurrent actor can remove this call's own addition in the same window. When a
+label landed in between and the issue is now sweep-eligible, the helper asks
+whether its own write caused that. When removing exactly the labels it added
+would clear the predicate, it removes them and exits nonzero. When the
+predicate holds without them the write was not the cause: the helper keeps the
+labels and exits with a distinct code, because undoing a correct label would
+leave the issue eligible anyway and report the opposite. A removal that fails,
+or that leaves the issue eligible, retains `LOCK`; the message names the labels
+to remove by hand only when they are still on the issue, and points at the
+current label set instead when the predicate holds through a different label.
+Every path before the write releases the mutex, so a failed read cannot strand
+a `LOCK` that only ref surgery clears.
 
 An operator recovers a stale lock only after proving that the original helper
 cannot resume. The operator terminates its session or process, or revokes its

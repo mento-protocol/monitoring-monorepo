@@ -19,7 +19,11 @@
  * declaring the issue safe.
  *
  * It never writes a state label and never writes a Project field. `issue:claim`,
- * `issue:review`, and `issue:release` own queue state and ownership.
+ * `issue:review`, and `issue:release` own queue state and ownership. The
+ * mutex makes a claim landing between the sweep's roster snapshot and this
+ * call observable too: the in-mutex read refuses an issue already carrying
+ * `agent-active` or `in-pr`, the same "never touch an owned issue" rule the
+ * pass follows everywhere else.
  */
 
 import {
@@ -27,6 +31,7 @@ import {
   isSafeSingleLineText,
   labelNames,
   satisfiesSweepLabelEligibility,
+  stateFromLabels,
 } from "./issue-board-state.mjs";
 import { getProject } from "./issue-board-projects.mjs";
 import { withIssueMutationLock } from "./issue-board-lock.mjs";
@@ -207,14 +212,19 @@ async function compensate(options, issue, additions, dependencies) {
     labelNames(compensated).has(label),
   );
   if (retained.length > 0) {
-    throw new Error(
+    const error = new Error(
       `the removal call returned success but ${retained.join(", ")} is still on the issue`,
     );
+    error.retainedLabels = retained;
+    throw error;
   }
   if (satisfiesSweepLabelEligibility(labelNames(compensated))) {
-    throw new Error(
+    const error = new Error(
       `the removal call returned success but ${eligibilityText(labelNames(compensated))} still satisfies the sweep predicate`,
     );
+    error.retainedLabels = [];
+    error.currentLabels = [...labelNames(compensated)];
+    throw error;
   }
   return compensated;
 }
@@ -234,6 +244,16 @@ async function groomLocked(options, number, labels, dependencies, lease) {
     const issue = await dependencies.getIssue(options, number);
     if (String(issue.state ?? "").toUpperCase() !== "OPEN") {
       throw new Error(`Issue #${number} is not open; groom writes open issues`);
+    }
+
+    // A claim can win the mutex between the sweep's roster snapshot and this
+    // call: the pass never touches an owned issue, and the in-mutex read is
+    // the first point this command can see that ownership landed.
+    const owningState = stateFromLabels(issue);
+    if (owningState === "active" || owningState === "review") {
+      throw new Error(
+        `Issue #${number} is owned (state: ${owningState}); groom does not write routing labels on an owned issue`,
+      );
     }
 
     const current = labelNames(issue);
@@ -265,6 +285,18 @@ async function groomLocked(options, number, labels, dependencies, lease) {
 
     const after = await dependencies.getIssue(options, number);
     const afterNames = labelNames(after);
+
+    // A concurrent actor — a human, or the file-size watchlist job — can
+    // remove one of this call's own additions in the window between the write
+    // and this read. Every branch below assumes `additions` landed; verify it
+    // before trusting any of them, success included.
+    const missing = additions.filter((label) => !afterNames.has(label));
+    if (missing.length > 0) {
+      throw new Error(
+        `Issue #${number} groom wrote ${additions.join(", ")}, but ${missing.join(", ")} is not on the issue after the write. The outcome is ambiguous; an operator must check the issue before it is treated as groomed.`,
+      );
+    }
+
     if (!satisfiesSweepLabelEligibility(afterNames)) {
       return {
         number: after.number,
@@ -297,8 +329,21 @@ async function groomLocked(options, number, labels, dependencies, lease) {
         compensationError instanceof Error
           ? compensationError.message
           : String(compensationError);
+      // The two ways compensate() fails need different recovery text: when the
+      // removal itself did not land, additions are the labels to remove by
+      // hand; when the removal succeeded and a *different* label still
+      // satisfies the predicate, additions are already gone and telling the
+      // operator to remove them again is wrong — point at the current set
+      // `reason` already names instead.
+      const retainedLabels = Array.isArray(compensationError?.retainedLabels)
+        ? compensationError.retainedLabels
+        : additions;
+      const recovery =
+        retainedLabels.length > 0
+          ? `Remove ${retainedLabels.join(", ")} by hand before releasing the mutex.`
+          : `${additions.join(", ")} is already off the issue; an operator must find and clear whatever else in the current label set still satisfies the predicate before releasing the mutex.`;
       throw new IssueGroomCompensationFailedError(
-        `Issue #${number} groom wrote ${additions.join(", ")}, a label landed after the in-mutex read, and the issue is now sweep-eligible. Compensation failed: ${reason}. Remove ${additions.join(", ")} by hand before releasing the mutex.`,
+        `Issue #${number} groom wrote ${additions.join(", ")}, a label landed after the in-mutex read, and the issue is now sweep-eligible. Compensation failed: ${reason}. ${recovery}`,
         { issue: number, additions },
         { cause: compensationError },
       );
