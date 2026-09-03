@@ -20,8 +20,10 @@ overrides:
   # GHSA-rgw5-rvv9-x895: the 5.0.8 resource-limit fix is incomplete.
   "brace-expansion@^1.0.0": 5.0.9
   "brace-expansion@>=5.0.0 <6": 5.0.9
-  # GHSA-7p8r-x3mc-p8w7: 3.1.5 fixes backslash authority confusion.
-  fast-uri@<3.1.5: 3.1.5
+  # GHSA-5jgf-p345-68v8, GHSA-f65p-4m7j-42xc, GHSA-fph4-wmhf-6fwf and
+  # GHSA-jqff-g426-hqxp hit 3.1.5, the floor the old GHSA-7p8r-x3mc-p8w7 pin
+  # set. 3.1.6 is the patched floor for the 3.x line; ajv 8 needs fast-uri ^3.
+  fast-uri@<3.1.6: 3.1.6
   form-data@<2.5.6: 2.5.6
   "form-data@>=4.0.0 <4.0.6": 4.0.6
   js-yaml@>=4.0.0 <4.3.1: 4.3.1
