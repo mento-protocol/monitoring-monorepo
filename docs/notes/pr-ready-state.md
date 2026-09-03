@@ -3,7 +3,7 @@ title: PR Ready State
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-31
+last_verified: 2026-09-03
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -163,10 +163,19 @@ resolves `.coderabbit.yaml` from the PR's source branch, so the setting that
 governs this PR is the one at its head, not the one on `main`. Read
 `reviews.auto_review.auto_incremental_review` there:
 
-- **`true`** — the branch predates the 2026-09-02 change, and a push does start
-  an automatic review. Wait for that attempt to become terminal before
-  requesting anything, exactly as before. Posting early duplicates the review
-  and the bill.
+- **`true`, and the org-level Global override does not set the key** — the
+  branch predates the 2026-09-02 change, and a push does start an automatic
+  review. Wait for that attempt to become terminal before requesting anything,
+  exactly as before. Posting early duplicates the review and the bill.
+- **`true`, but the Global override sets `auto_incremental_review: false`** —
+  the head value is no longer effective. CodeRabbit ranks organization-level
+  Global overrides above a repository's `.coderabbit.yaml`, so no automatic
+  review follows the push and waiting for one burns the babysit deadline and
+  can miss the only closeout review. Treat this exactly like the `false` branch
+  and send the closeout request once the head is stable.
+  [ADR 0066](../adr/0066-coderabbit-replaces-bugbot-third-reviewer.md) records
+  which keys that override pins and when the operator applied it; check there
+  before assuming the head value governs.
 - **`false`** — a push onto an already-open PR starts no automatic review, so
   there is nothing to wait for. Only the PR's opening push still draws one.
   Refresh once the head is stable and go straight to the closeout request.
@@ -515,12 +524,15 @@ Field expectations:
    required `gates`.
 8. After a batched fix push, read
    `reviews.auto_review.auto_incremental_review` from the PR head's
-   `.coderabbit.yaml`. If it is `true` — a branch predating the 2026-09-02
-   change — wait for the automatic attempt to become terminal, as before. If it
-   is `false`, no automatic run follows the push, so refresh once the head is
-   stable instead of waiting — except when this PR's opening review never
-   completed, in which case wait the bounded time as in the `true` branch,
-   because an unfinished review can still be retried on a push. Then, if
+   `.coderabbit.yaml`, and check whether the org-level Global override sets the
+   same key (ADR 0066 records it). Wait for the automatic attempt to become
+   terminal only when the head says `true` **and** the override leaves the key
+   unset. If the head says `false`, or the override sets it `false` — the
+   override outranks the head's file, so the head value stops being effective —
+   no automatic run follows the push: refresh once the head is stable instead of
+   waiting for one that cannot start. The one exception is an opening review
+   that never completed, where an unfinished review can still be retried on a
+   push, so wait the bounded time anyway. Then, if
    `gates.codeRabbitReviewSignal.state` is `missing` or `stale`, recheck the
    head and post at most one marked closeout request for that head. Do not post
    when the state is `requested`, `reviewed`, or `not_applicable`. After

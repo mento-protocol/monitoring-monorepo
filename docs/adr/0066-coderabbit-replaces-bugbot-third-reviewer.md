@@ -3,7 +3,7 @@ title: CodeRabbit replaces Cursor BugBot as the third PR review bot
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-02
+last_verified: 2026-09-03
 scope: ci/process
 date: 2026-08
 doc_type: adr

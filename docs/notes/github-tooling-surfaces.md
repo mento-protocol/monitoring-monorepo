@@ -3,7 +3,7 @@ title: GitHub Tooling Surfaces — gh CLI vs MCP
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-31
+last_verified: 2026-09-03
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -277,10 +277,14 @@ polled. Do not foreground-poll and never sleep-poll.
      `reviews.auto_review.auto_incremental_review` from the PR head's
      `.coderabbit.yaml` — CodeRabbit reads that file from the source branch, so
      a branch predating the 2026-09-02 change still has it `true`. When it is
-     `true`, wait for the automatic attempt to become terminal as before; when
-     it is `false`, a push onto an already-open PR starts no automatic review —
-     only the opening push does — so refresh once the head is stable instead of
-     waiting. One exception to that second branch: if this PR's opening review
+     `true` **and** the org-level Global override does not set the key, wait for
+     the automatic attempt to become terminal as before. When it is `false`, or
+     when the Global override sets `auto_incremental_review: false` — which
+     outranks the head's file and makes the head value ineffective — a push onto
+     an already-open PR starts no automatic review, only the opening push does,
+     so refresh once the head is stable and send the closeout request instead of
+     waiting for a run that cannot start. ADR 0066 records which keys that
+     override pins and when the operator applied it. One exception to that second branch: if this PR's opening review
      never completed, coming back as a rate-limit or cap notice rather than a
      review, CodeRabbit may still run and possibly retry it, so wait the
      bounded time as in the `true` branch before posting (PR #2236 observed a

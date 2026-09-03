@@ -5,7 +5,7 @@ title: Backlog Sweep Skill
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-28
+last_verified: 2026-09-03
 doc_type: skill
 scope: repo-wide
 review_interval_days: 90
