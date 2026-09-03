@@ -195,6 +195,80 @@ rm -f "$marker_report"
 [[ "$(cat "$fixture_root/repo/log")" == $'check\nshutdown' ]]
 [[ "$(cat "$marker_report")" == $'8\n9' ]]
 
+# Issue 2189. A runtime between the gate and this guardian can take the low
+# marker descriptors for its own handles — pnpm takes all three. Both declared
+# descriptors below are pipes, so the declaration survives only by reopening
+# each declared path, and the child must still receive both marker slots. The
+# wrapper runs trunk() more than once (status, check, shutdown), so this also
+# covers the repeated-call path where a reopen must not inherit a descriptor an
+# earlier call still held.
+echo stopped > "$fixture_root/repo/state"
+: > "$fixture_root/repo/log"
+rm -f "$marker_report"
+(
+  exec 8< <(printf 'reused\n')
+  exec 9< <(printf 'reused\n')
+  AGENTQG_RUN=agentqg:trunk-reopen-marker-test \
+    AGENTQG_MARKER_FDS=8,9 \
+    AGENTQG_MARKER_PATH_8="$fixture_root/repo/state" \
+    AGENTQG_MARKER_PATH_9="$fixture_root/repo/state" \
+    TRUNK_FIXTURE_MARKER_REPORT="$marker_report" \
+    run_wrapper >/dev/null
+)
+[[ "$(cat "$fixture_root/repo/state")" == stopped ]]
+[[ "$(cat "$fixture_root/repo/log")" == $'check\nshutdown' ]]
+[[ "$(cat "$marker_report")" == $'8\n9' ]]
+
+# A declared path that opens but is not the marker resolves nowhere either.
+# A directory opens cleanly on Linux and a symlink would redirect the name, so
+# opening is not the test — the guardian authenticates what it opened and
+# refuses anything that is not a regular file the declared name still resolves
+# to.
+echo stopped > "$fixture_root/repo/state"
+: > "$fixture_root/repo/log"
+rm -f "$fixture_root/repo/cleanup-error"
+mkdir -p "$fixture_root/repo/marker-directory"
+ln -sfn "$fixture_root/repo/state" "$fixture_root/repo/marker-link"
+for declared in marker-directory marker-link; do
+  set +e
+  (
+    exec 9< <(printf 'reused\n')
+    AGENTQG_RUN=agentqg:trunk-reopen-identity-test \
+      AGENTQG_MARKER_FDS=9 \
+      AGENTQG_MARKER_PATH_9="$fixture_root/repo/$declared" \
+      run_wrapper >/dev/null 2> "$fixture_root/repo/cleanup-error"
+  )
+  status=$?
+  set -e
+  if [[ "$(uname -s)" != Darwin ]]; then
+    [[ "$status" -eq 2 ]]
+    grep -q 'Trunk guardian marker 9 is not regular' \
+      "$fixture_root/repo/cleanup-error"
+  fi
+done
+
+# A declared path that cannot be opened leaves the declaration resolving
+# nowhere, so the guardian still refuses on Linux rather than starting without
+# marker containment.
+echo stopped > "$fixture_root/repo/state"
+: > "$fixture_root/repo/log"
+rm -f "$fixture_root/repo/cleanup-error"
+set +e
+(
+  exec 9< <(printf 'reused\n')
+  AGENTQG_RUN=agentqg:trunk-reopen-missing-test \
+    AGENTQG_MARKER_FDS=9 \
+    AGENTQG_MARKER_PATH_9="$fixture_root/repo/no-such-marker" \
+    run_wrapper >/dev/null 2> "$fixture_root/repo/cleanup-error"
+)
+status=$?
+set -e
+if [[ "$(uname -s)" != Darwin ]]; then
+  [[ "$status" -eq 2 ]]
+  grep -q 'Trunk guardian marker 9 is not regular' \
+    "$fixture_root/repo/cleanup-error"
+fi
+
 if [[ "$(uname -s)" == Darwin ]]; then
   # Node test workers can close the full marker set and reuse descriptor 9 as
   # IPC. Darwin's exact lineage remains authoritative, so the stale pipe is

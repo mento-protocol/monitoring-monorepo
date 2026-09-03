@@ -56,7 +56,10 @@ import { spawn } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { inheritGateMarkerStdio } from "./mapped-command-process-identity.mjs";
+import {
+  closeReopenedGateMarkers,
+  inheritGateMarkerStdio,
+} from "./mapped-command-process-identity.mjs";
 
 /**
  * The Sentry tools the probe requires to be present.
@@ -232,21 +235,28 @@ export function spawnServerSupervisor({
   handle,
   spawnFn = spawn,
 } = {}) {
-  return spawnFn(
-    "/bin/bash",
-    [
-      "-c",
-      MCP_SERVER_SUPERVISOR,
-      "sentry-mcp-server-supervisor",
-      command,
-      ...args,
-    ],
-    {
-      stdio: inheritGateMarkerStdio(["pipe", "pipe", "pipe", "pipe"]),
-      env: { ...process.env, SENTRY_ACCESS_TOKEN: handle },
-      detached: true,
-    },
-  );
+  try {
+    return spawnFn(
+      "/bin/bash",
+      [
+        "-c",
+        MCP_SERVER_SUPERVISOR,
+        "sentry-mcp-server-supervisor",
+        command,
+        ...args,
+      ],
+      {
+        stdio: inheritGateMarkerStdio(["pipe", "pipe", "pipe", "pipe"]),
+        env: { ...process.env, SENTRY_ACCESS_TOKEN: handle },
+        detached: true,
+      },
+    );
+  } finally {
+    // The supervisor holds its own copies from here. Releasing the parent's
+    // keeps a probe that spawns more than once from accruing a descriptor per
+    // marker per spawn, and runs even when the spawn threw.
+    closeReopenedGateMarkers();
+  }
 }
 
 /** Ask the live supervisor to settle its complete process group. */

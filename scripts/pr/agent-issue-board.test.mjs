@@ -22,12 +22,14 @@ import ts from "typescript";
 
 import {
   acquireIssueMutationLock,
+  agentReadyRoutingGaps,
   buildClaimComment,
   buildBackfillPlan,
   backfill,
   claim,
   chooseUntriedCandidate,
   githubProjectScopeHint,
+  incompleteGroomingFinding,
   issueBodySha256,
   isClaimable,
   isSweepClaimable,
@@ -3491,7 +3493,11 @@ test("sync leaves human-owned Status untouched for a stable open issue", async (
     number: 900,
     title: "human-owned status",
     state: "OPEN",
-    labels: [{ name: "agent-ready" }],
+    labels: [
+      { name: "agent-ready" },
+      { name: "risk:low" },
+      { name: "pkg:tooling" },
+    ],
     projectItems: [
       {
         id: "item-900",
@@ -3545,7 +3551,11 @@ test("sync adds a missing open item without writing Project Status", async () =>
     number: 1900,
     title: "missing Project membership",
     state: "OPEN",
-    labels: [{ name: "agent-ready" }],
+    labels: [
+      { name: "agent-ready" },
+      { name: "risk:low" },
+      { name: "pkg:tooling" },
+    ],
     projectItems: [],
   };
   let membershipReads = 0;
@@ -3618,7 +3628,11 @@ test("sync reclassifies concurrent open label drift after a membership add", asy
     number: 3900,
     title: "open drift after Project add",
     state: "OPEN",
-    labels: [{ name: "agent-ready" }],
+    labels: [
+      { name: "agent-ready" },
+      { name: "risk:low" },
+      { name: "pkg:tooling" },
+    ],
     projectItems: [],
   };
   let ensureCalls = 0;
@@ -3813,7 +3827,11 @@ test("sync reports successful issues before a later label conflict", async () =>
     number: 905,
     title: "stable ready",
     state: "OPEN",
-    labels: [{ name: "agent-ready" }],
+    labels: [
+      { name: "agent-ready" },
+      { name: "risk:low" },
+      { name: "pkg:tooling" },
+    ],
   };
   const conflict = {
     number: 906,
@@ -3840,6 +3858,92 @@ test("sync reports successful issues before a later label conflict", async () =>
   assertDeepEqual(error.results, [
     { number: 905, title: "stable ready", state: "ready" },
   ]);
+});
+
+test("sync reports incompletely groomed ready issues without blocking them", async () => {
+  const groomed = {
+    number: 908,
+    title: "groomed ready",
+    state: "OPEN",
+    labels: [
+      { name: "agent-ready" },
+      { name: "risk:low" },
+      { name: "pkg:tooling" },
+    ],
+  };
+  const thin = {
+    number: 909,
+    title: "thin ready",
+    state: "OPEN",
+    labels: [{ name: "agent-ready" }],
+  };
+  const memberships = [];
+
+  const error = await assertRejects(
+    () =>
+      syncWithTestLock(
+        { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+        {
+          getProject: async () => ownershipProject(),
+          listIssuesByLabels: async () => [groomed, thin],
+          getIssue: async (_options, number) =>
+            number === groomed.number ? groomed : thin,
+          findIssueProjectItem: async () => null,
+          ensureProjectItem: async (_options, _project, issue) => {
+            memberships.push(issue.number);
+            return `item-${issue.number}`;
+          },
+          sleep: async () => {},
+        },
+      ),
+    /Issue #909 is agent-ready but incompletely groomed: no risk:\* label; no pkg:\* label/,
+  );
+  assert(error instanceof IssueBoardSyncError, "aggregate sync error type");
+  assertDeepEqual(error.results, [
+    { number: 908, title: "groomed ready", state: "ready" },
+    { number: 909, title: "thin ready", state: "ready" },
+  ]);
+  assertDeepEqual(
+    memberships,
+    [908, 909],
+    "the finding reports after the projection, so both issues reach the Project",
+  );
+});
+
+test("sync drops a grooming finding the confirming read disproves", async () => {
+  const listed = {
+    number: 913,
+    title: "claimed mid-sync",
+    state: "OPEN",
+    labels: [{ name: "agent-ready" }],
+  };
+  const claimed = {
+    ...listed,
+    labels: [
+      { name: "agent-active" },
+      { name: "risk:low" },
+      { name: "pkg:tooling" },
+    ],
+  };
+  let reads = 0;
+
+  const results = await syncWithTestLock(
+    { repo: "mento-protocol/monitoring-monorepo", dryRun: false },
+    {
+      getProject: async () => ownershipProject(),
+      listIssuesByLabels: async () => [listed],
+      getIssue: async () => {
+        reads += 1;
+        return claimed;
+      },
+      sleep: async () => {},
+    },
+  );
+
+  assertDeepEqual(results, [
+    { number: 913, title: "claimed mid-sync", state: "active" },
+  ]);
+  assert(reads > 0, "the confirming read must run");
 });
 
 test("sync dry-run plans closed-label cleanup without a postcondition read", async () => {
@@ -3969,6 +4073,104 @@ test("sweep claim guard requires low risk, one package, and no blocker", () => {
     isSweepClaimable({ ...eligible, blockedBy: undefined }, project),
     false,
   );
+});
+
+test("incomplete grooming finding names every missing routing label", () => {
+  const groomed = {
+    number: 910,
+    state: "OPEN",
+    labels: [
+      { name: "agent-ready" },
+      { name: "risk:medium" },
+      { name: "pkg:dashboard" },
+      { name: "pkg:indexer" },
+    ],
+  };
+  assertDeepEqual(agentReadyRoutingGaps(groomed), []);
+  assertEqual(incompleteGroomingFinding(groomed), null);
+
+  const missingRisk = {
+    ...groomed,
+    labels: [{ name: "agent-ready" }, { name: "pkg:tooling" }],
+  };
+  assertDeepEqual(agentReadyRoutingGaps(missingRisk), ["no risk:* label"]);
+  assertEqual(
+    incompleteGroomingFinding(missingRisk),
+    "Issue #910 is agent-ready but incompletely groomed: no risk:* label",
+  );
+
+  assertDeepEqual(
+    agentReadyRoutingGaps({
+      ...groomed,
+      labels: [
+        { name: "agent-ready" },
+        { name: "risk:medium" },
+        { name: "risk:low" },
+        { name: "pkg:tooling" },
+      ],
+    }),
+    ["conflicting risk labels (risk:low, risk:medium)"],
+  );
+
+  assertDeepEqual(
+    agentReadyRoutingGaps({
+      ...groomed,
+      labels: [{ name: "agent-ready" }, { name: "risk:low" }],
+    }),
+    ["no pkg:* label"],
+  );
+
+  assertEqual(
+    incompleteGroomingFinding({
+      ...groomed,
+      labels: [{ name: "agent-ready" }],
+    }),
+    "Issue #910 is agent-ready but incompletely groomed: no risk:* label; no pkg:* label",
+  );
+});
+
+test("incomplete grooming finding scopes to open agent-ready issues", () => {
+  const bare = { number: 911, state: "OPEN", labels: [] };
+  assertEqual(
+    incompleteGroomingFinding({
+      ...bare,
+      labels: [{ name: "needs-grooming" }],
+    }),
+    null,
+    "needs-grooming makes no routing promise",
+  );
+  assertEqual(
+    incompleteGroomingFinding({ ...bare, labels: [{ name: "agent-active" }] }),
+    null,
+  );
+  assertEqual(
+    incompleteGroomingFinding({ ...bare, labels: [{ name: "in-pr" }] }),
+    null,
+  );
+  assertEqual(incompleteGroomingFinding(bare), null);
+  assertEqual(
+    incompleteGroomingFinding({
+      ...bare,
+      state: "CLOSED",
+      labels: [{ name: "agent-ready" }],
+    }),
+    null,
+    "a closed issue is nobody's ready queue",
+  );
+});
+
+test("an incompletely groomed issue stays claimable by hand", () => {
+  const thin = {
+    number: 912,
+    state: "OPEN",
+    labels: [{ name: "agent-ready" }],
+  };
+  assert(
+    incompleteGroomingFinding(thin) !== null,
+    "fixture must trip the finding",
+  );
+  assertEqual(isClaimable(thin), true);
+  assertEqual(isSweepClaimable(thin, ownershipProject()), false);
 });
 
 test("sweep claim guard scopes Blocked status to the selected Project", () => {
@@ -13614,7 +13816,11 @@ test("sync skips the mutex for exact open queue labels with exact Project member
     number: 2403,
     title: "stable sync item",
     state: "OPEN",
-    labels: [{ name: "agent-ready" }],
+    labels: [
+      { name: "agent-ready" },
+      { name: "risk:low" },
+      { name: "pkg:tooling" },
+    ],
     projectItems: [
       {
         title: "Agent Tasks",
@@ -13900,7 +14106,11 @@ test("sync binds stable membership by selected Project ID and ignores Status", a
     number: 2406,
     title: "same-title Project collision",
     state: "OPEN",
-    labels: [{ name: "agent-ready" }],
+    labels: [
+      { name: "agent-ready" },
+      { name: "risk:low" },
+      { name: "pkg:tooling" },
+    ],
     projectItems: [
       {
         title: "Agent Tasks",
@@ -13946,7 +14156,11 @@ test("sync preserves a human Status that differs from the queue label", async ()
     number: 2404,
     title: "drifted sync item",
     state: "OPEN",
-    labels: [{ name: "agent-ready" }],
+    labels: [
+      { name: "agent-ready" },
+      { name: "risk:low" },
+      { name: "pkg:tooling" },
+    ],
     projectItems: [
       {
         title: "Agent Tasks",

@@ -252,8 +252,18 @@ function /bin/launchctl { "$REVIEW_EVAL_FAKE_LAUNCHCTL" "$@"; }
   }
 
   function environment(options = {}) {
+    // The installer refuses to run inside a quality-gate run, and this suite is
+    // itself a mapped gate command (`pnpm review:eval:test`), so it inherits the
+    // gate's AGENTQG_* markers. Drop them here so the harness invokes the
+    // installer the way an operator does. One test puts a marker back to prove
+    // the refusal.
+    const inherited = { ...process.env };
+    delete inherited.AGENTQG_RUN;
+    delete inherited.AGENTQG_REQUEST;
+    if (options.gateMarker)
+      inherited[options.gateMarkerName ?? "AGENTQG_RUN"] = options.gateMarker;
     return {
-      ...process.env,
+      ...inherited,
       BASH_ENV: options.realPlutil ? realPlutilBashEnv : bashEnv,
       HOME: taskHome,
       PATH: inheritedPath,
@@ -660,3 +670,42 @@ test(
     }
   },
 );
+
+test("the launchd installer refuses to run inside a quality-gate run", () => {
+  const harness = makeHarness();
+  try {
+    for (const gateMarkerName of ["AGENTQG_RUN", "AGENTQG_REQUEST"]) {
+      const blocked = harness.run({
+        gateMarker: "agentqg:install-guard-test",
+        gateMarkerName,
+      });
+      assert.notEqual(blocked.status, 0);
+      assert.match(blocked.stderr, /refuses to run inside a quality-gate run/);
+      // The harness shims /bin/launchctl and logs every call it receives. An
+      // empty log proves the guard refused before the installer reached one.
+      assert.deepEqual(harness.operations(), []);
+      assert.equal(existsSync(harness.runLock), false);
+      assert.equal(existsSync(harness.installLock), false);
+      assert.equal(
+        readFileSync(harness.target, "utf8"),
+        harness.installedSentinel,
+      );
+    }
+
+    // Negative control. The same fixture installs when no marker is set, so the
+    // refusals above come from the marker and not from the harness state.
+    const allowed = harness.run();
+    assert.equal(allowed.status, 0, allowed.stdout + allowed.stderr);
+    assert.deepEqual(harness.operations(), [
+      "print:absent",
+      "print:absent",
+      "bootstrap",
+    ]);
+    assert.notEqual(
+      readFileSync(harness.target, "utf8"),
+      harness.installedSentinel,
+    );
+  } finally {
+    rmSync(harness.root, { recursive: true, force: true });
+  }
+});

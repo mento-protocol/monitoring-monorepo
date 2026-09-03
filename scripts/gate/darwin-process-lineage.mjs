@@ -1,6 +1,12 @@
 #!/usr/bin/env node
 
-import { existsSync, lstatSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { constants as osConstants } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
@@ -482,12 +488,14 @@ async function settleWatchedDarwinLineage(
   statePath,
   scratchDirectory,
   timeoutSeconds,
+  activeMappedCommand = null,
 ) {
   const result = await settleDarwinLineage({
     statePath,
     scratchDirectory,
     timeoutSeconds,
     retainState: true,
+    activeMappedCommand,
   });
   if (!result.active || !result.settled || result.retained !== true) {
     fail("Darwin settlement watcher did not prove an empty coherent exact set");
@@ -503,6 +511,11 @@ export async function watchDarwinLineageSettlement({
   cancelFile,
   armedFile,
   timeoutSeconds,
+  // The watcher settles one lineage, so it can carry a command name. This is
+  // the path a mapped command takes when it completes normally on Darwin; the
+  // `settle` CLI is the recovery route. Both have to name their drain or a
+  // named barrier meets neither.
+  activeMappedCommand = null,
 }) {
   if (process.platform !== "darwin") {
     fail("a Darwin lineage watcher cannot run on this platform");
@@ -518,7 +531,12 @@ export async function watchDarwinLineageSettlement({
     fail("Darwin settlement watcher requires a bound lineage");
   }
   const settle = () =>
-    settleWatchedDarwinLineage(statePath, scratchDirectory, settleTimeout);
+    settleWatchedDarwinLineage(
+      statePath,
+      scratchDirectory,
+      settleTimeout,
+      activeMappedCommand,
+    );
   let controlDirectory;
   let controller;
   let launcher;
@@ -678,7 +696,55 @@ function uidMatches(record) {
   return [record.uid, record.realUid, record.savedUid].includes(uid);
 }
 
-async function waitAtDarwinCensusTestBarrier() {
+// The mapped command a fixture named for this barrier, or null when it named
+// none. This mirrors the shell selector exactly, and the two tests are
+// deliberately different ones.
+//
+// Presence is `lstat`, matching `-e || -L`: an unresolvable name is still a
+// name that was asked for, so a dangling symlink must not read as "unnamed".
+// `existsSync` follows the link and would.
+//
+// Validity is `stat`, matching `-f`, which also follows: a symlink to a regular
+// file is a valid name and reading it works, so rejecting it here would refuse
+// something the shell accepts. `stat` throws for a dangling link and reports a
+// directory or FIFO as not a file, so both still fail closed.
+//
+// A name that was asked for and cannot be resolved fails the drain closed.
+// Arming everywhere instead is the wrong-drain race the name exists to close.
+function readDrainRefreshBarrierCommand(barrier) {
+  const path = `${barrier}.command`;
+  try {
+    lstatSync(path);
+  } catch {
+    return null;
+  }
+  let resolved;
+  try {
+    resolved = statSync(path);
+  } catch {
+    resolved = undefined;
+  }
+  if (resolved?.isFile() !== true) {
+    fail("the test-only drain refresh barrier name is not a regular file");
+  }
+  let contents;
+  try {
+    contents = readFileSync(path, "utf8");
+  } catch {
+    fail("the test-only drain refresh barrier name is unreadable");
+  }
+  const expected = contents.split("\n", 1)[0];
+  if (expected === "") {
+    fail("the test-only drain refresh barrier name is empty");
+  }
+  return expected;
+}
+
+// `activeMappedCommand` is the command whose drain is running, or null when the
+// caller cannot name one. A cohort of several commands settles at once and has
+// no single name, so it passes null and declines any named barrier rather than
+// picking an arbitrary member and calling it the drain.
+async function waitAtDarwinCensusTestBarrier(activeMappedCommand = null) {
   const barrier = process.env.AGENT_QUALITY_GATE_TEST_DRAIN_REFRESH_BARRIER;
   if (!barrier) return;
   if (
@@ -690,6 +756,14 @@ async function waitAtDarwinCensusTestBarrier() {
   ) {
     fail("Darwin census test barrier is unsafe");
   }
+  // Which drain this is. The shell barrier never runs for a Darwin lineage
+  // contract — `drain_condemned_run_commands` returns at the lineage arm before
+  // reaching it — so this seam is the only consumer on that path and has to do
+  // the selection itself. An unnamed barrier arms on the first drain, as
+  // before. A named one arms only on its own command, and never on a cohort,
+  // which has no single name to be.
+  const expected = readDrainRefreshBarrierCommand(barrier);
+  if (expected !== null && expected !== activeMappedCommand) return;
   try {
     writeFileSync(`${barrier}.used`, "", { flag: "wx", mode: 0o600 });
   } catch (error) {
@@ -982,6 +1056,9 @@ export async function settleDarwinLineageCohort({
   scratchDirectory,
   timeoutSeconds,
   retainState = false,
+  // Only a single-state settlement can name the command it is draining. A
+  // real cohort leaves this null, so a named test barrier declines it.
+  activeMappedCommand = null,
 }) {
   if (typeof retainState !== "boolean") {
     fail("Darwin lineage retain-state value must be boolean");
@@ -1245,7 +1322,9 @@ export async function settleDarwinLineageCohort({
 
     // Test-only crash seam. Every cohort state's classified tombstones are
     // durable before any exact identity receives a signal.
-    await waitAtDarwinCensusTestBarrier();
+    await waitAtDarwinCensusTestBarrier(
+      descriptors.length === 1 ? activeMappedCommand : null,
+    );
 
     const signalNow = Date.now();
     const successfulSignals = new Map();
@@ -1338,12 +1417,14 @@ export async function settleDarwinLineage({
   scratchDirectory,
   timeoutSeconds,
   retainState = false,
+  activeMappedCommand = null,
 }) {
   const result = await settleDarwinLineageCohort({
     statePaths: [statePath],
     scratchDirectory,
     timeoutSeconds,
     retainState,
+    activeMappedCommand,
   });
   return {
     active: result.active,
@@ -1472,6 +1553,7 @@ async function main() {
       cancelFile: required(options, "--cancel-file"),
       armedFile: required(options, "--armed-file"),
       timeoutSeconds: required(options, "--timeout-seconds"),
+      activeMappedCommand: options.get("--active-mapped-command") || null,
     });
     process.stdout.write(`${result.status}\n`);
     return;
@@ -1504,6 +1586,7 @@ async function main() {
   }
   if (command === "settle-cohort") {
     const allowedOptions = new Set([
+      "--active-mapped-command",
       "--retain-state",
       "--scratch",
       "--state-directory",
@@ -1527,6 +1610,12 @@ async function main() {
       scratchDirectory: required(options, "--scratch"),
       timeoutSeconds: required(options, "--timeout-seconds"),
       retainState,
+      // Darwin teardown takes this route even for a single command, so a name
+      // can be meaningful here. `settleDarwinLineageCohort` honours it only
+      // when exactly one state settles; a real cohort settles several mapped
+      // commands at once, so no single name describes its drain and a named
+      // test barrier must decline it rather than meet an arbitrary member.
+      activeMappedCommand: options.get("--active-mapped-command") || null,
     });
     process.stdout.write(`${JSON.stringify(result)}\n`);
     return;
@@ -1568,11 +1657,16 @@ async function main() {
       parentPid: required(options, "--parent-pid"),
     });
   } else if (command === "settle") {
+    // Optional, and an empty value is no name: a drain can run outside any
+    // mapped command. Passed as an argument rather than an environment
+    // variable so the mapped-child environment policy stays untouched.
+    const active = options.get("--active-mapped-command");
     result = await settleDarwinLineage({
       statePath,
       scratchDirectory,
       timeoutSeconds: required(options, "--timeout-seconds"),
       retainState: parseRetainState(required(options, "--retain-state")),
+      activeMappedCommand: active ? active : null,
     });
   } else if (command === "discard-settled") {
     result = discardSettledDarwinLineage({ statePath });
@@ -1602,6 +1696,13 @@ export const darwinLineageTransitionForTest = Object.freeze({
 
 export const darwinLineageWatchForTest = Object.freeze({
   readPrivateWatchState,
+});
+
+// The census barrier seam. Its selection is plain file inspection, so it runs
+// and is verifiable on any platform even though the census around it is Darwin
+// only.
+export const darwinLineageCensusBarrierForTest = Object.freeze({
+  waitAtDarwinCensusTestBarrier,
 });
 
 export const darwinLineageConstantsForTest = Object.freeze({

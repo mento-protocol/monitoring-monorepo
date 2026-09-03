@@ -81,19 +81,30 @@ Required blockers:
 
 Optional signals:
 
-- Legacy Cursor Bugbot checks on PRs opened before its 2026-08-31 disablement,
-  when branch protection does not require them.
 - Non-required check runs, flaky advisory jobs, or lint/report jobs configured
   outside the required status rollup.
 - Older bot comments or reviews that do not apply to the current head, provided
   every required current-head comment has been handled.
 
-Cursor BugBot is disabled. The optional check classifier and feedback parser
-retain explicit compatibility for open PRs that still carry legacy Cursor
-state. Report legacy check lag as advisory, but do not hold the all-clear on it
-unless branch protection requires it. Actionable Cursor feedback and an
-aggregate `CHANGES_REQUESTED` verdict remain required blockers. Do not wait for
-or request a new Cursor review.
+Cursor BugBot is disabled and its compatibility paths retired on 2026-09-02,
+after a live sweep of the four open PRs found no Cursor comment, review, or
+check. `cursor[bot]` is out of the feedback-state bot roster, `Cursor Bugbot`
+is out of the optional-check allowlist, and the unused `BUGBOT_BUG_ID`
+alternative is out of both actionable-marker regexes.
+
+Read the scope of that narrowly. Only the **top-level** comment and review-body
+ledger consults the bot roster, so only a stray top-level Cursor comment is now
+ignored. Inline surfaces stay author-agnostic: an unresolved Cursor review
+thread or an unreplied Cursor root inline comment still blocks exactly like any
+other author's, which matters because every Cursor finding this repo recorded
+was inline. An aggregate `CHANGES_REQUESTED` verdict also remains a required
+blocker whichever reviewer filed it.
+
+A stray `Cursor Bugbot` check is now an unrecognized context: optional whenever
+branch protection reports required contexts that do not name it, and required
+in the fallback path that runs when those contexts are unavailable. That
+fallback path already reports a `branch-protection` required blocker of its
+own, so the reclassification cannot make a PR fail on its own.
 
 CodeRabbit's `CodeRabbit` check context (ADR 0066) is advisory the same way,
 with one added trap: it reports `SUCCESS` even when no review ran. A
@@ -430,8 +441,10 @@ Field expectations:
 2. Freeze the original request, target/owner, changed files, and non-test
    changed-line count as the scope baseline. Batch review fixes locally,
    auditing sibling surfaces before pushing. Classify additions as in-scope,
-   follow-up, or stop; open an issue before deferring valid follow-up work, warn
-   near twice the baseline, and do not pause solely for cycle count before five
+   follow-up, or stop; open an issue labeled per
+   [`agent-issue-workflow.md`](agent-issue-workflow.md) before deferring valid
+   follow-up work, warn near twice the baseline, and do not pause solely for
+   cycle count before five
    review-triggered patch cycles are complete. Pause for reclassification before
    starting a sixth.
 3. Before invoking the gate, ensure that no direct validation, dashboard server,
@@ -474,8 +487,7 @@ Field expectations:
 9. Report visibly in-progress review-producing workflows as optional lag. If
    you are still watching the PR when one finishes, rerun `pr:feedback-state`
    to catch late feedback; do not treat the optional workflow status itself as
-   a blocker. Report legacy Cursor check lag as compatibility context only; do
-   not wait for or request a new BugBot review.
+   a blocker.
 10. After the CodeRabbit closeout step and any final optional-review refresh,
     rerun `pr:feedback-state` and then `pr:ready-state`. Signal all-clear only
     when feedback-state has no required blocker and ready-state `ready` is true

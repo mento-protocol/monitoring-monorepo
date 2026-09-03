@@ -625,7 +625,6 @@ test("keeps cancelled check runs when run timestamps are unavailable", () => {
 test("splits known advisory checks into optional lag when branch protection data is unavailable", () => {
   const split = splitRequiredAndOptionalChecks([
     { name: "Code Quality", status: "COMPLETED", conclusion: "SUCCESS" },
-    { name: "Cursor Bugbot", status: "IN_PROGRESS", conclusion: null },
     { name: "GraphQL schema diff", status: "IN_PROGRESS", conclusion: null },
     { name: "jscpd", status: "IN_PROGRESS", conclusion: null },
   ]);
@@ -637,11 +636,7 @@ test("splits known advisory checks into optional lag when branch protection data
     },
     {
       required: ["Code Quality:pass"],
-      optional: [
-        "Cursor Bugbot:pending",
-        "GraphQL schema diff:pending",
-        "jscpd:pending",
-      ],
+      optional: ["GraphQL schema diff:pending", "jscpd:pending"],
     },
   );
 });
@@ -649,10 +644,10 @@ test("splits known advisory checks into optional lag when branch protection data
 test("honors branch-protection required status contexts when available", () => {
   const split = splitRequiredAndOptionalChecks(
     [
-      { name: "Cursor Bugbot", status: "IN_PROGRESS", conclusion: null },
+      { name: "jscpd", status: "IN_PROGRESS", conclusion: null },
       { name: "advisory", status: "IN_PROGRESS", conclusion: null },
     ],
-    ["Cursor Bugbot"],
+    ["jscpd"],
   );
 
   assertDeepEqual(
@@ -661,7 +656,7 @@ test("honors branch-protection required status contexts when available", () => {
       optional: split.optional.map((check) => `${check.name}:${check.state}`),
     },
     {
-      required: ["Cursor Bugbot:pending"],
+      required: ["jscpd:pending"],
       optional: ["advisory:pending"],
     },
   );
@@ -1190,12 +1185,12 @@ test("filters top-level issue comments down to bots", () => {
       id: 2,
       body: "automated review",
       html_url: "https://github.com/example/comment-2",
-      user: { login: "cursor[bot]", type: "Bot" },
+      user: { login: "coderabbitai[bot]", type: "Bot" },
     },
   ]);
 
   assertEqual(bots.length, 1);
-  assertEqual(bots[0].author, "cursor[bot]");
+  assertEqual(bots[0].author, "coderabbitai[bot]");
 });
 
 test("filters top-level review bodies down to bots with body text", () => {
@@ -2032,7 +2027,7 @@ test("summarizes not-ready state when blockers remain", () => {
       reviews: [
         {
           body: "review body",
-          author: { login: "cursor[bot]", type: "Bot" },
+          author: { login: "coderabbitai[bot]", type: "Bot" },
         },
       ],
     },
@@ -2104,7 +2099,7 @@ test("summarizes ready state when all blocking surfaces are clean", () => {
       ...basePr,
       statusCheckRollup: [
         { name: "lint", conclusion: "SUCCESS", status: "COMPLETED" },
-        { name: "Cursor Bugbot", conclusion: null, status: "IN_PROGRESS" },
+        { name: "jscpd", conclusion: null, status: "IN_PROGRESS" },
         { name: "optional", conclusion: "SKIPPED", status: "COMPLETED" },
       ],
     },
@@ -2136,7 +2131,7 @@ test("summarizes ready state when all blocking surfaces are clean", () => {
   assertEqual(summary.ready, true);
   assertEqual(summary.required.ready, true);
   assertEqual(summary.optional.ready, false);
-  assertEqual(summary.optional.items[0].name, "Cursor Bugbot");
+  assertEqual(summary.optional.items[0].name, "jscpd");
   assertEqual(summary.statusChecks.skipped.length, 1);
 });
 
@@ -2297,13 +2292,12 @@ function codeRabbitSkipComment(body, overrides = {}) {
   };
 }
 
-test("splits the CodeRabbit check into optional lag alongside Cursor Bugbot", () => {
+test("splits the CodeRabbit check into optional lag alongside the other advisory checks", () => {
   const split = splitRequiredAndOptionalChecks([
     { name: "Code Quality", status: "COMPLETED", conclusion: "SUCCESS" },
     // Observed shape: CodeRabbit's context PASSES with "Review rate limited"
     // when no review ran. A pass here is not a review signal.
     { name: "CodeRabbit", status: "COMPLETED", conclusion: "SUCCESS" },
-    { name: "Cursor Bugbot", status: "IN_PROGRESS", conclusion: null },
     { name: "GraphQL schema diff", status: "IN_PROGRESS", conclusion: null },
     { name: "jscpd", status: "IN_PROGRESS", conclusion: null },
   ]);
@@ -2317,7 +2311,6 @@ test("splits the CodeRabbit check into optional lag alongside Cursor Bugbot", ()
       required: ["Code Quality:pass"],
       optional: [
         "CodeRabbit:pass",
-        "Cursor Bugbot:pending",
         "GraphQL schema diff:pending",
         "jscpd:pending",
       ],
@@ -2869,7 +2862,7 @@ test("honors branch protection when it makes the CodeRabbit check required", () 
   const split = splitRequiredAndOptionalChecks(
     [
       { name: "CodeRabbit", status: "IN_PROGRESS", conclusion: null },
-      { name: "Cursor Bugbot", status: "IN_PROGRESS", conclusion: null },
+      { name: "jscpd", status: "IN_PROGRESS", conclusion: null },
     ],
     ["CodeRabbit"],
   );
@@ -2881,6 +2874,57 @@ test("honors branch protection when it makes the CodeRabbit check required", () 
     },
     {
       required: ["CodeRabbit:pending"],
+      optional: ["jscpd:pending"],
+    },
+  );
+});
+
+test("no longer classifies a stray Cursor Bugbot check as a known optional check", () => {
+  // ADR 0066 step 4: the live Cursor compatibility path retired on
+  // 2026-09-02. Without branch-protection data the splitter falls back to
+  // the advisory allowlist, and an unrecognized context now reads as
+  // required — the fail-closed direction for a check nobody classified.
+  const fallback = splitRequiredAndOptionalChecks([
+    { name: "Cursor Bugbot", status: "IN_PROGRESS", conclusion: null },
+    { name: "jscpd", status: "IN_PROGRESS", conclusion: null },
+  ]);
+
+  assertDeepEqual(
+    {
+      required: fallback.required.map(
+        (check) => `${check.name}:${check.state}`,
+      ),
+      optional: fallback.optional.map(
+        (check) => `${check.name}:${check.state}`,
+      ),
+    },
+    {
+      required: ["Cursor Bugbot:pending"],
+      optional: ["jscpd:pending"],
+    },
+  );
+
+  // With branch-protection data it stays optional, because a retired context
+  // never appears in the required-context list.
+  const protectedSplit = splitRequiredAndOptionalChecks(
+    [
+      { name: "Cursor Bugbot", status: "IN_PROGRESS", conclusion: null },
+      { name: "ci", status: "COMPLETED", conclusion: "SUCCESS" },
+    ],
+    ["ci"],
+  );
+
+  assertDeepEqual(
+    {
+      required: protectedSplit.required.map(
+        (check) => `${check.name}:${check.state}`,
+      ),
+      optional: protectedSplit.optional.map(
+        (check) => `${check.name}:${check.state}`,
+      ),
+    },
+    {
+      required: ["ci:pass"],
       optional: ["Cursor Bugbot:pending"],
     },
   );

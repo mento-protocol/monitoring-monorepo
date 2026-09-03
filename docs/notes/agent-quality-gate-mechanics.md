@@ -578,8 +578,14 @@ walk excludes only named dependency, tool-cache, generated-build, coverage,
 documentation, and local-evidence directories:
 `.git`, `.cache`, `.investigations`, `.next`, `.pnpm-store`, `.rankings`,
 `.reviews`, `.tmp`, `.trunk`, `.turbo`, `coverage`, `dist`, `docs`,
-`node_modules`, and `vendor`. Its exact allowlist contains only reviewed local
-protocols that cannot request an external process. Static inspection cannot
+`node_modules`, and `vendor`. Its exact allowlist holds reviewed local protocols
+that cannot request an external process, plus one operator-run installer.
+`scripts/review/install-review-eval-launchd.sh` calls `launchctl` to install the
+review-eval scheduler. It is never a mapped command, and it refuses to start
+when the gate exports `AGENTQG_RUN` or `AGENTQG_REQUEST`, so it cannot create a
+process during a gate run that lineage tracking would miss. A source hash binds
+every entry, so one changed byte fails closed until a new capability review.
+Static inspection cannot
 detect arbitrary runtime-built broker calls or calls hidden in excluded
 dependencies and system executables. The coalition mismatch exclusion
 classifies external-service processes only within this preflight contract.
@@ -2331,7 +2337,57 @@ active control.
   validated test-control preflight establishes the worktree runtime capability
   receipt before the gate creates a parallel worker.
 - `AGENT_QUALITY_GATE_TEST_DRAIN_REFRESH_BARRIER` pauses once between a drain's
-  refreshed tag capture and its process census.
+  refreshed tag capture and its process census. "Once" does not by itself say
+  which drain: one runs after any mapped command with something to settle,
+  including a command that only saw a short-lived helper enter the durable
+  capture, so the first of them consumed the barrier and left a fixture waiting
+  at a rendezvous that had already happened. A fixture names the mapped command
+  it means to meet in a `.command` sibling of the barrier path, and the barrier
+  arms only there. The name is optional — an unnamed barrier keeps arming on the
+  first drain — but a name that was asked for and cannot be resolved fails the
+  drain closed rather than arming everywhere: unreadable, empty, dangling, or
+  not a regular file. Presence and validity are deliberately different tests —
+  presence does not follow a symlink, so a name pointing nowhere is still a name
+  that was asked for, while validity does, so a symlink to a regular file is a
+  valid name. Both copies of the selector, shell and Darwin, follow that rule. A name needs no trailing newline. The command
+  is named for the barrier at three shell sites, because a parallel command's
+  `run_with_timeout` runs inside the worker subshell while the parent reaps that
+  worker and runs the drain; naming it only in the child would make a parallel
+  rendezvous impossible and let a stale sequential name match a drain no fixture
+  asked for. The third is `teardown_active_timeouts`, which drains registered
+  workers on EXIT/INT/TERM after the reaping loop is gone, so it takes each name
+  from the `active_worker_mapped_commands` registry that aligns with the worker
+  identities. A cohort drain of several commands settles them at once and clears
+  the name instead: no single name describes it, and a named barrier must not
+  meet a drain it cannot identify. A cohort of one keeps its name — Darwin
+  teardown takes the cohort route even for a single command, so "cohort" there
+  does not imply "unidentifiable".
+
+  A fourth site is the Darwin census seam, `waitAtDarwinCensusTestBarrier` in
+  `scripts/gate/darwin-process-lineage.mjs`. It is not a redundant consumer: on
+  a Darwin lineage contract `drain_condemned_run_commands` returns at its
+  lineage arm before reaching the shell barrier, so the seam is the _only_
+  consumer on that path and does its own selection. The name reaches it as an
+  `--active-mapped-command` argument — an argument rather than an environment
+  variable, so the mapped-child environment policy stays untouched — and it
+  applies the same rules: unnamed arms on the first drain, a name arms only on
+  its own command, and an unresolvable name fails the drain closed.
+
+  Three helper routes settle a lineage and **all** must pass that argument:
+  `watch-settle`, which a mapped command takes when it completes normally;
+  `settle`, the recovery route; and `settle-cohort`, which Darwin teardown takes
+  on EXIT/INT/TERM. A cohort of one is one identifiable command and keeps its
+  name — the helper honours a name only when exactly one state settles, and the
+  shell teardown clears it only for a cohort of several, where no single name
+  describes the drain. Adding a fourth route without the argument would silently
+  strand a named rendezvous, so `darwin-process-lineage.test.mjs` asserts every
+  settlement call site carries it.
+
+  A fixture must also write `.release` on every terminal path, including its
+  cleanup trap: a barrier left unreleased parks the gate for the full 20-second
+  budget and then reports the barrier as the failure, burying the assertion that
+  actually failed.
+
 - `AGENT_QUALITY_GATE_TEST_PARALLEL_RELEASE_FAILURE_AT` accepts a positive
   integer and injects failure at that parallel lease-release attempt.
 - `AGENT_QUALITY_GATE_TEST_OWNER_WITNESS_BARRIER`,
@@ -2568,12 +2624,30 @@ deadline. Expiry preserves the lineage state and recovery barrier.
 The Sentry broker probe and CI-gate extractor each use a detached Bash
 group-leader supervisor. Their children inherit every declared quality-gate
 marker descriptor before their first instruction when the declaration is still
-active. A Darwin runtime can close every marker descriptor while it retains the
-environment declaration and then reuse those descriptor numbers for pipes. The
-spawn helper treats that declaration as stale only when no declared descriptor
-is an open regular file. Any partial survivor fails closed. Linux rejects an
-all-stale declaration because its marker can be the only remaining containment
-handle. The extractor's in-group watchdog writes a private timeout marker, then
+active. A runtime can close every marker descriptor while it retains the
+environment declaration and then reuse those descriptor numbers for its own
+handles; pnpm takes all three for pipes and an eventfd. The gate therefore
+declares where each marker lives in `AGENTQG_MARKER_PATH_<fd>`, one variable
+per descriptor because a marker path may contain any byte a packed separator
+could use. A declared descriptor resolves either as an inherited open regular
+file or by reopening its declared path, and the helper inspects every declared
+descriptor before it reopens any path, because an open takes the lowest free
+descriptor and could otherwise land on a slot a later declaration still names.
+A reopen is authenticated before it counts as a marker: opened
+`O_RDONLY|O_NOFOLLOW|O_NONBLOCK`, so a symlink at the declared name is refused
+and a FIFO cannot park the open waiting for a writer, then accepted only as a
+regular file owned by this user carrying the inode the declared name still
+resolves to. That last comparison closes the window between the open and the
+check. A descriptor failing any of it is closed rather than handed to the
+child. An inherited descriptor is still the stronger of the two and is always
+preferred: it is the inode the gate opened before any runtime ran, so nothing
+since can have substituted it, where a reopen attests only to what the declared
+name resolves to now. A declaration is stale only when no declared descriptor
+resolves either way. Any partial survivor fails closed. Linux rejects an all-stale declaration because its marker can be the
+only remaining containment handle; Darwin discards one because it binds a
+mapped root to its exact kernel lineage before START. A caller that spawns
+repeatedly releases the parent's reopened copies with
+`closeReopenedGateMarkers()`, since the child keeps its own. The extractor's in-group watchdog writes a private timeout marker, then
 signals `-$$` while the supervisor is still the live group leader. The broker
 probe gives its watchdog a private control pipe that the target does not
 inherit. A stop request, parent pipe EOF, or target exit settles the group while

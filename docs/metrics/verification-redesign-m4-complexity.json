@@ -654,10 +654,103 @@
         "testAdditionsUnderTwiceImplementationAdditions": false,
         "budgetEvaluation": "informational segment; evaluate the initial implementation limit on cumulativeM4"
       }
+    },
+    {
+      "name": "retained-graph-pin",
+      "pr": 2214,
+      "baseSha": "46a1e871788b2b13376e367d0fc008a348713a85",
+      "sourceSha": "47586abd500424442848d94ec78d1e4f96e41ab0",
+      "trackedCommand": "git diff --numstat 46a1e871788b2b13376e367d0fc008a348713a85 47586abd500424442848d94ec78d1e4f96e41ab0 -- . ':!docs/metrics/verification-redesign-m4-complexity.json'",
+      "files": [
+        {
+          "path": "docs/adr/0072-md-only-docs-checks-job.md",
+          "category": "doc",
+          "additions": 3,
+          "deletions": 3
+        },
+        {
+          "path": "scripts/workflows/check-no-skip-audit.mjs",
+          "category": "check",
+          "additions": 1,
+          "deletions": 1
+        }
+      ],
+      "totals": {
+        "check": {
+          "additions": 1,
+          "deletions": 1,
+          "net": 0
+        },
+        "doc": {
+          "additions": 3,
+          "deletions": 3,
+          "net": 0
+        },
+        "all": {
+          "additions": 4,
+          "deletions": 4,
+          "net": 0
+        }
+      },
+      "replacementSpecific": {
+        "implementationAdditions": 1,
+        "testAdditions": 0,
+        "testToImplementationRatio": 0,
+        "twiceImplementationAdditions": 2,
+        "testAdditionsUnderTwiceImplementationAdditions": true,
+        "budgetEvaluation": "informational segment; evaluate the initial implementation limit on cumulativeM4"
+      }
+    },
+    {
+      "name": "retained-graph-pin-incident-receipt",
+      "pr": 2218,
+      "baseSha": "2222f4a3fa78a0cb905cdbcae998206e631f6b67",
+      "sourceSha": "a1e187b2c78f550f58d3815fbdd4eeaab439fdad",
+      "trackedCommand": "git diff --numstat 2222f4a3fa78a0cb905cdbcae998206e631f6b67 a1e187b2c78f550f58d3815fbdd4eeaab439fdad -- . ':!docs/metrics/verification-redesign-m4-complexity.json'",
+      "files": [
+        {
+          "path": "docs/README.md",
+          "category": "doc",
+          "additions": 1,
+          "deletions": 1
+        },
+        {
+          "path": "docs/adr/0078-staged-verification-redesign.md",
+          "category": "doc",
+          "additions": 56,
+          "deletions": 26
+        },
+        {
+          "path": "docs/metrics/verification-redesign-m4-shadow-evidence.md",
+          "category": "doc",
+          "additions": 130,
+          "deletions": 39
+        }
+      ],
+      "totals": {
+        "doc": {
+          "additions": 187,
+          "deletions": 66,
+          "net": 121
+        },
+        "all": {
+          "additions": 187,
+          "deletions": 66,
+          "net": 121
+        }
+      },
+      "replacementSpecific": {
+        "implementationAdditions": 0,
+        "testAdditions": 0,
+        "testToImplementationRatio": 0,
+        "twiceImplementationAdditions": 0,
+        "testAdditionsUnderTwiceImplementationAdditions": true,
+        "budgetEvaluation": "informational segment; evaluate the initial implementation limit on cumulativeM4"
+      }
     }
   ],
   "cumulativeM4": {
-    "method": "Sum the initial segment and four repair segments. These additive activity counts preserve each reviewed diff. They are not a direct diff across unrelated main-branch merges.",
+    "method": "Sum the initial segment and six repair segments. These additive activity counts preserve each reviewed diff. They are not a direct diff across unrelated main-branch merges.",
     "totals": {
       "action": {
         "additions": 26,
@@ -670,8 +763,8 @@
         "net": 346
       },
       "check": {
-        "additions": 383,
-        "deletions": 70,
+        "additions": 384,
+        "deletions": 71,
         "net": 313
       },
       "test": {
@@ -680,9 +773,9 @@
         "net": 660
       },
       "doc": {
-        "additions": 724,
-        "deletions": 122,
-        "net": 602
+        "additions": 914,
+        "deletions": 191,
+        "net": 723
       },
       "package": {
         "additions": 1,
@@ -690,15 +783,15 @@
         "net": 0
       },
       "all": {
-        "additions": 2647,
-        "deletions": 718,
-        "net": 1929
+        "additions": 2838,
+        "deletions": 788,
+        "net": 2050
       }
     },
     "replacementSpecific": {
-      "implementationAdditions": 846,
+      "implementationAdditions": 847,
       "testAdditions": 1077,
-      "testToImplementationRatio": 1.273,
+      "testToImplementationRatio": 1.2715,
       "limits": {
         "thinOrchestrationScriptPhysicalLines": 245,
         "thinOrchestrationScriptUnder300": true,
@@ -712,7 +805,7 @@
         },
         "newReplacementFilePhysicalLineLimit": 500,
         "allNewReplacementFilesUnder500": true,
-        "twiceImplementationAdditions": 1692,
+        "twiceImplementationAdditions": 1694,
         "testAdditionsUnderTwiceImplementationAdditions": true
       }
     }
@@ -723,6 +816,6 @@
     "claimsCutoverAdditionsBelowDeletionsCondition": false,
     "recordsShadowRunIncidentEvidence": true,
     "claimsEligibleShadowCohort": false,
-    "statement": "M4 adds the manual audit lane and its static contract. It adds no schedule. The separate Markdown record contains incident evidence from the first run. M4 does not claim an eligible shadow cohort or cutover evidence."
+    "statement": "M4 adds the manual audit lane and its static contract. It adds no schedule. The separate Markdown record contains incident evidence from the first two eligible runs. M4 does not claim an eligible shadow cohort or cutover evidence."
   }
 }
