@@ -179,6 +179,27 @@ function eligibilityText(labels) {
   return [...labels].sort().join(", ");
 }
 
+/**
+ * Undoes exactly the labels `groomLocked` added, once their presence is known
+ * to have completed sweep eligibility.
+ *
+ * `additions` is attributed by absence, not by proof: a label this call is
+ * about to add and a label a human adds through the GitHub UI in the same
+ * instant are indistinguishable once both land, because the labels API has no
+ * compare-and-swap and its response never says which caller added a label.
+ * For every other label this call adds, that is not a real gap — nothing else
+ * is independently trying to add that exact string, so absence-before and
+ * presence-after is sufficient proof. Only a human racing this call onto the
+ * identical routing label is genuinely ambiguous, and there is no cheaper way
+ * to resolve it than a timeline read that is itself racy against the same
+ * window. Removing it anyway keeps this call's own promise — that its write
+ * never completes sweep eligibility — the same way exit 7 already keeps that
+ * promise for a *different* concurrent label; the cost is a label a human may
+ * have to add back, not a state transition or a lost queue position. Treating
+ * that as a reason to retain LOCK instead would turn every exit 5 into an
+ * exit 6, discarding the automatic compensation this module tests and ADR
+ * 0082 documents as the answer to a human racing the helper.
+ */
 async function compensate(options, issue, additions, dependencies) {
   await dependencies.removeIssueLabels(options, issue, additions);
   const compensated = await dependencies.getIssue(options, issue.number);
