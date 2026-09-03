@@ -21,16 +21,6 @@
  */
 export const SENTRY_MODULE_ARMS = [
   {
-    patterns: ["scripts/sentry/fixture-scan-canary.test.mjs"],
-    effects: [
-      {
-        why: "The #1943/#1970 drift canary (ADR 0068). Its own arm, ABOVE the per-suite arms below, because those arms name exact paths and a combined pattern here would shadow them — the routing bug #1974 shipped. The canary's watch list is a path pin: a renamed suite has to move here too, and this route is what makes that loud.",
-        command: "node scripts/sentry/fixture-scan-canary.test.mjs",
-        reason: "Sentry fixture drift canary changed",
-      },
-    ],
-  },
-  {
     patterns: [
       "scripts/sentry/triage/sentry-triage-ingest.mjs",
       "scripts/sentry/triage/sentry-triage-ingest.test.mjs",
@@ -145,10 +135,6 @@ export const SENTRY_MODULE_ARMS = [
           "node scripts/sentry/triage/sentry-triage-agent-comment.test.mjs",
         reason: "Sentry triage agent comment wrapper changed",
       },
-      {
-        command: "node scripts/sentry/fixture-scan-canary.test.mjs",
-        reason: "Sentry suite carrying scanned fixtures changed",
-      },
     ],
   },
   {
@@ -235,10 +221,6 @@ export const SENTRY_MODULE_ARMS = [
         command: "pnpm sentry:autofix:finalize:test",
         reason: "Sentry autofix finalize helper changed",
       },
-      {
-        command: "node scripts/sentry/fixture-scan-canary.test.mjs",
-        reason: "Sentry suite carrying scanned fixtures changed",
-      },
     ],
   },
   {
@@ -282,10 +264,6 @@ export const SENTRY_MODULE_ARMS = [
         command: "pnpm sentry:archive:test",
         reason: "Sentry triage archive helper changed",
       },
-      {
-        command: "node scripts/sentry/fixture-scan-canary.test.mjs",
-        reason: "Sentry suite carrying scanned fixtures changed",
-      },
     ],
   },
   {
@@ -300,10 +278,6 @@ export const SENTRY_MODULE_ARMS = [
         why: "The broker and the MCP pre-flight probe (#1938) share one suite: sentry-mcp-broker.test.mjs holds both, so the probe must route here too or a change touching only the probe runs none of its own tests.",
         command: "pnpm sentry:broker:test",
         reason: "Sentry MCP broker or pre-flight probe changed",
-      },
-      {
-        command: "node scripts/sentry/fixture-scan-canary.test.mjs",
-        reason: "Sentry suite carrying scanned fixtures changed",
       },
     ],
   },

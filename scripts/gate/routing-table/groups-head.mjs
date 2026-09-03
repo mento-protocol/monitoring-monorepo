@@ -190,7 +190,7 @@ export const HEAD_GROUPS = [
       },
       {
         patterns: [".gitignore"],
-        why: "Review-eval publication relies on the scoped cells/ ignore rule to keep raw model transcripts out of Git and autoreview bundles.",
+        why: "Review-eval publication relies on the scoped cells/ ignore rule to keep raw model transcripts out of Git.",
         effects: [
           {
             command: "pnpm review:eval:test",

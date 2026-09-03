@@ -19,10 +19,6 @@ import {
   getIndexerHandlerInvariantChecklistDecisions,
   getIndexerHandlerInvariantRoutingFamilies,
 } from "./gate/routing-table/indexer-handler-invariant-contract.mjs";
-import {
-  getIndexerHandlerInvariantChecklistDecisions as autoreviewCoreDecisions,
-  getIndexerHandlerInvariantRoutingFamilies as autoreviewCoreFamilies,
-} from "./agent-autoreview-core.mjs";
 
 const REPO = resolve(fileURLToPath(new URL("../", import.meta.url)));
 const CONTRACT_MODULE =
@@ -455,29 +451,6 @@ test("the checklist entry point rejects a non-string path list", () => {
         1,
       ]),
     /array of strings/,
-  );
-});
-
-// Temporary while the autoreview core still carries its own copy of this
-// contract. The removal PR deletes the core module and this test with it.
-test("the extracted contract answers exactly like the autoreview core", () => {
-  assert.deepEqual(
-    getIndexerHandlerInvariantRoutingFamilies(),
-    autoreviewCoreFamilies(),
-    "the extracted families must match the autoreview core families",
-  );
-  const inventory = [
-    ...currentIndexerSources,
-    ...currentIndexerTests,
-    ...walkFiles(`${REPO}/indexer-envio/abis`),
-    ...walkFiles(`${REPO}/indexer-envio/config`),
-    ...focusedRootIndexerInputs,
-    ...focusedIndexerScriptTestRuntimeInputs,
-  ].sort();
-  assert.deepEqual(
-    getIndexerHandlerInvariantChecklistDecisions(inventory),
-    autoreviewCoreDecisions(inventory),
-    "every live-inventory decision must match the autoreview core",
   );
 });
 

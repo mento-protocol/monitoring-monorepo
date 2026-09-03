@@ -10,7 +10,6 @@ export const CLAUDE_RUNTIME_DOCUMENT_PATHS = [
   ".claude/agents/dashboard-explorer.md",
   ".claude/agents/indexer-explorer.md",
   ".claude/agents/infra-reader.md",
-  ".claude/commands/autoreview.md",
   ".claude/commands/babysit-indexer-deploy.md",
   ".claude/commands/verify-ui.md",
   ".claude/claude-security-guidance.md",

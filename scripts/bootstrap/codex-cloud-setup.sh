@@ -504,29 +504,6 @@ MSG
   forge --version
 }
 
-ensure_autoreview_helper() {
-  local default_helper="$REPO_ROOT/scripts/agent-autoreview.mjs"
-  local helper="${AUTOREVIEW_HELPER:-$default_helper}"
-
-  echo "==> Verifying autoreview helper"
-  if [[ -x "$helper" ]]; then
-    return 0
-  fi
-
-  cat >&2 <<MSG
-error: an executable autoreview helper is required for Codex Cloud agent work:
-  ${helper}
-
-This repo vendors its default helper at:
-  ${default_helper}
-
-Restore that file before running this setup script, or set AUTOREVIEW_HELPER to
-an executable helper path. The repo ship flow depends on \`pnpm agent:autoreview\`
-as a batch-boundary review before opening PRs.
-MSG
-  return 1
-}
-
 check_osv_api_egress() {
   if is_disabled "${CODEX_CLOUD_CHECK_OSV_EGRESS:-true}"; then
     echo "==> Skipping OSV API egress check because CODEX_CLOUD_CHECK_OSV_EGRESS=${CODEX_CLOUD_CHECK_OSV_EGRESS}"
@@ -592,7 +569,6 @@ if command -v corepack >/dev/null 2>&1; then
 fi
 pnpm --version
 
-ensure_autoreview_helper
 prewarm_trunk
 install_trunk_tools
 install_foundry

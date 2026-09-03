@@ -60,30 +60,6 @@ activate_package_manager() {
   pnpm --version
 }
 
-ensure_autoreview_helper() {
-  local default_helper="$REPO_ROOT/scripts/agent-autoreview.mjs"
-  local helper="${AUTOREVIEW_HELPER:-$default_helper}"
-
-  echo "==> Verifying autoreview helper"
-  if [[ -x "$helper" ]]; then
-    return 0
-  fi
-
-  cat >&2 <<MSG
-error: an executable autoreview helper is required for cached Codex Cloud
-maintenance:
-  ${helper}
-
-This repo vendors its default helper at:
-  ${default_helper}
-
-Restore that file before running maintenance, or set AUTOREVIEW_HELPER to an
-executable helper path. Without it, \`pnpm agent:autoreview\` cannot run before
-PR updates.
-MSG
-  return 1
-}
-
 echo "==> Marking repository safe for git"
 git config --global --add safe.directory "$REPO_ROOT" || true
 
@@ -96,7 +72,6 @@ git config core.hooksPath .trunk/hooks
 git config agent.qualityGate.cloudPrePushRequireFresh true
 
 activate_package_manager
-ensure_autoreview_helper
 
 echo "==> Syncing workspace dependencies for the checked-out branch"
 CI=true pnpm install --frozen-lockfile --prefer-offline

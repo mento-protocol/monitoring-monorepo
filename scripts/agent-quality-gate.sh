@@ -7250,8 +7250,6 @@ implementation_signature() {
   for path in \
     scripts/agent-quality-gate.sh \
     scripts/agent-quality-gate.test.sh \
-    scripts/agent-autoreview-core.mjs \
-    scripts/agent-autoreview-secret-suppressions.json \
     scripts/gate/run-handles.sh \
     scripts/gate/darwin-broker-launch-preflight.mjs \
     scripts/gate/darwin-broker-launch-preflight.test.mjs \
@@ -7311,7 +7309,7 @@ implementation_signature() {
     scripts/gate/mapping/*.test.mjs | scripts/gate/routing-table/*.test.mjs)
         implementation_path="$repo_root/$path"
         ;;
-      scripts/agent-quality-gate.sh | scripts/agent-autoreview-core.mjs | scripts/agent-autoreview-secret-suppressions.json | scripts/docs/docs-navigation-eval-helpers.mjs | scripts/gate/lockfile-scope.mjs | scripts/gate/run-handles.sh | scripts/gate/darwin-broker-launch-preflight.mjs | scripts/gate/darwin-process-identity.c | scripts/gate/darwin-process-identity-runtime.inc.c | scripts/gate/darwin-process-identity-helper.mjs | scripts/gate/darwin-process-lineage-model.mjs | scripts/gate/darwin-process-lineage-state.mjs | scripts/gate/darwin-process-lineage.mjs | scripts/gate/darwin-process-lineage.sh | scripts/gate/trunk-check-once.sh | scripts/gate/mapping.mjs | scripts/gate/mapping/*.mjs | scripts/gate/routing-table/*.mjs | scripts/gate/quality-gate-coordinator.sh | scripts/gate/quality-gate-coordinator-support.sh)
+      scripts/agent-quality-gate.sh | scripts/docs/docs-navigation-eval-helpers.mjs | scripts/gate/lockfile-scope.mjs | scripts/gate/run-handles.sh | scripts/gate/darwin-broker-launch-preflight.mjs | scripts/gate/darwin-process-identity.c | scripts/gate/darwin-process-identity-runtime.inc.c | scripts/gate/darwin-process-identity-helper.mjs | scripts/gate/darwin-process-lineage-model.mjs | scripts/gate/darwin-process-lineage-state.mjs | scripts/gate/darwin-process-lineage.mjs | scripts/gate/darwin-process-lineage.sh | scripts/gate/trunk-check-once.sh | scripts/gate/mapping.mjs | scripts/gate/mapping/*.mjs | scripts/gate/routing-table/*.mjs | scripts/gate/quality-gate-coordinator.sh | scripts/gate/quality-gate-coordinator-support.sh)
         implementation_path="$script_source_dir/${path#scripts/}"
         ;;
       *)
@@ -7573,21 +7571,17 @@ gate_command_plan_reads_base() {
   return 0
 }
 
-# The markers below name two commands that read the DEFAULT branch's tip
-# WITHOUT naming any ref in their own text, so nothing structural can see them.
-# The autoreview suite gets both of its spellings, which share a plan dedupe
-# key:
+# The marker below names the one command that reads the DEFAULT branch's tip
+# WITHOUT naming any ref in its own text, so nothing structural can see it:
 #
 #   * `docs:navigation-eval -- --validate` tests whether a scored commit is an
 #     ancestor of `refs/remotes/origin/main`
 #     (scripts/docs/docs-navigation-eval-result.mjs, DEFAULT_BRANCH_REF).
-#   * the autoreview suite reads protected-main checklist blobs at
-#     `origin/main^{commit}` (scripts/agent-autoreview.test.sh).
 #
-# Both mean the default branch on purpose, which is NOT the gate's base: on a
-# stacked PR the base is the parent branch while these still read `origin/main`.
-# Binding the base tip for them would therefore miss exactly the advance that
-# changes their answer, so the caller binds the default branch's own OID as a
+# It means the default branch on purpose, which is NOT the gate's base: on a
+# stacked PR the base is the parent branch while it still reads `origin/main`.
+# Binding the base tip for it would therefore miss exactly the advance that
+# changes its answer, so the caller binds the default branch's own OID as a
 # separate stamp component. Where a command's base IS the gate's base, make its
 # verb name it instead — see `add_peg_registry_integrity_check`.
 gate_command_plan_reads_default_branch() {
@@ -7598,14 +7592,12 @@ gate_command_plan_reads_default_branch() {
   [[ -f "$plan_file" ]] || return 0
   grep -qF \
     -e 'docs:navigation-eval -- --validate' \
-    -e 'scripts/agent-autoreview.test.sh' \
-    -e 'agent:autoreview:test' \
     -- "$plan_file" || st=$?
   [[ "$st" -eq 1 ]] && return 1
   return 0
 }
 
-# The ref both marker commands resolve. `docs-navigation-eval-result.mjs` calls
+# The ref the marker command resolves. `docs-navigation-eval-result.mjs` calls
 # it DEFAULT_BRANCH_REF; keep the two spellings in step.
 gate_default_branch_ref="refs/remotes/origin/main"
 
@@ -7625,9 +7617,9 @@ gate_stamp_base_binding() {
   #
   # Such a plan ALSO keeps tip binding below. Binding the base tip is not
   # required by anything measured here, but it is strictly stricter, and the
-  # autoreview marker's runtime behaviour was established by reading its source
-  # rather than by running it. The narrower binding is not worth that gap for
-  # two commands this rare.
+  # marker's runtime behaviour was established by reading its source rather
+  # than by running it. The narrower binding is not worth that gap for one
+  # command this rare.
   if gate_command_plan_reads_default_branch "$plan_file"; then
     reads_default_branch=1
     suffix="+default-branch:$(ref_oid "$gate_default_branch_ref")"
@@ -9068,46 +9060,6 @@ print_trunk_launcher_environment_blocked_warning() {
   echo "  CI still enforces Trunk on the PR (.github/workflows/trunk.yml)." >&2
 }
 
-is_autoreview_test_command() {
-  local command="$1"
-  case "$command" in
-    *"pnpm agent:autoreview:test"*|*"bash scripts/agent-autoreview.test.sh"*)
-      return 0
-      ;;
-  esac
-
-  return 1
-}
-
-latest_autoreview_test_progress() {
-  local output_file="$1"
-  awk '
-    length($0) <= 512 &&
-      $0 ~ /^AUTOREVIEW_TEST_PROGRESS family=[[:alnum:]_,-]+ elapsed=[0-9]+s$/ {
-      latest = $0
-    }
-    END {
-      if (latest != "") {
-        print latest
-      }
-    }
-  ' "$output_file"
-}
-
-print_autoreview_test_timings() {
-  local output_file="$1"
-  # A canonical run currently has only a handful of families. Cap accepted
-  # protocol lines defensively so a noisy child cannot flood otherwise-quiet
-  # successful gate output while preserving each accepted marker verbatim.
-  awk '
-    count < 32 && length($0) <= 512 &&
-      $0 ~ /^AUTOREVIEW_TEST_TIMING family=[[:alnum:]_-]+ status=(ok|failed) elapsed=[0-9]+s$/ {
-      print
-      count++
-    }
-  ' "$output_file"
-}
-
 log_duration_line() {
   # Best-effort append; a logging failure must never fail the gate itself.
   local status="$1"
@@ -9159,33 +9111,6 @@ print_command_summary() {
     elapsed="${elapsed_and_command%%|*}"
     command="${elapsed_and_command#*|}"
     echo "- ${status} $(format_duration "$elapsed") ${command}"
-  done
-}
-
-monitor_sequential_autoreview_progress() {
-  local command="$1"
-  local output_file="$2"
-  local start_ts="$3"
-  local done_file="$4"
-  local parent_pid="$5"
-  local last_heartbeat_ts="$start_ts"
-  local heartbeat_interval=20
-  local now_ts
-
-  exec 24<&- 2>/dev/null || true
-
-  while [[ ! -e "$done_file" ]] && kill -0 "$parent_pid" 2>/dev/null; do
-    sleep 1
-    if [[ -e "$done_file" ]] || ! kill -0 "$parent_pid" 2>/dev/null; then
-      break
-    fi
-    now_ts="$(date +%s)"
-    if [[ $((now_ts - last_heartbeat_ts)) -ge "$heartbeat_interval" ]]; then
-      printf '⏳ still running after %s:\n' "$(format_duration $((now_ts - start_ts)))"
-      printf '    · %s\n' "$command"
-      latest_autoreview_test_progress "$output_file"
-      last_heartbeat_ts="$now_ts"
-    fi
   done
 }
 
@@ -10801,9 +10726,6 @@ run_mapped_command() {
   local command="$1"
   local output_file
   local trunk_probe_handshake_file
-  local gate_pid="$$"
-  local monitor_done_file=""
-  local monitor_pid=""
   local start_ts
   local elapsed
   local exit_code
@@ -10820,14 +10742,6 @@ run_mapped_command() {
   start_ts="$(date +%s)"
   echo
   echo "+ ${command}"
-  if is_autoreview_test_command "$command"; then
-    monitor_done_file="${output_file}.done"
-    tmpfiles+=("$monitor_done_file")
-    rm -f "$monitor_done_file"
-    monitor_sequential_autoreview_progress \
-      "$command" "$output_file" "$start_ts" "$monitor_done_file" "$gate_pid" &
-    monitor_pid="$!"
-  fi
   set +e
   run_with_timeout "$command" "" "" "$trunk_probe_handshake_file" \
     > "$output_file" 2>&1
@@ -10837,11 +10751,6 @@ run_mapped_command() {
   infrastructure_failed="$last_command_infrastructure_failed"
   trunk_provisioning_blocked="$last_command_trunk_provisioning_blocked"
   rm -f "$trunk_probe_handshake_file"
-  if [[ -n "$monitor_pid" ]]; then
-    : > "$monitor_done_file"
-    wait "$monitor_pid" 2>/dev/null || true
-    rm -f "$monitor_done_file"
-  fi
   elapsed="$last_command_execution_seconds"
 
   if [[ "$exit_code" -eq 0 ]]; then
@@ -10851,9 +10760,6 @@ run_mapped_command() {
       "$output_file"
     record_command_summary "ok" "$elapsed" "$command"
     record_command_stamp "$command"
-    if is_autoreview_test_command "$command"; then
-      print_autoreview_test_timings "$output_file"
-    fi
     echo "✓ ${command} ($(format_duration "$elapsed"))"
     rm -f "$output_file"
     return 0
@@ -11613,9 +11519,6 @@ run_mapped_entries_parallel() {
       if [[ "$status" -eq 0 ]]; then
         record_command_summary "ok" "$elapsed" "$command"
         record_command_stamp "$command"
-        if is_autoreview_test_command "$command"; then
-          print_autoreview_test_timings "$output_file"
-        fi
         echo "✓ ${command} ($(format_duration "$elapsed"))"
       elif [[ "$timed_out" != true ]] && is_trunk_command "$command" &&
         trunk_arm_is_environment_blocked_with_launcher_verdict \
@@ -12087,9 +11990,6 @@ run_mapped_entries_parallel() {
         for i in "${!active_commands[@]}"; do
           hb_cmd="${active_commands[$i]}"
           printf '    · %s\n' "$hb_cmd"
-          if is_autoreview_test_command "$hb_cmd"; then
-            latest_autoreview_test_progress "${active_output_files[$i]}"
-          fi
         done
         last_heartbeat_ts="$now_ts"
       fi

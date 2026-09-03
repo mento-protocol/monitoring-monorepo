@@ -1172,12 +1172,10 @@ test("material environment binds mapped-command controls", async (t) => {
     });
   const baseline = digest();
   const materialNames = [
-    "AGENT_AUTOREVIEW_GH_DEADLINE_SECONDS",
     "AGENT_QUALITY_GATE_LOCK_TEST_READY_FILE",
     "AGENT_QUALITY_GATE_TEST_WORKER_REGISTRATION_BARRIER",
     "ALL_PROXY",
     "APPDATA",
-    "AUTOREVIEW_HEARTBEAT_SECONDS",
     "BROWSERSLIST",
     "BROWSERSLIST_CONFIG",
     "BROWSERSLIST_ENV",
@@ -1247,8 +1245,6 @@ test("material environment binds mapped-command controls", async (t) => {
     "AGENT_CONTEXT_CODEX_HOOKS_FILE",
     "ALERT_RULES_LINT_RULES_DIR",
     "ANTHROPIC_VERTEX_PROJECT_ID",
-    "AUTOREVIEW_FAKE_MUTATE_REPO",
-    "AUTOREVIEW_TEST_FOCUS",
     "AWS_CONFIG_FILE",
     "AWS_CONTAINER_AUTHORIZATION_TOKEN",
     "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",

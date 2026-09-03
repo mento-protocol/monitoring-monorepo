@@ -190,14 +190,6 @@ async function copyCoordinatorRuntime(worktree) {
     join(targetScripts, "agent-quality-gate.sh"),
   );
   await copyFile(
-    join(sourceRoot, "scripts/agent-autoreview-core.mjs"),
-    join(targetScripts, "agent-autoreview-core.mjs"),
-  );
-  await copyFile(
-    join(sourceRoot, "scripts/agent-autoreview-secret-suppressions.json"),
-    join(targetScripts, "agent-autoreview-secret-suppressions.json"),
-  );
-  await copyFile(
     join(sourceRoot, "scripts/docs/docs-navigation-eval-helpers.mjs"),
     join(targetDocs, "docs-navigation-eval-helpers.mjs"),
   );
@@ -617,8 +609,6 @@ test("the real quality gate uses scheduler concurrency and recovery", async (t) 
           AGENT_QUALITY_GATE_LOCK_TEST_POISON: "same-parent-lock-control",
           AGENT_QUALITY_GATE_TEST_POISON: "same-parent-control",
           ALERT_RULES_LINT_RULES_DIR: `rules-${label}`,
-          AUTOREVIEW_FAKE_MUTATE_REPO: `autoreview-mutation-${label}`,
-          AUTOREVIEW_TEST_FOCUS: `autoreview-${label}`,
           AWS_CONFIG_FILE: `missing-aws-config-${label}`,
           CURL_FLAGS: `--header=fixture-${label}`,
           ESLINT_BASELINE_INPUT: `eslint-input-${label}`,

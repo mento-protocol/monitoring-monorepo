@@ -37,8 +37,6 @@
 const DEDUPE_ALIASES = new Map([
   ["pnpm agent:quality-gate:test", "agent-quality-gate.test"],
   ["bash scripts/agent-quality-gate.test.sh", "agent-quality-gate.test"],
-  ["pnpm agent:autoreview:test", "agent-autoreview.test"],
-  ["bash scripts/agent-autoreview.test.sh", "agent-autoreview.test"],
   ["pnpm tf:test", "tf-stacks.test"],
   ["node scripts/tf-stacks.test.mjs", "tf-stacks.test"],
 ]);

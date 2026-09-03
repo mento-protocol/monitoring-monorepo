@@ -125,11 +125,9 @@ const exactEnvironmentNames = new Set([
   "no_proxy",
 ]);
 const environmentPrefixes = [
-  "AGENT_AUTOREVIEW_",
   "AGENT_QUALITY_GATE_LOCK_TEST_",
   "AGENT_QUALITY_GATE_TEST_",
   "AUTH_",
-  "AUTOREVIEW_",
   "BROWSERSLIST_",
   "CARGO_",
   "COREPACK_",
@@ -159,14 +157,7 @@ const environmentPrefixes = [
   "npm_config_",
 ];
 export const MATERIAL_SINGLE_PATH_ENVIRONMENT_NAMES = Object.freeze([
-  "AGENT_AUTOREVIEW_DURATIONS_DIR",
-  "AGENT_AUTOREVIEW_MANIFEST_COUNTER_FILE",
   "APPDATA",
-  "AUTOREVIEW_CAPTURE",
-  "AUTOREVIEW_HELPER",
-  "AUTOREVIEW_MUTATE_PATH",
-  "AUTOREVIEW_PROGRESS_MARKER",
-  "AUTOREVIEW_SNAPSHOT_HELPER",
   "BROWSERSLIST_CONFIG",
   "BROWSERSLIST_ROOT_PATH",
   "BROWSERSLIST_STATS",
@@ -466,8 +457,6 @@ const parentMaterialMappedChildScrubbedExactNames = new Set([
 ]);
 const fingerprintExcludedScrubbedPrefixes = [
   "ALERT_RULES_LINT_",
-  "AUTOREVIEW_FAKE_",
-  "AUTOREVIEW_TEST_",
   "GATE_TEST_",
   "GIT_",
   "GITHUB_ACTION_PINS_",

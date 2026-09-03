@@ -91,7 +91,6 @@ test("dedupe keeps the FIRST reason, not the last", () => {
 test("the alias pairs share one dedupe key", () => {
   for (const [alias, direct] of [
     ["pnpm agent:quality-gate:test", "bash scripts/agent-quality-gate.test.sh"],
-    ["pnpm agent:autoreview:test", "bash scripts/agent-autoreview.test.sh"],
     ["pnpm tf:test", "node scripts/tf-stacks.test.mjs"],
   ]) {
     assert.equal(
@@ -405,7 +404,7 @@ test("every root manifest class schedules the focused package-policy contract", 
   }
 });
 
-test("Darwin runtime files shared with autoreview route both regression suites", () => {
+test("Darwin runtime files route the gate regression suite", () => {
   const sharedRuntimePaths = [
     "scripts/gate/darwin-process-identity.c",
     "scripts/gate/darwin-process-identity-runtime.inc.c",
@@ -429,15 +428,11 @@ test("Darwin runtime files shared with autoreview route both regression suites",
       },
     );
     const commands = commandsOf(plan);
-    for (const expected of [
-      "pnpm agent:quality-gate:test",
-      "pnpm agent:autoreview:test",
-    ]) {
-      assert.ok(
-        commands.includes(expected),
-        `${changedPath} does not route ${expected}: ${JSON.stringify(commands)}`,
-      );
-    }
+    const expected = "pnpm agent:quality-gate:test";
+    assert.ok(
+      commands.includes(expected),
+      `${changedPath} does not route ${expected}: ${JSON.stringify(commands)}`,
+    );
   }
 });
 

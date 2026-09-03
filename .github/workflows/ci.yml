@@ -91,8 +91,6 @@ jobs:
       codeHealth: ${{ steps.filter.outputs.codeHealth }}
       rootScripts: ${{ steps.filter.outputs.rootScripts }}
       docs: ${{ steps.filter.outputs.docs }}
-      autoreviewSuite: ${{ steps.filter.outputs.autoreviewSuite }}
-      autoreviewRootRuntime: ${{ steps.filter.outputs.autoreviewRootRuntime }}
       versionSkew: ${{ steps.filter.outputs.versionSkew }}
       forceAll: ${{ inputs.no_skip_audit || steps.filter.outputs.controlPlane == 'true' || steps.filter.outputs.all_count != steps.filter.outputs.routed_count || steps.filter.outputs.all_count != steps.filter.outputs.ordinary_count || (github.event_name == 'pull_request' && github.event.pull_request.changed_files >= 3000) }}
     steps:
@@ -147,7 +145,6 @@ jobs:
             indexer: &indexer
               - indexer-envio/**
               - shared-config/**
-              - scripts/agent-autoreview-core.mjs
               - scripts/eslint-baseline-diff.mjs
               - scripts/gate/routing-table/indexer-handler-invariant-contract.mjs
               - scripts/gate/routing-table/indexer-handler-invariant-families.mjs
@@ -390,39 +387,6 @@ jobs:
               - "**/*.md"
               - .github/workflows/ci.yml
               - .github/actions/pnpm-install/**
-            # The adversarial autoreview suite is intentionally isolated from
-            # the broader root-scripts job: it is expensive, path-specific,
-            # and runs sequentially in CI for deterministic fixture/process
-            # cleanup. The local quality gate may orchestrate the same complete
-            # family set in parallel.
-            autoreviewSuite: &autoreviewSuite
-              - scripts/agent-autoreview.sh
-              - scripts/agent-autoreview.mjs
-              - scripts/agent-autoreview-core.mjs
-              - scripts/agent-autoreview-secret-suppressions.json
-              - scripts/gate/darwin-process-identity.c
-              - scripts/gate/darwin-process-identity-runtime.inc.c
-              - scripts/gate/darwin-process-identity-helper.mjs
-              - scripts/gate/darwin-process-lineage-model.mjs
-              - scripts/gate/darwin-process-lineage-state.mjs
-              - scripts/gate/darwin-process-lineage.mjs
-              - scripts/gate/mapped-command-process-identity.mjs
-              - scripts/agent-autoreview-core.test.mjs
-              - scripts/agent-autoreview-target-guard.test.mjs
-              - scripts/agent-autoreview.test.sh
-              - package.json
-              - .node-version
-              - .github/workflows/ci.yml
-              - .github/actions/pnpm-install/**
-            # Focused x64 Blacksmith proof for the Linux/root Node trust path.
-            # Keep this separate from the broader scripts job so a regression
-            # cannot skip unrelated root suites and does not need pnpm install.
-            autoreviewRootRuntime: &autoreviewRootRuntime
-              - scripts/agent-autoreview.sh
-              - scripts/agent-autoreview*.mjs
-              - scripts/agent-autoreview-secret-suppressions.json
-              - .node-version
-              - .github/workflows/ci.yml
             # Dependency manifest and pnpm catalog/lifecycle policy drift.
             # This runs independently of package quality jobs so a manifest-only
             # PR cannot satisfy the required `ci` sentinel while bypassing the
@@ -460,8 +424,6 @@ jobs:
               - *codeHealth
               - *rootScripts
               - *docs
-              - *autoreviewSuite
-              - *autoreviewRootRuntime
               - *versionSkew
             ordinary:
               - "*.md"
@@ -1352,6 +1314,12 @@ jobs:
         run: pnpm agent:context-budget --strict
       - name: PR description validator suite
         run: node scripts/pr/check-pr-description.test.mjs
+      - name: Closeout review script suite
+        # scripts/pr/closeout-review.mjs is the repo's second-model review
+        # entry point (ADR 0085). Its suite runs a fake `codex` on PATH, so it
+        # needs no network and no model. The `rootScripts` filter is
+        # `scripts/**`, which already admits the script and its suite.
+        run: pnpm agent:closeout-review:test
       - name: Deploy root-anchor regression suite
         # Verifies deploy wrappers run deploy-sensitive commands from the same
         # repo root that scripts/lib/deploy-guard.sh checked for cleanliness.
@@ -1424,17 +1392,6 @@ jobs:
         # shared module, so they belong in a required job rather than only in
         # the advisory supply-chain workflow.
         run: node --test scripts/lib/pnpm-override-selector.test.mjs
-      - name: Sentry fixture scan canary
-        # Issues #1943/#1970, ADR 0068. Proves the four Sentry suites that carry
-        # credential-shaped fixtures still scan clean as whole text under
-        # scripts/agent-autoreview-core.mjs, and that none of the four paths has
-        # vanished. It is NOT a `sentry-*.test.mjs`, so the `sentry-suites` gate
-        # neither enumerates nor runs it; this step and the local quality gate
-        # are its two routes. The `rootScripts` filter is `scripts/**`, so the
-        # scanner, the four suites and the canary itself all admit this job —
-        # the same recursive entry every other scripts/ suite here relies on,
-        # rather than a new enumerated list to keep in sync.
-        run: node scripts/sentry/fixture-scan-canary.test.mjs
       # The Sentry suites used to run here, one step each (issue #1721). They
       # now run in the unconditional `sentry-suites` job, which also proves from
       # their own output that each one asserted (issue #1779, ADR 0062) — a
@@ -1702,91 +1659,6 @@ jobs:
         # non-Markdown doc-asset diff skipped it entirely.
         run: node scripts/sentry/ci-wiring/check-sentry-suites-in-ci.test.mjs
 
-  autoreview-suite:
-    name: Autoreview adversarial suite
-    needs: changes
-    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.autoreviewSuite == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    permissions:
-      contents: read
-      actions: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ inputs.no_skip_audit && inputs.audit_source_sha || github.sha }}
-          persist-credentials: false
-          fetch-depth: 0
-      # GitHub resolves $/ from the running commit; actionlint lacks support.
-      # trunk-ignore(actionlint/action)
-      - uses: $/.github/actions/pnpm-install
-        with:
-          restore-cache: ${{ !inputs.no_skip_audit }}
-      - name: Full sequential autoreview regression suite
-        shell: bash
-        run: |
-          set -euo pipefail
-          # setup-node lives below a runner toolcache whose writable ancestry is
-          # intentionally rejected by the nested semantic helper. Stage the same
-          # native binary under private runner-owned ancestry instead of relaxing
-          # runtime trust; the root/container source path has its own focused job.
-          trusted_node_dir="$(/usr/bin/mktemp -d "${HOME}/.autoreview-node.XXXXXX")"
-          trap '/bin/rm -rf -- "${trusted_node_dir}"' EXIT
-          /bin/chmod 0700 "$trusted_node_dir"
-          node_source="$(node -p 'process.execPath')"
-          /usr/bin/install -m 0500 "$node_source" "$trusted_node_dir/node"
-          PATH="$trusted_node_dir:$PATH" pnpm agent:autoreview:test -- --jobs 1
-      - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
-        if: always() && !inputs.no_skip_audit
-
-  autoreview-root-runtime:
-    name: Autoreview root-runtime trust
-    needs: changes
-    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.autoreviewRootRuntime == 'true'
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    timeout-minutes: 5
-    permissions:
-      contents: read
-      actions: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ inputs.no_skip_audit && inputs.audit_source_sha || github.sha }}
-          fetch-depth: ${{ inputs.no_skip_audit && '0' || '1' }}
-          persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version-file: .node-version
-          package-manager-cache: false
-      - name: Exercise Blacksmith toolcache Node as root
-        shell: bash
-        run: |
-          set -euo pipefail
-          node_path="$(/usr/bin/readlink -f -- "$(command -v node)")"
-          case "$node_path" in
-            /opt/hostedtoolcache/node/*/x64/bin/node) ;;
-            *)
-              echo "expected the Blacksmith x64 toolcache Node runtime" >&2
-              exit 1
-              ;;
-          esac
-          root_path="${node_path%/node}:/usr/local/bin:/usr/bin:/bin"
-          root_prefix=()
-          if [[ "$EUID" -ne 0 ]]; then
-            root_prefix=(/usr/bin/sudo)
-          fi
-          "${root_prefix[@]}" /usr/bin/env -i \
-            "PATH=$root_path" \
-            HOME=/root \
-            CI=true \
-            LC_ALL=C \
-            AUTOREVIEW_TEST_REQUIRE_ROOT_SNAPSHOT=1 \
-            AUTOREVIEW_TEST_NODE_SNAPSHOT_DIAGNOSTICS=1 \
-            AUTOREVIEW_TEST_TRUSTED_FIXTURE_PARENT=/root \
-            "$node_path" scripts/agent-autoreview-target-guard.test.mjs
-      - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
-        if: always() && !inputs.no_skip_audit
-
   version-skew:
     name: Version skew
     needs: changes
@@ -1867,8 +1739,6 @@ jobs:
         guardrail-prose,
         production-infra-contract,
         sentry-suites,
-        autoreview-suite,
-        autoreview-root-runtime,
         version-skew,
       ]
     if: always()
@@ -1882,7 +1752,7 @@ jobs:
         if: ${{ !inputs.no_skip_audit }}
         with:
           jobs: ${{ toJSON(needs) }}
-          allowed-skips: shared,ui,indexer,bridge,integration-probes,aegis,alerts,gov-watchdog,terraform,deps,scripts,docs-checks,autoreview-suite,autoreview-root-runtime,version-skew
+          allowed-skips: shared,ui,indexer,bridge,integration-probes,aegis,alerts,gov-watchdog,terraform,deps,scripts,docs-checks,version-skew
       - name: Require every no-skip job to pass
         if: ${{ inputs.no_skip_audit }}
         uses: re-actors/alls-green@b5b5b37504aa4183270bd3d855c52a67f212be35 # v1.3.0
