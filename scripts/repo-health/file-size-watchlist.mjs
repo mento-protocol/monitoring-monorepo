@@ -27,22 +27,12 @@ export const NEAR_HARD_CAP = 950;
  * seeing which files joined. It stays short on purpose: a file whose split is
  * merely expensive, or is already owned by an issue, belongs in the report as a
  * normal row. ADR 0065 owns the list and its review cadence.
+ *
+ * The list is currently EMPTY. Its three entries were the autoreview wrapper
+ * and its two large helpers; ADR 0085 deleted all three. Restoring an entry is
+ * an ADR 0065 decision.
  */
-export const SCRIPTS_EXEMPTIONS = [
-  {
-    reason:
-      "trust root: the wrapper hashes its own blob against frozen HEAD before an explicit-ref review, so a sourced sibling falls outside the identity it proves",
-    paths: ["scripts/agent-autoreview.sh"],
-  },
-  {
-    reason:
-      "trust root: the wrapper materializes the entry point, core, sealed exact-patch suppression policy, native Darwin identity runtime, and process-identity dependency under a 2 MB aggregate cap from explicit trust lists and private nested directories; splitting either large helper changes the attested runtime",
-    paths: [
-      "scripts/agent-autoreview.mjs",
-      "scripts/agent-autoreview-core.mjs",
-    ],
-  },
-];
+export const SCRIPTS_EXEMPTIONS = [];
 
 export function exemptionReason(path) {
   for (const entry of SCRIPTS_EXEMPTIONS) {

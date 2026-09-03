@@ -30,13 +30,12 @@ Setup prepares a fresh container. It:
   request API reads, and proves branch write access with a temporary branch;
 - refreshes `origin/main` and enables `.trunk/hooks`;
 - activates the `packageManager` version from `package.json` through Corepack;
-- verifies the repo-local autoreview helper, prewarms Trunk, installs Foundry,
-  and checks OSV API egress;
+- prewarms Trunk, installs Foundry, and checks OSV API egress;
 - installs the frozen workspace dependencies and Playwright Chromium with its
   Linux host libraries; and
 - regenerates and verifies Envio types, then runs `pnpm agent:context-check`.
 
-Setup fails closed when required GitHub auth/fetch, helper, tool installation,
+Setup fails closed when required GitHub auth/fetch, tool installation,
 dependency installation, codegen, or context validation fails. It can modify
 global Git credential configuration and the checkout's `origin` URL; use a
 dedicated Cloud container rather than a developer workstation.
@@ -101,20 +100,20 @@ Setup POSTs to `https://api.osv.dev/v1/querybatch` to prove osv-scanner egress.
 Set `CODEX_CLOUD_CHECK_OSV_EGRESS=false` only when that check is intentionally
 unavailable and the resulting quality-gate limitation is accepted.
 
-## Autoreview helper
+## Closeout review
 
-The default helper is `scripts/agent-autoreview.mjs`. Set `AUTOREVIEW_HELPER`
-only for an intentional compatible executable override. The helper and
-prepared-bundle trust contracts live in
-[`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md); do not
-duplicate them here.
+Setup vendors nothing for the closeout review. `pnpm agent:closeout-review`
+shells out to `codex`, and a Codex Cloud container already has it. The flow and
+its no-codex branch live in
+[`pr-operating-card.md`](pr-operating-card.md) step 4; do not duplicate them
+here.
 
 ## Maintenance contract
 
 Maintenance runs after a cached container checks out the task branch. It skips
 apt and tool installation, then re-establishes Git/origin state, refreshes
-`origin/main`, enables repo hooks, activates pnpm, verifies the autoreview
-helper, syncs the branch lockfile with:
+`origin/main`, enables repo hooks, activates pnpm, syncs the branch lockfile
+with:
 
 ```bash
 CI=true pnpm install --frozen-lockfile --prefer-offline

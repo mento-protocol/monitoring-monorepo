@@ -125,7 +125,7 @@ maintenance scripts as:
 ./scripts/bootstrap/codex-cloud-maintenance.sh
 ```
 
-Both paths rely on the repo-local autoreview helper. GitHub CLI bootstrap,
+GitHub CLI bootstrap,
 Git/credential setup, Trunk and Foundry installation, dependency/codegen checks,
 and maintenance behavior live in
 [`codex-cloud-setup.md`](codex-cloud-setup.md).

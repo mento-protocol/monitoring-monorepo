@@ -1,9 +1,10 @@
 ---
 title: Adversarial fixtures are authored to scan clean; no value or line registry
-status: active
+status: archived
 owner: eng
-canonical: true
-last_verified: 2026-08-21
+canonical: false
+last_verified: 2026-09-03
+superseded_by: ADR-0085
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -13,13 +14,19 @@ garden_lane: adrs-architecture
 
 # ADR 0068 — Adversarial fixtures are authored to scan clean; no value or line registry
 
-**Status:** Accepted (Aug 2026), in force.
+**Status:** Superseded by
+[ADR 0085](0085-autoreview-removal-thin-two-model-review.md) (Sep 2026).
+Historical decision retained.
 **Scope:** ci/process
 
-**Current refinement:** [ADR 0079](0079-sealed-exact-file-patch-secret-suppression.md)
-permits one sealed, complete, byte-exact Git file-patch record for issue #2114.
-It does not permit a value or line registry and does not implement the deferred
-source-provenance oracle below.
+**Both enforcement mechanisms are gone.** ADR 0085 deletes `secretLikeReason`
+with the autoreview core and deletes
+`scripts/sentry/fixture-scan-canary.test.mjs` with it. Decision 4 below and the
+scanner references in Evidence describe machinery that no longer exists. Trunk
+trufflehog and GitHub secret scanning are what now cover credential-shaped
+literals in tracked fixtures.
+[ADR 0079](0079-sealed-exact-file-patch-secret-suppression.md), the refinement
+this ADR carried, is archived with it.
 
 ## Context
 

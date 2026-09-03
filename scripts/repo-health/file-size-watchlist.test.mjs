@@ -9,7 +9,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { test } from "node:test";
-import { basename, dirname, join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -303,42 +303,25 @@ test("countLines treats # as a comment only when asked", () => {
 
 // Spelled out rather than derived from SCRIPTS_EXEMPTIONS: an expectation read
 // from the thing under test shrinks with it, and every deletion still passes.
-const EXPECTED_EXEMPT_PATHS = [
-  "scripts/agent-autoreview.sh",
-  "scripts/agent-autoreview.mjs",
-  "scripts/agent-autoreview-core.mjs",
-];
+const EXPECTED_EXEMPT_PATHS = [];
 
 const ADR_PATH = "docs/adr/0065-scripts-file-size-watchlist-scope.md";
 
-test("the exemption list holds exactly the three trust-root files", () => {
+test("the exemption list is empty and its record says so", () => {
   const declared = SCRIPTS_EXEMPTIONS.flatMap((entry) => entry.paths);
   assert.deepEqual(
     [...declared].sort(),
     [...EXPECTED_EXEMPT_PATHS].sort(),
     `adding or dropping an exemption is an ${ADR_PATH} decision; update that ADR and this list together`,
   );
-  // Only the scripts scope consults this list, so an entry outside scripts/
-  // would sit here doing nothing at all.
-  for (const path of declared) {
-    assert.ok(path.startsWith("scripts/"), `${path} is outside the scope`);
-    assert.match(exemptionReason(path) ?? "", /trust root/);
-    assert.doesNotMatch(
-      exemptionReason(path) ?? "",
-      /\|/,
-      "a pipe in a reason splits the exempt table cell and misreads the baseline",
-    );
-  }
 
-  // The ADR is the record; make that claim true rather than assumed. This also
-  // pins the filename the report prints in its exempt-table header.
+  // The ADR is the record; make that claim true rather than assumed.
   const adr = readFileSync(resolve(repoRoot, ADR_PATH), "utf8");
-  for (const path of EXPECTED_EXEMPT_PATHS) {
-    assert.ok(
-      adr.includes(basename(path)),
-      `${ADR_PATH} does not record ${path}; the exemption and its record have drifted`,
-    );
-  }
+  assert.match(
+    adr,
+    /no exemptions/iu,
+    `${ADR_PATH} does not record that the exemption list is empty`,
+  );
 
   // Files whose split is merely expensive, or already owned by an issue, are
   // not exempt. agent-quality-gate.sh is issue 1498's whole subject; the two
@@ -353,112 +336,6 @@ test("the exemption list holds exactly the three trust-root files", () => {
   ]) {
     assert.equal(exemptionReason(path), null, `${path} must not be exempt`);
   }
-});
-
-test("every exemption names a file that is still real and still over the cap", () => {
-  // A stale entry is the failure this list exists to prevent: it would keep
-  // quietly excusing a path that moved, shrank, or never existed.
-  const rows = scanFileList(EXPECTED_EXEMPT_PATHS, (path) =>
-    readFileSync(resolve(repoRoot, path), "utf8"),
-  );
-  assert.deepEqual(
-    EXPECTED_EXEMPT_PATHS.filter(
-      (path) => !rows.some((row) => row.path === path),
-    ),
-    [],
-    "an exempted file is no longer above the watch threshold; delete its entry",
-  );
-  for (const row of rows) {
-    assert.equal(row.status, "exempt");
-    assert.ok(row.reason.length > 0, `${row.path} carries no reason`);
-    assert.notEqual(row.capStatus, "exempt");
-  }
-});
-
-test("the trust root pins the complete nested helper runtime", () => {
-  // The exemption depends on one closed, attested runtime. Keep the two large
-  // helpers, sealed suppression policy, native Darwin identity runtime, and
-  // process-identity dependency in each trust enumeration.
-  // Windows are bounded so an unrelated literal elsewhere in the wrapper
-  // cannot stand in for the active materializer.
-  const wrapper = readFileSync(
-    resolve(repoRoot, "scripts/agent-autoreview.sh"),
-    "utf8",
-  );
-  const runtimePaths = [
-    "agent-autoreview.mjs",
-    "agent-autoreview-core.mjs",
-    "agent-autoreview-secret-suppressions.json",
-    "gate/darwin-process-identity.c",
-    "gate/darwin-process-identity-runtime.inc.c",
-    "gate/darwin-process-identity-helper.mjs",
-    "gate/darwin-process-lineage-model.mjs",
-    "gate/darwin-process-lineage-state.mjs",
-    "gate/darwin-process-lineage.mjs",
-    "gate/mapped-command-process-identity.mjs",
-  ];
-
-  const copyList = wrapper.match(/my @files = \(([\s\S]{0,500}?)\n\s*\);/);
-  assert.ok(copyList, "materialize_filesystem_autoreview_runtime lost @files");
-  assert.deepEqual(
-    [...copyList[1].matchAll(/\["([^"]+)", "([^"]+)"\]/g)].map(
-      ([, directory, name]) =>
-        directory === "." ? name : `${directory}/${name}`,
-    ),
-    runtimePaths,
-    "the Perl copy list no longer materializes the complete helper runtime",
-  );
-
-  // helper_paths, both autoreview runtime_paths arrays, the source snapshot,
-  // and the ACL loop. Each assertion stays next to its active implementation.
-  const lists = [
-    /local helper_paths=\(\n([\s\S]{0,500}?)\n\s*\)/,
-    /my @source_files = \(([\s\S]{0,460}?)\n\s*\);/,
-    /for source_file in \\\n([\s\S]{0,680}?); do/,
-  ];
-  for (const list of lists) {
-    const found = wrapper.match(list);
-    assert.ok(found, `the trust root lost a list matching ${list}`);
-    for (const helper of runtimePaths) {
-      assert.ok(
-        String(found[0]).includes(helper),
-        `${helper} is missing from ${String(found[0]).slice(0, 60)}…`,
-      );
-    }
-  }
-  const runtimeLists = [
-    ...wrapper.matchAll(/local runtime_paths=\(\n([\s\S]{0,560}?)\n\s*\)/g),
-  ];
-  assert.equal(
-    runtimeLists.length,
-    2,
-    "the trust root must keep two runtime path lists",
-  );
-  for (const found of runtimeLists) {
-    for (const helper of runtimePaths) {
-      assert.ok(
-        found[0].includes(helper),
-        `${helper} is missing from ${found[0].slice(0, 60)}…`,
-      );
-    }
-  }
-
-  assert.match(
-    wrapper,
-    /mkdir "\$runtime_dir\/scripts\/gate"[\s\S]{0,100}?chmod 0700 "\$runtime_dir\/scripts\/gate"/,
-    "the materialized gate directory is no longer private",
-  );
-
-  assert.match(
-    wrapper,
-    /my \$aggregate_limit = 2 \* 1024 \* 1024;[\s\S]{0,2600}?\$aggregate > \$aggregate_limit/,
-    "the 2 MB aggregate cap is no longer enforced next to where it is declared",
-  );
-  // …and the wrapper still hashes its own path against the frozen ref.
-  assert.match(
-    wrapper,
-    /verify_current_wrapper_matches_ref\(\) \{[\s\S]{0,400}?local relative_path="scripts\/agent-autoreview\.sh"/,
-  );
 });
 
 test("the live report never routes an exempt file into the issue queue", () => {
@@ -491,38 +368,52 @@ test("the live report never routes an exempt file into the issue queue", () => {
 });
 
 test("an exemption is what suppresses the row, not the scope", () => {
-  // Same content, two paths: one exempt, one a plain sibling. Drop the
-  // exemption and the identical file reports as a hard-cap row.
-  const files = [
-    "scripts/agent-autoreview-core.mjs",
-    "scripts/agent-autoreview-sibling.mjs",
-  ];
-  const rows = scanFileList(files, () => BIG_SOURCE);
-
+  // The live list is empty (ADR 0085), so this drives the real mechanism with a
+  // temporary entry rather than a stub: same content, two paths, one listed.
+  // Without the entry the identical file reports as a hard-cap row.
+  const files = ["scripts/exempted-helper.mjs", "scripts/plain-helper.mjs"];
   assert.deepEqual(
-    rows.map((row) => [row.path, row.status]),
+    scanFileList(files, () => BIG_SOURCE).map((row) => [row.path, row.status]),
     [
-      ["scripts/agent-autoreview-core.mjs", "exempt"],
-      ["scripts/agent-autoreview-sibling.mjs", "hard"],
+      ["scripts/exempted-helper.mjs", "hard"],
+      ["scripts/plain-helper.mjs", "hard"],
     ],
+    "an unlisted scripts file must report as a plain hard-cap row",
   );
-  assert.equal(rows[0].capStatus, "hard");
 
-  const { tracked, exempt } = partitionExempt(rows);
-  assert.deepEqual(
-    tracked.map((row) => row.path),
-    ["scripts/agent-autoreview-sibling.mjs"],
-  );
-  assert.equal(exempt.length, 1);
-  // An exempt row can never open an issue or fail a run.
-  assert.deepEqual(actionableFileSizeRows(exempt), []);
-  assert.equal(_private.shouldFail(exempt, "hard"), false);
+  SCRIPTS_EXEMPTIONS.push({
+    reason: "trust root: fixture entry for this test only",
+    paths: ["scripts/exempted-helper.mjs"],
+  });
+  try {
+    const rows = scanFileList(files, () => BIG_SOURCE);
+    assert.deepEqual(
+      rows.map((row) => [row.path, row.status]),
+      [
+        ["scripts/exempted-helper.mjs", "exempt"],
+        ["scripts/plain-helper.mjs", "hard"],
+      ],
+    );
+    assert.equal(rows[0].capStatus, "hard");
+
+    const { tracked, exempt } = partitionExempt(rows);
+    assert.deepEqual(
+      tracked.map((row) => row.path),
+      ["scripts/plain-helper.mjs"],
+    );
+    assert.equal(exempt.length, 1);
+    // An exempt row can never open an issue or fail a run.
+    assert.deepEqual(actionableFileSizeRows(exempt), []);
+    assert.equal(_private.shouldFail(exempt, "hard"), false);
+  } finally {
+    SCRIPTS_EXEMPTIONS.length = 0;
+  }
 });
 
 test("an exempt row reports its reason instead of vanishing", () => {
   const rows = [
     {
-      path: "scripts/agent-autoreview.sh",
+      path: "scripts/exempted-helper.sh",
       package: "scripts",
       raw: 6872,
       rough: 6479,
@@ -569,9 +460,9 @@ test("a scratch checkout flags an unexempted scripts file at the hard cap", () =
   try {
     execFileSync("git", ["init", "--quiet", root]);
     mkdirSync(join(root, "scripts"));
-    // agent-autoreview-core.mjs is exempt; the siblings are not. All hold the
-    // same 1,200-line body, so only the exemption separates them.
-    writeFileSync(join(root, "scripts/agent-autoreview-core.mjs"), BIG_SOURCE);
+    // Nothing is exempt any more (ADR 0085), so every over-cap scripts file
+    // below must reach the report as a tracked hard-cap row.
+    writeFileSync(join(root, "scripts/other-helper.mjs"), BIG_SOURCE);
     writeFileSync(join(root, "scripts/plain-helper.mjs"), BIG_SOURCE);
     // A newline in the name forces git to C-quote it in line-delimited output,
     // whatever `core.quotePath` says, and a quoted path matches no scope
@@ -596,14 +487,12 @@ test("a scratch checkout flags an unexempted scripts file at the hard cap", () =
     assert.deepEqual(
       report.rows.map((row) => [row.path, row.status]).sort(),
       [
+        ["scripts/other-helper.mjs", "hard"],
         ["scripts/plain-helper.mjs", "hard"],
         [`scripts/odd${"\n"}helper.mjs`, "hard"],
       ].sort(),
     );
-    assert.deepEqual(
-      report.exempt.map((row) => row.path),
-      ["scripts/agent-autoreview-core.mjs"],
-    );
+    assert.deepEqual(report.exempt, []);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

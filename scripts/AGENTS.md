@@ -54,14 +54,8 @@ validators. Inventories, pinned hashes, and identities stay with their domain.
 
 ## Why Files Stay Flat
 
-Move all 15 pin classes with their files; keep `agent-autoreview.sh`
-feedback-runtime pins.
+Move all 14 pin classes with their files.
 
-- **Autoreview pins.** `agent-autoreview.sh` pins runtime,
-  sealed `agent-autoreview-secret-suppressions.json` (ADR 0079),
-  `pr-feedback-state-claude.mjs` and
-  `pr-ready-state-review-signals.mjs`; feedback uses `origin/main`. Use ADR
-  0064's three-merge sequence.
 - **Gate routing pins.** Stub-repo tests require
   `$script_source_dir == $repo_root/scripts`.
   `bootstrap/codex-cloud-setup.{sh,test.sh}` pair offline.
@@ -85,9 +79,9 @@ feedback-runtime pins.
   signatures, fixtures, literals, and `.coderabbit.yaml` review scope together
   (ADRs 0064 and 0076).
 - **Gate mapping pins.** Signatures and Turbo inputs pin
-  `gate/routing-table/**`, `gate/mapping*`, the autoreview core, and sealed
-  policy. Runtime hashes use `$script_source_dir`; suites use `$repo_root`.
-  Core and inventory edits route autoreview and parity suites.
+  `gate/routing-table/**` and `gate/mapping*`. Runtime hashes use
+  `$script_source_dir`; suites use `$repo_root`. Family and inventory edits
+  route the parity suites.
   Setup, marker, SessionEnd, and package-policy edits route focused setup
   suite. Missing pins freeze the stamp (ADRs 0069 and 0079). Three exact pins:
   `.dependency-cruiser.cjs` and root `package.json` both name
@@ -104,7 +98,6 @@ feedback-runtime pins.
   `scripts/docs/check-verification-redesign-evidence*.mjs`.
 - **Sentry suite manifest.** `scripts/sentry/gate/sentry-suite-manifest.json`
   enforces two-way path equality with `findSentrySuites()`; moves fail closed.
-  `sentry/fixture-scan-canary.test.mjs` re-pins four (ADR 0068).
 - **Workflow pins.** Workflows pin `scripts/`. Terraform uses
   `terraform.stacks.json` `workflowAdmissionPatterns`.
   `check-ci-contract{,.test}.mjs` pins CI.
