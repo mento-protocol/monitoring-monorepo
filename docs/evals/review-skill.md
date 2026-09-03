@@ -443,9 +443,22 @@ The plan binds these inputs:
   and prompt digests.
 - Incumbent and candidate skill digests.
 - Finder, verifier, control, and judge model and effort settings.
-- Claude and Codex CLI versions, scorer identity, and the five-module experiment
-  harness digest.
+- Scorer identity and the five-module experiment harness digest.
 - Stage lanes, treatment order, and the canonical rerun manifest.
+
+The plan records the Claude and Codex CLI versions instead of binding them, on
+the canonical lane's policy: `claude` and `codex` ship far more often than a
+campaign runs. `--validate-plan` and `--run` rebuild the plan from its recorded
+versions, so a stored plan stays valid after a provider upgrade, and they probe
+the live versions separately. When the live versions differ, `--validate-plan`
+reports `cli_version_drift` as a warning and stays `ok`, `--run` writes one
+warning line to stderr, and every record carries the versions its own phases ran
+under: the contestant CLI for a fresh transcript, the judge CLI for a fresh
+score, and the planned versions for a phase served from cache. Cell identity
+keeps the planned versions, so cells cached under the old runtime are reused and
+rescored instead of re-run. The stage decision names the drift and the affected
+cell ids in its reasons, so a flip on a straddling pair reads as a possible
+runtime change rather than a skill change.
 
 The screen uses the first frozen report for PRs 1990, 1995, and 1999. It runs
 six verifier arms. Each fixture lane runs the two arms sequentially in its

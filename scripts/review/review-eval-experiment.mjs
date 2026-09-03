@@ -22,6 +22,7 @@ import {
   buildExperimentPlan,
   digestObject,
   EXPERIMENT_STAGES,
+  labelRecordRuntimes,
   stagePlanFor,
   validateExperimentPlan,
 } from "./review-eval-experiment-contract.mjs";
@@ -227,6 +228,14 @@ function writePlan(file, plan) {
   });
 }
 
+/** One line naming an upgrade between the planned and the live provider CLI. */
+function driftWarning(drift) {
+  return (
+    `runtime drift: ${drift.summary}; ` +
+    "cells that run now are labelled with the live versions"
+  );
+}
+
 function readPlan(campaignDir) {
   const file = path.join(campaignDir, "plan.json");
   let plan;
@@ -298,17 +307,25 @@ function validateLoadedCampaign(options) {
   });
   if (!fixtureCheck.ok) throw new Error(fixtureCheck.problems.join(" | "));
   const env = scrubbedEnv({ roots: [options.repoRoot] });
+  const liveCliVersions = {
+    claude: providerVersion("claude", env),
+    codex: providerVersion("codex", env),
+  };
   const validation = validateExperimentPlan({
     plan,
     contract,
     contractDigest,
-    cliVersions: {
-      claude: providerVersion("claude", env),
-      codex: providerVersion("codex", env),
-    },
+    cliVersions: liveCliVersions,
   });
   if (!validation.ok) throw new Error(validation.problems.join(" | "));
-  return { artifactRoot, planFile: file, plan, contract };
+  return {
+    artifactRoot,
+    planFile: file,
+    plan,
+    contract,
+    liveCliVersions,
+    drift: validation.drift,
+  };
 }
 
 function stageIdentity(plan, stage) {
@@ -403,16 +420,25 @@ async function runStage(options, campaign) {
     concurrency: options.concurrency,
   };
   const base = await runExperimentRuntimeStage(runtimeOptions);
+  const labelled = labelRecordRuntimes({
+    records: base.records,
+    planned: plan.inputs.cli_versions,
+    live: campaign.liveCliVersions ?? null,
+  });
+  const runtimeDrift = campaign.drift
+    ? { ...campaign.drift, cell_ids: labelled.fresh_cell_ids }
+    : null;
   let grouped = recordsByStage({
     artifactRoot,
     plan,
     stage: options.stage,
-    records: base.records,
+    records: labelled.records,
   });
   let decision = evaluateExperimentDecision({
     plan,
     stage: options.stage,
     recordsByStage: grouped,
+    runtimeDrift,
   });
   if (decision.novelty?.required === true) {
     const enriched = await enrichExperimentNovelty({
@@ -424,12 +450,17 @@ async function runStage(options, campaign) {
       plan,
       stage: options.stage,
       recordsByStage: grouped,
+      runtimeDrift,
     });
   }
   const payload = {
     schema_version: 1,
     plan_digest: plan.plan_digest,
     stage: options.stage,
+    cli_versions: {
+      planned: plan.inputs.cli_versions,
+      drift: runtimeDrift,
+    },
     records: grouped[options.stage],
     records_by_stage: grouped,
     decision,
@@ -459,6 +490,9 @@ export async function main(argv = process.argv.slice(2)) {
   if (options.mode === "plan") value = await planCampaign(options);
   else {
     const campaign = validateLoadedCampaign(options);
+    if (campaign.drift && options.mode === "run") {
+      process.stderr.write(`warning: ${driftWarning(campaign.drift)}\n`);
+    }
     value =
       options.mode === "validate-plan"
         ? {
@@ -466,6 +500,8 @@ export async function main(argv = process.argv.slice(2)) {
             artifact_root: campaign.artifactRoot,
             plan_file: campaign.planFile,
             plan_digest: campaign.plan.plan_digest,
+            cli_version_drift: campaign.drift,
+            warnings: campaign.drift ? [driftWarning(campaign.drift)] : [],
           }
         : await runStage(options, campaign);
   }

@@ -176,6 +176,76 @@ function cliIdentity(cliVersions, identities) {
   };
 }
 
+const CLI_PROVIDERS = Object.freeze(["claude", "codex", "judge"]);
+
+/** Normalize probed or recorded provider versions into the plan identity. */
+export function cliVersionIdentity(cliVersions, identities = null) {
+  return cliIdentity(cliVersions, identities);
+}
+
+/**
+ * Compare the versions a plan recorded with the versions probed now. A plan
+ * keeps its recorded versions forever, so an upgrade mid-campaign is drift to
+ * label, never a reason to refuse the plan.
+ */
+export function cliVersionDrift({ planned, live }) {
+  if (live === null || live === undefined) return null;
+  const recorded = cliVersionIdentity(planned);
+  const current = cliVersionIdentity(live);
+  const providers = CLI_PROVIDERS.filter(
+    (provider) => recorded[provider] !== current[provider],
+  ).map((provider) => ({
+    provider,
+    planned: recorded[provider],
+    live: current[provider],
+  }));
+  if (providers.length === 0) return null;
+  return {
+    providers,
+    planned: recorded,
+    live: current,
+    summary: providers
+      .map((entry) => `${entry.provider} ${entry.planned} -> ${entry.live}`)
+      .join(", "),
+  };
+}
+
+/** One reason string naming the drift and the cells that ran under it. */
+export function runtimeDriftReason(drift, cellIds = drift?.cell_ids ?? []) {
+  if (!isObject(drift) || typeof drift.summary !== "string") return null;
+  const cells = [...new Set(cellIds ?? [])].sort();
+  return cells.length === 0
+    ? `runtime drift: ${drift.summary}; every cell reused the planned runtime`
+    : `runtime drift: ${drift.summary} on ${cells.join(", ")}`;
+}
+
+/**
+ * Stamp each arm record with the versions it actually ran under, phase by
+ * phase. A phase served from cache ran under the planned versions; a phase that
+ * ran now carries the live ones, so no stage mixes runtimes unlabelled. The
+ * contestant CLI labels the raw transcript, the judge CLI labels the score.
+ */
+export function labelRecordRuntimes({ records, planned, live = null }) {
+  const recorded = cliVersionIdentity(planned);
+  const current = live === null ? recorded : cliVersionIdentity(live);
+  const freshCellIds = [];
+  const labelled = (records ?? []).map((record) => {
+    const reuse = record?.cache_reuse ?? {};
+    const freshRaw = reuse.raw === false;
+    const freshScore = reuse.score === false;
+    if (freshRaw || freshScore) freshCellIds.push(record.cell_id);
+    return {
+      ...record,
+      cli_versions: {
+        claude: freshRaw ? current.claude : recorded.claude,
+        codex: freshRaw ? current.codex : recorded.codex,
+        judge: freshScore ? current.judge : recorded.judge,
+      },
+    };
+  });
+  return { records: labelled, fresh_cell_ids: freshCellIds.sort() };
+}
+
 function modelIdentity(contract) {
   const copy = (value, label) => ({
     model: nonempty(value?.model, `${label}.model`),
@@ -422,13 +492,53 @@ export function stagePlanFor({ plan, stage }) {
   return stagePlan;
 }
 
+const MAX_PLAN_DIFFERENCES = 8;
+
+/** Name the paths where a stored plan and its rebuild disagree. */
+function planDifferences(actual, expected, path = "", out = []) {
+  if (out.length >= MAX_PLAN_DIFFERENCES) return out;
+  if (JSON.stringify(actual) === JSON.stringify(expected)) return out;
+  if (isObject(actual) && isObject(expected)) {
+    for (const key of new Set([
+      ...Object.keys(actual),
+      ...Object.keys(expected),
+    ])) {
+      planDifferences(
+        actual[key],
+        expected[key],
+        path ? `${path}.${key}` : key,
+        out,
+      );
+    }
+    return out;
+  }
+  if (
+    Array.isArray(actual) &&
+    Array.isArray(expected) &&
+    actual.length === expected.length
+  ) {
+    for (const [index, item] of actual.entries()) {
+      planDifferences(item, expected[index], `${path}[${index}]`, out);
+    }
+    return out;
+  }
+  out.push(path || "plan");
+  return out;
+}
+
+/**
+ * Rebuild the plan from its own recorded inputs, including the CLI versions it
+ * was planned under, so a stored plan stays internally consistent forever. A
+ * live probe passed as `cliVersions` is reported as drift, not as a problem.
+ */
 export function validateExperimentPlan({
   plan,
   contract,
   contractDigest = plan?.contract_digest,
-  cliVersions = plan?.inputs?.cli_versions,
+  cliVersions = null,
 }) {
   const problems = [];
+  let drift = null;
   try {
     if (!isObject(plan)) throw new Error("plan must be an object");
     const rebuilt = buildExperimentPlan({
@@ -437,18 +547,29 @@ export function validateExperimentPlan({
       plannedAt: plan.planned_at,
       incumbent: plan.incumbent,
       candidate: plan.candidate,
-      cliVersions,
+      cliVersions: plan?.inputs?.cli_versions,
       includeLivePaired: plan.stages?.["live-paired"]?.enabled === true,
     });
-    if (JSON.stringify(plan) !== JSON.stringify(rebuilt)) {
+    const differences = planDifferences(
+      stableValue(plan),
+      stableValue(rebuilt),
+    );
+    if (differences.length > 0) {
       problems.push(
-        "plan differs from the complete deterministic campaign plan",
+        "plan differs from the complete deterministic campaign plan at " +
+          differences.join(", "),
       );
+    } else if (JSON.stringify(plan) !== JSON.stringify(rebuilt)) {
+      problems.push("plan key order differs from the deterministic plan");
     }
+    drift = cliVersionDrift({
+      planned: rebuilt.inputs.cli_versions,
+      live: cliVersions,
+    });
   } catch (error) {
     problems.push(error.message);
   }
-  return { ok: problems.length === 0, problems };
+  return { ok: problems.length === 0, problems, drift };
 }
 
 function treatmentFor(plan, name) {

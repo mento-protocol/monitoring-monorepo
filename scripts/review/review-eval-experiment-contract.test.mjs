@@ -15,15 +15,19 @@ import { fileURLToPath } from "node:url";
 import {
   buildExperimentPlan,
   canonicalRerunManifest,
+  cliVersionDrift,
   digestObject,
   EXPERIMENT_SOURCE_FILES,
   experimentSourceDigest,
+  labelRecordRuntimes,
   novelCacheIdentity,
   rawCacheIdentity,
+  runtimeDriftReason,
   scoreCacheIdentity,
   stagePlanFor,
   validateExperimentPlan,
 } from "./review-eval-experiment-contract.mjs";
+import { evaluateExperimentDecision } from "./review-eval-experiment-decision.mjs";
 import {
   finderArgvDigest,
   planCells,
@@ -92,6 +96,7 @@ test("digestObject and plan validation are stable across persistence", () => {
   assert.deepEqual(validateExperimentPlan({ plan, contract, contractDigest }), {
     ok: true,
     problems: [],
+    drift: null,
   });
   const tampered = structuredClone(plan);
   tampered.stages.screen.lanes[0].source.sha256 = "f".repeat(64);
@@ -331,4 +336,117 @@ test("the qualification manifest is the canonical 24-cell rerun", () => {
     treatmentId: "candidate-a",
   });
   assert.deepEqual(plan.qualification, direct);
+});
+
+test("a stored plan validates against its own recorded CLI versions", () => {
+  const plan = JSON.parse(JSON.stringify(makePlan()));
+  const upgraded = { claude: "claude 2.1.259", codex: cliVersions.codex };
+  const validation = validateExperimentPlan({
+    plan,
+    contract,
+    contractDigest,
+    cliVersions: upgraded,
+  });
+  assert.deepEqual(validation.problems, []);
+  assert.equal(validation.ok, true);
+  assert.deepEqual(validation.drift.providers, [
+    { provider: "claude", planned: cliVersions.claude, live: "claude 2.1.259" },
+    { provider: "judge", planned: cliVersions.judge, live: "claude 2.1.259" },
+  ]);
+  assert.equal(
+    validateExperimentPlan({ plan, contract, contractDigest }).drift,
+    null,
+  );
+  const tampered = replacePlanField(plan, (copy) => {
+    copy.inputs.finder_argv_digest = "9".repeat(64);
+  });
+  const broken = validateExperimentPlan({
+    plan: tampered,
+    contract,
+    contractDigest,
+    cliVersions: upgraded,
+  });
+  assert.equal(broken.ok, false);
+  assert.match(broken.problems[0], /inputs\.finder_argv_digest/);
+});
+
+test("runtime drift labels fresh records and the stage decision", () => {
+  const plan = makePlan();
+  const planned = plan.inputs.cli_versions;
+  const live = { claude: "claude 2.1.259", codex: planned.codex };
+  const records = plan.stages.screen.lanes.flatMap((lane) =>
+    lane.sequence.map((treatment) => ({
+      ok: true,
+      campaign_id: plan.campaign_id,
+      candidate_id: plan.candidate.id,
+      stage: "screen",
+      cell_id: `${lane.lane_id}-${treatment}`,
+      pr: lane.pr,
+      treatment,
+      claims_count: 1,
+      matched_ids: [],
+      leak: { suspected: false },
+      empty: false,
+      cache_reuse:
+        treatment === "incumbent"
+          ? { raw: true, score: true }
+          : { raw: false, score: false },
+    })),
+  );
+  const labelled = labelRecordRuntimes({ records, planned, live });
+  assert.deepEqual(labelled.fresh_cell_ids, [
+    "screen-pr-1990-candidate",
+    "screen-pr-1995-candidate",
+    "screen-pr-1999-candidate",
+  ]);
+  for (const record of labelled.records) {
+    assert.deepEqual(
+      record.cli_versions,
+      record.treatment === "candidate"
+        ? { claude: live.claude, codex: live.codex, judge: live.claude }
+        : planned,
+    );
+  }
+  const rescored = labelRecordRuntimes({
+    records: [
+      {
+        cell_id: "screen-pr-1990-incumbent",
+        cache_reuse: { raw: true, score: false },
+      },
+    ],
+    planned,
+    live,
+  });
+  assert.deepEqual(rescored.records[0].cli_versions, {
+    claude: planned.claude,
+    codex: planned.codex,
+    judge: live.claude,
+  });
+  assert.deepEqual(rescored.fresh_cell_ids, ["screen-pr-1990-incumbent"]);
+  const drift = cliVersionDrift({ planned, live });
+  const decision = evaluateExperimentDecision({
+    plan,
+    stage: "screen",
+    recordsByStage: { screen: labelled.records },
+    runtimeDrift: { ...drift, cell_ids: labelled.fresh_cell_ids },
+  });
+  assert.equal(
+    decision.reasons[0],
+    `runtime drift: claude ${planned.claude} -> ${live.claude}, ` +
+      `judge ${planned.judge} -> ${live.claude} on ` +
+      "screen-pr-1990-candidate, screen-pr-1995-candidate, " +
+      "screen-pr-1999-candidate",
+  );
+  assert.deepEqual(decision.runtime_drift.cell_ids, labelled.fresh_cell_ids);
+  assert.equal(decision.reasons.length > 1, true);
+  const clean = evaluateExperimentDecision({
+    plan,
+    stage: "screen",
+    recordsByStage: { screen: labelled.records },
+  });
+  assert.equal(Object.hasOwn(clean, "runtime_drift"), false);
+  assert.equal(
+    runtimeDriftReason(drift),
+    `runtime drift: ${drift.summary}; every cell reused the planned runtime`,
+  );
 });
