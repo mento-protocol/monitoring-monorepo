@@ -256,8 +256,9 @@ and stay in place as history.
   | 4             | `32b60c787` | `beabff8f…` | 2026-09-02 16:51:26Z |
   | 5, base merge | `95c3b6dc7` | `c21f85af…` | 2026-09-03 06:43:23Z |
 
-  Runs 1-4 were refused by the spending cap, so nothing was billed. Runs 1-4
-  each reported the full base-to-head diff; run 5 reported an incremental
+  All five runs were refused by the spending cap, so nothing was billed. What
+  set run 5 apart was its scope, not its outcome: runs 1-4 each reported the
+  full base-to-head diff, while run 5 reported an incremental
   `4aef1be09`..`95c3b6dc7` delta, the first to do so. One confound stays open:
   the opening review never completed either, and CodeRabbit may retry an
   unfinished review when the head moves regardless of this key. A clean

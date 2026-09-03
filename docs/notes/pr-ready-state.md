@@ -163,10 +163,13 @@ resolves `.coderabbit.yaml` from the PR's source branch, so the setting that
 governs this PR is the one at its head, not the one on `main`. Read
 `reviews.auto_review.auto_incremental_review` there:
 
-- **`true`, and the org-level Global override does not set the key** — the
-  branch predates the 2026-09-02 change, and a push does start an automatic
-  review. Wait for that attempt to become terminal before requesting anything,
-  exactly as before. Posting early duplicates the review and the bill.
+- **`true` or absent, and the org-level Global override does not set the key**
+  — the branch predates the 2026-09-02 change, and a push does start an
+  automatic review. Wait for that attempt to become terminal before requesting
+  anything, exactly as before. Posting early duplicates the review and the
+  bill. A head with no `.coderabbit.yaml`, or one whose file omits the key,
+  reads as `true` here: CodeRabbit falls back to its provider default, which
+  enables incremental review. Do not read a missing value as `false`.
 - **`true`, but the Global override sets `auto_incremental_review: false`** —
   the head value is no longer effective. CodeRabbit ranks organization-level
   Global overrides above a repository's `.coderabbit.yaml`, so no automatic
@@ -526,8 +529,9 @@ Field expectations:
    `reviews.auto_review.auto_incremental_review` from the PR head's
    `.coderabbit.yaml`, and check whether the org-level Global override sets the
    same key (ADR 0066 records it). Wait for the automatic attempt to become
-   terminal only when the head says `true` **and** the override leaves the key
-   unset. If the head says `false`, or the override sets it `false` — the
+   terminal only when the head says `true` — or omits the key or the file
+   entirely, which falls back to the provider default of enabled — **and** the
+   override leaves the key unset. If the head says `false`, or the override sets it `false` — the
    override outranks the head's file, so the head value stops being effective —
    no automatic run follows the push: refresh once the head is stable instead of
    waiting for one that cannot start. The one exception is an opening review

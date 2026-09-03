@@ -277,8 +277,10 @@ polled. Do not foreground-poll and never sleep-poll.
      `reviews.auto_review.auto_incremental_review` from the PR head's
      `.coderabbit.yaml` — CodeRabbit reads that file from the source branch, so
      a branch predating the 2026-09-02 change still has it `true`. When it is
-     `true` **and** the org-level Global override does not set the key, wait for
-     the automatic attempt to become terminal as before. When it is `false`, or
+     `true`, or the key or file is absent — which falls back to the provider
+     default of enabled, so never read a missing value as `false` — **and** the
+     org-level Global override does not set the key, wait for the automatic
+     attempt to become terminal as before. When it is `false`, or
      when the Global override sets `auto_incremental_review: false` — which
      outranks the head's file and makes the head value ineffective — a push onto
      an already-open PR starts no automatic review, only the opening push does,
