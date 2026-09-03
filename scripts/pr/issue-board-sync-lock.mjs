@@ -20,7 +20,13 @@ export async function preflightStableSyncIssue(
   listedIssue,
   operations,
 ) {
-  const issue = await operations.getIssue(options, listedIssue.number);
+  // A complete enumeration snapshot decides the no-op skip without a read. A
+  // change after enumeration defers that issue to the next run; every mutation
+  // still re-reads under the mutex.
+  const issue =
+    listedIssue.projectItemsPageInfo?.hasNextPage === false
+      ? listedIssue
+      : await operations.getIssue(options, listedIssue.number);
   if (String(issue.state ?? "").toUpperCase() !== "OPEN") return null;
   const state = stateFromLabels(issue);
   if (!state || state === "done") return null;
