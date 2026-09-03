@@ -2234,6 +2234,27 @@ test("mutex GraphQL failures name the Contents write requirement", () => {
   );
 });
 
+test("mutex ref reads over REST name the Contents write requirement", () => {
+  const lockRef = `mento-issue-board-locks/v1/${"a".repeat(64)}`;
+  const hint = githubProjectScopeHint(
+    "gh: Resource not accessible by personal access token",
+    {},
+    ["api", `repos/o/r/git/matching-refs/${lockRef}`],
+  );
+  assert(
+    hint.includes("repository Contents write access"),
+    "missing matching-refs Contents guidance",
+  );
+  assertEqual(
+    githubProjectScopeHint(
+      "gh: Resource not accessible by personal access token",
+      {},
+      ["api", "repos/o/r/issues/1"],
+    ),
+    "",
+  );
+});
+
 test("project scope hints ignore scopes that are only granted", () => {
   assertEqual(
     githubProjectScopeHint(
