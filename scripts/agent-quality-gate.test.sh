@@ -6597,11 +6597,17 @@ run_teardown_drain_command_identity_regression() {
     active_worker_lifecycle_contracts=(portable-marker-v1 portable-marker-v1)
     active_worker_mapped_commands=("pnpm lint:scripts" "pnpm agent:prewarm:test")
     gate_drain_active_mapped_command="./tools/trunk check --ci x"
+    # Invoked indirectly: the eval'd teardown_active_timeouts body calls
+    # drain_completed_parallel_command once per registered worker, and the
+    # assertions below read what those calls wrote to $observed.
+    # shellcheck disable=SC2329
     drain_completed_parallel_command() {
       printf '%s\t%s\n' "$1" "${gate_drain_active_mapped_command:-<unset>}" \
         >> "$observed"
     }
-    collect_process_tree() { :; }
+    # No collect_process_tree stub: active_timeout_records is empty above, so
+    # the teardown returns before its descendant walk. Restore a stub here if a
+    # future fixture registers timeout records.
     eval "$contract_body"
     eval "$source_body"
     teardown_active_timeouts
@@ -6666,6 +6672,10 @@ run_teardown_drain_command_identity_regression() {
       gate_darwin_lineage_host_platform=Darwin
       gate_lock_enabled=1
       gate_lock_token=teardown-lock-token
+      # Fixture input for the lifted teardown, deliberately confined to this
+      # subshell. shellcheck -x follows scripts/gate/run-handles.sh, which a
+      # later test sources, and pairs its gate_run_id reads with this write.
+      # shellcheck disable=SC2030
       gate_run_id=teardown-run-id
       gate_drain_capture=""
       active_timeout_records=()
@@ -6685,14 +6695,20 @@ run_teardown_drain_command_identity_regression() {
         active_worker_mapped_commands+=("pnpm lint:scripts")
       fi
       gate_drain_active_mapped_command="./tools/trunk check --ci x"
+      # Invoked indirectly: the eval'd teardown_active_timeouts body calls
+      # drain_completed_darwin_command_cohort once for the Darwin cohort, and
+      # the assertions below read what that call wrote to $observed.
+      # shellcheck disable=SC2329
       drain_completed_darwin_command_cohort() {
         # `-` not `:-`: an empty name is the cleared-for-a-real-cohort case
         # and must not be reported as an unset variable.
         printf 'cohort\t%s\t%s\n' "$#" \
           "${gate_drain_active_mapped_command-<unset>}" > "$observed"
       }
-      gate_darwin_exact_identity_terminate() { :; }
-      collect_process_tree() { :; }
+      # No gate_darwin_exact_identity_terminate or collect_process_tree stub:
+      # active_timeout_records is empty above, so the teardown reaches neither
+      # the exact-identity terminate loop nor the descendant walk. Restore stubs
+      # here if a future fixture registers timeout records.
       eval "$contract_body"
       eval "$source_body"
       teardown_active_timeouts
