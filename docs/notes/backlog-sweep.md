@@ -3,7 +3,7 @@ title: Backlog Sweep
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-02
+last_verified: 2026-09-03
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -212,7 +212,10 @@ An issue enters a batch only when all of the following hold:
 - **Carries exactly one `pkg:*` label** — no package area makes the independence
   test vacuous, while several areas make ownership ambiguous. The
   `--sweep-eligible` claim path enforces the same rule.
-- **Mutually independent** — no two issues in one batch share a `pkg:*` label.
+- **Mutually independent** — two tests, in order. The docs-catalog test runs
+  first and ignores labels: two candidates that both regenerate
+  `docs/README.md` conflict whatever packages they sit in, below. Then the
+  label test — no two issues in one batch share a `pkg:*` label.
   That label is the repo's existing ownership area
   ([`agent-issue-workflow.md`](agent-issue-workflow.md)), so "same subsystem" is
   a lookup rather than a per-batch judgement. Otherwise the second PR pays for
@@ -220,14 +223,14 @@ An issue enters a batch only when all of the following hold:
   sibling. `pkg:tooling` is the one area where a path test replaces that
   lookup, below.
 - **Outside its own grooming veto window** — a candidate whose newest
-  _trusted_ `sweep-groomed:v1` marker comment is less than 12 hours old waits
-  for the next run, and the report names when that window closes. The window
-  gives a human a bounded chance to disagree with a label an agent applied,
-  before that label selects work for another agent. An issue a human labeled by
-  hand carries no marker and is never delayed. An operator who wants to
-  fast-track a groomed issue waits the window out or deletes the marker
-  comment: a window its caller can waive is not a window. What makes a marker
-  trusted is below.
+  _trusted_ `sweep-groomed:` marker comment is less than 12 hours old waits
+  for the next run, whatever version that marker carries, and the report names
+  when that window closes. The window gives a human a bounded chance to
+  disagree with a label an agent applied, before that label selects work for
+  another agent. An issue a human labeled by hand carries no marker and is
+  never delayed. An operator who wants to fast-track a groomed issue waits the
+  window out or deletes the marker comment: a window its caller can waive is
+  not a window. What makes a marker trusted is below.
 
 Fewer qualifying issues than the batch size is a normal result: take fewer and
 say so. Zero is also a result — write the report with an empty table rather
@@ -261,7 +264,7 @@ timing.
 gh issue view <n> --repo mento-protocol/monitoring-monorepo \
   --json comments \
   --jq '.comments[]
-        | select(.body | startswith("<!-- sweep-groomed:v1"))
+        | select(.body | startswith("<!-- sweep-groomed:"))
         | {login: .author.login, created: .createdAt}'
 
 repo=mento-protocol/monitoring-monorepo
@@ -278,6 +281,31 @@ and say so in the report. Ignoring costs at most 12 hours of veto on an issue
 the sweep did not groom itself; honouring an unverified marker costs the queue.
 The sweep's own marker never depends on the lookup, so the case the veto is for
 never turns on a failed API call.
+
+### Docs-catalog independence
+
+This test runs before the label test, on every pair, whatever labels the two
+candidates carry. A candidate carries the catalog when its work adds, moves, or
+removes a Markdown surface, changes any front matter of an existing one, or
+adds or removes an internal link, because the catalog lists broken internal
+links beside an entry per file. Only a body-prose edit that leaves the front
+matter and every link alone is exempt, and a body whose documentation effect
+cannot be read carries the catalog: nothing to compare is not evidence of no
+conflict. Two candidates that both carry it are never independent.
+
+[`context-standards.md`](../context-standards.md) requires that generated
+catalog to index every Markdown file, and `pnpm docs:index --check` fails while
+it is stale, so both workers regenerate `docs/README.md` and their PRs conflict
+on that one file even when they share no package and no other named path.
+Scoping the rule to `pkg:tooling` would miss the pair the label test cannot
+see: a `pkg:dashboard` issue adding a README beside a `pkg:indexer` issue
+adding one shares no label and no path, and still produces two PRs that
+regenerate one catalog.
+
+Do not restate which fields the catalog renders: `classifyDocumentation` and
+`catalogEntry` in `scripts/context/docs-index-helpers.mjs` decide that, they
+already read `canonical` and `doc_type` beyond the fields an earlier draft of
+this rule listed, and any list written here rots against them in silence.
 
 ### `pkg:tooling` independence
 
@@ -297,6 +325,10 @@ Two `pkg:tooling` candidates are independent when all three hold:
 - neither names a shared root file or a control root: `package.json`,
   `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `.trunk/**`, `.github/workflows/**`,
   `scripts/agent-quality-gate.sh`, or `scripts/gate/**`.
+
+A candidate that carries the docs catalog above brings `docs/README.md` into
+this comparison as well, so it also conflicts with a candidate that names that
+file outright.
 
 Normalize the mirrored skill trees before comparing, by path segments rather
 than by text: any path whose first two segments are `.claude/skills` is read
@@ -414,9 +446,43 @@ re-run selection after it.
 
 ### Candidates
 
-At most 10 a run, ordered by `rank-backlog` score, highest first, then by issue
-number, newest first. The outside-the-queue set carries no score, so it orders
-by age alone and sits behind every scored candidate. Two sets qualify:
+**Pin the tree before the walk.** Fetch `origin/main` and pin one OID for the
+whole pass, before any candidate is read, because the skip key below compares
+per-path digests at that OID and every later read in the pass must use the same
+tree. The pass runs long after Preflight — after the batch is claimed and every
+worker is spawned — so it pins its own OID rather than inheriting Preflight's,
+and the marker records the ref and OID it used. That record is what makes a
+verdict reproducible.
+
+```bash
+git fetch "$(git remote get-url --push origin)" main
+oid="$(git rev-parse FETCH_HEAD)"   # the commit this fetch just wrote
+git rev-parse "$oid:<path>"         # one blob or tree id; non-zero when absent
+```
+
+Fetch the validated push URL, not the remote name. Preflight verifies both
+effective `origin` URLs. A remote that carries a `pushurl` fetches from a
+different URL than it pushes to, so naming the validated push URL here binds
+this later tree read to the canonical repository the sweep publishes to.
+
+Pin `FETCH_HEAD`, not `origin/main`. Every fetch writes the commit it fetched
+there, while a fetch by URL updates no remote-tracking ref at all and a clone
+made with `--single-branch` on another branch has no `refs/remotes/origin/main`
+to read either, so `git rev-parse origin/main` fails after the batch is already
+claimed. The marker's `ref` still records `origin/main`: the remote and branch
+that was fetched.
+
+Address each path as `<oid>:<path>`, not with `git ls-tree`. A body may name a
+directory, with or without a trailing slash, and `git ls-tree "$oid" -- docs/notes/`
+lists that directory's children instead of returning its one tree id.
+`git rev-parse "$oid:<path>"` returns exactly one id for a file, for a directory,
+and for a directory written with a trailing slash, and exits non-zero when the
+path is absent — the case the marker's map omits.
+
+Order, then filter, then cap at 10. Ordering is by `rank-backlog` score,
+highest first, then by issue number, newest first. The outside-the-queue set
+carries no score, so it orders by age alone and sits behind every scored
+candidate. Two sets qualify:
 
 - `agent-ready` issues that lack exactly one `risk:*` or exactly one `pkg:*`
   label. Eligibility cannot admit one of these as written, whether or not this
@@ -435,33 +501,89 @@ by age alone and sits behind every scored candidate. Two sets qualify:
 never earn a `pkg:*` label, and ten of them would hold the cap every run and
 starve everything below.
 
-Every marker records the SHA-256 of the issue body the pass read and, beside it,
-which of the paths that body named existed in the checkout at that moment. Skip
-a candidate only when three things hold: the body digest still matches, that
-resolved path set still matches, and every label in the marker's `applied` list
-is on the issue.
+**The skip runs before the cap.** The cap bounds grooming attempts, not
+candidates examined. Capping first and skipping second gives the same ten
+unchanged high scorers every slot on every run, and no lower-ranked candidate is
+ever reached — the starvation the skip rule was written to prevent, moved one
+step up. So order the candidates, drop the bot records, then walk that order and
+test the skip key as you reach each one, stopping at the first 10 survivors. The
+test costs one comment read per candidate examined, so walk it lazily rather
+than pre-filtering the whole queue.
+
+That cost is bounded by the candidate set, not by the cap: a run in which every
+candidate skips reads every candidate's comments and grooms nothing. Record the
+number of candidates examined in the report beside the number groomed, so the
+read cost is measured rather than assumed. A fixed ceiling on candidates
+examined was rejected: the walk order is stable, so a hard stop at the same
+depth every run never reaches the tail of the queue, which is the starvation
+this ordering exists to remove.
+
+**The skip key has four parts**, read from the candidate's newest trusted
+`sweep-groomed:v2` marker. Skip only when all four hold:
+
+- the SHA-256 of the issue body still matches the marker's `body`;
+- the marker's `paths` map still matches, path for path and digest for digest,
+  resolved at this run's pinned `origin/main` OID;
+- every label in the marker's `applied` list is on the issue;
+- the issue's current `risk:*`, `pkg:*`, `kind:*`, and queue-state labels equal
+  the marker's `labels` snapshot plus its `applied` list.
+
+The fourth condition compares two sets that must cover the same label classes.
+The snapshot and this test both read `risk:*`, `pkg:*`, `kind:*`, and
+queue-state because those are every class the pass can write into `applied`. A
+class the pass writes but the snapshot omits would sit on the right side and
+never on the left, and the test would fail for every issue that carries one.
+Any future label class the pass writes joins both sides together.
 
 Each guards a different way the verdict can go stale. The body is what the pass
-reads. The resolved path set is the rest of it — a named path that was absent
-then and exists now changes the answer, and one that has since been deleted
-changes it too, so comparing the set catches both. The `applied` labels prove
-the previous run finished: a marker whose labels are missing records a write
-that failed after the comment landed, and skipping on the digest that failed run
+reads. The `paths` map is the rest of it — a named path that was absent then and
+exists now changes the answer, one since deleted changes it too, and one whose
+contents changed under a stable name changes it as well: a helper that becomes a
+production-data writer flips the Low-risk rule without touching the body or the
+path list. Comparing the map catches all three. The `applied` labels prove the
+previous run finished: a marker whose labels are missing records a write that
+failed after the comment landed, and skipping on the digest that failed run
 wrote would strand the issue permanently.
 
+The `labels` snapshot is what makes a human's correction reopen the candidate.
+The pass stops without writing on an issue carrying two `risk:*` labels and on a
+`risk:low` its verified paths contradict, and both stops write `applied: []`.
+Against an empty list the third condition succeeds vacuously, so a human who
+removes one of the two risk labels — the fix the stop was asking for — leaves
+the body and the path map unchanged and the issue skipped for ever. The snapshot
+is compared as a set against `labels` plus `applied`, because the pass's own
+write lands after the marker and must not invalidate it.
+
 Count every skip in the report, so a stuck issue is visible rather than silent.
+A candidate re-groomed because the key broke gets its reason named too: which
+path changed, which label a human moved, or that the marker was `v1`.
 
 Compare the body, not `updatedAt`: posting the marker updates the issue, so a
 timestamp test would compare the pass against its own write and never skip
 anything. The digest is the same primitive `pnpm issue:claim --body-sha256`
-already pins a sweep claim with. It also states the limit — a body edit reopens
-the candidate, and so does deleting the marker, but a verdict that would change
-only because the tree changed underneath it does not.
+already pins a sweep claim with. The limit is worth stating: only paths the body
+names are covered, so a verdict that would change because some file the body
+never mentions changed is not caught.
 
 ### What the pass applies
 
-Read the body, then read the paths it names in the checkout. Every label below
-comes from what the tree holds, not from what the body claims.
+Read the body, then read the paths it names against the OID pinned at the start
+of the pass. Every label below comes from what that tree holds, not from what
+the body claims.
+
+**The resolution basis is the shared ref, not the session checkout.** Read every
+path as `<oid>:<path>` against that one pinned OID. Preflight
+fetches `origin/main`
+and requires a clean worktree, but never requires the checkout to be _at_
+`origin/main`, so a sweep started from a clean feature branch would classify live
+issues against that branch's tree. A path that exists only on the branch produces
+a `pkg:*` the issue should not have, and one deleted on the branch produces the
+wrong risk verdict. The labels are repository-wide state while the checkout is
+session-local, and the pass never removes or downgrades a label, so a later
+correct run can add a label beside the wrong one but cannot retract it and the
+issue is left ambiguously routed and permanently sweep-ineligible. That rule
+stays; the resolution basis is the thing that moves. The fetch and the pin
+happen once, at the start of the pass, under Candidates above.
 
 **The pass never writes a label that leaves an issue sweep-eligible.** Work out
 the label set the write would produce; when that set satisfies the sweep
@@ -543,13 +665,20 @@ field, and it never touches the state label of an owned issue — one carrying
 One comment per groomed issue, opening with a machine-readable marker:
 
 ```text
-<!-- sweep-groomed:v1 {"sweep":"<sweep_id>","at":"<ISO-8601 UTC>","body":"<sha256>","paths":[...],"applied":[...],"proposed":[...]} -->
+<!-- sweep-groomed:v2 {"sweep":"<sweep_id>","at":"<ISO-8601 UTC>","ref":"origin/main","oid":"<40-hex>","body":"<sha256>","paths":{"<path>":"<blob or tree sha>"},"labels":[...],"applied":[...],"proposed":[...]} -->
 ```
 
-`body` is the SHA-256 of the issue body this pass read and `paths` the named
-paths that existed in the checkout when it read them; the next run skips the
-candidate only while both still match and its `applied` labels are present. `applied` lists the labels the pass writes
-immediately after posting this comment; the comment is written first, so the field names an intent that the
+`ref` and `oid` name the tree the paths were resolved against, so a later reader
+can tell what a verdict was based on and reproduce it. `body` is the SHA-256 of
+the issue body this pass read. `paths` maps each named path that resolved at
+that OID to the one blob or tree id `git rev-parse "<oid>:<path>"` returns; a
+path the body names and the
+tree does not hold is absent from the map. `labels` snapshots the issue's
+`risk:*`, `pkg:*`, `kind:*`, and queue-state labels as read, before this pass
+writes anything — every class the pass can write, so the skip key compares like
+with like. Together with `applied` those four fields are the skip key above.
+`applied` lists the labels the pass writes immediately after posting this
+comment; the comment is written first, so the field names an intent that the
 label call then carries out. `proposed` lists everything the pass judged right
 and will not write itself: a `risk:low` it is not allowed to apply, the state
 label the mutex owns, the `agent-ready` promotion only an operator can make,
@@ -560,6 +689,16 @@ two or contradicted by its own paths.
 is measured from GitHub's `createdAt` on the comment instead, and only on a
 comment from a trusted author, both settled under Eligibility above.
 
+**The version in the prefix is what retires an old contract.** `v2` added `ref`,
+`oid`, `labels`, and per-path digests, so the skip key matches the literal
+`sweep-groomed:v2` prefix and every `v1` marker is ignored by construction:
+issues groomed under `v1` re-groom once, on a tree the marker never named.
+The veto window is the exception and reads any `sweep-groomed:` version, because
+it asks whether a human has had a chance to see the labels and that question
+does not depend on the payload shape. Reading `v2` only there would un-veto
+every issue the last run groomed. The next contract change bumps to `v3` on the
+same terms.
+
 Under it, in prose: the labels applied, the paths checked, the Low-risk rule
 clause that decided the risk label, and — for an unlabeled issue — whether the
 body meets the agent-ready bar. The marker's timestamp is what the veto window
@@ -567,7 +706,7 @@ reads; the prose is what a human reads before promoting the issue.
 
 ### The veto window
 
-A candidate whose newest `sweep-groomed:v1` marker is younger than 12 hours is
+A candidate whose newest `sweep-groomed:` marker is younger than 12 hours is
 ineligible, and the eligibility step above enforces it. The window is a bounded
 chance for a human to disagree with an agent's label before that label picks
 work for another agent. Only a sweep writes this marker, so an issue a human
@@ -674,19 +813,30 @@ Two properties make the table worth reading:
   the ready queue, `--needs-grooming` takes it out of reach until a human
   settles something.
 
-The grooming section is its own table, `Issue | Labels applied | Proposed for a
-human | Rule basis | Veto ends`. `Proposed for a human` is the column an
-operator acts on: a `risk:low` the pass may not write, the state label the mutex
-owns, workboard enrollment, an `agent-ready` promotion the body already
-deserves. `Rule basis` names the Low-risk rule clause behind the risk verdict.
+The grooming section states two run-wide facts above its table: the
+`origin/main` OID every path was read against, the same value the marker
+carries, so a verdict in the report is reproducible from a named ref rather than
+from whatever tree the session happened to hold; and how many candidates the
+walk examined to reach the groomed set. Both are one value a run, so neither is
+a column.
+
+The table itself is `Issue | Labels applied | Proposed for a human | Rule basis
+| Veto ends`. `Proposed for a human` is the
+column an operator acts on: a `risk:low` the pass may not write, the state label
+the mutex owns, workboard enrollment, an `agent-ready` promotion the body already
+deserves. `Rule basis` names the Low-risk rule clause behind the risk verdict,
+and on a skipped or re-groomed row it carries the reason instead.
 `Veto ends` is the end of that issue's 12-hour window, and it says when the
 window closes rather than when the issue becomes selectable — a proposal nobody
 has applied, a `risk:medium`, or several `pkg:*` labels all keep it ineligible
 whatever the clock says. Name the remaining requirement beside the time whenever
 one applies. Zero groomed issues is a valid line and gets written rather than
 omitted — an empty candidate set and a pass that never ran read identically once
-the section is missing. Candidates skipped as unchanged since their last marker
-get a line too, so a permanently stuck issue is visible.
+the section is missing. Candidates skipped against their last marker get a row
+too, so a permanently stuck issue is visible, and so do candidates the key sent
+back for re-grooming. Both put their reason in `Rule basis`: for a skip, that
+the key held; for a re-groom, what broke it — the path whose digest moved, the
+label a human changed, or a `v1` marker.
 
 The report ends with one URL for each READY PR. A human can open each link and
 merge in the GitHub UI. Listing a link is not merge approval. The sweep never

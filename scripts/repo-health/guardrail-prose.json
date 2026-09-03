@@ -68,7 +68,7 @@
     "Bind `--repo` to the base repository — checkout inference can select the wrong same-number PR on fork PRs."
   ],
   ".agents/skills/backlog-sweep/SKILL.md": [
-    "git remote -v # origin fetch and push must serve mento-protocol/monitoring-monorepo",
+    "git remote -v # origin fetch and push must serve mento-protocol/monitoring-monorepo git status --porcelain # must print nothing git fetch origin main # only after both origin URLs pass",
     "Run dashboard coverage or scoped related tests, browser work, production builds, and size-limit work without another command-heavy check set."
   ],
   ".claude/skills/backlog-sweep/SKILL.md": [
