@@ -10,8 +10,10 @@
  * `scripts/` — and copied the rest. Both now read them from here.
  *
  * The local Sentry projection route also reads the canonical issue-state label
- * definitions. It uses the narrowed `agent-ready` definition before create and
- * the full set before closed repair. Callers own their markers, metadata
+ * definitions. Before create it ensures its own routing set — the narrowed
+ * `agent-ready` definition, the shared `risk:medium` definition, and two labels
+ * this module does not carry — and before a closed repair it ensures the full
+ * set. Callers own their markers, metadata
  * validation, and decision branches. This module owns the shared lifecycle
  * label definitions and the mechanisms that were byte-identical between the
  * documentation jobs.

@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 import {
   _private,
   SCRIPTS_EXEMPTIONS,
+  SOURCE_SCOPES,
   countLines,
   exemptionReason,
   formatIssue,
@@ -28,11 +29,21 @@ import {
 import {
   ISSUE_MARKER,
   actionableFileSizeRows,
+  actionableLabels,
+  packageLabelsForRows,
   planIssueSync,
+  riskLabelForIssue,
+  scopePackageLabel,
 } from "./file-size-watchlist-issue.mjs";
+// The consumer that reports incomplete grooming. Asserting through it, rather
+// than restating its rule here, is what pins the label set to the finding.
+import { agentReadyRoutingGaps } from "../pr/issue-board-state.mjs";
 
 const scriptPath = fileURLToPath(import.meta.url);
 const repoRoot = resolve(dirname(scriptPath), "../..");
+
+// `agentReadyRoutingGaps` reads `labels[].name`; the planner returns bare names.
+const asIssue = (labels) => ({ labels: labels.map((name) => ({ name })) });
 
 test("scopeForPath excludes generated files, non-Aegis tests, and dashboard types", () => {
   assert.equal(scopeForPath("indexer-envio/.envio/types.d.ts"), null);
@@ -204,7 +215,7 @@ test("actionable drift keeps cap status separate from raw growth", () => {
 
 test("issue sync creates, resolves, and force-publishes one marked issue", () => {
   const actionableRows = [
-    { path: "near.ts", status: "near-hard", rawDelta: 0 },
+    { path: "near.ts", package: "dashboard", status: "near-hard", rawDelta: 0 },
   ];
   const marked = {
     number: 44,
@@ -213,11 +224,20 @@ test("issue sync creates, resolves, and force-publishes one marked issue", () =>
     labels: [{ name: "agent-ready" }, { name: "custom" }],
   };
 
-  assert.equal(
-    planIssueSync({ issues: [], rows: actionableRows, publishReport: false })
-      .action,
-    "create",
-  );
+  const created = planIssueSync({
+    issues: [],
+    rows: actionableRows,
+    publishReport: false,
+  });
+  assert.equal(created.action, "create");
+  assert.deepEqual(created.labels, [
+    "file-size-watchlist",
+    "agent-ready",
+    "kind:refactor",
+    "priority:p2",
+    "pkg:dashboard",
+    "risk:medium",
+  ]);
 
   const resolved = planIssueSync({
     issues: [marked],
@@ -254,6 +274,162 @@ test("issue sync never overwrites a claimed packet and fails on duplicates", () 
       }),
     /expected at most one/,
   );
+});
+
+test("every watchlist scope maps to a pkg:* label", () => {
+  for (const scope of SOURCE_SCOPES) {
+    assert.match(scopePackageLabel(scope.label), /^pkg:/);
+  }
+  assert.throws(() => scopePackageLabel("terraform"), /has no pkg:\* label/);
+});
+
+test("actionable labels span every package the rows touch", () => {
+  const rows = [
+    {
+      path: "scripts/sentry/triage/sentry-triage-project.mjs",
+      package: "scripts",
+    },
+    { path: "ui-dashboard/src/app/page.tsx", package: "dashboard" },
+    { path: "aegis/src/server.ts", package: "aegis" },
+  ];
+  assert.deepEqual(packageLabelsForRows(rows), [
+    "pkg:aegis",
+    "pkg:dashboard",
+    "pkg:tooling",
+  ]);
+  assert.deepEqual(actionableLabels(rows), [
+    "file-size-watchlist",
+    "agent-ready",
+    "kind:refactor",
+    "priority:p2",
+    "pkg:aegis",
+    "pkg:dashboard",
+    "pkg:tooling",
+    "risk:medium",
+  ]);
+});
+
+test("the live scan never produces a sweep-claimable label set", () => {
+  const report = JSON.parse(
+    execFileSync(
+      process.execPath,
+      ["scripts/repo-health/file-size-watchlist.mjs", "--format", "json"],
+      { cwd: repoRoot, encoding: "utf8", maxBuffer: 5 * 1024 * 1024 },
+    ),
+  );
+  const actionable = actionableFileSizeRows(report.rows);
+  if (actionable.length === 0) {
+    // Drift cleared, which is the state the automation exists to reach. The
+    // filer opens nothing, so there is no label set to check; assert that
+    // instead of failing the suite for the healthy tree.
+    const plan = planIssueSync({
+      issues: [],
+      rows: report.rows,
+      publishReport: false,
+    });
+    assert.equal(plan.action, "noop");
+    return;
+  }
+  const labels = actionableLabels(actionable);
+  // The sweep predicate is `agent-ready` plus exactly one `risk:*` equal to
+  // `risk:low` plus exactly one `pkg:*` (`hasSweepRouting`,
+  // scripts/pr/issue-board-state.mjs). This job writes `agent-ready`, so the
+  // risk label is the only thing keeping its own issue out of the unattended
+  // sweep. docs/notes/backlog-sweep.md reserves that `risk:low` for a human.
+  assert.ok(labels.includes("agent-ready"));
+  assert.deepEqual(
+    labels.filter((label) => label.startsWith("risk:")),
+    ["risk:medium"],
+  );
+  assert.deepEqual(agentReadyRoutingGaps(asIssue(labels)), []);
+});
+
+test("a lone production-data writer still files at the risk floor", () => {
+  // sentry-triage-archive.mjs is a live actionable row and it archives the
+  // underlying Sentry issue under a write-scoped token. Any per-row risk rule
+  // that misses the low-risk rule's production-data clause reads this single
+  // scripts/ row as `risk:low` and hands the issue to the unattended sweep.
+  const rows = [
+    {
+      path: "scripts/sentry/triage/sentry-triage-archive.mjs",
+      package: "scripts",
+    },
+  ];
+  const labels = actionableLabels(rows);
+  assert.deepEqual(packageLabelsForRows(rows), ["pkg:tooling"]);
+  assert.equal(riskLabelForIssue([]), "risk:medium");
+  // The fixture, not the live scan, is what pins the contract: one package, one
+  // risk label, and never the `risk:low` that would complete the sweep
+  // predicate. This holds whether or not the tree has drift today.
+  assert.ok(labels.includes("agent-ready"));
+  assert.deepEqual(
+    labels.filter((label) => label.startsWith("risk:")),
+    ["risk:medium"],
+  );
+  assert.deepEqual(agentReadyRoutingGaps(asIssue(labels)), []);
+});
+
+test("an operator risk escalation survives the next upsert as the only risk label", () => {
+  const marked = {
+    number: 44,
+    state: "open",
+    body: ISSUE_MARKER,
+    labels: [
+      { name: "agent-ready" },
+      { name: "risk:high" },
+      { name: "pkg:alerts" },
+      { name: "file-size-watchlist" },
+    ],
+  };
+  const plan = planIssueSync({
+    issues: [marked],
+    rows: [
+      {
+        path: "ui-dashboard/src/app/page.tsx",
+        package: "dashboard",
+        status: "hard",
+        rawDelta: 0,
+      },
+    ],
+    publishReport: false,
+  });
+  assert.equal(plan.action, "upsert-open");
+  assert.deepEqual(
+    plan.labels.filter((label) => label.startsWith("risk:")),
+    ["risk:high"],
+    "the write must never leave two risk labels, and must never lower one",
+  );
+  // A package area this job did not apply only narrows eligibility, so it stays.
+  assert.ok(plan.labels.includes("pkg:alerts"));
+  assert.ok(plan.labels.includes("pkg:dashboard"));
+  assert.deepEqual(agentReadyRoutingGaps(asIssue(plan.labels)), []);
+});
+
+test("the risk floor holds and an unrankable risk label is repaired", () => {
+  assert.equal(riskLabelForIssue(["risk:low"]), "risk:medium");
+  assert.equal(riskLabelForIssue(["risk:medium"]), "risk:medium");
+  assert.equal(riskLabelForIssue(["risk:high"]), "risk:high");
+  assert.equal(riskLabelForIssue(["risk:unknown"]), "risk:medium");
+  assert.equal(riskLabelForIssue(["risk:low", "risk:high"]), "risk:high");
+});
+
+test("the resolved label set keeps managed routing labels off a closed report", () => {
+  const marked = {
+    number: 47,
+    state: "open",
+    body: ISSUE_MARKER,
+    labels: [
+      { name: "pkg:tooling" },
+      { name: "risk:medium" },
+      { name: "custom" },
+    ],
+  };
+  const resolved = planIssueSync({
+    issues: [marked],
+    rows: [],
+    publishReport: false,
+  });
+  assert.deepEqual(resolved.labels, ["custom", "file-size-watchlist"]);
 });
 
 const BIG_SOURCE = Array.from(

@@ -537,6 +537,12 @@ export const AGENT_MODULE_ARMS = [
         command: "pnpm issue:board:test",
         reason: "agent issue board helper changed",
       },
+      {
+        why: "file-size-watchlist.test.mjs asserts the labels the monthly filer writes through agentReadyRoutingGaps, the state module's own incomplete-grooming predicate. Without this arm a change to that predicate can invalidate the filer's contract and stay unrun until an unrelated watchlist edit.",
+        command: "node --test scripts/repo-health/file-size-watchlist.test.mjs",
+        reason:
+          "issue-board state predicate backs the file-size watchlist label contract",
+      },
     ],
   },
 ];

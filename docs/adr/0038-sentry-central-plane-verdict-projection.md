@@ -77,10 +77,13 @@ deterministic step.**
   job — the matrix jobs hosting the LLM agent never see it. For a `code-fix` /
   `config-fix` verdict whose destination is `external`, it files an issue in
   that repo. For `local-config`, it files a local work issue with
-  `agent-ready` using the ambient workflow token. Before a local create, the
-  route ensures only the canonical shared `agent-ready` definition. Before a
-  closed-match repair, it ensures all four canonical lifecycle label definitions
-  named by the edit. Neither path force-edits existing metadata. Both routes label the stub
+  `agent-ready`, `kind:bug`, `pkg:dashboard`, and `risk:medium` using the
+  ambient workflow token; `agent-ready` needs exactly one `risk:*` and at least
+  one `pkg:*` beside it, and the projected body names no verification command,
+  which holds the risk at medium. Before a local create, the route ensures every
+  one of those four definitions, because `gh issue create` fails on a label the
+  repository does not carry. Before a closed-match repair, it ensures all four
+  canonical lifecycle label definitions named by the edit. Neither path force-edits existing metadata. Both routes label the stub
   `sentry:projected`, comment the projected URL, and close the stub. A closed
   local match restores `agent-ready`, removes `agent-active`, `in-pr`, and
   `needs-grooming`, and then reopens. A failed repair stays retryable; an open
