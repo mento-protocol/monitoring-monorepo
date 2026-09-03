@@ -884,9 +884,11 @@ The full procedure is
    means a requested label is a state label or not a routing label; exit 4 means
    the resulting set would satisfy the sweep predicate and nothing was written;
    exit 5 means the write landed, left the issue eligible, and was removed
-   again. All three end with the label off the issue and the marker already
-   posted, so post one follow-up comment naming the label that did not land and
-   record it as proposed in the report. Never amend the marker's `applied`
+   again. All three end with the labels this call tried to add still off the
+   issue — a requested label already on the issue before this call is
+   untouched — and the marker already posted the full requested set, so post
+   one follow-up comment naming only the labels that did not land and record
+   those as proposed in the report. Never amend the marker's `applied`
    field: the skip key reads it. Exit 6 means the removal left the issue
    sweep-eligible, the mutex is held, and the message names the labels to remove
    by hand. Exit 7 means a concurrent write made the issue sweep-eligible, this

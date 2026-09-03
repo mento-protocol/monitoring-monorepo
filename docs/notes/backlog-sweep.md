@@ -698,13 +698,15 @@ Exit codes say what happened, and the pass records each against the issue:
 |     7 | A concurrent write left the issue sweep-eligible. This call did not cause it.         |
 | other | The outcome is unknown and the mutex may still be held.                               |
 
-Exit 3, 4, and 5 all end with the requested label off the issue, and the marker
-comment already lists that label in its `applied` field. Post one follow-up
-comment naming the label that did not land, the one the marker rule above
-already requires for a failed write, and record the label as proposed in the run
-report. Never amend
-the marker: the skip key reads `applied`, so a label left there that is not on
-the issue re-grooms the issue next run with no record of why.
+Exit 3, 4, and 5 all end with the labels this call tried to add still off the
+issue — a requested label that was already on the issue before this call is
+untouched and stays, exit code notwithstanding — and the marker comment already
+lists the full requested set in its `applied` field. Post one follow-up comment
+naming only the labels that did not land, the one the marker rule above already
+requires for a failed write, and record those labels as proposed in the run
+report. Never amend the marker: the skip key reads `applied`, so a label left
+there that is not on the issue re-grooms the issue next run with no record of
+why.
 
 Exit 6, exit 7, and any other nonzero exit go to the operator. Exit 6 names the
 labels to remove by hand and holds the per-issue mutex until an operator clears
