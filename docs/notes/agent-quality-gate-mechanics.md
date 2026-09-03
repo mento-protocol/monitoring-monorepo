@@ -22,9 +22,11 @@ Before opening or updating an agent-authored PR:
 ```bash
 pnpm agent:quality-gate          # inspect mapped commands and checklists
 pnpm agent:quality-gate --run    # execute the safe local mapped commands
-pnpm agent:autoreview            # required for a non-trivial completed batch
-pnpm agent:autoreview:test -- --jobs 1  # sequential full regression closeout for autoreview runtime changes
+pnpm agent:closeout-review       # required for a non-trivial completed batch
 ```
+
+The closeout review is owned by
+[`pr-operating-card.md`](pr-operating-card.md) step 4, not by this runbook.
 
 The local-only gate never deploys or applies Terraform. Run it explicitly;
 do not assume the pre-push hook exists.
@@ -39,11 +41,8 @@ The checked-in Claude permission grants approval-free execution only for
 `./scripts/agent-quality-gate.sh`. It does not grant the `pnpm` package alias
 because the active branch controls that alias before the gate can validate it.
 
-`pnpm agent:autoreview` reviews source only. `pnpm agent:autoreview:test` runs
-all families with at most three workers and bounded progress/timings, which the
-mapped gate preserves. `-- --jobs 1` changes only scheduling. CI uses that mode
-on `ubuntu-latest` for runtime or fixture changes; required `ci` demands success
-when selected.
+`pnpm agent:closeout-review` reviews source only, so the mapped gate still owns
+tests, browser checks, and generated-artifact checks.
 
 Background `--run` gates and `git push`: a 600s foreground kill writes no
 freshness stamp, so the next run cannot use `--skip-if-fresh`. Each run appends
@@ -184,6 +183,7 @@ edit limited to root tooling scripts such as `scripts.agent:quality-gate`,
 `scripts.agent:prewarm:test`, `scripts.agent:review-materiality`,
 `scripts.agent:review-materiality:test`, `scripts.agent:context-check`,
 `scripts.agent:context-budget`, `scripts.agent:context-budget:test`,
+`scripts.agent:closeout-review`, `scripts.agent:closeout-review:test`,
 `scripts.agent:autoreview`, `scripts.agent:autoreview:test`, `scripts.issue:board`,
 `scripts.issue:board:test`, `scripts.issue:claim`, `scripts.issue:review`,
 `scripts.issue:release`, every `scripts.sentry:*` entry (the runners and their
@@ -713,7 +713,11 @@ procedure below.
   The exact
   `sentry/broker/mapped-command-process-identity.mjs` bridge routes
   `pnpm sentry:broker:test`. It keeps the probe's local import on the same
-  canonical helper that the workflow stages.
+  canonical helper that the workflow stages. The exact
+  `pr/closeout-review{,.test}.mjs` pair routes
+  `node --test scripts/pr/closeout-review.test.mjs`; root `package.json`,
+  `check-agent-quality-gate-package-scripts.mjs`, and `gate/mapping/facts.mjs`
+  name both `agent:closeout-review` aliases.
 - **Gate runtime pins.** Before `cd`, `agent-quality-gate.sh` resolves
   `gate/run-handles.sh`, coordinator files,
   `gate/darwin-broker-launch-preflight.mjs`,
@@ -2341,7 +2345,57 @@ active control.
   validated test-control preflight establishes the worktree runtime capability
   receipt before the gate creates a parallel worker.
 - `AGENT_QUALITY_GATE_TEST_DRAIN_REFRESH_BARRIER` pauses once between a drain's
-  refreshed tag capture and its process census.
+  refreshed tag capture and its process census. "Once" does not by itself say
+  which drain: one runs after any mapped command with something to settle,
+  including a command that only saw a short-lived helper enter the durable
+  capture, so the first of them consumed the barrier and left a fixture waiting
+  at a rendezvous that had already happened. A fixture names the mapped command
+  it means to meet in a `.command` sibling of the barrier path, and the barrier
+  arms only there. The name is optional — an unnamed barrier keeps arming on the
+  first drain — but a name that was asked for and cannot be resolved fails the
+  drain closed rather than arming everywhere: unreadable, empty, dangling, or
+  not a regular file. Presence and validity are deliberately different tests —
+  presence does not follow a symlink, so a name pointing nowhere is still a name
+  that was asked for, while validity does, so a symlink to a regular file is a
+  valid name. Both copies of the selector, shell and Darwin, follow that rule. A name needs no trailing newline. The command
+  is named for the barrier at three shell sites, because a parallel command's
+  `run_with_timeout` runs inside the worker subshell while the parent reaps that
+  worker and runs the drain; naming it only in the child would make a parallel
+  rendezvous impossible and let a stale sequential name match a drain no fixture
+  asked for. The third is `teardown_active_timeouts`, which drains registered
+  workers on EXIT/INT/TERM after the reaping loop is gone, so it takes each name
+  from the `active_worker_mapped_commands` registry that aligns with the worker
+  identities. A cohort drain of several commands settles them at once and clears
+  the name instead: no single name describes it, and a named barrier must not
+  meet a drain it cannot identify. A cohort of one keeps its name — Darwin
+  teardown takes the cohort route even for a single command, so "cohort" there
+  does not imply "unidentifiable".
+
+  A fourth site is the Darwin census seam, `waitAtDarwinCensusTestBarrier` in
+  `scripts/gate/darwin-process-lineage.mjs`. It is not a redundant consumer: on
+  a Darwin lineage contract `drain_condemned_run_commands` returns at its
+  lineage arm before reaching the shell barrier, so the seam is the _only_
+  consumer on that path and does its own selection. The name reaches it as an
+  `--active-mapped-command` argument — an argument rather than an environment
+  variable, so the mapped-child environment policy stays untouched — and it
+  applies the same rules: unnamed arms on the first drain, a name arms only on
+  its own command, and an unresolvable name fails the drain closed.
+
+  Three helper routes settle a lineage and **all** must pass that argument:
+  `watch-settle`, which a mapped command takes when it completes normally;
+  `settle`, the recovery route; and `settle-cohort`, which Darwin teardown takes
+  on EXIT/INT/TERM. A cohort of one is one identifiable command and keeps its
+  name — the helper honours a name only when exactly one state settles, and the
+  shell teardown clears it only for a cohort of several, where no single name
+  describes the drain. Adding a fourth route without the argument would silently
+  strand a named rendezvous, so `darwin-process-lineage.test.mjs` asserts every
+  settlement call site carries it.
+
+  A fixture must also write `.release` on every terminal path, including its
+  cleanup trap: a barrier left unreleased parks the gate for the full 20-second
+  budget and then reports the barrier as the failure, burying the assertion that
+  actually failed.
+
 - `AGENT_QUALITY_GATE_TEST_PARALLEL_RELEASE_FAILURE_AT` accepts a positive
   integer and injects failure at that parallel lease-release attempt.
 - `AGENT_QUALITY_GATE_TEST_OWNER_WITNESS_BARRIER`,
@@ -2536,8 +2590,13 @@ workers. Browser tests and size-limit can rewrite `next-env.d.ts`. Use
 same-machine spare workers only for read-only work. Run concurrent validation
 outside the coordinator only on another machine. Run focused checks first, then
 let the gate own the mapped batch. For a non-trivial batch, freeze the card's
-scope baseline and run autoreview after the gate. After accepted fixes, rerun
-focused checks and autoreview.
+scope baseline and run the closeout review after the gate. After accepted
+fixes, rerun focused checks and the closeout. Card step 4 owns that flow.
+
+Superseded from here to the end of the autoreview material:
+[`pr-operating-card.md`](pr-operating-card.md) step 4 owns the closeout review.
+Everything below that describes `agent-autoreview` is machinery the removal PR
+retires — read it as history, not instruction.
 
 **Stage timing and capture deadlines.** The wrapper and helper append
 best-effort stage JSONL to `.tmp/agent-autoreview/durations.jsonl`; override
@@ -2746,6 +2805,10 @@ refetch, including a conflict-triggered base refresh, restarts this preflight an
 refreshes both pins before another adapter call.
 
 ### The two review axes
+
+Superseded: [`pr-operating-card.md`](pr-operating-card.md) step 4 owns the
+closeout review. The autoreview sections below describe machinery the removal
+PR retires; read them as history, not instruction.
 
 A conflict repair is reviewed against **two** axes, because either alone can miss a
 regression the other catches. Pin both inputs as immutable commit IDs before merging:
