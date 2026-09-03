@@ -69,8 +69,8 @@ reviews:
         Report an ordering or lifecycle finding when the trace shows a documented lifecycle invariant violation, such as a bypassed prerequisite, duplicate execution, deadlock, incorrect ownership, or missed settlement, or when focused coverage no longer reaches the changed path.
 
   # Generated, vendored, and machine-written trees. Reviewing them spends
-  # reviewed-file capacity (the Pro+ fair-usage ladder is finite; no usage-based
-  # add-on is enabled) on diffs no human authored.
+  # billable reviewed files (the usage-based add-on is enabled, so over-limit
+  # reviews bill 25¢ per reviewed file) on diffs no human authored.
   path_filters:
     - "!pnpm-lock.yaml"
     - "!**/pnpm-lock.yaml"
@@ -102,10 +102,24 @@ reviews:
     # Empty means the default branch flow only.
     base_branches: []
     drafts: false
-    auto_incremental_review: true
-    # Keep the vendor default of 5. A threshold of 2 paused 16 of the first 29
-    # PRs after rollout, including six PRs with only 2-4 total commits. Five
-    # avoids treating one normal fix round as an active-development burst while
-    # still bounding long agent commit sequences. `@coderabbitai review`
-    # requests one exact-head closeout review after a pause.
+    # Off since 2026-09-02 (ADR 0066). The usage-based add-on is enabled
+    # (Automatic mode, $500/month cap) and the cap was reached on 2026-09-02
+    # with 16 days left in the cycle. The 30-day team view read that day: 672
+    # review events, 365 billed, 3.9 review events per PR, ~5.5 billed files
+    # per billed push. CodeRabbit bills per push delta, so every agent fix
+    # round re-bills the same files. With this off, CodeRabbit should review a
+    # PR once when it opens, and the head-bound `@coderabbitai review` request
+    # in `docs/notes/pr-ready-state.md` buys the final head one more review.
+    # Observed on PR #2236, though: every push still started a run. Until
+    # that is explained, treat "no run on an intermediate push" as the intent
+    # rather than the measured behaviour; ADR 0066 holds the dated tally, the
+    # evidence, and the organization-level override that follows from it.
+    # Intermediate pushes lose CodeRabbit's review. Codex still reviews every
+    # push automatically; Claude is opt-in via `@claude review`, because
+    # `.github/workflows/claude.yml` triggers only on `opened` and
+    # `ready_for_review`. No required gate changes, because CodeRabbit's check
+    # was already advisory; ADR 0066 records the residual this does cost.
+    auto_incremental_review: false
+    # The vendor default of 5, kept. It now only matters if incremental
+    # reviews are re-enabled; the org-level global override pins it too.
     auto_pause_after_reviewed_commits: 5

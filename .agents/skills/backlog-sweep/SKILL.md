@@ -5,7 +5,7 @@ title: Backlog Sweep Skill
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-02
+last_verified: 2026-09-03
 doc_type: skill
 scope: repo-wide
 review_interval_days: 90
@@ -87,8 +87,14 @@ record that looks stale from outside is routinely a live holder inside a long
 browser suite.
 
 **State the usage reality before starting.** One shipped PR costs roughly 3% of
-the weekly usage window, and every push to it triggers another round of bot
-reviews whose findings then cost replies and often another push. Two issues is
+the weekly usage window, and every push to it triggers another Codex review,
+whose findings then cost replies and often another push. Claude is not a
+per-push cost: `.github/workflows/claude.yml` fires on `opened` and
+`ready_for_review` only, so a Claude re-review is opt-in via `@claude review`.
+CodeRabbit should not be a per-push cost either — it is configured to review
+the opening push and the closeout head only — but PR #2236 observed a run on
+every push, all refused by the spending cap, so budget for the attempt until
+ADR 0066's open question is settled. Two issues is
 the default because the cost is dominated by review rounds, not by the first
 implementation. **Refuse a batch size above 4.** Say that plainly and stop
 rather than clamping silently — an operator who asked for 6 needs to know they
@@ -603,7 +609,7 @@ changed.` Review the lifecycle and install scripts in the diff first, then
   `pnpm issue:review --pr <pr> --issue <n>`.
 - **The babysit:** sweep every feedback surface — top-level comments, review
   bodies, inline threads, annotations, failing logs. **Batch fixes into single
-  pushes**, because every push costs another bot review round. Reply before
+  pushes**, because every push costs another Codex review round. Reply before
   resolving, in the two canonical forms: `Fixed in <commit> — <what changed>`
   and `Won't fix: <technical reason why>`. Drive to READY on both projections,
   `pr:feedback-state` clean first, then `pr:ready-state`.
