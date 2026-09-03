@@ -21,10 +21,17 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { SESSION_TEXT_BUDGET_CHARS } from "./review-eval-stream.mjs";
+
 // Truncations, claim caps, and the line-proximity window are bench2 values.
 // Changing one changes the score, so they move only with `matcher_digest`.
 const MAX_SPLIT_REVIEW_CHARS = 40000;
-const MAX_JUDGE_REVIEW_CHARS = 30000;
+// The smaller of the two truncations, and the one capture is budgeted against:
+// `claudeStreamEnvelope()` keeps the final message plus whole earlier messages
+// up to this many characters, so the report a session ended on always survives
+// into both judge prompts. The constant is defined once, in the stream module,
+// because two copies drifting apart is what silently drops the report again.
+const MAX_JUDGE_REVIEW_CHARS = SESSION_TEXT_BUDGET_CHARS;
 const MAX_CLAIMS = 25;
 const MAX_CLAIM_CHARS = 600;
 const MAX_DETAIL_CHARS = 400;
@@ -61,8 +68,16 @@ export const CALIBRATION_VERDICTS = ["matched", "unmatched"];
 // `.tsx` truth defect was never offered to the judge. Every prefix pair is
 // listed longest first: `json` before `js`, `tsx` before `ts`, `tftest.hcl`
 // before `tf`.
+//
+// Longest-first is not enough on its own. An extension the list does not carry,
+// but one of these is a prefix of — `.json5`, `.tfvars`, `.jsx` — still matched
+// that prefix and dropped both the rest of the name and the line number, so a
+// review citing `config.json5:4` reached the judge as `config.json` with no
+// line, on a file the review never named. The boundary rejects a following word
+// character; a following dot stays legal, so a file name that ends a sentence,
+// and `peg.tftest.hcl`, both still match.
 const LOCATION_PATTERN =
-  /([\w./-]+\.(?:md|sh|mjs|json|js|tsx|ts|py|ya?ml|tftest\.hcl|tf|hcl|toml))(?::(\d+))?/g;
+  /([\w./-]+\.(?:md|sh|mjs|json|js|tsx|ts|py|ya?ml|tftest\.hcl|tf|hcl|toml))(?!\w)(?::(\d+))?/g;
 
 const MARKUP_PATTERN = /<[^>]+>|[*`]/g;
 const PLACEHOLDER_PATTERN = /\{\{([A-Z_]+)\}\}/g;
@@ -78,6 +93,11 @@ const scriptPath = fileURLToPath(import.meta.url);
 // `review-eval-result-shape.mjs`, timestamp validation lives in
 // `review-eval-ledger.mjs`, and the verdict rules live in
 // `review-eval-report.mjs`.
+//
+// `review-eval-stream.mjs` is hashed because it owns the capture rule: which
+// assistant messages of a session reach a judge at all, and the budget this
+// file truncates to. It has no imports of its own so the orchestrator can seal
+// it, which also means nothing else pulls it into this digest.
 //
 // The two fixture helpers are hashed for the same reason. `gridFixtures()`
 // chooses the matrix, `fixtureForPr()` selects the truth file and the recall
@@ -95,6 +115,7 @@ export const SCORING_MODULES = [
   "review-eval-run.mjs",
   "review-eval-run-plan.mjs",
   "review-eval-run-execution.mjs",
+  "review-eval-stream.mjs",
   "review-eval-run-cell.mjs",
   "review-eval-run-score.mjs",
   "review-eval-result-shape.mjs",

@@ -7,6 +7,15 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { defaultRunGit } from "./review-eval-fixtures.mjs";
+// The parser and the envelope live in a dependency-free module of their own:
+// the orchestrator's sealed source snapshot carries that file and the cell
+// writer loads its parser out of the snapshot, not out of the live checkout.
+import {
+  claudeStreamEnvelope,
+  parseClaudeStream,
+  SESSION_TEXT_BUDGET_CHARS,
+  sessionText,
+} from "./review-eval-stream.mjs";
 
 const CLAUDE_MAX_TURNS = 80;
 const CLAUDE_TOOLS = [
@@ -187,8 +196,8 @@ export function claudeArgv({
     // The stream, not the single-shot envelope. `--output-format json` reports
     // only the last assistant message in its `result` field, so a reviewer that
     // files its report, runs one more tool call and then posts a short addendum
-    // is scored on the addendum alone. `claudeStreamEnvelope()` below rebuilds
-    // the envelope the rest of the harness reads from the whole session.
+    // is scored on the addendum alone. `claudeStreamEnvelope()` rebuilds the
+    // envelope the rest of the harness reads from the session.
     // `--verbose` is what the CLI requires beside `stream-json` under `-p`.
     "--output-format",
     "stream-json",
@@ -209,117 +218,14 @@ export function claudeArgv({
   ];
 }
 
-/** The text blocks of one assistant message, in order. */
-function assistantText(message) {
-  const content = message?.content;
-  if (typeof content === "string") return content.trim();
-  if (!Array.isArray(content)) return "";
-  return content
-    .filter((block) => block?.type === "text" && typeof block.text === "string")
-    .map((block) => block.text)
-    .join("")
-    .trim();
-}
-
-/**
- * The assistant messages and the closing `result` event of one `stream-json`
- * session.
- *
- * Sub-agent messages carry a `parent_tool_use_id` and are left out. They are
- * the reviewer's internal delegation, not the report it filed, and folding them
- * into the transcript would put text no reader ever saw in front of the claim
- * extractor. A sub-agent's own `result` event carries the same field and is
- * left out for a stronger reason: it closes the delegation, not the session, so
- * taking it would hand every consumer a sub-agent's cost, turn count and error
- * bit — and, when the sub-agent ran last, its text as the session's answer.
- *
- * `chars` is the length of the stream this parse read. It is the one number
- * that says how close a session came to the caller's output ceiling, which
- * kills the process rather than truncating it.
- *
- * A line that opens like JSON and does not parse throws rather than being
- * skipped: truncated output must fail a cell, not be scored as a shorter
- * review. Lines that do not open like JSON are CLI chatter and are ignored.
- */
-export function parseClaudeStream(raw, { label = "claude" } = {}) {
-  const text = typeof raw === "string" ? raw : String(raw ?? "");
-  const messages = [];
-  let result = null;
-  for (const line of text.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed.startsWith("{")) continue;
-    let event;
-    try {
-      event = JSON.parse(trimmed);
-    } catch (error) {
-      throw new Error(
-        `${label} wrote a malformed stream event: ${error.message}`,
-        { cause: error },
-      );
-    }
-    if (!event || typeof event !== "object" || Array.isArray(event)) continue;
-    if ((event.parent_tool_use_id ?? null) !== null) continue;
-    if (event.type === "assistant") {
-      const message = assistantText(event.message);
-      if (message) messages.push(message);
-      continue;
-    }
-    if (event.type === "result") result = event;
-  }
-  if (!result) throw new Error(`${label} produced no result event`);
-  return { messages, result, chars: text.length };
-}
-
-function finiteNumber(value) {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-/**
- * One `--output-format json` envelope, rebuilt from the session stream.
- *
- * Every consumer of a contestant or judge call reads this shape, so the four
- * fields the CLI put in its envelope — `total_cost_usd`, `num_turns`,
- * `is_error`, `session_id` and `duration_ms` — carry over from the closing
- * `result` event unchanged, and `result` stays the field that holds the text.
- *
- * `resultText` decides which text that is. A contestant is scored on its whole
- * session (`"session"`): the report and every later message belong to the
- * review. A judge answers in its last message (`"final"`), and the judge
- * parsers slice one JSON object out of that text, so an earlier message's
- * stray brace would break the slice. `final_result` and `assistant_messages`
- * are new: they keep the discarded half and the message count visible for
- * evidence, so a cell can be told from a one-message cell after the fact.
- *
- * `stream_chars` is the size of the stream those fields were read from. The
- * caller kills a session that writes more than `EXEC_MAX_OUTPUT_CHARS`, so a
- * cell that scored oddly can be checked against the ceiling it ran under
- * instead of guessing whether it came close.
- */
-export function claudeStreamEnvelope(
-  raw,
-  { label = "claude", resultText = "session" } = {},
-) {
-  const { messages, result, chars } = parseClaudeStream(raw, { label });
-  const finalText =
-    typeof result.result === "string" && result.result.trim()
-      ? result.result
-      : (messages.at(-1) ?? "");
-  return {
-    result: resultText === "final" ? finalText : messages.join("\n\n"),
-    final_result: finalText,
-    assistant_messages: messages.length,
-    stream_chars: chars,
-    total_cost_usd: finiteNumber(result.total_cost_usd) ?? 0,
-    num_turns: Number.isInteger(result.num_turns) ? result.num_turns : null,
-    // A result event that does not say it succeeded is an error. The CLI always
-    // carries the field; a stream that lost it lost the one bit that separates
-    // a finished review from a truncated one.
-    is_error: result.is_error !== false,
-    session_id:
-      typeof result.session_id === "string" ? result.session_id : null,
-    duration_ms: finiteNumber(result.duration_ms),
-  };
-}
+// The stream parser and the session envelope are re-exported so every existing
+// importer of this module keeps its import path.
+export {
+  claudeStreamEnvelope,
+  parseClaudeStream,
+  sessionText,
+  SESSION_TEXT_BUDGET_CHARS,
+};
 
 export function claudeExec({
   prompt,
