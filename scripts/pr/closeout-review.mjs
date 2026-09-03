@@ -97,15 +97,32 @@ function fail(reason) {
   process.exit(2);
 }
 
-/** Run a command and capture its output. Never throws on a non-zero exit. */
-function run(command, args, cwd) {
+/**
+ * The environment `codex` gets: the allowlist above over the fixed scrub. Built
+ * once and used for every `codex` call, the version probe included, so no
+ * invocation of that executable ever sees the operator's whole shell.
+ */
+function codexEnv() {
+  const env = { ...ENV_FIXED };
+  for (const name of ENV_ALLOWLIST) {
+    if (process.env[name] !== undefined) env[name] = process.env[name];
+  }
+  return env;
+}
+
+/**
+ * Run a command and capture its output. Never throws on a non-zero exit.
+ * `env` defaults to the operator's environment plus the Git scrub, which is
+ * right for `git` and `gh`; `codex` is passed `codexEnv()` instead.
+ */
+function run(command, args, cwd, env) {
   const result = spawnSync(command, args, {
     cwd,
     encoding: "utf8",
     // A whole working-tree diff passes through here for the fingerprint below,
     // and the 1 MiB default would report a large one as a failed command.
     maxBuffer: 64 * 1024 * 1024,
-    env: { ...process.env, ...ENV_FIXED },
+    env: env ?? { ...process.env, ...ENV_FIXED },
   });
   return {
     ok: !result.error && result.status === 0,
@@ -336,12 +353,53 @@ function treeFingerprint(repoRoot) {
     .digest("hex");
 }
 
-/** Spawn codex in its own process group so a timeout can kill the whole tree. */
-function runCodex(repoRoot, base, reportPath, timeoutSeconds) {
-  const env = { ...ENV_FIXED };
-  for (const name of ENV_ALLOWLIST) {
-    if (process.env[name] !== undefined) env[name] = process.env[name];
+/**
+ * Locate `codex` on PATH before running it. A bare `spawn("codex")` resolves
+ * through PATH after the process has already been handed an environment, and
+ * under `pnpm run` the repository's own `node_modules/.bin` is the first entry
+ * on that PATH. A shim there would be the executable this tool trusts, so
+ * resolve the path first, refuse one inside the tree under review, and exec the
+ * absolute path from then on.
+ */
+function resolveCodex(repoRoot) {
+  // Both sides are resolved through symlinks before the comparison: a temporary
+  // or home directory is often itself a link, and `git rev-parse` already hands
+  // back the resolved form.
+  let root;
+  try {
+    root = fs.realpathSync(repoRoot);
+  } catch {
+    root = repoRoot;
   }
+  for (const entry of (process.env.PATH ?? "").split(path.delimiter)) {
+    if (!entry) continue;
+    const candidate = path.resolve(entry, "codex");
+    let directory;
+    try {
+      if (!fs.statSync(candidate).isFile()) continue;
+      fs.accessSync(candidate, fs.constants.X_OK);
+      directory = fs.realpathSync(path.dirname(candidate));
+    } catch {
+      continue;
+    }
+    // The directory, not the executable: a link inside the repository still
+    // lets the branch choose what runs, wherever it points.
+    if (directory === root || directory.startsWith(`${root}${path.sep}`)) {
+      fail(
+        `refusing the repository-controlled codex at ${candidate}; ` +
+          "the branch under review must not supply its own reviewer",
+      );
+    }
+    return candidate;
+  }
+  return fail(
+    "codex is not on PATH; see operating-card step 4 for the fallback",
+  );
+}
+
+/** Spawn codex in its own process group so a timeout can kill the whole tree. */
+function runCodex(repoRoot, codexBin, base, reportPath, timeoutSeconds) {
+  const env = codexEnv();
   const argv = [
     "exec",
     "review",
@@ -361,7 +419,7 @@ function runCodex(repoRoot, base, reportPath, timeoutSeconds) {
   const stderrFd = fs.openSync(`${reportPath}.stderr.log`, "w", 0o600);
   fs.fchmodSync(bodyFd, 0o600);
   fs.fchmodSync(stderrFd, 0o600);
-  const child = spawn("codex", argv, {
+  const child = spawn(codexBin, argv, {
     cwd: repoRoot,
     env,
     detached: true,
@@ -422,9 +480,10 @@ async function main() {
       "refusing to run inside an active Codex session: nested `codex exec` is unavailable",
     );
   }
-  const version = run("codex", ["--version"], repoRoot);
+  const codexBin = resolveCodex(repoRoot);
+  const version = run(codexBin, ["--version"], repoRoot, codexEnv());
   if (!version.ok) {
-    fail("codex is not on PATH; see operating-card step 4 for the fallback");
+    fail(`codex at ${codexBin} does not answer --version`);
   }
 
   const status = run("git", ["status", "--porcelain"], repoRoot);
@@ -454,16 +513,12 @@ async function main() {
 
   const result = await runCodex(
     repoRoot,
+    codexBin,
     base,
     reportPath,
     options.timeoutSeconds,
   );
   const body = fs.readFileSync(reportPath, "utf8");
-  const stderrTail = fs
-    .readFileSync(`${reportPath}.stderr.log`, "utf8")
-    .split("\n")
-    .slice(-20)
-    .join("\n");
 
   // codex re-reads the tree and re-resolves the base ref while it runs, so a
   // commit, an edit or a sibling fetch landing mid-run moves what the report
@@ -487,7 +542,12 @@ async function main() {
   } else if (result.timedOut) {
     reason = `codex timed out after ${options.timeoutSeconds}s; the partial report is kept`;
   } else if (result.code !== 0) {
-    reason = `codex exited ${result.code}\n${stderrTail}`;
+    // The transcript holds unscanned model output and quoted diff text. Name
+    // the owner-only file rather than copying its tail into a terminal or a CI
+    // log that keeps it.
+    reason =
+      `codex exited ${result.code}; its transcript is ` +
+      `${reportPath}.stderr.log`;
   } else if (body.trim() === "") {
     reason = "codex produced an empty report";
   } else if (targetChanged || baseMoved) {

@@ -446,7 +446,15 @@ test("a non-zero codex exit is a tool failure, not a finding", (t) => {
 
   assert.equal(run.status, 2);
   assert.match(run.stderr, /codex exited 7/);
-  assert.match(run.stderr, /boom/);
+  // The transcript is named, not quoted: its content is unscanned model output
+  // and quoted diff text, and this stderr reaches terminals and CI logs.
+  assert.match(run.stderr, new RegExp(`${run.reportPath}\\.stderr\\.log`));
+  assert.doesNotMatch(run.stderr, /boom/);
+  assert.match(
+    fs.readFileSync(`${run.reportPath}.stderr.log`, "utf8"),
+    /boom/,
+    "the transcript still holds what codex printed",
+  );
   assert.match(fs.readFileSync(run.reportPath, "utf8"), /^verdict: failed$/m);
 });
 
@@ -546,6 +554,54 @@ test("a missing codex CLI is refused with the fallback pointer", (t) => {
 
   assert.equal(run.status, 2);
   assert.match(run.stderr, /codex is not on PATH/);
+});
+
+test("a codex inside the tree under review is refused", (t) => {
+  const repo = makeRepo(t);
+  // Where `pnpm run` puts the repository's own bin directory: first on PATH.
+  const shimDir = path.join(repo.repo, "node_modules", ".bin");
+  fs.mkdirSync(shimDir, { recursive: true });
+  fakeCodex(shimDir, 'echo "clean"');
+
+  const run = runScript(
+    repo,
+    ["--base", "base", "--no-fetch"],
+    {},
+    `${shimDir}:${gitOnlyDir(repo.root)}`,
+  );
+
+  assert.equal(run.status, 2);
+  assert.match(run.stderr, /refusing the repository-controlled codex/);
+  assert.equal(run.reportPath, null);
+});
+
+test("the version probe runs under the same environment allowlist", (t) => {
+  const repo = makeRepo(t);
+  const envDump = path.join(repo.root, "version-env.txt");
+  // A fake that dumps its environment from the `--version` branch, which the
+  // shared helper answers before it can be observed.
+  const file = path.join(repo.bin, "codex");
+  fs.writeFileSync(
+    file,
+    [
+      "#!/bin/sh",
+      'if [ "$1" = "--version" ]; then',
+      `  env > ${JSON.stringify(envDump)}`,
+      '  echo "codex-cli 9.9.9-fake"',
+      "  exit 0",
+      "fi",
+      'echo "clean"',
+    ].join("\n") + "\n",
+  );
+  fs.chmodSync(file, 0o755);
+
+  const run = runScript(repo, ["--base", "base", "--no-fetch"]);
+
+  assert.equal(run.status, 0);
+  const dumped = fs.readFileSync(envDump, "utf8");
+  assert.doesNotMatch(dumped, /^GH_TOKEN=/m, "GH_TOKEN reached the probe");
+  assert.match(dumped, /^OPENAI_API_KEY=secret-openai-key$/m);
+  assert.match(dumped, /^GIT_CONFIG_GLOBAL=\/dev\/null$/m);
 });
 
 test("an unknown argument is refused with the usage line", (t) => {
