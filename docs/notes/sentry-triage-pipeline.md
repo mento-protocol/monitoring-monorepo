@@ -100,7 +100,7 @@ Adding a project means adding it to the allowlist, not only to Sentry.
 | Verdict              | `analytics-mento-org` (local)                                                                                                                                                                                                                     | Every other project (external)                        |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
 | `code-fix`           | `fix_scope: mechanical` → **autofix-eligible**, closed ledger entry — the only path that writes code. `fix_scope: architectural` → **stays OPEN** under `sentry:fix-scope-architectural` (human design work, excluded from autofix at query time) | Projects an issue into the owning repo. Never autofix |
-| `config-fix`         | Projects a local work issue with `agent-ready`; no autofix                                                                                                                                                                                        | Projects an issue into the owning repo                |
+| `config-fix`         | Projects a local work issue with `agent-ready`, `kind:bug`, `pkg:dashboard`, and `risk:medium`; no autofix                                                                                                                                        | Projects an issue into the owning repo                |
 | `upstream-transient` | Closes. Nothing downstream                                                                                                                                                                                                                        | Same                                                  |
 | `needs-human`        | Stays open with a decision-ready brief                                                                                                                                                                                                            | Same                                                  |
 
@@ -942,7 +942,7 @@ the label and transition below:
 | `code-fix` (mechanical/external) | `sentry:verdict-code-fix`                                    | Close as completed                | Project to an allowlisted external repo, or leave a visible projection-skipped note; eligible local mechanical issues may later enter autofix |
 | `code-fix` (local architectural) | `sentry:verdict-code-fix` + `sentry:fix-scope-architectural` | **Keep open** (human design work) | Excluded from autofix at query time; re-triage to clear (#1812)                                                                               |
 | `config-fix` (external)          | `sentry:verdict-config-fix`                                  | Close as completed                | Project to an allowlisted external repo, or leave a visible projection-skipped note                                                           |
-| `config-fix` (local)             | `sentry:verdict-config-fix`                                  | Close after projection            | Create or reuse a local work issue with `agent-ready`; no projection PAT required                                                             |
+| `config-fix` (local)             | `sentry:verdict-config-fix`                                  | Close after projection            | Create or reuse a local work issue with `agent-ready`, `kind:bug`, `pkg:dashboard`, and `risk:medium`; no projection PAT required             |
 | `upstream-transient`             | `sentry:verdict-upstream`                                    | Close as completed                | None                                                                                                                                          |
 | `needs-human`                    | `sentry:verdict-needs-human`                                 | Keep open                         | Human answers the recorded question and decides the next action                                                                               |
 
@@ -1041,11 +1041,15 @@ reuse and must be treated as a migration. A local config route uses the
 ambient workflow token. It only matches local issues whose `gh issue list`
 author is `app/github-actions`, while marker comments use the trusted
 `github-actions` or `github-actions[bot]` comment fence. Before it creates a
-local issue, it ensures only the canonical shared `agent-ready` definition.
+local issue, it ensures every routing label definition it applies:
+`agent-ready`, `kind:bug`, `pkg:dashboard`, and `risk:medium`.
 Before it repairs a closed match, it ensures all four canonical lifecycle label
 definitions named by the edit. Neither path force-edits existing metadata. It
-creates a new issue with `agent-ready`. For a closed match, it restores that
-label and removes
+creates a new issue with that routing set: `agent-ready` needs exactly one
+`risk:*` and at least one `pkg:*` (docs/notes/agent-issue-workflow.md), the
+dashboard is the only local project's package, and the projected body names no
+verification command, which keeps the risk at medium. For a closed match, it
+restores `agent-ready` and removes
 `agent-active`, `in-pr`, and `needs-grooming` before reopening it, so a failed
 repair stays retryable. It leaves an open match's lifecycle unchanged. On
 `main`, an absent `SENTRY_PROJECTION_TOKEN` makes only external projection a

@@ -51,7 +51,8 @@ export function exemptionReason(path) {
   return null;
 }
 
-const SOURCE_SCOPES = [
+// Exported so the issue filer's pkg:* map can be pinned against the scope list.
+export const SOURCE_SCOPES = [
   {
     label: "dashboard",
     prefix: "ui-dashboard/src/",

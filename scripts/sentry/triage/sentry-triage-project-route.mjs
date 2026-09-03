@@ -21,6 +21,52 @@ import {
 
 export const AGENT_READY_LABEL = AGENT_READY_LABEL_DEFINITION.name;
 
+/**
+ * The routing labels a LOCAL projected work issue is created with.
+ * `agent-ready` alone made every projection read as incompletely groomed:
+ * docs/notes/agent-issue-workflow.md requires exactly one `risk:*` and at least
+ * one `pkg:*` beside it, and `pnpm issue:board sync` reports the gap.
+ *
+ * - `pkg:dashboard`: the local route is reached only when the verdict names
+ *   THIS repo, and `analytics-mento-org` — `ui-dashboard/` — is the only Sentry
+ *   project whose source lives here (docs/notes/sentry-triage-pipeline.md), so
+ *   the dashboard is the owning package the routing already resolved.
+ * - `kind:bug`: the projection exists because a production error fired. A
+ *   `config-fix` verdict says where the fix goes, not that the error was
+ *   intended.
+ * - `risk:medium`: the low-risk rule needs the body to name a verification
+ *   path, and the projected body renders verdict fields and links only. Adding
+ *   a command the pipeline cannot derive would invent an untrusted fact, so the
+ *   honest floor is medium.
+ *
+ * Definitions, not names, because the ensure below creates a missing label from
+ * the same shared shape it applies. Each color and description copies the live
+ * repository label, so a create lands identical metadata; an existing label is
+ * never edited.
+ */
+export const LOCAL_PROJECTION_LABEL_DEFINITIONS = [
+  AGENT_READY_LABEL_DEFINITION,
+  {
+    name: "kind:bug",
+    color: "d73a4a",
+    description: "Bug fix work item",
+  },
+  {
+    name: "pkg:dashboard",
+    color: "1d76db",
+    description: "Dashboard package or UI workflow",
+  },
+  {
+    name: "risk:medium",
+    color: "fbca04",
+    description: "Medium-risk change requiring focused verification",
+  },
+];
+
+export const LOCAL_PROJECTION_LABELS = LOCAL_PROJECTION_LABEL_DEFINITIONS.map(
+  (definition) => definition.name,
+);
+
 // `projectable` remains the external-write capability. This closed routing
 // enum adds one exact local destination without widening that capability.
 export const PROJECTION_DESTINATIONS = {
@@ -192,22 +238,23 @@ const REPROJECTION_REOPEN_COMMENT =
   "Reopened by the Mento Sentry triage pipeline: the underlying Sentry issue " +
   "regressed and was re-triaged as actionable.";
 
-// Local create consumes only the agent-ready lifecycle label. It creates a
-// missing label from the shared canonical definition and never force-edits
-// existing shared metadata. The ensure is best-effort. The issue mutation
-// remains authoritative and fails loudly if the label is still absent.
-export async function ensureAgentReadyLabel(owningRun, owningRepo) {
+// Local create consumes the routing label set above. It creates a missing label
+// from the shared canonical definition and never force-edits existing shared
+// metadata. The ensure is best-effort. The issue mutation remains authoritative
+// and fails loudly if a label is still absent, which is why the ensure covers
+// every label the create passes, not only `agent-ready`.
+export async function ensureLocalProjectionLabels(owningRun, owningRepo) {
   try {
     await ensureLabelsExist(
       { repo: owningRepo },
       {
         runner: owningRun,
-        definitions: [AGENT_READY_LABEL_DEFINITION],
+        definitions: LOCAL_PROJECTION_LABEL_DEFINITIONS,
       },
     );
   } catch (error) {
     process.stderr.write(
-      `warning: could not ensure label ${AGENT_READY_LABEL}: ${error.message}\n`,
+      `warning: could not ensure local projection labels (${LOCAL_PROJECTION_LABELS.join(", ")}): ${error.message}\n`,
     );
   }
 }
