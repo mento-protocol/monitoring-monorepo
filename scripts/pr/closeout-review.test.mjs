@@ -812,3 +812,100 @@ test("an --out symlink is refused before anything is written", (t) => {
   assert.match(run.stderr, /symbolic link|not ignored by Git/);
   assert.equal(fs.existsSync(target), false);
 });
+
+test("a codex symlinked into the tree under review is refused", (t) => {
+  const repo = makeRepo(t);
+  // The link sits outside the repository and points back into it, so only the
+  // resolved target says the branch supplies its own reviewer.
+  const inTree = path.join(repo.repo, "tools");
+  fs.mkdirSync(inTree, { recursive: true });
+  fakeCodex(inTree, 'echo "clean"');
+  const linkDir = path.join(repo.root, "link-bin");
+  fs.mkdirSync(linkDir, { recursive: true });
+  fs.symlinkSync(path.join(inTree, "codex"), path.join(linkDir, "codex"));
+
+  const run = runScript(
+    repo,
+    ["--base", "base", "--no-fetch"],
+    {},
+    `${linkDir}:${gitOnlyDir(repo.root)}`,
+  );
+
+  assert.equal(run.status, 2);
+  assert.match(run.stderr, /refusing the repository-controlled codex/);
+  assert.equal(run.reportPath, null);
+});
+
+test("environment-injected Git configuration does not reach the fingerprint", (t) => {
+  const repo = makeRepo(t);
+  fakeCodex(repo.bin, 'echo "clean"');
+  // A dirty tracked file, so the diff behind the fingerprint has output the
+  // injected `diff.noprefix` would reshape.
+  fs.writeFileSync(
+    path.join(repo.repo, "math.js"),
+    "export const sum = () => 2;\n",
+  );
+
+  const plain = runScript(repo, ["--base", "base", "--no-fetch"]);
+  const injected = runScript(repo, ["--base", "base", "--no-fetch"], {
+    GIT_CONFIG_COUNT: "1",
+    GIT_CONFIG_KEY_0: "diff.noprefix",
+    GIT_CONFIG_VALUE_0: "true",
+  });
+
+  assert.equal(plain.status, 0);
+  assert.equal(injected.status, 0);
+  const fingerprint = (run) =>
+    fs
+      .readFileSync(run.reportPath, "utf8")
+      .match(/^target_fingerprint: (\S+)$/m)[1];
+  assert.equal(
+    fingerprint(injected),
+    fingerprint(plain),
+    "injected Git configuration reshaped the fingerprint",
+  );
+});
+
+test("a HEAD that moves during base resolution is a stop", (t) => {
+  const repo = makeRepo(t);
+  fakeCodex(repo.bin, 'echo "clean"');
+  fakeGh(repo.bin, { defaultBranch: "trunk", pulls: [] });
+  addOrigin(repo.repo, "trunk");
+  // `gh` runs after HEAD is read and before the fingerprint is taken, so a
+  // commit landing here sits inside both fingerprints while `head_sha` still
+  // names the commit codex never saw. The fingerprints agree and only the
+  // saved HEAD differs, which is the case the fingerprint pair cannot see.
+  const ghPath = path.join(repo.bin, "gh");
+  const marker = path.join(repo.root, "committed");
+  const ghScript = fs.readFileSync(ghPath, "utf8").split("\n");
+  // Ahead of the query answers, because each branch exits before the end of
+  // the file. The marker keeps the second `gh` call from re-running the block:
+  // a second `git commit` with nothing staged writes to the stdout the script
+  // under test parses as JSON.
+  ghScript.splice(
+    1,
+    0,
+    [
+      `if [ ! -e ${JSON.stringify(marker)} ]; then`,
+      `  : > ${JSON.stringify(marker)}`,
+      `  ( cd ${JSON.stringify(repo.repo)} &&`,
+      "    echo 'export const product = () => 6;' > product.js &&",
+      "    git add -A && git commit --quiet -m mid-run ) >/dev/null 2>&1",
+      "fi",
+    ].join("\n"),
+  );
+  fs.writeFileSync(ghPath, ghScript.join("\n"));
+
+  const run = runScript(repo, ["--no-fetch"]);
+
+  assert.equal(run.status, 2);
+  assert.match(run.stderr, /the review target moved while codex read it/);
+  const report = fs.readFileSync(run.reportPath, "utf8");
+  assert.match(report, /^target_moved: yes$/m);
+  // The header names the commit the run started on and the report names the
+  // one it ended on. Without the saved-HEAD check this run reads as clean.
+  const headSha = report.match(/^head_sha: ([0-9a-f]{40})$/m)[1];
+  const atFinish = report.match(/^head_sha_at_finish: ([0-9a-f]{40})$/m)[1];
+  assert.notEqual(headSha, atFinish);
+  assert.equal(atFinish, git(repo.repo, "rev-parse", "HEAD"));
+});

@@ -754,8 +754,10 @@ review adapter to that pairing found anything the pairing missed. Over PRs
 scored 14 against 14 and 13 against 13 of 22 known defects, and 5 against 5 and
 4 against 4 of the P1 subset. The adapter's own pass returned 1, 0 and 1
 findings, none of them new; on PR 1995 it reported the patch correct while five
-known defects went unfound. Issue 2239 removed that adapter on this evidence:
-the two-model operating point above is what carries the recall.
+known defects went unfound. On this evidence issue 2239 drops that adapter from
+the operating flow: the two-model operating point above is what carries the
+recall. The adapter and its runtime are still in the tree at this commit; a
+later change in that issue's stack deletes them.
 
 ## What this evaluation cannot tell you
 

@@ -27,10 +27,28 @@
  * leaves the partial text instead of an empty file. The header block is
  * prepended once the run ends and the outcome is known.
  */
-import { spawn, spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+
+import {
+  checkOutPath,
+  codexEnv,
+  discoverRoot,
+  fail,
+  realOrSelf,
+  resolveCodex,
+  run,
+  sanitizedPath,
+  setSafePath,
+} from "./closeout-review-exec.mjs";
+import {
+  mergeBase,
+  resolveBase,
+  shortstat,
+  treeFingerprint,
+  verifyBase,
+} from "./closeout-review-git.mjs";
 
 const MODEL = "gpt-5.6-sol";
 const EFFORT = "high";
@@ -42,184 +60,6 @@ const SANDBOX = "read-only";
 const FINDINGS_HEADING = /^(?:Full review comments|Review comments?):\s*$/m;
 const FINDING_BULLET = /^- \[P\d+\] /m;
 const DEFAULT_TIMEOUT_SECONDS = 3600;
-
-/**
- * Environment for `codex`, built by allowlist rather than inherited: the
- * operator shell holds GitHub, cloud and provider credentials the reviewing
- * model has no use for. The fixed values below scrub the operator's global Git
- * configuration, so `codex` sees a plain `git diff` rather than a
- * difftastic-rendered one.
- */
-const ENV_ALLOWLIST = [
-  "HOME",
-  "PATH",
-  "TMPDIR",
-  "USER",
-  "SHELL",
-  "TERM",
-  "LANG",
-  "LC_ALL",
-  "LC_CTYPE",
-  "TZ",
-  "HTTP_PROXY",
-  "HTTPS_PROXY",
-  "NO_PROXY",
-  "http_proxy",
-  "https_proxy",
-  "no_proxy",
-  "SSL_CERT_FILE",
-  "SSL_CERT_DIR",
-  "XDG_CONFIG_HOME",
-  "XDG_CACHE_HOME",
-  "OPENAI_API_KEY",
-  "CODEX_API_KEY",
-  "OPENAI_BASE_URL",
-  "OPENAI_ORGANIZATION",
-  "OPENAI_PROJECT",
-  "AZURE_OPENAI_API_KEY",
-  "AZURE_OPENAI_ENDPOINT",
-  "CODEX_HOME",
-];
-
-const ENV_FIXED = {
-  GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_SYSTEM: "/dev/null",
-  GIT_CONFIG_NOSYSTEM: "1",
-  GIT_EXTERNAL_DIFF: "",
-  GIT_PAGER: "cat",
-  PAGER: "cat",
-  GIT_TERMINAL_PROMPT: "0",
-};
-
-/** Exit 2 with a one-line reason. Every preflight failure lands here. */
-function fail(reason) {
-  process.stderr.write(`closeout-review: ${reason}\n`);
-  process.exit(2);
-}
-
-/**
- * The PATH every subprocess gets, with directories the branch under review
- * controls removed. Under `pnpm run` the repository's own `node_modules/.bin`
- * is the first entry on PATH, so a dependency shipping a `git` or `gh` shim
- * would otherwise decide the base, the diff and the fingerprint this tool
- * reports — and would see the operator's environment while doing it. Set once
- * the repository root is known; `resolveCodex` refuses such an entry outright
- * rather than skipping past it, because a silently different reviewer is worse
- * than a stop.
- */
-let SAFE_PATH = null;
-
-/** A path with its links resolved, or the path itself when that fails. */
-function realOrSelf(target) {
-  try {
-    return fs.realpathSync(target);
-  } catch {
-    return target;
-  }
-}
-
-/**
- * The repository root, found on the filesystem rather than by running a
- * program. Nothing may execute off the inherited PATH before it is sanitized:
- * under `pnpm run` the repository's own `node_modules/.bin` comes first, and a
- * shim there would otherwise receive the operator's whole environment on the
- * very first call. Walk up from the working directory to the nearest `.git`
- * instead — a directory in a normal clone, a file in a worktree or submodule.
- */
-function discoverRoot() {
-  let directory = realOrSelf(process.cwd());
-  for (;;) {
-    if (fs.existsSync(path.join(directory, ".git"))) return directory;
-    const parent = path.dirname(directory);
-    if (parent === directory) fail("not inside a Git repository");
-    directory = parent;
-  }
-}
-
-function sanitizedPath(root) {
-  const kept = [];
-  for (const entry of (process.env.PATH ?? "").split(path.delimiter)) {
-    if (!entry) continue;
-    let resolved;
-    try {
-      resolved = fs.realpathSync(path.resolve(entry));
-    } catch {
-      resolved = path.resolve(entry);
-    }
-    if (resolved === root || resolved.startsWith(`${root}${path.sep}`)) {
-      continue;
-    }
-    kept.push(entry);
-  }
-  return kept.join(path.delimiter);
-}
-
-/**
- * The environment `codex` gets: the allowlist above over the fixed scrub. Built
- * once and used for every `codex` call, the version probe included, so no
- * invocation of that executable ever sees the operator's whole shell.
- */
-function codexEnv() {
-  const env = { ...ENV_FIXED };
-  for (const name of ENV_ALLOWLIST) {
-    if (process.env[name] !== undefined) env[name] = process.env[name];
-  }
-  if (SAFE_PATH !== null) env.PATH = SAFE_PATH;
-  return env;
-}
-
-/**
- * Variables that redirect what Git and `gh` read and write. `codex` runs
- * under an allowlist that omits them, so leaving them in this process's own
- * Git environment would let the header and the fingerprint describe a
- * different index or object store from the one the reviewer sees.
- */
-const GIT_AMBIENT = [
-  "GIT_DIR",
-  "GIT_WORK_TREE",
-  "GIT_INDEX_FILE",
-  "GIT_COMMON_DIR",
-  "GIT_NAMESPACE",
-  "GIT_OBJECT_DIRECTORY",
-  "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-  "GIT_CEILING_DIRECTORIES",
-  // `gh` reads these to address a repository other than the checkout, which
-  // would make the base come from somewhere the branch was never on.
-  "GH_REPO",
-  "GH_HOST",
-];
-
-/** The environment local `git` and `gh` calls run under. */
-function localGitEnv() {
-  const env = { ...process.env, ...ENV_FIXED };
-  for (const name of GIT_AMBIENT) delete env[name];
-  if (SAFE_PATH !== null) env.PATH = SAFE_PATH;
-  return env;
-}
-
-/**
- * Run a command and capture its output. Never throws on a non-zero exit.
- * `env` defaults to the operator's environment plus the Git scrub, which is
- * right for `git` and `gh`; `codex` is passed `codexEnv()` instead.
- */
-function run(command, args, cwd, env) {
-  const result = spawnSync(command, args, {
-    cwd,
-    encoding: "utf8",
-    // A whole working-tree diff passes through here for the fingerprint below,
-    // and the 1 MiB default would report a large one as a failed command.
-    maxBuffer: 64 * 1024 * 1024,
-    env: env ?? localGitEnv(),
-  });
-  return {
-    ok: !result.error && result.status === 0,
-    // The trimmed form is what every caller reads; `raw` is for the target
-    // fingerprint, where trailing whitespace is part of what codex sees.
-    raw: result.stdout ?? "",
-    stdout: (result.stdout ?? "").trim(),
-    stderr: (result.stderr ?? "").trim(),
-  };
-}
 
 function parseArgs(argv) {
   const options = {
@@ -256,379 +96,8 @@ function parseArgs(argv) {
   return options;
 }
 
-/**
- * `owner/name` for a remote URL, or null when the URL does not name a
- * repository on `github.com`. The host is part of the identity: a mirror at
- * `https://mirror.example/<owner>/<name>.git` carries the same last two path
- * segments as the GitHub repository `gh` resolved, and accepting it would let
- * a stale or third-party copy supply the base the review diffs against.
- */
-function repoFromRemoteUrl(url) {
-  const scp = url.match(/^(?:[^@/]+@)?([^:/]+):(.+)$/);
-  let host;
-  let repoPath;
-  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(url)) {
-    let parsed;
-    try {
-      parsed = new URL(url);
-    } catch {
-      return null;
-    }
-    host = parsed.hostname;
-    repoPath = parsed.pathname;
-  } else if (scp) {
-    host = scp[1];
-    repoPath = scp[2];
-  } else {
-    return null;
-  }
-  if (host.toLowerCase() !== "github.com") return null;
-  const match = repoPath.match(/^\/?([^/]+)\/([^/]+?)(?:\.git)?\/?$/);
-  return match ? `${match[1]}/${match[2]}` : null;
-}
-
-/**
- * The one configured remote serving `repo`. More than one is a stop. Only the
- * `(fetch)` URL counts: a remote can carry a separate push URL, and the fetch
- * side is the one the base is read through.
- */
-function remoteForRepo(repoRoot, repo) {
-  const remotes = run("git", ["remote", "-v"], repoRoot);
-  if (!remotes.ok) fail("cannot read the configured remotes");
-  const names = new Set();
-  for (const line of remotes.stdout.split("\n")) {
-    const parsed = line.match(/^(\S+)\s+(\S+)\s+\((fetch|push)\)$/);
-    if (!parsed || parsed[3] !== "fetch") continue;
-    const [, name, url] = parsed;
-    if (repoFromRemoteUrl(url)?.toLowerCase() === repo.toLowerCase()) {
-      names.add(name);
-    }
-  }
-  if (names.size !== 1) {
-    fail(
-      `cannot resolve base: ${names.size} remotes serve ${repo}; pass --base`,
-    );
-  }
-  return [...names][0];
-}
-
-/**
- * Mirror operating-card step 5: resolve the base repository from evidence, then
- * the remote serving it, then this branch's open PR on that repository. A
- * failed query is never read as "no PR"; it is a stop.
- */
-function resolveBase(repoRoot) {
-  const view = run(
-    "gh",
-    ["repo", "view", "--json", "nameWithOwner,parent,defaultBranchRef"],
-    repoRoot,
-  );
-  if (!view.ok) fail("cannot resolve base: gh repo view failed; pass --base");
-  let repoInfo;
-  try {
-    repoInfo = JSON.parse(view.stdout);
-  } catch {
-    fail("cannot resolve base: gh repo view returned no JSON; pass --base");
-  }
-  const currentRepo = repoInfo.nameWithOwner;
-  const baseRepo = repoInfo.parent?.nameWithOwner ?? currentRepo;
-  if (!currentRepo || !baseRepo) {
-    fail("cannot resolve base: gh named no repository; pass --base");
-  }
-  const baseRemote = remoteForRepo(repoRoot, baseRepo);
-
-  const branch = run("git", ["rev-parse", "--abbrev-ref", "HEAD"], repoRoot);
-  if (!branch.ok || branch.stdout === "HEAD") {
-    fail("cannot resolve base: HEAD is detached; pass --base");
-  }
-  const list = run(
-    "gh",
-    [
-      "pr",
-      "list",
-      "--repo",
-      baseRepo,
-      "--head",
-      branch.stdout,
-      "--state",
-      "open",
-      "--limit",
-      // `gh pr list` pages at 30 by default. A branch name shared across forks
-      // could push this repository's own PR off that page and read as "no PR",
-      // so ask for more than any real branch attracts and refuse a full page.
-      "100",
-      "--json",
-      "baseRefName,headRepositoryOwner",
-    ],
-    repoRoot,
-  );
-  if (!list.ok) fail("cannot resolve base: gh pr list failed; pass --base");
-  let pulls;
-  try {
-    pulls = JSON.parse(list.stdout);
-  } catch {
-    fail("cannot resolve base: gh pr list returned no JSON; pass --base");
-  }
-  if (pulls.length >= 100) {
-    fail(
-      `cannot resolve base: ${pulls.length} open PRs match ${branch.stdout}; pass --base`,
-    );
-  }
-  const headOwner = currentRepo.split("/")[0].toLowerCase();
-  const mine = pulls.filter(
-    (pull) => pull.headRepositoryOwner?.login?.toLowerCase() === headOwner,
-  );
-  if (mine.length > 1) {
-    fail(
-      `cannot resolve base: ${mine.length} open PRs match ${branch.stdout}; pass --base`,
-    );
-  }
-  const baseRef =
-    mine.length === 1
-      ? mine[0].baseRefName
-      : defaultBranchOf(repoRoot, baseRepo, currentRepo, repoInfo);
-  return `${baseRemote}/${baseRef}`;
-}
-
-/**
- * The base repository's default branch. Card step 4 runs before the PR exists,
- * so zero open PRs is the normal first pass, not an error; the branch it falls
- * back to is read from the repository rather than assumed to be `main`.
- */
-function defaultBranchOf(repoRoot, baseRepo, currentRepo, repoInfo) {
-  let branch;
-  if (baseRepo === currentRepo) {
-    branch = repoInfo.defaultBranchRef?.name ?? null;
-  } else {
-    const view = run(
-      "gh",
-      ["repo", "view", baseRepo, "--json", "defaultBranchRef"],
-      repoRoot,
-    );
-    if (!view.ok) {
-      fail(`cannot resolve base: gh repo view ${baseRepo} failed; pass --base`);
-    }
-    try {
-      branch = JSON.parse(view.stdout).defaultBranchRef?.name ?? null;
-    } catch {
-      branch = null;
-    }
-  }
-  if (!branch) {
-    fail(
-      `cannot resolve base: no open PR for this branch and ${baseRepo} names ` +
-        "no default branch; pass --base",
-    );
-  }
-  return branch;
-}
-
-/**
- * Fetch the base when it is a remote-tracking ref, then verify it resolves. A
- * failed fetch is fatal: a stale tracking ref still resolves, so continuing
- * would review the wrong base without saying so.
- */
-function verifyBase(repoRoot, base, shouldFetch) {
-  if (shouldFetch) {
-    const remotes = run("git", ["remote"], repoRoot);
-    // A remote name may itself hold slashes, so take the longest configured
-    // name the base starts with rather than splitting on the first one.
-    let remote = null;
-    if (remotes.ok) {
-      for (const name of remotes.stdout.split("\n")) {
-        if (!name || !base.startsWith(`${name}/`)) continue;
-        if (remote === null || name.length > remote.length) remote = name;
-      }
-    }
-    if (remote !== null) {
-      const branch = base.slice(remote.length + 1);
-      // An explicit refspec, because a bare `git fetch <remote> <branch>` can
-      // exit 0 having updated only FETCH_HEAD — a single-branch clone whose
-      // configured mapping does not cover this branch leaves the
-      // remote-tracking ref stale, and the review would run on the old base.
-      const fetched = run(
-        "git",
-        [
-          "fetch",
-          "--quiet",
-          remote,
-          `+refs/heads/${branch}:refs/remotes/${remote}/${branch}`,
-        ],
-        repoRoot,
-      );
-      if (!fetched.ok) {
-        fail(`cannot fetch ${base}: ${fetched.stderr || "git fetch failed"}`);
-      }
-    }
-  }
-  const sha = run(
-    "git",
-    ["rev-parse", "--verify", "--quiet", `${base}^{commit}`],
-    repoRoot,
-  );
-  if (!sha.ok || !sha.stdout) fail(`base ${base} does not resolve to a commit`);
-  return sha.stdout;
-}
-
-/**
- * Where a write to `target` actually lands. `path.resolve` is lexical, so an
- * ignored `.reviews/link` pointing back into a tracked directory would pass
- * the check below and then be followed by `openSync`. Resolve the deepest
- * existing ancestor through its links, and refuse a final component that is
- * itself a link rather than guessing what truncating it would do.
- */
-function realDestination(target) {
-  const parent = path.dirname(target);
-  let realParent;
-  const missing = [];
-  let probe = parent;
-  for (;;) {
-    try {
-      realParent = fs.realpathSync(probe);
-      break;
-    } catch {
-      const next = path.dirname(probe);
-      if (next === probe) return target;
-      missing.unshift(path.basename(probe));
-      probe = next;
-    }
-  }
-  const resolved = path.join(realParent, ...missing, path.basename(target));
-  for (const candidate of [resolved, `${resolved}.stderr.log`]) {
-    let stat;
-    try {
-      stat = fs.lstatSync(candidate);
-    } catch {
-      continue;
-    }
-    if (stat.isSymbolicLink()) {
-      fail(`--out ${target} is a symbolic link; pass a real path`);
-    }
-  }
-  return resolved;
-}
-
-/**
- * Refuse a report path that Git would track. Both the report and its sibling
- * `.stderr.log` are unscanned model output, so both have to be ignored.
- */
-function checkOutPath(repoRoot, outPath) {
-  const resolved = realDestination(path.resolve(outPath));
-  if (!resolved.startsWith(`${repoRoot}${path.sep}`)) return resolved;
-  for (const candidate of [resolved, `${resolved}.stderr.log`]) {
-    if (!run("git", ["check-ignore", "-q", candidate], repoRoot).ok) {
-      fail(`--out ${outPath} is inside the repository and not ignored by Git`);
-    }
-  }
-  return resolved;
-}
-
 function utcStamp(date) {
   return date.toISOString().replace(/[-:]/g, "").replace(/\..*/, "");
-}
-
-/**
- * The commit codex reviews from. Its own report summaries say "against the
- * specified merge base", so a base holding commits HEAD does not have — a base
- * that moved after the last merge forward — must not be diffed directly: the
- * two-dot form would count those base-only changes in reverse and overstate
- * the branch. No merge base is a stop: a shallow or single-branch checkout can
- * resolve the base ref and still hold no common ancestry, and the header hands
- * `merge_base_sha` to the reviewer as a commit naming the reviewed range.
- */
-function mergeBase(repoRoot, base) {
-  const found = run("git", ["merge-base", "HEAD", base], repoRoot);
-  if (!found.ok || !/^[0-9a-f]{40}$/.test(found.stdout)) {
-    fail(
-      `no merge base between HEAD and ${base}; deepen the checkout ` +
-        "(git fetch --unshallow) or pass a --base that shares history",
-    );
-  }
-  return found.stdout;
-}
-
-/**
- * The size codex will see. It diffs the working tree against the merge base,
- * not `base...HEAD`, so this uses the two-dot form against that commit.
- * Untracked files appear in neither; the `dirty` header field is the flag for
- * uncommitted work.
- */
-function shortstat(repoRoot, from) {
-  const stat = run(
-    "git",
-    ["diff", "--no-ext-diff", "--shortstat", from],
-    repoRoot,
-  );
-  return stat.ok && stat.stdout ? stat.stdout : "0 files changed";
-}
-
-/**
- * What the reviewer is reading: HEAD, the index and working-tree state, and the
- * tracked content that differs from HEAD. It is taken before the run and again
- * after it, so a target that shifts under the reviewer is caught instead of
- * being reported as reviewed. `dirty` alone cannot do this: an edit to an
- * already-modified file leaves the flag and the status lines unchanged.
- * Untracked content is outside the fingerprint exactly as it is outside
- * `--base`; the status listing still names those paths.
- */
-function treeFingerprint(repoRoot) {
-  const parts = [
-    run("git", ["rev-parse", "HEAD"], repoRoot),
-    run("git", ["status", "--porcelain"], repoRoot),
-    run("git", ["diff", "--no-ext-diff", "HEAD"], repoRoot),
-  ];
-  if (parts.some((part) => !part.ok)) return null;
-  return (
-    createHash("sha256")
-      // Raw, not trimmed: a trailing space gained or lost on the last changed
-      // line is a byte codex reads, and trimming would hide that edit.
-      .update(parts.map((part) => part.raw).join("\0"))
-      .digest("hex")
-  );
-}
-
-/**
- * Locate `codex` on PATH before running it. A bare `spawn("codex")` resolves
- * through PATH after the process has already been handed an environment, and
- * under `pnpm run` the repository's own `node_modules/.bin` is the first entry
- * on that PATH. A shim there would be the executable this tool trusts, so
- * resolve the path first, refuse one inside the tree under review, and exec the
- * absolute path from then on.
- */
-function resolveCodex(repoRoot) {
-  // Both sides are resolved through symlinks before the comparison: a temporary
-  // or home directory is often itself a link, and `git rev-parse` already hands
-  // back the resolved form.
-  let root;
-  try {
-    root = fs.realpathSync(repoRoot);
-  } catch {
-    root = repoRoot;
-  }
-  for (const entry of (process.env.PATH ?? "").split(path.delimiter)) {
-    if (!entry) continue;
-    const candidate = path.resolve(entry, "codex");
-    let directory;
-    try {
-      if (!fs.statSync(candidate).isFile()) continue;
-      fs.accessSync(candidate, fs.constants.X_OK);
-      directory = fs.realpathSync(path.dirname(candidate));
-    } catch {
-      continue;
-    }
-    // The directory, not the executable: a link inside the repository still
-    // lets the branch choose what runs, wherever it points.
-    if (directory === root || directory.startsWith(`${root}${path.sep}`)) {
-      fail(
-        `refusing the repository-controlled codex at ${candidate}; ` +
-          "the branch under review must not supply its own reviewer",
-      );
-    }
-    return candidate;
-  }
-  return fail(
-    "codex is not on PATH; see operating-card step 4 for the fallback",
-  );
 }
 
 /** Spawn codex in its own process group so a timeout can kill the whole tree. */
@@ -736,7 +205,7 @@ async function main() {
   // process runs anything at all. Git then confirms the directory really is
   // the top level, on the clean PATH.
   const repoRoot = discoverRoot();
-  SAFE_PATH = sanitizedPath(repoRoot);
+  setSafePath(sanitizedPath(repoRoot));
   const toplevel = run("git", ["rev-parse", "--show-toplevel"], process.cwd());
   if (!toplevel.ok) fail("not inside a Git repository");
   if (realOrSelf(toplevel.stdout) !== repoRoot) {
@@ -803,7 +272,8 @@ async function main() {
     repoRoot,
   );
   const targetAfter = treeFingerprint(repoRoot);
-  const moved = headAtFinish.ok && headAtFinish.stdout !== head.stdout;
+  // `!ok` counts as moved: an unreadable HEAD is not evidence that it held.
+  const moved = !headAtFinish.ok || headAtFinish.stdout !== head.stdout;
   const baseMoved = !baseAtFinish.ok || baseAtFinish.stdout !== baseSha;
   const targetChanged = targetAfter === null || targetAfter !== targetBefore;
 
@@ -823,9 +293,13 @@ async function main() {
       `${reportPath}.stderr.log`;
   } else if (body.trim() === "") {
     reason = "codex produced an empty report";
-  } else if (targetChanged || baseMoved) {
+  } else if (targetChanged || baseMoved || moved) {
+    // `moved` is checked on its own because HEAD is read before the base is
+    // resolved and fetched: a commit landing in that window is already in
+    // `targetBefore`, so the fingerprints agree while `head_sha` names the
+    // commit codex never saw.
     reason =
-      `the review target moved while codex read it (${targetChanged ? "head or working tree" : `base ${base}`}); ` +
+      `the review target moved while codex read it (${targetChanged || moved ? "head or working tree" : `base ${base}`}); ` +
       "the report does not describe the diff in its header";
   } else if (FINDINGS_HEADING.test(body) || FINDING_BULLET.test(body)) {
     verdict = "findings";
@@ -858,7 +332,7 @@ async function main() {
     ...(baseMoved && baseAtFinish.ok
       ? { base_sha_at_finish: baseAtFinish.stdout }
       : {}),
-    ...(targetChanged || baseMoved ? { target_moved: "yes" } : {}),
+    ...(targetChanged || baseMoved || moved ? { target_moved: "yes" } : {}),
     verdict,
   });
   const footer = result.timedOut

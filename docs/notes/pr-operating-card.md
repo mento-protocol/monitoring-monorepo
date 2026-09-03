@@ -173,7 +173,7 @@ even when you never open an authority.
    instruction files the worktree holds, so an untracked one, or one a stacked
    base already carries, shapes the report without appearing in the diff. Read
    the instruction files the run will actually see, not only the touched ones.
-   A diff that changes `scripts/pr/closeout-review.mjs` or its aliases runs
+   A diff that changes `scripts/pr/closeout-review*.mjs` or its aliases runs
    the candidate's own review tool, so review those changes from a trusted
    checkout at the base instead. The reviewer runs under the operator's own
    `codex` configuration and can read the operator's `HOME`: it is not an

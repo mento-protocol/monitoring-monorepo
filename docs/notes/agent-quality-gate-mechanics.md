@@ -714,7 +714,7 @@ procedure below.
   `sentry/broker/mapped-command-process-identity.mjs` bridge routes
   `pnpm sentry:broker:test`. It keeps the probe's local import on the same
   canonical helper that the workflow stages. The exact
-  `pr/closeout-review{,.test}.mjs` pair routes
+  `pr/closeout-review{,-exec,-git,.test}.mjs` set routes
   `node --test scripts/pr/closeout-review.test.mjs`; root `package.json`,
   `check-agent-quality-gate-package-scripts.mjs`, and `gate/mapping/facts.mjs`
   name both `agent:closeout-review` aliases.
