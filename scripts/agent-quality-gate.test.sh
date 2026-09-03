@@ -6489,6 +6489,11 @@ run_teardown_drain_command_identity_regression() {
     gate_darwin_lineage_host_platform=Linux
     gate_lock_enabled=1
     gate_lock_token=teardown-lock-token
+    # Same deliberately subshell-local write as the Darwin fixture below. One
+    # SC2030 is reported per variable, and it currently lands on that block,
+    # leaving this line unprotected; carry the directive here too so removing or
+    # reordering the Darwin fixture cannot re-red Code Quality.
+    # shellcheck disable=SC2030
     gate_run_id=teardown-run-id
     gate_drain_capture=""
     active_timeout_records=()
@@ -6511,9 +6516,12 @@ run_teardown_drain_command_identity_regression() {
       printf '%s\t%s\n' "$1" "${gate_drain_active_mapped_command:-<unset>}" \
         >> "$observed"
     }
-    # No collect_process_tree stub: active_timeout_records is empty above, so
-    # the teardown returns before its descendant walk. Restore a stub here if a
-    # future fixture registers timeout records.
+    # No collect_process_tree stub: the teardown's descendant walk iterates
+    # `roots`, built only from active_timeout_records, which is empty above, so
+    # the walk never iterates. The walk is reached, not skipped: the guard
+    # before it returns only when every registry is empty, and
+    # active_worker_pgids is not. Restore a stub here if a future fixture
+    # registers timeout records.
     eval "$contract_body"
     eval "$source_body"
     teardown_active_timeouts
@@ -6612,9 +6620,10 @@ run_teardown_drain_command_identity_regression() {
           "${gate_drain_active_mapped_command-<unset>}" > "$observed"
       }
       # No gate_darwin_exact_identity_terminate or collect_process_tree stub:
-      # active_timeout_records is empty above, so the teardown reaches neither
-      # the exact-identity terminate loop nor the descendant walk. Restore stubs
-      # here if a future fixture registers timeout records.
+      # active_timeout_records is empty above, so the exact-identity terminate
+      # loop never iterates. Restore only that stub if a future fixture
+      # registers timeout records; the Darwin path returns before the descendant
+      # walk either way, so collect_process_tree stays unreachable here.
       eval "$contract_body"
       eval "$source_body"
       teardown_active_timeouts
