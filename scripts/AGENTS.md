@@ -94,15 +94,9 @@ feedback-runtime pins.
   `gate/mapping/engine.test.mjs` (scanned roots);
   `gate/mapping/post-passes.mjs` schedules `code-health:deps` itself.
 - **Review-eval pins.** The runbook tracks `scripts/review/run-eval*.sh`,
-  `install-review-eval-launchd*`, the launchd plist, and
-  `review-eval-*publication*` with their tests. Its file table,
-  `review:eval:experiment`, and ADR 0083 pin
-  `scripts/review/review-eval-experiment*.mjs`.
-  `review-eval-run-plan.mjs` (`ORCHESTRATOR_FILES`) and
-  `run-eval-source-snapshot.sh` name `review-eval-cell-writer.mjs` and
-  `review-eval-stream.mjs` exactly: the orchestrator digest hashes them and
-  the sealed snapshot copies them beside the shell, so a move updates both
-  lists in the same PR.
+  `install-review-eval-launchd*`, `review-eval-*publication*`, and the
+  sealed cell modules in `ORCHESTRATOR_FILES`. Its file table and ADR 0083
+  pin `scripts/review/review-eval-experiment*.mjs`.
 - **Navigation-eval pin.** `forbidden_sources` in
   `docs/evals/documentation-navigation-fixtures.json` names its source.
 - **Verification evidence.** `.gitattributes` pins

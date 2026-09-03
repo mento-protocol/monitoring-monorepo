@@ -211,7 +211,11 @@ copies and sources `run-eval-source-snapshot.sh` from that directory first. The
 helper copies the wrapper, the other two sourced helpers, and the two node
 modules the cell path loads — `review-eval-cell-writer.mjs` and the
 dependency-free `review-eval-stream.mjs` it imports — creates a PID-bound
-random owner marker, seals the directory, and restarts the wrapper. The
+random owner marker, seals the directory, and restarts the wrapper. Those two
+module names are exact pins in both `ORCHESTRATOR_FILES`
+(`review-eval-run-plan.mjs`) and `run-eval-source-snapshot.sh`: the
+orchestrator digest hashes them and the snapshot copies them, so a move
+updates both lists in the same PR. The
 restarted process accepts only that sealed, non-symlink direct child. The
 read-only directory and files prevent in-place writes and entry replacement
 before a later helper source. Cleanup unlinks only the six fixed source files
