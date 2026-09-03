@@ -318,10 +318,18 @@ test("the live scan never produces a sweep-claimable label set", () => {
     ),
   );
   const actionable = actionableFileSizeRows(report.rows);
-  assert.ok(
-    actionable.length > 0,
-    "no actionable row today; this assertion needs a real row to mean anything",
-  );
+  if (actionable.length === 0) {
+    // Drift cleared, which is the state the automation exists to reach. The
+    // filer opens nothing, so there is no label set to check; assert that
+    // instead of failing the suite for the healthy tree.
+    const plan = planIssueSync({
+      issues: [],
+      rows: report.rows,
+      publishReport: false,
+    });
+    assert.equal(plan.action, "noop");
+    return;
+  }
   const labels = actionableLabels(actionable);
   // The sweep predicate is `agent-ready` plus exactly one `risk:*` equal to
   // `risk:low` plus exactly one `pkg:*` (`hasSweepRouting`,
@@ -347,9 +355,18 @@ test("a lone production-data writer still files at the risk floor", () => {
       package: "scripts",
     },
   ];
+  const labels = actionableLabels(rows);
   assert.deepEqual(packageLabelsForRows(rows), ["pkg:tooling"]);
   assert.equal(riskLabelForIssue([]), "risk:medium");
-  assert.ok(!actionableLabels(rows).includes("risk:low"));
+  // The fixture, not the live scan, is what pins the contract: one package, one
+  // risk label, and never the `risk:low` that would complete the sweep
+  // predicate. This holds whether or not the tree has drift today.
+  assert.ok(labels.includes("agent-ready"));
+  assert.deepEqual(
+    labels.filter((label) => label.startsWith("risk:")),
+    ["risk:medium"],
+  );
+  assert.deepEqual(agentReadyRoutingGaps(asIssue(labels)), []);
 });
 
 test("an operator risk escalation survives the next upsert as the only risk label", () => {

@@ -11,6 +11,7 @@ import {
   AGENT_READY_LABEL_DEFINITION,
   ensureLabelsExist,
   ISSUE_STATE_LABEL_DEFINITIONS,
+  LABEL_DEFINITIONS,
 } from "../../lib/gh-issue-lifecycle.mjs";
 import { PROJECTED_LABEL } from "./sentry-triage-project-core.mjs";
 import {
@@ -40,10 +41,22 @@ export const AGENT_READY_LABEL = AGENT_READY_LABEL_DEFINITION.name;
  *   honest floor is medium.
  *
  * Definitions, not names, because the ensure below creates a missing label from
- * the same shared shape it applies. Each color and description copies the live
- * repository label, so a create lands identical metadata; an existing label is
- * never edited.
+ * the same shared shape it applies. `agent-ready` and `risk:medium` come from
+ * the shared lifecycle definitions rather than being restated here, so the
+ * repository keeps one source of truth per label; `ensureLabelsExist` never
+ * edits an existing label, so a second shape would silently be decided by
+ * whichever scheduled producer created the label first. `kind:bug` and
+ * `pkg:dashboard` are not in the shared set, and their color and description
+ * copy this repository's live labels.
  */
+function sharedLabelDefinition(name) {
+  const definition = LABEL_DEFINITIONS.find((label) => label.name === name);
+  if (definition === undefined) {
+    throw new Error(`no shared definition for label '${name}'`);
+  }
+  return definition;
+}
+
 export const LOCAL_PROJECTION_LABEL_DEFINITIONS = [
   AGENT_READY_LABEL_DEFINITION,
   {
@@ -56,11 +69,7 @@ export const LOCAL_PROJECTION_LABEL_DEFINITIONS = [
     color: "1d76db",
     description: "Dashboard package or UI workflow",
   },
-  {
-    name: "risk:medium",
-    color: "fbca04",
-    description: "Medium-risk change requiring focused verification",
-  },
+  sharedLabelDefinition("risk:medium"),
 ];
 
 export const LOCAL_PROJECTION_LABELS = LOCAL_PROJECTION_LABEL_DEFINITIONS.map(
