@@ -639,7 +639,7 @@ shell. The fix removes the credential instead. See
 it stays there: `claude-code-action` places it in that process env itself
 (`base-action/src/parse-sdk-options.ts` spreads the whole `process.env` into the
 CLI subprocess, deleting only the OIDC request vars and `ALL_INPUTS`), and the
-pinned v1.0.202 offers no per-step or first-class MCP env forwarding to move it.
+pinned v1.0.206 offers no per-step or first-class MCP env forwarding to move it.
 Accepted with its bounding: it is inference-only, so worst case is
 inference-quota abuse, not repo or queue compromise, and any use lands in an
 auditable public comment. Re-check on the next action bump.

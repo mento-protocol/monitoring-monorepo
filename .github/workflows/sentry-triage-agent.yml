@@ -258,7 +258,7 @@ jobs:
   #     agent's Bash env. `claude-code-action` puts it there itself — its
   #     base-action/src/parse-sdk-options.ts spreads the whole `process.env`
   #     into the CLI subprocess, deleting only the OIDC request vars and
-  #     ALL_INPUTS — and the pinned v1.0.202 offers no per-step or first-class
+  #     ALL_INPUTS — and the pinned v1.0.206 offers no per-step or first-class
   #     MCP env forwarding to move it (parse-sdk-options.ts differs from the
   #     v1.0.194 blob in one hunk: an added `delete env.ALL_INPUTS`, which
   #     narrows that env rather than widening it; `{ ...process.env }` still
@@ -311,20 +311,29 @@ jobs:
     # base-action/src/parse-sdk-options.ts are byte-identical to the v1.0.190
     # blobs; only base-action/action.yml changed, bumping the bundled CLI to
     # 2.1.234 and appending ~/.local/bin to $GITHUB_PATH after auto-install —
-    # neither an input nor an env channel), and again on the bump to the
-    # version pinned below, v1.0.202 (e5ad3c77): its root action.yml is
-    # byte-identical to the v1.0.194 blob, so no input and no env channel
-    # moved. base-action/action.yml changed only the bundled CLI version,
-    # 2.1.234 to 2.1.243. base-action/src/parse-sdk-options.ts gained one
-    # hunk, `delete env.ALL_INPUTS`, which removes a variable from the agent
-    # subprocess env; --mcp-config still resolves a path or inline JSON and
-    # never env. src/mcp/install-mcp-server.ts also changed, but only to match
+    # neither an input nor an env channel), on the v1.0.202 bump (e5ad3c77:
+    # its root action.yml was byte-identical to the v1.0.194 blob, so no input
+    # and no env channel moved; base-action/action.yml changed only the
+    # bundled CLI version, 2.1.234 to 2.1.243;
+    # base-action/src/parse-sdk-options.ts gained one hunk,
+    # `delete env.ALL_INPUTS`, which removes a variable from the agent
+    # subprocess env, and --mcp-config still resolved a path or inline JSON and
+    # never env; src/mcp/install-mcp-server.ts also changed, but only to match
     # the bare `mcp__github`-style aggregate selectors alongside the
     # `mcp__github__` prefixes when deciding whether to add the action's OWN
-    # built-in GitHub servers; it does not touch how a user-supplied
-    # --mcp-config server is launched or what env it reads.
+    # built-in GitHub servers, not how a user-supplied --mcp-config server is
+    # launched or what env it reads), and again on the bump to the version
+    # pinned below, v1.0.206 (1f291e1c): root action.yml,
+    # base-action/src/parse-sdk-options.ts, and src/mcp/install-mcp-server.ts
+    # are byte-identical to the v1.0.202 blobs, so no input, no env channel,
+    # and no MCP launch path moved. base-action/action.yml changed only the
+    # bundled CLI version, 2.1.243 to 2.1.246, and the two package.json files
+    # only the Agent SDK range, ^0.3.243 to ^0.3.246. The rest of that diff is
+    # GitHub-operations code — branch-name validation, comment links, a
+    # delete_files prompt example, file-ops schemas — plus a .gitattributes
+    # line-ending file and tests, none of them an input or an env channel.
     #   SCOPE OF THAT AUDIT, stated plainly: it covers the action repository's
-    #   own env plumbing, not the bundled Claude Code CLI (2.1.234 to 2.1.243)
+    #   own env plumbing, not the bundled Claude Code CLI (2.1.243 to 2.1.246)
     #   or Agent SDK, which is what actually launches the stdio Sentry MCP
     #   server from --mcp-config. That launcher is a published binary, not
     #   source in the pinned tree, so no bump audit can read it, and the
