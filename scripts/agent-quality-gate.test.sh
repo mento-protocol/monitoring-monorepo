@@ -6573,14 +6573,15 @@ run_teardown_drain_command_identity_regression() {
   local workers
   for workers in 1 2; do
     rc=0
-    # The lifted teardown reads these fixture variables by name. A later test
-    # also sources run-handles.sh, so ShellCheck pairs that file's gate_run_id
-    # read with this subshell-local fixture write.
-    # shellcheck disable=SC2030,SC2034
+    # shellcheck disable=SC2034
     (
       gate_darwin_lineage_host_platform=Darwin
       gate_lock_enabled=1
       gate_lock_token=teardown-lock-token
+      # Fixture input for the lifted teardown, deliberately confined to this
+      # subshell. shellcheck -x follows scripts/gate/run-handles.sh, which a
+      # later test sources, and pairs its gate_run_id reads with this write.
+      # shellcheck disable=SC2030
       gate_run_id=teardown-run-id
       gate_drain_capture=""
       active_timeout_records=()
