@@ -722,9 +722,18 @@ The full procedure is
 
    ```bash
    git fetch origin main
-   oid="$(git rev-parse origin/main)"
-   git ls-tree "$oid" -- <path>      # blob or tree SHA, empty when absent
+   oid="$(git rev-parse FETCH_HEAD)"   # the commit this fetch just wrote
+   git rev-parse "$oid:<path>"         # one blob or tree id; non-zero when absent
    ```
+
+   Pin `FETCH_HEAD`, not `origin/main`: a clone made with `--single-branch` on
+   another branch has no `refs/remotes/origin/main` for the fetch to update, so
+   `git rev-parse origin/main` there fails after the batch is already claimed.
+   Address each path as `<oid>:<path>`, not with `git ls-tree`: a body may name
+   a directory with a trailing slash, and `git ls-tree "$oid" -- docs/notes/`
+   lists that directory's children rather than its one tree id, while
+   `git rev-parse "$oid:<path>"` returns one id for a file, a directory, and a
+   directory with a trailing slash, and exits non-zero when the path is absent.
 
    Order by `rank-backlog` score, highest first, then by issue number, newest
    first; the
@@ -769,8 +778,8 @@ The full procedure is
    issue groomed under `v1` re-grooms once.
 
 2. **Read the body, then read the paths it names against the OID pinned in
-   step 1.** Read every path with `git ls-tree` or `git cat-file` against that
-   OID, never from the session checkout. Labels are repository-wide state and
+   step 1.** Read every path as `<oid>:<path>` against that OID, never from the
+   session checkout. Labels are repository-wide state and
    the checkout is session-local:
    a sweep started from a clean feature branch would otherwise classify live
    issues against that branch's tree, and since the pass never removes or
@@ -821,7 +830,8 @@ The full procedure is
 
    `ref` and `oid` name the tree the paths were resolved against. `body` is the
    SHA-256 of the issue body this pass read. `paths` maps each named path that
-   resolved at that OID to its `git ls-tree` blob or tree SHA, so a file whose
+   resolved at that OID to the one id `git rev-parse "<oid>:<path>"` returns,
+   so a file whose
    contents changed under a stable name invalidates the marker; only paths the
    body names are covered. `labels` snapshots the issue's `risk:*`, `pkg:*`,
    `kind:*`, and queue-state labels as read, before this pass writes anything —

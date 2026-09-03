@@ -447,9 +447,22 @@ verdict reproducible.
 
 ```bash
 git fetch origin main
-oid="$(git rev-parse origin/main)"
-git ls-tree "$oid" -- <path>      # blob or tree SHA, empty when absent
+oid="$(git rev-parse FETCH_HEAD)"   # the commit this fetch just wrote
+git rev-parse "$oid:<path>"         # one blob or tree id; non-zero when absent
 ```
+
+Pin `FETCH_HEAD`, not `origin/main`. `git fetch origin main` always writes the
+commit it fetched there, while a clone made with `--single-branch` on another
+branch has no `refs/remotes/origin/main` for that fetch to update, and
+`git rev-parse origin/main` in it fails after the batch is already claimed. The
+marker's `ref` still records `origin/main`, which is what was fetched.
+
+Address each path as `<oid>:<path>`, not with `git ls-tree`. A body may name a
+directory, with or without a trailing slash, and `git ls-tree "$oid" -- docs/notes/`
+lists that directory's children instead of returning its one tree id.
+`git rev-parse "$oid:<path>"` returns exactly one id for a file, for a directory,
+and for a directory written with a trailing slash, and exits non-zero when the
+path is absent — the case the marker's map omits.
 
 Order, then filter, then cap at 10. Ordering is by `rank-backlog` score,
 highest first, then by issue number, newest first. The outside-the-queue set
@@ -544,7 +557,7 @@ of the pass. Every label below comes from what that tree holds, not from what
 the body claims.
 
 **The resolution basis is the shared ref, not the session checkout.** Read every
-path with `git ls-tree` or `git cat-file` against that one pinned OID. Preflight
+path as `<oid>:<path>` against that one pinned OID. Preflight
 fetches `origin/main`
 and requires a clean worktree, but never requires the checkout to be _at_
 `origin/main`, so a sweep started from a clean feature branch would classify live
@@ -643,7 +656,8 @@ One comment per groomed issue, opening with a machine-readable marker:
 `ref` and `oid` name the tree the paths were resolved against, so a later reader
 can tell what a verdict was based on and reproduce it. `body` is the SHA-256 of
 the issue body this pass read. `paths` maps each named path that resolved at
-that OID to its `git ls-tree` blob or tree SHA; a path the body names and the
+that OID to the one blob or tree id `git rev-parse "<oid>:<path>"` returns; a
+path the body names and the
 tree does not hold is absent from the map. `labels` snapshots the issue's
 `risk:*`, `pkg:*`, `kind:*`, and queue-state labels as read, before this pass
 writes anything — every class the pass can write, so the skip key compares like
