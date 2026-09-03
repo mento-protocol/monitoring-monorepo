@@ -336,9 +336,9 @@ usage window.
 
 ## Preflight
 
-The orchestrator verifies, before anything is claimed: `origin/main` fetched, a
-clean session worktree, working `gh` auth, and that
-`git remote get-url --push origin` serves `mento-protocol/monitoring-monorepo`.
+Before anything is claimed, the orchestrator verifies a clean session worktree,
+working `gh` auth, and that both effective `origin` URLs serve
+`mento-protocol/monitoring-monorepo`. It fetches `origin/main` only after these checks pass.
 It does not probe or change the legacy gate's lock.
 
 A fork checkout is a stop. The operating card refuses every fork head and tells

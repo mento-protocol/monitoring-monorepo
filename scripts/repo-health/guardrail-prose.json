@@ -23,7 +23,7 @@
     "| Dashboard UI or visual output, route or interaction, browser test, or frontend build/runtime path | Also run `pnpm dashboard:build`, then follow [`dashboard-verification.md`](dashboard-verification.md) for the changed UI or runtime path, console, interaction, breakpoints, and applicable auth states. |",
     "| Indexer schema, configuration, ABI, entry point, or handler reachability | Run each affected code-generation variant from [`../../indexer-envio/AGENTS.md`](../../indexer-envio/AGENTS.md). Run affected non-mainnet variants first and `pnpm indexer:codegen` last. Inspect the generated diff before indexer package checks. |",
     "| Dashboard GraphQL query or schema consumer, `indexer-envio/schema.graphql`, or `scripts/envio-schema-stubs.graphql` | Run `pnpm dashboard:codegen` and inspect the generated diff. |",
-    "| Manifest, lockfile, pnpm configuration, or patch | Inspect lifecycle and install effects. Then run `CI=true pnpm install --frozen-lockfile` before code generation or the applicable package rows. |",
+    "| Manifest, lockfile, pnpm configuration, or patch | Inspect lifecycle and install effects. Run `CI=true pnpm install --frozen-lockfile` from the repository root. When one of these inputs changes under `alerts/infra/onchain-event-handler`, `alerts/infra/oncall-announcer`, or `governance-watchdog`, also run `CI=true pnpm install --frozen-lockfile --ignore-scripts --lockfile-dir .` from that root. Complete the installs before code generation or the applicable package rows. |",
     "| Package Vitest configuration or hermetic setup | Run `node scripts/repo-health/check-hermetic-vitest-setup.mjs`. |",
     "| Trunk configuration or local Git hook | Run `./tools/trunk check --ci --all` and `node scripts/workflows/check-github-action-pins.mjs`. Also run `bash scripts/bootstrap/agent-setup-contract.test.sh` when hook or Trunk action behavior changes. |",
     "| Shell file, hosted agent setup, or hook | Run `bash -n` on each surviving changed shell file. Run `bash scripts/bootstrap/agent-setup-contract.test.sh` when hosted setup or hook behavior changes. |",
@@ -68,6 +68,7 @@
     "Bind `--repo` to the base repository — checkout inference can select the wrong same-number PR on fork PRs."
   ],
   ".agents/skills/backlog-sweep/SKILL.md": [
+    "git remote -v # origin fetch and push must serve mento-protocol/monitoring-monorepo",
     "Run dashboard coverage or scoped related tests, browser work, production builds, and size-limit work without another command-heavy check set."
   ],
   ".claude/skills/backlog-sweep/SKILL.md": [

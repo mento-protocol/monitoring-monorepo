@@ -46,14 +46,13 @@ worker works
 
 ## Preflight
 
-Every check here fails cheaply. Skipping one fails late, after issues are
-already claimed and a worker is mid-validation.
+Every check here fails cheaply. Skipping one fails late, after issues are already claimed and a worker is mid-validation.
 
 ```bash
-git fetch origin main
-git status --porcelain            # must print nothing
-gh auth status                    # must report an authenticated account
-git remote get-url --push origin  # must serve mento-protocol/monitoring-monorepo
+gh auth status          # must report an authenticated account
+git remote -v           # origin fetch and push must serve mento-protocol/monitoring-monorepo
+git status --porcelain  # must print nothing
+git fetch origin main   # only after both origin URLs pass
 ```
 
 **A fork checkout is a stop, before anything is claimed.** The operating card
