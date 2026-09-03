@@ -96,6 +96,7 @@ const TOOLING_SCRIPT_POINTERS = new Set(
     "issue:board",
     "issue:board:test",
     "issue:claim",
+    "issue:groom",
     "issue:review",
     "issue:release",
     "sentry:ingest",
