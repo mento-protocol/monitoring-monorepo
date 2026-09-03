@@ -13,7 +13,8 @@ import path from "node:path";
  * Environment for `codex`, built by allowlist rather than inherited: the
  * operator shell holds GitHub, cloud and provider credentials the reviewing
  * model has no use for. The fixed values below scrub the operator's global Git
- * configuration, so `codex` sees a plain `git diff` rather than a
+ * configuration, and `GIT_EXTERNAL_DIFF` is absent from both the allowlist and
+ * the fixed set, so `codex` sees a plain `git diff` rather than a
  * difftastic-rendered one.
  */
 const ENV_ALLOWLIST = [
@@ -51,7 +52,6 @@ const ENV_FIXED = {
   GIT_CONFIG_GLOBAL: "/dev/null",
   GIT_CONFIG_SYSTEM: "/dev/null",
   GIT_CONFIG_NOSYSTEM: "1",
-  GIT_EXTERNAL_DIFF: "",
   GIT_PAGER: "cat",
   PAGER: "cat",
   GIT_TERMINAL_PROMPT: "0",
@@ -107,6 +107,14 @@ export function discoverRoot() {
   }
 }
 
+/**
+ * The sanitized PATH, each surviving entry stored in the resolved absolute form
+ * the check was made against. A relative entry is resolved by whoever searches
+ * it: this process resolves it against its own working directory, while `run`
+ * starts subprocesses with `cwd: repoRoot`. Keeping the literal entry would vet
+ * one directory and hand the child another; the resolved form makes them the
+ * same directory whatever the caller's working directory is.
+ */
 export function sanitizedPath(root) {
   const kept = [];
   for (const entry of (process.env.PATH ?? "").split(path.delimiter)) {
@@ -120,7 +128,7 @@ export function sanitizedPath(root) {
     if (resolved === root || resolved.startsWith(`${root}${path.sep}`)) {
       continue;
     }
-    kept.push(entry);
+    kept.push(resolved);
   }
   return kept.join(path.delimiter);
 }
@@ -146,6 +154,14 @@ export function codexEnv() {
  * different index or object store from the one the reviewer sees.
  */
 const GIT_AMBIENT = [
+  // Deleted rather than emptied. `--no-ext-diff` covers the diffs this tool
+  // runs itself, but `--submodule=diff` renders the nested diff through a
+  // child `git` that gets no flags — and an empty `GIT_EXTERNAL_DIFF` is a
+  // command name Git still tries to run, so the nested diff dies and the
+  // fingerprint goes blind to everything under a submodule. With the variable
+  // gone, and global and system configuration pointed at /dev/null, no
+  // external differ is reachable at all.
+  "GIT_EXTERNAL_DIFF",
   "GIT_DIR",
   "GIT_WORK_TREE",
   "GIT_INDEX_FILE",
@@ -182,11 +198,23 @@ export function localGitEnv() {
 }
 
 /**
+ * How long any one synchronous command may take. `verifyBase` fetches the base
+ * over the network and `resolveBase` calls `gh`, so without a deadline a
+ * stalled remote holds the whole closeout open with nothing on screen. Five
+ * minutes is far past what a single-branch fetch or a local `git diff` needs
+ * and still bounds the wait. `--timeout-seconds` is a different budget: it
+ * covers the asynchronous `codex` child, which legitimately runs for an hour.
+ */
+export const RUN_TIMEOUT_MS = 300_000;
+
+/**
  * Run a command and capture its output. Never throws on a non-zero exit.
  * `env` defaults to the operator's environment plus the Git scrub, which is
  * right for `git` and `gh`; `codex` is passed `codexEnv()` instead.
+ * `timeoutMs` bounds the wait; Node sets `result.error` when it expires, so a
+ * timed-out command reports `ok: false` like any other failure.
  */
-export function run(command, args, cwd, env) {
+export function run(command, args, cwd, env, timeoutMs = RUN_TIMEOUT_MS) {
   const result = spawnSync(command, args, {
     cwd,
     encoding: "utf8",
@@ -194,6 +222,7 @@ export function run(command, args, cwd, env) {
     // and the 1 MiB default would report a large one as a failed command.
     maxBuffer: 64 * 1024 * 1024,
     env: env ?? localGitEnv(),
+    timeout: timeoutMs,
   });
   return {
     ok: !result.error && result.status === 0,
@@ -263,6 +292,55 @@ function inside(target, root) {
   return target === root || target.startsWith(`${root}${path.sep}`);
 }
 
+/** The file `resolveCodex` accepted, by the identity that made it acceptable. */
+let CODEX_IDENTITY = null;
+
+/** dev/ino/nlink/uid/mode of `target`, following links to the real file. */
+function executableIdentity(target) {
+  const stat = fs.statSync(target);
+  return {
+    dev: stat.dev,
+    ino: stat.ino,
+    nlink: stat.nlink,
+    uid: stat.uid,
+    mode: stat.mode,
+  };
+}
+
+/**
+ * Whether the reviewed tree can rewrite the bytes behind `stat`. A hard link is
+ * a second name for one inode, and `realpathSync` reports the name it was
+ * reached by, so a `codex` whose path lies outside the checkout can still be
+ * another name for a writable file inside it. Root-owned files are exempt — the
+ * checkout cannot write them — and so are read-only ones, which is the shape a
+ * content-addressed package store hard-links into place.
+ */
+function multiplyLinkedAndWritable(stat) {
+  return stat.nlink > 1 && stat.uid !== 0 && (stat.mode & 0o222) !== 0;
+}
+
+/**
+ * Re-check the reviewer immediately before it runs. Resolution and execution
+ * are separate syscalls with the base fetch, the `gh` queries and the
+ * fingerprint in between, so the pathname `resolveCodex` approved can be
+ * relinked to another file in that window.
+ */
+export function assertCodexUnchanged(codexBin) {
+  if (CODEX_IDENTITY === null) fail("codex was never resolved");
+  let now;
+  try {
+    now = executableIdentity(codexBin);
+  } catch {
+    return fail(`codex at ${codexBin} is gone since it was resolved`);
+  }
+  const changed = Object.keys(CODEX_IDENTITY).some(
+    (key) => now[key] !== CODEX_IDENTITY[key],
+  );
+  if (changed || multiplyLinkedAndWritable(now)) {
+    fail(`codex at ${codexBin} changed identity after it was resolved`);
+  }
+}
+
 /**
  * Locate `codex` on PATH before running it. A bare `spawn("codex")` resolves
  * through PATH after the process has already been handed an environment, and
@@ -286,7 +364,9 @@ export function resolveCodex(repoRoot) {
     const candidate = path.resolve(entry, "codex");
     let directory;
     let target;
+    let identity;
     try {
+      identity = executableIdentity(candidate);
       if (!fs.statSync(candidate).isFile()) continue;
       fs.accessSync(candidate, fs.constants.X_OK);
       directory = fs.realpathSync(path.dirname(candidate));
@@ -303,6 +383,15 @@ export function resolveCodex(repoRoot) {
           "the branch under review must not supply its own reviewer",
       );
     }
+    if (multiplyLinkedAndWritable(identity)) {
+      fail(
+        `refusing the multiply-linked codex at ${candidate} ` +
+          `(${identity.nlink} links, writable, not root-owned); a second name ` +
+          "for it inside the checkout would let the branch under review " +
+          "rewrite its own reviewer",
+      );
+    }
+    CODEX_IDENTITY = identity;
     return candidate;
   }
   return fail(

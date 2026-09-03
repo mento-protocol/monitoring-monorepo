@@ -53,7 +53,7 @@ pnpm agent:quality-gate --run --allow-package-script-changes  # Local
 git config agent.qualityGate.allowPackageScriptChanges true   # Hosted, before the direct warm command
 pnpm agent:context-check           # Validate repo-visible agent instructions, links, and routing
 pnpm agent:review-materiality      # Classify review depth + context-update signals for current diff
-pnpm agent:closeout-review         # Second-model source review; prints `report: <path>`; exit 1 = findings, 2 = it did not run
+pnpm agent:closeout-review         # Second-model source review; prints `report: <path>`; exit 1 = findings, 2 = closeout failed, no usable review
 pnpm agent:closeout-review --base <base-remote>/<baseRefName>  # Fork or stacked PR; otherwise it resolves the base itself
 pnpm agent:closeout-review:test    # Suite for the closeout review tool
 pnpm review:eval:experiment -- --help  # Non-ledger paired screen; canonical qualification reruns all 24 cells

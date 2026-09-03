@@ -590,12 +590,15 @@ changed.` Review the lifecycle and install scripts in the diff first, then
   left to notice it finished.
 
 - **The closeout:** `pnpm agent:closeout-review`, then hand its printed report
-  path to the `review` skill. Exit 1 means the report carries findings; exit 2
-  means the tool did not run, so there is no review to hand over. Prepend the
-  `codex` CLI's install directory to `PATH` — a worker subagent does not always
-  inherit the interactive shell's `PATH`. With no `codex` on PATH, run the
-  `review` skill alone and disclose the single-source coverage; inside an active
-  Codex session the script refuses, because nested `codex exec` is unavailable.
+  path to the `review` skill. Exit 1 means the report carries findings. Exit 2
+  means the closeout failed and there is no review to hand over: the target
+  moved, codex failed or timed out, the report came back empty, or the tool
+  never started. Block on a 2 and report the reason the script printed. Prepend
+  the `codex` CLI's install directory to `PATH` — a worker subagent does not
+  always inherit the interactive shell's `PATH`. Two causes fall back instead of
+  blocking: with no `codex` on PATH, run the `review` skill alone and disclose
+  the single-source coverage; inside an active Codex session the script refuses,
+  because nested `codex exec` is unavailable.
   [`pr-operating-card.md`](../../../docs/notes/pr-operating-card.md) step 4 owns
   the flow — this skill defers to it rather than carrying a second copy.
   Address the real findings; an unexplained strengthening of a validation claim
