@@ -13,16 +13,19 @@ import path from "node:path";
 import test from "node:test";
 
 import {
+  DEFAULT_EXPERIMENT_POLICY,
   rawCacheIdentity,
   digestObject,
   recordRuntimeDrift,
   runtimeDriftReason,
 } from "./review-eval-experiment-contract.mjs";
+import { runStage, stageRuntimeChange } from "./review-eval-experiment.mjs";
 import {
   readExperimentCache,
   sha256Bytes,
 } from "./review-eval-experiment-cache.mjs";
 import { finderArgvDigest, skillDigest } from "./review-eval-run-plan.mjs";
+import { SESSION_TEXT_BUDGET_CHARS } from "./review-eval-stream.mjs";
 import {
   enrichExperimentNovelty,
   parseContestantEnvelope,
@@ -57,7 +60,15 @@ function contestantStream(messages, resultOverrides = {}) {
   return `${events.map((event) => JSON.stringify(event)).join("\n")}\n`;
 }
 
-function makeHarness({ laneCount = 3, live = false } = {}) {
+function makeHarness({
+  laneCount = 3,
+  live = false,
+  cliVersions = {
+    claude: "claude-test",
+    codex: "codex-test",
+    judge: "judge-test",
+  },
+} = {}) {
   const root = mkdtempSync(
     path.join(tmpdir(), "review-eval-experiment-runtime-"),
   );
@@ -150,11 +161,7 @@ function makeHarness({ laneCount = 3, live = false } = {}) {
     inputs: {
       scorer_digest: digest("s"),
       finder_argv_digest: plannedFinderDigest,
-      cli_versions: {
-        claude: "claude-test",
-        codex: "codex-test",
-        judge: "judge-test",
-      },
+      cli_versions: { ...cliVersions },
       models: {
         finder: { model: "finder", effort: "high" },
         verifier: { model: "verifier", effort: "high" },
@@ -168,6 +175,7 @@ function makeHarness({ laneCount = 3, live = false } = {}) {
         },
       },
     },
+    policy: structuredClone(DEFAULT_EXPERIMENT_POLICY),
     incumbent: {
       id: "incumbent",
       skill_ref: incumbentSkill,
@@ -1020,5 +1028,134 @@ test("novelty names the judge only on the records that invoked it", async (t) =>
   assert.deepEqual(
     recordRuntimeDrift({ planned, records: enriched }).cell_ids,
     [incumbent.cell_id],
+  );
+});
+
+test("a trimmed cell records how much of its session it kept", async (t) => {
+  // The runbook promises the trimming is visible after the fact, and the
+  // canonical cell writer stores all three counts. The experiment raw payload
+  // stored the message count alone, so a cell whose earlier messages were cut
+  // looked exactly like one that fit the budget.
+  const harness = makeHarness({ laneCount: 1 });
+  t.after(harness.cleanup);
+  const stream = contestantStream([
+    "x".repeat(SESSION_TEXT_BUDGET_CHARS),
+    "file.js:1 has a defect",
+  ]);
+  const result = await runExperimentRuntimeStage(
+    baseOptions(harness, { contestantExec: async () => stream }),
+  );
+  for (const record of result.records) {
+    const { payload } = JSON.parse(readFileSync(record.artifacts.raw, "utf8"));
+    // Only the final message fits the judge budget, so `output` is that message
+    // alone and the counts say the earlier one was dropped.
+    assert.equal(payload.output, "file.js:1 has a defect");
+    assert.equal(payload.assistant_messages, 2);
+    assert.equal(payload.assistant_messages_kept, 1);
+    assert.equal(payload.stream_chars, stream.length);
+    assert.equal(record.assistant_messages, 2);
+    assert.equal(record.assistant_messages_kept, 1);
+    assert.equal(record.stream_chars, stream.length);
+  }
+});
+
+test("a mid-stage provider upgrade is named once for the whole stage", async (t) => {
+  const start = { claude: "2.1.258", codex: "0.48.2" };
+  const harness = makeHarness({
+    laneCount: 1,
+    // The plan was written under the versions the stage started with, so the
+    // only difference this test can see is the one that landed mid-stage.
+    cliVersions: { ...start, judge: start.claude },
+  });
+  t.after(harness.cleanup);
+  const live = { ...start };
+  const stderr = [];
+  const written = t.mock.method(process.stderr, "write", (line) => {
+    stderr.push(line);
+    return true;
+  });
+  t.after(() => written.mock.restore());
+  const result = await runStage(
+    {
+      stage: harness.stage,
+      repoRoot: harness.repoRoot,
+      fixtureCacheDir: harness.fixtureCacheDir,
+      concurrency: 1,
+    },
+    {
+      artifactRoot: harness.artifactRoot,
+      plan: harness.plan,
+      contract: harness.contract,
+      env: {},
+      // The versions probed when the campaign loaded, which every cell of this
+      // stage is keyed on.
+      liveCliVersions: start,
+    },
+    {
+      // The end-of-stage probe: the CLI updated itself while the arms ran.
+      probe: (name) => {
+        live.claude = "2.1.259";
+        return live[name];
+      },
+      prepareFixture: harness.prepareFixture,
+      reset: async () => true,
+      scorerDigestNow: () => harness.plan.inputs.scorer_digest,
+      judgeExec: judgeExec(),
+      contestantExec: async () => contestantStream(["file.js:1 has a defect"]),
+    },
+  );
+  const reason =
+    "runtime changed during the stage: claude 2.1.258 -> 2.1.259, " +
+    "judge 2.1.258 -> 2.1.259; cells that ran after the change may have " +
+    "used the later version and are keyed on the earlier one";
+  assert.equal(result.decision.reasons[0], reason);
+  assert.deepEqual(stderr, [`warning: ${reason}\n`]);
+  const change = {
+    providers: [
+      { provider: "claude", start: "2.1.258", end: "2.1.259" },
+      { provider: "judge", start: "2.1.258", end: "2.1.259" },
+    ],
+    summary: "claude 2.1.258 -> 2.1.259, judge 2.1.258 -> 2.1.259",
+  };
+  assert.deepEqual(result.runtime_change_during_stage, change);
+  assert.deepEqual(result.decision.runtime_change_during_stage, change);
+  // The change is reported for the stage and charged to no cell: every cell
+  // stays recorded and keyed under the versions the stage started with.
+  for (const record of result.records) {
+    assert.deepEqual(record.cli_versions.raw, { claude: start.claude });
+    const { payload } = JSON.parse(readFileSync(record.artifacts.raw, "utf8"));
+    const identity = rawCacheIdentity({
+      plan: harness.plan,
+      stage: harness.stage,
+      lane: harness.lanes.find((lane) => lane.pr === record.pr),
+      treatment: record.treatment,
+      sourceDigest: payload.source_digest,
+      cliVersions: start,
+    });
+    assert.notEqual(
+      readExperimentCache({
+        artifactRoot: harness.artifactRoot,
+        kind: "raw",
+        identity,
+      }),
+      null,
+    );
+  }
+});
+
+test("every mid-stage probe is compared with the versions the stage started on", () => {
+  const start = { claude: "2.1.258", codex: "0.48.2" };
+  assert.equal(stageRuntimeChange(start, [{ ...start }]), null);
+  // A second upgrade during novelty must not hide the one that landed during
+  // the arms: each probe is measured against the start, not against the probe
+  // before it.
+  const change = stageRuntimeChange(start, [
+    { claude: "2.1.259", codex: start.codex },
+    { claude: "2.1.260", codex: start.codex },
+  ]);
+  assert.equal(
+    change.summary,
+    "claude 2.1.258 -> 2.1.259, claude 2.1.258 -> 2.1.260, " +
+      "judge 2.1.258 -> 2.1.259, judge 2.1.258 -> 2.1.260",
   );
 });

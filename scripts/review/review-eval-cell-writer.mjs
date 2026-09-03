@@ -40,7 +40,11 @@ const raw = readFileSync(rawPath, "utf8");
 let envelope;
 try {
   envelope = stream.claudeStreamEnvelope(raw, { label: "contestant" });
-} catch {
+} catch (error) {
+  // The parser names what it could not read — a truncated line, a missing
+  // result event. Swallowing that left exit 3 as the only evidence, and a
+  // caller reading the run log could not tell one broken stream from another.
+  writeFileSync(2, `the contestant stream did not parse: ${error.message}\n`);
   process.exit(3);
 }
 if (envelope.is_error || envelope.result.trim() === "") process.exit(3);

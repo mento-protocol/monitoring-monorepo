@@ -470,6 +470,10 @@ function phaseLabel(cellId, phase) {
   return `${cellId ?? "unnamed cell"} ${phase}`;
 }
 
+function streamCount(value) {
+  return Number.isSafeInteger(value) && value >= 0;
+}
+
 export function validateRawExperimentPayload(payload, expected) {
   assertPhaseCliVersions(
     payload,
@@ -486,7 +490,13 @@ export function validateRawExperimentPayload(payload, expected) {
     payload.treatment !== expected.treatment ||
     payload.source_digest !== expected.source.digest ||
     payload.source_report !== expected.source.text ||
-    typeof payload.output !== "string"
+    typeof payload.output !== "string" ||
+    // A payload that lost its capture counts cannot say how much of the session
+    // `output` carries, so it is re-run rather than read as a whole session.
+    !streamCount(payload.assistant_messages) ||
+    !streamCount(payload.assistant_messages_kept) ||
+    !streamCount(payload.stream_chars) ||
+    payload.assistant_messages_kept > payload.assistant_messages
   ) {
     throw new Error("raw experiment cache payload is mismatched");
   }

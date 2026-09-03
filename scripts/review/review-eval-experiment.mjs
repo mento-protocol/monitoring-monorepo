@@ -20,6 +20,7 @@ import { DEFAULT_SKILL_DIR, expandHome } from "./review-eval-run-plan.mjs";
 import { scrubbedEnv, sourceCheckouts } from "./review-eval-run-execution.mjs";
 import {
   buildExperimentPlan,
+  cliVersionDrift,
   digestObject,
   EXPERIMENT_STAGES,
   recordRuntimeDrift,
@@ -228,6 +229,56 @@ function writePlan(file, plan) {
   });
 }
 
+/**
+ * The providers whose live version moved between the probe that opened the
+ * stage and a probe taken after its cells ran.
+ *
+ * Cells are keyed on the versions probed at stage start. A provider that
+ * auto-updates while the stage runs therefore leaves the cells that ran after
+ * the update recorded and keyed under the earlier version. Probing once per
+ * artifact would not close that window — the probe still precedes the spawn —
+ * and it would fragment the phase cache, so the stage reports the change over
+ * the whole stage instead of attributing it to individual cells.
+ *
+ * Each probe is compared with the stage-start versions rather than with the
+ * probe before it, so an update that lands during scoring is still named when a
+ * second update follows it.
+ */
+export function stageRuntimeChange(start, probed) {
+  const seen = new Map();
+  for (const live of probed) {
+    for (const entry of cliVersionDrift({ planned: start, live })?.providers ??
+      []) {
+      seen.set(`${entry.provider}\u0000${entry.live}`, {
+        provider: entry.provider,
+        start: entry.planned,
+        end: entry.live,
+      });
+    }
+  }
+  if (seen.size === 0) return null;
+  const providers = [...seen.values()].sort(
+    (left, right) =>
+      left.provider.localeCompare(right.provider) ||
+      left.end.localeCompare(right.end),
+  );
+  return {
+    providers,
+    summary: providers
+      .map((entry) => `${entry.provider} ${entry.start} -> ${entry.end}`)
+      .join(", "),
+  };
+}
+
+/** One line naming a provider CLI that changed while the stage was running. */
+export function stageRuntimeChangeReason(change) {
+  return (
+    `runtime changed during the stage: ${change.summary}; ` +
+    "cells that ran after the change may have used the later version and " +
+    "are keyed on the earlier one"
+  );
+}
+
 /** One line naming an upgrade between the planned and the live provider CLI. */
 function driftWarning(drift) {
   return (
@@ -325,6 +376,7 @@ function validateLoadedCampaign(options) {
     planFile: file,
     plan,
     contract,
+    env,
     liveCliVersions,
     drift: validation.drift,
   };
@@ -389,7 +441,12 @@ function splitRecords(records) {
   return output;
 }
 
-async function runStage(options, campaign) {
+/**
+ * Run one planned stage. `overrides` carries the version probe and the runtime
+ * hooks a test replaces; the CLI passes none.
+ */
+export async function runStage(options, campaign, overrides = {}) {
+  const { probe = providerVersion, ...runtimeOverrides } = overrides;
   const { artifactRoot, plan, contract } = campaign;
   const stagePlan = stagePlanFor({ plan, stage: options.stage });
   if (!stagePlan.enabled) {
@@ -432,8 +489,14 @@ async function runStage(options, campaign) {
     fixtureCacheDir,
     concurrency: options.concurrency,
     cliVersions: campaign.liveCliVersions,
+    ...runtimeOverrides,
   };
+  const probeLive = () => ({
+    claude: probe("claude", campaign.env),
+    codex: probe("codex", campaign.env),
+  });
   const base = await runExperimentRuntimeStage(runtimeOptions);
+  const probed = [probeLive()];
   let grouped = recordsByStage({
     artifactRoot,
     plan,
@@ -453,6 +516,7 @@ async function runStage(options, campaign) {
       records: Object.values(grouped).flat(),
     });
     grouped = splitRecords(enriched);
+    probed.push(probeLive());
     runtimeDrift = stageRuntimeDrift(plan, grouped);
     decision = evaluateExperimentDecision({
       plan,
@@ -460,6 +524,16 @@ async function runStage(options, campaign) {
       recordsByStage: grouped,
       runtimeDrift,
     });
+  }
+  const runtimeChange = stageRuntimeChange(campaign.liveCliVersions, probed);
+  if (runtimeChange) {
+    const reason = stageRuntimeChangeReason(runtimeChange);
+    process.stderr.write(`warning: ${reason}\n`);
+    decision = {
+      ...decision,
+      reasons: [reason, ...decision.reasons],
+      runtime_change_during_stage: runtimeChange,
+    };
   }
   const payload = {
     schema_version: 1,
@@ -469,6 +543,9 @@ async function runStage(options, campaign) {
       planned: plan.inputs.cli_versions,
       drift: runtimeDrift,
     },
+    ...(runtimeChange
+      ? { runtime_change_during_stage: runtimeChange }
+      : undefined),
     records: grouped[options.stage],
     records_by_stage: grouped,
     decision,

@@ -75,6 +75,11 @@ included once a holdout decision folds them in.
   Their cost is the price of not mixing runtimes.
 - A pair that straddles an upgrade is labelled, never refused. The operator
   reads the label and decides whether the comparison stands.
+- A provider that auto-updates mid-stage still leaves the cells that ran after
+  the update keyed on the versions probed at stage start. `--run` re-probes
+  after the arms and after novelty and names any change in the decision and the
+  stage payload as `runtime_change_during_stage`, without attributing it to
+  individual cells.
 - Stored plans survive provider releases, so a paused campaign resumes.
 - ADR 0083 stays active. Only its plan-binding clause is superseded.
 

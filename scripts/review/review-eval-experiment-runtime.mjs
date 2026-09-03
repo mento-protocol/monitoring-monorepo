@@ -207,11 +207,15 @@ export function createExperimentArmExecutor({
           cli_versions: rawVersions,
           source_digest: source.digest,
           source_report: source.text,
-          // Every assistant message of the cell, in order — not the last one.
-          // `assistant_messages` is kept so a re-read of the cache can tell a
-          // multi-message session from a single-message one.
+          // Every assistant message of the cell that fits the judge budget, in
+          // order — not the last one. The three counts are kept so a re-read of
+          // the cache can tell a multi-message session from a single-message
+          // one and see how much of the session `output` dropped, which is the
+          // same evidence the canonical cell writer stores.
           output: envelope.result,
           assistant_messages: envelope.assistant_messages,
+          assistant_messages_kept: envelope.assistant_messages_kept,
+          stream_chars: envelope.stream_chars,
           cost_usd: Number(envelope.total_cost_usd ?? 0),
           turns: envelope.num_turns ?? null,
         },
@@ -327,6 +331,10 @@ export function createExperimentArmExecutor({
       pr: lane.pr,
       treatment,
       output: raw.output,
+      // How much of the session `output` carries, beside the text itself.
+      assistant_messages: raw.assistant_messages,
+      assistant_messages_kept: raw.assistant_messages_kept,
+      stream_chars: raw.stream_chars,
       claims: score.claims,
       claims_count: score.claims.length,
       matched_ids: score.matched_ids,

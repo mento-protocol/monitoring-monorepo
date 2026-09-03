@@ -495,6 +495,12 @@ reports the runtime that produced each artifact rather than the runtime of the
 retry. The stage decision names every transition with the cells it touched,
 screen cells included once a holdout decision folds them in, so a flip on a
 straddling pair reads as a possible runtime change rather than a skill change.
+Every cell of one stage is keyed on the versions probed when that stage started,
+so a CLI that auto-updates while the stage runs leaves the cells that ran after
+the update keyed on the earlier version; `--run` re-probes after the arms and
+after novelty, and a change between those probes is written to stderr and named
+in the decision and the stage payload as `runtime_change_during_stage` for the
+stage as a whole, never per cell.
 
 What the canonical lane keeps free of the two versions is its ledger
 comparability key, not its cell fingerprint. `claude` and `codex` ship far more

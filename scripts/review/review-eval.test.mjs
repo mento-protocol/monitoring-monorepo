@@ -821,7 +821,7 @@ test("comparabilityKey moves with the contract, the prompts, and the scorer", ()
 
 test("orchestratorSourceDigest binds the shell and the cell modules", () => {
   const expected =
-    "56ae2f21cd564b722c255d9304eb9988c53c1ba3b9fd9c3d0652bb51f5fd85ab";
+    "dda25054b96c037e82b0a616e98b97ad028c6f2351f14bf8948f76a1fc1beb60";
   assert.equal(orchestratorSourceDigest(), expected);
   // The cell writer and the stream parser are in the digest for the same
   // reason the shell is: the writer decides what a paid cell records and the
@@ -4792,10 +4792,14 @@ test("the cell writer tells a harness fault from a broken stream", () => {
     assert.equal(existsSync(resultFile), false);
 
     // A truncated stream is still the cell's own failure, and still exits 3.
+    // The parser's own message goes to stderr first: exit 3 alone said a cell
+    // broke its stream without saying how.
     writeFileSync(rawFile, stream.slice(0, 40));
-    assert.equal(
-      runWriter(writerPath, [rawFile, otherFile, resultFile]).status,
-      3,
+    const truncated = runWriter(writerPath, [rawFile, otherFile, resultFile]);
+    assert.equal(truncated.status, 3);
+    assert.match(
+      truncated.stderr,
+      /the contestant stream did not parse: contestant wrote a malformed stream event/,
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });
