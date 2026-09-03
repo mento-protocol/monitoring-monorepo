@@ -438,7 +438,21 @@ export function writeExperimentCache({
   }
 }
 
+/**
+ * Every artifact stores the versions of the providers its own phase invoked.
+ * Provenance is read back from these bytes, never inferred from whether the
+ * current invocation reused the artifact, so a retry cannot relabel work that
+ * an upgraded runtime produced.
+ */
+function assertPhaseCliVersions(payload, expected, label) {
+  if (expected === undefined) return;
+  if (JSON.stringify(payload?.cli_versions) !== JSON.stringify(expected)) {
+    throw new Error(`${label} cache payload ran under other CLI versions`);
+  }
+}
+
 export function validateRawExperimentPayload(payload, expected) {
+  assertPhaseCliVersions(payload, expected.cliVersions, "raw experiment");
   if (
     payload?.ok !== true ||
     payload.campaign_id !== expected.plan.campaign_id ||
@@ -456,7 +470,12 @@ export function validateRawExperimentPayload(payload, expected) {
   return payload;
 }
 
-export function validateScoreExperimentPayload(payload, rawDigest) {
+export function validateScoreExperimentPayload(
+  payload,
+  rawDigest,
+  cliVersions,
+) {
+  assertPhaseCliVersions(payload, cliVersions, "score experiment");
   const leak = payload?.leak;
   if (
     payload?.raw_digest !== rawDigest ||
@@ -474,7 +493,12 @@ export function validateScoreExperimentPayload(payload, rawDigest) {
   return payload;
 }
 
-export function validateNovelExperimentPayload(payload, scoreDigest) {
+export function validateNovelExperimentPayload(
+  payload,
+  scoreDigest,
+  cliVersions,
+) {
+  assertPhaseCliVersions(payload, cliVersions, "novel experiment");
   if (
     payload?.score_digest !== scoreDigest ||
     !Number.isSafeInteger(payload.verdict?.novelWrong) ||

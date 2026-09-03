@@ -15,6 +15,7 @@ import test from "node:test";
 import {
   rawCacheIdentity,
   digestObject,
+  recordRuntimeDrift,
 } from "./review-eval-experiment-contract.mjs";
 import {
   readExperimentCache,
@@ -239,6 +240,7 @@ function baseOptions(harness, overrides = {}) {
     fixtureCacheDir: harness.fixtureCacheDir,
     prepareFixture: harness.prepareFixture,
     reset: async () => true,
+    cliVersions: harness.plan.inputs.cli_versions,
     scorerDigestNow: () => harness.plan.inputs.scorer_digest,
     judgeExec: judgeExec(),
     contestantExec: async () => contestantStream(["file.js:1 has a defect"]),
@@ -361,6 +363,11 @@ test("one live finder report is shared by both arms", async (t) => {
     rawPayloads[0].payload.source_report,
     "one shared live finder report",
   );
+  // This lane does spawn the finder, so its cell carries the Codex version.
+  assert.deepEqual(rawPayloads[0].payload.cli_versions, {
+    claude: harness.plan.inputs.cli_versions.claude,
+    codex: harness.plan.inputs.cli_versions.codex,
+  });
   await assert.rejects(
     runExperimentRuntimeStage(
       baseOptions(harness, {
@@ -400,6 +407,7 @@ test("successful empty output is cached and malformed output is not", async (t) 
     lane: emptyHarness.lanes[0],
     treatment: "candidate",
     sourceDigest: source.sha256,
+    cliVersions: emptyHarness.plan.inputs.cli_versions,
   });
   assert.equal(
     readExperimentCache({
@@ -584,6 +592,7 @@ test("novel scoring follows base scoring and reuses its cache", async (t) => {
       fixtureCacheDir: harness.fixtureCacheDir,
       prepareFixture: harness.prepareFixture,
       reset: async () => true,
+      cliVersions: harness.plan.inputs.cli_versions,
       scorerDigestNow: () => currentNovelDigest,
       judgeExec: async () => {
         currentNovelDigest = digest("x");
@@ -611,6 +620,7 @@ test("novel scoring follows base scoring and reuses its cache", async (t) => {
       return harness.prepareFixture(options);
     },
     reset: async () => true,
+    cliVersions: harness.plan.inputs.cli_versions,
     scorerDigestNow: () => harness.plan.inputs.scorer_digest,
     judgeExec: judgeExec(events),
   });
@@ -636,6 +646,7 @@ test("novel scoring follows base scoring and reuses its cache", async (t) => {
     fixtureCacheDir: harness.fixtureCacheDir,
     prepareFixture: harness.prepareFixture,
     reset: async () => true,
+    cliVersions: harness.plan.inputs.cli_versions,
     scorerDigestNow: () => harness.plan.inputs.scorer_digest,
     judgeExec: async () => {
       throw new Error("cached novel judge ran again");
@@ -655,4 +666,123 @@ test("runtime leaves the canonical ledger untouched", async (t) => {
   await runExperimentRuntimeStage(baseOptions(harness));
   assert.equal(readFileSync(ledger, "utf8"), "ledger sentinel\n");
   assert.deepEqual(readdirSync(harness.artifactRoot), ["cache"]);
+});
+
+test("an artifact keeps the runtime that produced it across a retry", async (t) => {
+  // The defect this replaced: provenance was inferred from the current
+  // invocation's `cache_reuse` flags, so a stage retried after a failure
+  // relabelled artifacts an upgraded CLI had produced as planned-runtime work.
+  const harness = makeHarness({ laneCount: 1 });
+  t.after(harness.cleanup);
+  const planned = harness.plan.inputs.cli_versions;
+  const upgraded = { ...planned, claude: "claude-2", judge: "judge-2" };
+  const first = await runExperimentRuntimeStage(baseOptions(harness));
+  for (const record of first.records) {
+    assert.deepEqual(record.cli_versions, {
+      raw: { claude: planned.claude },
+      score: { judge: planned.judge },
+    });
+  }
+
+  // The CLI upgrades. No artifact of the old runtime is found, so the cell
+  // reruns and stores the versions it actually ran under.
+  let contestantCalls = 0;
+  const upgradedRun = await runExperimentRuntimeStage(
+    baseOptions(harness, {
+      cliVersions: upgraded,
+      contestantExec: async () => {
+        contestantCalls += 1;
+        return contestantStream(["file.js:1 has a defect"]);
+      },
+    }),
+  );
+  assert.equal(contestantCalls, 2);
+  for (const record of upgradedRun.records) {
+    assert.deepEqual(record.cache_reuse, { raw: false, score: false });
+    assert.deepEqual(record.cli_versions, {
+      raw: { claude: "claude-2" },
+      score: { judge: "judge-2" },
+    });
+    const stored = JSON.parse(readFileSync(record.artifacts.raw, "utf8"));
+    assert.deepEqual(stored.payload.cli_versions, { claude: "claude-2" });
+  }
+
+  // The stage fails after those artifacts land. The retry reuses them and must
+  // still report the runtime that produced them.
+  const retry = await runExperimentRuntimeStage(
+    baseOptions(harness, {
+      cliVersions: upgraded,
+      contestantExec: async () => {
+        throw new Error("cached contestant ran again");
+      },
+      judgeExec: async () => {
+        throw new Error("cached judge ran again");
+      },
+    }),
+  );
+  for (const record of retry.records) {
+    assert.deepEqual(record.cache_reuse, { raw: true, score: true });
+    assert.deepEqual(record.cli_versions, {
+      raw: { claude: "claude-2" },
+      score: { judge: "judge-2" },
+    });
+  }
+  assert.deepEqual(
+    recordRuntimeDrift({ planned, records: retry.records }).providers.map(
+      (entry) => [entry.provider, entry.live, entry.cell_ids.length],
+    ),
+    [
+      ["claude", "claude-2", 2],
+      ["judge", "judge-2", 2],
+    ],
+  );
+});
+
+test("a novelty judge stores its own runtime and keeps it on reuse", async (t) => {
+  const harness = makeHarness({ laneCount: 1 });
+  t.after(harness.cleanup);
+  const planned = harness.plan.inputs.cli_versions;
+  const upgraded = { ...planned, judge: "judge-2" };
+  const base = await runExperimentRuntimeStage(
+    baseOptions(harness, { cliVersions: upgraded }),
+  );
+  const enrichOptions = (overrides = {}) => ({
+    plan: harness.plan,
+    records: base.records,
+    contract: harness.contract,
+    artifactRoot: harness.artifactRoot,
+    repoRoot: harness.repoRoot,
+    fixtureCacheDir: harness.fixtureCacheDir,
+    prepareFixture: harness.prepareFixture,
+    reset: async () => true,
+    cliVersions: upgraded,
+    scorerDigestNow: () => harness.plan.inputs.scorer_digest,
+    judgeExec: judgeExec(),
+    ...overrides,
+  });
+  const enriched = await enrichExperimentNovelty(enrichOptions());
+  for (const record of enriched) {
+    assert.deepEqual(record.cli_versions.novel, { judge: "judge-2" });
+    const stored = JSON.parse(readFileSync(record.artifacts.novel, "utf8"));
+    assert.deepEqual(stored.payload.cli_versions, { judge: "judge-2" });
+  }
+  const reused = await enrichExperimentNovelty(
+    enrichOptions({
+      judgeExec: async () => {
+        throw new Error("cached novel judge ran again");
+      },
+    }),
+  );
+  assert.equal(
+    reused.every((record) => record.cache_reuse.novel === true),
+    true,
+  );
+  assert.deepEqual(recordRuntimeDrift({ planned, records: reused }).providers, [
+    {
+      provider: "judge",
+      planned: planned.judge,
+      live: "judge-2",
+      cell_ids: reused.map((record) => record.cell_id).sort(),
+    },
+  ]);
 });

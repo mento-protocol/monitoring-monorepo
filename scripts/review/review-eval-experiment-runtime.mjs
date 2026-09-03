@@ -20,6 +20,7 @@ import {
 import {
   MAX_FIXTURE_LANES,
   novelCacheIdentity,
+  phaseCliVersions,
   rawCacheIdentity,
   scoreCacheIdentity,
   stagePlanFor,
@@ -121,6 +122,7 @@ export function createExperimentArmExecutor({
   contract,
   artifactRoot,
   repoRoot,
+  cliVersions,
   handoffTemplate = readPinnedExperimentFile({
     repoRoot,
     record: plan.inputs.prompts.handoff,
@@ -137,12 +139,19 @@ export function createExperimentArmExecutor({
 }) {
   const judge = (request) => judgeExec({ ...request, env });
   return async ({ lane, treatment, fixture, source }) => {
+    const rawVersions = phaseCliVersions({
+      phase: "raw",
+      cliVersions,
+      source,
+    });
+    const scoreVersions = phaseCliVersions({ phase: "score", cliVersions });
     const rawIdentity = rawCacheIdentity({
       plan,
       stage,
       lane,
       treatment,
       sourceDigest: source.digest,
+      cliVersions,
     });
     let rawEntry = readCache({
       artifactRoot,
@@ -194,6 +203,8 @@ export function createExperimentArmExecutor({
           cell_id: experimentCellId(lane, treatment),
           pr: lane.pr,
           treatment,
+          // The runtime this transcript was produced under, stored with it.
+          cli_versions: rawVersions,
           source_digest: source.digest,
           source_report: source.text,
           // Every assistant message of the cell, in order — not the last one.
@@ -213,9 +224,10 @@ export function createExperimentArmExecutor({
       treatment,
       source,
       cellId: experimentCellId(lane, treatment),
+      cliVersions: rawVersions,
     });
     const rawDigest = rawEntry.artifact.content_digest;
-    const scoreIdentity = scoreCacheIdentity({ plan, rawDigest });
+    const scoreIdentity = scoreCacheIdentity({ plan, rawDigest, cliVersions });
     let scoreEntry = readCache({
       artifactRoot,
       kind: "score",
@@ -279,6 +291,8 @@ export function createExperimentArmExecutor({
         identity: scoreIdentity,
         payload: {
           raw_digest: rawDigest,
+          // The judge runtime that extracted and matched these claims.
+          cli_versions: scoreVersions,
           claims,
           matched_ids: matches.matchedIds,
           judge_reasoning: matches.judgeReasoning,
@@ -286,7 +300,11 @@ export function createExperimentArmExecutor({
         },
       });
     }
-    const score = validateScoreExperimentPayload(scoreEntry.payload, rawDigest);
+    const score = validateScoreExperimentPayload(
+      scoreEntry.payload,
+      rawDigest,
+      scoreVersions,
+    );
     return {
       ok: true,
       campaign_id: plan.campaign_id,
@@ -301,6 +319,9 @@ export function createExperimentArmExecutor({
       matched_ids: score.matched_ids,
       leak: score.leak,
       empty: raw.output.trim().length === 0,
+      // Read from the artifacts, so a reused artifact reports the runtime that
+      // produced it rather than the runtime of this invocation.
+      cli_versions: { raw: raw.cli_versions, score: score.cli_versions },
       raw_digest: rawDigest,
       score_digest: scoreEntry.artifact.content_digest,
       cache_reuse: { raw: rawReused, score: scoreReused },
@@ -395,6 +416,7 @@ export async function enrichExperimentNovelty({
   contract,
   artifactRoot,
   repoRoot,
+  cliVersions,
   fixtureCacheDir,
   concurrency = MAX_FIXTURE_LANES,
   prepareFixture = defaultExperimentPrepareFixture,
@@ -407,6 +429,8 @@ export async function enrichExperimentNovelty({
   env = scrubbedEnv({ roots: [repoRoot] }),
 }) {
   assertExperimentConcurrency(concurrency);
+  const scoreVersions = phaseCliVersions({ phase: "score", cliVersions });
+  const novelVersions = phaseCliVersions({ phase: "novel", cliVersions });
   const groups = new Map();
   for (const record of records) {
     const lane = stagePlanFor({ plan, stage: record.stage }).lanes.find(
@@ -440,6 +464,7 @@ export async function enrichExperimentNovelty({
         const scoreIdentity = scoreCacheIdentity({
           plan,
           rawDigest: record.raw_digest,
+          cliVersions,
         });
         const scoreEntry = readCache({
           artifactRoot,
@@ -457,10 +482,12 @@ export async function enrichExperimentNovelty({
         const score = validateScoreExperimentPayload(
           scoreEntry.payload,
           record.raw_digest,
+          scoreVersions,
         );
         const identity = novelCacheIdentity({
           plan,
           scoreDigest: record.score_digest,
+          cliVersions,
         });
         let entry = readCache({
           artifactRoot,
@@ -489,17 +516,24 @@ export async function enrichExperimentNovelty({
             artifactRoot,
             kind: "novel",
             identity,
-            payload: { score_digest: record.score_digest, verdict },
+            payload: {
+              score_digest: record.score_digest,
+              // The judge runtime that classified these claims.
+              cli_versions: novelVersions,
+              verdict,
+            },
           });
         }
         const payload = validateNovelExperimentPayload(
           entry.payload,
           record.score_digest,
+          novelVersions,
         );
         enriched.push({
           ...record,
           wrong_claims: payload.verdict.novelWrong,
           novel_real: payload.verdict.novelReal,
+          cli_versions: { ...record.cli_versions, novel: payload.cli_versions },
           novel_digest: entry.artifact.content_digest,
           cache_reuse: { ...record.cache_reuse, novel: reused },
           artifacts: { ...record.artifacts, novel: entry.file },

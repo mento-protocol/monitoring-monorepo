@@ -447,19 +447,28 @@ The plan binds these inputs:
 - Scorer identity and the five-module experiment harness digest.
 - Stage lanes, treatment order, and the canonical rerun manifest.
 
-The plan records the Claude and Codex CLI versions instead of binding them, on
-the canonical lane's policy: `claude` and `codex` ship far more often than a
-campaign runs. `--validate-plan` and `--run` rebuild the plan from its recorded
-versions, so a stored plan stays valid after a provider upgrade, and they probe
-the live versions separately. When the live versions differ, `--validate-plan`
-reports `cli_version_drift` as a warning and stays `ok`, `--run` writes one
-warning line to stderr, and every record carries the versions its own phases ran
-under: the contestant CLI for a fresh transcript, the judge CLI for a fresh
-score, and the planned versions for a phase served from cache. Cell identity
-keeps the planned versions, so cells cached under the old runtime are reused and
-rescored instead of re-run. The stage decision names the drift and the affected
-cell ids in its reasons, so a flip on a straddling pair reads as a possible
-runtime change rather than a skill change.
+The plan records the Claude and Codex CLI versions instead of binding them.
+`--validate-plan` and `--run` rebuild the plan from its recorded versions, so a
+stored plan stays valid after a provider upgrade, and they probe the live
+versions separately. A live difference is a warning: `--validate-plan` reports
+`cli_version_drift` and stays `ok`, and `--run` writes one line to stderr.
+
+Cell identity follows the canonical lane exactly. Every cache identity carries
+the live version of each provider its own phase invokes — the contestant CLI for
+a raw cell, the finder CLI as well on a `live-paired` lane, the judge CLI for a
+score or novelty cell. An artifact produced under another runtime is never
+found, so the cell reruns and no phase mixes runtimes. Each artifact stores the
+versions it ran under and each record reads those bytes, so a stage retried
+after a failure reports the runtime that produced each artifact rather than the
+runtime of the retry. The stage decision names every transition with the cells
+it touched, screen cells included once a holdout decision folds them in, so a
+flip on a straddling pair reads as a possible runtime change rather than a skill
+change.
+
+What the canonical lane keeps free of the two versions is its ledger
+comparability key, not its cell fingerprint. `claude` and `codex` ship far more
+often than the suite runs, so keying the ledger on them would start a fresh
+lineage at every upgrade.
 
 The screen uses the first frozen report for PRs 1990, 1995, and 1999. It runs
 six verifier arms. Each fixture lane runs the two arms sequentially in its

@@ -210,40 +210,83 @@ export function cliVersionDrift({ planned, live }) {
   };
 }
 
-/** One reason string naming the drift and the cells that ran under it. */
-export function runtimeDriftReason(drift, cellIds = drift?.cell_ids ?? []) {
-  if (!isObject(drift) || typeof drift.summary !== "string") return null;
-  const cells = [...new Set(cellIds ?? [])].sort();
-  return cells.length === 0
-    ? `runtime drift: ${drift.summary}; every cell reused the planned runtime`
-    : `runtime drift: ${drift.summary} on ${cells.join(", ")}`;
+/**
+ * The providers one cache phase invokes, at the versions it invokes them at.
+ * A frozen-report lane never spawns the finder, so `codex` belongs to a
+ * live-finder raw phase alone; scoring and novelty classification are judge
+ * calls. These versions go into the phase's cache identity and into the
+ * artifact it writes, so a phase can never be attributed to a provider it did
+ * not run or to a version it did not run under.
+ */
+export function phaseCliVersions({ phase, cliVersions, source = null }) {
+  const live = cliVersionIdentity(cliVersions);
+  if (phase === "raw") {
+    return source?.kind === "live-finder"
+      ? { claude: live.claude, codex: live.codex }
+      : { claude: live.claude };
+  }
+  if (phase === "score" || phase === "novel") return { judge: live.judge };
+  throw new Error(`unknown experiment cache phase ${JSON.stringify(phase)}`);
 }
 
 /**
- * Stamp each arm record with the versions it actually ran under, phase by
- * phase. A phase served from cache ran under the planned versions; a phase that
- * ran now carries the live ones, so no stage mixes runtimes unlabelled. The
- * contestant CLI labels the raw transcript, the judge CLI labels the score.
+ * Read the versions every record actually ran under out of the records
+ * themselves, and name each transition away from the planned versions with the
+ * cells it touched. Records carry what their artifacts stored, so a stage
+ * retried later reports the runtime that produced each artifact rather than the
+ * runtime of the retry. Pass every record the decision reads, including screen
+ * records folded into a holdout decision.
  */
-export function labelRecordRuntimes({ records, planned, live = null }) {
+export function recordRuntimeDrift({ planned, records }) {
   const recorded = cliVersionIdentity(planned);
-  const current = live === null ? recorded : cliVersionIdentity(live);
-  const freshCellIds = [];
-  const labelled = (records ?? []).map((record) => {
-    const reuse = record?.cache_reuse ?? {};
-    const freshRaw = reuse.raw === false;
-    const freshScore = reuse.score === false;
-    if (freshRaw || freshScore) freshCellIds.push(record.cell_id);
-    return {
-      ...record,
-      cli_versions: {
-        claude: freshRaw ? current.claude : recorded.claude,
-        codex: freshRaw ? current.codex : recorded.codex,
-        judge: freshScore ? current.judge : recorded.judge,
-      },
-    };
+  const transitions = new Map();
+  for (const record of records ?? []) {
+    if (!isObject(record?.cli_versions)) continue;
+    for (const phase of Object.values(record.cli_versions)) {
+      if (!isObject(phase)) continue;
+      for (const [provider, version] of Object.entries(phase)) {
+        if (!CLI_PROVIDERS.includes(provider)) continue;
+        if (version === recorded[provider]) continue;
+        const key = `${provider}\u0000${version}`;
+        if (!transitions.has(key)) {
+          transitions.set(key, {
+            provider,
+            planned: recorded[provider],
+            live: version,
+            cells: new Set(),
+          });
+        }
+        transitions.get(key).cells.add(record.cell_id);
+      }
+    }
+  }
+  if (transitions.size === 0) return null;
+  const providers = [...transitions.values()]
+    .sort(
+      (left, right) =>
+        left.provider.localeCompare(right.provider) ||
+        left.live.localeCompare(right.live),
+    )
+    .map(({ cells, ...entry }) => ({ ...entry, cell_ids: [...cells].sort() }));
+  return {
+    providers,
+    cell_ids: [...new Set(providers.flatMap((entry) => entry.cell_ids))].sort(),
+    summary: providers
+      .map((entry) => `${entry.provider} ${entry.planned} -> ${entry.live}`)
+      .join(", "),
+  };
+}
+
+/** One reason string naming each transition and the cells that ran under it. */
+export function runtimeDriftReason(drift) {
+  if (!isObject(drift) || !Array.isArray(drift.providers)) return null;
+  if (drift.providers.length === 0) return null;
+  const transitions = drift.providers.map((entry) => {
+    const move = `${entry.provider} ${entry.planned} -> ${entry.live}`;
+    const cells = [...new Set(entry.cell_ids ?? [])].sort();
+    return cells.length === 0 ? move : `${move} on ${cells.join(", ")}`;
   });
-  return { records: labelled, fresh_cell_ids: freshCellIds.sort() };
+  return `runtime drift: ${transitions.join("; ")}`;
 }
 
 function modelIdentity(contract) {
@@ -582,12 +625,19 @@ function withDigest(identity) {
   return { ...identity, digest: digestObject(identity) };
 }
 
+/**
+ * Cache identities carry the LIVE version of every provider the phase invokes,
+ * exactly as the canonical lane's cell fingerprint does. An artifact produced
+ * under another runtime is therefore never found, the cell reruns, and no
+ * decision ever mixes two runtimes inside one phase.
+ */
 export function rawCacheIdentity({
   plan,
   stage,
   lane,
   treatment: treatmentName,
   sourceDigest = null,
+  cliVersions,
 }) {
   const plannedStage = stagePlanFor({ plan, stage });
   const plannedLane = plannedStage.lanes.find(
@@ -621,7 +671,7 @@ export function rawCacheIdentity({
     treatment: treatmentName,
     skill_digest: selectedTreatment.skill_digest,
     contract_digest: plan.contract_digest,
-    cli_version: plan.inputs.cli_versions.claude,
+    cli_versions: phaseCliVersions({ phase: "raw", cliVersions, source }),
     model: plan.inputs.models.verifier,
     prompt: plan.inputs.prompts.handoff,
     fixture: plannedLane.fixture,
@@ -629,7 +679,7 @@ export function rawCacheIdentity({
   });
 }
 
-export function scoreCacheIdentity({ plan, rawDigest }) {
+export function scoreCacheIdentity({ plan, rawDigest, cliVersions }) {
   return withDigest({
     schema_version: EXPERIMENT_SCHEMA_VERSION,
     namespace: EXPERIMENT_NAMESPACE,
@@ -638,11 +688,11 @@ export function scoreCacheIdentity({ plan, rawDigest }) {
     raw_digest: assertDigest(rawDigest, "rawDigest"),
     scorer_digest: plan.inputs.scorer_digest,
     judge: plan.inputs.models.judge,
-    judge_cli_version: plan.inputs.cli_versions.judge,
+    cli_versions: phaseCliVersions({ phase: "score", cliVersions }),
   });
 }
 
-export function novelCacheIdentity({ plan, scoreDigest }) {
+export function novelCacheIdentity({ plan, scoreDigest, cliVersions }) {
   return withDigest({
     schema_version: EXPERIMENT_SCHEMA_VERSION,
     namespace: EXPERIMENT_NAMESPACE,
@@ -651,7 +701,7 @@ export function novelCacheIdentity({ plan, scoreDigest }) {
     score_digest: assertDigest(scoreDigest, "scoreDigest"),
     scorer_digest: plan.inputs.scorer_digest,
     judge: plan.inputs.models.judge,
-    judge_cli_version: plan.inputs.cli_versions.judge,
+    cli_versions: phaseCliVersions({ phase: "novel", cliVersions }),
   });
 }
 

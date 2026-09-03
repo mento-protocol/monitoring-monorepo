@@ -22,7 +22,7 @@ import {
   buildExperimentPlan,
   digestObject,
   EXPERIMENT_STAGES,
-  labelRecordRuntimes,
+  recordRuntimeDrift,
   stagePlanFor,
   validateExperimentPlan,
 } from "./review-eval-experiment-contract.mjs";
@@ -232,7 +232,8 @@ function writePlan(file, plan) {
 function driftWarning(drift) {
   return (
     `runtime drift: ${drift.summary}; ` +
-    "cells that run now are labelled with the live versions"
+    "artifacts from the planned versions are not reused, and every cell that " +
+    "runs now records the live versions"
   );
 }
 
@@ -368,6 +369,17 @@ function recordsByStage({ artifactRoot, plan, stage, records }) {
   return output;
 }
 
+/**
+ * Drift named by every record the decision reads — a holdout decision folds in
+ * the screen records, and each record carries what its own artifacts stored.
+ */
+function stageRuntimeDrift(plan, grouped) {
+  return recordRuntimeDrift({
+    planned: plan.inputs.cli_versions,
+    records: Object.values(grouped).flat(),
+  });
+}
+
 function splitRecords(records) {
   const output = {};
   for (const record of records) {
@@ -418,22 +430,16 @@ async function runStage(options, campaign) {
     contract,
     fixtureCacheDir,
     concurrency: options.concurrency,
+    cliVersions: campaign.liveCliVersions,
   };
   const base = await runExperimentRuntimeStage(runtimeOptions);
-  const labelled = labelRecordRuntimes({
-    records: base.records,
-    planned: plan.inputs.cli_versions,
-    live: campaign.liveCliVersions ?? null,
-  });
-  const runtimeDrift = campaign.drift
-    ? { ...campaign.drift, cell_ids: labelled.fresh_cell_ids }
-    : null;
   let grouped = recordsByStage({
     artifactRoot,
     plan,
     stage: options.stage,
-    records: labelled.records,
+    records: base.records,
   });
+  let runtimeDrift = stageRuntimeDrift(plan, grouped);
   let decision = evaluateExperimentDecision({
     plan,
     stage: options.stage,
@@ -446,6 +452,7 @@ async function runStage(options, campaign) {
       records: Object.values(grouped).flat(),
     });
     grouped = splitRecords(enriched);
+    runtimeDrift = stageRuntimeDrift(plan, grouped);
     decision = evaluateExperimentDecision({
       plan,
       stage: options.stage,

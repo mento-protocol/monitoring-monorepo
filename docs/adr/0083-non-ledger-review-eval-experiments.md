@@ -29,6 +29,13 @@ experiment cannot replace canonical qualification.
 
 ## Decision
 
+ADR 0085 supersedes this decision on one point: the plan records provider CLI
+versions and each cache identity binds the live version of the provider its
+phase invokes. The bullet below that names provider CLI versions among what the
+plan binds is superseded by that ADR; everything else here stands, so this ADR
+keeps `status: active` — the checklist's archive-and-`superseded_by` rule
+applies to a whole superseded decision, not to one clause.
+
 Add a small staged experiment lane with these rules:
 
 - The lane writes `plan.json` and content-addressed artifacts under `cache/raw/`,

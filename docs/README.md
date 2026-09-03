@@ -214,6 +214,7 @@ Authority: canonical
 - [`docs/adr/0082-persistent-issue-board-mutation-mutex.md`](adr/0082-persistent-issue-board-mutation-mutex.md) — Persistent Issue-Board Mutation Mutex
 - [`docs/adr/0083-non-ledger-review-eval-experiments.md`](adr/0083-non-ledger-review-eval-experiments.md) — Review-skill experiments use a separate staged non-ledger lane
 - [`docs/adr/0084-github-ui-operator-merge.md`](adr/0084-github-ui-operator-merge.md) — Use GitHub for ordinary pull request merges
+- [`docs/adr/0085-review-eval-cli-versions-bind-the-cell.md`](adr/0085-review-eval-cli-versions-bind-the-cell.md) — Provider CLI versions bind the review-eval cell, not the plan
 
 Authority: non-canonical
 
