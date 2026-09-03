@@ -441,8 +441,10 @@ Field expectations:
 2. Freeze the original request, target/owner, changed files, and non-test
    changed-line count as the scope baseline. Batch review fixes locally,
    auditing sibling surfaces before pushing. Classify additions as in-scope,
-   follow-up, or stop; open an issue before deferring valid follow-up work, warn
-   near twice the baseline, and do not pause solely for cycle count before five
+   follow-up, or stop; open an issue labeled per
+   [`agent-issue-workflow.md`](agent-issue-workflow.md) before deferring valid
+   follow-up work, warn near twice the baseline, and do not pause solely for
+   cycle count before five
    review-triggered patch cycles are complete. Pause for reclassification before
    starting a sixth.
 3. Before invoking the gate, ensure that no direct validation, dashboard server,

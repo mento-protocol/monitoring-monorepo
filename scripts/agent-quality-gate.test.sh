@@ -4915,6 +4915,14 @@ STUB
 
     # shellcheck disable=SC2329
     cleanup_sequential_descendant_fixture() {
+      # Release the drain barrier before signalling anything. A holder parked
+      # here is inside a 20-second poll for `.release`, so an assertion that
+      # fails between arming and the release below used to leave it there for
+      # the full budget and then report `the test-only drain refresh barrier
+      # did not release` on top of the real failure — burying the assertion
+      # that actually failed under an artifact of the failing (issue 2212).
+      # Unconditional: releasing a barrier that never armed is a no-op file.
+      : > "${drain_refresh_barrier}.release" 2>/dev/null || true
       if [[ "$holder_pid" =~ ^[1-9][0-9]*$ && -n "$holder_start" ]] &&
         gate_test_process_has_live_start "$holder_pid" "$holder_start"; then
         gate_test_signal_with_current_parent \
@@ -5060,7 +5068,12 @@ STUB
     contender_output="$fixture_runtime/replacement-contender-output"
     rm -f "$descendant_pid_file" "$replacement_pid_file" "$contender_started" \
       "${drain_refresh_barrier}.used" "${drain_refresh_barrier}.ready" \
-      "${drain_refresh_barrier}.release"
+      "${drain_refresh_barrier}.release" "${drain_refresh_barrier}.command"
+    # Only the prewarm command forks the descendant this fixture rendezvouses
+    # with; the two commands before it fork nothing. Naming it keeps an earlier
+    # drain — one that saw only a transient helper — from consuming the barrier
+    # and stranding this fixture at a rendezvous that already happened.
+    printf '%s\n' "pnpm agent:prewarm:test" > "${drain_refresh_barrier}.command"
     holder_start=""
     contender_start=""
     descendant_start=""
@@ -6375,9 +6388,350 @@ STUB
   )
 }
 
+# Which drain the test-only refresh barrier arms on. The fixture below rides a
+# real gate and so can only ever sample the ordering it happens to get; this
+# exercises the selection directly, so the case that used to lose the race is
+# deterministic rather than occasional (issue 2212).
+run_drain_refresh_barrier_selection_regression() {
+  local fixture_root barrier source_body rc
+  fixture_root="$(mktemp -d)"
+  barrier="$fixture_root/drain-refresh"
+  # Lift the function out of the gate rather than sourcing the script, which
+  # would run its whole top level. Bounded to the first column-0 `}` so a body
+  # brace cannot end it early.
+  source_body="$(awk '
+    /^gate_drain_test_refresh_barrier\(\) \{$/ { capture = 1 }
+    capture { print }
+    capture && /^\}$/ { exit }
+  ' "$repo_root/scripts/agent-quality-gate.sh")"
+  [[ "$source_body" == *"gate_drain_test_refresh_barrier() {"* &&
+    "$source_body" == *$'\n}' ]] ||
+    fail "could not lift gate_drain_test_refresh_barrier out of the gate"
+
+  barrier_case() {
+    local expect_armed="$1" expect_rc="$2" active="$3" named="$4"
+    # The lifted function reads both of these by name, which shellcheck cannot
+    # see through the eval below. They are the inputs under test: the barrier
+    # path the gate was configured with, and the mapped command whose drains
+    # are running.
+    # shellcheck disable=SC2034
+    local drain_refresh_test_barrier="$barrier"
+    # shellcheck disable=SC2034
+    local gate_drain_active_mapped_command="$active"
+    rm -f "${barrier}.used" "${barrier}.ready" "${barrier}.command"
+    # Pre-created so an arming case returns on its first poll instead of
+    # spending the 20-second budget.
+    : > "${barrier}.release"
+    [[ "$named" == "<none>" ]] ||
+      printf '%s\n' "$named" > "${barrier}.command"
+    eval "$source_body"
+    rc=0
+    gate_drain_test_refresh_barrier || rc=$?
+    [[ "$rc" -eq "$expect_rc" ]] ||
+      fail "drain refresh barrier named '${named}' under '${active}' returned ${rc}, expected ${expect_rc}"
+    if [[ "$expect_armed" -eq 1 ]]; then
+      [[ -e "${barrier}.ready" && -e "${barrier}.used" ]] ||
+        fail "drain refresh barrier named '${named}' under '${active}' did not arm"
+    else
+      [[ ! -e "${barrier}.ready" && ! -e "${barrier}.used" ]] ||
+        fail "drain refresh barrier named '${named}' under '${active}' armed on the wrong drain"
+    fi
+  }
+
+  # An unnamed barrier keeps arming on whatever drain reaches it first, so a
+  # fixture that never opts in is unaffected by this change.
+  barrier_case 1 0 "pnpm lint:scripts" "<none>"
+  # Named: the earlier command must pass straight through. This is the case the
+  # race lost — the barrier was consumed here and the real rendezvous starved.
+  barrier_case 0 0 "./tools/trunk check --ci x" "pnpm agent:prewarm:test"
+  barrier_case 0 0 "pnpm lint:scripts" "pnpm agent:prewarm:test"
+  # Named, and this is the drain that was named.
+  barrier_case 1 0 "pnpm agent:prewarm:test" "pnpm agent:prewarm:test"
+  # A name that cannot be read is a fixture asking for a rendezvous it will not
+  # get; arming everywhere instead is exactly the defect, so this fails closed.
+  barrier_case 0 2 "pnpm agent:prewarm:test" ""
+  # A name written without a trailing newline still names that command. `read`
+  # fills the variable and only then reports EOF, so a fallback on its status
+  # would silently turn this into the empty-name refusal above.
+  rm -f "${barrier}.used" "${barrier}.ready" "${barrier}.command"
+  : > "${barrier}.release"
+  printf '%s' "pnpm agent:prewarm:test" > "${barrier}.command"
+  (
+    # Both are read by name inside the lifted function, which shellcheck cannot
+    # see through the eval, so it reads them as dead assignments.
+    # shellcheck disable=SC2034
+    drain_refresh_test_barrier="$barrier"
+    # shellcheck disable=SC2034
+    gate_drain_active_mapped_command="pnpm agent:prewarm:test"
+    eval "$source_body"
+    gate_drain_test_refresh_barrier
+  ) || fail "a drain refresh barrier name without a trailing newline was discarded"
+  [[ -e "${barrier}.ready" ]] ||
+    fail "a drain refresh barrier name without a trailing newline did not arm"
+
+  # A name that exists but cannot be read must refuse, not fall back to arming
+  # anywhere: `-r` alone cannot tell it apart from no name at all.
+  rm -f "${barrier}.used" "${barrier}.ready"
+  printf '%s\n' "pnpm agent:prewarm:test" > "${barrier}.command"
+  chmod 000 "${barrier}.command"
+  if [[ -r "${barrier}.command" ]]; then
+    # Running as a user that bypasses the permission bits, so the case cannot
+    # be posed here. Skipping silently would look like coverage.
+    echo "note: skipping unreadable drain-barrier name case (reads bypass mode 000)"
+  else
+    rc=0
+    (
+      # shellcheck disable=SC2034
+      drain_refresh_test_barrier="$barrier"
+      # shellcheck disable=SC2034
+      gate_drain_active_mapped_command="pnpm agent:prewarm:test"
+      eval "$source_body"
+      gate_drain_test_refresh_barrier
+    ) 2>/dev/null || rc=$?
+    [[ "$rc" -eq 2 ]] ||
+      fail "an unreadable drain refresh barrier name returned ${rc}, expected 2"
+    [[ ! -e "${barrier}.ready" && ! -e "${barrier}.used" ]] ||
+      fail "an unreadable drain refresh barrier name armed anyway"
+  fi
+  chmod 600 "${barrier}.command"
+
+  # A name that resolves nowhere, or to something that is not a file, is still
+  # a name a fixture asked for. `-e` alone is false for a dangling symlink, so
+  # both of these used to fall through to arming on the first drain.
+  for broken in dangling directory; do
+    rm -f "${barrier}.used" "${barrier}.ready" "${barrier}.command"
+    rm -rf "${barrier}.command.dir"
+    : > "${barrier}.release"
+    if [[ "$broken" == dangling ]]; then
+      ln -s "${barrier}.command.absent" "${barrier}.command"
+    else
+      mkdir -p "${barrier}.command.dir"
+      ln -s "${barrier}.command.dir" "${barrier}.command"
+    fi
+    rc=0
+    (
+      # shellcheck disable=SC2034
+      drain_refresh_test_barrier="$barrier"
+      # shellcheck disable=SC2034
+      gate_drain_active_mapped_command="pnpm agent:prewarm:test"
+      eval "$source_body"
+      gate_drain_test_refresh_barrier
+    ) 2>/dev/null || rc=$?
+    [[ "$rc" -eq 2 ]] ||
+      fail "a ${broken} drain refresh barrier name returned ${rc}, expected 2"
+    [[ ! -e "${barrier}.ready" && ! -e "${barrier}.used" ]] ||
+      fail "a ${broken} drain refresh barrier name armed anyway"
+  done
+  # The mirror of those two: a symlink that resolves to a regular file is a
+  # valid name, because `-f` follows the link and the read succeeds. The Darwin
+  # seam has to accept the same thing, so this pins the contract both copy.
+  rm -f "${barrier}.used" "${barrier}.ready" "${barrier}.command"
+  rm -rf "${barrier}.command.dir"
+  : > "${barrier}.release"
+  printf '%s\n' "pnpm agent:prewarm:test" > "${barrier}.command.target"
+  ln -s "${barrier}.command.target" "${barrier}.command"
+  (
+    # shellcheck disable=SC2034
+    drain_refresh_test_barrier="$barrier"
+    # shellcheck disable=SC2034
+    gate_drain_active_mapped_command="pnpm agent:prewarm:test"
+    eval "$source_body"
+    gate_drain_test_refresh_barrier
+  ) || fail "a symlinked drain refresh barrier name was refused"
+  [[ -e "${barrier}.ready" ]] ||
+    fail "a symlinked drain refresh barrier name did not arm"
+  rm -f "${barrier}.command" "${barrier}.command.target"
+  rm -rf "${barrier}.command.dir"
+  unset -f barrier_case
+  rm -rf "$fixture_root"
+}
+
+# The EXIT/INT/TERM teardown drains registered parallel workers after the
+# reaping loop — and its locals — are gone. It must still name each worker's
+# mapped command for the test-only refresh barrier. Carrying whatever the last
+# sequential command left behind is the same wrong-drain race one process
+# boundary over (issue 2212).
+run_teardown_drain_command_identity_regression() {
+  local fixture_root observed contract_body source_body unregister_body line rc
+  fixture_root="$(mktemp -d)"
+  observed="$fixture_root/observed"
+  # Lift the two functions out of the gate rather than sourcing the script,
+  # which would run its whole top level. Bounded to the first column-0 `}` so a
+  # body brace cannot end either one early.
+  contract_body="$(awk '
+    /^gate_lifecycle_contract_is_supported\(\) \{$/ { capture = 1 }
+    capture { print }
+    capture && /^\}$/ { exit }
+  ' "$repo_root/scripts/agent-quality-gate.sh")"
+  source_body="$(awk '
+    /^teardown_active_timeouts\(\) \{$/ { capture = 1 }
+    capture { print }
+    capture && /^\}$/ { exit }
+  ' "$repo_root/scripts/agent-quality-gate.sh")"
+  [[ "$contract_body" == *"gate_lifecycle_contract_is_supported() {"* &&
+    "$contract_body" == *$'\n}' ]] ||
+    fail "could not lift gate_lifecycle_contract_is_supported out of the gate"
+  [[ "$source_body" == *"teardown_active_timeouts() {"* &&
+    "$source_body" == *$'\n}' ]] ||
+    fail "could not lift teardown_active_timeouts out of the gate"
+
+  rc=0
+  # The lifted teardown reads its whole environment by name, which shellcheck
+  # cannot see through the eval below, so every input here reads as dead.
+  # shellcheck disable=SC2034
+  (
+    gate_darwin_lineage_host_platform=Linux
+    gate_lock_enabled=1
+    gate_lock_token=teardown-lock-token
+    gate_run_id=teardown-run-id
+    gate_drain_capture=""
+    active_timeout_records=()
+    active_timeout_exact_identities=()
+    active_timeout_drain_identity=""
+    active_timeout_lifecycle_contract=""
+    # Two registered workers, neither of them the command whose name the parent
+    # is still carrying from the last sequential run.
+    active_worker_pgids=(4000001 4000002)
+    active_worker_drain_identities=(teardown-identity-a teardown-identity-b)
+    active_worker_start_identities=(teardown-start-a teardown-start-b)
+    active_worker_lifecycle_contracts=(portable-marker-v1 portable-marker-v1)
+    active_worker_mapped_commands=("pnpm lint:scripts" "pnpm agent:prewarm:test")
+    gate_drain_active_mapped_command="./tools/trunk check --ci x"
+    # Invoked indirectly: the eval'd teardown_active_timeouts body calls
+    # drain_completed_parallel_command once per registered worker, and the
+    # assertions below read what those calls wrote to $observed.
+    # shellcheck disable=SC2329
+    drain_completed_parallel_command() {
+      printf '%s\t%s\n' "$1" "${gate_drain_active_mapped_command:-<unset>}" \
+        >> "$observed"
+    }
+    # No collect_process_tree stub: active_timeout_records is empty above, so
+    # the teardown returns before its descendant walk. Restore a stub here if a
+    # future fixture registers timeout records.
+    eval "$contract_body"
+    eval "$source_body"
+    teardown_active_timeouts
+    printf 'remaining\t%s\n' "${#active_worker_mapped_commands[@]}" >> "$observed"
+  ) || rc=$?
+  [[ "$rc" -eq 0 ]] ||
+    fail "the teardown drain of registered parallel workers returned ${rc}, expected 0"
+  local -a lines=()
+  while IFS= read -r line; do
+    lines+=("$line")
+  done < "$observed"
+  [[ "${#lines[@]}" -eq 3 ]] ||
+    fail "the teardown drained ${#lines[@]} entries, expected 2 workers and a registry count"
+  [[ "${lines[0]}" == $'teardown-identity-a\tpnpm lint:scripts' ]] ||
+    fail "the teardown named '${lines[0]#*$'\t'}' for the first worker, expected its own mapped command"
+  [[ "${lines[1]}" == $'teardown-identity-b\tpnpm agent:prewarm:test' ]] ||
+    fail "the teardown named '${lines[1]#*$'\t'}' for the second worker, expected its own mapped command"
+  # The command registry clears with the identities it aligns with; a survivor
+  # would misalign the next pool's registry and fail every later teardown.
+  [[ "${lines[2]}" == $'remaining\t0' ]] ||
+    fail "the teardown left ${lines[2]#*$'\t'} mapped command(s) registered, expected none"
+
+  # The settled-worker path prunes the same registry. A command left behind
+  # here misaligns the registry the teardown above depends on.
+  unregister_body="$(awk '
+    /^unregister_active_parallel_worker\(\) \{$/ { capture = 1 }
+    capture { print }
+    capture && /^\}$/ { exit }
+  ' "$repo_root/scripts/agent-quality-gate.sh")"
+  [[ "$unregister_body" == *"unregister_active_parallel_worker() {"* &&
+    "$unregister_body" == *$'\n}' ]] ||
+    fail "could not lift unregister_active_parallel_worker out of the gate"
+  rc=0
+  (
+    active_worker_pgids=(4000001 4000002)
+    active_worker_drain_identities=(teardown-identity-a teardown-identity-b)
+    active_worker_start_identities=(teardown-start-a teardown-start-b)
+    active_worker_lifecycle_contracts=(portable-marker-v1 portable-marker-v1)
+    active_worker_mapped_commands=("pnpm lint:scripts" "pnpm agent:prewarm:test")
+    eval "$contract_body"
+    eval "$unregister_body"
+    unregister_active_parallel_worker \
+      4000001 teardown-identity-a teardown-start-a portable-marker-v1
+    printf 'kept\t%s\t%s\n' \
+      "${#active_worker_mapped_commands[@]}" \
+      "${active_worker_mapped_commands[0]-<unset>}" > "$observed"
+  ) || rc=$?
+  [[ "$rc" -eq 0 ]] ||
+    fail "unregistering a settled parallel worker returned ${rc}, expected 0"
+  IFS= read -r line < "$observed"
+  [[ "$line" == $'kept\t1\tpnpm agent:prewarm:test' ]] ||
+    fail "unregistering a settled worker left '${line}', expected only the other worker's mapped command"
+
+  # Darwin teardown always settles through the cohort route, so a cohort of one
+  # is one identifiable command and must keep its name. Only a real cohort of
+  # several has no single name to be.
+  local workers
+  for workers in 1 2; do
+    rc=0
+    # shellcheck disable=SC2034
+    (
+      gate_darwin_lineage_host_platform=Darwin
+      gate_lock_enabled=1
+      gate_lock_token=teardown-lock-token
+      # Fixture input for the lifted teardown, deliberately confined to this
+      # subshell. shellcheck -x follows scripts/gate/run-handles.sh, which a
+      # later test sources, and pairs its gate_run_id reads with this write.
+      # shellcheck disable=SC2030
+      gate_run_id=teardown-run-id
+      gate_drain_capture=""
+      active_timeout_records=()
+      active_timeout_exact_identities=()
+      active_timeout_drain_identity=""
+      active_timeout_lifecycle_contract=""
+      active_worker_pgids=(4000001)
+      active_worker_drain_identities=(teardown-identity-a)
+      active_worker_start_identities=(teardown-start-a)
+      active_worker_lifecycle_contracts=(darwin-coherent-lineage-v2)
+      active_worker_mapped_commands=("pnpm agent:prewarm:test")
+      if [[ "$workers" -eq 2 ]]; then
+        active_worker_pgids+=(4000002)
+        active_worker_drain_identities+=(teardown-identity-b)
+        active_worker_start_identities+=(teardown-start-b)
+        active_worker_lifecycle_contracts+=(darwin-coherent-lineage-v2)
+        active_worker_mapped_commands+=("pnpm lint:scripts")
+      fi
+      gate_drain_active_mapped_command="./tools/trunk check --ci x"
+      # Invoked indirectly: the eval'd teardown_active_timeouts body calls
+      # drain_completed_darwin_command_cohort once for the Darwin cohort, and
+      # the assertions below read what that call wrote to $observed.
+      # shellcheck disable=SC2329
+      drain_completed_darwin_command_cohort() {
+        # `-` not `:-`: an empty name is the cleared-for-a-real-cohort case
+        # and must not be reported as an unset variable.
+        printf 'cohort\t%s\t%s\n' "$#" \
+          "${gate_drain_active_mapped_command-<unset>}" > "$observed"
+      }
+      # No gate_darwin_exact_identity_terminate or collect_process_tree stub:
+      # active_timeout_records is empty above, so the teardown reaches neither
+      # the exact-identity terminate loop nor the descendant walk. Restore stubs
+      # here if a future fixture registers timeout records.
+      eval "$contract_body"
+      eval "$source_body"
+      teardown_active_timeouts
+    ) || rc=$?
+    [[ "$rc" -eq 0 ]] ||
+      fail "the Darwin teardown of ${workers} worker(s) returned ${rc}, expected 0"
+    IFS= read -r line < "$observed"
+    if [[ "$workers" -eq 1 ]]; then
+      [[ "$line" == $'cohort\t1\tpnpm agent:prewarm:test' ]] ||
+        fail "a one-token Darwin teardown cohort reported '${line}', expected it to keep its own mapped command"
+    else
+      [[ "$line" == $'cohort\t2\t' ]] ||
+        fail "a two-token Darwin teardown cohort reported '${line}', expected no name"
+    fi
+  done
+  rm -rf "$fixture_root"
+}
+
 run_parallel_worker_loss_coordinator_regression
 run_parallel_release_failure_coordinator_regression
 run_stale_failure_result_regression
+run_drain_refresh_barrier_selection_regression
+run_teardown_drain_command_identity_regression
 run_sequential_descendant_lease_regression
 run_trunk_probe_lease_regression
 run_trunk_probe_deadline_regression
@@ -13481,12 +13835,6 @@ assert_contains "- pnpm agent:review-materiality:test (agent review materiality 
 run_gate "scripts/pr/review-materiality.test.mjs"
 assert_contains "- pnpm agent:review-materiality:test (agent review materiality helper changed)"
 
-run_gate "scripts/pr/review-process-metrics.mjs"
-assert_contains "- node scripts/pr/review-process-metrics.test.mjs (review-process metrics collector changed)"
-
-run_gate "scripts/pr/review-process-metrics.test.mjs"
-assert_contains "- node scripts/pr/review-process-metrics.test.mjs (review-process metrics collector changed)"
-
 # The CodeRabbit config pin (ADR 0066). The config is a repo-root .yaml, so it
 # reaches no `scripts/*` arm and needs its own top-level route; both halves of
 # the pair must run the pin.
@@ -14621,6 +14969,7 @@ done
   active_worker_pgids=(101)
   active_worker_drain_identities=(fixture-worker-1)
   active_worker_start_identities=(fixture-start-1)
+  active_worker_mapped_commands=("pnpm lint:scripts")
   active_worker_lifecycle_contracts=()
   if unregister_active_parallel_worker \
     101 fixture-worker-1 fixture-start-1 portable-marker-v1; then
@@ -14633,13 +14982,23 @@ done
     exit 1
   fi
 
+  # The mapped command registry aligns with the same four, so a gap there is
+  # the same fail-closed case as a missing lifecycle contract.
   active_worker_lifecycle_contracts=(portable-marker-v1)
+  active_worker_mapped_commands=()
+  if unregister_active_parallel_worker \
+    101 fixture-worker-1 fixture-start-1 portable-marker-v1; then
+    exit 1
+  fi
+
+  active_worker_mapped_commands=("pnpm lint:scripts")
   unregister_active_parallel_worker \
     101 fixture-worker-1 fixture-start-1 portable-marker-v1
   [[ "${#active_worker_pgids[@]}" -eq 0 ]]
   [[ "${#active_worker_drain_identities[@]}" -eq 0 ]]
   [[ "${#active_worker_start_identities[@]}" -eq 0 ]]
   [[ "${#active_worker_lifecycle_contracts[@]}" -eq 0 ]]
+  [[ "${#active_worker_mapped_commands[@]}" -eq 0 ]]
 )
 rm -rf "$parallel_contract_fixture"
 

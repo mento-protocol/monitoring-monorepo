@@ -52,18 +52,6 @@ export const TOOLING_MODULE_ARMS = [
     ],
   },
   {
-    patterns: [
-      "scripts/pr/review-process-metrics.mjs",
-      "scripts/pr/review-process-metrics.test.mjs",
-    ],
-    effects: [
-      {
-        command: "node scripts/pr/review-process-metrics.test.mjs",
-        reason: "review-process metrics collector changed",
-      },
-    ],
-  },
-  {
     patterns: ["scripts/coderabbit-config.test.mjs"],
     effects: [
       {
