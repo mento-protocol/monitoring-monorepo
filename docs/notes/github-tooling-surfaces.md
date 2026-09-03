@@ -157,10 +157,10 @@ keep `pnpm pr:ready-state` and `gh pr checks` as the canonical probes.
 
 `pnpm issue:claim`, `issue:review`, `issue:release`, `issue:groom`,
 `issue:board sync`, and `issue:board backfill` shell out to gh. They use GraphQL
-for Project #12 and the Git data APIs for the persistent per-issue mutex. The mutex uses GraphQL
-`updateRefs` with an exact `beforeOid` on a retained custom ref and reads that
-ref through the REST matching-references endpoint, because GraphQL
-`Repository.ref` does not resolve the custom namespace. The active
+for Project #12 and the Git data APIs for the persistent per-issue mutex. The
+mutex uses GraphQL `updateRefs` with an exact `beforeOid` on a retained custom
+ref and reads that ref through the REST matching-references endpoint, because
+GraphQL `Repository.ref` does not resolve the custom namespace. The active
 credential needs Project write access and repository Contents write access.
 Each helper rejects a non-`github.com` `GH_HOST` and a host-qualified `GH_REPO`.
 The transport also sets `GH_HOST=github.com` and removes `GH_REPO` before every
