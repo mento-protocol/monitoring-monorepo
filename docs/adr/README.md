@@ -94,7 +94,8 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0082](0082-persistent-issue-board-mutation-mutex.md)       | One persistent compare-and-swap Git ref serializes issue-board helper mutations      |
 | [0083](0083-non-ledger-review-eval-experiments.md)          | Review-skill experiments use a separate staged non-ledger lane                       |
 | [0084](0084-github-ui-operator-merge.md)                    | Use GitHub for ordinary pull request merges                                          |
-| [0085](0085-autoreview-removal-thin-two-model-review.md)    | Remove the autoreview machinery; keep a thin two-model closeout review               |
+| [0085](0085-review-eval-cli-versions-bind-the-cell.md)      | Provider CLI versions bind the review-eval cell, not the plan                        |
+| [0086](0086-autoreview-removal-thin-two-model-review.md)    | Remove the autoreview machinery; keep a thin two-model closeout review               |
 
 ### shared-config
 

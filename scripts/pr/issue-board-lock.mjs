@@ -43,6 +43,7 @@ const OWNER_FIELDS_BY_OPERATION = Object.freeze({
     OPTIONAL_PROJECT_FIELDS.branch,
     OPTIONAL_PROJECT_FIELDS.claimedAt,
   ]),
+  groom: Object.freeze([]),
   sync: Object.freeze([]),
 });
 
@@ -903,52 +904,64 @@ async function readDefaultBranchCommit(options) {
   };
 }
 
-async function readLockRef(options, refName, scope) {
+// GraphQL `repository.ref(qualifiedName:)` returns null for refs outside
+// `refs/heads` and `refs/tags`, so the retained lock ref is read through the
+// Git data REST API and its commit through GraphQL `repository.object`.
+export async function readLockRef(
+  options,
+  refName,
+  scope,
+  { json = ghJson, graphql = ghGraphql } = {},
+) {
+  const matches = await json([
+    "api",
+    `repos/${options.repo}/git/matching-refs/${refName.slice("refs/".length)}`,
+  ]);
+  const match = (matches ?? []).find((entry) => entry?.ref === refName);
+  if (!match) return null;
+  const oid = match.object?.sha ?? null;
   const { owner, name } = splitRepo(options.repo);
-  const response = await ghGraphql(
-    `query($owner:String!,$name:String!,$ref:String!){
-      repository(owner:$owner,name:$name){
-        id
-        ref(qualifiedName:$ref) {
-          id
-          target {
-            __typename
-            oid
-            ... on Commit {
-              message
-              tree { oid }
+  const response = oid
+    ? await graphql(
+        `
+          query ($owner: String!, $name: String!, $oid: GitObjectID!) {
+            repository(owner: $owner, name: $name) {
+              id
+              object(oid: $oid) {
+                __typename
+                oid
+                ... on Commit {
+                  message
+                  tree {
+                    oid
+                  }
+                }
+              }
             }
           }
-        }
-      }
-    }`,
-    { owner, name, ref: refName },
-  );
-  const ref = response?.data?.repository?.ref;
-  if (!ref) return null;
+        `,
+        { owner, name, oid },
+      )
+    : null;
+  const target = response?.data?.repository?.object;
   if (
-    ref.target?.__typename !== "Commit" ||
-    !ref.target?.oid ||
-    !ref.target?.tree?.oid
+    match.object?.type !== "commit" ||
+    target?.__typename !== "Commit" ||
+    !target?.oid ||
+    !target?.tree?.oid
   ) {
     throw conflict(
       scope,
       refName,
-      { oid: ref.target?.oid ?? null, payload: null },
+      { oid, payload: null },
       "the ref does not target a commit",
     );
   }
   return {
-    id: ref.id,
-    oid: ref.target.oid,
-    treeOid: ref.target.tree.oid,
+    oid: target.oid,
+    treeOid: target.tree.oid,
     repositoryId: response.data.repository.id,
-    payload: parseLockPayload(
-      ref.target.message,
-      scope,
-      refName,
-      ref.target.oid,
-    ),
+    payload: parseLockPayload(target.message, scope, refName, target.oid),
   };
 }
 
@@ -1129,7 +1142,7 @@ async function initializeLockRef(
     }
   }
   throw new Error(
-    `Issue #${scope.issue} mutex ref ${refName} was absent after ${LOCK_RECONCILE_ATTEMPTS} compare-and-swap attempts`,
+    `Issue #${scope.issue} mutex ref ${refName} read as absent after ${LOCK_RECONCILE_ATTEMPTS} create-from-absent compare-and-swap attempts; last compare-and-swap error: ${String(lastError?.message ?? lastError).split("\n")[0]}`,
     { cause: lastError },
   );
 }

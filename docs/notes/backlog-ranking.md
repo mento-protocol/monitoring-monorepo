@@ -35,9 +35,16 @@ disagree with the pick.
 
 The loop reuses the workflow's terms and adds none:
 
-- `agent-ready` — eligible to be Selected.
+- `agent-ready` — eligible to be Selected once its routing labels are complete.
 - `needs-grooming` — scored and ranked, never Selected. A high-scoring
   `needs-grooming` issue is a grooming prompt, and the receipt says so.
+- **incompletely groomed** — an `agent-ready` issue that carries no `risk:*`,
+  more than one `risk:*`, or no `pkg:*`, as
+  [`agent-issue-workflow.md`](agent-issue-workflow.md#labels) defines it.
+  Consumers treat it as `needs-grooming`, so the loop scores and ranks it but
+  never Selects it and never stands it as the runner-up. Method names it and its
+  routing gap; which `risk:*` fits is the
+  [low-risk rule](agent-issue-workflow.md#low-risk-rule)'s call, not the loop's.
 - `agent-active` and `in-pr` — already owned, so dropped from the roster. This
   repo claims through labels and Project fields rather than assignees, so
   neither state shows up in an assignee check — and the reverse holds too: an

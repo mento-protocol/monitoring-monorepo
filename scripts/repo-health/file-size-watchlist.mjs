@@ -29,7 +29,7 @@ export const NEAR_HARD_CAP = 950;
  * normal row. ADR 0065 owns the list and its review cadence.
  *
  * The list is currently EMPTY. Its three entries were the autoreview wrapper
- * and its two large helpers; ADR 0085 deleted all three. Restoring an entry is
+ * and its two large helpers; ADR 0086 deleted all three. Restoring an entry is
  * an ADR 0065 decision.
  */
 export const SCRIPTS_EXEMPTIONS = [];
@@ -41,7 +41,8 @@ export function exemptionReason(path) {
   return null;
 }
 
-const SOURCE_SCOPES = [
+// Exported so the issue filer's pkg:* map can be pinned against the scope list.
+export const SOURCE_SCOPES = [
   {
     label: "dashboard",
     prefix: "ui-dashboard/src/",

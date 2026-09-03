@@ -29,6 +29,13 @@ experiment cannot replace canonical qualification.
 
 ## Decision
 
+ADR 0085 supersedes this decision on one point: the plan records provider CLI
+versions and each cache identity binds the live version of the provider its
+phase invokes. The bullet below that names provider CLI versions among what the
+plan binds is superseded by that ADR; everything else here stands, so this ADR
+keeps `status: active` — the checklist's archive-and-`superseded_by` rule
+applies to a whole superseded decision, not to one clause.
+
 Add a small staged experiment lane with these rules:
 
 - The lane writes `plan.json` and content-addressed artifacts under `cache/raw/`,
@@ -42,7 +49,7 @@ Add a small staged experiment lane with these rules:
   validates the complete campaign plan before it starts a model process. The
   plan binds the contract digest, fixture head and base SHAs, truth,
   finder-report and prompt digests, skill digests, model and effort settings,
-  provider CLI versions, scorer, the five-module experiment harness digest,
+  provider CLI versions, scorer, the six-module experiment harness digest,
   complete lane set, treatment order, and a canonical 24-cell rerun manifest.
 - The screen uses the first frozen finder report for each of the three grid
   fixtures. The holdout uses each complementary report. The optional
@@ -135,6 +142,7 @@ Add a small staged experiment lane with these rules:
 - `scripts/review/review-eval-experiment-contract.mjs`
 - `scripts/review/review-eval-experiment-decision.mjs`
 - `scripts/review/review-eval-experiment-runtime.mjs`
+- `scripts/review/review-eval-experiment-versions.mjs`
 - `scripts/review/review-eval-experiment*.test.mjs`
 - `scripts/review/review-eval-fixtures.mjs`
 - `scripts/review/review-eval-run-execution.mjs`

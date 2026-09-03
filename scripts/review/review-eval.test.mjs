@@ -49,8 +49,11 @@ import {
   cellFingerprint,
   cellReuseDecision,
   claudeArgv,
+  claudeExec,
+  claudeStreamEnvelope,
   comparabilityKey,
   leakSignals,
+  LEGACY_SPLIT_CACHE_PLAN,
   loginsInFixtureTree,
   ORCHESTRATOR_FILES,
   orchestratorSourceDigest,
@@ -76,6 +79,7 @@ import {
   scorerDigest,
 } from "./review-eval-score.mjs";
 import { runEvidenceProblems } from "./review-eval-run-evidence.mjs";
+import { SESSION_TEXT_BUDGET_CHARS } from "./review-eval-stream.mjs";
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const scriptPath = fileURLToPath(new URL("./review-eval.mjs", import.meta.url));
@@ -86,6 +90,8 @@ const validationModuleLineLimits = new Map([
   ["review-eval-run-execution.mjs", 600],
   ["review-eval-run-cell.mjs", 600],
   ["review-eval-run-score.mjs", 600],
+  ["review-eval-stream.mjs", 600],
+  ["review-eval-cell-writer.mjs", 600],
   ["review-eval-plan-evidence.mjs", 600],
   ["review-eval-run-evidence.mjs", 600],
   ["review-eval-appended.mjs", 600],
@@ -198,11 +204,21 @@ test("run-eval shell sources retain split headroom", () => {
   }
 });
 
-test("the shell split reconstructs the cached-cell orchestrator bytes", () => {
+test("the shell split no longer reconstructs the pre-split cell runtime", () => {
+  const reconstructed = createHash("sha256")
+    .update(reconstructLegacyOrchestrator())
+    .digest("hex");
+  // The split markers still splice the helper payloads back into the wrapper,
+  // so this pin still catches an unintended shell edit.
   assert.equal(
-    createHash("sha256").update(reconstructLegacyOrchestrator()).digest("hex"),
-    "5cdfbd0e709af2d68c193d484b724706b339ab0562d14b283f5fc38eebe9ae49",
+    reconstructed,
+    "521f25b1882d76fa34bc607a5f225209ce86005daa861ae6fb9549717bdffffb",
   );
+  // It is no longer the pre-split monolith. Capturing the whole session instead
+  // of the CLI's last-message envelope changed what a cell records, so the 24
+  // cells cached under that monolith are not reusable and the orchestrator
+  // reuse transition in `review-eval-run-cell.mjs` is closed.
+  assert.notEqual(reconstructed, LEGACY_SPLIT_CACHE_PLAN.orchestratorDigest);
 });
 
 test("review-eval validation modules retain split headroom", () => {
@@ -803,10 +819,15 @@ test("comparabilityKey moves with the contract, the prompts, and the scorer", ()
   );
 });
 
-test("orchestratorSourceDigest binds the wrapper and three helpers", () => {
+test("orchestratorSourceDigest binds the shell and the cell modules", () => {
   const expected =
-    "d0790e1d52542ac8e22bbc84932e98d635035f685ca201321bda3ab4c196033a";
+    "dda25054b96c037e82b0a616e98b97ad028c6f2351f14bf8948f76a1fc1beb60";
   assert.equal(orchestratorSourceDigest(), expected);
+  // The cell writer and the stream parser are in the digest for the same
+  // reason the shell is: the writer decides what a paid cell records and the
+  // parser decides which assistant messages it records at all. Read from the
+  // live repository instead, either could change between two cells of one run
+  // while every cell fingerprint stayed identical.
   assert.deepEqual(
     ORCHESTRATOR_FILES.map((file) => path.basename(file)),
     [
@@ -814,6 +835,8 @@ test("orchestratorSourceDigest binds the wrapper and three helpers", () => {
       "run-eval-source-snapshot.sh",
       "run-eval-lifecycle.sh",
       "run-eval-runtime.sh",
+      "review-eval-cell-writer.mjs",
+      "review-eval-stream.mjs",
     ],
   );
 
@@ -1020,41 +1043,35 @@ test("a cached cell from another skill or contract is never reused", () => {
   const decide = (result) =>
     cellReuseDecision({ plan, resultPath: "unused", result });
   assert.equal(decide({ ok: true, fingerprint }).reuse, true);
+  // The pre-split cells were captured from the CLI's last-message envelope.
+  // Capturing the whole session changed what a cell records, so the reviewed
+  // orchestrator transition that kept them reusable is closed and a cell
+  // carrying that digest is refused like any other stale one.
   const legacyOrchestratorFingerprint = {
     ...fingerprint,
     skill_ref: "/tmp/old-candidate",
     dirty: true,
-    orchestrator_digest:
-      "5cdfbd0e709af2d68c193d484b724706b339ab0562d14b283f5fc38eebe9ae49",
+    orchestrator_digest: LEGACY_SPLIT_CACHE_PLAN.orchestratorDigest,
   };
   const transitioned = decide({
     ok: true,
     fingerprint: legacyOrchestratorFingerprint,
   });
-  assert.equal(transitioned.reuse, true);
-  assert.match(
-    transitioned.reason,
-    /recorded reviewed orchestrator transition/,
-  );
-  assert.equal(
-    decide({
-      ok: true,
-      fingerprint: {
-        ...legacyOrchestratorFingerprint,
-        skill_ref: "installed",
-        dirty: false,
-      },
-    }).reuse,
-    true,
-  );
+  assert.equal(transitioned.reuse, false);
+  assert.match(transitioned.reason, /unexpected skill_ref, dirty/);
   const legacyWithoutTreatment = Object.fromEntries(
     Object.entries(legacyOrchestratorFingerprint).filter(
       ([field]) => !["skill_ref", "dirty"].includes(field),
     ),
   );
+  const untransitioned = decide({
+    ok: true,
+    fingerprint: legacyWithoutTreatment,
+  });
+  assert.equal(untransitioned.reuse, false);
   assert.match(
-    decide({ ok: true, fingerprint: legacyWithoutTreatment }).reason,
-    /lacks the complete historically valid legacy treatment fields/,
+    untransitioned.reason,
+    /produced under a different orchestrator_digest/,
   );
   for (const malformedLegacy of [
     { ...legacyOrchestratorFingerprint, dirty: "true" },
@@ -1082,9 +1099,12 @@ test("a cached cell from another skill or contract is never reused", () => {
       ),
     ),
   ]) {
-    assert.match(
-      decide({ ok: true, fingerprint: malformedLegacy }).reason,
-      /lacks the complete historically valid legacy treatment fields/,
+    // Every one of these shapes used to be judged against the legacy treatment
+    // rule. With the transition closed they are refused for carrying fields
+    // this run's fingerprint does not have, which is the same verdict.
+    assert.equal(
+      decide({ ok: true, fingerprint: malformedLegacy }).reuse,
+      false,
     );
   }
   assert.match(
@@ -1098,22 +1118,22 @@ test("a cached cell from another skill or contract is never reused", () => {
     }).reason,
     /unexpected skill_ref, dirty/,
   );
-  assert.match(
+  assert.equal(
     decide({
       ok: true,
       fingerprint: { ...legacyOrchestratorFingerprint, legacy: true },
-    }).reason,
-    /unexpected legacy/,
+    }).reuse,
+    false,
   );
-  assert.match(
+  assert.equal(
     decide({
       ok: true,
       fingerprint: {
         ...legacyOrchestratorFingerprint,
         skill_digest: "0".repeat(64),
       },
-    }).reason,
-    /different skill_digest/,
+    }).reuse,
+    false,
   );
   for (const obsoleteTarget of [
     "77bba1e0af554775f19429d48ea6470a3574b05e6b3ed95a1b3e73e8bf3a2807",
@@ -1198,19 +1218,37 @@ test("a cached cell from another skill or contract is never reused", () => {
   );
 });
 
-test("the exact pre-split cache is discovered, seeded, and reused", () => {
+test("the pre-split cache lineage is closed", () => {
+  // One full run finished its 24 paid cells under the pre-split monolith, and
+  // the planner used to discover and reuse them through the reviewed
+  // orchestrator transition. Capturing the whole session instead of the CLI's
+  // last-message envelope changed what a cell records, so that transition no
+  // longer resolves: the lineage is neither discovered nor reusable. The
+  // shell's resume-cache seeding stays covered by the ledger-driven resume
+  // case.
   const root = makeRoot();
   const now = new Date("2026-08-28T20:00:00Z");
-  const oldKey =
-    "4543e3da483d5f2c70fc97e97664377ae22cc844bf1e5f376c1ce60eb3a42267";
-  const oldMatcher =
-    "d183758cd7a3b28aa14fe857ed04c6ca93601e1834a1dfd08cf730ad2332c922";
-  const oldOrchestrator =
-    "5cdfbd0e709af2d68c193d484b724706b339ab0562d14b283f5fc38eebe9ae49";
+  const oldKey = LEGACY_SPLIT_CACHE_PLAN.comparabilityKey;
+  const oldOrchestrator = LEGACY_SPLIT_CACHE_PLAN.orchestratorDigest;
+  const oldContractDigest = LEGACY_SPLIT_CACHE_PLAN.contractDigest;
+  // The reusable lineage is a fixed tuple of digests, one of which is the
+  // contract that scored those cells, so the case drives the frozen pre-split
+  // contract rather than whatever the live contract holds today.
+  const { contract: oldContract, digest: frozenContractDigest } = loadContract(
+    path.join(
+      repoRoot,
+      "scripts/review/testdata/review-eval-split-equivalence/contract.json.txt",
+    ),
+  );
+  assert.equal(
+    frozenContractDigest,
+    oldContractDigest,
+    "the frozen split-equivalence contract is no longer the pre-split contract",
+  );
   try {
     const planArgs = {
-      contract,
-      contractDigest,
+      contract: oldContract,
+      contractDigest: oldContractDigest,
       kind: "full",
       repoRoot: root,
       now,
@@ -1228,21 +1266,17 @@ test("the exact pre-split cache is discovered, seeded, and reused", () => {
       "result.json",
     );
     mkdirSync(path.dirname(oldResult), { recursive: true });
-    const oldPlan = {
-      ...first,
-      matcher_digest: oldMatcher,
-      comparability_key: oldKey,
-      detail_dir: oldDetail,
-      plan_dir: oldPhysical,
-      resume_from: null,
-      inputs: {
-        ...first.inputs,
-        orchestrator_digest: oldOrchestrator,
-      },
-    };
     writeFileSync(
       path.join(oldPhysical, "plan.json"),
-      JSON.stringify({ ...oldPlan, matcher_digest: "0".repeat(64) }),
+      JSON.stringify({
+        ...first,
+        matcher_digest: LEGACY_SPLIT_CACHE_PLAN.matcherDigest,
+        comparability_key: oldKey,
+        detail_dir: oldDetail,
+        plan_dir: oldPhysical,
+        resume_from: null,
+        inputs: { ...first.inputs, orchestrator_digest: oldOrchestrator },
+      }),
     );
     const oldFingerprint = {
       ...cellFingerprint({ plan: first }),
@@ -1255,86 +1289,20 @@ test("the exact pre-split cache is discovered, seeded, and reused", () => {
       JSON.stringify({ ok: true, fingerprint: oldFingerprint }),
     );
 
-    const currentOut = path.join(root, first.detail_dir);
-    const refused = buildPlan({
-      ...planArgs,
-      outDir: currentOut,
-      write: false,
-    });
-    assert.equal(refused.resume_from, null);
-
-    writeFileSync(path.join(oldPhysical, "plan.json"), JSON.stringify(oldPlan));
-    const invalidDetail = `${oldDetail}-2`;
-    const invalidPhysical = path.join(root, invalidDetail);
-    mkdirSync(invalidPhysical, { recursive: true });
-    writeFileSync(
-      path.join(invalidPhysical, "plan.json"),
-      JSON.stringify({
-        ...oldPlan,
-        planned_at: "2026-08-28T21:00:00Z",
-        detail_dir: invalidDetail,
-        plan_dir: invalidPhysical,
-      }),
-    );
-    for (const invalidCell of first.cells.slice(0, 2)) {
-      const invalidResult = path.join(
-        invalidPhysical,
-        "cells",
-        invalidCell.cell_id,
-        "result.json",
-      );
-      mkdirSync(path.dirname(invalidResult), { recursive: true });
-      writeFileSync(
-        invalidResult,
-        JSON.stringify({
-          ok: true,
-          fingerprint: { ...oldFingerprint, unexpected: true },
-        }),
-      );
-    }
     const planned = buildPlan({
       ...planArgs,
-      outDir: currentOut,
-      write: true,
+      outDir: path.join(root, first.detail_dir),
+      write: false,
     });
-    assert.equal(planned.resume_from, oldDetail);
-
-    const shell = runEvalSourceSet();
-    const block = shell.match(
-      /\nRESUME_FROM="\$\(json_field "\$PLAN_OUT" resume_from\)"\n[\s\S]*?\nfi\n/,
-    )?.[0];
-    const guard = shell.match(
-      /\nrequire_safe_detail\(\) \{\n[\s\S]*?\n\}\n/,
-    )?.[0];
-    assert.ok(block, "the resume-cache step was not found in run-eval.sh");
-    assert.ok(guard, "the detail-path guard was not found in run-eval.sh");
-    const harness = [
-      "set -euo pipefail",
-      `REPO=${JSON.stringify(root)}`,
-      `RUN_DIR=${JSON.stringify(currentOut)}`,
-      `PLAN_OUT=${JSON.stringify(path.join(currentOut, "plan.json"))}`,
-      `fail() { printf 'FATAL: %s\\n' "$*" >&2; exit 1; }`,
-      `log() { printf '%s\\n' "$*"; }`,
-      `json_field() { node -e 'const d=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")); process.stdout.write(String(d[process.argv[2]]));' "$1" "$2"; }`,
-      guard,
-      block,
-    ].join("\n");
-    const seeded = spawnSync("bash", ["-c", harness], { encoding: "utf8" });
-    assert.equal(seeded.status, 0, seeded.stderr);
-    assert.match(seeded.stdout, /seeded the resume cache/);
-
-    const copiedResult = path.join(
-      currentOut,
-      "cells",
-      cell.cell_id,
-      "result.json",
+    assert.equal(planned.resume_from, null);
+    assert.equal(
+      cellReuseDecision({
+        plan: planned,
+        resultPath: "unused",
+        result: { ok: true, fingerprint: oldFingerprint },
+      }).reuse,
+      false,
     );
-    const decision = cellReuseDecision({
-      plan: planned,
-      resultPath: copiedResult,
-    });
-    assert.equal(decision.reuse, true);
-    assert.match(decision.reason, /recorded reviewed orchestrator transition/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -4538,6 +4506,450 @@ test("a blind judge disables tools and keeps its turn bound", () => {
   assert.deepEqual(tooled.slice(allowedToolsAt + 3), ["--max-turns", "60"]);
 });
 
+test("a model call captures the session, not its last message", async () => {
+  const argv = claudeArgv({
+    prompt: "review this",
+    model: "claude-opus-5",
+    effort: "high",
+  });
+  // `--output-format json` reports only the last assistant message in its
+  // `result` field, which scored a reviewer's closing addendum as its whole
+  // review. The stream carries every message.
+  const formatAt = argv.indexOf("--output-format");
+  assert.notEqual(formatAt, -1);
+  assert.equal(argv[formatAt + 1], "stream-json");
+  assert.equal(argv.includes("--verbose"), true);
+
+  const stream = [
+    {
+      type: "assistant",
+      parent_tool_use_id: null,
+      message: {
+        content: [{ type: "text", text: "run-eval.sh:150 is wrong." }],
+      },
+    },
+    {
+      type: "assistant",
+      parent_tool_use_id: "toolu_1",
+      message: { content: [{ type: "text", text: "sub-agent chatter" }] },
+    },
+    {
+      type: "assistant",
+      parent_tool_use_id: null,
+      message: { content: [{ type: "text", text: "Final addendum." }] },
+    },
+    {
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      result: "Final addendum.",
+      total_cost_usd: 0.25,
+      num_turns: 4,
+      session_id: "session-1",
+      duration_ms: 1200,
+    },
+    // A sub-agent closes its delegation with a `result` event of its own,
+    // carrying its own cost, turn count and error bit. It is not the session's
+    // result, and it may arrive after the session's: taking it would report a
+    // sub-agent's answer as the reviewer's.
+    {
+      type: "result",
+      subtype: "success",
+      parent_tool_use_id: "toolu_1",
+      is_error: true,
+      result: "sub-agent answer.",
+      total_cost_usd: 9.99,
+      num_turns: 40,
+      session_id: "session-sub",
+      duration_ms: 99,
+    },
+  ]
+    .map((event) => JSON.stringify(event))
+    .join("\n");
+
+  // A contestant is scored on the whole session; a sub-agent's own messages
+  // are its reviewer's internal delegation and stay out.
+  const session = claudeStreamEnvelope(stream);
+  assert.equal(session.result, "run-eval.sh:150 is wrong.\n\nFinal addendum.");
+  assert.equal(session.assistant_messages, 2);
+  assert.equal(session.final_result, "Final addendum.");
+  assert.equal(session.total_cost_usd, 0.25);
+  assert.equal(session.num_turns, 4);
+  assert.equal(session.is_error, false);
+  assert.equal(session.session_id, "session-1");
+  assert.equal(session.duration_ms, 1200);
+  // The stream's own size, so a cell that scored oddly can be checked against
+  // the output ceiling that kills a session rather than truncating it.
+  assert.equal(session.stream_chars, stream.length);
+  assert.throws(
+    () => claudeStreamEnvelope('{"is_error":false,"result":"Final addendum."}'),
+    /no result event/,
+  );
+
+  const shim = mkdtempSync(path.join(tmpdir(), "review-eval-claude-"));
+  try {
+    const argvLog = path.join(shim, "argv.json");
+    writeFileSync(
+      path.join(shim, "claude"),
+      `#!/usr/bin/env node
+const { writeFileSync } = require("node:fs");
+writeFileSync(${JSON.stringify(argvLog)}, JSON.stringify(process.argv.slice(2)));
+process.stdout.write(${JSON.stringify(`${stream}\n`)});
+`,
+      { mode: 0o755 },
+    );
+    // A judge answers in its final message, and `parseJudgeJson` slices one
+    // JSON object out of that text, so the judge envelope keeps final-message
+    // `result` semantics while still reporting the session's shape.
+    const raw = await claudeExec({
+      prompt: "judge this",
+      model: "claude-opus-5",
+      effort: "high",
+      cwd: shim,
+      env: { PATH: `${shim}${path.delimiter}${process.env.PATH}` },
+    });
+    const envelope = JSON.parse(raw);
+    assert.equal(envelope.result, "Final addendum.");
+    assert.equal(envelope.assistant_messages, 2);
+    assert.equal(envelope.total_cost_usd, 0.25);
+    assert.equal(envelope.stream_chars, stream.length + 1);
+    const spawned = JSON.parse(readFileSync(argvLog, "utf8"));
+    assert.equal(spawned.includes("json"), false);
+    assert.equal(spawned.includes("stream-json"), true);
+  } finally {
+    rmSync(shim, { recursive: true, force: true });
+  }
+});
+
+test("the session envelope keeps the final message inside the judge budget", () => {
+  // The judges score the head of what they are handed: 40 000 characters for
+  // the claim splitter, 30 000 for the match judge. Joining every message of a
+  // long session and letting them truncate scored the reviewer's working notes
+  // and threw its report away, so capture keeps the tail instead.
+  const message = (text) => ({
+    type: "assistant",
+    parent_tool_use_id: null,
+    message: { content: [{ type: "text", text }] },
+  });
+  const build = (texts) =>
+    [
+      ...texts.map(message),
+      {
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        result: texts.at(-1) ?? "",
+        total_cost_usd: 0.5,
+        num_turns: 6,
+      },
+    ]
+      .map((event) => JSON.stringify(event))
+      .join("\n");
+
+  const short = claudeStreamEnvelope(build(["first note", "second", "report"]));
+  assert.equal(short.result, "first note\n\nsecond\n\nreport");
+  assert.equal(short.assistant_messages, 3);
+  assert.equal(short.assistant_messages_kept, 3);
+
+  // One message that does not fit stops the walk; the messages after it are the
+  // contiguous tail of the session, and the report is always among them.
+  const filler = "x".repeat(SESSION_TEXT_BUDGET_CHARS - 20);
+  const long = claudeStreamEnvelope(
+    build(["dropped preamble", filler, "the finding", "the report"]),
+  );
+  assert.equal(long.assistant_messages, 4);
+  assert.equal(long.assistant_messages_kept, 2);
+  assert.equal(long.result, "the finding\n\nthe report");
+  assert.ok(long.result.length <= SESSION_TEXT_BUDGET_CHARS);
+
+  // A final message that alone exceeds the budget is kept whole. Cutting it
+  // here would take the same report away that this rule exists to keep; the
+  // scorer truncates it exactly as it always did.
+  const huge = "y".repeat(SESSION_TEXT_BUDGET_CHARS + 500);
+  const oversized = claudeStreamEnvelope(build(["earlier", huge]));
+  assert.equal(oversized.result, huge);
+  assert.equal(oversized.assistant_messages_kept, 1);
+
+  // A judge answers in its last message and is unaffected by the budget.
+  const judged = claudeStreamEnvelope(build(["thinking", "the verdict"]), {
+    resultText: "final",
+  });
+  assert.equal(judged.result, "the verdict");
+  assert.equal(judged.assistant_messages, 2);
+  assert.equal(judged.assistant_messages_kept, 1);
+});
+
+test("the cell writer tells a harness fault from a broken stream", () => {
+  // The orchestrator runs the writer out of its sealed source snapshot, and the
+  // writer loads the stream parser beside it. `$SPEC` is the live repository
+  // under a candidate run, so a parser read from there could change between two
+  // cells while every cell fingerprint stayed identical.
+  const runtime = runEvalSource("runtime");
+  // The sealed snapshot first. The pre-split path is the fallback for the
+  // frozen equivalence harness, which sources the cell runtime with no wrapper
+  // around it; the wrapper sets the variable before every paid run.
+  assert.match(
+    runtime,
+    /CELL_WRITER="\$\{RUN_EVAL_SCRIPT_DIR:-\$SPEC\/scripts\/review\}\/review-eval-cell-writer\.mjs"/,
+  );
+  const writer = runtime.slice(runtime.indexOf('mkdir -p "$out_dir"'));
+  assert.match(
+    writer,
+    /node "\$CELL_WRITER" "\$raw" "\$other_file" "\$out_dir\/result\.json"/,
+  );
+  assert.equal(writer.includes("$SPEC"), false);
+  // The pre-flight is the same load, before the cell has paid for anything.
+  assertBefore(
+    runtime,
+    'node "$CELL_WRITER" --preflight',
+    'run_bounded "$raw"',
+    "the cell writer pre-flight runs after the paid contestant call",
+  );
+
+  // Exit 4 keeps the cell and the stream it paid for; every other failure
+  // deletes the directory.
+  const faultAt = writer.indexOf("envelope_status -eq 4");
+  assert.notEqual(faultAt, -1, "the cell writer does not branch on exit 4");
+  const faultBranch = writer.slice(
+    faultAt,
+    writer.indexOf("\n    else\n", faultAt),
+  );
+  assert.match(faultBranch, /harness fault, cell kept/);
+  assert.equal(faultBranch.includes('rm -rf "$out_dir"'), false);
+  assert.match(writer.slice(faultAt), /else\n\s+rm -rf "\$out_dir"/);
+
+  const dir = mkdtempSync(path.join(tmpdir(), "review-eval-cell-writer-"));
+  try {
+    const rawFile = path.join(dir, "stream.jsonl");
+    const otherFile = path.join(dir, "other.md");
+    const resultFile = path.join(dir, "result.json");
+    const stream = [
+      {
+        type: "assistant",
+        parent_tool_use_id: null,
+        message: { content: [{ type: "text", text: "run-eval.sh:150." }] },
+      },
+      {
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        result: "run-eval.sh:150.",
+        total_cost_usd: 0.5,
+        num_turns: 3,
+      },
+    ]
+      .map((event) => JSON.stringify(event))
+      .join("\n");
+    writeFileSync(rawFile, `${stream}\n`);
+    writeFileSync(otherFile, "the other review");
+    const writerPath = path.join(
+      repoRoot,
+      "scripts/review/review-eval-cell-writer.mjs",
+    );
+    const runWriter = (module, args) =>
+      spawnSync(process.execPath, [module, ...args], {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          REVIEW_EVAL_CELL: "pr-1990-pipeline-draw1",
+          REVIEW_EVAL_PR: "1990",
+          REVIEW_EVAL_CONDITION: "pipeline",
+          REVIEW_EVAL_DRAW: "1",
+          REVIEW_EVAL_MODEL: "claude-opus-5",
+          REVIEW_EVAL_EFFORT: "high",
+          REVIEW_EVAL_FINDER: "codex",
+          REVIEW_EVAL_FIXTURE: dir,
+          REVIEW_EVAL_SECONDS: "12",
+          REVIEW_EVAL_FINDER_CHARS: "40",
+          REVIEW_EVAL_FINGERPRINT: "{}",
+        },
+      });
+    const ok = runWriter(writerPath, [rawFile, otherFile, resultFile]);
+    assert.equal(ok.status, 0, ok.stderr);
+    const written = JSON.parse(readFileSync(resultFile, "utf8"));
+    // The cell records how much stream it wrote, so a run can be checked
+    // against the output ceiling that kills a session instead of truncating it,
+    // and how many of its messages the scored text carries.
+    assert.equal(written.stream_chars, stream.length + 1);
+    assert.equal(written.assistant_messages, 1);
+    assert.equal(written.assistant_messages_kept, 1);
+    rmSync(resultFile);
+
+    // A writer whose parser is not beside it says nothing about the cell.
+    // Before this exit code the import threw outside the `try`, node exited 1,
+    // and the caller deleted the paid cell under "claude reported an error".
+    const orphan = path.join(dir, "review-eval-cell-writer.mjs");
+    cpSync(writerPath, orphan);
+    const fault = runWriter(orphan, [rawFile, otherFile, resultFile]);
+    assert.equal(fault.status, 4);
+    assert.match(fault.stderr, /the stream parser beside .* did not load/);
+    assert.equal(existsSync(resultFile), false);
+
+    // The pre-flight loads exactly what the writer loads, and costs nothing.
+    assert.equal(runWriter(orphan, ["--preflight"]).status, 4);
+    const armed = runWriter(writerPath, ["--preflight"]);
+    assert.equal(armed.status, 0, armed.stderr);
+    assert.equal(existsSync(resultFile), false);
+
+    // A truncated stream is still the cell's own failure, and still exits 3.
+    // The parser's own message goes to stderr first: exit 3 alone said a cell
+    // broke its stream without saying how.
+    writeFileSync(rawFile, stream.slice(0, 40));
+    const truncated = runWriter(writerPath, [rawFile, otherFile, resultFile]);
+    assert.equal(truncated.status, 3);
+    assert.match(
+      truncated.stderr,
+      /the contestant stream did not parse: contestant wrote a malformed stream event/,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a harness fault keeps the stream the cell already paid for", () => {
+  // The exit-4 branch kept `$out_dir` and then deleted the only capture of the
+  // session, so the retry had to buy the same review again.
+  const runtime = runEvalSource("runtime");
+  const branch = runtime.match(
+    /\n {2}if \[\[ \$envelope_status -ne 0 \]\]; then\n[\s\S]*?\n {2}fi\n/,
+  )?.[0];
+  assert.ok(branch, "the cell writer's failure branch moved");
+  const dir = mkdtempSync(path.join(tmpdir(), "review-eval-cell-fault-"));
+  try {
+    const harness = (status) => {
+      const outDir = path.join(dir, `cell-${status}`);
+      const raw = path.join(dir, `raw-${status}`);
+      const other = path.join(dir, `other-${status}`);
+      mkdirSync(outDir, { recursive: true });
+      writeFileSync(path.join(outDir, "plan-note"), "paid\n");
+      writeFileSync(raw, '{"type":"result"}\n');
+      writeFileSync(`${raw}.err`, "stderr of the session\n");
+      writeFileSync(other, "the other review");
+      const script = [
+        "set -uo pipefail",
+        'log() { printf "%s\\n" "$*"; }',
+        "log_stderr_tail() { :; }",
+        `cell_id="pr-1990-pipeline-draw1"`,
+        `out_dir=${JSON.stringify(outDir)}`,
+        `raw=${JSON.stringify(raw)}`,
+        `other_file=${JSON.stringify(other)}`,
+        `envelope_status=${status}`,
+        "cell_tail() {",
+        branch,
+        "  return 0",
+        "}",
+        "cell_tail",
+        'printf "returned=%s\\n" "$?"',
+      ].join("\n");
+      const run = spawnSync("bash", ["-c", script], { encoding: "utf8" });
+      assert.equal(run.status, 0, run.stderr);
+      return { outDir, raw, other, run };
+    };
+
+    const fault = harness(4);
+    assert.match(fault.run.stdout, /returned=1/);
+    assert.match(fault.run.stdout, /harness fault, cell kept/);
+    assert.equal(existsSync(fault.outDir), true);
+    assert.equal(
+      readFileSync(path.join(fault.outDir, "stream.jsonl"), "utf8"),
+      '{"type":"result"}\n',
+    );
+    assert.equal(
+      readFileSync(path.join(fault.outDir, "stream.err"), "utf8"),
+      "stderr of the session\n",
+    );
+    assert.equal(existsSync(fault.raw), false);
+    assert.equal(existsSync(`${fault.raw}.err`), false);
+    assert.equal(existsSync(fault.other), false);
+
+    // A stream the cell broke is still its own failure: nothing is cached.
+    const broken = harness(3);
+    assert.match(broken.run.stdout, /returned=1/);
+    assert.match(broken.run.stdout, /not cached/);
+    assert.equal(existsSync(broken.outDir), false);
+    assert.equal(existsSync(broken.raw), false);
+    assert.equal(existsSync(broken.other), false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the shell cell path caps the contestant stream like the node path", () => {
+  // `claudeExec` kills a judge that writes more than 64 MiB. The canonical
+  // shell path is the one that spends the matrix budget, and it enforced only
+  // a wall clock: a runaway session filled the disk, and then the reader's heap
+  // when the cell writer read the file back in one string.
+  const runtime = runEvalSource("runtime");
+  const lifecycle = runEvalSource("lifecycle");
+  assert.match(
+    runtime,
+    /run_capped_in_fixture "\$fixture" claude "\$\{claude_args\[@\]\}"/,
+  );
+  assert.match(
+    runtime,
+    /CELL_STREAM_MAX_BYTES="\$\{REVIEW_EVAL_MAX_STREAM_BYTES:-67108864\}"/,
+  );
+  // The variable moves the ceiling for the test below; nothing removes it.
+  assert.equal(runtime.includes("ulimit -f unlimited"), false);
+  const bounded = lifecycle.match(/\nrun_bounded\(\) \{\n[\s\S]*?\n\}\n/)?.[0];
+  const inFixture = runtime.match(
+    /\nrun_in_fixture\(\) \{\n[\s\S]*?\n\}\n/,
+  )?.[0];
+  const capped = runtime.match(
+    /\nCELL_STREAM_MAX_BYTES=[\s\S]*?\nrun_capped_in_fixture\(\) \{\n[\s\S]*?\n\}\n/,
+  )?.[0];
+  assert.ok(bounded && inFixture && capped, "the capped cell launcher moved");
+
+  const dir = mkdtempSync(path.join(tmpdir(), "review-eval-stream-cap-"));
+  try {
+    // A contestant that never stops writing. One MiB is far past the ceiling
+    // the run below sets, and well inside the one the run after it sets.
+    const fake = path.join(dir, "claude");
+    writeFileSync(
+      fake,
+      "#!/bin/sh\ndd if=/dev/zero bs=1024 count=1024 2>/dev/null | tr '\\0' 'x'\n",
+      { mode: 0o755 },
+    );
+    const out = path.join(dir, "stream.jsonl");
+    const script = [
+      "set -uo pipefail",
+      'fail() { printf "FATAL: %s\\n" "$*" >&2; exit 1; }',
+      "STARTED=$(date +%s)",
+      "CELL_ENV=(env)",
+      bounded,
+      inFixture,
+      capped,
+      `run_bounded ${JSON.stringify(out)} 60 run_capped_in_fixture ${JSON.stringify(dir)} ${JSON.stringify(fake)}`,
+      'printf "status=%s\\n" "$?"',
+      `printf "bytes=%s\\n" "$(wc -c <${JSON.stringify(out)} | tr -d " ")"`,
+    ].join("\n");
+    const run = (ceiling) =>
+      spawnSync("bash", ["-c", script], {
+        encoding: "utf8",
+        env: { ...process.env, REVIEW_EVAL_MAX_STREAM_BYTES: String(ceiling) },
+      });
+
+    const overrun = run(65536);
+    assert.equal(overrun.status, 0, overrun.stderr);
+    // The writer takes SIGXFSZ at the ceiling, so the cell fails and its
+    // truncated stream never reaches the cache.
+    assert.match(overrun.stdout, /status=[1-9]/);
+    const bytes = Number(overrun.stdout.match(/bytes=(\d+)/)?.[1]);
+    assert.ok(
+      bytes > 0 && bytes <= 65536,
+      `the contestant wrote ${bytes} bytes past a 65536-byte ceiling`,
+    );
+
+    // The same session under a ceiling it fits in is untouched.
+    const within = run(4194304);
+    assert.equal(within.status, 0, within.stderr);
+    assert.match(within.stdout, /status=0/);
+    assert.match(within.stdout, /bytes=1048576/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("a scoring subprocess inherits no GitHub credential", () => {
   const scrubbed = scrubbedEnv({
     env: {
@@ -5510,6 +5922,7 @@ test("the orchestrator keeps every helper stage on one private source snapshot",
     const changedSnapshotHelper = path.join(dir, "changed-source-snapshot.sh");
     const changedLifecycle = path.join(dir, "changed-lifecycle.sh");
     const changedRuntime = path.join(dir, "changed-runtime.sh");
+    const changedStream = path.join(dir, "changed-stream.mjs");
     writeFileSync(changedWrapper, "wrapper=changed\n");
     writeFileSync(changedSnapshotHelper, "SNAPSHOT_HELPER=changed\n");
     writeFileSync(
@@ -5517,6 +5930,7 @@ test("the orchestrator keeps every helper stage on one private source snapshot",
       'case "$RUN_EVAL_LIFECYCLE_STAGE" in support) SNAPSHOT_LIFECYCLE=changed ;; esac\n',
     );
     writeFileSync(changedRuntime, "SNAPSHOT_RUNTIME=changed\n");
+    writeFileSync(changedStream, "export const stream = 'changed';\n");
 
     const harness = [
       "#!/usr/bin/env bash",
@@ -5539,8 +5953,11 @@ test("the orchestrator keeps every helper stage on one private source snapshot",
       "cp " +
         JSON.stringify(changedRuntime) +
         ' "$TEST_LIVE/run-eval-runtime.sh"',
+      "cp " +
+        JSON.stringify(changedStream) +
+        ' "$TEST_LIVE/review-eval-stream.mjs"',
       "RUN_EVAL_LIFECYCLE_STAGE=support",
-      'node -e \'const fs = require("node:fs"); const p = process.argv[1]; const mode = (name) => (fs.statSync(name).mode & 0o777).toString(8); process.stdout.write(`modes=${mode(p)}:${mode(`${p}/run-eval.sh`)}:${mode(`${p}/run-eval-source-snapshot.sh`)}:${mode(`${p}/run-eval-lifecycle.sh`)}:${mode(`${p}/run-eval-runtime.sh`)}\\n`);\' "$RUN_EVAL_SOURCE_SNAPSHOT"',
+      'node -e \'const fs = require("node:fs"); const p = process.argv[1]; const mode = (name) => (fs.statSync(name).mode & 0o777).toString(8); process.stdout.write(`modes=${mode(p)}:${mode(`${p}/run-eval.sh`)}:${mode(`${p}/run-eval-source-snapshot.sh`)}:${mode(`${p}/run-eval-lifecycle.sh`)}:${mode(`${p}/run-eval-runtime.sh`)}:${mode(`${p}/review-eval-cell-writer.mjs`)}:${mode(`${p}/review-eval-stream.mjs`)}\\n`);\' "$RUN_EVAL_SOURCE_SNAPSHOT"',
       "node -e 'for (const key of Object.keys(process.env)) { if (key.startsWith(\"RUN_EVAL_\")) process.exit(1); }'",
       'if [[ $(id -u) -ne 0 ]] && mv "$RUN_EVAL_SOURCE_SNAPSHOT/run-eval-runtime.sh" "$RUN_EVAL_SOURCE_SNAPSHOT/run-eval-runtime.moved" 2>/dev/null; then fail "the sealed source snapshot allowed an entry replacement"; fi',
       'source "$RUN_EVAL_SCRIPT_DIR/run-eval-lifecycle.sh"',
@@ -5560,6 +5977,17 @@ test("the orchestrator keeps every helper stage on one private source snapshot",
       writeFileSync(
         path.join(live, "run-eval-runtime.sh"),
         "SNAPSHOT_RUNTIME=old\n",
+      );
+      // The cell writer and the stream parser it imports are snapshotted with
+      // the shell: the wrapper loads them from the sealed directory, so the
+      // restart must copy and seal them too.
+      writeFileSync(
+        path.join(live, "review-eval-cell-writer.mjs"),
+        "export const writer = 'old';\n",
+      );
+      writeFileSync(
+        path.join(live, "review-eval-stream.mjs"),
+        "export const stream = 'old';\n",
       );
     };
     resetLiveSources();
@@ -5587,7 +6015,7 @@ test("the orchestrator keeps every helper stage on one private source snapshot",
     });
     assert.equal(run.status, 0, run.stderr);
     assert.match(run.stdout, /lifecycle=old runtime=old/);
-    assert.match(run.stdout, /modes=500:500:400:400:400/);
+    assert.match(run.stdout, /modes=500:500:400:400:400:400:400/);
     const snapshot = run.stdout.match(/snapshot=(.+)$/m)?.[1];
     assert.ok(snapshot);
     assert.equal(
@@ -5602,6 +6030,10 @@ test("the orchestrator keeps every helper stage on one private source snapshot",
     assert.equal(
       readFileSync(liveSnapshotHelper, "utf8"),
       "SNAPSHOT_HELPER=changed\n",
+    );
+    assert.equal(
+      readFileSync(path.join(live, "review-eval-stream.mjs"), "utf8"),
+      "export const stream = 'changed';\n",
     );
     assert.equal(existsSync(snapshot), false);
     const snapshotEntries = () =>
@@ -5782,6 +6214,8 @@ test("the persistent plan must bind the private source snapshot", () => {
       "run-eval-source-snapshot.sh",
       "run-eval-lifecycle.sh",
       "run-eval-runtime.sh",
+      "review-eval-cell-writer.mjs",
+      "review-eval-stream.mjs",
     ];
     for (const name of names) {
       writeFileSync(path.join(snapshot, name), "snapshotted " + name + "\n");

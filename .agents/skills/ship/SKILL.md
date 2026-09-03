@@ -47,10 +47,13 @@ hygiene, and production closeout.
   gate. Then run `pnpm agent:closeout-review` for non-trivial behavioural,
   workflow, security, data-flow, infrastructure, or UI changes, and hand its
   printed report path to the `review` skill. Exit 1 means the report carries
-  findings; exit 2 means the tool did not run, so there is no review. With no
-  `codex` on PATH the script is skipped and the `review` skill runs alone, as
-  single-source coverage to disclose in `## Validation`. Card step 4 owns the
-  flow — follow it rather than a bare command.
+  findings. Exit 2 means the closeout failed and there is no usable review: the
+  target moved, codex failed or timed out, the report came back empty, or the
+  tool never started. Block on a 2 and report the reason the script printed.
+  One cause falls back instead — with no `codex` on PATH the script is skipped
+  and the `review` skill runs alone, as single-source coverage to disclose in
+  `## Validation`. Card step 4 owns the flow — follow it rather than a bare
+  command.
 - **Resolve the base repo from evidence.** A fork checkout uses its parent as
   `BASE_REPO`; never substitute a fork's `origin` for its parent. Bind every
   `gh pr view`, feedback-state, and ready-state call with `--repo <BASE_REPO>`.
