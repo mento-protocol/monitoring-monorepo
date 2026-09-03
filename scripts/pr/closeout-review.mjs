@@ -353,7 +353,7 @@ function resolveBase(repoRoot) {
  * back to is read from the repository rather than assumed to be `main`.
  */
 function defaultBranchOf(repoRoot, baseRepo, currentRepo, repoInfo) {
-  let branch = null;
+  let branch;
   if (baseRepo === currentRepo) {
     branch = repoInfo.defaultBranchRef?.name ?? null;
   } else {
@@ -418,7 +418,7 @@ function verifyBase(repoRoot, base, shouldFetch) {
  */
 function realDestination(target) {
   const parent = path.dirname(target);
-  let realParent = parent;
+  let realParent;
   const missing = [];
   let probe = parent;
   for (;;) {
