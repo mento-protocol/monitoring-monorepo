@@ -196,7 +196,11 @@ export function createExperimentArmExecutor({
           treatment,
           source_digest: source.digest,
           source_report: source.text,
+          // Every assistant message of the cell, in order — not the last one.
+          // `assistant_messages` is kept so a re-read of the cache can tell a
+          // multi-message session from a single-message one.
           output: envelope.result,
+          assistant_messages: envelope.assistant_messages,
           cost_usd: Number(envelope.total_cost_usd ?? 0),
           turns: envelope.num_turns ?? null,
         },

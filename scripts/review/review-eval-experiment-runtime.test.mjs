@@ -30,6 +30,31 @@ import {
 const digest = (character) => character.repeat(64);
 const head = (number) => number.toString(16).padStart(40, "0");
 
+/**
+ * One `stream-json` session: an assistant message per entry, then the closing
+ * result event. `result` on that event is the LAST message, which is exactly
+ * what the retired `--output-format json` envelope carried.
+ */
+function contestantStream(messages, resultOverrides = {}) {
+  const events = messages.map((text) => ({
+    type: "assistant",
+    parent_tool_use_id: null,
+    message: { role: "assistant", content: [{ type: "text", text }] },
+  }));
+  events.push({
+    type: "result",
+    subtype: "success",
+    is_error: false,
+    result: messages.at(-1) ?? "",
+    total_cost_usd: 0.5,
+    num_turns: messages.length,
+    session_id: "session",
+    duration_ms: 1000,
+    ...resultOverrides,
+  });
+  return `${events.map((event) => JSON.stringify(event)).join("\n")}\n`;
+}
+
 function makeHarness({ laneCount = 3, live = false } = {}) {
   const root = mkdtempSync(
     path.join(tmpdir(), "review-eval-experiment-runtime-"),
@@ -216,8 +241,7 @@ function baseOptions(harness, overrides = {}) {
     reset: async () => true,
     scorerDigestNow: () => harness.plan.inputs.scorer_digest,
     judgeExec: judgeExec(),
-    contestantExec: async () =>
-      JSON.stringify({ is_error: false, result: "file.js:1 has a defect" }),
+    contestantExec: async () => contestantStream(["file.js:1 has a defect"]),
     ...overrides,
   };
 }
@@ -243,10 +267,7 @@ test("runtime bounds fixture lanes and preserves each recorded pair order", asyn
         maximum = Math.max(maximum, active);
         await new Promise((resolve) => setImmediate(resolve));
         active -= 1;
-        return JSON.stringify({
-          is_error: false,
-          result: "file.js:1 has a defect",
-        });
+        return contestantStream(["file.js:1 has a defect"]);
       },
     }),
   );
@@ -310,10 +331,7 @@ test("one live finder report is shared by both arms", async (t) => {
             "utf8",
           ),
         });
-        return JSON.stringify({
-          is_error: false,
-          result: "file.js:1 has a defect",
-        });
+        return contestantStream(["file.js:1 has a defect"]);
       },
     }),
   );
@@ -364,10 +382,9 @@ test("successful empty output is cached and malformed output is not", async (t) 
     baseOptions(emptyHarness, {
       contestantExec: async ({ treatment }) => {
         calls += 1;
-        return JSON.stringify({
-          is_error: false,
-          result: treatment === "candidate" ? "   " : "file.js:1 has a defect",
-        });
+        return contestantStream([
+          treatment === "candidate" ? "   " : "file.js:1 has a defect",
+        ]);
       },
     }),
   );
@@ -390,7 +407,8 @@ test("successful empty output is cached and malformed output is not", async (t) 
       kind: "raw",
       identity: rawIdentity,
     }).payload.output,
-    "   ",
+    // A whitespace-only message contributes no text to the session.
+    "",
   );
   const reused = await runExperimentRuntimeStage(
     baseOptions(emptyHarness, {
@@ -422,15 +440,61 @@ test("successful empty output is cached and malformed output is not", async (t) 
   );
   const rawDir = path.join(malformedHarness.artifactRoot, "cache", "raw");
   assert.equal(existsSync(rawDir) ? readdirSync(rawDir).length : 0, 0);
-  assert.throws(() => parseContestantEnvelope('{"is_error":true}'), /usable/);
   assert.throws(
-    () => parseContestantEnvelope('{"result":"finding"}'),
+    () =>
+      parseContestantEnvelope(
+        contestantStream(["finding"], { is_error: true }),
+      ),
     /usable/,
   );
   assert.throws(
-    () => parseContestantEnvelope('{"is_error":"false","result":"finding"}'),
+    () =>
+      parseContestantEnvelope(
+        contestantStream(["finding"], { is_error: "false" }),
+      ),
     /usable/,
   );
+  assert.throws(
+    () => parseContestantEnvelope(contestantStream(["finding"], { type: "x" })),
+    /no result event/,
+  );
+});
+
+test("a cell is scored on every assistant message it wrote", async (t) => {
+  // The defect this replaced: two 2026-09-02 cells wrote their report, ran one
+  // more tool call, then posted a short addendum, and the envelope's `result`
+  // field carried the addendum alone. Both messages must reach the scorer, in
+  // the order the reviewer wrote them.
+  const envelope = parseContestantEnvelope(
+    contestantStream(["file.js:1 has a defect", "Final addendum"]),
+  );
+  assert.equal(envelope.result, "file.js:1 has a defect\n\nFinal addendum");
+  assert.equal(envelope.final_result, "Final addendum");
+  assert.equal(envelope.assistant_messages, 2);
+
+  // The retired single-shot envelope is no longer a shape this harness can
+  // read, so a cell cannot fall back to final-message-only scoring in silence.
+  assert.throws(
+    () =>
+      parseContestantEnvelope(
+        JSON.stringify({ is_error: false, result: "Final addendum" }),
+      ),
+    /malformed JSON/,
+  );
+
+  const harness = makeHarness({ laneCount: 1 });
+  t.after(harness.cleanup);
+  const result = await runExperimentRuntimeStage(
+    baseOptions(harness, {
+      contestantExec: async () =>
+        contestantStream(["file.js:1 has a defect", "Final addendum"]),
+    }),
+  );
+  for (const record of result.records) {
+    const { payload } = JSON.parse(readFileSync(record.artifacts.raw, "utf8"));
+    assert.equal(payload.output, "file.js:1 has a defect\n\nFinal addendum");
+    assert.equal(payload.assistant_messages, 2);
+  }
 });
 
 test("runtime rejects scorer drift after a contestant finishes", async (t) => {
@@ -443,10 +507,7 @@ test("runtime rejects scorer drift after a contestant finishes", async (t) => {
         scorerDigestNow: () => currentDigest,
         contestantExec: async () => {
           currentDigest = digest("x");
-          return JSON.stringify({
-            is_error: false,
-            result: "file.js:1 has a defect",
-          });
+          return contestantStream(["file.js:1 has a defect"]);
         },
         judgeExec: async () => {
           throw new Error("drifted scorer reached a judge");

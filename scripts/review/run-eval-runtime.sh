@@ -453,8 +453,12 @@ run_cell() {
     prompt="$(cat "$SPEC/scripts/review/prompts/request.md")"
   fi
 
+  # `stream-json` because a cell is scored on every assistant message it wrote.
+  # `--output-format json` reports only the last one, so a reviewer that filed
+  # its report, ran one more tool call and then posted an addendum was scored on
+  # the addendum. `claudeStreamEnvelope()` below rebuilds the envelope.
   local -a claude_args=(-p "$prompt" --model "$model" --effort "$effort"
-    --setting-sources "" --output-format json
+    --setting-sources "" --output-format stream-json --verbose
     --permission-mode bypassPermissions
     --allowed-tools "${CLAUDE_TOOLS[@]}" --max-turns 80)
   if [[ $condition != "control" ]]; then
@@ -498,15 +502,18 @@ run_cell() {
     REVIEW_EVAL_SECONDS="$(($(date +%s) - started))" \
     REVIEW_EVAL_FINDER_CHARS="$codex_chars" \
     REVIEW_EVAL_FINGERPRINT="$FINGERPRINT_JSON" \
-    node -e '
-      const fs = require("node:fs");
-      const raw = fs.readFileSync(process.argv[1], "utf8");
+    node --input-type=module -e '
+      import { readFileSync, writeFileSync } from "node:fs";
+      import { pathToFileURL } from "node:url";
+      // The same parser the experiment lane and the judges use, so one fix
+      // covers both exec paths.
+      const { claudeStreamEnvelope } = await import(pathToFileURL(process.argv[4]).href);
+      const raw = readFileSync(process.argv[1], "utf8");
       let envelope;
-      try { envelope = JSON.parse(raw); } catch { envelope = { is_error: true, result: raw.slice(-4000) }; }
-      const ok = !envelope.is_error && typeof envelope.result === "string" && envelope.result.trim() !== "";
-      if (!ok) process.exit(3);
-      const other = fs.readFileSync(process.argv[2], "utf8");
-      fs.writeFileSync(process.argv[3], `${JSON.stringify({
+      try { envelope = claudeStreamEnvelope(raw, { label: "contestant" }); } catch { process.exit(3); }
+      if (envelope.is_error || envelope.result.trim() === "") process.exit(3);
+      const other = readFileSync(process.argv[2], "utf8");
+      writeFileSync(process.argv[3], `${JSON.stringify({
         cell_id: process.env.REVIEW_EVAL_CELL,
         pr: Number(process.env.REVIEW_EVAL_PR),
         condition: process.env.REVIEW_EVAL_CONDITION,
@@ -518,13 +525,15 @@ run_cell() {
         fingerprint: JSON.parse(process.env.REVIEW_EVAL_FINGERPRINT),
         ok: true,
         output: envelope.result,
+        assistant_messages: envelope.assistant_messages,
         other_review: other,
         finder_chars: Number(process.env.REVIEW_EVAL_FINDER_CHARS),
         seconds: Number(process.env.REVIEW_EVAL_SECONDS),
         cost_usd: envelope.total_cost_usd ?? 0,
         turns: envelope.num_turns ?? null,
       }, null, 1)}\n`);
-    ' "$raw" "$other_file" "$out_dir/result.json"; then
+    ' "$raw" "$other_file" "$out_dir/result.json" \
+    "$SPEC/scripts/review/review-eval-run-execution.mjs"; then
     rm -rf "$out_dir"
     log "  $cell_id FAILED — claude reported an error; not cached"
     log_stderr_tail "$raw.err"

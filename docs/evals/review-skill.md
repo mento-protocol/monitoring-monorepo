@@ -85,6 +85,15 @@ committed booleans, so no model is ever re-invoked to compare two months. A
 condition's dollars are its contestant cells alone; what the judges cost is
 recorded once per row as `scoring_usd`, and the report prints both.
 
+A cell is scored on every assistant message of its session, in order, joined by
+a blank line. The CLI's single-shot envelope carries only the last message, so a
+reviewer that filed its report, ran one more tool call and then posted a short
+addendum was scored on the addendum alone. Each lane captures the session stream
+instead and records the message count beside the transcript. A sub-agent's own
+messages stay out: they are the reviewer's internal delegation, not the report
+it filed. Judge calls keep last-message semantics, because a judge's answer is
+its final message.
+
 A condition counts a PR as zero-finding only when every draw that completed
 for that PR emitted no parseable claim. One empty draw beside a productive one
 is sampling variance, not a condition that found nothing.

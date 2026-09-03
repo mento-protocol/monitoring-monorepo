@@ -49,8 +49,11 @@ import {
   cellFingerprint,
   cellReuseDecision,
   claudeArgv,
+  claudeExec,
+  claudeStreamEnvelope,
   comparabilityKey,
   leakSignals,
+  LEGACY_SPLIT_CACHE_PLAN,
   loginsInFixtureTree,
   ORCHESTRATOR_FILES,
   orchestratorSourceDigest,
@@ -198,11 +201,21 @@ test("run-eval shell sources retain split headroom", () => {
   }
 });
 
-test("the shell split reconstructs the cached-cell orchestrator bytes", () => {
+test("the shell split no longer reconstructs the pre-split cell runtime", () => {
+  const reconstructed = createHash("sha256")
+    .update(reconstructLegacyOrchestrator())
+    .digest("hex");
+  // The split markers still splice the helper payloads back into the wrapper,
+  // so this pin still catches an unintended shell edit.
   assert.equal(
-    createHash("sha256").update(reconstructLegacyOrchestrator()).digest("hex"),
-    "5cdfbd0e709af2d68c193d484b724706b339ab0562d14b283f5fc38eebe9ae49",
+    reconstructed,
+    "809911903aa6c3b9a0717cac24fa1e5d5f1d4444853a5066efc9cf9b3939b839",
   );
+  // It is no longer the pre-split monolith. Capturing the whole session instead
+  // of the CLI's last-message envelope changed what a cell records, so the 24
+  // cells cached under that monolith are not reusable and the orchestrator
+  // reuse transition in `review-eval-run-cell.mjs` is closed.
+  assert.notEqual(reconstructed, LEGACY_SPLIT_CACHE_PLAN.orchestratorDigest);
 });
 
 test("review-eval validation modules retain split headroom", () => {
@@ -805,7 +818,7 @@ test("comparabilityKey moves with the contract, the prompts, and the scorer", ()
 
 test("orchestratorSourceDigest binds the wrapper and three helpers", () => {
   const expected =
-    "d0790e1d52542ac8e22bbc84932e98d635035f685ca201321bda3ab4c196033a";
+    "27650a4a1a7f96e6b19878d0e92062365e6c8251b47d138b106e325a7b36482f";
   assert.equal(orchestratorSourceDigest(), expected);
   assert.deepEqual(
     ORCHESTRATOR_FILES.map((file) => path.basename(file)),
@@ -1020,41 +1033,35 @@ test("a cached cell from another skill or contract is never reused", () => {
   const decide = (result) =>
     cellReuseDecision({ plan, resultPath: "unused", result });
   assert.equal(decide({ ok: true, fingerprint }).reuse, true);
+  // The pre-split cells were captured from the CLI's last-message envelope.
+  // Capturing the whole session changed what a cell records, so the reviewed
+  // orchestrator transition that kept them reusable is closed and a cell
+  // carrying that digest is refused like any other stale one.
   const legacyOrchestratorFingerprint = {
     ...fingerprint,
     skill_ref: "/tmp/old-candidate",
     dirty: true,
-    orchestrator_digest:
-      "5cdfbd0e709af2d68c193d484b724706b339ab0562d14b283f5fc38eebe9ae49",
+    orchestrator_digest: LEGACY_SPLIT_CACHE_PLAN.orchestratorDigest,
   };
   const transitioned = decide({
     ok: true,
     fingerprint: legacyOrchestratorFingerprint,
   });
-  assert.equal(transitioned.reuse, true);
-  assert.match(
-    transitioned.reason,
-    /recorded reviewed orchestrator transition/,
-  );
-  assert.equal(
-    decide({
-      ok: true,
-      fingerprint: {
-        ...legacyOrchestratorFingerprint,
-        skill_ref: "installed",
-        dirty: false,
-      },
-    }).reuse,
-    true,
-  );
+  assert.equal(transitioned.reuse, false);
+  assert.match(transitioned.reason, /unexpected skill_ref, dirty/);
   const legacyWithoutTreatment = Object.fromEntries(
     Object.entries(legacyOrchestratorFingerprint).filter(
       ([field]) => !["skill_ref", "dirty"].includes(field),
     ),
   );
+  const untransitioned = decide({
+    ok: true,
+    fingerprint: legacyWithoutTreatment,
+  });
+  assert.equal(untransitioned.reuse, false);
   assert.match(
-    decide({ ok: true, fingerprint: legacyWithoutTreatment }).reason,
-    /lacks the complete historically valid legacy treatment fields/,
+    untransitioned.reason,
+    /produced under a different orchestrator_digest/,
   );
   for (const malformedLegacy of [
     { ...legacyOrchestratorFingerprint, dirty: "true" },
@@ -1082,9 +1089,12 @@ test("a cached cell from another skill or contract is never reused", () => {
       ),
     ),
   ]) {
-    assert.match(
-      decide({ ok: true, fingerprint: malformedLegacy }).reason,
-      /lacks the complete historically valid legacy treatment fields/,
+    // Every one of these shapes used to be judged against the legacy treatment
+    // rule. With the transition closed they are refused for carrying fields
+    // this run's fingerprint does not have, which is the same verdict.
+    assert.equal(
+      decide({ ok: true, fingerprint: malformedLegacy }).reuse,
+      false,
     );
   }
   assert.match(
@@ -1098,22 +1108,22 @@ test("a cached cell from another skill or contract is never reused", () => {
     }).reason,
     /unexpected skill_ref, dirty/,
   );
-  assert.match(
+  assert.equal(
     decide({
       ok: true,
       fingerprint: { ...legacyOrchestratorFingerprint, legacy: true },
-    }).reason,
-    /unexpected legacy/,
+    }).reuse,
+    false,
   );
-  assert.match(
+  assert.equal(
     decide({
       ok: true,
       fingerprint: {
         ...legacyOrchestratorFingerprint,
         skill_digest: "0".repeat(64),
       },
-    }).reason,
-    /different skill_digest/,
+    }).reuse,
+    false,
   );
   for (const obsoleteTarget of [
     "77bba1e0af554775f19429d48ea6470a3574b05e6b3ed95a1b3e73e8bf3a2807",
@@ -1198,23 +1208,22 @@ test("a cached cell from another skill or contract is never reused", () => {
   );
 });
 
-test("the exact pre-split cache is discovered, seeded, and reused", () => {
+test("the pre-split cache lineage is closed", () => {
+  // One full run finished its 24 paid cells under the pre-split monolith, and
+  // the planner used to discover and reuse them through the reviewed
+  // orchestrator transition. Capturing the whole session instead of the CLI's
+  // last-message envelope changed what a cell records, so that transition no
+  // longer resolves: the lineage is neither discovered nor reusable. The
+  // shell's resume-cache seeding stays covered by the ledger-driven resume
+  // case.
   const root = makeRoot();
   const now = new Date("2026-08-28T20:00:00Z");
-  const oldKey =
-    "4543e3da483d5f2c70fc97e97664377ae22cc844bf1e5f376c1ce60eb3a42267";
-  const oldMatcher =
-    "d183758cd7a3b28aa14fe857ed04c6ca93601e1834a1dfd08cf730ad2332c922";
-  const oldOrchestrator =
-    "5cdfbd0e709af2d68c193d484b724706b339ab0562d14b283f5fc38eebe9ae49";
-  const oldContractDigest =
-    "7223888cc6bd15c9bdb3bf1f6929a516719dd497ee6d2f1bc577a6405e8202e9";
+  const oldKey = LEGACY_SPLIT_CACHE_PLAN.comparabilityKey;
+  const oldOrchestrator = LEGACY_SPLIT_CACHE_PLAN.orchestratorDigest;
+  const oldContractDigest = LEGACY_SPLIT_CACHE_PLAN.contractDigest;
   // The reusable lineage is a fixed tuple of digests, one of which is the
-  // contract that scored those cells. So the case drives it with the frozen
-  // pre-split contract instead of whatever the live contract holds today: an
-  // amendment to the live contract retires the lineage for real runs — which
-  // is correct, since every cell fingerprint carries the contract digest — and
-  // must not quietly delete the coverage that proves the discovery works.
+  // contract that scored those cells, so the case drives the frozen pre-split
+  // contract rather than whatever the live contract holds today.
   const { contract: oldContract, digest: frozenContractDigest } = loadContract(
     path.join(
       repoRoot,
@@ -1247,21 +1256,17 @@ test("the exact pre-split cache is discovered, seeded, and reused", () => {
       "result.json",
     );
     mkdirSync(path.dirname(oldResult), { recursive: true });
-    const oldPlan = {
-      ...first,
-      matcher_digest: oldMatcher,
-      comparability_key: oldKey,
-      detail_dir: oldDetail,
-      plan_dir: oldPhysical,
-      resume_from: null,
-      inputs: {
-        ...first.inputs,
-        orchestrator_digest: oldOrchestrator,
-      },
-    };
     writeFileSync(
       path.join(oldPhysical, "plan.json"),
-      JSON.stringify({ ...oldPlan, matcher_digest: "0".repeat(64) }),
+      JSON.stringify({
+        ...first,
+        matcher_digest: LEGACY_SPLIT_CACHE_PLAN.matcherDigest,
+        comparability_key: oldKey,
+        detail_dir: oldDetail,
+        plan_dir: oldPhysical,
+        resume_from: null,
+        inputs: { ...first.inputs, orchestrator_digest: oldOrchestrator },
+      }),
     );
     const oldFingerprint = {
       ...cellFingerprint({ plan: first }),
@@ -1274,86 +1279,20 @@ test("the exact pre-split cache is discovered, seeded, and reused", () => {
       JSON.stringify({ ok: true, fingerprint: oldFingerprint }),
     );
 
-    const currentOut = path.join(root, first.detail_dir);
-    const refused = buildPlan({
-      ...planArgs,
-      outDir: currentOut,
-      write: false,
-    });
-    assert.equal(refused.resume_from, null);
-
-    writeFileSync(path.join(oldPhysical, "plan.json"), JSON.stringify(oldPlan));
-    const invalidDetail = `${oldDetail}-2`;
-    const invalidPhysical = path.join(root, invalidDetail);
-    mkdirSync(invalidPhysical, { recursive: true });
-    writeFileSync(
-      path.join(invalidPhysical, "plan.json"),
-      JSON.stringify({
-        ...oldPlan,
-        planned_at: "2026-08-28T21:00:00Z",
-        detail_dir: invalidDetail,
-        plan_dir: invalidPhysical,
-      }),
-    );
-    for (const invalidCell of first.cells.slice(0, 2)) {
-      const invalidResult = path.join(
-        invalidPhysical,
-        "cells",
-        invalidCell.cell_id,
-        "result.json",
-      );
-      mkdirSync(path.dirname(invalidResult), { recursive: true });
-      writeFileSync(
-        invalidResult,
-        JSON.stringify({
-          ok: true,
-          fingerprint: { ...oldFingerprint, unexpected: true },
-        }),
-      );
-    }
     const planned = buildPlan({
       ...planArgs,
-      outDir: currentOut,
-      write: true,
+      outDir: path.join(root, first.detail_dir),
+      write: false,
     });
-    assert.equal(planned.resume_from, oldDetail);
-
-    const shell = runEvalSourceSet();
-    const block = shell.match(
-      /\nRESUME_FROM="\$\(json_field "\$PLAN_OUT" resume_from\)"\n[\s\S]*?\nfi\n/,
-    )?.[0];
-    const guard = shell.match(
-      /\nrequire_safe_detail\(\) \{\n[\s\S]*?\n\}\n/,
-    )?.[0];
-    assert.ok(block, "the resume-cache step was not found in run-eval.sh");
-    assert.ok(guard, "the detail-path guard was not found in run-eval.sh");
-    const harness = [
-      "set -euo pipefail",
-      `REPO=${JSON.stringify(root)}`,
-      `RUN_DIR=${JSON.stringify(currentOut)}`,
-      `PLAN_OUT=${JSON.stringify(path.join(currentOut, "plan.json"))}`,
-      `fail() { printf 'FATAL: %s\\n' "$*" >&2; exit 1; }`,
-      `log() { printf '%s\\n' "$*"; }`,
-      `json_field() { node -e 'const d=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")); process.stdout.write(String(d[process.argv[2]]));' "$1" "$2"; }`,
-      guard,
-      block,
-    ].join("\n");
-    const seeded = spawnSync("bash", ["-c", harness], { encoding: "utf8" });
-    assert.equal(seeded.status, 0, seeded.stderr);
-    assert.match(seeded.stdout, /seeded the resume cache/);
-
-    const copiedResult = path.join(
-      currentOut,
-      "cells",
-      cell.cell_id,
-      "result.json",
+    assert.equal(planned.resume_from, null);
+    assert.equal(
+      cellReuseDecision({
+        plan: planned,
+        resultPath: "unused",
+        result: { ok: true, fingerprint: oldFingerprint },
+      }).reuse,
+      false,
     );
-    const decision = cellReuseDecision({
-      plan: planned,
-      resultPath: copiedResult,
-    });
-    assert.equal(decision.reuse, true);
-    assert.match(decision.reason, /recorded reviewed orchestrator transition/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -4555,6 +4494,102 @@ test("a blind judge disables tools and keeps its turn bound", () => {
     "Grep",
   ]);
   assert.deepEqual(tooled.slice(allowedToolsAt + 3), ["--max-turns", "60"]);
+});
+
+test("a model call captures the session, not its last message", async () => {
+  const argv = claudeArgv({
+    prompt: "review this",
+    model: "claude-opus-5",
+    effort: "high",
+  });
+  // `--output-format json` reports only the last assistant message in its
+  // `result` field, which scored a reviewer's closing addendum as its whole
+  // review. The stream carries every message.
+  const formatAt = argv.indexOf("--output-format");
+  assert.notEqual(formatAt, -1);
+  assert.equal(argv[formatAt + 1], "stream-json");
+  assert.equal(argv.includes("--verbose"), true);
+
+  const stream = [
+    {
+      type: "assistant",
+      parent_tool_use_id: null,
+      message: {
+        content: [{ type: "text", text: "run-eval.sh:150 is wrong." }],
+      },
+    },
+    {
+      type: "assistant",
+      parent_tool_use_id: "toolu_1",
+      message: { content: [{ type: "text", text: "sub-agent chatter" }] },
+    },
+    {
+      type: "assistant",
+      parent_tool_use_id: null,
+      message: { content: [{ type: "text", text: "Final addendum." }] },
+    },
+    {
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      result: "Final addendum.",
+      total_cost_usd: 0.25,
+      num_turns: 4,
+      session_id: "session-1",
+      duration_ms: 1200,
+    },
+  ]
+    .map((event) => JSON.stringify(event))
+    .join("\n");
+
+  // A contestant is scored on the whole session; a sub-agent's own messages
+  // are its reviewer's internal delegation and stay out.
+  const session = claudeStreamEnvelope(stream);
+  assert.equal(session.result, "run-eval.sh:150 is wrong.\n\nFinal addendum.");
+  assert.equal(session.assistant_messages, 2);
+  assert.equal(session.final_result, "Final addendum.");
+  assert.equal(session.total_cost_usd, 0.25);
+  assert.equal(session.num_turns, 4);
+  assert.equal(session.is_error, false);
+  assert.equal(session.session_id, "session-1");
+  assert.equal(session.duration_ms, 1200);
+  assert.throws(
+    () => claudeStreamEnvelope('{"is_error":false,"result":"Final addendum."}'),
+    /no result event/,
+  );
+
+  const shim = mkdtempSync(path.join(tmpdir(), "review-eval-claude-"));
+  try {
+    const argvLog = path.join(shim, "argv.json");
+    writeFileSync(
+      path.join(shim, "claude"),
+      `#!/usr/bin/env node
+const { writeFileSync } = require("node:fs");
+writeFileSync(${JSON.stringify(argvLog)}, JSON.stringify(process.argv.slice(2)));
+process.stdout.write(${JSON.stringify(`${stream}\n`)});
+`,
+      { mode: 0o755 },
+    );
+    // A judge answers in its final message, and `parseJudgeJson` slices one
+    // JSON object out of that text, so the judge envelope keeps final-message
+    // `result` semantics while still reporting the session's shape.
+    const raw = await claudeExec({
+      prompt: "judge this",
+      model: "claude-opus-5",
+      effort: "high",
+      cwd: shim,
+      env: { PATH: `${shim}${path.delimiter}${process.env.PATH}` },
+    });
+    const envelope = JSON.parse(raw);
+    assert.equal(envelope.result, "Final addendum.");
+    assert.equal(envelope.assistant_messages, 2);
+    assert.equal(envelope.total_cost_usd, 0.25);
+    const spawned = JSON.parse(readFileSync(argvLog, "utf8"));
+    assert.equal(spawned.includes("json"), false);
+    assert.equal(spawned.includes("stream-json"), true);
+  } finally {
+    rmSync(shim, { recursive: true, force: true });
+  }
 });
 
 test("a scoring subprocess inherits no GitHub credential", () => {

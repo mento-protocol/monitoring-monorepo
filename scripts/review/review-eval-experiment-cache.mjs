@@ -17,7 +17,10 @@ import path from "node:path";
 import { isDeepStrictEqual, promisify } from "node:util";
 
 import { materializeFixture } from "./review-eval-fixtures.mjs";
-import { claudeArgv } from "./review-eval-run-execution.mjs";
+import {
+  claudeArgv,
+  claudeStreamEnvelope,
+} from "./review-eval-run-execution.mjs";
 import { expandHome, skillDigest } from "./review-eval-run-plan.mjs";
 import {
   digestObject,
@@ -80,22 +83,27 @@ export function experimentProviderText(value, label) {
   return text;
 }
 
+/**
+ * The contestant envelope, rebuilt from the cell's `stream-json` session.
+ *
+ * `result` is every assistant message the reviewer wrote, in order, separated
+ * by a blank line. The single-shot `--output-format json` envelope this
+ * replaced carried only the last one, so a cell that filed its report, ran one
+ * more tool call and then posted an addendum was scored on the addendum.
+ */
 export function parseExperimentContestantEnvelope(raw) {
   let envelope;
   try {
-    envelope = JSON.parse(experimentProviderText(raw, "contestant"));
+    envelope = claudeStreamEnvelope(experimentProviderText(raw, "contestant"), {
+      label: "contestant",
+      resultText: "session",
+    });
   } catch (error) {
     throw new Error(`contestant returned malformed JSON: ${error.message}`, {
       cause: error,
     });
   }
-  if (
-    !envelope ||
-    typeof envelope !== "object" ||
-    Array.isArray(envelope) ||
-    envelope.is_error !== false ||
-    typeof envelope.result !== "string"
-  ) {
+  if (envelope.is_error !== false || typeof envelope.result !== "string") {
     throw new Error("contestant returned no usable review text");
   }
   return envelope;

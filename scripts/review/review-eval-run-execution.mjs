@@ -184,8 +184,15 @@ export function claudeArgv({
     effort,
     "--setting-sources",
     "",
+    // The stream, not the single-shot envelope. `--output-format json` reports
+    // only the last assistant message in its `result` field, so a reviewer that
+    // files its report, runs one more tool call and then posts a short addendum
+    // is scored on the addendum alone. `claudeStreamEnvelope()` below rebuilds
+    // the envelope the rest of the harness reads from the whole session.
+    // `--verbose` is what the CLI requires beside `stream-json` under `-p`.
     "--output-format",
-    "json",
+    "stream-json",
+    "--verbose",
     "--permission-mode",
     "bypassPermissions",
     // `--allowed-tools` grants permission but does not limit which built-in
@@ -202,6 +209,107 @@ export function claudeArgv({
   ];
 }
 
+/** The text blocks of one assistant message, in order. */
+function assistantText(message) {
+  const content = message?.content;
+  if (typeof content === "string") return content.trim();
+  if (!Array.isArray(content)) return "";
+  return content
+    .filter((block) => block?.type === "text" && typeof block.text === "string")
+    .map((block) => block.text)
+    .join("")
+    .trim();
+}
+
+/**
+ * The assistant messages and the closing `result` event of one `stream-json`
+ * session.
+ *
+ * Sub-agent messages carry a `parent_tool_use_id` and are left out. They are
+ * the reviewer's internal delegation, not the report it filed, and folding them
+ * into the transcript would put text no reader ever saw in front of the claim
+ * extractor.
+ *
+ * A line that opens like JSON and does not parse throws rather than being
+ * skipped: truncated output must fail a cell, not be scored as a shorter
+ * review. Lines that do not open like JSON are CLI chatter and are ignored.
+ */
+export function parseClaudeStream(raw, { label = "claude" } = {}) {
+  const text = typeof raw === "string" ? raw : String(raw ?? "");
+  const messages = [];
+  let result = null;
+  for (const line of text.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("{")) continue;
+    let event;
+    try {
+      event = JSON.parse(trimmed);
+    } catch (error) {
+      throw new Error(
+        `${label} wrote a malformed stream event: ${error.message}`,
+        { cause: error },
+      );
+    }
+    if (!event || typeof event !== "object" || Array.isArray(event)) continue;
+    if (
+      event.type === "assistant" &&
+      (event.parent_tool_use_id ?? null) === null
+    ) {
+      const message = assistantText(event.message);
+      if (message) messages.push(message);
+      continue;
+    }
+    if (event.type === "result") result = event;
+  }
+  if (!result) throw new Error(`${label} produced no result event`);
+  return { messages, result };
+}
+
+function finiteNumber(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+/**
+ * One `--output-format json` envelope, rebuilt from the session stream.
+ *
+ * Every consumer of a contestant or judge call reads this shape, so the four
+ * fields the CLI put in its envelope — `total_cost_usd`, `num_turns`,
+ * `is_error`, `session_id` and `duration_ms` — carry over from the closing
+ * `result` event unchanged, and `result` stays the field that holds the text.
+ *
+ * `resultText` decides which text that is. A contestant is scored on its whole
+ * session (`"session"`): the report and every later message belong to the
+ * review. A judge answers in its last message (`"final"`), and the judge
+ * parsers slice one JSON object out of that text, so an earlier message's
+ * stray brace would break the slice. `final_result` and `assistant_messages`
+ * are new: they keep the discarded half and the message count visible for
+ * evidence, so a cell can be told from a one-message cell after the fact.
+ */
+export function claudeStreamEnvelope(
+  raw,
+  { label = "claude", resultText = "session" } = {},
+) {
+  const { messages, result } = parseClaudeStream(raw, { label });
+  const finalText =
+    typeof result.result === "string" && result.result.trim()
+      ? result.result
+      : (messages.at(-1) ?? "");
+  return {
+    result: resultText === "final" ? finalText : messages.join("\n\n"),
+    final_result: finalText,
+    assistant_messages: messages.length,
+    total_cost_usd: finiteNumber(result.total_cost_usd) ?? 0,
+    num_turns: Number.isInteger(result.num_turns) ? result.num_turns : null,
+    // A result event that does not say it succeeded is an error. The CLI always
+    // carries the field; a stream that lost it lost the one bit that separates
+    // a finished review from a truncated one.
+    is_error: result.is_error !== false,
+    session_id:
+      typeof result.session_id === "string" ? result.session_id : null,
+    duration_ms: finiteNumber(result.duration_ms),
+  };
+}
+
 export function claudeExec({
   prompt,
   model,
@@ -210,6 +318,12 @@ export function claudeExec({
   allowedTools = CLAUDE_TOOLS,
   maxTurns = CLAUDE_MAX_TURNS,
   env = scrubbedEnv(),
+  // Every caller of this function is a judge: the scoring pass, the calibration
+  // replays, and the experiment lane's extract, match and novelty calls. A
+  // judge's answer is its final message, so its envelope keeps final-message
+  // `result` semantics. Contestant cells run through their own lane and ask for
+  // the whole session.
+  resultText = "final",
 }) {
   const args = claudeArgv({ prompt, model, effort, allowedTools, maxTurns });
   return new Promise((resolve, reject) => {
@@ -229,7 +343,9 @@ export function claudeExec({
       else resolve(value);
     };
     // The same wall clock `spawnSync` enforced, and the same output ceiling: a
-    // judge that never returns must fail its cell, not hold the run open.
+    // judge that never returns must fail its cell, not hold the run open. The
+    // ceiling now bounds the whole event stream rather than one envelope, so it
+    // covers the tool results the session streamed as well.
     const timer = setTimeout(() => {
       child.kill("SIGKILL");
       finish(new Error(`claude did not finish within ${EXEC_TIMEOUT_MS} ms`));
@@ -254,7 +370,16 @@ export function claudeExec({
     });
     child.on("close", (code, signal) => {
       if (code === 0) {
-        finish(null, stdout);
+        try {
+          finish(
+            null,
+            JSON.stringify(
+              claudeStreamEnvelope(stdout, { label: "claude", resultText }),
+            ),
+          );
+        } catch (error) {
+          finish(error);
+        }
         return;
       }
       finish(
