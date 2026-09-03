@@ -8,9 +8,25 @@
 
 import { createHash } from "node:crypto";
 
-import { ISSUE_STATE_LABELS } from "../lib/gh-issue-lifecycle.mjs";
+import {
+  AGENT_ACTIVE_LABEL_DEFINITION,
+  IN_PR_LABEL_DEFINITION,
+  ISSUE_STATE_LABELS,
+} from "../lib/gh-issue-lifecycle.mjs";
 
 export { ISSUE_STATE_LABELS };
+
+/**
+ * The two queue-state labels that mean a live claim owns the issue.
+ *
+ * `agent-ready` and `needs-grooming` describe unowned work; these two say a
+ * session holds it. Helpers that must not touch owned work read the pair from
+ * here rather than restating it.
+ */
+export const ISSUE_OWNED_STATE_LABELS = Object.freeze([
+  AGENT_ACTIVE_LABEL_DEFINITION.name,
+  IN_PR_LABEL_DEFINITION.name,
+]);
 
 export const DEFAULT_REPO = "mento-protocol/monitoring-monorepo";
 export const DEFAULT_PROJECT_OWNER = "mento-protocol";

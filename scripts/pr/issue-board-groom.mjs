@@ -23,21 +23,24 @@
  * mutex makes a claim landing between the sweep's roster snapshot and this
  * call observable too: the in-mutex read refuses an issue already carrying
  * `agent-active` or `in-pr`, the same "never touch an owned issue" rule the
- * pass follows everywhere else.
+ * pass follows everywhere else. One refusal comes before the mutex: a label
+ * the repository does not define makes `gh issue edit` fail only after the
+ * write is attempted, so that label is refused before the lock is taken.
  */
 
 import {
+  ISSUE_OWNED_STATE_LABELS,
   ISSUE_STATE_LABELS,
   isSafeSingleLineText,
   labelNames,
   satisfiesSweepLabelEligibility,
-  stateFromLabels,
 } from "./issue-board-state.mjs";
 import { getProject } from "./issue-board-projects.mjs";
 import { withIssueMutationLock } from "./issue-board-lock.mjs";
 import {
   addIssueLabels,
   getIssue,
+  listRepoLabelNames,
   removeIssueLabels,
 } from "./issue-board-transport.mjs";
 
@@ -58,6 +61,10 @@ export const GROOM_COMPENSATED_EXIT_CODE = 5;
 export const GROOM_COMPENSATION_FAILED_EXIT_CODE = 6;
 /** A concurrent write left the issue eligible; this call did not cause it. */
 export const GROOM_CONCURRENT_ELIGIBILITY_EXIT_CODE = 7;
+/** A live claim owns the issue. Nothing was written. */
+export const GROOM_OWNED_REFUSED_EXIT_CODE = 8;
+/** The post-write read does not show this call's labels. The mutex is held. */
+export const GROOM_WRITE_UNCONFIRMED_EXIT_CODE = 9;
 
 export class IssueGroomLabelRefusedError extends Error {
   constructor(message, details = {}) {
@@ -106,6 +113,44 @@ export class IssueGroomConcurrentEligibilityError extends Error {
     this.code = "ISSUE_GROOM_CONCURRENT_ELIGIBILITY";
     this.exitCode = GROOM_CONCURRENT_ELIGIBILITY_EXIT_CODE;
     this.details = details;
+  }
+}
+
+export class IssueGroomOwnedRefusedError extends Error {
+  constructor(message, details = {}) {
+    super(message);
+    this.name = "IssueGroomOwnedRefusedError";
+    this.code = "ISSUE_GROOM_OWNED_REFUSED";
+    this.exitCode = GROOM_OWNED_REFUSED_EXIT_CODE;
+    this.details = details;
+  }
+}
+
+export class IssueGroomWriteUnconfirmedError extends Error {
+  constructor(message, details = {}) {
+    super(message);
+    this.name = "IssueGroomWriteUnconfirmedError";
+    this.code = "ISSUE_GROOM_WRITE_UNCONFIRMED";
+    this.exitCode = GROOM_WRITE_UNCONFIRMED_EXIT_CODE;
+    this.details = details;
+  }
+}
+
+/**
+ * A compensation attempt that did not prove the board is safe.
+ *
+ * `retainedLabels` is what the removal left behind. It tells a removal that
+ * did not land, where this call's labels are the ones to remove by hand, from
+ * a removal that succeeded while a different label keeps the issue eligible,
+ * where naming those labels again sends the operator after labels that are
+ * already gone.
+ */
+class GroomCompensationError extends Error {
+  constructor(message, { retainedLabels = [], currentLabels = [] } = {}) {
+    super(message);
+    this.name = "GroomCompensationError";
+    this.retainedLabels = retainedLabels;
+    this.currentLabels = currentLabels;
   }
 }
 
@@ -212,19 +257,19 @@ async function compensate(options, issue, additions, dependencies) {
     labelNames(compensated).has(label),
   );
   if (retained.length > 0) {
-    const error = new Error(
+    throw new GroomCompensationError(
       `the removal call returned success but ${retained.join(", ")} is still on the issue`,
+      {
+        retainedLabels: retained,
+        currentLabels: [...labelNames(compensated)],
+      },
     );
-    error.retainedLabels = retained;
-    throw error;
   }
   if (satisfiesSweepLabelEligibility(labelNames(compensated))) {
-    const error = new Error(
+    throw new GroomCompensationError(
       `the removal call returned success but ${eligibilityText(labelNames(compensated))} still satisfies the sweep predicate`,
+      { currentLabels: [...labelNames(compensated)] },
     );
-    error.retainedLabels = [];
-    error.currentLabels = [...labelNames(compensated)];
-    throw error;
   }
   return compensated;
 }
@@ -246,17 +291,23 @@ async function groomLocked(options, number, labels, dependencies, lease) {
       throw new Error(`Issue #${number} is not open; groom writes open issues`);
     }
 
+    const current = labelNames(issue);
+
     // A claim can win the mutex between the sweep's roster snapshot and this
     // call: the pass never touches an owned issue, and the in-mutex read is
-    // the first point this command can see that ownership landed.
-    const owningState = stateFromLabels(issue);
-    if (owningState === "active" || owningState === "review") {
-      throw new Error(
-        `Issue #${number} is owned (state: ${owningState}); groom does not write routing labels on an owned issue`,
+    // the first point this command can see that ownership landed. Refuse
+    // before computing additions, so nothing is written and the mutex goes
+    // back to the session that owns the issue.
+    const owned = ISSUE_OWNED_STATE_LABELS.filter((label) =>
+      current.has(label),
+    );
+    if (owned.length > 0) {
+      throw new IssueGroomOwnedRefusedError(
+        `Issue #${number} groom refused: ${owned.join(", ")} means a live claim owns the issue, and the routing verdict this call carries was read before that claim landed. Nothing was written. Groom it again after the claim releases the issue.`,
+        { issue: number, requested: labels, owned },
       );
     }
 
-    const current = labelNames(issue);
     const additions = labels.filter((label) => !current.has(label));
     if (additions.length === 0) {
       return {
@@ -283,17 +334,34 @@ async function groomLocked(options, number, labels, dependencies, lease) {
     mutationAttempted = true;
     await dependencies.addIssueLabels(options, issue, additions);
 
+    // A dry run prints the `gh` command and writes nothing, so every check
+    // below would read this call's own labels as missing and refuse. Report
+    // the write it would make, the way the other board commands report a dry
+    // run, and leave the proofs to the run that writes.
+    if (options.dryRun) {
+      return {
+        number: issue.number,
+        title: issue.title,
+        state: "groomed",
+        writes: additions.map((label) => ({ field: "label", value: label })),
+      };
+    }
+
     const after = await dependencies.getIssue(options, number);
     const afterNames = labelNames(after);
 
     // A concurrent actor — a human, or the file-size watchlist job — can
     // remove one of this call's own additions in the window between the write
-    // and this read. Every branch below assumes `additions` landed; verify it
-    // before trusting any of them, success included.
-    const missing = additions.filter((label) => !afterNames.has(label));
-    if (missing.length > 0) {
-      throw new Error(
-        `Issue #${number} groom wrote ${additions.join(", ")}, but ${missing.join(", ")} is not on the issue after the write. The outcome is ambiguous; an operator must check the issue before it is treated as groomed.`,
+    // and this read, and a read that lags the write looks the same from here.
+    // Both leave the write unproven, and the lagging read cannot rule out that
+    // this write left the issue sweep-eligible. Every branch below reasons
+    // from `additions` having landed, so refuse before all of them and keep
+    // the mutex: only a person reading the issue can say what the board holds.
+    const unconfirmed = additions.filter((label) => !afterNames.has(label));
+    if (unconfirmed.length > 0) {
+      throw new IssueGroomWriteUnconfirmedError(
+        `Issue #${number} groom wrote ${additions.join(", ")}, and the confirming read does not show ${unconfirmed.join(", ")}: it read ${eligibilityText(afterNames)}. Either the label was removed after the write or the read lagged it, so this call cannot prove its write left the issue sweep-ineligible. The mutex is held: read the issue's labels, remove ${additions.join(", ")} if the issue is sweep-eligible, then clear the mutex.`,
+        { issue: number, additions, unconfirmed, labels: [...afterNames] },
       );
     }
 
@@ -330,18 +398,24 @@ async function groomLocked(options, number, labels, dependencies, lease) {
           ? compensationError.message
           : String(compensationError);
       // The two ways compensate() fails need different recovery text: when the
-      // removal itself did not land, additions are the labels to remove by
-      // hand; when the removal succeeded and a *different* label still
-      // satisfies the predicate, additions are already gone and telling the
-      // operator to remove them again is wrong — point at the current set
-      // `reason` already names instead.
-      const retainedLabels = Array.isArray(compensationError?.retainedLabels)
-        ? compensationError.retainedLabels
-        : additions;
-      const recovery =
-        retainedLabels.length > 0
-          ? `Remove ${retainedLabels.join(", ")} by hand before releasing the mutex.`
-          : `${additions.join(", ")} is already off the issue; an operator must find and clear whatever else in the current label set still satisfies the predicate before releasing the mutex.`;
+      // removal itself did not land, the labels it left behind are the ones to
+      // remove by hand; when the removal succeeded and a *different* label
+      // still satisfies the predicate, this call's labels are already gone, so
+      // the text names the set that satisfies the predicate now instead of
+      // sending the operator after labels nothing can find.
+      const outcome =
+        compensationError instanceof GroomCompensationError
+          ? compensationError
+          : null;
+      let recovery;
+      if (outcome && outcome.retainedLabels.length === 0) {
+        recovery = `${additions.join(", ")} is already off the issue, so removing it again cannot clear eligibility: ${eligibilityText(outcome.currentLabels)} is what satisfies the sweep predicate now. Decide which of those labels is wrong, clear it, then release the mutex.`;
+      } else {
+        const retained = outcome?.retainedLabels.length
+          ? outcome.retainedLabels
+          : additions;
+        recovery = `Remove ${retained.join(", ")} by hand before releasing the mutex.`;
+      }
       throw new IssueGroomCompensationFailedError(
         `Issue #${number} groom wrote ${additions.join(", ")}, a label landed after the in-mutex read, and the issue is now sweep-eligible. Compensation failed: ${reason}. ${recovery}`,
         { issue: number, additions },
@@ -376,11 +450,32 @@ export async function groom(options, overrides = {}) {
     addIssueLabels,
     getIssue,
     getProject,
+    listRepoLabelNames,
     removeIssueLabels,
     withIssueMutationLock,
     ...overrides,
   };
   const number = options.issues[0];
+
+  // `gh issue edit --add-label` fails on a label the repository does not
+  // define, and inside the mutex that failure lands where this module can no
+  // longer prove what the board holds, so it keeps LOCK for an operator. One
+  // bounded read before the mutex is taken turns a typo, or a routing value
+  // whose label was never created, into a refusal that never touches the
+  // mutex. It reads repository labels, not the issue, so it adds nothing to
+  // the serialized section and re-derives none of its decisions. Checking the
+  // whole request rather than the additions costs nothing: deleting a
+  // repository label removes it from every issue, so a label the issue already
+  // carries is one the repository defines.
+  const defined = await dependencies.listRepoLabelNames(options);
+  const absent = labels.filter((label) => !defined.has(label));
+  if (absent.length > 0) {
+    throw new IssueGroomLabelRefusedError(
+      `Issue #${number} groom refused: ${absent.join(", ")} is not a label ${options.repo} defines. gh issue edit fails on an unknown label only after the write is attempted, where this command keeps the per-issue mutex for an operator. Create the label from its canonical definition, or propose it for a human, then groom the issue again.`,
+      { issue: number, requested: labels, absent },
+    );
+  }
+
   const project = await dependencies.getProject(options);
   return [
     await dependencies.withIssueMutationLock(

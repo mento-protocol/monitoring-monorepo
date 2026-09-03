@@ -60,7 +60,8 @@ Routing labels:
 `pnpm issue:groom` is the only issue-board helper that writes `pkg:*`, `risk:*`,
 and `kind:*`. It takes the same per-issue mutex, revalidates the resulting label
 set inside it, and refuses a write that would leave the issue backlog-sweep
-eligible. It never writes a state label. The monthly file-size watchlist job
+eligible. It also refuses an issue a live claim owns, and a label the repository
+does not define. It never writes a state label. The monthly file-size watchlist job
 (`scripts/repo-health/file-size-watchlist-issue.mjs`) is the other unattended
 writer of these labels: it replaces the whole label set of the issues it owns
 outside the mutex, and holds itself to a `risk:medium` floor so it cannot hand

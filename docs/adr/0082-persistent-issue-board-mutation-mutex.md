@@ -436,7 +436,11 @@ Grooming routing writes take the same mutex. `issue:groom` writes `pkg:*`,
 label and every other label class, and refuses an issue the in-mutex read
 finds already owned (`agent-active` or `in-pr`) — a claim can win the mutex
 between the sweep's roster snapshot and this call, and the read is the first
-point this command can see that. It re-reads the issue's labels inside the
+point this command can see that. It refuses a label the repository does not
+define earlier still, before it takes the mutex: `gh issue edit` fails on an
+unknown label only after the write is attempted, where this module keeps
+`LOCK`, so one bounded read of the repository's labels keeps that failure away
+from the mutex entirely. It re-reads the issue's labels inside the
 serialized section and refuses the write when the resulting set would satisfy
 the backlog-sweep label predicate: `agent-ready`, exactly one `risk:*` equal to
 `risk:low`, and exactly one `pkg:*`. The mutex serializes helpers, not people,

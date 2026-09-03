@@ -838,7 +838,8 @@ The full procedure is
      `agent-active` a claim added a moment earlier. Propose the state instead —
      `needs-grooming` for an unlabeled candidate, never `agent-ready` — and let
      an operator or a mutex-owning helper apply it. `issue:groom` takes that
-     mutex for routing labels and refuses state labels. Write no Project field.
+     mutex for routing labels, and refuses state labels and an issue a live
+     claim already owns. Write no Project field.
 
 4. **Post the marker comment, then write the labels — in that order, on every
    issue.** The two writes are separate API calls, and a label that lands with
@@ -880,21 +881,28 @@ The full procedure is
    `gh issue edit`. The helper takes the ADR 0082 per-issue mutex, re-reads the
    live labels inside it, and applies the write only when the resulting set
    still fails the sweep predicate. Step 3's check runs against a snapshot; this
-   read is what holds it against a state label that lands in between. Exit 3
-   means a requested label is a state label or not a routing label; exit 4 means
-   the resulting set would satisfy the sweep predicate and nothing was written;
-   exit 5 means the write landed, left the issue eligible, and was removed
-   again. All three end with the labels this call tried to add still off the
-   issue — a requested label already on the issue before this call is
-   untouched — and the marker already posted the full requested set, so post
-   one follow-up comment naming only the labels that did not land and record
-   those as proposed in the report. Never amend the marker's `applied`
-   field: the skip key reads it. Exit 6 means the removal left the issue
-   sweep-eligible, the mutex is held, and the message names the labels to remove
-   by hand. Exit 7 means a concurrent write made the issue sweep-eligible, this
-   call did not cause it, and its labels stay. Any other nonzero exit means the
-   outcome is unknown and the mutex may still be held. Report exit 6, exit 7,
-   and any other nonzero exit to the operator, and never retry them.
+   read is what holds it against a state label that lands in between. Before it
+   takes the mutex at all, it refuses a routing label the repository does not
+   define, because `gh issue edit` fails on an unknown label only after the
+   write is attempted. Exit 3 means a requested label is a state label, is not a routing
+   label, or is not one the repository defines; exit 4 means the resulting set
+   would satisfy the sweep predicate and nothing was written; exit 5 means the
+   write landed, left the issue eligible, and was removed again; exit 8 means a
+   live claim owns the issue and nothing was written. All four end with the
+   labels this call tried to add still off the issue — a requested label
+   already on the issue before this call is untouched — and the marker already
+   posted the full requested set, so post one follow-up comment naming only the
+   labels that did not land and record those as proposed in the report. Never
+   amend the marker's `applied` field: the skip key reads it. Exit 6 means the
+   removal left the issue sweep-eligible and the mutex is held; the message
+   names the labels to remove by hand when they are still on the issue, and the
+   label set that still satisfies the predicate when they are not. Exit 7 means
+   a concurrent write made the issue sweep-eligible, this call did not cause it,
+   and its labels stay. Exit 9 means the confirming read did not show the labels
+   this call wrote, so it proves nothing and the mutex stays held. Any other
+   nonzero exit means the outcome is unknown and the mutex may still be held.
+   Report exit 6, exit 7, exit 9, and any other nonzero exit to the operator,
+   and never retry them.
    `issue:claim`, `issue:review`, and `issue:release` still own state labels and
    Project ownership fields.
 

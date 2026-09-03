@@ -49,13 +49,17 @@ export {
   GROOM_CONCURRENT_ELIGIBILITY_EXIT_CODE,
   GROOM_ELIGIBILITY_REFUSED_EXIT_CODE,
   GROOM_LABEL_REFUSED_EXIT_CODE,
+  GROOM_OWNED_REFUSED_EXIT_CODE,
   GROOM_ROUTING_LABEL_PREFIXES,
+  GROOM_WRITE_UNCONFIRMED_EXIT_CODE,
   issueBoardExitCode,
   IssueGroomCompensatedError,
   IssueGroomCompensationFailedError,
   IssueGroomConcurrentEligibilityError,
   IssueGroomEligibilityRefusedError,
   IssueGroomLabelRefusedError,
+  IssueGroomOwnedRefusedError,
+  IssueGroomWriteUnconfirmedError,
   validateGroomLabels,
 } from "./issue-board-groom.mjs";
 export {
@@ -63,7 +67,10 @@ export {
   parseClaimComment,
   selectNewestTrustedClaim,
 } from "./issue-board-backfill.mjs";
-export { githubProjectScopeHint } from "./issue-board-transport.mjs";
+export {
+  githubProjectScopeHint,
+  listRepoLabelNames,
+} from "./issue-board-transport.mjs";
 export {
   readClaimOwnership,
   requireOwnershipFields,
@@ -94,6 +101,7 @@ export {
   isReleasable,
   isReviewable,
   isSweepClaimable,
+  ISSUE_OWNED_STATE_LABELS,
   ISSUE_STATE_LABELS,
   satisfiesSweepLabelEligibility,
   labelsForState,

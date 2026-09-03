@@ -25,6 +25,8 @@ import {
   agentReadyRoutingGaps,
   groom,
   issueBoardExitCode,
+  ISSUE_OWNED_STATE_LABELS,
+  listRepoLabelNames,
   satisfiesSweepLabelEligibility,
   validateGroomLabels,
   buildClaimComment,
@@ -14437,6 +14439,21 @@ test("Project metadata writes never target the Status field", async () => {
 
 const GROOM_ISSUE_NUMBER = 2600;
 
+// The labels the fixture repository defines. `groom` reads this set before it
+// writes, so a label absent from it is the "repository does not define that
+// label" case rather than a fixture gap.
+const GROOM_REPO_LABELS = Object.freeze([
+  "agent-active",
+  "agent-ready",
+  "in-pr",
+  "kind:workflow",
+  "needs-grooming",
+  "pkg:indexer",
+  "pkg:tooling",
+  "risk:low",
+  "risk:medium",
+]);
+
 function createGroomBoard({
   labels = [],
   title = "Groom target",
@@ -14445,6 +14462,7 @@ function createGroomBoard({
   removeFails = null,
   readFails = null,
   afterRemove = null,
+  repoLabels = GROOM_REPO_LABELS,
   stalePostWriteRead = false,
   failUnlock = false,
 } = {}) {
@@ -14471,8 +14489,12 @@ function createGroomBoard({
     get labels() {
       return [...current].sort();
     },
+    get reads() {
+      return reads;
+    },
     dependencies: {
       getProject: async () => ownershipProject(),
+      listRepoLabelNames: async () => new Set(repoLabels),
       getIssue: async (_options, issueNumber) => {
         assertEqual(issueNumber, GROOM_ISSUE_NUMBER, "groom issue number");
         reads += 1;
@@ -14487,9 +14509,10 @@ function createGroomBoard({
           labels: names.map((name) => ({ name })),
         };
       },
-      addIssueLabels: async (_options, _issue, add) => {
-        wrote = true;
+      addIssueLabels: async (addOptions, _issue, add) => {
         calls.push({ op: "add", labels: [...add] });
+        if (addOptions?.dryRun) return;
+        wrote = true;
         for (const label of add) current.add(label);
         if (afterWrite) afterWrite(current);
       },
@@ -14571,20 +14594,21 @@ test("groom applies routing labels under the per-issue mutex", async () => {
 });
 
 test("groom refuses an issue a claim won after the roster snapshot", async () => {
-  for (const [state, labels] of [
-    ["active", ["agent-active", "risk:low"]],
-    ["review", ["in-pr", "risk:low"]],
-  ]) {
-    const board = createGroomBoard({ labels });
+  assertDeepEqual(
+    [...ISSUE_OWNED_STATE_LABELS],
+    ["agent-active", "in-pr"],
+    "the owned-state pair is the one the sweep never touches",
+  );
+
+  for (const ownedLabel of ISSUE_OWNED_STATE_LABELS) {
+    const board = createGroomBoard({ labels: [ownedLabel, "risk:low"] });
     const err = await assertRejects(
       () => groom(groomOptions(["pkg:tooling"]), board.dependencies),
-      /is owned/,
+      new RegExp(`${ownedLabel} means a live claim owns the issue`),
     );
 
-    assert(
-      new RegExp(`state: ${state}`).test(err.message),
-      "the refusal must name the owning state it saw",
-    );
+    assertEqual(err.code, "ISSUE_GROOM_OWNED_REFUSED", "owned refusal code");
+    assertEqual(issueBoardExitCode(err), 8, "owned refusal exit code");
     assertDeepEqual(board.calls, [], "an owned issue must not be written to");
     assertEqual(
       lockCommitStates(board.server).at(-1).state,
@@ -14718,10 +14742,14 @@ test("a stale post-write read is refused as ambiguous, not reported as success",
   });
   const err = await assertRejects(
     () => groom(groomOptions(["pkg:tooling"]), board.dependencies),
-    /pkg:tooling is not on the issue after the write/,
+    /the confirming read does not show pkg:tooling/,
   );
 
-  assertEqual(issueBoardExitCode(err), 1, "an ambiguous outcome exits 1");
+  assert(
+    err instanceof IssueMutationLockStaleError,
+    "an unproven write keeps the mutex, so the lock layer reports it as stale",
+  );
+  assertEqual(issueBoardExitCode(err), 9, "unconfirmed write exit code");
   assertDeepEqual(board.calls, [{ op: "add", labels: ["pkg:tooling"] }]);
   assertDeepEqual(board.labels, ["agent-ready", "pkg:tooling", "risk:low"]);
   assert(
@@ -14746,10 +14774,18 @@ test("groom refuses success when a concurrent actor removes its own addition", a
   });
   const err = await assertRejects(
     () => groom(groomOptions(["pkg:tooling"]), board.dependencies),
-    /pkg:tooling is not on the issue after the write/,
+    /the confirming read does not show pkg:tooling/,
   );
 
-  assertEqual(issueBoardExitCode(err), 1, "an ambiguous outcome exits 1");
+  assert(
+    err instanceof IssueMutationLockStaleError,
+    "an unproven write keeps the mutex, so the lock layer reports it as stale",
+  );
+  assertEqual(issueBoardExitCode(err), 9, "unconfirmed write exit code");
+  assert(
+    /it read risk:low/.test(err.message),
+    "the refusal must name what the confirming read actually saw",
+  );
   assertEqual(
     lockCommitStates(board.server).at(-1).state,
     "LOCK",
@@ -14898,6 +14934,12 @@ test("compensation that leaves the issue eligible keeps the mutex", async () => 
     !/Remove pkg:tooling by hand/.test(err.message),
     "the recovery text must not repeat the generic 'remove additions' instruction here",
   );
+  assert(
+    /agent-ready, pkg:indexer, risk:low is what satisfies the sweep predicate now/.test(
+      err.message,
+    ),
+    "the recovery text must name the label set that still satisfies the predicate",
+  );
 });
 
 // Every groom exit code promises what the mutex did, so a refusal whose release
@@ -14932,6 +14974,105 @@ test("a compensated write whose mutex release fails exits 1, not 5", async () =>
   assert(
     /Failed to release the restored mutex/.test(err.message),
     "the message must name the release failure",
+  );
+});
+
+test("groom refuses a routing label the repository does not define", async () => {
+  const board = createGroomBoard({ labels: ["risk:medium"] });
+  const err = await assertRejects(
+    () =>
+      groom(
+        groomOptions(["pkg:tooling", "pkg:not-a-real-area"]),
+        board.dependencies,
+      ),
+    /pkg:not-a-real-area is not a label .* defines/,
+  );
+
+  assertEqual(err.code, "ISSUE_GROOM_LABEL_REFUSED", "absent label code");
+  assertEqual(issueBoardExitCode(err), 3, "absent label exit code");
+  assertDeepEqual(
+    board.calls,
+    [],
+    "gh issue edit fails on an unknown label, so the write must not be tried",
+  );
+  assertDeepEqual(
+    lockCommitStates(board.server),
+    [],
+    "the label check runs before the mutex, so no lock is taken at all",
+  );
+});
+
+test("the repository label listing pages and refuses an unbounded run", async () => {
+  const pages = [
+    Array.from({ length: 100 }, (_, index) => ({ name: `pkg:p${index}` })),
+    [{ name: "risk:low" }, { name: "" }, {}],
+  ];
+  const requested = [];
+  const names = await listRepoLabelNames(
+    { repo: "owner/repo" },
+    {
+      json: async (args) => {
+        requested.push(String(args.at(-1)));
+        return pages.shift() ?? [];
+      },
+    },
+  );
+
+  assertEqual(names.size, 101, "every page's names are collected");
+  assert(
+    names.has("pkg:p0") && names.has("risk:low"),
+    "both pages contribute names",
+  );
+  assertEqual(requested.length, 2, "a short page ends the listing");
+  assert(
+    requested[0].includes("page=1") && requested[1].includes("page=2"),
+    "the listing pages in order",
+  );
+
+  await assertRejects(
+    () =>
+      listRepoLabelNames(
+        { repo: "owner/repo" },
+        { json: async () => ({ message: "Not Found" }) },
+      ),
+    /unexpected non-array label listing/,
+  );
+
+  await assertRejects(
+    () =>
+      listRepoLabelNames(
+        { repo: "owner/repo" },
+        {
+          json: async () =>
+            Array.from({ length: 100 }, (_, index) => ({
+              name: `pkg:full${index}`,
+            })),
+        },
+      ),
+    /exceeded 20 pages/,
+  );
+});
+
+test("a groom dry run reports the write it would make", async () => {
+  const board = createGroomBoard({ labels: ["risk:medium"] });
+  const results = await groom(
+    { ...groomOptions(["pkg:tooling"]), dryRun: true },
+    board.dependencies,
+  );
+
+  assertDeepEqual(results[0].writes, [
+    { field: "label", value: "pkg:tooling" },
+  ]);
+  assertDeepEqual(board.calls, [{ op: "add", labels: ["pkg:tooling"] }]);
+  assertDeepEqual(
+    board.labels,
+    ["risk:medium"],
+    "a dry run must leave the labels alone",
+  );
+  assertEqual(
+    board.reads,
+    1,
+    "a dry run has no write to confirm, so it makes no post-write read",
   );
 });
 
