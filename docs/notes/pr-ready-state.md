@@ -3,7 +3,7 @@ title: PR Ready State
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-31
+last_verified: 2026-09-03
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -158,14 +158,57 @@ Only a request from an `OWNER`, `MEMBER`, or `COLLABORATOR`, or from a
 recognized repository agent bot, counts as `requested`. A marker quoted by an
 outside commenter does not suppress the real closeout request.
 
-After the optional CodeRabbit check becomes terminal, refresh the projection
-once. Batch fixes before the push and wait for that automatic review attempt
-before requesting another review. That wait is bounded by the babysit deadline:
-a check that never starts, or is still pending when the deadline arrives, is
-optional lag, not a reason to keep waiting. If the signal is `missing` or
+**Read the head's own config before deciding whether to wait.** CodeRabbit
+resolves `.coderabbit.yaml` from the PR's source branch, so the setting that
+governs this PR is the one at its head, not the one on `main`. Read
+`reviews.auto_review.auto_incremental_review` there:
+
+- **`true` or absent, and the org-level Global override does not set the key**
+  — the branch predates the 2026-09-02 change, and a push does start an
+  automatic review. Wait for that attempt to become terminal before requesting
+  anything, exactly as before. Posting early duplicates the review and the
+  bill. A head with no `.coderabbit.yaml`, or one whose file omits the key,
+  reads as `true` here: CodeRabbit falls back to its provider default, which
+  enables incremental review. Do not read a missing value as `false`.
+- **`true`, but the Global override sets `auto_incremental_review: false`** —
+  the head value is no longer effective. CodeRabbit ranks organization-level
+  Global overrides above a repository's `.coderabbit.yaml`, so no automatic
+  review follows the push and waiting for one burns the babysit deadline and
+  can miss the only closeout review. Treat this exactly like the `false` branch
+  and send the closeout request once the head is stable.
+  [ADR 0066](../adr/0066-coderabbit-replaces-bugbot-third-reviewer.md) records
+  which keys that override pins and when the operator applied it; check there
+  before assuming the head value governs.
+- **`false`** — a push onto an already-open PR starts no automatic review, so
+  there is nothing to wait for. Only the PR's opening push still draws one.
+  Refresh once the head is stable and go straight to the closeout request.
+  **Unless the opening review never finished.** `false` says what should
+  happen; it does not establish what did. If this PR's opening review came
+  back as a rate-limit or cap notice rather than a review, CodeRabbit may
+  still run — possibly retrying that unfinished review — and a request posted
+  into the middle of it recreates the duplicate review and bill. PR #2236
+  observed exactly that: every push drew a run within roughly 75 seconds while
+  `false` was in force.
+  [ADR 0066](../adr/0066-coderabbit-replaces-bugbot-third-reviewer.md) holds
+  the dated tally — do not restate a count here, because a live count goes
+  stale on the next push. So when no opening review completed, wait the bounded
+  time for an automatic attempt first, exactly as in the `true` branch.
+
+Either way, batch fixes into one push. If the signal is then `missing` or
 `stale`, re-resolve `headRefOid` immediately before posting and require it to
 equal the marker head. Post at most one marked request for that head. A
 `requested`, `reviewed`, or `not_applicable` signal suppresses another post.
+
+**Then wait for the closeout attempt before the final sweep.** Once the request
+is posted, the signal sits at `requested` and readiness will not hold it —
+`summarizeCodeRabbitReviewGate` returns `required: false`. Wait for that
+closeout review to become terminal before the final `pr:feedback-state` sweep,
+bounded by the babysit deadline, and handle any findings it posts. A review
+that never starts, or is still pending at the deadline, is optional lag and not
+a reason to keep waiting. This is a procedural wait: the machine contract still
+never blocks readiness on the CodeRabbit signal, and
+[ADR 0066](../adr/0066-coderabbit-replaces-bugbot-third-reviewer.md) records
+that residual.
 GitHub's issue-comment API has no conditional-create operation, so the marker is
 a detection and best-effort suppression mechanism rather than an atomic claim.
 The CodeRabbit check and review remain advisory: report a pending or
@@ -174,8 +217,13 @@ per-PR allowance.
 [ADR 0066](../adr/0066-coderabbit-replaces-bugbot-third-reviewer.md) records
 the two tiers: the free OSS tier meters per repository on a star-scaled 1–10
 reviews/hour, and a paid seat meters per developer identity across every PR
-that identity opened. This org runs a paid Pro+ seat, so the ceiling is the
-identity's, currently about 4 reviews/hour at this repo's review volume.
+that identity opened. This org runs a paid seat on the plan the vendor renamed
+from Pro+ to **Team** (checked 2026-09-02), nominally 8 reviews/hour. Do not
+plan a wait against that nominal figure: the sustained rate falls with the
+identity's 7-day volume, and past roughly 90 reviews in 7 days — where the sole
+PR author sits — it is 1/hour. Past the usage add-on's monthly spending cap,
+that 1/hour free refill is the whole allowance and every other attempt is
+refused outright, which is the state observed on 2026-09-02.
 Either way, watching several PRs at once draws down one allowance, so a
 re-request inside the window queues or no-ops on whichever PR reaches the
 limit first — do not tight-loop `@coderabbitai review` posts waiting for a
@@ -478,13 +526,25 @@ Field expectations:
    context; deployment/status bot comments may be informational.
 7. If ready-state `ready` is false, fix or wait only on `required.blockers` and
    required `gates`.
-8. After a batched fix push, wait for the optional automatic CodeRabbit check
-   to become terminal, then refresh once. Stop waiting at the babysit deadline,
-   or as soon as it is clear no run started: the check is advisory and never
-   gates readiness, so an absent or still-pending result is optional lag. If
+8. After a batched fix push, read
+   `reviews.auto_review.auto_incremental_review` from the PR head's
+   `.coderabbit.yaml`, and check whether the org-level Global override sets the
+   same key (ADR 0066 records it). Wait for the automatic attempt to become
+   terminal only when the head says `true` — or omits the key or the file
+   entirely, which falls back to the provider default of enabled — **and** the
+   override leaves the key unset. If the head says `false`, or the override sets it `false` — the
+   override outranks the head's file, so the head value stops being effective —
+   no automatic run follows the push: refresh once the head is stable instead of
+   waiting for one that cannot start. The one exception is an opening review
+   that never completed, where an unfinished review can still be retried on a
+   push, so wait the bounded time anyway. Then, if
    `gates.codeRabbitReviewSignal.state` is `missing` or `stale`, recheck the
    head and post at most one marked closeout request for that head. Do not post
-   when the state is `requested`, `reviewed`, or `not_applicable`.
+   when the state is `requested`, `reviewed`, or `not_applicable`. After
+   posting, wait for that closeout attempt to become terminal before step 10's
+   sweep, bounded by the babysit deadline. A CodeRabbit check that never starts
+   or is still pending at the deadline is advisory optional lag and never gates
+   readiness.
 9. Report visibly in-progress review-producing workflows as optional lag. If
    you are still watching the PR when one finishes, rerun `pr:feedback-state`
    to catch late feedback; do not treat the optional workflow status itself as
