@@ -39,7 +39,7 @@ The loop reuses the workflow's terms and adds none:
 - `needs-grooming` — scored and ranked, never Selected. A high-scoring
   `needs-grooming` issue is a grooming prompt, and the receipt says so.
 - **incompletely groomed** — an `agent-ready` issue that carries no `risk:*`,
-  two conflicting `risk:*`, or no `pkg:*`, as
+  more than one `risk:*`, or no `pkg:*`, as
   [`agent-issue-workflow.md`](agent-issue-workflow.md#labels) defines it.
   Consumers treat it as `needs-grooming`, so the loop scores and ranks it but
   never Selects it and never stands it as the runner-up. Method names it and its
