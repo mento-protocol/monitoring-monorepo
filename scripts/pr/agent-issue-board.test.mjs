@@ -81,6 +81,7 @@ import {
   createIssueOwnerProofTestOperations,
   executeIssueOwnerMutation,
   IssueOwnerMutationCapabilityError,
+  readLockRef,
 } from "./issue-board-lock.mjs";
 import {
   getIssue,
@@ -1998,6 +1999,123 @@ test("queue-label issue lists use one all-state OR query", async () => {
   ]);
 });
 
+test("queue-label issue lists attach exact Project items from one batched node read", async () => {
+  const graphqlCalls = [];
+  const exactItem = {
+    id: "item-a",
+    project: { id: "project", title: "Agent Tasks" },
+  };
+  const issues = await listIssuesByLabels(
+    { repo: "mento-protocol/monitoring-monorepo" },
+    ISSUE_STATE_LABELS,
+    {
+      state: "all",
+      json: async () => [
+        { id: "issue-a", number: 1, projectItems: [{ title: "Agent Tasks" }] },
+        { id: "issue-b", number: 2, projectItems: [{ title: "Agent Tasks" }] },
+      ],
+      graphql: async (query, variables) => {
+        graphqlCalls.push(variables);
+        assert(/nodes\(ids:\s*\$ids\)/.test(query), "expected a batched read");
+        return {
+          data: {
+            nodes: [
+              {
+                id: "issue-a",
+                projectItems: {
+                  nodes: [exactItem],
+                  pageInfo: { hasNextPage: false },
+                },
+              },
+              {
+                id: "issue-b",
+                projectItems: { nodes: [], pageInfo: { hasNextPage: true } },
+              },
+            ],
+          },
+        };
+      },
+    },
+  );
+  assertDeepEqual(graphqlCalls, [{ ids: ["issue-a", "issue-b"] }]);
+  assertDeepEqual(issues[0].projectItems, [exactItem]);
+  assertDeepEqual(issues[0].projectItemsPageInfo, { hasNextPage: false });
+  assertDeepEqual(issues[1].projectItems, [{ title: "Agent Tasks" }]);
+  assertEqual(issues[1].projectItemsPageInfo, undefined);
+});
+
+test("mutex ref read resolves the retained custom ref through REST", async () => {
+  const refName = issueMutationLockRef(LOCK_TEST_OPTIONS, 2226);
+  const payload = {
+    kind: "mento-issue-board-mutex",
+    version: 1,
+    state: "UNLOCK",
+    scope: {
+      repo: "mento-protocol/monitoring-monorepo",
+      projectOwner: "mento-protocol",
+      projectNumber: 12,
+      issue: 2226,
+    },
+  };
+  const jsonCalls = [];
+  const graphqlCalls = [];
+  const transport = {
+    json: async (args) => {
+      jsonCalls.push(args);
+      return [
+        { ref: `${refName}0`, object: { sha: "decoy", type: "commit" } },
+        { ref: refName, object: { sha: "lock-oid", type: "commit" } },
+      ];
+    },
+    graphql: async (query, variables) => {
+      graphqlCalls.push(variables);
+      assert(/object\(oid:\s*\$oid\)/.test(query), "expected an object read");
+      return {
+        data: {
+          repository: {
+            id: "repository",
+            object: {
+              __typename: "Commit",
+              oid: "lock-oid",
+              message: JSON.stringify(payload),
+              tree: { oid: "tree-oid" },
+            },
+          },
+        },
+      };
+    },
+  };
+  const observed = await readLockRef(
+    LOCK_TEST_OPTIONS,
+    refName,
+    payload.scope,
+    transport,
+  );
+  assertDeepEqual(jsonCalls, [
+    [
+      "api",
+      `repos/mento-protocol/monitoring-monorepo/git/matching-refs/${refName.slice("refs/".length)}`,
+    ],
+  ]);
+  assertDeepEqual(graphqlCalls, [
+    { owner: "mento-protocol", name: "monitoring-monorepo", oid: "lock-oid" },
+  ]);
+  assertDeepEqual(observed, {
+    oid: "lock-oid",
+    treeOid: "tree-oid",
+    repositoryId: "repository",
+    payload,
+  });
+
+  const absent = await readLockRef(LOCK_TEST_OPTIONS, refName, payload.scope, {
+    json: async () => [],
+    graphql: async () => {
+      throw new Error("an absent ref must not read a commit");
+    },
+  });
+  assertEqual(absent, null);
+});
+
 test("open PR branch proof filters the repository and fails closed at its cap", async () => {
   const options = { repo: "mento-protocol/monitoring-monorepo" };
   const calls = [];
@@ -2113,6 +2231,27 @@ test("mutex GraphQL failures name the Contents write requirement", () => {
   assert(
     hint.includes("repository Contents write access"),
     "missing mutex Contents guidance",
+  );
+});
+
+test("mutex ref reads over REST name the Contents write requirement", () => {
+  const lockRef = `mento-issue-board-locks/v1/${"a".repeat(64)}`;
+  const hint = githubProjectScopeHint(
+    "gh: Resource not accessible by personal access token",
+    {},
+    ["api", `repos/o/r/git/matching-refs/${lockRef}`],
+  );
+  assert(
+    hint.includes("repository Contents write access"),
+    "missing matching-refs Contents guidance",
+  );
+  assertEqual(
+    githubProjectScopeHint(
+      "gh: Resource not accessible by personal access token",
+      {},
+      ["api", "repos/o/r/issues/1"],
+    ),
+    "",
   );
 });
 
@@ -13864,6 +14003,40 @@ test("sync skips the mutex for exact open queue labels with exact Project member
   assertEqual(ownershipReads, 0);
   assertEqual(exactItemReads, 1);
   assertEqual(exactStatusReads, 0);
+});
+
+test("sync preflight trusts a complete enumeration snapshot without a per-issue read", async () => {
+  const issue = {
+    id: "issue-2404",
+    number: 2404,
+    title: "snapshot-stable sync item",
+    state: "OPEN",
+    labels: [
+      { name: "agent-ready" },
+      { name: "risk:low" },
+      { name: "pkg:tooling" },
+    ],
+    projectItems: [
+      { id: "selected-item", project: { id: "project", title: "Agent Tasks" } },
+    ],
+    projectItemsPageInfo: { hasNextPage: false },
+  };
+  let lockCalls = 0;
+  const results = await sync(LOCK_TEST_OPTIONS, {
+    getProject: async () => ({ id: "project", title: "Agent Tasks" }),
+    listIssuesByLabels: async () => [issue],
+    getIssue: async () => {
+      throw new Error("complete enumeration snapshot must not be re-read");
+    },
+    readIssueLockOwnership: async () => null,
+    withIssueMutationLock: async () => {
+      lockCalls += 1;
+    },
+  });
+  assertDeepEqual(results, [
+    { number: 2404, title: "snapshot-stable sync item", state: "ready" },
+  ]);
+  assertEqual(lockCalls, 0);
 });
 
 test("Project item lookup ignores a same-title Project and binds the selected ID", async () => {

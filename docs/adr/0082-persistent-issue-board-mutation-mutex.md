@@ -70,9 +70,13 @@ mutation is atomic. `beforeOid` is an exact precondition. The all-zero object ID
 asserts absence. `RefUpdate.name` accepts a fully qualified `GitRefname`. See
 [Update refs](https://docs.github.com/en/graphql/reference/git#updaterefs),
 [RefUpdate](https://docs.github.com/en/graphql/reference/git#refupdate),
-[Repository ref](https://docs.github.com/en/graphql/reference/repos#repository),
 and
 [Create a reference](https://docs.github.com/en/rest/git/refs?apiVersion=2022-11-28#create-a-reference).
+The helper reads the retained ref through
+[List matching references](https://docs.github.com/en/rest/git/refs?apiVersion=2022-11-28#list-matching-references)
+and its commit through GraphQL `Repository.object`. GraphQL
+`Repository.ref(qualifiedName:)` returns null for refs outside `refs/heads` and
+`refs/tags`, so it cannot observe the lock namespace (issue 2226).
 The REST create contract corroborates custom namespaces because it accepts a
 name that starts with `refs` and has at least two slashes. State commits use
 [Create a commit](https://docs.github.com/en/rest/git/commits?apiVersion=2022-11-28#create-a-commit).
