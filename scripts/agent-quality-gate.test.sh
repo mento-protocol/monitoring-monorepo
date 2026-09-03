@@ -6484,7 +6484,7 @@ run_teardown_drain_command_identity_regression() {
   rc=0
   # The lifted teardown reads its whole environment by name, which shellcheck
   # cannot see through the eval below, so every input here reads as dead.
-  # shellcheck disable=SC2034,SC2329
+  # shellcheck disable=SC2034
   (
     gate_darwin_lineage_host_platform=Linux
     gate_lock_enabled=1
@@ -6573,7 +6573,7 @@ run_teardown_drain_command_identity_regression() {
   local workers
   for workers in 1 2; do
     rc=0
-    # shellcheck disable=SC2030,SC2034,SC2329
+    # shellcheck disable=SC2034
     (
       gate_darwin_lineage_host_platform=Darwin
       gate_lock_enabled=1
