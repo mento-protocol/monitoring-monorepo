@@ -121,13 +121,17 @@ Both opt-outs cost a stated reason. A bare flag would let the rule this table
 exists to enforce be suppressed with one word, and leave the next reader unable
 to tell a considered exception from a silenced check.
 
-One routing family has an external data source. The indexer handler-invariant
-classifier stays in the attested `scripts/agent-autoreview-core.mjs` runtime so
-autoreview and the local gate do not grow separate owner lists. The core exports
-a detached, deeply frozen family view and consumes that same view for its
-`{path, route, owner}` decisions. It validates the family schema before export:
-unknown fields, invalid types, overlapping exact owners, and Bash-unsafe literal
-paths fail import.
+One routing family had an external data source. The indexer handler-invariant
+classifier now sits beside the table, in
+`gate/routing-table/indexer-handler-invariant-contract.mjs` (validation and the
+two public exports) and `indexer-handler-invariant-families.mjs` (the data). The
+contract exports a detached, deeply frozen family view and consumes that same
+view for its `{path, route, owner}` decisions. It validates the family schema
+before export: unknown fields, invalid types, overlapping exact owners, and
+Bash-unsafe literal paths fail import. `scripts/agent-autoreview-core.mjs` holds
+a duplicate copy of the same data until the autoreview removal PR deletes it; a
+parity test keeps the two in step, and an edit to either source routes the
+handler-invariant checklist.
 
 `arms-packages.mjs` derives two first-match arms from that view. Explicit
 `route: false` families form the excluded arm. Routed exact paths form the
@@ -174,11 +178,12 @@ For a wrapper-attested runtime, the wrapper verifies the sealed runtime
 identity and content manifest immediately before and after the classifier
 process. A difference at either boundary fails before checklist decisions are
 used. A prepared runtime keeps its existing prepared-runtime trust contract.
-When a candidate changes `scripts/agent-autoreview-core.mjs`, that protected
-classifier cannot see a new owner or a false-to-true reclassification in the
-candidate revision. The core path therefore selects the handler-invariant
-checklist in both autoreview and the local gate. This source trigger
-intentionally routes unrelated core edits. Executing the candidate classifier
+When a candidate changes `scripts/agent-autoreview-core.mjs` or either
+`gate/routing-table/indexer-handler-invariant-*.mjs` module, the classifier that
+decides comes from the reviewing checkout and cannot see a new owner or a
+false-to-true reclassification in the candidate revision. Each of those three
+paths therefore selects the handler-invariant checklist. This source trigger
+intentionally routes unrelated edits. Executing the candidate classifier
 would break the protected-main trust boundary.
 
 ### 2. Patterns are compiled by the repo's own translator, never by a glob library
@@ -327,8 +332,9 @@ stderr is a separate change with its own fixture work.
 Six pins land with the table:
 
 1. **`implementation_signature()`** gains every module in the directory, suites
-   included, plus the external `scripts/agent-autoreview-core.mjs` family source
-   — the same treatment `scripts/agent-quality-gate.test.sh` and
+   included — the two handler-invariant classifier modules among them — plus
+   `scripts/agent-autoreview-core.mjs`, which keeps its entry while it holds the
+   duplicate family copy. That is the same treatment `scripts/agent-quality-gate.test.sh` and
    `scripts/terraform/terraform-fmt-check.test.mjs` already get, since a suite is
    part of what the gate proves about itself. An entry it cannot
    `stat` hashes as `__missing__`, which **freezes** the signature, so
