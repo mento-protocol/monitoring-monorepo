@@ -200,7 +200,7 @@ function remoteForRepo(repoRoot, repo) {
 function resolveBase(repoRoot) {
   const view = run(
     "gh",
-    ["repo", "view", "--json", "nameWithOwner,parent"],
+    ["repo", "view", "--json", "nameWithOwner,parent,defaultBranchRef"],
     repoRoot,
   );
   if (!view.ok) fail("cannot resolve base: gh repo view failed; pass --base");
@@ -253,8 +253,44 @@ function resolveBase(repoRoot) {
       `cannot resolve base: ${mine.length} open PRs match ${branch.stdout}; pass --base`,
     );
   }
-  const baseRef = mine.length === 1 ? mine[0].baseRefName : "main";
+  const baseRef =
+    mine.length === 1
+      ? mine[0].baseRefName
+      : defaultBranchOf(repoRoot, baseRepo, currentRepo, repoInfo);
   return `${baseRemote}/${baseRef}`;
+}
+
+/**
+ * The base repository's default branch. Card step 4 runs before the PR exists,
+ * so zero open PRs is the normal first pass, not an error; the branch it falls
+ * back to is read from the repository rather than assumed to be `main`.
+ */
+function defaultBranchOf(repoRoot, baseRepo, currentRepo, repoInfo) {
+  let branch = null;
+  if (baseRepo === currentRepo) {
+    branch = repoInfo.defaultBranchRef?.name ?? null;
+  } else {
+    const view = run(
+      "gh",
+      ["repo", "view", baseRepo, "--json", "defaultBranchRef"],
+      repoRoot,
+    );
+    if (!view.ok) {
+      fail(`cannot resolve base: gh repo view ${baseRepo} failed; pass --base`);
+    }
+    try {
+      branch = JSON.parse(view.stdout).defaultBranchRef?.name ?? null;
+    } catch {
+      branch = null;
+    }
+  }
+  if (!branch) {
+    fail(
+      `cannot resolve base: no open PR for this branch and ${baseRepo} names ` +
+        "no default branch; pass --base",
+    );
+  }
+  return branch;
 }
 
 /**
@@ -414,7 +450,7 @@ function runCodex(repoRoot, codexBin, base, reportPath, timeoutSeconds) {
   ];
   // Both files hold unscanned model output that can quote the diff, so keep
   // them owner-only. The mode argument applies to a file this call creates;
-  // fchmod covers one that already exists under a re-used `--out` path.
+  // fchmod covers one that already exists under a reused `--out` path.
   const bodyFd = fs.openSync(reportPath, "w", 0o600);
   const stderrFd = fs.openSync(`${reportPath}.stderr.log`, "w", 0o600);
   fs.fchmodSync(bodyFd, 0o600);

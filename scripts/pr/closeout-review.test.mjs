@@ -614,3 +614,92 @@ test("an unknown argument is refused with the usage line", (t) => {
   assert.match(run.stderr, /unknown argument --engine/);
   assert.match(run.stderr, /usage: closeout-review/);
 });
+
+/**
+ * A fake `gh` answering the two queries `resolveBase` makes: `repo view` and
+ * `pr list`. `defaultBranch` is what `repo view` reports; `pulls` is the JSON
+ * array `pr list` returns.
+ */
+function fakeGh(bin, { defaultBranch, pulls }) {
+  const view = JSON.stringify({
+    nameWithOwner: "acme/widgets",
+    parent: null,
+    defaultBranchRef: defaultBranch ? { name: defaultBranch } : null,
+  });
+  const file = path.join(bin, "gh");
+  fs.writeFileSync(
+    file,
+    [
+      "#!/bin/sh",
+      'if [ "$1" = "repo" ]; then',
+      `  echo ${JSON.stringify(view)}`,
+      "  exit 0",
+      "fi",
+      'if [ "$1" = "pr" ]; then',
+      `  echo ${JSON.stringify(JSON.stringify(pulls))}`,
+      "  exit 0",
+      "fi",
+      "exit 1",
+    ].join("\n") + "\n",
+  );
+  fs.chmodSync(file, 0o755);
+}
+
+/** Point `origin` at a GitHub URL and give it a tracking ref for `branch`. */
+function addOrigin(repo, branch) {
+  git(repo, "remote", "add", "origin", "https://github.com/acme/widgets.git");
+  git(repo, "update-ref", `refs/remotes/origin/${branch}`, "base");
+}
+
+test("with no open PR the base falls back to the repository default branch", (t) => {
+  const repo = makeRepo(t);
+  fakeCodex(repo.bin, 'echo "clean"');
+  // A default branch that is deliberately not `main`: a hardcoded fallback
+  // would review against the wrong ref here and say nothing.
+  fakeGh(repo.bin, { defaultBranch: "trunk", pulls: [] });
+  addOrigin(repo.repo, "trunk");
+
+  const run = runScript(repo, ["--no-fetch"]);
+
+  assert.equal(run.status, 0);
+  assert.match(run.stdout, /against origin\/trunk /);
+  assert.match(
+    fs.readFileSync(run.reportPath, "utf8"),
+    /^base_ref: origin\/trunk$/m,
+  );
+});
+
+test("with one open PR the base is that PR own base branch", (t) => {
+  const repo = makeRepo(t);
+  fakeCodex(repo.bin, 'echo "clean"');
+  fakeGh(repo.bin, {
+    defaultBranch: "trunk",
+    pulls: [
+      {
+        baseRefName: "release",
+        headRepositoryOwner: { login: "acme" },
+      },
+    ],
+  });
+  addOrigin(repo.repo, "release");
+
+  const run = runScript(repo, ["--no-fetch"]);
+
+  assert.equal(run.status, 0);
+  assert.match(
+    fs.readFileSync(run.reportPath, "utf8"),
+    /^base_ref: origin\/release$/m,
+  );
+});
+
+test("a repository naming no default branch refuses instead of guessing", (t) => {
+  const repo = makeRepo(t);
+  fakeCodex(repo.bin, 'echo "clean"');
+  fakeGh(repo.bin, { defaultBranch: null, pulls: [] });
+  addOrigin(repo.repo, "trunk");
+
+  const run = runScript(repo, ["--no-fetch"]);
+
+  assert.equal(run.status, 2);
+  assert.match(run.stderr, /names no default branch; pass --base/);
+});
