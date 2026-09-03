@@ -322,8 +322,13 @@ test("Claude runtime registry rejects non-string scalar metadata", () => {
       "doc_type",
       "garden_lane",
     ];
+    // The registry is shorter than this field list, and its length moves when a
+    // runtime document is added or removed. Wrap so every field still lands on
+    // a real document; the validator reports each failing field separately, so
+    // two fields on one document still produce two errors.
     for (const [index, field] of scalarFields.entries()) {
-      registry.documents[index][field] = index % 2 === 0 ? [] : {};
+      registry.documents[index % registry.documents.length][field] =
+        index % 2 === 0 ? [] : {};
     }
     write(
       repo,

@@ -103,8 +103,11 @@ unavailable and the resulting quality-gate limitation is accepted.
 ## Closeout review
 
 Setup vendors nothing for the closeout review. `pnpm agent:closeout-review`
-shells out to `codex`, and a Codex Cloud container already has it. The flow and
-its no-codex branch live in
+shells out to `codex`, and a Codex Cloud container already has it. The script
+still refuses inside an active Codex session: with `CODEX_SANDBOX` or
+`CODEX_THREAD_ID` set it exits 2, because nested `codex exec` is unavailable.
+Run the closeout from a Claude session or an operator shell. That branch, the
+no-codex branch, and the whole flow live in
 [`pr-operating-card.md`](pr-operating-card.md) step 4; do not duplicate them
 here.
 

@@ -13287,6 +13287,12 @@ assert_contains "- pnpm sentry:archive:test (Sentry triage archive helper change
 run_gate "scripts/sentry/triage/sentry-triage-archive.test.mjs"
 assert_contains "- pnpm sentry:archive:test (Sentry triage archive helper changed)"
 
+run_gate "scripts/sentry/autofix/sentry-autofix-finalize.test.mjs"
+assert_contains "- pnpm sentry:autofix:finalize:test (Sentry autofix finalize helper changed)"
+
+run_gate "scripts/sentry/broker/sentry-mcp-broker.test.mjs"
+assert_contains "- pnpm sentry:broker:test (Sentry MCP broker or pre-flight probe changed)"
+
 run_gate "scripts/indexer-handler-invariant-contract.test.mjs"
 assert_contains "- node --test scripts/indexer-handler-invariant-contract.test.mjs (indexer handler invariant contract changed)"
 

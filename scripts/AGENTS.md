@@ -83,7 +83,7 @@ Move all 14 pin classes with their files.
   `$script_source_dir`; suites use `$repo_root`. Family and inventory edits
   route the parity suites.
   Setup, marker, SessionEnd, and package-policy edits route focused setup
-  suite. Missing pins freeze the stamp (ADRs 0069 and 0079). Three exact pins:
+  suite. Missing pins freeze the stamp (ADR 0069). Three exact pins:
   `.dependency-cruiser.cjs` and root `package.json` both name
   `gate/mapping/engine.test.mjs` (scanned roots);
   `gate/mapping/post-passes.mjs` schedules `code-health:deps` itself.
@@ -154,8 +154,8 @@ in the same PR.
 - New Node root scripts need `pnpm lint:scripts` coverage; new shell scripts must
   pass `bash -n`. Add a focused command to `scripts/agent-quality-gate.sh` for
   behavior syntax and lint cannot verify.
-- No ESLint `max-lines` reaches this tree. The file-size watchlist reports it
-  instead — tests aside, three trust-root files exempt:
+- No ESLint `max-lines` reaches this tree. The file-size watchlist reports every
+  scripts/ file; the exemption list is currently empty:
   [ADR 0065](../docs/adr/0065-scripts-file-size-watchlist-scope.md).
 - `pnpm tf plan/apply platform` owns one private saved plan. Never accept a
   caller plan path, or print, upload, or cache either plan form. Mechanism and

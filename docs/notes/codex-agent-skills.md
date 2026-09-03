@@ -125,9 +125,8 @@ maintenance scripts as:
 ./scripts/bootstrap/codex-cloud-maintenance.sh
 ```
 
-GitHub CLI bootstrap,
-Git/credential setup, Trunk and Foundry installation, dependency/codegen checks,
-and maintenance behavior live in
+GitHub CLI bootstrap, Git/credential setup, Trunk and Foundry installation,
+dependency/codegen checks, and maintenance behavior live in
 [`codex-cloud-setup.md`](codex-cloud-setup.md).
 
 ## Repo skill adapters
