@@ -156,8 +156,8 @@ keep `pnpm pr:ready-state` and `gh pr checks` as the canonical probes.
 ## Issue workboard transitions
 
 `pnpm issue:claim`, `issue:review`, `issue:release`, `issue:groom`,
-`issue:board sync`, and `issue:board backfill` shell out to gh. They use GraphQL for Project #12 and the
-Git data APIs for the persistent per-issue mutex. The mutex uses GraphQL
+`issue:board sync`, and `issue:board backfill` shell out to gh. They use GraphQL
+for Project #12 and the Git data APIs for the persistent per-issue mutex. The mutex uses GraphQL
 `updateRefs` with an exact `beforeOid` on a retained custom ref and reads that
 ref through the REST matching-references endpoint, because GraphQL
 `Repository.ref` does not resolve the custom namespace. The active

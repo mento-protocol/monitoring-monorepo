@@ -437,10 +437,16 @@ label and every other label class. It re-reads the issue's labels inside the
 serialized section and refuses the write when the resulting set would satisfy
 the backlog-sweep label predicate: `agent-ready`, exactly one `risk:*` equal to
 `risk:low`, and exactly one `pkg:*`. The mutex serializes helpers, not people,
-so the helper re-reads the labels after the write. When a state label landed in
-between and the issue is now sweep-eligible, the helper removes exactly the
-labels it added and exits nonzero. A failed removal retains `LOCK` and names the
-labels an operator must remove by hand.
+so the helper re-reads the labels after the write. When a label landed in
+between and the issue is now sweep-eligible, the helper asks whether its own
+write caused that. When removing exactly the labels it added would clear the
+predicate, it removes them and exits nonzero. When the predicate holds without
+them the write was not the cause: the helper keeps the labels and exits with a
+distinct code, because undoing a correct label would leave the issue eligible
+anyway and report the opposite. A removal that fails, or that leaves the issue
+eligible, retains `LOCK` and names the labels an operator must remove by hand.
+Every path before the write releases the mutex, so a failed read cannot strand a
+`LOCK` that only ref surgery clears.
 
 An operator recovers a stale lock only after proving that the original helper
 cannot resume. The operator terminates its session or process, or revokes its

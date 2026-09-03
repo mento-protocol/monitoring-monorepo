@@ -882,11 +882,17 @@ The full procedure is
    still fails the sweep predicate. Step 3's check runs against a snapshot; this
    read is what holds it against a state label that lands in between. Exit 3
    means a requested label is a state label or not a routing label; exit 4 means
-   the write would complete eligibility and nothing was written; exit 5 means it
-   landed, completed eligibility, and was removed again. Treat 4 and 5 the same
-   way — put the label in `proposed`. Exit 6 means compensation failed: the
-   issue is sweep-eligible, the mutex is held, and the message names the labels
-   to remove by hand. Report exit 6 to the operator and never retry it.
+   the resulting set would satisfy the sweep predicate and nothing was written;
+   exit 5 means the write landed, left the issue eligible, and was removed
+   again. All three end with the label off the issue and the marker already
+   posted, so post one follow-up comment naming the label that did not land and
+   record it as proposed in the report. Never amend the marker's `applied`
+   field: the skip key reads it. Exit 6 means the removal left the issue
+   sweep-eligible, the mutex is held, and the message names the labels to remove
+   by hand. Exit 7 means a concurrent write made the issue sweep-eligible, this
+   call did not cause it, and its labels stay. Any other nonzero exit means the
+   outcome is unknown and the mutex may still be held. Report exit 6, exit 7,
+   and any other nonzero exit to the operator, and never retry them.
    `issue:claim`, `issue:review`, and `issue:release` still own state labels and
    Project ownership fields.
 

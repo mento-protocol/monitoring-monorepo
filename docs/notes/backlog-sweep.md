@@ -677,7 +677,10 @@ The helper holds the ADR 0082 per-issue mutex, re-reads the issue's live labels
 inside the serialized section, and applies them only when the set the write
 would produce still fails the sweep predicate. The snapshot check above is the
 pass's own rule; this read is what makes it hold against a state label that
-lands between the two. The helper writes no state label and no Project field:
+lands between the two. It re-reads once more after the write and removes exactly
+the labels it added when they completed eligibility. A label that did not
+complete it stays: removing a correct `kind:*` would leave the issue eligible
+anyway and lose the label. The helper writes no state label and no Project field:
 `issue:claim`, `issue:review`, and `issue:release` own queue state and
 ownership. Never write routing labels with raw `gh issue edit` — that call takes
 no mutex, so its no-widening check is computed from a snapshot the write cannot
@@ -685,20 +688,31 @@ re-check.
 
 Exit codes say what happened, and the pass records each against the issue:
 
-| Exit | Meaning                                                                 |
-| ---: | ----------------------------------------------------------------------- |
-|    0 | The labels were applied.                                                |
-|    3 | A requested label is a queue-state label or not a routing label.        |
-|    4 | The write would complete eligibility. Nothing was written.              |
-|    5 | The write landed, completed eligibility, and was removed again.         |
-|    6 | Compensation failed. The issue is sweep-eligible and the mutex is held. |
+|  Exit | Meaning                                                                               |
+| ----: | ------------------------------------------------------------------------------------- |
+|     0 | The labels were applied.                                                              |
+|     3 | A requested label is a queue-state label or not a routing label. Nothing was written. |
+|     4 | The resulting label set would satisfy the sweep predicate. Nothing was written.       |
+|     5 | The write landed, left the issue sweep-eligible, and was removed again.               |
+|     6 | The removal left the issue sweep-eligible. The mutex is held.                         |
+|     7 | A concurrent write left the issue sweep-eligible. This call did not cause it.         |
+| other | The outcome is unknown and the mutex may still be held.                               |
 
-Exit 4 is the ordinary refusal: put the label in the marker's `proposed` list.
-Exit 5 means a state label landed after the in-mutex read — the labels this call
-added were removed, so the issue is back where it started; treat it as exit 4 and
-propose the label. Exit 6 is the one an operator must see: the message names the
-labels to remove by hand, and the per-issue mutex stays held until that happens.
-Report it and move to the next candidate; do not retry the write.
+Exit 3, 4, and 5 all end with the requested label off the issue, and the marker
+comment already lists that label in its `applied` field. Post one follow-up
+comment naming the label that did not land, the one the marker rule above
+already requires for a failed write, and record the label as proposed in the run
+report. Never amend
+the marker: the skip key reads `applied`, so a label left there that is not on
+the issue re-grooms the issue next run with no record of why.
+
+Exit 6, exit 7, and any other nonzero exit go to the operator. Exit 6 names the
+labels to remove by hand and holds the per-issue mutex until an operator clears
+it. Exit 7 reports an issue a concurrent write made sweep-eligible; this call's
+labels did not cause it and are correct, so the helper keeps them. Any other
+nonzero exit means the outcome is unknown and the mutex may still be held, so
+report the message verbatim. Move to the next candidate in every case, and never
+retry the write.
 
 The pass never touches the state label of an owned issue — one carrying
 `agent-active` or `in-pr` belongs to a live claim.

@@ -14443,10 +14443,28 @@ function createGroomBoard({
   state = "OPEN",
   afterWrite = null,
   removeFails = null,
+  readFails = null,
+  afterRemove = null,
+  stalePostWriteRead = false,
+  failUnlock = false,
 } = {}) {
   const current = new Set(labels);
   const calls = [];
   const server = createFakeLockServer();
+  let reads = 0;
+  let preWriteSnapshot = null;
+  let wrote = false;
+  const operations = failUnlock
+    ? server.withOperations({
+        compareAndSwapLockRef: async (...args) => {
+          const commit = server.commits.get(args[4]);
+          if (wrote && commit.payload.state === "UNLOCK") {
+            throw new Error("unlock ref update rejected");
+          }
+          return server.compareAndSwapLockRef(...args);
+        },
+      })
+    : server.operations;
   return {
     server,
     calls,
@@ -14457,14 +14475,20 @@ function createGroomBoard({
       getProject: async () => ownershipProject(),
       getIssue: async (_options, issueNumber) => {
         assertEqual(issueNumber, GROOM_ISSUE_NUMBER, "groom issue number");
+        reads += 1;
+        if (readFails && reads === 1) throw new Error(readFails);
+        const names =
+          stalePostWriteRead && reads > 1 ? preWriteSnapshot : [...current];
+        if (reads === 1) preWriteSnapshot = [...current];
         return {
           number: GROOM_ISSUE_NUMBER,
           title,
           state,
-          labels: [...current].map((name) => ({ name })),
+          labels: names.map((name) => ({ name })),
         };
       },
       addIssueLabels: async (_options, _issue, add) => {
+        wrote = true;
         calls.push({ op: "add", labels: [...add] });
         for (const label of add) current.add(label);
         if (afterWrite) afterWrite(current);
@@ -14473,6 +14497,7 @@ function createGroomBoard({
         calls.push({ op: "remove", labels: [...remove] });
         if (removeFails) throw new Error(removeFails);
         for (const label of remove) current.delete(label);
+        if (afterRemove) afterRemove(current);
       },
       withIssueMutationLock: (options, issueNumber, metadata, mutation) =>
         withIssueMutationLock(
@@ -14480,7 +14505,7 @@ function createGroomBoard({
           issueNumber,
           metadata,
           mutation,
-          server.operations,
+          operations,
         ),
     },
   };
@@ -14585,6 +14610,16 @@ test("groom refuses queue-state and non-routing labels", async () => {
   assertDeepEqual(validateGroomLabels(["pkg:tooling", "pkg:tooling"]), [
     "pkg:tooling",
   ]);
+
+  // gh issue edit takes one comma-separated list, so a comma inside a label
+  // writes two labels. The module is the enforcement point, not the CLI's
+  // splitter: a caller importing validateGroomLabels must get the same answer.
+  const commaError = assertThrows(
+    () => validateGroomLabels(["pkg:tooling,agent-ready"]),
+    /gh issue edit takes one comma-separated list/,
+  );
+  assertEqual(commaError.code, "ISSUE_GROOM_LABEL_REFUSED", "comma code");
+  assertEqual(issueBoardExitCode(commaError), 3, "comma label exit code");
 });
 
 // The interleaving ADR 0082 cannot serialize: a person adds a state label
@@ -14644,44 +14679,28 @@ test("groom compensation removes only the labels it added", async () => {
   assertDeepEqual(board.labels, ["agent-ready", "kind:workflow", "risk:low"]);
 });
 
-// Negative control. The same interleaving fixture, driven through a write path
-// that keeps the in-mutex revalidation but drops the post-write read, must
-// leave the issue sweep-eligible. Without this the compensation test could pass
-// against a fixture whose concurrent state write never lands.
-test("negative control: no post-write read leaves the interleaved issue eligible", async () => {
+// The post-write read is what catches the interleave, so the control drives the
+// real module with that read made stale: the fixture's concurrent `agent-ready`
+// still lands, the module sees the pre-write snapshot, and the issue is left
+// sweep-eligible. Restore the read to a live one and the same fixture reaches
+// compensation instead, which is the test above.
+test("a stale post-write read leaves the interleaved issue sweep-eligible", async () => {
   const board = createGroomBoard({
     labels: ["risk:low"],
     afterWrite: interleavedAgentReady(),
+    stalePostWriteRead: true,
   });
-  const options = groomOptions(["pkg:tooling"]);
-  const result = await board.dependencies.withIssueMutationLock(
-    options,
-    GROOM_ISSUE_NUMBER,
-    { operation: "groom", projectId: "project", agent: options.agent },
-    async () => {
-      const issue = await board.dependencies.getIssue(
-        options,
-        GROOM_ISSUE_NUMBER,
-      );
-      const current = new Set(issue.labels.map((label) => label.name));
-      const additions = options.addLabels.filter(
-        (label) => !current.has(label),
-      );
-      assert(
-        !satisfiesSweepLabelEligibility(new Set([...current, ...additions])),
-        "the in-mutex check must pass, so only the post-write read can catch this",
-      );
-      await board.dependencies.addIssueLabels(options, issue, additions);
-      return { added: additions };
-    },
+  const results = await groom(
+    groomOptions(["pkg:tooling"]),
+    board.dependencies,
   );
 
-  assertDeepEqual(result.added, ["pkg:tooling"]);
+  assertEqual(results[0].state, "groomed", "the stale read reports success");
   assertDeepEqual(board.calls, [{ op: "add", labels: ["pkg:tooling"] }]);
   assertDeepEqual(board.labels, ["agent-ready", "pkg:tooling", "risk:low"]);
   assert(
     satisfiesSweepLabelEligibility(board.labels),
-    "the negative control must prove the interleaved state write lands",
+    "the control must prove the interleaved state write lands",
   );
 });
 
@@ -14713,6 +14732,120 @@ test("groom keeps the mutex when compensation fails", async () => {
     lockCommitStates(board.server).at(-1).state,
     "LOCK",
     "a failed compensation must retain LOCK",
+  );
+});
+
+test("a failed in-mutex read releases the per-issue mutex", async () => {
+  const board = createGroomBoard({
+    labels: ["risk:low"],
+    readFails: "gh issue view failed with exit 1: HTTP 502",
+  });
+  await assertRejects(
+    () => groom(groomOptions(["pkg:tooling"]), board.dependencies),
+    /HTTP 502/,
+  );
+
+  assertDeepEqual(board.calls, [], "a failed read must write nothing");
+  assertEqual(
+    lockCommitStates(board.server).at(-1).state,
+    "UNLOCK",
+    "a failure before the write must not strand the per-issue mutex",
+  );
+});
+
+test("groom keeps a write a concurrent label made eligible without it", async () => {
+  const board = createGroomBoard({
+    labels: ["risk:low", "pkg:tooling"],
+    afterWrite: interleavedAgentReady(),
+  });
+  const err = await assertRejects(
+    () => groom(groomOptions(["kind:workflow"]), board.dependencies),
+    /This call did not cause it/,
+  );
+
+  assertEqual(err.code, "ISSUE_GROOM_CONCURRENT_ELIGIBILITY", "outcome code");
+  assertEqual(issueBoardExitCode(err), 7, "concurrent eligibility exit code");
+  assertDeepEqual(
+    board.calls,
+    [{ op: "add", labels: ["kind:workflow"] }],
+    "a write this call did not cause must not be undone",
+  );
+  assertDeepEqual(board.labels, [
+    "agent-ready",
+    "kind:workflow",
+    "pkg:tooling",
+    "risk:low",
+  ]);
+  assert(
+    satisfiesSweepLabelEligibility(board.labels),
+    "the reported outcome is an issue left eligible by the concurrent write",
+  );
+  assertEqual(
+    lockCommitStates(board.server).at(-1).state,
+    "UNLOCK",
+    "a write this call did not cause is not a stale-lock case",
+  );
+});
+
+test("compensation that leaves the issue eligible keeps the mutex", async () => {
+  const board = createGroomBoard({
+    labels: ["risk:low"],
+    afterWrite: interleavedAgentReady(),
+    afterRemove: (labels) => labels.add("pkg:indexer"),
+  });
+  const err = await assertRejects(
+    () => groom(groomOptions(["pkg:tooling"]), board.dependencies),
+    /still satisfies the sweep predicate/,
+  );
+
+  assertEqual(issueBoardExitCode(err), 6, "compensation failure exit code");
+  assert(
+    err instanceof IssueMutationLockStaleError,
+    "an issue still eligible after compensation must keep the mutex",
+  );
+  assert(
+    satisfiesSweepLabelEligibility(board.labels),
+    "the removal cleared this call's labels and the issue is still eligible",
+  );
+  assertEqual(
+    lockCommitStates(board.server).at(-1).state,
+    "LOCK",
+    "a compensation that did not clear the predicate must retain LOCK",
+  );
+});
+
+// Every groom exit code promises what the mutex did, so a refusal whose release
+// then failed must not report as that refusal. ADR 0082 states the same rule for
+// the stale-lock code: the walk stops at `cause` and never enters
+// `AggregateError.errors`, so this run exits 1 and the runbook's exit table
+// routes it to the operator.
+test("a compensated write whose mutex release fails exits 1, not 5", async () => {
+  const board = createGroomBoard({
+    labels: ["risk:low"],
+    afterWrite: interleavedAgentReady(),
+    failUnlock: true,
+  });
+  const err = await assertRejects(
+    () => groom(groomOptions(["pkg:tooling"]), board.dependencies),
+    /Compensated by removing pkg:tooling/,
+  );
+
+  assert(
+    err instanceof IssueMutationLockStaleError,
+    "a failed release must report the mutex as stale",
+  );
+  assert(
+    err.cause instanceof AggregateError,
+    "the lock layer wraps the refusal and the release failure together",
+  );
+  assertEqual(
+    issueBoardExitCode(err),
+    1,
+    "a retained mutex must not report as the refusal's own exit code",
+  );
+  assert(
+    /Failed to release the restored mutex/.test(err.message),
+    "the message must name the release failure",
   );
 });
 
