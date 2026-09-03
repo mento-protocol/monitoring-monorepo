@@ -208,7 +208,9 @@ grep -q 'shared-config/scripts/build.mjs' <<< "$web_deps_marker_block" ||
   fail ".trunk/hooks/pre-commit must remain executable"
 [[ ! -e .trunk/hooks/pre-push ]] ||
   fail ".trunk/hooks/pre-push must stay absent after local cutover"
-grep -Fq -- "- trunk-fmt-pre-commit" .trunk/trunk.yaml ||
+sed -n '/^actions:$/,$p' .trunk/trunk.yaml |
+  sed -n '/^  enabled:$/,/^  [^[:space:]]/p' |
+  grep -Fqx -- "    - trunk-fmt-pre-commit" ||
   fail ".trunk/trunk.yaml must keep trunk-fmt-pre-commit enabled"
 for removed_pre_push_marker in \
   "trunk-check-pre-push" \

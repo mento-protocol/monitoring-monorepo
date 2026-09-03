@@ -161,12 +161,13 @@ When a new `@mento-protocol/contracts` version is published:
 2. Update the affected namespace in both
    `shared-config/deployment-namespaces.json` and
    `indexer-envio/config/deployment-namespaces.json`.
-3. Run `pnpm install` from the repository root.
+3. Inspect lifecycle and install effects as required by step 3 of the
+   [PR operating card](../docs/notes/pr-operating-card.md). Then run
+   `pnpm install` from the repository root.
 4. From `indexer-envio/`, run `pnpm generate:abis` and commit any vendored ABI
    changes.
 5. Run `pnpm check:yaml-addresses`. Then apply the indexer code-generation and
-   direct dashboard and indexer package checks in step 3 of the
-   [PR operating card](../docs/notes/pr-operating-card.md).
+   direct dashboard and indexer package checks from the same card.
 
 ### Adding a contract to the index
 
