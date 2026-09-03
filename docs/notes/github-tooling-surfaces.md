@@ -163,7 +163,8 @@ ref and reads that ref through the REST matching-references endpoint, because
 GraphQL `Repository.ref` does not resolve the custom namespace. The active
 credential needs Project write access, repository Contents write access (the
 mutex ref), and Issues write access (`issue:claim`, `issue:review`,
-`issue:release`, and `issue:groom` all write labels or comments on the issue).
+`issue:release`, `issue:groom`, and `issue:board sync` all write labels or
+comments on the issue).
 Each helper rejects a non-`github.com` `GH_HOST` and a host-qualified `GH_REPO`.
 The transport also sets `GH_HOST=github.com` and removes `GH_REPO` before every
 gh call. Explicit repository and Project flags cannot authorize another host.

@@ -712,8 +712,10 @@ issue — a requested label that was already on the issue before this call is
 untouched and stays, exit code notwithstanding — and the marker comment already
 lists the full requested set in its `applied` field. Post one follow-up comment
 naming only the labels that did not land, the one the marker rule above already
-requires for a failed write, and record those labels as proposed in the run
-report. Never amend the marker: the skip key reads `applied`, so a label left
+requires for a failed write. Record the exit 4, exit 5, and exit 8 labels as
+proposed in the run report. Exit 3 refuses the label itself before the mutex and
+before any write, so record those labels as refused and keep them out of
+`proposed`. Never amend the marker: the skip key reads `applied`, so a label left
 there that is not on the issue re-grooms the issue next run with no record of
 why. Exit 8 also means the issue left the pass's reach: a claim owns it now, so
 leave its labels to the session that owns it.

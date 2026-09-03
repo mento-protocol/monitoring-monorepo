@@ -892,8 +892,10 @@ The full procedure is
    labels this call tried to add still off the issue — a requested label
    already on the issue before this call is untouched — and the marker already
    posted the full requested set, so post one follow-up comment naming only the
-   labels that did not land and record those as proposed in the report. Never
-   amend the marker's `applied` field: the skip key reads it. Exit 6 means the
+   labels that did not land. Record the exit 4, exit 5, and exit 8 labels as
+   proposed. Exit 3 refuses the label itself before the mutex, so report those
+   labels as refused and keep them out of `proposed`. Never amend the marker's
+   `applied` field: the skip key reads it. Exit 6 means the
    removal left the issue sweep-eligible and the mutex is held; the message
    names the labels to remove by hand when they are still on the issue, and the
    label set that still satisfies the predicate when they are not. Exit 7 means
