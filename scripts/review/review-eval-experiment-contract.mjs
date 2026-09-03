@@ -230,7 +230,12 @@ function phaseProviders(phase) {
  * says the phase reached its answer without calling a provider.
  */
 function normalizePhaseCliVersions(phase, versions, label) {
-  const providers = phaseProviders(phase);
+  if (!Object.hasOwn(PHASE_PROVIDERS, phase)) {
+    throw new Error(
+      `${label} names unknown cache phase ${JSON.stringify(phase)}`,
+    );
+  }
+  const providers = PHASE_PROVIDERS[phase];
   if (!isObject(versions)) {
     throw new Error(`${label} ${phase} CLI versions must be an object`);
   }
@@ -302,16 +307,22 @@ export function recordedPhaseCliVersions({ record, phase }) {
  * retried later reports the runtime that produced each artifact rather than the
  * runtime of the retry. Pass every record the decision reads, including screen
  * records folded into a holdout decision.
+ *
+ * Broken provenance throws rather than being skipped. A record whose versions
+ * cannot be read is a record whose drift cannot be reported, and skipping it
+ * would present an unattributed upgrade as a clean run.
  */
 export function recordRuntimeDrift({ planned, records }) {
   const recorded = cliVersionIdentity(planned);
   const transitions = new Map();
   for (const record of records ?? []) {
-    if (!isObject(record?.cli_versions)) continue;
-    for (const phase of Object.values(record.cli_versions)) {
-      if (!isObject(phase)) continue;
+    const label = record?.cell_id ? `record ${record.cell_id}` : "record";
+    if (!isObject(record?.cli_versions)) {
+      throw new Error(`${label} stores no runtime provenance; re-run the cell`);
+    }
+    for (const [phaseName, stored] of Object.entries(record.cli_versions)) {
+      const phase = normalizePhaseCliVersions(phaseName, stored, label);
       for (const [provider, version] of Object.entries(phase)) {
-        if (!CLI_PROVIDERS.includes(provider)) continue;
         if (version === recorded[provider]) continue;
         const key = `${provider}\u0000${version}`;
         if (!transitions.has(key)) {

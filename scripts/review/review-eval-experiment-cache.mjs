@@ -444,15 +444,38 @@ export function writeExperimentCache({
  * current invocation reused the artifact, so a retry cannot relabel work that
  * an upgraded runtime produced.
  */
+function phaseVersionSet(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * Fails closed on both sides. A caller that omits the phase versions, and a
+ * payload that stores none, both throw: an unchecked artifact would otherwise
+ * pass provenance silently and drop out of the drift report. A phase that
+ * invoked no provider passes its empty set explicitly.
+ */
 function assertPhaseCliVersions(payload, expected, label) {
-  if (expected === undefined) return;
-  if (JSON.stringify(payload?.cli_versions) !== JSON.stringify(expected)) {
+  if (!phaseVersionSet(expected)) {
+    throw new Error(`${label} cache read supplied no CLI versions to check`);
+  }
+  if (!phaseVersionSet(payload?.cli_versions)) {
+    throw new Error(`${label} cache payload records no CLI versions`);
+  }
+  if (JSON.stringify(payload.cli_versions) !== JSON.stringify(expected)) {
     throw new Error(`${label} cache payload ran under other CLI versions`);
   }
 }
 
+function phaseLabel(cellId, phase) {
+  return `${cellId ?? "unnamed cell"} ${phase}`;
+}
+
 export function validateRawExperimentPayload(payload, expected) {
-  assertPhaseCliVersions(payload, expected.cliVersions, "raw experiment");
+  assertPhaseCliVersions(
+    payload,
+    expected.cliVersions,
+    phaseLabel(expected.cellId, "raw"),
+  );
   if (
     payload?.ok !== true ||
     payload.campaign_id !== expected.plan.campaign_id ||
@@ -474,8 +497,9 @@ export function validateScoreExperimentPayload(
   payload,
   rawDigest,
   cliVersions,
+  cellId = null,
 ) {
-  assertPhaseCliVersions(payload, cliVersions, "score experiment");
+  assertPhaseCliVersions(payload, cliVersions, phaseLabel(cellId, "score"));
   const leak = payload?.leak;
   if (
     payload?.raw_digest !== rawDigest ||
@@ -497,8 +521,9 @@ export function validateNovelExperimentPayload(
   payload,
   scoreDigest,
   cliVersions,
+  cellId = null,
 ) {
-  assertPhaseCliVersions(payload, cliVersions, "novel experiment");
+  assertPhaseCliVersions(payload, cliVersions, phaseLabel(cellId, "novel"));
   if (
     payload?.score_digest !== scoreDigest ||
     !Number.isSafeInteger(payload.verdict?.novelWrong) ||

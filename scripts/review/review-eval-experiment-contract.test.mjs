@@ -579,6 +579,42 @@ test("drift is read from the records, and only from phases that ran", () => {
   assert.equal(runtimeDriftReason(null), null);
 });
 
+test("drift reporting fails closed on a record it cannot read", () => {
+  const plan = makePlan();
+  const planned = plan.inputs.cli_versions;
+  const upgraded = { raw: { claude: "claude 2.1.259" } };
+  const broken = (cliVersions) => [
+    { cell_id: "screen-pr-1990-candidate", cli_versions: upgraded },
+    { cell_id: "screen-pr-1990-incumbent", cli_versions: cliVersions },
+  ];
+  // Skipping any of these would report the first cell's upgrade as the whole
+  // story and present the second cell as a clean, on-plan run.
+  for (const [cliVersions, message] of [
+    [undefined, /screen-pr-1990-incumbent stores no runtime provenance/],
+    [null, /screen-pr-1990-incumbent stores no runtime provenance/],
+    ["claude 2.1.259", /screen-pr-1990-incumbent stores no runtime provenance/],
+    [{ stage: { claude: "claude 2" } }, /names unknown cache phase "stage"/],
+    [{ raw: "claude 2" }, /raw CLI versions must be an object/],
+    [
+      { score: { claude: "claude 2" } },
+      /names score provider "claude", which that phase never invokes/,
+    ],
+    [{ raw: { claude: "" } }, /raw\.claude must be a non-empty string/],
+  ]) {
+    assert.throws(
+      () => recordRuntimeDrift({ planned, records: broken(cliVersions) }),
+      message,
+    );
+  }
+  assert.deepEqual(
+    recordRuntimeDrift({
+      planned,
+      records: broken({ raw: { claude: planned.claude }, score: {} }),
+    }).cell_ids,
+    ["screen-pr-1990-candidate"],
+  );
+});
+
 test("a novelty judge that drifts alone still names its cell", () => {
   const plan = makePlan();
   const planned = plan.inputs.cli_versions;

@@ -316,6 +316,7 @@ export function createExperimentArmExecutor({
       scoreEntry.payload,
       rawDigest,
       scoreVersions,
+      experimentCellId(lane, treatment),
     );
     return {
       ok: true,
@@ -496,6 +497,7 @@ export async function enrichExperimentNovelty({
           scoreEntry.payload,
           record.raw_digest,
           scoreIdentity.cli_versions,
+          record.cell_id,
         );
         // A record already enriched under an earlier runtime keeps that
         // artifact; only a novelty verdict written now carries the live judge.
@@ -564,6 +566,7 @@ export async function enrichExperimentNovelty({
           entry.payload,
           record.score_digest,
           identity.cli_versions,
+          record.cell_id,
         );
         enriched.push({
           ...record,
