@@ -37,12 +37,11 @@ bootstrap; setup has a separate [trust boundary](../../../docs/notes/worktree-an
 
 ## What this repo adds
 
-- **Repository identity before agent-invoked code**: Resolve `CURRENT_REPO`,
-  `BASE_REPO`, PR, remotes, and base after bootstrap. Stop fork and
-  cross-repository heads before agent code. Bind PR probes to `BASE_REPO`; a
-  failed query does not prove that no PR exists. Use the resolved PR base, not
-  a fixed `origin/main`, for every diff-based author check, including stacked
-  PRs.
+- **Repository identity before agent-invoked code**: After bootstrap, resolve
+  `CURRENT_REPO`, `BASE_REPO`, the PR, remotes, and base. Stop fork or
+  cross-repository heads. Bind probes to `BASE_REPO`; a failed query does not
+  prove that no PR exists. Use the resolved base for all diff checks. Before a
+  new PR, bind and reuse its intended base. Use `main` only for unstacked work.
 - **Author checks before ready publication**: Apply every matching row in card
   step 3. Format every intended changed file before those checks. Record each
   result in `## Validation`. Reapply affected rows after a material fix, base

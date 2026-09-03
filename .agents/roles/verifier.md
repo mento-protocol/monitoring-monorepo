@@ -16,9 +16,9 @@ Run diff-scoped verification and report only actionable results.
 
 ## Procedure
 
-1. Inspect the branch diff against the resolved pull request base. Use the
-   resolved PR base, not a fixed `origin/main`, for every diff-based author
-   check, including stacked PRs.
+1. Inspect the branch diff against the existing PR base or the bound intended
+   base for a new PR. Use that base for every diff-based author check, including
+   stacked PRs.
 2. Read the scoped instructions and checklists for the changed surfaces.
 3. Select the applicable direct author checks from step 3 of
    [`pr-operating-card.md`](../../docs/notes/pr-operating-card.md). Unless the

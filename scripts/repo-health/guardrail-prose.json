@@ -13,7 +13,9 @@
   ],
   "docs/notes/pr-operating-card.md": [
     "inspect resolved-base and working-tree changes, including untracked files, for package manifests, package-manager configuration, lockfiles, and patches. Review lifecycle and install effects before any package-manager command, including the claim command.",
+    "If root `package.json` changed, first run `node scripts/check-agent-quality-gate-package-scripts.mjs`.",
     "**Run the repository preflight first.** Automatic setup can finish before agent control under a [separate trust boundary](worktree-and-web-setup.md); this preflight does not attest it.",
+    "With no PR, bind the intended base before author checks. Use `main` only after confirming the work is not stacked; stop and ask if unclear.",
     "**Agent sessions never merge a PR without the user's explicit, direct approval of that specific merge.**",
     "**Agent sessions never merge without explicit approval** for that specific merge",
     "**Knowingly deferred work needs a GitHub issue first**, linked from `## Deferrals`.",
@@ -26,7 +28,7 @@
     "| `shared-config/src/thresholds.ts`, `alerts/rules/main.tf`, or `alerts/rules/rules-fpmms.tf` | Run `node scripts/alerts/check-deviation-threshold-drift.mjs`. For `shared-config/src/thresholds.ts`, also run `pnpm --filter @mento-protocol/indexer-envio exec vitest run deviationThresholdSharedConfigSync`. |",
     "| Indexer schema, configuration, ABI, entry point, handler reachability, or reserve-yield handler/RPC source | Run each affected code-generation variant from [`../../indexer-envio/AGENTS.md`](../../indexer-envio/AGENTS.md). For reserve-yield handler/RPC source, `indexer-envio/src/EventHandlers.ts`, or `indexer-envio/config.multichain.mainnet.yaml`, run `pnpm --filter @mento-protocol/indexer-envio indexer:reserve-yield:test`. Run affected non-mainnet variants first and `pnpm indexer:codegen` last. Inspect the generated diff before indexer package checks. |",
     "| Dashboard GraphQL query or schema consumer, `indexer-envio/schema.graphql`, or `scripts/envio-schema-stubs.graphql` | Run `pnpm dashboard:codegen` and inspect the generated diff. For `indexer-envio/schema.graphql` or `scripts/envio-schema-stubs.graphql`, also run `pnpm --filter @mento-protocol/ui-dashboard test` and `pnpm --filter @mento-protocol/metrics-bridge test`. |",
-    "| Manifest, lockfile, pnpm configuration, or patch | Inspect lifecycle and install effects. Run `CI=true pnpm install --frozen-lockfile` from the repository root. When one of these inputs changes under `alerts/infra/onchain-event-handler`, `alerts/infra/oncall-announcer`, or `governance-watchdog`, also run `CI=true pnpm install --frozen-lockfile --ignore-scripts --lockfile-dir .` from that root. For either alert function's `pnpm-workspace.yaml`, also run `node --test scripts/supply-chain/alerts-uuid-overrides.test.mjs`. Complete the installs before code generation or the applicable package rows. |",
+    "| Manifest, lockfile, pnpm configuration, or patch | Inspect lifecycle and install effects. For root `package.json`, require the preflight package-script validator to pass. Run `CI=true pnpm install --frozen-lockfile` from the repository root. When one of these inputs changes under `alerts/infra/onchain-event-handler`, `alerts/infra/oncall-announcer`, or `governance-watchdog`, also run `CI=true pnpm install --frozen-lockfile --ignore-scripts --lockfile-dir .` from that root. For either alert function's `pnpm-workspace.yaml`, also run `node --test scripts/supply-chain/alerts-uuid-overrides.test.mjs`. Complete the installs before code generation or the applicable package rows. |",
     "| Package Vitest configuration or hermetic setup | Run `node scripts/repo-health/check-hermetic-vitest-setup.mjs`. |",
     "| Trunk configuration or local Git hook | Run `./tools/trunk check --ci --all` and `node scripts/workflows/check-github-action-pins.mjs`. Also run `bash scripts/bootstrap/agent-setup-contract.test.sh` when hook or Trunk action behavior changes. |",
     "| Shell file, hosted agent setup, or hook | Run `bash -n` on each surviving changed shell file. Run `bash scripts/bootstrap/agent-setup-contract.test.sh` when hosted setup or hook behavior changes. |",
@@ -51,20 +53,20 @@
   ],
   ".agents/skills/ship/SKILL.md": [
     "Run its preflight before agent-invoked repository code.",
-    "Stop fork and cross-repository heads before agent code.",
-    "Use the resolved PR base, not a fixed `origin/main`, for every diff-based author check, including stacked PRs.",
+    "Stop fork or cross-repository heads.",
+    "Use the resolved base for all diff checks. Before a new PR, bind and reuse its intended base. Use `main` only for unstacked work.",
     "Apply every matching row in card",
     "Pre-push runs no repository verification."
   ],
   ".claude/skills/ship/SKILL.md": [
     "Run its preflight before agent-invoked repository code.",
-    "Stop fork and cross-repository heads before agent code.",
-    "Use the resolved PR base, not a fixed `origin/main`, for every diff-based author check, including stacked PRs.",
+    "Stop fork or cross-repository heads.",
+    "Use the resolved base for all diff checks. Before a new PR, bind and reuse its intended base. Use `main` only for unstacked work.",
     "Apply every matching row in card",
     "Pre-push runs no repository verification."
   ],
   ".agents/roles/verifier.md": [
-    "Use the resolved PR base, not a fixed `origin/main`, for every diff-based author check, including stacked PRs."
+    "Inspect the branch diff against the existing PR base or the bound intended base for a new PR. Use that base for every diff-based author check, including stacked PRs."
   ],
   "docs/notes/pr-ready-state.md": [
     "Use the resolved PR base, not a fixed `origin/main`, for every diff-based author check, including stacked PRs.",
