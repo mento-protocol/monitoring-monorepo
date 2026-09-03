@@ -27,10 +27,28 @@
  * leaves the partial text instead of an empty file. The header block is
  * prepended once the run ends and the outcome is known.
  */
-import { spawn, spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+
+import {
+  checkOutPath,
+  codexEnv,
+  discoverRoot,
+  fail,
+  realOrSelf,
+  resolveCodex,
+  run,
+  sanitizedPath,
+  setSafePath,
+} from "./closeout-review-exec.mjs";
+import {
+  mergeBase,
+  resolveBase,
+  shortstat,
+  treeFingerprint,
+  verifyBase,
+} from "./closeout-review-git.mjs";
 
 const MODEL = "gpt-5.6-sol";
 const EFFORT = "high";
@@ -42,77 +60,6 @@ const SANDBOX = "read-only";
 const FINDINGS_HEADING = /^(?:Full review comments|Review comments?):\s*$/m;
 const FINDING_BULLET = /^- \[P\d+\] /m;
 const DEFAULT_TIMEOUT_SECONDS = 3600;
-
-/**
- * Environment for `codex`, built by allowlist rather than inherited: the
- * operator shell holds GitHub, cloud and provider credentials the reviewing
- * model has no use for. The fixed values below scrub the operator's global Git
- * configuration, so `codex` sees a plain `git diff` rather than a
- * difftastic-rendered one.
- */
-const ENV_ALLOWLIST = [
-  "HOME",
-  "PATH",
-  "TMPDIR",
-  "USER",
-  "SHELL",
-  "TERM",
-  "LANG",
-  "LC_ALL",
-  "LC_CTYPE",
-  "TZ",
-  "HTTP_PROXY",
-  "HTTPS_PROXY",
-  "NO_PROXY",
-  "http_proxy",
-  "https_proxy",
-  "no_proxy",
-  "SSL_CERT_FILE",
-  "SSL_CERT_DIR",
-  "XDG_CONFIG_HOME",
-  "XDG_CACHE_HOME",
-  "OPENAI_API_KEY",
-  "CODEX_API_KEY",
-  "OPENAI_BASE_URL",
-  "OPENAI_ORGANIZATION",
-  "OPENAI_PROJECT",
-  "AZURE_OPENAI_API_KEY",
-  "AZURE_OPENAI_ENDPOINT",
-  "CODEX_HOME",
-];
-
-const ENV_FIXED = {
-  GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_SYSTEM: "/dev/null",
-  GIT_CONFIG_NOSYSTEM: "1",
-  GIT_EXTERNAL_DIFF: "",
-  GIT_PAGER: "cat",
-  PAGER: "cat",
-  GIT_TERMINAL_PROMPT: "0",
-};
-
-/** Exit 2 with a one-line reason. Every preflight failure lands here. */
-function fail(reason) {
-  process.stderr.write(`closeout-review: ${reason}\n`);
-  process.exit(2);
-}
-
-/** Run a command and capture its output. Never throws on a non-zero exit. */
-function run(command, args, cwd) {
-  const result = spawnSync(command, args, {
-    cwd,
-    encoding: "utf8",
-    // A whole working-tree diff passes through here for the fingerprint below,
-    // and the 1 MiB default would report a large one as a failed command.
-    maxBuffer: 64 * 1024 * 1024,
-    env: { ...process.env, ...ENV_FIXED },
-  });
-  return {
-    ok: !result.error && result.status === 0,
-    stdout: (result.stdout ?? "").trim(),
-    stderr: (result.stderr ?? "").trim(),
-  };
-}
 
 function parseArgs(argv) {
   const options = {
@@ -149,199 +96,13 @@ function parseArgs(argv) {
   return options;
 }
 
-/** `owner/name` for a remote URL, or null when the URL names no GitHub repo. */
-function repoFromRemoteUrl(url) {
-  const match = url.match(/[:/]([^/:]+)\/([^/]+?)(?:\.git)?\/?$/);
-  return match ? `${match[1]}/${match[2]}` : null;
-}
-
-/** The one configured remote serving `repo`. More than one is a stop. */
-function remoteForRepo(repoRoot, repo) {
-  const remotes = run("git", ["remote", "-v"], repoRoot);
-  if (!remotes.ok) fail("cannot read the configured remotes");
-  const names = new Set();
-  for (const line of remotes.stdout.split("\n")) {
-    const [name, url] = line.split(/\s+/);
-    if (!name || !url) continue;
-    if (repoFromRemoteUrl(url)?.toLowerCase() === repo.toLowerCase()) {
-      names.add(name);
-    }
-  }
-  if (names.size !== 1) {
-    fail(
-      `cannot resolve base: ${names.size} remotes serve ${repo}; pass --base`,
-    );
-  }
-  return [...names][0];
-}
-
-/**
- * Mirror operating-card step 5: resolve the base repository from evidence, then
- * the remote serving it, then this branch's open PR on that repository. A
- * failed query is never read as "no PR"; it is a stop.
- */
-function resolveBase(repoRoot) {
-  const view = run(
-    "gh",
-    ["repo", "view", "--json", "nameWithOwner,parent"],
-    repoRoot,
-  );
-  if (!view.ok) fail("cannot resolve base: gh repo view failed; pass --base");
-  let repoInfo;
-  try {
-    repoInfo = JSON.parse(view.stdout);
-  } catch {
-    fail("cannot resolve base: gh repo view returned no JSON; pass --base");
-  }
-  const currentRepo = repoInfo.nameWithOwner;
-  const baseRepo = repoInfo.parent?.nameWithOwner ?? currentRepo;
-  if (!currentRepo || !baseRepo) {
-    fail("cannot resolve base: gh named no repository; pass --base");
-  }
-  const baseRemote = remoteForRepo(repoRoot, baseRepo);
-
-  const branch = run("git", ["rev-parse", "--abbrev-ref", "HEAD"], repoRoot);
-  if (!branch.ok || branch.stdout === "HEAD") {
-    fail("cannot resolve base: HEAD is detached; pass --base");
-  }
-  const list = run(
-    "gh",
-    [
-      "pr",
-      "list",
-      "--repo",
-      baseRepo,
-      "--head",
-      branch.stdout,
-      "--state",
-      "open",
-      "--json",
-      "baseRefName,headRepositoryOwner",
-    ],
-    repoRoot,
-  );
-  if (!list.ok) fail("cannot resolve base: gh pr list failed; pass --base");
-  let pulls;
-  try {
-    pulls = JSON.parse(list.stdout);
-  } catch {
-    fail("cannot resolve base: gh pr list returned no JSON; pass --base");
-  }
-  const headOwner = currentRepo.split("/")[0].toLowerCase();
-  const mine = pulls.filter(
-    (pull) => pull.headRepositoryOwner?.login?.toLowerCase() === headOwner,
-  );
-  if (mine.length > 1) {
-    fail(
-      `cannot resolve base: ${mine.length} open PRs match ${branch.stdout}; pass --base`,
-    );
-  }
-  const baseRef = mine.length === 1 ? mine[0].baseRefName : "main";
-  return `${baseRemote}/${baseRef}`;
-}
-
-/**
- * Fetch the base when it is a remote-tracking ref, then verify it resolves. A
- * failed fetch is fatal: a stale tracking ref still resolves, so continuing
- * would review the wrong base without saying so.
- */
-function verifyBase(repoRoot, base, shouldFetch) {
-  const parts = base.match(/^([^/]+)\/(.+)$/);
-  if (shouldFetch && parts) {
-    const remotes = run("git", ["remote"], repoRoot);
-    if (remotes.ok && remotes.stdout.split("\n").includes(parts[1])) {
-      const fetched = run(
-        "git",
-        ["fetch", "--quiet", parts[1], parts[2]],
-        repoRoot,
-      );
-      if (!fetched.ok) {
-        fail(`cannot fetch ${base}: ${fetched.stderr || "git fetch failed"}`);
-      }
-    }
-  }
-  const sha = run(
-    "git",
-    ["rev-parse", "--verify", "--quiet", `${base}^{commit}`],
-    repoRoot,
-  );
-  if (!sha.ok || !sha.stdout) fail(`base ${base} does not resolve to a commit`);
-  return sha.stdout;
-}
-
-/**
- * Refuse a report path that Git would track. Both the report and its sibling
- * `.stderr.log` are unscanned model output, so both have to be ignored.
- */
-function checkOutPath(repoRoot, outPath) {
-  const resolved = path.resolve(outPath);
-  if (!resolved.startsWith(`${repoRoot}${path.sep}`)) return resolved;
-  for (const candidate of [resolved, `${resolved}.stderr.log`]) {
-    if (!run("git", ["check-ignore", "-q", candidate], repoRoot).ok) {
-      fail(`--out ${outPath} is inside the repository and not ignored by Git`);
-    }
-  }
-  return resolved;
-}
-
 function utcStamp(date) {
   return date.toISOString().replace(/[-:]/g, "").replace(/\..*/, "");
 }
 
-/**
- * The commit codex reviews from. Its own report summaries say "against the
- * specified merge base", so a base holding commits HEAD does not have — a base
- * that moved after the last merge forward — must not be diffed directly: the
- * two-dot form would count those base-only changes in reverse and overstate
- * the branch. Falls back to the base itself when no merge base exists.
- */
-function mergeBase(repoRoot, base) {
-  const found = run("git", ["merge-base", "HEAD", base], repoRoot);
-  return found.ok && found.stdout ? found.stdout : base;
-}
-
-/**
- * The size codex will see. It diffs the working tree against the merge base,
- * not `base...HEAD`, so this uses the two-dot form against that commit.
- * Untracked files appear in neither; the `dirty` header field is the flag for
- * uncommitted work.
- */
-function shortstat(repoRoot, from) {
-  const stat = run(
-    "git",
-    ["diff", "--no-ext-diff", "--shortstat", from],
-    repoRoot,
-  );
-  return stat.ok && stat.stdout ? stat.stdout : "0 files changed";
-}
-
-/**
- * What the reviewer is reading: HEAD, the index and working-tree state, and the
- * tracked content that differs from HEAD. It is taken before the run and again
- * after it, so a target that shifts under the reviewer is caught instead of
- * being reported as reviewed. `dirty` alone cannot do this: an edit to an
- * already-modified file leaves the flag and the status lines unchanged.
- * Untracked content is outside the fingerprint exactly as it is outside
- * `--base`; the status listing still names those paths.
- */
-function treeFingerprint(repoRoot) {
-  const parts = [
-    run("git", ["rev-parse", "HEAD"], repoRoot),
-    run("git", ["status", "--porcelain"], repoRoot),
-    run("git", ["diff", "--no-ext-diff", "HEAD"], repoRoot),
-  ];
-  if (parts.some((part) => !part.ok)) return null;
-  return createHash("sha256")
-    .update(parts.map((part) => part.stdout).join("\0"))
-    .digest("hex");
-}
-
 /** Spawn codex in its own process group so a timeout can kill the whole tree. */
-function runCodex(repoRoot, base, reportPath, timeoutSeconds) {
-  const env = { ...ENV_FIXED };
-  for (const name of ENV_ALLOWLIST) {
-    if (process.env[name] !== undefined) env[name] = process.env[name];
-  }
+function runCodex(repoRoot, codexBin, base, reportPath, timeoutSeconds) {
+  const env = codexEnv();
   const argv = [
     "exec",
     "review",
@@ -356,12 +117,12 @@ function runCodex(repoRoot, base, reportPath, timeoutSeconds) {
   ];
   // Both files hold unscanned model output that can quote the diff, so keep
   // them owner-only. The mode argument applies to a file this call creates;
-  // fchmod covers one that already exists under a re-used `--out` path.
+  // fchmod covers one that already exists under a reused `--out` path.
   const bodyFd = fs.openSync(reportPath, "w", 0o600);
   const stderrFd = fs.openSync(`${reportPath}.stderr.log`, "w", 0o600);
   fs.fchmodSync(bodyFd, 0o600);
   fs.fchmodSync(stderrFd, 0o600);
-  const child = spawn("codex", argv, {
+  const child = spawn(codexBin, argv, {
     cwd: repoRoot,
     env,
     detached: true,
@@ -385,13 +146,40 @@ function runCodex(repoRoot, base, reportPath, timeoutSeconds) {
       kill("SIGTERM");
       setTimeout(() => kill("SIGKILL"), 5000).unref();
     }, timeoutSeconds * 1000);
+    // The child is in its own process group, so a Ctrl-C or a SIGTERM aimed at
+    // this wrapper never reaches it: without these handlers an hour-long paid
+    // review keeps running, and keeps writing the report, after the command
+    // appears cancelled.
+    let interruptTimer = null;
+    let wasInterrupted = false;
+    const interrupted = (signal) => {
+      wasInterrupted = true;
+      kill("SIGTERM");
+      if (interruptTimer) return;
+      // A last resort for a child that ignores SIGTERM: the normal path is the
+      // "close" event below, which settles and lets the caller report the run.
+      interruptTimer = setTimeout(() => {
+        kill("SIGKILL");
+        process.exit(signal === "SIGINT" ? 130 : 143);
+      }, 2000);
+      interruptTimer.unref();
+    };
+    const handlers = ["SIGINT", "SIGTERM", "SIGHUP"].map((signal) => {
+      const handler = () => interrupted(signal);
+      process.on(signal, handler);
+      return [signal, handler];
+    });
     const settle = (outcome) => {
       if (settled) return;
       settled = true;
+      for (const [signal, handler] of handlers) {
+        process.removeListener(signal, handler);
+      }
+      if (interruptTimer) clearTimeout(interruptTimer);
       clearTimeout(deadline);
       // codex can exit on SIGTERM while a descendant ignores it, so sweep the
       // group again rather than trusting an unreferenced escalation timer.
-      if (outcome.timedOut) kill("SIGKILL");
+      if (outcome.timedOut || wasInterrupted) kill("SIGKILL");
       fs.closeSync(bodyFd);
       fs.closeSync(stderrFd);
       resolve(outcome);
@@ -413,18 +201,28 @@ function renderHeader(fields) {
 async function main() {
   const options = parseArgs(process.argv.slice(2));
 
+  // The root comes off the filesystem, so PATH is sanitized before this
+  // process runs anything at all. Git then confirms the directory really is
+  // the top level, on the clean PATH.
+  const repoRoot = discoverRoot();
+  setSafePath(sanitizedPath(repoRoot));
   const toplevel = run("git", ["rev-parse", "--show-toplevel"], process.cwd());
   if (!toplevel.ok) fail("not inside a Git repository");
-  const repoRoot = toplevel.stdout;
+  if (realOrSelf(toplevel.stdout) !== repoRoot) {
+    fail(
+      `the nearest .git is at ${repoRoot} but Git reports ${toplevel.stdout}`,
+    );
+  }
 
   if (process.env.CODEX_SANDBOX || process.env.CODEX_THREAD_ID) {
     fail(
       "refusing to run inside an active Codex session: nested `codex exec` is unavailable",
     );
   }
-  const version = run("codex", ["--version"], repoRoot);
+  const codexBin = resolveCodex(repoRoot);
+  const version = run(codexBin, ["--version"], repoRoot, codexEnv());
   if (!version.ok) {
-    fail("codex is not on PATH; see operating-card step 4 for the fallback");
+    fail(`codex at ${codexBin} does not answer --version`);
   }
 
   const status = run("git", ["status", "--porcelain"], repoRoot);
@@ -443,7 +241,10 @@ async function main() {
   const defaultOut = path.join(
     repoRoot,
     ".reviews",
-    `closeout-review-${utcStamp(started)}-${head.stdout.slice(0, 7)}.md`,
+    // The pid keeps two runs started in the same second on the same commit
+    // from opening each other's report with "w" and reading back the wrong
+    // body.
+    `closeout-review-${utcStamp(started)}-${head.stdout.slice(0, 7)}-${process.pid}.md`,
   );
   const reportPath = checkOutPath(repoRoot, options.out ?? defaultOut);
   fs.mkdirSync(path.dirname(reportPath), { recursive: true });
@@ -454,16 +255,12 @@ async function main() {
 
   const result = await runCodex(
     repoRoot,
+    codexBin,
     base,
     reportPath,
     options.timeoutSeconds,
   );
   const body = fs.readFileSync(reportPath, "utf8");
-  const stderrTail = fs
-    .readFileSync(`${reportPath}.stderr.log`, "utf8")
-    .split("\n")
-    .slice(-20)
-    .join("\n");
 
   // codex re-reads the tree and re-resolves the base ref while it runs, so a
   // commit, an edit or a sibling fetch landing mid-run moves what the report
@@ -475,7 +272,8 @@ async function main() {
     repoRoot,
   );
   const targetAfter = treeFingerprint(repoRoot);
-  const moved = headAtFinish.ok && headAtFinish.stdout !== head.stdout;
+  // `!ok` counts as moved: an unreadable HEAD is not evidence that it held.
+  const moved = !headAtFinish.ok || headAtFinish.stdout !== head.stdout;
   const baseMoved = !baseAtFinish.ok || baseAtFinish.stdout !== baseSha;
   const targetChanged = targetAfter === null || targetAfter !== targetBefore;
 
@@ -487,12 +285,21 @@ async function main() {
   } else if (result.timedOut) {
     reason = `codex timed out after ${options.timeoutSeconds}s; the partial report is kept`;
   } else if (result.code !== 0) {
-    reason = `codex exited ${result.code}\n${stderrTail}`;
+    // The transcript holds unscanned model output and quoted diff text. Name
+    // the owner-only file rather than copying its tail into a terminal or a CI
+    // log that keeps it.
+    reason =
+      `codex exited ${result.code}; its transcript is ` +
+      `${reportPath}.stderr.log`;
   } else if (body.trim() === "") {
     reason = "codex produced an empty report";
-  } else if (targetChanged || baseMoved) {
+  } else if (targetChanged || baseMoved || moved) {
+    // `moved` is checked on its own because HEAD is read before the base is
+    // resolved and fetched: a commit landing in that window is already in
+    // `targetBefore`, so the fingerprints agree while `head_sha` names the
+    // commit codex never saw.
     reason =
-      `the review target moved while codex read it (${targetChanged ? "head or working tree" : `base ${base}`}); ` +
+      `the review target moved while codex read it (${targetChanged || moved ? "head or working tree" : `base ${base}`}); ` +
       "the report does not describe the diff in its header";
   } else if (FINDINGS_HEADING.test(body) || FINDING_BULLET.test(body)) {
     verdict = "findings";
@@ -525,7 +332,7 @@ async function main() {
     ...(baseMoved && baseAtFinish.ok
       ? { base_sha_at_finish: baseAtFinish.stdout }
       : {}),
-    ...(targetChanged || baseMoved ? { target_moved: "yes" } : {}),
+    ...(targetChanged || baseMoved || moved ? { target_moved: "yes" } : {}),
     verdict,
   });
   const footer = result.timedOut

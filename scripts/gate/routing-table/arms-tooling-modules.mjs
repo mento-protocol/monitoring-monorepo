@@ -450,6 +450,8 @@ export const TOOLING_MODULE_ARMS = [
     why: "The closeout review tool operating-card step 4 runs. Its own suite is the only check that proves the pinned codex argv, the environment allowlist, and the exit codes the card reads.",
     patterns: [
       "scripts/pr/closeout-review.mjs",
+      "scripts/pr/closeout-review-exec.mjs",
+      "scripts/pr/closeout-review-git.mjs",
       "scripts/pr/closeout-review.test.mjs",
     ],
     effects: [

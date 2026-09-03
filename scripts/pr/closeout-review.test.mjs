@@ -446,7 +446,15 @@ test("a non-zero codex exit is a tool failure, not a finding", (t) => {
 
   assert.equal(run.status, 2);
   assert.match(run.stderr, /codex exited 7/);
-  assert.match(run.stderr, /boom/);
+  // The transcript is named, not quoted: its content is unscanned model output
+  // and quoted diff text, and this stderr reaches terminals and CI logs.
+  assert.match(run.stderr, new RegExp(`${run.reportPath}\\.stderr\\.log`));
+  assert.doesNotMatch(run.stderr, /boom/);
+  assert.match(
+    fs.readFileSync(`${run.reportPath}.stderr.log`, "utf8"),
+    /boom/,
+    "the transcript still holds what codex printed",
+  );
   assert.match(fs.readFileSync(run.reportPath, "utf8"), /^verdict: failed$/m);
 });
 
@@ -548,6 +556,54 @@ test("a missing codex CLI is refused with the fallback pointer", (t) => {
   assert.match(run.stderr, /codex is not on PATH/);
 });
 
+test("a codex inside the tree under review is refused", (t) => {
+  const repo = makeRepo(t);
+  // Where `pnpm run` puts the repository's own bin directory: first on PATH.
+  const shimDir = path.join(repo.repo, "node_modules", ".bin");
+  fs.mkdirSync(shimDir, { recursive: true });
+  fakeCodex(shimDir, 'echo "clean"');
+
+  const run = runScript(
+    repo,
+    ["--base", "base", "--no-fetch"],
+    {},
+    `${shimDir}:${gitOnlyDir(repo.root)}`,
+  );
+
+  assert.equal(run.status, 2);
+  assert.match(run.stderr, /refusing the repository-controlled codex/);
+  assert.equal(run.reportPath, null);
+});
+
+test("the version probe runs under the same environment allowlist", (t) => {
+  const repo = makeRepo(t);
+  const envDump = path.join(repo.root, "version-env.txt");
+  // A fake that dumps its environment from the `--version` branch, which the
+  // shared helper answers before it can be observed.
+  const file = path.join(repo.bin, "codex");
+  fs.writeFileSync(
+    file,
+    [
+      "#!/bin/sh",
+      'if [ "$1" = "--version" ]; then',
+      `  env > ${JSON.stringify(envDump)}`,
+      '  echo "codex-cli 9.9.9-fake"',
+      "  exit 0",
+      "fi",
+      'echo "clean"',
+    ].join("\n") + "\n",
+  );
+  fs.chmodSync(file, 0o755);
+
+  const run = runScript(repo, ["--base", "base", "--no-fetch"]);
+
+  assert.equal(run.status, 0);
+  const dumped = fs.readFileSync(envDump, "utf8");
+  assert.doesNotMatch(dumped, /^GH_TOKEN=/m, "GH_TOKEN reached the probe");
+  assert.match(dumped, /^OPENAI_API_KEY=secret-openai-key$/m);
+  assert.match(dumped, /^GIT_CONFIG_GLOBAL=\/dev\/null$/m);
+});
+
 test("an unknown argument is refused with the usage line", (t) => {
   const repo = makeRepo(t);
   fakeCodex(repo.bin, 'echo "clean"');
@@ -557,4 +613,299 @@ test("an unknown argument is refused with the usage line", (t) => {
   assert.equal(run.status, 2);
   assert.match(run.stderr, /unknown argument --engine/);
   assert.match(run.stderr, /usage: closeout-review/);
+});
+
+/**
+ * A fake `gh` answering the two queries `resolveBase` makes: `repo view` and
+ * `pr list`. `defaultBranch` is what `repo view` reports; `pulls` is the JSON
+ * array `pr list` returns.
+ */
+function fakeGh(bin, { defaultBranch, pulls }) {
+  const view = JSON.stringify({
+    nameWithOwner: "acme/widgets",
+    parent: null,
+    defaultBranchRef: defaultBranch ? { name: defaultBranch } : null,
+  });
+  const file = path.join(bin, "gh");
+  fs.writeFileSync(
+    file,
+    [
+      "#!/bin/sh",
+      'if [ "$1" = "repo" ]; then',
+      `  echo ${JSON.stringify(view)}`,
+      "  exit 0",
+      "fi",
+      'if [ "$1" = "pr" ]; then',
+      `  echo ${JSON.stringify(JSON.stringify(pulls))}`,
+      "  exit 0",
+      "fi",
+      "exit 1",
+    ].join("\n") + "\n",
+  );
+  fs.chmodSync(file, 0o755);
+}
+
+/** Point `origin` at a GitHub URL and give it a tracking ref for `branch`. */
+function addOrigin(repo, branch) {
+  git(repo, "remote", "add", "origin", "https://github.com/acme/widgets.git");
+  git(repo, "update-ref", `refs/remotes/origin/${branch}`, "base");
+}
+
+test("with no open PR the base falls back to the repository default branch", (t) => {
+  const repo = makeRepo(t);
+  fakeCodex(repo.bin, 'echo "clean"');
+  // A default branch that is deliberately not `main`: a hardcoded fallback
+  // would review against the wrong ref here and say nothing.
+  fakeGh(repo.bin, { defaultBranch: "trunk", pulls: [] });
+  addOrigin(repo.repo, "trunk");
+
+  const run = runScript(repo, ["--no-fetch"]);
+
+  assert.equal(run.status, 0);
+  assert.match(run.stdout, /against origin\/trunk /);
+  assert.match(
+    fs.readFileSync(run.reportPath, "utf8"),
+    /^base_ref: origin\/trunk$/m,
+  );
+});
+
+test("with one open PR the base is that PR own base branch", (t) => {
+  const repo = makeRepo(t);
+  fakeCodex(repo.bin, 'echo "clean"');
+  fakeGh(repo.bin, {
+    defaultBranch: "trunk",
+    pulls: [
+      {
+        baseRefName: "release",
+        headRepositoryOwner: { login: "acme" },
+      },
+    ],
+  });
+  addOrigin(repo.repo, "release");
+
+  const run = runScript(repo, ["--no-fetch"]);
+
+  assert.equal(run.status, 0);
+  assert.match(
+    fs.readFileSync(run.reportPath, "utf8"),
+    /^base_ref: origin\/release$/m,
+  );
+});
+
+test("a repository naming no default branch refuses instead of guessing", (t) => {
+  const repo = makeRepo(t);
+  fakeCodex(repo.bin, 'echo "clean"');
+  fakeGh(repo.bin, { defaultBranch: null, pulls: [] });
+  addOrigin(repo.repo, "trunk");
+
+  const run = runScript(repo, ["--no-fetch"]);
+
+  assert.equal(run.status, 2);
+  assert.match(run.stderr, /names no default branch; pass --base/);
+});
+
+test("a repository-controlled git shim never runs at all", (t) => {
+  const repo = makeRepo(t);
+  fakeCodex(repo.bin, 'echo "clean"');
+  // What `pnpm run` puts first on PATH. The shim records every call it gets,
+  // so the marker proves whether it was consulted — including on the first
+  // call, before the script knows where the repository root is.
+  const shimDir = path.join(repo.repo, "node_modules", ".bin");
+  fs.mkdirSync(shimDir, { recursive: true });
+  const marker = path.join(repo.root, "shim-ran.txt");
+  fs.writeFileSync(
+    path.join(shimDir, "git"),
+    [
+      "#!/bin/sh",
+      `echo "$@" >> ${JSON.stringify(marker)}`,
+      `exec ${JSON.stringify(GIT_BIN)} "$@"`,
+    ].join("\n") + "\n",
+  );
+  fs.chmodSync(path.join(shimDir, "git"), 0o755);
+
+  const run = runScript(
+    repo,
+    ["--base", "base", "--no-fetch"],
+    {},
+    `${shimDir}:${repo.bin}:${process.env.PATH}`,
+  );
+
+  assert.equal(run.status, 0);
+  assert.equal(fs.existsSync(marker), false, "the shim was executed");
+});
+
+test("a default report path is unique per process", (t) => {
+  const repo = makeRepo(t);
+  fakeCodex(repo.bin, 'echo "clean"');
+
+  const run = runScript(repo, ["--base", "base", "--no-fetch"]);
+
+  assert.equal(run.status, 0);
+  assert.match(path.basename(run.reportPath), /-[0-9a-f]{7}-\d+\.md$/);
+});
+
+test("ambient Git redirection does not reach the fingerprint", (t) => {
+  const repo = makeRepo(t);
+  fakeCodex(repo.bin, 'echo "clean"');
+  // An alternate index the reviewer would never see. Left in place, Git would
+  // read and write it here, and the header would describe a tree codex did
+  // not read.
+  const index = path.join(repo.root, "alternate-index");
+
+  const run = runScript(repo, ["--base", "base", "--no-fetch"], {
+    GIT_INDEX_FILE: index,
+  });
+
+  assert.equal(run.status, 0);
+  assert.equal(fs.existsSync(index), false, "Git used the alternate index");
+});
+
+test("a mirror remote is not read as the GitHub base repository", (t) => {
+  const repo = makeRepo(t);
+  fakeCodex(repo.bin, 'echo "clean"');
+  fakeGh(repo.bin, { defaultBranch: "trunk", pulls: [] });
+  // Same owner and name, different host: accepting it would let a mirror
+  // supply the base the review diffs against.
+  git(
+    repo.repo,
+    "remote",
+    "add",
+    "mirror",
+    "https://mirror.example/acme/widgets.git",
+  );
+
+  const run = runScript(repo, ["--no-fetch"]);
+
+  assert.equal(run.status, 2);
+  assert.match(run.stderr, /0 remotes serve acme\/widgets/);
+});
+
+test("no merge base is a stop rather than a base-ref merge base", (t) => {
+  const repo = makeRepo(t);
+  fakeCodex(repo.bin, 'echo "clean"');
+  // An orphan branch shares no history with HEAD, so `git merge-base` fails
+  // exactly as it does in a shallow checkout.
+  git(repo.repo, "checkout", "--quiet", "--orphan", "unrelated");
+  git(repo.repo, "commit", "--quiet", "--allow-empty", "-m", "unrelated");
+  git(repo.repo, "checkout", "--quiet", "main");
+
+  const run = runScript(repo, ["--base", "unrelated", "--no-fetch"]);
+
+  assert.equal(run.status, 2);
+  assert.match(run.stderr, /no merge base between HEAD and unrelated/);
+});
+
+test("an --out symlink is refused before anything is written", (t) => {
+  const repo = makeRepo(t);
+  fakeCodex(repo.bin, 'echo "clean"');
+  // Ignored by Git, so the lexical check passes; the link lands in a tracked
+  // directory, which is where the report would actually be written.
+  const reviews = path.join(repo.repo, ".reviews");
+  fs.mkdirSync(reviews, { recursive: true });
+  const target = path.join(repo.repo, "leaked.md");
+  const link = path.join(reviews, "link.md");
+  fs.symlinkSync(target, link);
+
+  const run = runScript(repo, ["--base", "base", "--no-fetch", "--out", link]);
+
+  assert.equal(run.status, 2);
+  assert.match(run.stderr, /symbolic link|not ignored by Git/);
+  assert.equal(fs.existsSync(target), false);
+});
+
+test("a codex symlinked into the tree under review is refused", (t) => {
+  const repo = makeRepo(t);
+  // The link sits outside the repository and points back into it, so only the
+  // resolved target says the branch supplies its own reviewer.
+  const inTree = path.join(repo.repo, "tools");
+  fs.mkdirSync(inTree, { recursive: true });
+  fakeCodex(inTree, 'echo "clean"');
+  const linkDir = path.join(repo.root, "link-bin");
+  fs.mkdirSync(linkDir, { recursive: true });
+  fs.symlinkSync(path.join(inTree, "codex"), path.join(linkDir, "codex"));
+
+  const run = runScript(
+    repo,
+    ["--base", "base", "--no-fetch"],
+    {},
+    `${linkDir}:${gitOnlyDir(repo.root)}`,
+  );
+
+  assert.equal(run.status, 2);
+  assert.match(run.stderr, /refusing the repository-controlled codex/);
+  assert.equal(run.reportPath, null);
+});
+
+test("environment-injected Git configuration does not reach the fingerprint", (t) => {
+  const repo = makeRepo(t);
+  fakeCodex(repo.bin, 'echo "clean"');
+  // A dirty tracked file, so the diff behind the fingerprint has output the
+  // injected `diff.noprefix` would reshape.
+  fs.writeFileSync(
+    path.join(repo.repo, "math.js"),
+    "export const sum = () => 2;\n",
+  );
+
+  const plain = runScript(repo, ["--base", "base", "--no-fetch"]);
+  const injected = runScript(repo, ["--base", "base", "--no-fetch"], {
+    GIT_CONFIG_COUNT: "1",
+    GIT_CONFIG_KEY_0: "diff.noprefix",
+    GIT_CONFIG_VALUE_0: "true",
+  });
+
+  assert.equal(plain.status, 0);
+  assert.equal(injected.status, 0);
+  const fingerprint = (run) =>
+    fs
+      .readFileSync(run.reportPath, "utf8")
+      .match(/^target_fingerprint: (\S+)$/m)[1];
+  assert.equal(
+    fingerprint(injected),
+    fingerprint(plain),
+    "injected Git configuration reshaped the fingerprint",
+  );
+});
+
+test("a HEAD that moves during base resolution is a stop", (t) => {
+  const repo = makeRepo(t);
+  fakeCodex(repo.bin, 'echo "clean"');
+  fakeGh(repo.bin, { defaultBranch: "trunk", pulls: [] });
+  addOrigin(repo.repo, "trunk");
+  // `gh` runs after HEAD is read and before the fingerprint is taken, so a
+  // commit landing here sits inside both fingerprints while `head_sha` still
+  // names the commit codex never saw. The fingerprints agree and only the
+  // saved HEAD differs, which is the case the fingerprint pair cannot see.
+  const ghPath = path.join(repo.bin, "gh");
+  const marker = path.join(repo.root, "committed");
+  const ghScript = fs.readFileSync(ghPath, "utf8").split("\n");
+  // Ahead of the query answers, because each branch exits before the end of
+  // the file. The marker keeps the second `gh` call from re-running the block:
+  // a second `git commit` with nothing staged writes to the stdout the script
+  // under test parses as JSON.
+  ghScript.splice(
+    1,
+    0,
+    [
+      `if [ ! -e ${JSON.stringify(marker)} ]; then`,
+      `  : > ${JSON.stringify(marker)}`,
+      `  ( cd ${JSON.stringify(repo.repo)} &&`,
+      "    echo 'export const product = () => 6;' > product.js &&",
+      "    git add -A && git commit --quiet -m mid-run ) >/dev/null 2>&1",
+      "fi",
+    ].join("\n"),
+  );
+  fs.writeFileSync(ghPath, ghScript.join("\n"));
+
+  const run = runScript(repo, ["--no-fetch"]);
+
+  assert.equal(run.status, 2);
+  assert.match(run.stderr, /the review target moved while codex read it/);
+  const report = fs.readFileSync(run.reportPath, "utf8");
+  assert.match(report, /^target_moved: yes$/m);
+  // The header names the commit the run started on and the report names the
+  // one it ended on. Without the saved-HEAD check this run reads as clean.
+  const headSha = report.match(/^head_sha: ([0-9a-f]{40})$/m)[1];
+  const atFinish = report.match(/^head_sha_at_finish: ([0-9a-f]{40})$/m)[1];
+  assert.notEqual(headSha, atFinish);
+  assert.equal(atFinish, git(repo.repo, "rev-parse", "HEAD"));
 });
