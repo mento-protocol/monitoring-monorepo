@@ -74,6 +74,95 @@ move the still-open issue to `needs-grooming` through the explicit stored merged
 PR proof. That operator action happens after the sweep has stopped. It does not
 grant the sweep merge authority.
 
+## Amendment — 2026-09: the sweep grooms its own queue
+
+The first operator-triggered sweep (2026-09-01) claimed nothing. Of 18 open
+`agent-ready` issues, none carried `risk:low` beside exactly one `pkg:*`, and
+nine engineering issues carried no queue-state label at all, so ranking counted
+them outside the queue. The Consequences section below prices narrow
+eligibility as "the intended cost". That price assumed the labels already
+existed. Neither stage of the loop writes them, so the delivered throughput was
+zero rather than low.
+
+Two additions, neither of which changes the decision above. Eligibility keeps
+every clause it had, the sweep still stops at READY, and it still never merges.
+
+**A grooming pass inside the sweep.** It runs after the batch is claimed and
+every worker is spawned, and before the report — including on an empty batch,
+which is the case it exists for. It reads each candidate's body and the paths
+that body names, applies `pkg:*`, `kind:*`, and a narrowing `risk:*` from what
+the tree holds, posts one `sweep-groomed:v1` marker comment per issue, and is
+capped at 10 candidates a run. Its position in the loop is one safety property:
+this run's eligibility step has already finished, so no label the pass writes
+can select work for this run. Grooming first and then selecting was the
+alternative, and it is one night faster; it was rejected because it lets one
+unattended session grant itself `risk:low` and immediately work the issue,
+which is the root [`AGENTS.md`](../../AGENTS.md) rule against weakening a
+control that blocks your own work, applied to the sweep's own gate.
+
+**Ordering alone was not enough, so the pass never writes a label that leaves an
+issue sweep-eligible, and never writes a state label.** A run boundary plus a
+passive veto still ends with the same agent population treating its own label as
+authorization twelve hours later, on an issue no human read. The rule is stated
+against the eligibility predicate rather than against a list of labels, because
+which label completes it depends on what the issue already carries: for an issue
+holding `risk:low` and no package area it is the `pkg:*`; for one holding a
+package area and no risk label it is the `risk:low`. Narrowing labels —
+`risk:medium`, `risk:high`, several `pkg:*` areas — are written freely. Anything
+that would complete the predicate goes in the marker's `proposed` list with the
+rule clause behind it, and one human label supplies the acknowledgement that
+ordering cannot. State labels are withheld for a different reason:
+[ADR 0082](0082-persistent-issue-board-mutation-mutex.md) serializes queue-state
+writes behind the per-issue mutex, `gh issue edit` does not take it, and a raw
+write against a roster snapshot can land `needs-grooming` beside an
+`agent-active` a claim added moments earlier. Both stay proposals an operator or
+a mutex-owning helper applies. The cost is that repairing the queue completely
+still needs one human pass; the pass removes the labeling work, not the
+judgement.
+
+The marker also carries a 12-hour veto window. An issue a sweep groomed is
+ineligible until it closes, which gives a human a bounded chance to disagree
+with an agent's label before that label picks work for another agent. Only a
+sweep writes the marker, so hand-labeling is never delayed. The accepted cost
+is that fast-tracking a sweep-groomed issue means waiting the window out or
+deleting the marker comment.
+
+The marker is written before the labels, on every issue. The comment and the
+label edit are separate API calls, so an ordering exists either way, and only
+this one fails safe: a label that landed with no marker is selectable at once,
+while a marker with no labels is an issue the next run will not pick and the
+report explains. When the comment cannot be posted the pass writes no label for
+that issue at all.
+
+The marker is a comment, so eligibility reads it as untrusted input. The window
+is measured from GitHub's `createdAt` rather than the timestamp inside the
+payload, and a marker counts only from an author who can set labels — the
+account the sweep authenticates as, or a login whose repository role is
+`triage` or above. `authorAssociation` was rejected for that second test: it
+names a relationship rather than a permission level, so a read-only outside
+collaborator reads as `COLLABORATOR`. Without both rules the veto is a queue
+denial-of-service, where any issue participant parks a real issue out of the
+queue by re-posting the public marker format or extends its window with a
+future timestamp.
+
+**A path test for `pkg:tooling` independence.** The batch rule "no two issues
+share a `pkg:*` label" assumes a label maps to a collision surface. It does for
+`pkg:indexer` and `pkg:dashboard`. `pkg:tooling` spans `scripts/`, `docs/`,
+`.agents/`, `.claude/`, and root tooling, so it refuses unrelated pairs. Two
+`pkg:tooling` candidates are now independent when each body names its expected
+files, no path either names equals or contains a path the other names, and
+neither names a shared root file or control root. Containment rather than a
+fixed-depth prefix, because `docs/` and `docs/notes/` differ at every prefix
+length yet overlap on every file. The mirrored skill trees normalize to one
+path first, since the mirror check makes every edit land in both; that
+normalization is by path segment, so it does not depend on how a body happens
+to spell a directory. A candidate
+with no path list conflicts with every other. The refinement is scoped to that
+one label; every other area keeps the label test. `pnpm issue:claim
+--sweep-eligible` enforces neither form and needs no change: it grades one
+issue's own labels and never sees the batch, so batch independence stays the
+orchestrator's judgement in both shapes.
+
 ## Alternatives considered
 
 **Shared checkout for all workers.** Cheaper to set up and avoids repeated
@@ -105,7 +194,9 @@ and every PR before anything merges.
 Eligibility is deliberately narrower than the ranking that feeds it —
 `agent-ready`, exactly one `risk:*` label equal to `risk:low`, a `pkg:*` area,
 fit not authority-capped, not blocked, and mutually independent within a batch.
-Issues outside that set stay manual, which is the intended cost.
+Issues outside that set stay manual, which is the intended cost. The amendment
+above adds the pass that keeps that set from being empty, and bounds the delay
+it introduces at 12 hours per groomed issue.
 
 A batch of 4 runs at most three ordinary check sets at once. Heavy checks run
 alone while other workers edit. Required CI owns merge admission.
@@ -126,6 +217,10 @@ PR it opens.
 - [`docs/notes/backlog-sweep.md`](../notes/backlog-sweep.md) is the canonical
   contract the skill produces against — eligibility, boundaries, resilience
   duties, and the report.
+- Issue
+  [#2209](https://github.com/mento-protocol/monitoring-monorepo/issues/2209)
+  carries the 2026-09 amendment: the grooming pass, its veto window, and the
+  `pkg:tooling` path test, all documented in the two files above.
 - The skill and canonical backlog-sweep runbook enforce the sweep-local
   resource bound.
 - The never-merge boundary rests on the operating card and
