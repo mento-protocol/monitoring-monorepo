@@ -11,7 +11,7 @@
  * Exit codes carry the verdict, because `codex exec review` always exits 0:
  *   0  the review ran and reported no findings
  *   1  the review ran and reported findings
- *   2  the tool did not run, or ran and produced nothing usable
+ *   2  the tool did not run, or ran and produced nothing usable, or it threw
  *
  * Exit 0 is the absence of a findings heading, not a positive clean verdict:
  * `codex exec review` prints no marker a clean run can be recognized by, so an
@@ -289,14 +289,27 @@ function utcStamp(date) {
 }
 
 /**
- * The size codex will see. It diffs the working tree against the base, not
- * `base...HEAD`, so this uses the same two-dot form. Untracked files appear in
- * neither; the `dirty` header field is the flag for uncommitted work.
+ * The commit codex reviews from. Its own report summaries say "against the
+ * specified merge base", so a base holding commits HEAD does not have — a base
+ * that moved after the last merge forward — must not be diffed directly: the
+ * two-dot form would count those base-only changes in reverse and overstate
+ * the branch. Falls back to the base itself when no merge base exists.
  */
-function shortstat(repoRoot, base) {
+function mergeBase(repoRoot, base) {
+  const found = run("git", ["merge-base", "HEAD", base], repoRoot);
+  return found.ok && found.stdout ? found.stdout : base;
+}
+
+/**
+ * The size codex will see. It diffs the working tree against the merge base,
+ * not `base...HEAD`, so this uses the two-dot form against that commit.
+ * Untracked files appear in neither; the `dirty` header field is the flag for
+ * uncommitted work.
+ */
+function shortstat(repoRoot, from) {
   const stat = run(
     "git",
-    ["diff", "--no-ext-diff", "--shortstat", base],
+    ["diff", "--no-ext-diff", "--shortstat", from],
     repoRoot,
   );
   return stat.ok && stat.stdout ? stat.stdout : "0 files changed";
@@ -422,6 +435,7 @@ async function main() {
 
   const base = options.base ?? resolveBase(repoRoot);
   const baseSha = verifyBase(repoRoot, base, options.fetch);
+  const mergeBaseSha = mergeBase(repoRoot, base);
   const targetBefore = treeFingerprint(repoRoot);
   if (targetBefore === null) fail("cannot fingerprint the review target");
 
@@ -435,7 +449,7 @@ async function main() {
   fs.mkdirSync(path.dirname(reportPath), { recursive: true });
 
   process.stdout.write(
-    `diff: ${shortstat(repoRoot, base)} against ${base} (${baseSha.slice(0, 7)})\n`,
+    `diff: ${shortstat(repoRoot, mergeBaseSha)} against ${base} (merge base ${mergeBaseSha.slice(0, 7)})\n`,
   );
 
   const result = await runCodex(
@@ -496,7 +510,12 @@ async function main() {
     sandbox: SANDBOX,
     base_ref: base,
     base_sha: baseSha,
+    merge_base_sha: mergeBaseSha,
     head_sha: head.stdout,
+    // `head_sha` plus `dirty` does not name the bytes codex read when the tree
+    // carries uncommitted work. This does, and it is checkable: re-run the
+    // fingerprint over the same three inputs and compare.
+    target_fingerprint: targetBefore,
     branch: branch.ok ? branch.stdout : "unknown",
     dirty: status.stdout === "" ? "no" : "yes",
     started: started.toISOString(),
@@ -521,4 +540,11 @@ async function main() {
   process.exitCode = exitCode;
 }
 
-await main();
+// Exit 1 means "the review ran and found things". Nothing else may produce it,
+// so an unexpected throw — an unwritable `--out` directory, a full disk — lands
+// on the tool-failure code rather than reading as findings.
+try {
+  await main();
+} catch (error) {
+  fail(`unexpected failure: ${error?.stack ?? error}`);
+}

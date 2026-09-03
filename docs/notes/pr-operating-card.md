@@ -178,10 +178,11 @@ even when you never open an authority.
    Then invoke the `review` skill on the same diff and pass it four
    instructions: the second-model pass already ran, so do not run the skill's
    own second-model tooling; read the whole report file at `<path>` rather
-   than skimming it; the report covers base `<ref>@<sha>` and head `<sha>`
-   (dirty: `<flag>`), so exclude it if that is not the pinned target; verify
-   every claim against the code, because some are wrong, and add what the
-   report missed.
+   than skimming it; the report covers merge base `<sha>` and head `<sha>`
+   (dirty: `<flag>`, `target_fingerprint: <sha256>`), so exclude it if that is
+   not the pinned target — on a dirty tree the fingerprint, not the head sha,
+   is what names the reviewed bytes; verify every claim against the code,
+   because some are wrong, and add what the report missed.
 
    **With no `codex` on PATH** — Claude cloud sessions — skip the script, run
    the `review` skill alone, and disclose the single-source coverage in

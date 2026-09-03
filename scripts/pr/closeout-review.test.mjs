@@ -122,7 +122,10 @@ test("a clean report exits 0 and prints the report path last", (t) => {
   const run = runScript(repo, ["--base", "base", "--no-fetch"]);
 
   assert.equal(run.status, 0);
-  assert.match(run.stdout, /^diff: .* against base \([0-9a-f]{7}\)$/m);
+  assert.match(
+    run.stdout,
+    /^diff: .* against base \(merge base [0-9a-f]{7}\)$/m,
+  );
   assert.ok(run.reportPath, `no report path in: ${run.stdout}`);
   const report = fs.readFileSync(run.reportPath, "utf8");
   assert.match(report, /^verdict: clean$/m);
@@ -352,6 +355,64 @@ test("the printed diff size counts uncommitted work, as codex does", (t) => {
   const run = runScript(repo, ["--base", "base", "--no-fetch"]);
 
   assert.match(run.stdout, /^diff: 2 files changed/m);
+});
+
+test("the printed diff size ignores commits only the base carries", (t) => {
+  const repo = makeRepo(t);
+  fakeCodex(repo.bin, 'echo "clean"');
+  // Advance `base` past the merge base with a file HEAD never saw. The two-dot
+  // form against the branch tip would count that file as a reversed deletion.
+  const headSha = git(repo.repo, "rev-parse", "HEAD");
+  git(repo.repo, "checkout", "--quiet", "base");
+  fs.writeFileSync(
+    path.join(repo.repo, "base-only.js"),
+    "export const x = 1;\n",
+  );
+  git(repo.repo, "add", "-A");
+  git(repo.repo, "commit", "--quiet", "-m", "base moves on");
+  git(repo.repo, "checkout", "--quiet", headSha);
+  git(repo.repo, "checkout", "--quiet", "-B", "work", headSha);
+
+  const run = runScript(repo, ["--base", "base", "--no-fetch"]);
+
+  assert.match(run.stdout, /^diff: 1 file changed/m);
+  assert.match(run.stdout, /against base \(merge base [0-9a-f]{7}\)/);
+  const report = fs.readFileSync(run.reportPath, "utf8");
+  assert.equal(
+    report.match(/^merge_base_sha: ([0-9a-f]{40})$/m)[1],
+    git(repo.repo, "merge-base", "HEAD", "base"),
+  );
+  assert.notEqual(
+    report.match(/^base_sha: ([0-9a-f]{40})$/m)[1],
+    report.match(/^merge_base_sha: ([0-9a-f]{40})$/m)[1],
+  );
+});
+
+test("the header carries a fingerprint of the reviewed tree", (t) => {
+  const repo = makeRepo(t);
+  fakeCodex(repo.bin, 'echo "clean"');
+  fs.writeFileSync(path.join(repo.repo, "math.js"), "export const sum = 9;\n");
+
+  const run = runScript(repo, ["--base", "base", "--no-fetch"]);
+
+  assert.match(
+    fs.readFileSync(run.reportPath, "utf8"),
+    /^target_fingerprint: [0-9a-f]{64}$/m,
+  );
+});
+
+test("an unwritable report path is a tool failure, not a finding", (t) => {
+  const repo = makeRepo(t);
+  fakeCodex(repo.bin, 'echo "clean"');
+  // A directory where the report file belongs: the open throws. Exit 1 is
+  // reserved for a review that ran and found things.
+  const out = path.join(repo.repo, ".reviews", "taken.md");
+  fs.mkdirSync(out, { recursive: true });
+
+  const run = runScript(repo, ["--base", "base", "--no-fetch", "--out", out]);
+
+  assert.equal(run.status, 2);
+  assert.match(run.stderr, /closeout-review: unexpected failure/);
 });
 
 test("a failed base fetch is fatal rather than silently stale", (t) => {

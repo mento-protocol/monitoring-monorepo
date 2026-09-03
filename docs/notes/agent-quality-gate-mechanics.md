@@ -2586,8 +2586,13 @@ workers. Browser tests and size-limit can rewrite `next-env.d.ts`. Use
 same-machine spare workers only for read-only work. Run concurrent validation
 outside the coordinator only on another machine. Run focused checks first, then
 let the gate own the mapped batch. For a non-trivial batch, freeze the card's
-scope baseline and run autoreview after the gate. After accepted fixes, rerun
-focused checks and autoreview.
+scope baseline and run the closeout review after the gate. After accepted
+fixes, rerun focused checks and the closeout. Card step 4 owns that flow.
+
+Superseded from here to the end of the autoreview material:
+[`pr-operating-card.md`](pr-operating-card.md) step 4 owns the closeout review.
+Everything below that describes `agent-autoreview` is machinery the removal PR
+retires — read it as history, not instruction.
 
 **Stage timing and capture deadlines.** The wrapper and helper append
 best-effort stage JSONL to `.tmp/agent-autoreview/durations.jsonl`; override
