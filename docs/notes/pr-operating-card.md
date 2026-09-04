@@ -150,8 +150,8 @@ If root `package.json` changed, first run
    step 6 reads this one baseline.** A later pass never re-freezes, because a
    per-pass baseline sees only its own delta and hides cumulative growth.
    After each review-driven fix round, recount the branch's own non-test
-   changed lines against the current merge base, so a later base integration
-   adds nothing to the count. The stop threshold is twice the baseline; for a
+   changed lines the same way, new files staged first, against the current
+   merge base, so a later base integration adds nothing to the count. The stop threshold is twice the baseline; for a
    baseline under 50 lines it is 100 lines instead. When the count reaches
    the threshold, stop and report the growth to the user before the next
    round; the user decides whether to continue, split, or cut, and a continue

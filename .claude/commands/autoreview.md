@@ -6,8 +6,8 @@ argument-hint: "[additional options except --base]"
 # Auto Review
 
 Resolve the base in repository preflight. Reuse the scope baseline the
-operating card's step 4 froze; freeze one only when none exists yet. Without a
-base integration, run:
+operating card's step 4 froze; freeze one only when none exists yet, and record
+its fields in `## Validation`. Without a base integration, run:
 
 ```bash
 pnpm agent:closeout-review --base "$BASE_REMOTE/$baseRefName" $ARGUMENTS

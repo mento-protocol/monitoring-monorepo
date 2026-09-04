@@ -489,8 +489,8 @@ Field expectations:
 2. Read the scope baseline the operating card's step 4 froze before the first
    review pass, with the fields step 4 defines. Do not re-freeze it here. When
    none was recorded, as on a babysit-only entry to a PR opened elsewhere,
-   freeze one from the current head and state that it covers growth from that
-   point only. Batch review fixes locally,
+   freeze one from the current head, record its fields in `## Validation`, and
+   state that it covers growth from that point only. Batch review fixes locally,
    auditing sibling surfaces before pushing. Classify additions as in-scope,
    follow-up, or stop; open an issue labeled per
    [`agent-issue-workflow.md`](agent-issue-workflow.md) before deferring valid
