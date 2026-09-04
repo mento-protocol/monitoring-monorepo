@@ -486,12 +486,14 @@ Field expectations:
 1. Sweep feedback surfaces and build the feedback ledger before editing, then
    reply to every review comment. Use `Fixed in <commit> — <what changed>` or
    `Won't fix: <technical reason why>`; never resolve a thread before replying.
-2. Freeze the original request, target/owner, changed files, and non-test
-   changed-line count as the scope baseline. Batch review fixes locally,
+2. Read the scope baseline the operating card's step 4 froze before the first
+   review pass (request, target/owner, changed files, merge-base SHA, non-test
+   changed-line count). Do not re-freeze it here. Batch review fixes locally,
    auditing sibling surfaces before pushing. Classify additions as in-scope,
    follow-up, or stop; open an issue labeled per
    [`agent-issue-workflow.md`](agent-issue-workflow.md) before deferring valid
-   follow-up work, warn near twice the baseline, and do not pause solely for
+   follow-up work. When the non-test count nears twice the baseline, report the
+   growth and wait for the user. Do not pause solely for
    cycle count before five
    review-triggered patch cycles are complete. Pause for reclassification before
    starting a sixth.

@@ -129,10 +129,18 @@ even when you never open an authority.
    Authority:
    [`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md).
 
-4. **Review.** Freeze the scope baseline first — the initial request,
-   target/owner, changed-file set, and non-test changed-line count — as the
-   reference Babysit (step 6) checks new additions against. Then, for a
-   non-trivial completed batch, run the closeout review.
+4. **Review.** Freeze the scope baseline first, before any review-driven
+   edit: the initial request, target/owner, changed-file set, the merge-base
+   SHA, the tree SHA (or dirty fingerprint), and the non-test changed-line
+   count against that merge base. Record those numbers once; they go into
+   `## Validation` at step 5. **Every pass in this step and in step 6 reads
+   this one baseline.** A later pass never re-freezes, because a per-pass
+   baseline sees only its own delta and hides cumulative growth. After each
+   review-driven fix round, recount non-test changed lines against the same
+   merge base. When the count approaches twice the baseline, stop and report
+   the growth to the user before the next round; the user decides whether to
+   continue, split, or cut. Then, for a non-trivial completed batch, run the
+   closeout review.
 
    **Test the validation claims against what the run actually establishes.**
    On a re-run for an open PR that is its `## Validation` section; on the first
@@ -335,10 +343,12 @@ even when you never open an authority.
    sample, they do not enumerate; review is a batch-boundary verifier, not the
    inner edit loop. Never force-push or amend while babysitting,
    and `git fetch` before every push because reviewers push mid-session. Check
-   new additions against the scope baseline frozen at step 4; classify each as
+   new additions against the scope baseline frozen at step 4, never a
+   re-frozen one; classify each as
    in-scope, follow-up, or stop; **file a labeled GitHub issue before deferring
-   any valid follow-up** and link it from the PR's `## Deferrals` section. Warn
-   as the diff approaches twice the baseline. Do not pause solely for cycle count
+   any valid follow-up** and link it from the PR's `## Deferrals` section. The
+   step-4 growth stop applies here too: when the non-test count approaches
+   twice the baseline, report and wait for the user. Do not pause solely for cycle count
    before five review-triggered patch cycles are complete; pause for
    reclassification before starting a sixth. Authority:
    [`agent-issue-workflow.md`](agent-issue-workflow.md) for the deferral and
