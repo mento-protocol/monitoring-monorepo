@@ -494,8 +494,8 @@ Field expectations:
    auditing sibling surfaces before pushing. Classify additions as in-scope,
    follow-up, or stop; open an issue labeled per
    [`agent-issue-workflow.md`](agent-issue-workflow.md) before deferring valid
-   follow-up work. When the non-test count nears twice the baseline, report the
-   growth and wait for the user. Do not pause solely for
+   follow-up work. When the non-test count reaches the step-4 threshold,
+   report the growth and wait for the user. Do not pause solely for
    cycle count before five
    review-triggered patch cycles are complete. Pause for reclassification before
    starting a sixth.

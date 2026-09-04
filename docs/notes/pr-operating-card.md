@@ -143,13 +143,15 @@ If root `package.json` changed, first run
 4. **Review.** Freeze the scope baseline first, before any review-driven
    edit: the initial request, target/owner, changed-file set, the merge-base
    SHA, the tree SHA (or dirty fingerprint), and the non-test changed-line
-   count against that merge base. Record those numbers once; they go into
+   count against that merge base, with new files staged first so the count
+   sees them. Record those numbers once; they go into
    `## Validation` at step 5. **Every pass in this step and in step 6 reads
    this one baseline.** A later pass never re-freezes, because a per-pass
    baseline sees only its own delta and hides cumulative growth. After each
    review-driven fix round, recount the branch's own non-test changed lines
    against the current merge base, so a later base integration adds nothing
-   to the count. When the count approaches twice the baseline, stop and report
+   to the count. When the count reaches twice the baseline, or 100 lines for
+   a baseline under 50, stop and report
    the growth to the user before the next round; the user decides whether to
    continue, split, or cut. Then, for a non-trivial completed batch, run the
    closeout review.
@@ -384,8 +386,8 @@ If root `package.json` changed, first run
    bot finding is a valid follow-up only when the defect is observed, the wrong
    outcome is operator-visible, and the fix is small; otherwise answer it as an
    evidence-backed won't-fix, which needs no issue. The
-   step-4 growth stop applies here too: when the non-test count approaches
-   twice the baseline, report and wait for the user. Do not pause solely for cycle count
+   step-4 growth stop applies here too: when the non-test count reaches the
+   step-4 threshold, report and wait for the user. Do not pause solely for cycle count
    before five review-triggered patch cycles are complete; pause for
    reclassification before starting a sixth. Authority:
    [`agent-issue-workflow.md`](agent-issue-workflow.md) for the deferral and
