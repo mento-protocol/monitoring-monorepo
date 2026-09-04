@@ -18,7 +18,7 @@
  * would leave the wrapper arm unreachable.
  */
 
-import { getIndexerHandlerInvariantRoutingFamilies } from "../../agent-autoreview-core.mjs";
+import { getIndexerHandlerInvariantRoutingFamilies } from "./indexer-handler-invariant-contract.mjs";
 
 const indexerHandlerInvariantFamilies =
   getIndexerHandlerInvariantRoutingFamilies();
@@ -498,7 +498,7 @@ export const PACKAGE_ARMS = [
         ],
       },
       {
-        why: "Every current or future src/test JS, JSON, or TypeScript module and every focused external runtime or test-support input must keep an explicit owner in the core. This test runs for all 25 inventory patterns before a later scripts-only change can discover drift.",
+        why: "Every current or future src/test JS, JSON, or TypeScript module and every focused external runtime or test-support input must keep an explicit owner in the contract. This test runs for all 25 inventory patterns before a later scripts-only change can discover drift.",
         dispatch: "path",
         arms: [
           {
@@ -506,8 +506,8 @@ export const PACKAGE_ARMS = [
             effects: [
               {
                 command:
-                  "node --test scripts/agent-autoreview-indexer-invariant-contract.test.mjs",
-                reason: "indexer autoreview invariant inventory changed",
+                  "node --test scripts/indexer-handler-invariant-contract.test.mjs",
+                reason: "indexer handler invariant inventory changed",
               },
               {
                 command:
@@ -519,7 +519,7 @@ export const PACKAGE_ARMS = [
         ],
       },
       {
-        why: "The shared autoreview core owns the exact indexer family dispositions. The first arm carries explicit exclusions; the second carries explicit routes. Future JS, JSON, and TypeScript module patterns only trigger the inventory check until they gain an explicit owner.",
+        why: "The extracted invariant contract owns the exact indexer family dispositions. The first arm carries explicit exclusions; the second carries explicit routes. Future JS, JSON, and TypeScript module patterns only trigger the inventory check until they gain an explicit owner.",
         dispatch: "path",
         arms: [
           {

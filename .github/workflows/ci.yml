@@ -148,8 +148,10 @@ jobs:
               - indexer-envio/**
               - shared-config/**
               - scripts/agent-autoreview-core.mjs
-              - scripts/agent-autoreview-indexer-invariant-contract.test.mjs
               - scripts/eslint-baseline-diff.mjs
+              - scripts/gate/routing-table/indexer-handler-invariant-contract.mjs
+              - scripts/gate/routing-table/indexer-handler-invariant-families.mjs
+              - scripts/indexer-handler-invariant-contract.test.mjs
               - pnpm-lock.yaml
               - package.json
               - pnpm-workspace.yaml
@@ -758,10 +760,10 @@ jobs:
         run: pnpm --filter @mento-protocol/indexer-envio lint
       - name: Knip (dead-code / dep hygiene, blocking)
         run: pnpm --filter @mento-protocol/indexer-envio knip
-      - name: Indexer autoreview invariant contract
+      - name: Indexer handler invariant contract
         # Retained owner inventory and fail-closed schema checks. Keep this
         # separate from the legacy routing parity suite below.
-        run: node --test scripts/agent-autoreview-indexer-invariant-contract.test.mjs
+        run: node --test scripts/indexer-handler-invariant-contract.test.mjs
       - name: Legacy indexer routing parity suite
         # This remaining suite checks only the optional legacy diagnostic's
         # table and checklist router. The no-skip audit measures retained
