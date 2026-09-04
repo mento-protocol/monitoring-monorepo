@@ -515,10 +515,8 @@ test("freshness, CI routes, and Turbo inputs pin the external family source", ()
     .split(/\s+/)
     .filter(Boolean);
   assert.ok(
-    signatureEntries?.includes(
-      "scripts/gate/routing-table/indexer-handler-invariant-families.mjs",
-    ),
-    "implementation_signature() does not list the external family source",
+    signatureEntries?.includes("scripts/agent-autoreview-core.mjs"),
+    "implementation_signature() does not list the retained autoreview core",
   );
   assert.ok(
     signatureEntries?.includes(

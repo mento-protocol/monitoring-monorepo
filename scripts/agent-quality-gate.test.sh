@@ -8263,9 +8263,7 @@ done < <(cd "$repo_root" && git ls-files 'scripts/gate/routing-table/*.mjs')
   fail "expected the routing table to have at least 15 tracked modules, found ${#routing_table_modules[@]} — enumeration found nothing to check"
 # The two indexer handler-invariant modules are claimed by an earlier arm in
 # the agent-module table, which routes the same two commands under its own
-# reason. Enumeration still covers them: every routing-table module must route
-# the routing-table suite and the gate suite, whichever arm claims it, so the
-# expected reason is selected per module rather than dropped.
+# reason. Enumeration still covers them; only the expected reason differs.
 for routing_table_module in "${routing_table_modules[@]}"; do
   run_gate "$routing_table_module"
   case "$routing_table_module" in

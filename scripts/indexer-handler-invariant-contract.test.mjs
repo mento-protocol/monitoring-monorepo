@@ -327,43 +327,25 @@ test("unowned modules fall back without inheriting a broad owner", () => {
       );
     }
   }
+  const OUTSIDE = "outside-indexer-handler-invariant-scope";
   for (const [candidatePath, owner] of [
     ["indexer-envio/test/documentation-catalog.test.ts", "future-module"],
     ["indexer-envio/src/handlers/documentation-catalog.ts", "future-module"],
     ["indexer-envio/src/rpc/documentation-catalog.ts", "future-module"],
-    [
-      "indexer-envio/abis/documentation-catalog.json",
-      "outside-indexer-handler-invariant-scope",
-    ],
-    [
-      "indexer-envio/config/documentation-catalog.json",
-      "outside-indexer-handler-invariant-scope",
-    ],
+    ["indexer-envio/abis/documentation-catalog.json", OUTSIDE],
+    ["indexer-envio/config/documentation-catalog.json", OUTSIDE],
+    ["indexer-envio/.env.example", OUTSIDE],
+    ["indexer-envio/envio-env.d.ts", OUTSIDE],
+    ["indexer-envio/package.json", OUTSIDE],
+    ["indexer-envio/scripts/generateNttAddresses.mjs", OUTSIDE],
+    ["indexer-envio/tsconfig.json", OUTSIDE],
+    ["indexer-envio/src/future-handler.vue", OUTSIDE],
+    ["ui-dashboard/src/future-handler.ts", OUTSIDE],
   ]) {
     assert.deepEqual(
       getIndexerHandlerInvariantChecklistDecisions([candidatePath]),
       [{ path: candidatePath, route: false, owner }],
       `${candidatePath} does not inherit a broad checklist owner`,
-    );
-  }
-  for (const outsidePath of [
-    "indexer-envio/.env.example",
-    "indexer-envio/envio-env.d.ts",
-    "indexer-envio/package.json",
-    "indexer-envio/scripts/generateNttAddresses.mjs",
-    "indexer-envio/tsconfig.json",
-    "indexer-envio/src/future-handler.vue",
-    "ui-dashboard/src/future-handler.ts",
-  ]) {
-    assert.deepEqual(
-      getIndexerHandlerInvariantChecklistDecisions([outsidePath]),
-      [
-        {
-          path: outsidePath,
-          route: false,
-          owner: "outside-indexer-handler-invariant-scope",
-        },
-      ],
     );
   }
 });
@@ -446,95 +428,80 @@ test("the extracted contract answers exactly like the autoreview core", () => {
   );
 });
 
-async function assertMalformedFamiliesFailImport(label, rewrite, expected) {
+async function assertMalformedFamiliesFailImport(label, from, to, expected) {
   const directory = mkdtempSync(`${tmpdir()}/indexer-invariant-${label}-`);
   const contractPath = `${directory}/indexer-handler-invariant-contract.mjs`;
-  const familiesPath = `${directory}/indexer-handler-invariant-families.mjs`;
   try {
     copyFileSync(
       `${TABLE}/indexer-handler-invariant-contract.mjs`,
       contractPath,
     );
-    const changed = rewrite(FAMILIES_SOURCE);
+    const changed = FAMILIES_SOURCE.replace(from, to);
     assert.notEqual(
       changed,
       FAMILIES_SOURCE,
       `${label} fixture changed no source`,
     );
-    writeFileSync(familiesPath, changed, "utf8");
+    writeFileSync(
+      `${directory}/indexer-handler-invariant-families.mjs`,
+      changed,
+      "utf8",
+    );
     await assert.rejects(import(pathToFileURL(contractPath).href), expected);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
 }
 
+// Each row corrupts one field of a copied families module and requires the
+// contract to refuse the import. The anchors are literal source text, so they
+// carry the file's own indentation.
 test("the external family schema fails closed before use", async () => {
-  await assertMalformedFamiliesFailImport(
-    "route-type",
-    (source) => source.replace("route: false,", 'route: "false",'),
-    /route must be boolean/,
-  );
-  await assertMalformedFamiliesFailImport(
-    "exact-overlap",
-    (source) =>
-      source.replace(
-        '"indexer-envio/src/pool/health.ts",',
-        '"indexer-envio/src/swap.ts",',
-      ),
-    /explicit path .* has 2 owners/,
-  );
-  await assertMalformedFamiliesFailImport(
-    "bash-metacharacter",
-    (source) =>
-      source.replace(
-        '"indexer-envio/src/abis.ts",',
-        '"indexer-envio/src/abi*.ts",',
-      ),
-    /Bash-unsafe literal path/,
-  );
-  await assertMalformedFamiliesFailImport(
-    "exact-directory",
-    (source) =>
-      source.replace(
-        '"indexer-envio/src/abis.ts",',
-        '"indexer-envio/src/abis.ts/",',
-      ),
-    /noncanonical or Bash-unsafe literal path/,
-  );
-  await assertMalformedFamiliesFailImport(
-    "prefix-field",
-    (source) =>
-      source.replace(
-        'owner: "abi-runtime-inputs",\n    route: true,',
-        'owner: "abi-runtime-inputs",\n    route: true,\n    prefix: "indexer-envio/abis/",',
-      ),
-    /unknown keys: prefix/,
-  );
-  await assertMalformedFamiliesFailImport(
-    "fallback-route",
-    (source) =>
-      source.replace(
-        'owner: "future-module",\n    route: false,',
-        'owner: "future-module",\n    route: true,',
-      ),
-    /fallback must remain unclassified/,
-  );
-  await assertMalformedFamiliesFailImport(
-    "fallback-extension",
-    (source) =>
-      source.replace(
-        '        "json",\n      ],',
-        '        "json",\n        "md",\n      ],',
-      ),
-    /only the canonical src\/test JS, JSON, or TS module scope/,
-  );
-  await assertMalformedFamiliesFailImport(
-    "fallback-prefix",
-    (source) =>
-      source.replace(
-        'prefixes: ["indexer-envio/src/", "indexer-envio/test/"],',
-        'prefixes: ["indexer-envio/src/", "indexer-envio/test/", "indexer-envio/config/"],',
-      ),
-    /only the canonical src\/test JS, JSON, or TS module scope/,
-  );
+  for (const [label, from, to, expected] of [
+    ["route-type", "route: false,", 'route: "false",', /route must be boolean/],
+    [
+      "exact-overlap",
+      '"indexer-envio/src/pool/health.ts",',
+      '"indexer-envio/src/swap.ts",',
+      /explicit path .* has 2 owners/,
+    ],
+    [
+      "bash-metacharacter",
+      '"indexer-envio/src/abis.ts",',
+      '"indexer-envio/src/abi*.ts",',
+      /Bash-unsafe literal path/,
+    ],
+    [
+      "exact-directory",
+      '"indexer-envio/src/abis.ts",',
+      '"indexer-envio/src/abis.ts/",',
+      /noncanonical or Bash-unsafe literal path/,
+    ],
+    [
+      "prefix-field",
+      'owner: "abi-runtime-inputs",\n    route: true,',
+      'owner: "abi-runtime-inputs",\n    route: true,\n    prefix: "indexer-envio/abis/",',
+      /unknown keys: prefix/,
+    ],
+    [
+      "fallback-route",
+      'owner: "future-module",\n    route: false,',
+      'owner: "future-module",\n    route: true,',
+      /fallback must remain unclassified/,
+    ],
+    [
+      "fallback-extension",
+      '        "json",\n      ],',
+      '        "json",\n        "md",\n      ],',
+      /only the canonical src\/test JS, JSON, or TS module scope/,
+    ],
+    [
+      "fallback-prefix",
+      'prefixes: ["indexer-envio/src/", "indexer-envio/test/"],',
+      'prefixes: ["indexer-envio/src/", "indexer-envio/test/", "indexer-envio/config/"],',
+      /only the canonical src\/test JS, JSON, or TS module scope/,
+    ],
+  ]) {
+    await assertMalformedFamiliesFailImport(label, from, to, expected);
+  }
 });
