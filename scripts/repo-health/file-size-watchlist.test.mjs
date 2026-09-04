@@ -544,7 +544,7 @@ test("the live report never routes an exempt file into the issue queue", () => {
 });
 
 test("an exemption is what suppresses the row, not the scope", () => {
-  // The live list is empty (ADR 0086), so this drives the real mechanism with a
+  // The live list is empty (ADR 0087), so this drives the real mechanism with a
   // temporary entry rather than a stub: same content, two paths, one listed.
   // Without the entry the identical file reports as a hard-cap row.
   const files = ["scripts/exempted-helper.mjs", "scripts/plain-helper.mjs"];
@@ -636,7 +636,7 @@ test("a scratch checkout flags an unexempted scripts file at the hard cap", () =
   try {
     execFileSync("git", ["init", "--quiet", root]);
     mkdirSync(join(root, "scripts"));
-    // Nothing is exempt any more (ADR 0086), so every over-cap scripts file
+    // Nothing is exempt any more (ADR 0087), so every over-cap scripts file
     // below must reach the report as a tracked hard-cap row.
     writeFileSync(join(root, "scripts/other-helper.mjs"), BIG_SOURCE);
     writeFileSync(join(root, "scripts/plain-helper.mjs"), BIG_SOURCE);

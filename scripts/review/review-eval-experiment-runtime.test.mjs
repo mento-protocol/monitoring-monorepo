@@ -13,10 +13,10 @@ import path from "node:path";
 import test from "node:test";
 
 import {
-  DEFAULT_EXPERIMENT_POLICY,
   rawCacheIdentity,
   digestObject,
 } from "./review-eval-experiment-contract.mjs";
+import { experimentPolicy } from "./review-eval-experiment-grid.mjs";
 import {
   recordRuntimeDrift,
   runtimeDriftReason,
@@ -66,6 +66,7 @@ function contestantStream(messages, resultOverrides = {}) {
 
 function makeHarness({
   laneCount = 3,
+  draws = 1,
   live = false,
   stage: stageUnderTest = null,
   // Plan a screen stage beside the stage under test, so a holdout run has the
@@ -111,58 +112,61 @@ function makeHarness({
   const lanesFor = (stageName) =>
     Array.from({ length: laneCount }, (_unused, index) => {
       const pr = 2000 + index;
-      const truthFile = path.join(repoRoot, `truth-${pr}.json`);
-      const reportFile = path.join(repoRoot, `report-${pr}.md`);
-      const truth = {
-        reviewers: [],
-        findings: [
-          {
-            id: 1,
-            path: "file.js",
-            line: 1,
-            severity: "P1",
-            title: "The file has a defect",
-            body: "The defect breaks the request.",
-            author: null,
-            acted_on: true,
+      return Array.from({ length: draws }, (_ignored, draw) => {
+        const truthFile = path.join(repoRoot, `truth-${pr}.json`);
+        const reportFile = path.join(repoRoot, `report-${pr}.md`);
+        const truth = {
+          reviewers: [],
+          findings: [
+            {
+              id: 1,
+              path: "file.js",
+              line: 1,
+              severity: "P1",
+              title: "The file has a defect",
+              body: "The defect breaks the request.",
+              author: null,
+              acted_on: true,
+            },
+          ],
+        };
+        writeFileSync(truthFile, `${JSON.stringify(truth)}\n`);
+        writeFileSync(reportFile, `Pinned finder report for PR ${pr}.\n`);
+        const pairedOrder = (index + draw) % 2 === 0 ? "AB" : "BA";
+        return {
+          lane_id: `${stageName}-pr-${pr}-d${draw}`,
+          pr,
+          draw,
+          paired_order: pairedOrder,
+          fixture: {
+            first_head: head(index + 1),
+            base_sha: head(index + 11),
+            truth_file: path.relative(repoRoot, truthFile),
+            truth_sha256: sha256Bytes(readFileSync(truthFile)),
+            scorable_ids: [1],
+            p1_ids: [1],
           },
-        ],
-      };
-      writeFileSync(truthFile, `${JSON.stringify(truth)}\n`);
-      writeFileSync(reportFile, `Pinned finder report for PR ${pr}.\n`);
-      const pairedOrder = index % 2 === 0 ? "AB" : "BA";
-      return {
-        lane_id: `${stageName}-pr-${pr}`,
-        pr,
-        paired_order: pairedOrder,
-        fixture: {
-          first_head: head(index + 1),
-          base_sha: head(index + 11),
-          truth_file: path.relative(repoRoot, truthFile),
-          truth_sha256: sha256Bytes(readFileSync(truthFile)),
-          scorable_ids: [1],
-          p1_ids: [1],
-        },
-        source:
-          stageName === "live-paired"
-            ? {
-                kind: "live-finder",
-                finder_id: `live-pr-${pr}`,
-                shared: true,
-                finder_argv_digest: plannedFinderDigest,
-              }
-            : {
-                kind: "frozen-report",
-                report_index: 0,
-                file: path.relative(repoRoot, reportFile),
-                sha256: sha256Bytes(readFileSync(reportFile)),
-              },
-        sequence:
-          pairedOrder === "AB"
-            ? ["incumbent", "candidate"]
-            : ["candidate", "incumbent"],
-      };
-    });
+          source:
+            stageName === "live-paired"
+              ? {
+                  kind: "live-finder",
+                  finder_id: `live-pr-${pr}`,
+                  shared: true,
+                  finder_argv_digest: plannedFinderDigest,
+                }
+              : {
+                  kind: "frozen-report",
+                  report_index: 0,
+                  file: path.relative(repoRoot, reportFile),
+                  sha256: sha256Bytes(readFileSync(reportFile)),
+                },
+          sequence:
+            pairedOrder === "AB"
+              ? ["incumbent", "candidate"]
+              : ["candidate", "incumbent"],
+        };
+      });
+    }).flat();
   const stage = stageUnderTest ?? (live ? "live-paired" : "screen");
   const lanes = lanesFor(stage);
   const screenLanes = withScreen ? lanesFor("screen") : null;
@@ -187,7 +191,14 @@ function makeHarness({
         },
       },
     },
-    policy: structuredClone(DEFAULT_EXPERIMENT_POLICY),
+    policy: experimentPolicy({
+      // One fixture per PR, as `experimentFixtures` yields: the policy applies
+      // `draws` itself, so passing every per-draw lane would count PRs twice.
+      fixtures: lanes
+        .filter((lane) => lane.draw === 0)
+        .map((lane) => lane.fixture),
+      draws,
+    }),
     incumbent: {
       id: "incumbent",
       skill_ref: incumbentSkill,
@@ -207,13 +218,14 @@ function makeHarness({
   };
   const plan = { ...planBase, plan_digest: digestObject(planBase) };
   const fixturePaths = new Map();
+  // Keyed on the PR, as the real cache is: every draw of a PR shares one tree.
   const prepareFixture = async ({ lane }) => {
-    if (!fixturePaths.has(lane.lane_id)) {
-      const fixturePath = path.join(fixtureCacheDir, lane.lane_id);
+    if (!fixturePaths.has(lane.pr)) {
+      const fixturePath = path.join(fixtureCacheDir, String(lane.pr));
       mkdirSync(fixturePath, { recursive: true });
-      fixturePaths.set(lane.lane_id, { path: fixturePath, forbidden: [] });
+      fixturePaths.set(lane.pr, { path: fixturePath, forbidden: [] });
     }
-    return fixturePaths.get(lane.lane_id);
+    return fixturePaths.get(lane.pr);
   };
   return {
     root,
@@ -298,7 +310,7 @@ test("runtime bounds fixture lanes and preserves each recorded pair order", asyn
       },
     }),
   );
-  assert.equal(result.records.length, 6);
+  assert.equal(result.records.length, harness.lanes.length * 2);
   assert.equal(maximum, 2);
   for (const lane of harness.lanes) {
     assert.deepEqual(starts.get(lane.lane_id), lane.sequence);
@@ -319,12 +331,68 @@ test("runtime bounds fixture lanes and preserves each recorded pair order", asyn
     runExperimentRuntimeStage(baseOptions(harness, { plan: disabledPlan })),
     /stage screen is disabled/,
   );
-  const oversized = makeHarness({ laneCount: 4 });
-  t.after(oversized.cleanup);
+  // A grid wider than the concurrency cap is a longer stage, not an error.
+  const wide = makeHarness({ laneCount: 4 });
+  t.after(wide.cleanup);
+  const wideRun = await runExperimentRuntimeStage(baseOptions(wide));
+  assert.equal(wideRun.records.length, wide.lanes.length * 2);
+  const emptyPlan = structuredClone(harness.plan);
+  emptyPlan.stages[harness.stage].lanes = [];
   await assert.rejects(
-    runExperimentRuntimeStage(baseOptions(oversized)),
-    /exceeds three fixture lanes/,
+    runExperimentRuntimeStage(baseOptions(harness, { plan: emptyPlan })),
+    /plans no fixture lane/,
   );
+});
+
+test("two draws of one PR share one report and never overlap", async (t) => {
+  const harness = makeHarness({ laneCount: 2, draws: 2, live: true });
+  t.after(harness.cleanup);
+  // Two draws of a PR reset and stage inside one tree, so an overlap between
+  // them would be two cells deleting each other's working copy.
+  const busy = new Set();
+  const overlaps = [];
+  const finderPrs = [];
+  const prompts = new Map();
+  let concurrentPrs = 0;
+  const result = await runExperimentRuntimeStage(
+    baseOptions(harness, {
+      finderExec: async ({ lane }) => {
+        finderPrs.push(lane.pr);
+        return `one live finder report for PR ${lane.pr}`;
+      },
+      contestantExec: async ({ lane, prompt }) => {
+        if (busy.has(lane.pr)) overlaps.push(lane.lane_id);
+        busy.add(lane.pr);
+        concurrentPrs = Math.max(concurrentPrs, busy.size);
+        prompts.set(lane.lane_id, prompt);
+        await new Promise((resolve) => setImmediate(resolve));
+        busy.delete(lane.pr);
+        return contestantStream(["file.js:1 has a defect"]);
+      },
+    }),
+  );
+  assert.deepEqual(overlaps, []);
+  assert.equal(concurrentPrs, 2);
+  // Lanes and records keep the plan's order, and each names its own draw.
+  assert.deepEqual(
+    result.records.map((record) => `${record.cell_id}:${record.draw}`),
+    harness.lanes.flatMap((lane) =>
+      lane.sequence.map(
+        (treatment) => `${lane.lane_id}-${treatment}:${lane.draw}`,
+      ),
+    ),
+  );
+  const prs = [...new Set(harness.lanes.map((lane) => lane.pr))];
+  // One finder run per PR group, not one per draw, and every draw reads it.
+  assert.deepEqual(finderPrs.sort(), [...prs].sort());
+  for (const pr of prs) {
+    const [first, second] = harness.lanes.filter((lane) => lane.pr === pr);
+    assert.equal(
+      prompts.get(first.lane_id),
+      prompts.get(second.lane_id),
+      `PR ${pr} draws read different reports`,
+    );
+  }
 });
 
 test("one live finder report is shared by both arms", async (t) => {
@@ -591,7 +659,7 @@ test("novel scoring follows base scoring and reuses its cache", async (t) => {
   );
   const holdoutLane = {
     ...structuredClone(harness.lanes[0]),
-    lane_id: `holdout-pr-${harness.lanes[0].pr}`,
+    lane_id: `holdout-pr-${harness.lanes[0].pr}-d0`,
   };
   harness.plan.stages.holdout = {
     stage: "holdout",
@@ -815,7 +883,7 @@ test("a novelty judge stores its own runtime and keeps it on reuse", async (t) =
 function holdoutStage(harness) {
   const lanes = harness.lanes.map((lane) => ({
     ...structuredClone(lane),
-    lane_id: `holdout-pr-${lane.pr}`,
+    lane_id: `holdout-pr-${lane.pr}-d${lane.draw ?? 0}`,
   }));
   harness.plan.stages.holdout = { stage: "holdout", enabled: true, lanes };
   return lanes;

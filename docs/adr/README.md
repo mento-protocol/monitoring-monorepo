@@ -95,7 +95,8 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0083](0083-non-ledger-review-eval-experiments.md)          | Review-skill experiments use a separate staged non-ledger lane                       |
 | [0084](0084-github-ui-operator-merge.md)                    | Use GitHub for ordinary pull request merges                                          |
 | [0085](0085-review-eval-cli-versions-bind-the-cell.md)      | Provider CLI versions bind the review-eval cell, not the plan                        |
-| [0086](0086-autoreview-removal-thin-two-model-review.md)    | Remove the autoreview machinery; keep a thin two-model closeout review               |
+| [0086](0086-review-eval-lane-any-grid-multi-draw.md)        | The experiment lane runs any grid at N draws and decides on paired evidence          |
+| [0087](0087-autoreview-removal-thin-two-model-review.md)    | Remove the autoreview machinery; keep a thin two-model closeout review               |
 
 ### shared-config
 

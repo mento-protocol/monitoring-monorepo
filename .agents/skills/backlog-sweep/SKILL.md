@@ -533,6 +533,14 @@ Then spawn one worker subagent per issue. Give each a brief containing:
 - **The loop:** [`pr-operating-card.md`](../../../docs/notes/pr-operating-card.md)
   steps 2-7, end to end. Implement surgically — touch only what the issue
   needs, and read the scoped `AGENTS.md` for the package first.
+
+  **Name the simplest version before you write code.** On every issue, answer
+  two questions: what is the simplest change that satisfies the issue's Done
+  means, and what could be removed instead of added. Record both answers in one
+  or two lines in the PR body's `## Details`. They matter most when the work
+  adds a new module, a new script, or a new file that other tooling has to
+  register, because each one is a surface every later change must carry.
+
 - **Formatting before the commit:** `./tools/trunk fmt <changed files>`. The
   retained pre-commit hook formats staged files, and the required Code Quality
   check enforces formatting in CI.

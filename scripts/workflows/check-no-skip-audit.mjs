@@ -28,9 +28,9 @@ const CODECOV_IF = "${{ !inputs.no_skip_audit && !startsWith(github.event.pull_r
 // prettier-ignore
 const READ_SCOPES = Object.freeze({ actions: "read", contents: "read", "pull-requests": "read" });
 // prettier-ignore
-const ADMISSION_STEP_HASH = "18f1c3741064363a488462c96fd34772c3b66eeee4a3f4bd2fb2a86275c3a203", CHECKOUT_STEP_HASH = "2d39e2e5293845e1c63f0f2e95ab8eb7e3d65360955c5b2c54ea1bddff57c22d", PROTECTED_DRIFT_STEP_HASH = "1c33012ad5fe4cba9ac77ec4f04100f82a3676fc553f143afdcac9bbafb19fec", SUMMARY_STEP_HASH = "b6def63e8f5ccb7e13a6460f546cb391bf0e86350876470a787f038ea7cebb10";
+const ADMISSION_STEP_HASH = "18f1c3741064363a488462c96fd34772c3b66eeee4a3f4bd2fb2a86275c3a203", CHECKOUT_STEP_HASH = "2d39e2e5293845e1c63f0f2e95ab8eb7e3d65360955c5b2c54ea1bddff57c22d", PROTECTED_DRIFT_STEP_HASH = "e587efe489b709485e5fa08d31854e4549522eaf1059e654e524688b76ce480e", SUMMARY_STEP_HASH = "b6def63e8f5ccb7e13a6460f546cb391bf0e86350876470a787f038ea7cebb10";
 const CI_GRAPH_HASH =
-    "95d2d2e5a8600c7c8af0b2aa697c8f84184610184da423e4c453b2e2bf3b0e71",
+    "82ab6334799d0da0d747cfb91188a036971418785e22ad6a75bd8bf844c12e9b",
   BASELINE_HASH =
     "467641beda8b2b45d49d0c62429d8e95f62b05c1db96f6665b106012a09cef12";
 // prettier-ignore
@@ -51,7 +51,6 @@ const CALL_INPUTS = {
 // prettier-ignore
 const LEGACY_GATE_STEPS = Object.freeze([
   ["indexer", "Legacy indexer routing parity suite", "node --test scripts/gate/routing-table/indexer-invariant-parity.test.mjs"],
-  ["scripts", "Agent quality-gate routing regression suite", "pnpm agent:quality-gate:test"],
   ["scripts", "Gate routing-table suite", "pnpm gate:routing-table:test"],
   ["docs-checks", "Gate routing-table suite", "pnpm gate:routing-table:test"],
 ]);
@@ -59,6 +58,7 @@ const LEGACY_GATE_STEPS = Object.freeze([
 const RETAINED_EXTRACTED_STEPS = Object.freeze([
   ["indexer", "Indexer handler invariant contract", "node --test scripts/indexer-handler-invariant-contract.test.mjs"],
   ["scripts", "Agent setup and package-policy contracts", "bash scripts/bootstrap/agent-setup-contract.test.sh"],
+  ["scripts", "Dependency-cruiser root contract", "node --test scripts/repo-health/dependency-cruiser-root-contract.test.mjs"],
 ]);
 // prettier-ignore
 const RUN_DIRECTORIES = new Set(["aegis", "alerts/infra/oncall-announcer", "alerts/infra/onchain-event-handler", "alerts/rules", "governance-watchdog"]);

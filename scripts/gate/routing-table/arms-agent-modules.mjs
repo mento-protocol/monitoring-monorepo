@@ -34,7 +34,7 @@ export const AGENT_MODULE_ARMS = [
     ],
   },
   {
-    why: "The gate materializes the identity helper and reads the lineage modules as part of its own trusted runtime. Autoreview was the second consumer until ADR 0086 removed it; the gate suite is now the only cover these sources have.",
+    why: "The gate materializes the identity helper and reads the lineage modules as part of its own trusted runtime. Autoreview was the second consumer until ADR 0087 removed it; the gate suite is now the only cover these sources have.",
     patterns: [
       "scripts/gate/darwin-process-identity-helper.mjs",
       "scripts/gate/darwin-process-lineage-model.mjs",

@@ -3,7 +3,7 @@ title: Scripts Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-02
+last_verified: 2026-09-04
 doc_type: agent-instructions
 scope: scripts
 review_interval_days: 90
@@ -97,12 +97,10 @@ Move each pin class with its files.
   `scripts/docs/check-verification-redesign-evidence*.mjs`.
 - **Sentry suite manifest.** `scripts/sentry/gate/sentry-suite-manifest.json`
   enforces two-way path equality with `findSentrySuites()`; moves fail closed.
-- **Workflow pins.** Workflows pin `scripts/`. Terraform uses
-  `terraform.stacks.json` `workflowAdmissionPatterns`.
-  `check-ci-contract{,.test}.mjs` pins CI.
-  `check-no-skip-audit{,.test}.mjs` pins admission, SHAs, cache, skips, protected
-  drift, focused contracts, and the retained workflow graph. Moves update
-  ADR 0064, routing, globs, and pins.
+- **Workflow pins.** `check-ci-contract{,.test}.mjs` pins CI.
+  `check-no-skip-audit{,.test}.mjs` pins admission, SHAs, caches, skips,
+  `repo-health/dependency-cruiser-root-contract.test.mjs`, and the retained
+  graph. Moves update ADR 0064 and all pins.
 - **Terraform stack registry.** `terraform.stacks.json` `changedPathPatterns`
   pins exact `scripts/` paths per stack. The broad workflow admission boundary
   covers the directory; `pnpm tf:test` enforces subsumption.
@@ -169,7 +167,7 @@ in the same PR.
 
 Apply [PR operating card step 3](../docs/notes/pr-operating-card.md) to each
 changed root tool: `bash -n <changed-shell-script>`, `pnpm lint:scripts`, and
-its focused test. Required CI owns the legacy gate self-test. Deploy wrappers
-also run
+its focused test. Required CI does not run the optional legacy gate self-test.
+Run it only when a change affects that diagnostic before retirement. Deploy wrappers also run
 `node scripts/check-deploy-root-anchors.test.mjs`. After a move, run
 `pnpm agent:context-check` and `pnpm docs:index --check`.

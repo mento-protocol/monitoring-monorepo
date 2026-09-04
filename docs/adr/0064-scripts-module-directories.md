@@ -47,7 +47,7 @@ Routing survives a subdirectory in three of the four discovery mechanisms:
   filesystem globs. The `scripts/*.sh` arm in `scripts/agent-quality-gate.sh`
   keeps routing a file that moves into a subdirectory. A second such arm lived
   in `scripts/agent-autoreview.sh` until
-  [ADR 0086](0086-autoreview-removal-thin-two-model-review.md) deleted that wrapper.
+  [ADR 0087](0087-autoreview-removal-thin-two-model-review.md) deleted that wrapper.
 - `pnpm lint:scripts` runs `eslint scripts/`, and `eslint.config.mjs` scopes
   root scripts with `scripts/**/*.{mjs,js}` and `scripts/**/*.cjs`. ESLint
   recurses into the directory argument, so a moved file stays linted.
@@ -68,7 +68,7 @@ Both deploy arms carried that pair, added ahead of the move rather than with
 it: `scripts/deploy-*.sh|scripts/*/deploy-*.sh` routes the root-anchor check in
 `agent-quality-gate.sh`, and the same pair routed the Terraform/Cloud Run
 checklist in `select_checklists()` in `agent-autoreview.sh` until
-[ADR 0086](0086-autoreview-removal-thin-two-model-review.md) deleted that wrapper. The
+[ADR 0087](0087-autoreview-removal-thin-two-model-review.md) deleted that wrapper. The
 surviving arm stays shell-scoped. The check behind it has a `deploy-*.sh`
 subject set, and the Node deploy helpers that land in the same directory drive
 Envio and own no Cloud Run surface, so it is not the right home for them.
@@ -199,7 +199,7 @@ scheduled document, for context an agent gets from the directory map in
   there is no fallback to degrade to. Hold the last step until no wrapper old
   enough to need the pre-move paths is still in use. D3 completed the three
   merges on 2026-08-20; `scripts/pr/` is now the only pinned location.
-  [ADR 0086](0086-autoreview-removal-thin-two-model-review.md) has since deleted the
+  [ADR 0087](0087-autoreview-removal-thin-two-model-review.md) has since deleted the
   wrapper, so nothing reads that pin any more and its residual is gone. The
   hazard class stands for any future mechanism that reads a path from
   `origin/main` rather than from the working tree.
@@ -366,11 +366,11 @@ not only the arm of the consumer that happens to fail loudest.
   paired `scripts/deploy-*.sh` / `scripts/*/deploy-*.sh` and
   `scripts/sentry-*.test.mjs` / `scripts/*/sentry-*.test.mjs` arms). The
   matching arms in `scripts/agent-autoreview.sh` went with that wrapper in
-  [ADR 0086](0086-autoreview-removal-thin-two-model-review.md).
+  [ADR 0087](0087-autoreview-removal-thin-two-model-review.md).
 - Routing assertions for the deploy pair, with a negative control:
   `scripts/agent-quality-gate.test.sh` (the `scripts/deploy/` cases beside the
   flat ones). `run_deploy_directory_checklist_routing_regression` in
-  `scripts/agent-autoreview.test.sh` was the second, and ADR 0086 deleted it.
+  `scripts/agent-autoreview.test.sh` was the second, and ADR 0087 deleted it.
 - Recursive lint: `package.json` `lint:scripts`, `eslint.config.mjs` `files`
   globs.
 - Recursive CI filter: `.github/workflows/ci.yml`, `rootScripts` filter, whose

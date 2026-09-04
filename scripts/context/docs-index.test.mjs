@@ -226,7 +226,7 @@ test("Claude runtime registry gives every projection owned non-canonical metadat
 });
 
 // docs/context-standards.md states the registry's size in prose, and nothing
-// recomputed it when ADR 0086 removed a runtime document. Pin the prose to the
+// recomputed it when ADR 0087 removed a runtime document. Pin the prose to the
 // list, so the next added or removed runtime document reds here.
 const COUNT_WORDS = [
   "zero",

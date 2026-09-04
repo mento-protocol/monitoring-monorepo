@@ -4,7 +4,7 @@ status: archived
 owner: eng
 canonical: false
 last_verified: 2026-09-03
-superseded_by: ADR-0086
+superseded_by: ADR-0087
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -15,11 +15,11 @@ garden_lane: adrs-architecture
 # ADR 0068 — Adversarial fixtures are authored to scan clean; no value or line registry
 
 **Status:** Superseded by
-[ADR 0086](0086-autoreview-removal-thin-two-model-review.md) (Sep 2026).
+[ADR 0087](0087-autoreview-removal-thin-two-model-review.md) (Sep 2026).
 Historical decision retained.
 **Scope:** ci/process
 
-**Both enforcement mechanisms are gone.** ADR 0086 deletes `secretLikeReason`
+**Both enforcement mechanisms are gone.** ADR 0087 deletes `secretLikeReason`
 with the autoreview core and deletes
 `scripts/sentry/fixture-scan-canary.test.mjs` with it. Decision 4 below and the
 scanner references in Evidence describe machinery that no longer exists. Trunk

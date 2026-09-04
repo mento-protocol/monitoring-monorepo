@@ -103,6 +103,7 @@ jobs:
             .github/workflows/no-skip-audit.yml
             scripts/bootstrap/agent-setup-contract.test.sh
             scripts/indexer-handler-invariant-contract.test.mjs
+            scripts/repo-health/dependency-cruiser-root-contract.test.mjs
             scripts/workflows/check-no-skip-audit.mjs
             scripts/workflows/check-no-skip-audit.test.mjs
             scripts/lib/workflow-yaml.mjs

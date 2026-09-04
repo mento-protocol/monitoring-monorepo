@@ -90,7 +90,7 @@ written, all in the autoreview trust root: the `agent-autoreview.sh` wrapper,
 which hashed its own blob against a frozen-HEAD snapshot, and the two large
 helpers `agent-autoreview.mjs` and `agent-autoreview-core.mjs`, which that
 wrapper materialized under a 2 MB aggregate cap.
-[ADR 0086](0086-autoreview-removal-thin-two-model-review.md) deleted all three,
+[ADR 0087](0087-autoreview-removal-thin-two-model-review.md) deleted all three,
 so `SCRIPTS_EXEMPTIONS` is now an empty list. The mechanism above stays; only
 its contents are gone.
 
@@ -134,7 +134,7 @@ Rejected on measurement: of the test files a plan named unsplittable, only
 suite may extract non-suite helper modules — the gate closes over its transitive
 imports, so only a new `*.test.mjs` is barred. `tf-stacks.test.mjs` and
 `agent-autoreview.test.sh` were facades that may import or source extracted
-siblings; [ADR 0086](0086-autoreview-removal-thin-two-model-review.md) has since deleted the
+siblings; [ADR 0087](0087-autoreview-removal-thin-two-model-review.md) has since deleted the
 second. Writing those as mechanical bars would have put false reasons in the
 report; writing them honestly leaves 36 actionable rows nobody will work, which
 is how a watchlist gets ignored from its first run.
@@ -208,7 +208,7 @@ that nothing holds in place.
   `scripts/sentry/ci-wiring/check-sentry-suites-in-ci.test.mjs`, "the checker's
   own files stay under the file-size hard cap"
 - The retired trust-root pins that justified the three original exemptions:
-  [ADR 0086](0086-autoreview-removal-thin-two-model-review.md)
+  [ADR 0087](0087-autoreview-removal-thin-two-model-review.md)
 - Test-split costs behind the exclusion:
   [`scripts/sentry/gate/sentry-suite-manifest.json`](../../scripts/sentry/gate/sentry-suite-manifest.json)
   and [ADR 0062](0062-sentry-suites-self-run-gate.md); `verifyExemptRoute` in

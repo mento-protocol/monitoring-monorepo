@@ -3,7 +3,7 @@ title: Staged replacement of the mandatory local gate with existing CI
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-03
+last_verified: 2026-09-04
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -13,10 +13,12 @@ garden_lane: adrs-architecture
 
 # ADR 0078 — staged replacement of the mandatory local gate with existing CI
 
-**Status:** Accepted (Aug 2026), amended 2026-09-03. The M5 early local cutover
+**Status:** Accepted (Aug 2026), amended 2026-09-04. The M5 early local cutover
 is in force. The operator approved it before the original pre-cutover sample.
-The legacy gate remains callable as a diagnostic and remains covered in
-required CI. Issue #2128 owns the post-cutover canary and retirement evidence.
+The legacy gate remains callable as a diagnostic. Its regression suite no
+longer runs in required CI because it tests machine-local lock and coordinator
+behavior that isolated CI runners do not use. Issue #2128 owns the post-cutover
+canary and retirement evidence.
 [ADR 0007](0007-agent-quality-gate-and-merge-oracle.md) remains active for the
 hosted two-projection all-clear and Codex approval gate. This ADR supersedes
 only its mandatory-local-gate target state. [ADR
@@ -193,7 +195,10 @@ authority inputs and shared thresholds require the existing integrity and
 cross-package parity checks in the author-check table. Reserve-yield inputs,
 alert and schema cross-consumers, deployable QuickNode filters, Safe event-hash
 sources, and Upstash MCP trust surfaces use their focused existing contracts.
-Routine coverage and Knip, broad dependency and supply-chain audits, full-browser suites, and legacy-gate self-tests remain CI-only. A focused policy or configuration check stays local only when the table or a triggered checklist selects it.
+Routine coverage and Knip, broad dependency and supply-chain audits, and
+full-browser suites remain CI-only. The optional legacy diagnostic self-test is
+manual during M6 observation. A focused policy or configuration check stays
+local only when the table or a triggered checklist selects it.
 
 These local results shorten feedback. Required CI remains merge authority. A
 manual push can omit author checks, but it cannot omit required CI.
@@ -225,7 +230,7 @@ scripts/indexer-handler-invariant-contract.test.mjs` in the `indexer` job and
 `RETAINED_EXTRACTED_STEPS` in `scripts/workflows/check-no-skip-audit.mjs` pins
 both steps so neither can leave CI unnoticed. Changing a registration is a
 `ci.yml` edit that the constant must follow.
-[ADR 0086](0086-autoreview-removal-thin-two-model-review.md) has since deleted the
+[ADR 0087](0087-autoreview-removal-thin-two-model-review.md) has since deleted the
 autoreview source the owner and schema assertions compared against, so
 `indexer-handler-invariant-contract.test.mjs` checks one copy of the family data
 instead of two; that suite and its audit step stay.
@@ -308,8 +313,9 @@ Issue #2127 therefore removes repository verification from pre-push after the
 graph-pin repair reaches protected `main`, protected-main CI passes, and strict
 current-base checking is active. The cutover keeps staged formatting
 on pre-commit. It must add the fixed `/ship` author-check trigger table. It must
-also keep the full legacy gate available in required CI and as a diagnostic.
-Required CI remains merge authority.
+also keep the full legacy gate available as a diagnostic until its separately
+approved retirement. Required CI does not run the diagnostic regression suite.
+Required CI remains merge authority through its direct retained checks.
 
 Issue #2128 owns the deferred acceptance window. It must observe at least 10
 distinct merged pull requests over at least 7 calendar days after cutover. A

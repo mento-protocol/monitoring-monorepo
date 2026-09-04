@@ -4,7 +4,9 @@ import test from "node:test";
 import {
   claimInflationRequiresNovelty,
   evaluateExperimentDecision,
+  signFlipPValue,
 } from "./review-eval-experiment-decision.mjs";
+import { experimentPolicy } from "./review-eval-experiment-grid.mjs";
 
 const candidateId = "candidate-1";
 const fixtures = [
@@ -42,22 +44,9 @@ function plan() {
   return {
     campaign_id: "campaign-1",
     candidate: { id: candidateId },
-    policy: {
-      screen: {
-        known_net_min: 2,
-        p1_net_min: 0,
-        nonnegative_prs_min: 2,
-      },
-      combined: {
-        known_net_min: 3,
-        candidate_p1_min: 9,
-        p1_opportunities: 12,
-        p1_net_min: 2,
-        gaining_prs_min: 2,
-        wrong_claim_delta_max: 1,
-      },
-      claim_inflation: { absolute_delta_min: 3, ratio_min: 1.25 },
-    },
+    // The bars this panel derives, never a copy of them: a threshold change
+    // has to move these cases through `experimentPolicy`, not past it.
+    policy: experimentPolicy({ fixtures, draws: 1 }),
     stages: {
       screen: stage("screen"),
       holdout: stage("holdout"),
@@ -452,6 +441,52 @@ test("holdout finalists require novelty and pass the combined 9-of-12 gate", () 
     (record) => record.pr === 1 && record.treatment === "candidate",
   ).wrong_claims = 1;
   assert.equal(decide(campaign, "holdout", classified).status, "REJECT");
+});
+
+test("the paired rule reads the panel's own bar and reports the flip test", () => {
+  const campaign = plan();
+  const bar = campaign.policy.screen.known_net_min;
+  // A loss the size of the bar is a regression; one short of it is not.
+  const lost = (net) =>
+    decide(campaign, "screen", {
+      screen: records(
+        campaign,
+        "screen",
+        screenSpecs.map((spec, index) => ({
+          ...spec,
+          incumbent: { known: 4, p1: 1 },
+          candidate: { known: index === 0 ? 4 - net : 4, p1: 1 },
+        })),
+      ),
+    });
+  const atBar = lost(bar);
+  assert.equal(atBar.metrics.known.net, -bar);
+  assert.equal(atBar.status, "REJECT");
+  const shortOfBar = lost(bar - 1);
+  assert.equal(shortOfBar.status, "INCONCLUSIVE");
+  // One lane differs, so half the flip assignments reach the observed sum.
+  assert.deepEqual(shortOfBar.metrics.sign_flip, {
+    pairs: 3,
+    informative_pairs: 1,
+    p_value: 0.5,
+  });
+
+  // The diagnostic is reported beside a passing verdict, never against it.
+  const passed = decide(campaign, "screen", {
+    screen: records(campaign, "screen", screenSpecs),
+  });
+  assert.equal(passed.status, "PROMISING");
+  assert.equal(passed.metrics.sign_flip.informative_pairs, 2);
+  assert.equal(passed.metrics.sign_flip.p_value > 0, true);
+});
+
+test("the sign-flip diagnostic is exact, one-sided, and bounded", () => {
+  assert.equal(signFlipPValue([0, 0, 0]), 1);
+  // A tied pair cancels out of both tails; a loss reads its own tail.
+  assert.equal(signFlipPValue([0, 2, 0, 2]), 0.25);
+  assert.equal(signFlipPValue([-3, 1]), 0.5);
+  assert.equal(signFlipPValue(Array.from({ length: 20 }, () => 1)), 2 ** -20);
+  assert.equal(signFlipPValue(Array.from({ length: 21 }, () => 1)), null);
 });
 
 test("claim inflation requires both the absolute and ratio thresholds", () => {

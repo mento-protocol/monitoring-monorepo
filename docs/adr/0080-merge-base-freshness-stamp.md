@@ -136,7 +136,7 @@ reach, because the ref they read is not the gate's base. `docs:navigation-eval
 -- --validate` tests ancestry against `refs/remotes/origin/main` as the DEFAULT
 branch, and the autoreview suite read protected-main checklist blobs at
 `origin/main^{commit}`.
-[ADR 0086](0086-autoreview-removal-thin-two-model-review.md) has since deleted
+[ADR 0087](0087-autoreview-removal-thin-two-model-review.md) has since deleted
 that suite, so the navigation eval is the only marker command left. Handing it
 the gate's `--base` would change what it asserts — on a stacked PR the default
 branch is still `main`. It is named in a short marker list inside the predicate,

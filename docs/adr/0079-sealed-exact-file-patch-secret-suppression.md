@@ -4,7 +4,7 @@ status: archived
 owner: eng
 canonical: false
 last_verified: 2026-09-03
-superseded_by: ADR-0086
+superseded_by: ADR-0087
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -15,8 +15,8 @@ garden_lane: adrs-architecture
 # ADR 0079 — Autoreview permits only sealed exact-file-patch secret suppression
 
 **Status:** Superseded by
-[ADR 0086](0086-autoreview-removal-thin-two-model-review.md) (Sep 2026).
-Historical decision retained. ADR 0086 deletes both the scanner this policy
+[ADR 0087](0087-autoreview-removal-thin-two-model-review.md) (Sep 2026).
+Historical decision retained. ADR 0087 deletes both the scanner this policy
 constrained and the sealed record it authorized, so the issue #2114 exception is
 retired with no successor.
 **Scope:** ci/process

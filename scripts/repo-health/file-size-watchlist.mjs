@@ -29,7 +29,7 @@ export const NEAR_HARD_CAP = 950;
  * normal row. ADR 0065 owns the list and its review cadence.
  *
  * The list is currently EMPTY. Its three entries were the autoreview wrapper
- * and its two large helpers; ADR 0086 deleted all three. Restoring an entry is
+ * and its two large helpers; ADR 0087 deleted all three. Restoring an entry is
  * an ADR 0065 decision.
  */
 export const SCRIPTS_EXEMPTIONS = [];

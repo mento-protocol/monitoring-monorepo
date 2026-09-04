@@ -212,7 +212,8 @@ Authority: canonical
 - [`docs/adr/0083-non-ledger-review-eval-experiments.md`](adr/0083-non-ledger-review-eval-experiments.md) — Review-skill experiments use a separate staged non-ledger lane
 - [`docs/adr/0084-github-ui-operator-merge.md`](adr/0084-github-ui-operator-merge.md) — Use GitHub for ordinary pull request merges
 - [`docs/adr/0085-review-eval-cli-versions-bind-the-cell.md`](adr/0085-review-eval-cli-versions-bind-the-cell.md) — Provider CLI versions bind the review-eval cell, not the plan
-- [`docs/adr/0086-autoreview-removal-thin-two-model-review.md`](adr/0086-autoreview-removal-thin-two-model-review.md) — Remove the autoreview machinery; keep a thin two-model closeout review
+- [`docs/adr/0086-review-eval-lane-any-grid-multi-draw.md`](adr/0086-review-eval-lane-any-grid-multi-draw.md) — The experiment lane runs any grid at N draws and decides on paired evidence
+- [`docs/adr/0087-autoreview-removal-thin-two-model-review.md`](adr/0087-autoreview-removal-thin-two-model-review.md) — Remove the autoreview machinery; keep a thin two-model closeout review
 
 Authority: non-canonical
 

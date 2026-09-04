@@ -120,7 +120,7 @@ already protects that surface where it matters and where the pin is not noise:
 artifact ([ADR 0065](0065-scripts-file-size-watchlist-scope.md) records it).
 `agent-autoreview.sh` was the second such protection — it hashed its own blob
 against a frozen-HEAD snapshot before an explicit-ref review — until
-[ADR 0086](0086-autoreview-removal-thin-two-model-review.md) deleted it. The rejection
+[ADR 0087](0087-autoreview-removal-thin-two-model-review.md) deleted it. The rejection
 stands on the reflex argument above, which never depended on either pin. Prose is the surface where a pin is cheap, because normative
 sentences are supposed to be stable: a rule that changes monthly is not a rule.
 

@@ -128,7 +128,7 @@ view for its `{path, route, owner}` decisions. It validates the family schema
 before export: unknown fields, invalid types, overlapping exact owners, and
 Bash-unsafe literal paths fail import. `scripts/agent-autoreview-core.mjs` held
 a duplicate copy of the same data, kept in step by a parity test, until
-[ADR 0086](0086-autoreview-removal-thin-two-model-review.md) deleted it. The contract is
+[ADR 0087](0087-autoreview-removal-thin-two-model-review.md) deleted it. The contract is
 now the single source, and an edit to it or to the family data routes the
 handler-invariant checklist.
 
@@ -176,7 +176,7 @@ Autoreview imported the classifier from its own attested runtime, and verified
 that runtime's sealed identity and content manifest around every classifier
 process. It loaded only the core copy of the family data, which
 `scripts/indexer-handler-invariant-contract.test.mjs` kept in step with this
-one. [ADR 0086](0086-autoreview-removal-thin-two-model-review.md) deleted the wrapper and
+one. [ADR 0087](0087-autoreview-removal-thin-two-model-review.md) deleted the wrapper and
 that copy, so the gate is the only consumer left. When a candidate
 changes either `gate/routing-table/indexer-handler-invariant-*.mjs` module, the
 classifier that decides still comes from the gate's own checkout and cannot see
@@ -280,7 +280,7 @@ Six pins land with the table:
    included — the two handler-invariant classifier modules among them.
    `scripts/agent-autoreview-core.mjs` carried an entry too while it held the
    duplicate family copy;
-   [ADR 0086](0086-autoreview-removal-thin-two-model-review.md) removed both the file and
+   [ADR 0087](0087-autoreview-removal-thin-two-model-review.md) removed both the file and
    the entry. That is the same treatment `scripts/agent-quality-gate.test.sh`
    and
    `scripts/terraform/terraform-fmt-check.test.mjs` already get, since a suite is
@@ -297,10 +297,10 @@ Six pins land with the table:
    because of pin 1 — the gate self-test; the gate's own arm schedules the
    routing-table suite; and the required `ci` job runs it too. The indexer job
    runs the focused parity test. A core-only edit scheduled both gate suites
-   until [ADR 0086](0086-autoreview-removal-thin-two-model-review.md) deleted the core.
+   until [ADR 0087](0087-autoreview-removal-thin-two-model-review.md) deleted the core.
 3. `turbo.json` inputs, beside the two existing gate entries in all three tasks,
    include the table directory. Its external core source had an entry beside it
-   until [ADR 0086](0086-autoreview-removal-thin-two-model-review.md) deleted that file.
+   until [ADR 0087](0087-autoreview-removal-thin-two-model-review.md) deleted that file.
 4. Import-time schema validation and the pairing lint, failing closed.
 5. The `scripts/AGENTS.md` pin registry, which ADR 0064 requires for any new pin.
 6. ADR 0064's sweep-checklist item 9, so a `scripts/` move updates the data as
@@ -357,7 +357,7 @@ the checkout's own `pnpm` aliases and test suites; attesting its own runtime and
 then executing the branch's suites buys nothing. ADR 0065 already ratified the
 asymmetry: all three exempt trust-root files were `agent-autoreview*`, and it
 states that `agent-quality-gate.sh` "stays in the report".
-[ADR 0086](0086-autoreview-removal-thin-two-model-review.md) deleted those three files, so
+[ADR 0087](0087-autoreview-removal-thin-two-model-review.md) deleted those three files, so
 `SCRIPTS_EXEMPTIONS` is now empty and the gate still stays in the report.
 
 **Adding the gate to `SCRIPTS_EXEMPTIONS` and closing 1498.** Would clear the
@@ -478,7 +478,7 @@ gate is not a trust root.
   runtime or test-support inputs, and narrows the handler-invariant checklist to
   its owned paths. Other changed-path classes keep their prior plan. The
   autoreview-core source class received the checklist and both gate suites by
-  design until [ADR 0086](0086-autoreview-removal-thin-two-model-review.md) deleted that
+  design until [ADR 0087](0087-autoreview-removal-thin-two-model-review.md) deleted that
   source.
 - **Issue 1498's original split is rejected.** Its acceptance criteria named sourced
   `scripts/lib/gate-*.sh` helpers for the watchdog, stamps and executor —
