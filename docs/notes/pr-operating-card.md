@@ -370,7 +370,10 @@ If root `package.json` changed, first run
    and `git fetch` before every push because reviewers push mid-session. Check
    new additions against the scope baseline frozen at step 4; classify each as
    in-scope, follow-up, or stop; **file a labeled GitHub issue before deferring
-   any valid follow-up** and link it from the PR's `## Deferrals` section. Warn
+   any valid follow-up** and link it from the PR's `## Deferrals` section. A
+   bot finding is a valid follow-up only when the defect is observed, the wrong
+   outcome is operator-visible, and the fix is small; otherwise answer it as an
+   evidence-backed won't-fix, which needs no issue. Warn
    as the diff approaches twice the baseline. Do not pause solely for cycle count
    before five review-triggered patch cycles are complete; pause for
    reclassification before starting a sixth. Authority:
@@ -555,7 +558,8 @@ These bind regardless of which step you are on:
   `## Deferrals`. Every issue an agent files carries a state label, a `kind:*`,
   at least one `pkg:*`, and exactly one `risk:*` set by the
   [Low-risk rule](agent-issue-workflow.md#low-risk-rule). An evidence-backed
-  won't-fix is not a deferral.
+  won't-fix is not a deferral, and it is the default for any bot finding that
+  fails one or more of the three follow-up conditions above.
 - **Never weaken a control that is blocking your own work.** Do not widen,
   disable, or soften the author-check contract, the sandbox or permission config, branch
   protection, or a safety-boundary rule to unblock the change you are making
