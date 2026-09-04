@@ -10726,7 +10726,6 @@ run_mapped_command() {
   local command="$1"
   local output_file
   local trunk_probe_handshake_file
-  local start_ts
   local elapsed
   local exit_code
   local infrastructure_failed
@@ -10739,7 +10738,6 @@ run_mapped_command() {
   output_file="$(make_tmpfile)"
   trunk_probe_handshake_file="$(make_tmpfile)"
   tmpfiles+=("$trunk_probe_handshake_file")
-  start_ts="$(date +%s)"
   echo
   echo "+ ${command}"
   set +e
