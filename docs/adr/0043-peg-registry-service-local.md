@@ -61,11 +61,11 @@ unpublished.
   upstream. Pool references cannot be proven statically (pools are discovered
   on-chain), so the activated bridge resolves every `(chain, pool)` against
   Hasura at startup and re-validates continuously with each structural poll. It
-  fails that asset's `indexed-pool` coverage path
-  closed and publishes `mento_peg_indexed_pool_reachable` whenever resolution
-  stops (retired pool, resync, partial backend failure), not only when it never
-  resolved. A distinct ops alert on that metric is required before the peg
-  signal becomes alert-authoritative.
+  marks that asset's `indexed-pool` coverage path as unreachable by publishing
+  `mento_peg_indexed_pool_reachable = 0` whenever resolution stops (retired
+  pool, resync, partial backend failure), not only when it never resolved. This
+  makes the coverage path fail closed. A distinct ops alert on that metric is
+  required before the peg signal becomes alert-authoritative.
 - Schema decisions that the first adversarial review forced:
   - Asset keys are internal slugs (`europ-schuman`), never tickers; the
     onboarding census binds by contract address / issuer identity (ticker

@@ -45,7 +45,10 @@ not discovered in review.
 - Checklists are canonical context (ADR 0005). Root and relevant package entry
   points hard-link the applicable checklist. Step 2 of the PR operating card
   requires the stateful data and UI checklist for matching changes. Step 3
-  requires the matching direct author checks.
+  requires the matching direct author checks. The required `CI / ci` check
+  aggregates the applicable automated checks in
+  [the CI workflow](../../.github/workflows/ci.yml). CI does not validate
+  checklist completion.
 - Recurring automated-review hazards are canonicalized so bots don't re-litigate
   settled patterns.
 
