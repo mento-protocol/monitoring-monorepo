@@ -5,7 +5,7 @@ title: Monorepo Import Skill
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-09-02
 doc_type: skill
 scope: repo-wide
 review_interval_days: 90
@@ -83,16 +83,17 @@ patterns and update them in the same PR.
 
 ## Phase 4: Verify In Layers
 
-Run the narrow local checks for the imported subsystem first, then the repo's
-agent gate:
+Run the narrow local checks for the imported subsystem first. Then apply the
+repo-wide checks for its changed surfaces:
 
 - package build/typecheck/test/lint for imported TypeScript packages
 - `forge test` for imported Foundry helpers/contracts
 - Terraform fmt/init/validate/plan for touched Terraform roots; never apply
   without explicit user approval
 - workflow syntax and path/filter review for new CI/deploy workflows
-- the quality gate from operating-card step 3 before opening or updating the
-  PR; hosted sessions use its exact direct warm command
+- the applicable direct author checks from step 3 of the
+  [operating card](../../../docs/notes/pr-operating-card.md) before the ready
+  handoff
 
 If registry/network access is unavailable, do not pretend lockfile or install
 work is verified. Surface the blocked command and rerun with network access when

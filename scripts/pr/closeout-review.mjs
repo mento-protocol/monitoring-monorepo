@@ -80,6 +80,9 @@ function parseArgs(argv) {
     if (flag === "--no-fetch") {
       options.fetch = false;
     } else if (flag === "--base" && value) {
+      if (options.base !== null) {
+        fail("--base can be provided only once");
+      }
       options.base = value;
       index += 1;
     } else if (flag === "--out" && value) {

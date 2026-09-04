@@ -139,18 +139,6 @@ lint:
 actions:
   disabled:
     - trunk-announce
-    - trunk-check-pre-push # Use custom pre-push below
-  definitions:
-    - id: agent-quality-gate-pre-push
-      display_name: Agent Quality Gate Pre-Push
-      description: >
-        Runs the path-aware agent quality gate before push. The gate maps the
-        branch diff to the required local checks instead of always running the
-        full monorepo pre-push suite.
-      run: git fetch --quiet origin main && ./scripts/agent-quality-gate.sh --run --parallel 3 --skip-if-fresh --pre-push --base origin/main
-      triggers:
-        - git_hooks: [pre-push]
   enabled:
     - trunk-fmt-pre-commit
-    - agent-quality-gate-pre-push
     - trunk-upgrade-available

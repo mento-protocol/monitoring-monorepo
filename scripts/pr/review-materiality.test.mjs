@@ -220,7 +220,7 @@ test("classifies non-canonical plan-only edits as trivial", () => {
   assertEqual(report.tier, "trivial");
   assertEqual(
     report.recommendedReview[0],
-    "Run the quality gate from operating-card step 3.",
+    "Run the applicable direct author checks from docs/notes/pr-operating-card.md step 3.",
   );
   // Pinned so the advice cannot drift back to a command the repo no longer has.
   assertEqual(
@@ -248,16 +248,20 @@ test("classifies root script changes as full and requiring context", () => {
   // Pinned so the advice cannot drift back to a command the repo no longer has.
   assertEqual(
     report.recommendedReview[1],
-    "Run pnpm agent:closeout-review before pushing.",
+    'Run pnpm agent:closeout-review --base "$BASE_REMOTE/$baseRefName" before pushing.',
   );
   // The finder pass alone is not the closeout; card step 4 needs the verifier.
   assertEqual(
     report.recommendedReview[2],
-    "Hand that report to the review skill for the verifier pass; with no codex on PATH, run the review skill alone and say so in ## Validation.",
+    "After a base integration, use both immutable axes from operating-card step 4. Hand each report to the review skill for the verifier pass; with no codex on PATH, run the review skill alone and say so in ## Validation.",
   );
   assertEqual(report.contextUpdateRequired, true);
   assertEqual(report.contextUpdatesPresent, false);
   assertEqual(report.contextUpdateMissing, true);
+  assertEqual(
+    report.recommendedReview[3],
+    "Identify every applicable checklist from the changed surfaces and scoped instructions, then audit sibling surfaces before the next push.",
+  );
   assertIncludes(
     report.contextReasons.map((reason) => reason.detail).join("\n"),
     "agent:review-materiality",
@@ -908,11 +912,11 @@ test("line-count threshold promotes otherwise simple docs to standard", () => {
   // A standard change gets the whole two-model closeout, not the finder alone.
   assertEqual(
     report.recommendedReview[1],
-    "Run pnpm agent:closeout-review before pushing.",
+    'Run pnpm agent:closeout-review --base "$BASE_REMOTE/$baseRefName" before pushing.',
   );
   assertEqual(
     report.recommendedReview[2],
-    "Hand that report to the review skill for the verifier pass; with no codex on PATH, run the review skill alone and say so in ## Validation.",
+    "After a base integration, use both immutable axes from operating-card step 4. Hand each report to the review skill for the verifier pass; with no codex on PATH, run the review skill alone and say so in ## Validation.",
   );
 });
 

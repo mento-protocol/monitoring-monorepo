@@ -93,7 +93,6 @@ refresh_origin_main
 
 echo "==> Configuring repository git hooks"
 git config core.hooksPath .trunk/hooks
-git config agent.qualityGate.cloudPrePushRequireFresh true
 
 activate_package_manager
 ensure_autoreview_helper

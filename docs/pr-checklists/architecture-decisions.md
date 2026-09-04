@@ -3,7 +3,7 @@ title: Architecture Decision Records — when and how
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-09-02
 doc_type: checklist
 scope: repo-wide
 review_interval_days: 90
@@ -15,8 +15,8 @@ garden_lane: pr-checklists-process
 Architectural decisions are recorded as ADRs under [`docs/adr/`](../adr/README.md).
 This checklist answers the two questions the ADR log depends on: **does this
 change need an ADR, and if so how do I write one.** Read it when a PR touches an
-architecturally significant surface (the quality gate and
-`pnpm adr:check` will remind you).
+architecturally significant surface. `pnpm adr:check` and required CI provide
+the reminder.
 
 ## Does this change need an ADR?
 
@@ -37,10 +37,12 @@ change no direction, or anything a code comment at the site already fully
 explains. When in doubt, prefer recording it — a thin ADR beats a silent
 decision — but do not manufacture ADRs for non-decisions.
 
-## Trigger surfaces (the gate watches these)
+## Trigger surfaces checked by the ADR reminder
 
-These changes almost always encode a decision. `pnpm adr:check` (and the agent
-quality gate) flags them when no ADR accompanies the diff:
+These changes almost always encode a decision. `pnpm adr:check` flags them when
+no ADR accompanies the diff. Step 3 of the
+[PR operating card](../notes/pr-operating-card.md) requires that focused check
+for the same trigger surfaces:
 
 - **A new package/service** — a new top-level directory with its own
   `AGENTS.md` / `package.json`, or a new workspace package registered in
@@ -90,8 +92,9 @@ the new decision, then flip the old one to `status: archived` with a
 
 ## When an ADR is genuinely not needed
 
-If the gate flags a trigger surface but the change is not a decision (e.g. a new
-workflow that only reformats logs, a stack-file reorder), that is fine — say so
-on the [PR template's](../../.github/PULL_REQUEST_TEMPLATE.md)
+If `pnpm adr:check` flags a trigger surface but the change is not a decision
+(for example, a new workflow that only reformats logs or a stack-file reorder),
+that is fine. State the reason on the
+[PR template's](../../.github/PULL_REQUEST_TEMPLATE.md)
 **"Architecture decision?"** line with a one-line reason. A won't-record with a
 reason is complete; a silent skip is not.

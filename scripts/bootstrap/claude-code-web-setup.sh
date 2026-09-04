@@ -25,7 +25,6 @@ git config --global --add safe.directory "$REPO_ROOT" || true
 
 echo "==> Configuring repository git hooks"
 git config core.hooksPath .trunk/hooks
-git config agent.qualityGate.cloudPrePushRequireFresh true
 
 echo "==> Activating package manager from package.json"
 if command -v corepack >/dev/null 2>&1; then
@@ -36,7 +35,7 @@ fi
 pnpm --version
 
 echo "==> Prewarming Trunk CLI and linters"
-# Trunk powers the git pre-commit/pre-push hooks (.trunk/hooks) and `trunk fmt`.
+# Trunk powers the git pre-commit hook (.trunk/hooks) and `trunk fmt`.
 # The launcher self-downloads the pinned CLI from trunk.io, which is NOT in the
 # default Trusted allowlist for Claude Code on the web. The current operating
 # allowlist beyond the Trusted defaults is trunk.io, *.trunk.io, and (optional,
@@ -67,7 +66,7 @@ if trunk_ver=$(TRUNK_LAUNCHER_QUIET=true ./tools/trunk --version 2>/dev/null); t
   fi
 else
   echo "WARN: Trunk CLI could not be downloaded (is trunk.io allowlisted?)." >&2
-  echo "WARN: git pre-commit/pre-push hooks will be skipped this session." >&2
+  echo "WARN: the git pre-commit hook will be skipped this session." >&2
   echo "WARN: Add 'trunk.io' and '*.trunk.io' to the env's Allowed domains (Custom" >&2
   echo "WARN: network access, keep defaults) to enable local Trunk fmt/lint hooks." >&2
 fi

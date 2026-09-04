@@ -3,7 +3,7 @@ title: Codex Agent Skills
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-26
+last_verified: 2026-09-02
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -54,8 +54,8 @@ under a read-only sandbox and writes the report to a gitignored file.
 it, how to hand the report to the `review` skill, and what to do in a Claude
 cloud session with no `codex` on PATH or inside an active Codex session, where
 nested `codex exec` is unavailable. Keep that step as the single owner instead
-of copying the contract here. The closeout is source review only: mapped quality
-gates, browser checks, generated-artifact checks, runtime verification, and
+of copying the contract here. The closeout is source review only: direct author
+checks, browser checks, generated-artifact checks, runtime verification, and
 final PR readiness remain separate.
 
 ## Claude global-store shadowing
@@ -116,9 +116,9 @@ actual rule is not.
 
 ## Codex Cloud routing
 
-Codex Cloud does not inherit a developer's local `~/.agents`, `~/.codex`, or
-`~/.claude` directories. Configure the environment setup and optional
-maintenance scripts as:
+Codex Cloud does not inherit local agent directories. On a trusted canonical
+branch under the [bootstrap boundary](worktree-and-web-setup.md#bootstrap-trust-boundary),
+configure setup and optional maintenance as:
 
 ```bash
 ./scripts/bootstrap/codex-cloud-setup.sh
@@ -134,8 +134,8 @@ and maintenance behavior live in
 
 The repo-local `ship` and `babysit-pr` skills under `.agents/skills/` have exact
 `.claude/skills/` mirrors. They preserve the familiar workflow names while
-backing behavior with repo-visible commands such as `pnpm agent:quality-gate`,
-`pnpm agent:closeout-review`, and `pnpm pr:ready-state`.
+backing behavior with the repo-visible PR operating card and commands such as
+`pnpm agent:closeout-review` and `pnpm pr:ready-state`.
 
 The `doc-garden` skill uses the same exact-mirror contract. It turns a generated
 bounded packet into evidence-backed dispositions, guarded semantic edits,
@@ -154,7 +154,8 @@ from a receipt, claims each issue by number, and hands each to its own worker
 that ships a ready-for-review PR. Which surface runs those workers is the
 runtime's to decide — Codex uses whatever parallel-execution surface it
 provides. With none, the session works the batch sequentially and takes both
-roles itself: the orchestrator's no-edit, no-gate, no-ship prohibitions exist to
+roles itself: the orchestrator's no-edit, no-author-check, no-ship
+prohibitions exist to
 keep concurrent workers out of each other's trees, so they do not bind when
 there is exactly one actor. The isolated checkout per issue, the duties, and the
 report contract hold either way. It never merges. It stops at READY and prints
@@ -163,8 +164,9 @@ report contract live in [`backlog-sweep.md`](backlog-sweep.md).
 
 The `.agents/skills/` ↔ `.claude/skills/` mirror is enforced, not just
 documented: `scripts/repo-health/check-skills-mirror.mjs` byte-compares the two
-trees and fails on any drift, and the Agent Quality Gate runs it automatically
-whenever either tree changes. Symlinking the trees was rejected — repo files
+trees and fails on any drift. The optional legacy gate also selects it for
+those changes. Symlinking the trees was
+rejected — repo files
 pushed via the GitHub Contents API and hosted/web checkouts are not guaranteed
 to preserve symlinks, so a check script is the safer default. Run
 `node scripts/repo-health/check-skills-mirror.mjs` after editing either copy.
