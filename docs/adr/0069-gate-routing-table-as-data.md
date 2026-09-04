@@ -181,10 +181,16 @@ used. A prepared runtime keeps its existing prepared-runtime trust contract.
 When a candidate changes `scripts/agent-autoreview-core.mjs` or either
 `gate/routing-table/indexer-handler-invariant-*.mjs` module, the classifier that
 decides comes from the reviewing checkout and cannot see a new owner or a
-false-to-true reclassification in the candidate revision. Each of those three
-paths therefore selects the handler-invariant checklist. This source trigger
-intentionally routes unrelated edits. Executing the candidate classifier
-would break the protected-main trust boundary.
+false-to-true reclassification in the candidate revision. The local gate
+therefore selects the handler-invariant checklist for all three paths.
+Autoreview selects it for the core path alone, the only one of the three it
+loads. The two copies cannot diverge:
+`scripts/indexer-handler-invariant-contract.test.mjs` compares them over the
+whole live inventory, and CI runs it for every change to either module. A
+candidate that changes a decision therefore changes the core copy too, and
+autoreview routes the checklist. This source trigger intentionally routes
+unrelated edits. Executing the candidate classifier would break the
+protected-main trust boundary.
 
 ### 2. Patterns are compiled by the repo's own translator, never by a glob library
 
