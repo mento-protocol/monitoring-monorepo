@@ -92,7 +92,6 @@ const TOOLING_SCRIPT_POINTERS = new Set(
     "docs:navigation-eval:test",
     "agent:closeout-review",
     "agent:closeout-review:test",
-    "agent:autoreview",
     "issue:board",
     "issue:board:test",
     "issue:claim",

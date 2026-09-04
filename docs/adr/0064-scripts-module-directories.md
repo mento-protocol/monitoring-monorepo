@@ -44,9 +44,10 @@ directory of its own.
 Routing survives a subdirectory in three of the four discovery mechanisms:
 
 - Bash `case` patterns match `/` with `*`, because they are pattern matches, not
-  filesystem globs. The `scripts/*` arm in `scripts/agent-autoreview.sh` and the
-  `scripts/*.sh` arm in `scripts/agent-quality-gate.sh` keep routing a file that
-  moves into a subdirectory.
+  filesystem globs. The `scripts/*.sh` arm in `scripts/agent-quality-gate.sh`
+  keeps routing a file that moves into a subdirectory. A second such arm lived
+  in `scripts/agent-autoreview.sh` until
+  [ADR 0087](0087-autoreview-removal-thin-two-model-review.md) deleted that wrapper.
 - `pnpm lint:scripts` runs `eslint scripts/`, and `eslint.config.mjs` scopes
   root scripts with `scripts/**/*.{mjs,js}` and `scripts/**/*.cjs`. ESLint
   recurses into the directory argument, so a moved file stays linted.
@@ -63,24 +64,26 @@ all 53 `sentry-*` files wherever they land, keep the `deploy-` prefix on the
 deploy wrappers, and add the paired one-level arm whenever a literal-prefix glob
 is the routing.
 
-Both deploy arms now carry that pair, added ahead of the move rather than with
+Both deploy arms carried that pair, added ahead of the move rather than with
 it: `scripts/deploy-*.sh|scripts/*/deploy-*.sh` routes the root-anchor check in
-`agent-quality-gate.sh`, and the same pair routes the Terraform/Cloud Run
-checklist in `select_checklists()` in `agent-autoreview.sh`. Both stay
-shell-scoped. The check behind the first has a `deploy-*.sh` subject set, and
-the Node deploy helpers that land in the same directory drive Envio and own no
-Cloud Run surface, so neither arm is the right home for them. Widening a routing
-glob is separable from the move it protects, and doing it first means the move
-cannot be the commit that goes quiet.
+`agent-quality-gate.sh`, and the same pair routed the Terraform/Cloud Run
+checklist in `select_checklists()` in `agent-autoreview.sh` until
+[ADR 0087](0087-autoreview-removal-thin-two-model-review.md) deleted that wrapper. The
+surviving arm stays shell-scoped. The check behind it has a `deploy-*.sh`
+subject set, and the Node deploy helpers that land in the same directory drive
+Envio and own no Cloud Run surface, so it is not the right home for them.
+Widening a routing glob is separable from the move it protects, and doing it
+first means the move cannot be the commit that goes quiet.
 
 Because `*` matches `/`, the pair reaches a `deploy-*.sh` basename under any
-`scripts/` subdirectory rather than one fixed directory. That is deliberate on
-both arms: `collectDeployWrappers()` in `check-deploy-root-anchors.test.mjs`
-walks `scripts/` recursively, so routing pinned to a single directory would once
-again be narrower than the check it schedules. The one live path it newly
-reaches is `scripts/lib/deploy-guard.sh`, the guard every wrapper sources before
-it mutates anything, which is precisely when both the check and the Cloud Run
-checklist should run. Both suites pin it. One consequence for later edits: a
+`scripts/` subdirectory rather than one fixed directory. That was deliberate on
+both arms and still is on the surviving one: `collectDeployWrappers()` in
+`check-deploy-root-anchors.test.mjs` walks `scripts/` recursively, so routing
+pinned to a single directory would once again be narrower than the check it
+schedules. The one live path it newly reaches is `scripts/lib/deploy-guard.sh`,
+the guard every wrapper sources before it mutates anything, which is precisely
+when the root-anchor check should run. `agent-quality-gate.test.sh` pins it; the
+Cloud Run checklist that pinned it from the other side went with the wrapper. One consequence for later edits: a
 `case` takes the first matching arm, so a new arm for a path of the shape
 `scripts/<dir>/deploy-*.sh` goes ABOVE the pair or it never runs.
 
@@ -181,7 +184,7 @@ scheduled document, for context an agent gets from the directory map in
   and treat operator regeneration as a release step. P6 hit this with
   `scripts/mcp/upstash-mcp-launcher.mjs`.
 - A file read from `origin/main` rather than the working tree cannot move in one
-  PR. `agent-autoreview.sh` materializes the `pr-*-state` helpers from the
+  PR. `agent-autoreview.sh` materialized the `pr-*-state` helpers from the
   protected `origin/main` snapshot because the checked-out copies are not
   trusted, and a missing path there fails closed. The wrapper that runs is
   whichever one the developer has checked out, so any single PR that both moves
@@ -195,11 +198,11 @@ scheduled document, for context an agent gets from the directory map in
   than the `pr-description.yml` case above, which degrades to a warning; here
   there is no fallback to degrade to. Hold the last step until no wrapper old
   enough to need the pre-move paths is still in use. D3 completed the three
-  merges on 2026-08-20; `scripts/pr/` is now the only pinned location. The
-  residual is the one this shape is designed to make loud: a checkout whose
-  wrapper predates the first merge resolves nothing and fails closed on
-  materialization until it pulls, rather than silently reviewing against a
-  runtime that is not there.
+  merges on 2026-08-20; `scripts/pr/` is now the only pinned location.
+  [ADR 0087](0087-autoreview-removal-thin-two-model-review.md) has since deleted the
+  wrapper, so nothing reads that pin any more and its residual is gone. The
+  hazard class stands for any future mechanism that reads a path from
+  `origin/main` rather than from the working tree.
 - Duplicated copies diverge through the merge queue, not through the PR that
   duplicates them. While both locations are live, an unrelated PR that edits one
   side is not a conflict for the copy PR, so git merges both cleanly and the two
@@ -222,9 +225,9 @@ routing, not procedure.
 1. Root `package.json` — 74 entries reference `scripts/`.
 2. `check-agent-quality-gate-package-scripts.mjs` — pinned alias map.
 3. `.github/workflows/` — 22 of 32 files pin a `scripts/` path. `ci.yml`
-   (`autoreviewSuite`, `autoreviewRootRuntime`, `versionSkew`; `rootScripts` is
-   the recursive `scripts/**`), `infra.yml`, `alerts-rules.yml`,
-   `peg-policy-publication.yml`, and `schema-diff.yml` list individual files.
+   (`versionSkew`; `rootScripts` is the recursive `scripts/**`), `infra.yml`,
+   `alerts-rules.yml`, `peg-policy-publication.yml`, and `schema-diff.yml` list
+   individual files.
    The three Terraform filters are the exception: `ci.yml` `terraform` plus
    `infra.yml` push and `pull_request` copy the broad
    `workflowAdmissionPatterns` boundary from `terraform.stacks.json`, including
@@ -359,15 +362,15 @@ not only the arm of the consumer that happens to fail loudest.
 - Flat-layout scale and prefix counts: `git ls-files scripts/` — 210 top-level
   files, 53 with the `sentry-` prefix, measured at P0. The count falls with each
   phase; `scripts/AGENTS.md` carries the current one.
-- Bash `case` routing: `scripts/agent-autoreview.sh` (`scripts/*` arm, and the
-  paired `scripts/deploy-*.sh` / `scripts/*/deploy-*.sh` checklist arm),
-  `scripts/agent-quality-gate.sh` (`scripts/*.sh`, and the paired
-  `scripts/deploy-*.sh` / `scripts/*/deploy-*.sh` and
-  `scripts/sentry-*.test.mjs` / `scripts/*/sentry-*.test.mjs` arms).
-- Routing assertions for both deploy pairs, each with a negative control:
+- Bash `case` routing: `scripts/agent-quality-gate.sh` (`scripts/*.sh`, and the
+  paired `scripts/deploy-*.sh` / `scripts/*/deploy-*.sh` and
+  `scripts/sentry-*.test.mjs` / `scripts/*/sentry-*.test.mjs` arms). The
+  matching arms in `scripts/agent-autoreview.sh` went with that wrapper in
+  [ADR 0087](0087-autoreview-removal-thin-two-model-review.md).
+- Routing assertions for the deploy pair, with a negative control:
   `scripts/agent-quality-gate.test.sh` (the `scripts/deploy/` cases beside the
-  flat ones) and `run_deploy_directory_checklist_routing_regression` in
-  `scripts/agent-autoreview.test.sh`.
+  flat ones). `run_deploy_directory_checklist_routing_regression` in
+  `scripts/agent-autoreview.test.sh` was the second, and ADR 0087 deleted it.
 - Recursive lint: `package.json` `lint:scripts`, `eslint.config.mjs` `files`
   globs.
 - Recursive CI filter: `.github/workflows/ci.yml`, `rootScripts` filter, whose

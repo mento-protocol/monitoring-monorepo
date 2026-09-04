@@ -268,7 +268,7 @@ function withGitFixture(run) {
     execFileSync("git", ["-C", root, "config", "user.name", "Fixture"]);
     const files = {
       ...Object.fromEntries(
-        ".agents/roles/standards-enforcer.md .agents/skills/ship/SKILL.md .claude/commands/autoreview.md .claude/skills/ship/SKILL.md .trunk/hooks/pre-commit docs/notes/pr-operating-card.md scripts/bootstrap/agent-setup-contract.test.sh scripts/docs/check-verification-redesign-evidence-source-patch.test.mjs scripts/docs/check-verification-redesign-evidence.mjs scripts/docs/check-verification-redesign-evidence.test.mjs scripts/pr/closeout-review-exec.mjs scripts/pr/closeout-review-git.mjs scripts/pr/closeout-review.mjs scripts/pr/closeout-review.test.mjs scripts/repo-health/check-guardrail-prose.mjs scripts/repo-health/check-guardrail-prose.test.mjs scripts/repo-health/guardrail-prose.json"
+        ".agents/roles/standards-enforcer.md .agents/skills/ship/SKILL.md .claude/skills/ship/SKILL.md .trunk/hooks/pre-commit docs/notes/pr-operating-card.md scripts/bootstrap/agent-setup-contract.test.sh scripts/docs/check-verification-redesign-evidence-source-patch.test.mjs scripts/docs/check-verification-redesign-evidence.mjs scripts/docs/check-verification-redesign-evidence.test.mjs scripts/pr/closeout-review-exec.mjs scripts/pr/closeout-review-git.mjs scripts/pr/closeout-review.mjs scripts/pr/closeout-review.test.mjs scripts/repo-health/check-guardrail-prose.mjs scripts/repo-health/check-guardrail-prose.test.mjs scripts/repo-health/guardrail-prose.json"
           .split(" ")
           .map((path) => [path, "replacement surface\n"]),
       ),
@@ -483,7 +483,7 @@ test("buildManifest accepts pre-push removal only with Trunk config", () => {
       manifest.entries.map((entry) => [entry.path, entry]),
     );
     const replacementPaths =
-      ".agents/roles/standards-enforcer.md .agents/roles/verifier.md .agents/skills/ship/SKILL.md .claude/commands/autoreview.md .claude/skills/ship/SKILL.md .trunk/hooks/pre-commit .trunk/trunk.yaml docs/notes/pr-operating-card.md scripts/bootstrap/agent-setup-contract.test.sh scripts/docs/check-verification-redesign-evidence-source-patch.test.mjs scripts/docs/check-verification-redesign-evidence.mjs scripts/docs/check-verification-redesign-evidence.test.mjs scripts/pr/closeout-review-exec.mjs scripts/pr/closeout-review-git.mjs scripts/pr/closeout-review.mjs scripts/pr/closeout-review.test.mjs scripts/repo-health/check-guardrail-prose.mjs scripts/repo-health/check-guardrail-prose.test.mjs scripts/repo-health/guardrail-prose.json".split(
+      ".agents/roles/standards-enforcer.md .agents/roles/verifier.md .agents/skills/ship/SKILL.md .claude/skills/ship/SKILL.md .trunk/hooks/pre-commit .trunk/trunk.yaml docs/notes/pr-operating-card.md scripts/bootstrap/agent-setup-contract.test.sh scripts/docs/check-verification-redesign-evidence-source-patch.test.mjs scripts/docs/check-verification-redesign-evidence.mjs scripts/docs/check-verification-redesign-evidence.test.mjs scripts/pr/closeout-review-exec.mjs scripts/pr/closeout-review-git.mjs scripts/pr/closeout-review.mjs scripts/pr/closeout-review.test.mjs scripts/repo-health/check-guardrail-prose.mjs scripts/repo-health/check-guardrail-prose.test.mjs scripts/repo-health/guardrail-prose.json".split(
         " ",
       );
     assert.deepEqual(

@@ -199,7 +199,7 @@ test("classification is single-valued and explicit metadata overrides defaults",
   assert.deepEqual(override.errors, []);
 });
 
-test("Claude runtime registry gives all seven projections owned non-canonical metadata", () => {
+test("Claude runtime registry gives every projection owned non-canonical metadata", () => {
   withRepo((repo) => {
     const { files } = writeRuntimeRegistryFixture(repo);
     const first = buildDocumentationInventory({ repoRoot: repo, files });
@@ -223,6 +223,41 @@ test("Claude runtime registry gives all seven projections owned non-canonical me
     assert.match(rendered, /; sources:/);
     assert.match(rendered, /\[`AGENTS\.md`\]/);
   });
+});
+
+// docs/context-standards.md states the registry's size in prose, and nothing
+// recomputed it when ADR 0087 removed a runtime document. Pin the prose to the
+// list, so the next added or removed runtime document reds here.
+const COUNT_WORDS = [
+  "zero",
+  "one",
+  "two",
+  "three",
+  "four",
+  "five",
+  "six",
+  "seven",
+  "eight",
+  "nine",
+  "ten",
+];
+
+test("context-standards states the registry's current size", () => {
+  const count = COUNT_WORDS[CLAUDE_RUNTIME_DOCUMENT_PATHS.length];
+  assert.ok(count, "the registry outgrew the spelled-out counts");
+  const standards = readFileSync(
+    fileURLToPath(new URL("../../docs/context-standards.md", import.meta.url)),
+    "utf8",
+  );
+  for (const sentence of [
+    `Their ${count} supported paths are instead registered in`,
+    `registry limited to its ${count} named Claude runtime documents`,
+  ]) {
+    assert.ok(
+      standards.includes(sentence),
+      `docs/context-standards.md does not say "${sentence}"`,
+    );
+  }
 });
 
 test("Claude runtime registry fails closed for invalid entries and proposed-tree drift", () => {
@@ -322,8 +357,13 @@ test("Claude runtime registry rejects non-string scalar metadata", () => {
       "doc_type",
       "garden_lane",
     ];
+    // The registry is shorter than this field list, and its length moves when a
+    // runtime document is added or removed. Wrap so every field still lands on
+    // a real document; the validator reports each failing field separately, so
+    // two fields on one document still produce two errors.
     for (const [index, field] of scalarFields.entries()) {
-      registry.documents[index][field] = index % 2 === 0 ? [] : {};
+      registry.documents[index % registry.documents.length][field] =
+        index % 2 === 0 ? [] : {};
     }
     write(
       repo,

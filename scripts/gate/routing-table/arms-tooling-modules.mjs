@@ -22,7 +22,7 @@
  */
 export const TOOLING_MODULE_ARMS = [
   {
-    why: "scripts/pr/ is the only location: the aliases, the suites, and the autoreview wrapper all resolve there. Neither arm is a glob, so each path needs naming outright.",
+    why: "scripts/pr/ is the only location: the aliases, the suites, and the closeout-review wrapper all resolve there. Neither arm is a glob, so each path needs naming outright.",
     patterns: [
       "scripts/pr/pr-feedback-state.mjs",
       "scripts/pr/pr-feedback-state-core.mjs",

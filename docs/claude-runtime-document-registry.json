@@ -44,21 +44,6 @@
       "canonical_sources": ["AGENTS.md", "docs/terraform.md"]
     },
     {
-      "path": ".claude/commands/autoreview.md",
-      "title": "Auto Review",
-      "canonical": false,
-      "status": "active",
-      "owner": "eng",
-      "scope": "repo-wide",
-      "doc_type": "command",
-      "garden_lane": "agent-entry-points",
-      "review_interval_days": 180,
-      "canonical_sources": [
-        "docs/notes/agent-quality-gate-mechanics.md",
-        "docs/notes/pr-operating-card.md"
-      ]
-    },
-    {
       "path": ".claude/commands/babysit-indexer-deploy.md",
       "title": "Babysit Indexer Deploy",
       "canonical": false,

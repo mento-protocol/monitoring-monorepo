@@ -109,16 +109,14 @@ Also configure the optional maintenance script for cached container resumes:
 ```
 
 These scripts perform the frozen install, Envio codegen, context checks, and
-cached-container maintenance. They still verify the legacy autoreview helper
-until issue #2128; this is not the normal review entry point. Normal delivery
-uses the direct author checks, bound `agent:closeout-review`, and verifier flow
-in [PR operating card](./docs/notes/pr-operating-card.md) steps 3-4. Keep
-browser and runtime evidence separate.
+cached-container maintenance. Normal delivery uses the direct author checks,
+bound `agent:closeout-review`, and verifier flow in
+[PR operating card](./docs/notes/pr-operating-card.md) steps 3-4. Keep browser
+and runtime evidence separate.
 
-After checkout in a cached container, maintenance refreshes `origin/main`,
-verifies the retained legacy helper, syncs the branch lockfile with
-`pnpm install --frozen-lockfile --prefer-offline`, regenerates Envio types, and
-validates agent context.
+After checkout in a cached container, maintenance refreshes `origin/main`, syncs
+the branch lockfile with `pnpm install --frozen-lockfile --prefer-offline`,
+regenerates Envio types, and validates agent context.
 
 If you install manually, verify the dashboard can resolve its Sentry package
 after `pnpm install`:

@@ -90,8 +90,7 @@ report covers the `agent-ready` rule above; it does not check `kind:*`.
 2. None of those paths is a control, deploy, or money-path surface:
    `terraform/**` or any `*.tf`; `.github/workflows/**`; `scripts/deploy*`,
    `**/deploy.sh`, `cloudbuild*`; `scripts/agent-quality-gate.sh` and
-   `scripts/gate/**`; `scripts/agent-autoreview*` and any autoreview runtime;
-   `scripts/pr/closeout-review*`;
+   `scripts/gate/**`; `scripts/pr/closeout-review*`;
    `scripts/pr/agent-issue-board*`, `scripts/pr/issue-board-*`, and
    `scripts/pr/pr-ready-state*`; `.trunk/**`;
    `.claude/hooks` or settings; `package.json`, `pnpm-lock.yaml`,

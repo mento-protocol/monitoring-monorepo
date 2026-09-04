@@ -34,7 +34,7 @@ const REQUIRED_WHOLE_FILE_PATHS = new Set(
   ),
 );
 const REQUIRED_REPLACEMENT_WHOLE_FILE_PATHS = new Set(
-  ".agents/roles/standards-enforcer.md .agents/roles/verifier.md .agents/skills/ship/SKILL.md .claude/commands/autoreview.md .claude/skills/ship/SKILL.md .trunk/hooks/pre-commit .trunk/trunk.yaml docs/notes/pr-operating-card.md scripts/bootstrap/agent-setup-contract.test.sh scripts/docs/check-verification-redesign-evidence-source-patch.test.mjs scripts/docs/check-verification-redesign-evidence.mjs scripts/docs/check-verification-redesign-evidence.test.mjs scripts/pr/closeout-review-exec.mjs scripts/pr/closeout-review-git.mjs scripts/pr/closeout-review.mjs scripts/pr/closeout-review.test.mjs scripts/repo-health/check-guardrail-prose.mjs scripts/repo-health/check-guardrail-prose.test.mjs scripts/repo-health/guardrail-prose.json".split(
+  ".agents/roles/standards-enforcer.md .agents/roles/verifier.md .agents/skills/ship/SKILL.md .claude/skills/ship/SKILL.md .trunk/hooks/pre-commit .trunk/trunk.yaml docs/notes/pr-operating-card.md scripts/bootstrap/agent-setup-contract.test.sh scripts/docs/check-verification-redesign-evidence-source-patch.test.mjs scripts/docs/check-verification-redesign-evidence.mjs scripts/docs/check-verification-redesign-evidence.test.mjs scripts/pr/closeout-review-exec.mjs scripts/pr/closeout-review-git.mjs scripts/pr/closeout-review.mjs scripts/pr/closeout-review.test.mjs scripts/repo-health/check-guardrail-prose.mjs scripts/repo-health/check-guardrail-prose.test.mjs scripts/repo-health/guardrail-prose.json".split(
     " ",
   ),
 );

@@ -333,13 +333,23 @@ test("codex receives the pinned argv and an allowlisted environment", (t) => {
 });
 
 test("every frozen finder report shape is read as findings", (t) => {
-  // Three of the six use the singular `Review comment:` heading. A detector
-  // that only knows `Full review comments:` reports those as clean.
+  // Some reports use the singular `Review comment:` heading. A detector that
+  // only knows `Full review comments:` reports those as clean, so the frozen
+  // set must keep both shapes.
   const dir = fileURLToPath(
     new URL("../../docs/evals/review-skill-finder-reports/", import.meta.url),
   );
   const reports = fs.readdirSync(dir).filter((name) => name.endsWith(".md"));
-  assert.equal(reports.length, 6);
+  const shapes = new Set(
+    reports.map((name) =>
+      fs
+        .readFileSync(path.join(dir, name), "utf8")
+        .includes("Full review comments:")
+        ? "plural"
+        : "singular",
+    ),
+  );
+  assert.deepEqual([...shapes].sort(), ["plural", "singular"]);
 
   for (const name of reports) {
     const repo = makeRepo(t);

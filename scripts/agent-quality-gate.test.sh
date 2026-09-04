@@ -3872,9 +3872,6 @@ adapter_drift_lock="$(cd "$adapter_drift_lock" && pwd -P)"
   mkdir -p bin scripts/docs scripts/gate/mapping \
     scripts/gate/routing-table scripts/lib tools
   cp "$repo_root/scripts/agent-quality-gate.sh" scripts/agent-quality-gate.sh
-  cp "$repo_root/scripts/agent-autoreview-core.mjs" scripts/agent-autoreview-core.mjs
-  cp "$repo_root/scripts/agent-autoreview-secret-suppressions.json" \
-    scripts/agent-autoreview-secret-suppressions.json
   cp "$repo_root/scripts/docs/docs-navigation-eval-helpers.mjs" scripts/docs/
   cp "$repo_root/scripts/lib/gh-issue-lifecycle.mjs" scripts/lib/
   cp "$repo_root/scripts/gate/lockfile-scope.mjs" scripts/gate/
@@ -6886,7 +6883,6 @@ package_json_repo="$(mktemp -d)"
     "agent:quality-gate": "./scripts/agent-quality-gate.sh",
     "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh",
     "agent:context-check": "node scripts/context/check-agent-context.mjs",
-    "agent:autoreview": "./scripts/agent-autoreview.sh",
     "agent:prewarm": "node scripts/gate/agent-prewarm.mjs",
     "agent:prewarm:test": "node scripts/gate/agent-prewarm.test.mjs",
     "agent:review-materiality": "node scripts/pr/review-materiality.mjs",
@@ -6951,7 +6947,6 @@ dedupe_quality_gate_alias_repo="$(mktemp -d)"
     "agent:quality-gate": "./scripts/agent-quality-gate.sh",
     "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh",
     "agent:context-check": "node scripts/context/check-agent-context.mjs",
-    "agent:autoreview": "./scripts/agent-autoreview.sh",
     "agent:prewarm": "node scripts/gate/agent-prewarm.mjs",
     "agent:prewarm:test": "node scripts/gate/agent-prewarm.test.mjs",
     "agent:review-materiality": "node scripts/pr/review-materiality.mjs",
@@ -7001,7 +6996,6 @@ lockfile_script_repo="$(mktemp -d)"
     "agent:quality-gate": "./scripts/agent-quality-gate.sh",
     "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh",
     "agent:context-check": "node scripts/context/check-agent-context.mjs",
-    "agent:autoreview": "./scripts/agent-autoreview.sh",
     "agent:prewarm": "node scripts/gate/agent-prewarm.mjs",
     "agent:prewarm:test": "node scripts/gate/agent-prewarm.test.mjs",
     "agent:review-materiality": "node scripts/pr/review-materiality.mjs",
@@ -7061,7 +7055,6 @@ pr_ready_state_script_repo="$(mktemp -d)"
     "agent:quality-gate": "./scripts/agent-quality-gate.sh",
     "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh",
     "agent:context-check": "node scripts/context/check-agent-context.mjs",
-    "agent:autoreview": "./scripts/agent-autoreview.sh",
     "agent:prewarm": "node scripts/gate/agent-prewarm.mjs",
     "agent:prewarm:test": "node scripts/gate/agent-prewarm.test.mjs",
     "agent:review-materiality": "node scripts/pr/review-materiality.mjs",
@@ -9225,262 +9218,6 @@ assert_contains "+ node scripts/check-agent-quality-gate-package-scripts.mjs"
 assert_contains "Stopping after first failed mapped command (--fail-fast)."
 assert_not_contains "Running quality commands with parallelism 4."
 
-autoreview_progress_repo="$(mktemp -d)"
-autoreview_progress_marker="$autoreview_progress_repo/autoreview-progress-ready"
-(
-  cd "$autoreview_progress_repo"
-  git init -q
-  git config user.email test@example.invalid
-  git config user.name "Quality Gate Test"
-  mkdir -p bin scripts tools
-  cat > scripts/agent-autoreview.test.sh <<'STUB'
-#!/usr/bin/env bash
-set -euo pipefail
-/bin/sleep 0.1
-printf '%s\n' \
-  'AUTOREVIEW_TEST_PROGRESS family=target-selection elapsed=1s' \
-  'AUTOREVIEW_TEST_PROGRESS family=adapter elapsed=2s'
-: > "${AUTOREVIEW_PROGRESS_MARKER:?}"
-echo 'successful autoreview noise that should stay quiet'
-# Stay in flight until the gate has actually relayed the published progress,
-# then finish. The parent reaches that heartbeat only after settling this
-# command's siblings, and each settlement walks the process table, so its cost
-# is a property of the machine rather than a constant: the fixed six-second
-# sleep this replaces held on Linux and expired mid-settlement on macOS,
-# leaving nothing in flight to relay (issue 2108).
-#
-# Poll for the relayed record itself, not the heartbeat's display text, so
-# rewording that banner cannot stall this stub. Matching the record is sound
-# because the relay is the only writer that can put this line into the gate's
-# stdout while this command is still running: mapped output is captured to a
-# private per-command file, a successful command contributes only its
-# AUTOREVIEW_TEST_TIMING records, and a failed command's output is dumped to
-# stderr after it exits. latest_autoreview_test_progress prints the matched
-# line verbatim, so the relayed form is exactly this string. The assertions
-# below already rely on that same routing, so this adds no new assumption.
-#
-# /bin/date and /bin/sleep, never the bare names: this fixture shadows date on
-# PATH to drive the gate's fake clock, and a bare call here would advance the
-# gate's counter. Measured on the clock rather than by counting sleeps, for the
-# same reason as the interrupt fixture below — each pass also forks grep, so a
-# loop count names a bound it never actually waits. Expiring fails loudly, so
-# the report names this timeout instead of the downstream assertion it would
-# otherwise surface as.
-heartbeat_seen=0
-progress_wait_deadline_seconds=120
-progress_wait_started_at="$(/bin/date +%s)"
-while :; do
-  if grep -Fq 'AUTOREVIEW_TEST_PROGRESS family=adapter elapsed=2s' \
-    "${AUTOREVIEW_PROGRESS_OUTPUT:?}"; then
-    heartbeat_seen=1
-    break
-  fi
-  if [[ $(($(/bin/date +%s) - progress_wait_started_at)) -ge \
-    "$progress_wait_deadline_seconds" ]]; then
-    break
-  fi
-  /bin/sleep 0.1
-done
-if [[ "$heartbeat_seen" -ne 1 ]]; then
-  echo "autoreview progress relay did not run within ${progress_wait_deadline_seconds}s" >&2
-  exit 1
-fi
-printf '%s\n' \
-  'AUTOREVIEW_TEST_TIMING family=target-selection status=ok elapsed=3s' \
-  'AUTOREVIEW_TEST_TIMING family=adapter status=ok elapsed=4s'
-STUB
-  cat > tools/trunk <<'STUB'
-#!/usr/bin/env bash
-if [ "${1:-} ${2:-}" = "daemon status" ]; then
-  printf 'x Daemon stopped\n'
-  exit 1
-fi
-exit 0
-STUB
-  cat > bin/pnpm <<'STUB'
-#!/usr/bin/env bash
-if [[ "$*" == agent:autoreview:test* ]]; then
-  /bin/bash scripts/agent-autoreview.test.sh
-fi
-STUB
-  # Keep real time until the child publishes progress. Then advance the gate's
-  # clock by 30 seconds per read so registration cannot consume the only
-  # synthetic heartbeat before the progress lines exist.
-  cat > bin/date <<'STUB'
-#!/usr/bin/env bash
-if [[ "$*" != "+%s" ]]; then
-  exec /bin/date "$@"
-fi
-if [[ -n "${AUTOREVIEW_PROGRESS_MARKER:-}" &&
-  ! -e "$AUTOREVIEW_PROGRESS_MARKER" ]]; then
-  exec /bin/date "$@"
-fi
-lock_dir="${DATE_COUNTER_FILE:?}.lock"
-while ! mkdir "$lock_dir" 2>/dev/null; do
-  /bin/sleep 0.01
-done
-trap 'rmdir "$lock_dir"' EXIT
-value=0
-if [[ -f "$DATE_COUNTER_FILE" ]]; then
-  value="$(cat "$DATE_COUNTER_FILE")"
-else
-  value="$(/bin/date +%s)"
-fi
-value=$((value + 30))
-printf '%s\n' "$value" > "$DATE_COUNTER_FILE"
-printf '%s\n' "$value"
-STUB
-  chmod +x bin/date bin/pnpm scripts/agent-autoreview.test.sh tools/trunk
-  git add .
-  git commit -qm init
-  printf 'scripts/agent-autoreview.test.sh\n' > changed-paths.txt
-  rm -f "$autoreview_progress_marker"
-  # The mapped command reads this run's stdout while the gate writes it. That
-  # is the handshake, not an accident: one writer, one reader that only ever
-  # greps to EOF, so SC2094's clobber case cannot arise here.
-  # shellcheck disable=SC2094
-  AUTOREVIEW_PROGRESS_MARKER="$autoreview_progress_marker" \
-    AUTOREVIEW_PROGRESS_OUTPUT="$output_file" \
-    DATE_COUNTER_FILE="$autoreview_progress_repo/date-counter" \
-    PATH="$autoreview_progress_repo/bin:$PATH" \
-    "$repo_root/scripts/agent-quality-gate.sh" \
-      --changed-paths-file changed-paths.txt \
-      --base HEAD \
-      --run \
-      --parallel 4 \
-      > "$output_file" 2>&1
-)
-assert_contains "AUTOREVIEW_TEST_PROGRESS family=adapter elapsed=2s"
-assert_not_contains "AUTOREVIEW_TEST_PROGRESS family=target-selection elapsed=1s"
-assert_contains "AUTOREVIEW_TEST_TIMING family=target-selection status=ok elapsed=3s"
-assert_contains "AUTOREVIEW_TEST_TIMING family=adapter status=ok elapsed=4s"
-assert_not_contains "successful autoreview noise that should stay quiet"
-
-for sequential_mode in parallel-one fail-fast; do
-  sequential_args=(--fail-fast)
-  if [[ "$sequential_mode" == parallel-one ]]; then
-    sequential_args=(--parallel 1)
-  fi
-  (
-    cd "$autoreview_progress_repo"
-    # This block re-runs the same unchanged fixture to exercise the progress
-    # monitor; per-command reuse (issue #1410) would otherwise skip the
-    # autoreview test on later runs, so drop the stamps to force re-execution.
-    rm -f "$autoreview_progress_repo/.tmp/agent-quality-gate/command-stamps.tsv"
-    rm -f "$autoreview_progress_marker"
-    # Same deliberate read-while-write handshake as the parallel case above.
-    # shellcheck disable=SC2094
-    AUTOREVIEW_PROGRESS_MARKER="$autoreview_progress_marker" \
-      AUTOREVIEW_PROGRESS_OUTPUT="$output_file" \
-      DATE_COUNTER_FILE="$autoreview_progress_repo/date-counter" \
-      PATH="$autoreview_progress_repo/bin:$PATH" \
-      "$repo_root/scripts/agent-quality-gate.sh" \
-        --changed-paths-file changed-paths.txt \
-        --base HEAD \
-        --run \
-        "${sequential_args[@]}" \
-        > "$output_file" 2>&1
-  )
-  assert_contains "AUTOREVIEW_TEST_PROGRESS family=adapter elapsed=2s"
-  assert_contains "AUTOREVIEW_TEST_TIMING family=adapter status=ok elapsed=4s"
-  assert_not_contains "successful autoreview noise that should stay quiet"
-done
-
-(
-  cd "$autoreview_progress_repo"
-  cat > scripts/agent-autoreview.test.sh <<'STUB'
-#!/usr/bin/env bash
-echo 'AUTOREVIEW_TEST_PROGRESS family=runtime-trust elapsed=5s'
-echo 'AUTOREVIEW_TEST_TIMING family=runtime-trust status=failed elapsed=6s'
-echo 'complete autoreview failure diagnostic'
-exit 7
-STUB
-  chmod +x scripts/agent-autoreview.test.sh
-  set +e
-  DATE_COUNTER_FILE="$autoreview_progress_repo/date-counter" \
-    PATH="$autoreview_progress_repo/bin:$PATH" \
-    "$repo_root/scripts/agent-quality-gate.sh" \
-      --changed-paths-file changed-paths.txt \
-      --base HEAD \
-      --run \
-      --parallel 4 \
-      > "$output_file" 2>&1
-  exit_code=$?
-  set -e
-  [[ "$exit_code" -ne 0 ]] ||
-    fail "gate did not fail when the autoreview test command failed"
-)
-assert_contains "AUTOREVIEW_TEST_PROGRESS family=runtime-trust elapsed=5s"
-assert_contains "AUTOREVIEW_TEST_TIMING family=runtime-trust status=failed elapsed=6s"
-assert_contains "complete autoreview failure diagnostic"
-
-(
-  cd "$autoreview_progress_repo"
-  cat > scripts/agent-autoreview.test.sh <<'STUB'
-#!/usr/bin/env bash
-set -euo pipefail
-# The gate removes AUTOREVIEW_TEST_* controls before mapped commands start.
-# The fixture runs from this repository root, so use its fixed relative path.
-printf '%s\n' "$$" > autoreview-child-pid
-echo 'AUTOREVIEW_TEST_PROGRESS family=adapter elapsed=7s'
-sleep 30
-STUB
-  chmod +x scripts/agent-autoreview.test.sh
-  autoreview_pid_file="$autoreview_progress_repo/autoreview-child-pid"
-  gate_output_fifo="$autoreview_progress_repo/gate-output.fifo"
-  rm -f "$autoreview_pid_file" "$gate_output_fifo"
-  mkfifo "$gate_output_fifo"
-  cat "$gate_output_fifo" > "$output_file" &
-  output_reader_pid=$!
-  DATE_COUNTER_FILE="$autoreview_progress_repo/date-counter" \
-    PATH="$autoreview_progress_repo/bin:$PATH" \
-    "$repo_root/scripts/agent-quality-gate.sh" \
-      --changed-paths-file changed-paths.txt \
-      --base HEAD \
-      --run \
-      --parallel 1 \
-      > "$gate_output_fifo" 2>&1 &
-  gate_pid=$!
-  launched=0
-  for _ in {1..200}; do
-    if [[ -s "$autoreview_pid_file" ]]; then
-      launched=1
-      break
-    fi
-    if ! kill -0 "$gate_pid" 2>/dev/null; then
-      break
-    fi
-    sleep 0.05
-  done
-  if [[ "$launched" -ne 1 ]]; then
-    kill -KILL "$gate_pid" 2>/dev/null || true
-    wait "$gate_pid" 2>/dev/null || true
-    kill -KILL "$output_reader_pid" 2>/dev/null || true
-    wait "$output_reader_pid" 2>/dev/null || true
-    fail "sequential autoreview cancellation fixture did not launch"
-  fi
-
-  kill -KILL "$gate_pid"
-  wait "$gate_pid" 2>/dev/null || true
-  kill -KILL "$(cat "$autoreview_pid_file")" 2>/dev/null || true
-  reader_exited=0
-  for _ in {1..100}; do
-    if ! kill -0 "$output_reader_pid" 2>/dev/null; then
-      reader_exited=1
-      break
-    fi
-    sleep 0.05
-  done
-  if [[ "$reader_exited" -ne 1 ]]; then
-    kill -KILL "$output_reader_pid" 2>/dev/null || true
-    wait "$output_reader_pid" 2>/dev/null || true
-    fail "sequential autoreview progress monitor survived its killed gate parent"
-  fi
-  wait "$output_reader_pid" 2>/dev/null || true
-  rm -f "$gate_output_fifo"
-)
-rm -rf "$autoreview_progress_repo"
-
 serialized_repo_mutation_repo="$(mktemp -d)"
 (
   cd "$serialized_repo_mutation_repo"
@@ -9492,14 +9229,15 @@ serialized_repo_mutation_repo="$(mktemp -d)"
 #!/usr/bin/env bash
 exit 0
 STUB
-  cat > scripts/agent-autoreview.sh <<'STUB'
+  mkdir -p scripts/repo-health
+  cat > scripts/repo-health/dev-janitor.sh <<'STUB'
 #!/usr/bin/env bash
 exit 0
 STUB
-  cat > scripts/agent-autoreview.test.sh <<'STUB'
+  cat > scripts/repo-health/dev-janitor.test.sh <<'STUB'
 #!/usr/bin/env bash
 if [[ ! -f "${SERIAL_MUTATION_MARKER:?}" ]]; then
-  echo "autoreview test overlapped the repo-mutating quality-gate self-test"
+  echo "dev-janitor test overlapped the repo-mutating quality-gate self-test"
   exit 1
 fi
 STUB
@@ -9518,16 +9256,14 @@ case "$*" in
     sleep 0.2
     : > "${SERIAL_MUTATION_MARKER:?}"
     ;;
-  agent:autoreview:test*)
-    /bin/bash scripts/agent-autoreview.test.sh
-    ;;
 esac
 STUB
-  chmod +x bin/pnpm scripts/agent-autoreview.sh scripts/agent-autoreview.test.sh scripts/agent-quality-gate.sh tools/trunk
+  chmod +x bin/pnpm scripts/repo-health/dev-janitor.sh \
+    scripts/repo-health/dev-janitor.test.sh scripts/agent-quality-gate.sh tools/trunk
   git add .
   git commit -qm init
   printf '%s\n' \
-    "scripts/agent-autoreview.sh" \
+    "scripts/repo-health/dev-janitor.sh" \
     "scripts/agent-quality-gate.sh" \
     > changed-paths.txt
   SERIAL_MUTATION_MARKER="$serialized_repo_mutation_repo/serial-marker" \
@@ -9541,9 +9277,9 @@ STUB
 )
 rm -rf "$serialized_repo_mutation_repo"
 assert_contains "+ pnpm agent:quality-gate:test"
-assert_contains "+ pnpm agent:autoreview:test"
+assert_contains "+ bash scripts/repo-health/dev-janitor.test.sh"
 assert_contains "All mapped commands passed."
-assert_not_contains "autoreview test overlapped the repo-mutating quality-gate self-test"
+assert_not_contains "dev-janitor test overlapped the repo-mutating quality-gate self-test"
 
 auto_parallel_quality_repo="$(mktemp -d)"
 (
@@ -11513,10 +11249,6 @@ mkdir -p \
   "$signature_runtime_root/scripts/gate/routing-table"
 cp "$repo_root/scripts/agent-quality-gate.sh" \
   "$signature_runtime_root/scripts/agent-quality-gate.sh"
-cp "$repo_root/scripts/agent-autoreview-core.mjs" \
-  "$signature_runtime_root/scripts/agent-autoreview-core.mjs"
-cp "$repo_root/scripts/agent-autoreview-secret-suppressions.json" \
-  "$signature_runtime_root/scripts/agent-autoreview-secret-suppressions.json"
 cp "$repo_root/scripts/gate/run-handles.sh" \
   "$signature_runtime_root/scripts/gate/run-handles.sh"
 cp "$repo_root/scripts/gate/darwin-broker-launch-preflight.mjs" \
@@ -11578,8 +11310,8 @@ chmod +x "$signature_runtime_root/scripts/agent-quality-gate.sh"
   printf 'fixture\n' > fixture.txt
   printf 'second fixture\n' > second.txt
   printf '# fixture gate implementation\n' > scripts/agent-quality-gate.sh
-  printf '// fixture autoreview core routing source\n' > scripts/agent-autoreview-core.mjs
-  printf '[]\n' > scripts/agent-autoreview-secret-suppressions.json
+  printf '// fixture darwin lineage model\n' \
+    > scripts/gate/darwin-process-lineage-model.mjs
   printf '// fixture alias validator\n' > scripts/check-agent-quality-gate-package-scripts.mjs
   printf '# fixture routing classifier\n' > scripts/docs/docs-navigation-eval-helpers.mjs
   printf '# fixture lockfile scope classifier\n' > scripts/gate/lockfile-scope.mjs
@@ -11741,14 +11473,14 @@ STUB
   # A pinned gate-runtime source loads from the gate's own source tree. A
   # target-repo placeholder must not affect the signature, while the loaded
   # source-tree copy must invalidate it independently.
-  printf '// changed fixture autoreview core routing source\n' \
-    >> scripts/agent-autoreview-core.mjs
+  printf '// changed fixture darwin lineage model\n' \
+    >> scripts/gate/darwin-process-lineage-model.mjs
   run_signature_gate_again
   [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "9" ]] ||
-    fail "a non-runtime autoreview core placeholder invalidated the fresh stamp"
+    fail "a non-runtime darwin lineage placeholder invalidated the fresh stamp"
 
-  printf '// changed runtime autoreview core routing source\n' \
-    >> "$signature_runtime_root/scripts/agent-autoreview-core.mjs"
+  printf '// changed runtime darwin lineage model\n' \
+    >> "$signature_runtime_root/scripts/gate/darwin-process-lineage-model.mjs"
   COUNTER_FILE="$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count" \
     "$signature_gate" \
       --changed-paths-file changed-paths-two.txt \
@@ -11757,7 +11489,7 @@ STUB
       --skip-if-fresh \
       > "$output_file" 2>&1
   [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "10" ]] ||
-    fail "fresh gate stamp was reused after the pinned autoreview core changed"
+    fail "fresh gate stamp was reused after the pinned darwin lineage model changed"
 
   # The signature has two path roots. Runtime modules come from the gate's own
   # checkout, while commands and configuration come from the repository under
@@ -13462,33 +13194,18 @@ assert_contains "- pnpm sentry:archive:test (Sentry triage archive helper change
 run_gate "scripts/sentry/triage/sentry-triage-archive.test.mjs"
 assert_contains "- pnpm sentry:archive:test (Sentry triage archive helper changed)"
 
-# The #1943/#1970 fixture drift canary (ADR 0068). Three routes, all pinned:
-# its own file, the scanner whose credential-key vocabulary decides whether the
-# renamed fixtures still scan clean, and each of the four suites that carry
-# those fixtures. The canary's own arm sits ABOVE the per-suite arms in the
-# gate: a single combined pattern there would match those four paths first and
-# silently drop each suite's focused test, which is the routing bug #1974
-# shipped. The per-suite assertions below are what would red if someone
-# collapsed these arms that way.
-fixture_canary="- node scripts/sentry/fixture-scan-canary.test.mjs"
+run_gate "scripts/sentry/autofix/sentry-autofix-finalize.test.mjs"
+assert_contains "- pnpm sentry:autofix:finalize:test (Sentry autofix finalize helper changed)"
 
-run_gate "scripts/sentry/fixture-scan-canary.test.mjs"
-assert_contains "$fixture_canary (Sentry fixture drift canary changed)"
-
-run_gate "scripts/agent-autoreview-core.mjs"
-assert_contains "- pnpm agent:autoreview:test (agent autoreview helper changed)"
-assert_contains "- docs/pr-checklists/indexer-handler-invariants.md (indexer invariant routing source changed)"
-assert_contains "$fixture_canary (autoreview secret scanner changed)"
-assert_contains "- pnpm gate:routing-table:test (indexer invariant routing source changed)"
-assert_contains "- node --test scripts/indexer-handler-invariant-contract.test.mjs (indexer invariant routing source changed)"
-assert_contains "- pnpm agent:quality-gate:test (indexer invariant routing source changed)"
+run_gate "scripts/sentry/broker/sentry-mcp-broker.test.mjs"
+assert_contains "- pnpm sentry:broker:test (Sentry MCP broker or pre-flight probe changed)"
 
 run_gate "scripts/indexer-handler-invariant-contract.test.mjs"
 assert_contains "- node --test scripts/indexer-handler-invariant-contract.test.mjs (indexer handler invariant contract changed)"
 
-# The extracted contract and its family data carry the same conservative set as
-# the autoreview core copy they left: the gate classifies from its own checkout,
-# so it cannot see a candidate revision's new owner until that source lands.
+# The extracted contract and its family data carry a conservative set: the gate
+# classifies from its own checkout, so it cannot see a candidate revision's new
+# owner until that source lands.
 for indexer_invariant_source in \
   "scripts/gate/routing-table/indexer-handler-invariant-contract.mjs" \
   "scripts/gate/routing-table/indexer-handler-invariant-families.mjs"; do
@@ -13499,37 +13216,19 @@ for indexer_invariant_source in \
   assert_contains "- pnpm agent:quality-gate:test (indexer invariant routing source changed)"
 done
 
-run_gate "scripts/agent-autoreview-secret-suppressions.json"
-assert_contains "- pnpm agent:autoreview:test (agent autoreview helper changed)"
-
 # The protected-main classifier sees both targets below as route:false. A
-# candidate core can add the new owner or reclassify the existing owner, so the
-# changed core path must carry the checklist independently of those decisions.
+# candidate families source can add the new owner or reclassify the existing
+# owner, so the changed source path must carry the checklist independently of
+# those decisions.
 run_gate \
-  "scripts/agent-autoreview-core.mjs" \
+  "scripts/gate/routing-table/indexer-handler-invariant-families.mjs" \
   "indexer-envio/src/futureProtectedSkew.ts"
 assert_contains "- docs/pr-checklists/indexer-handler-invariants.md (indexer invariant routing source changed)"
 
 run_gate \
-  "scripts/agent-autoreview-core.mjs" \
+  "scripts/gate/routing-table/indexer-handler-invariant-families.mjs" \
   "indexer-envio/src/rpc/log.ts"
 assert_contains "- docs/pr-checklists/indexer-handler-invariants.md (indexer invariant routing source changed)"
-
-run_gate "scripts/sentry/autofix/sentry-autofix-finalize.test.mjs"
-assert_contains "- pnpm sentry:autofix:finalize:test (Sentry autofix finalize helper changed)"
-assert_contains "$fixture_canary (Sentry suite carrying scanned fixtures changed)"
-
-run_gate "scripts/sentry/broker/sentry-mcp-broker.test.mjs"
-assert_contains "- pnpm sentry:broker:test (Sentry MCP broker or pre-flight probe changed)"
-assert_contains "$fixture_canary (Sentry suite carrying scanned fixtures changed)"
-
-run_gate "scripts/sentry/triage/sentry-triage-agent-comment.test.mjs"
-assert_contains "- node scripts/sentry/triage/sentry-triage-agent-comment.test.mjs (Sentry triage agent comment wrapper changed)"
-assert_contains "$fixture_canary (Sentry suite carrying scanned fixtures changed)"
-
-run_gate "scripts/sentry/triage/sentry-triage-archive.test.mjs"
-assert_contains "- pnpm sentry:archive:test (Sentry triage archive helper changed)"
-assert_contains "$fixture_canary (Sentry suite carrying scanned fixtures changed)"
 
 # The handled-family lookup, split out of sentry-autofix-queue-io.mjs for the
 # 600-line soft cap. Pinned ALONE — a module added to this leg without a routing
@@ -13909,30 +13608,6 @@ assert_contains "- node scripts/pr/check-pr-description.test.mjs (review-eval pu
 run_gate ".gitignore"
 assert_contains "- pnpm review:eval:test (review-eval raw cell exclusion changed)"
 
-run_gate "scripts/agent-autoreview.mjs"
-assert_contains "- pnpm lint:scripts (root build script changed)"
-assert_contains "- pnpm agent:autoreview:test (agent autoreview helper changed)"
-
-run_gate "scripts/agent-autoreview-secret-suppressions.json"
-assert_contains "- pnpm lint:scripts (root build script changed)"
-assert_contains "- pnpm agent:autoreview:test (agent autoreview helper changed)"
-
-run_gate "scripts/agent-autoreview-core.mjs"
-assert_contains "- pnpm lint:scripts (root build script changed)"
-assert_contains "- pnpm agent:autoreview:test (agent autoreview helper changed)"
-assert_contains "- docs/pr-checklists/indexer-handler-invariants.md (indexer invariant routing source changed)"
-assert_contains "- pnpm gate:routing-table:test (indexer invariant routing source changed)"
-assert_contains "- pnpm agent:quality-gate:test (indexer invariant routing source changed)"
-
-run_gate "scripts/agent-autoreview-core.test.mjs"
-assert_contains "- pnpm lint:scripts (root build script changed)"
-assert_contains "- pnpm agent:autoreview:test (agent autoreview helper changed)"
-assert_not_contains "indexer invariant routing source changed"
-
-run_gate "scripts/agent-autoreview-target-guard.test.mjs"
-assert_contains "- pnpm lint:scripts (root build script changed)"
-assert_contains "- pnpm agent:autoreview:test (agent autoreview helper changed)"
-
 run_gate "scripts/context/check-agent-context.mjs"
 assert_contains "- pnpm agent:context-check (agent context checker changed)"
 assert_contains "- node scripts/context/check-agent-context.test.mjs (agent context checker changed)"
@@ -14095,12 +13770,6 @@ assert_contains "- node scripts/verify-github-environment-protection.test.mjs (G
 
 run_gate "scripts/verify-github-environment-protection.test.mjs"
 assert_contains "- node scripts/verify-github-environment-protection.test.mjs (GitHub environment protection checker changed)"
-
-run_gate "scripts/agent-autoreview.sh"
-assert_contains "- pnpm agent:autoreview:test (agent autoreview adapter changed)"
-
-run_gate "scripts/agent-autoreview.test.sh"
-assert_contains "- pnpm agent:autoreview:test (agent autoreview adapter changed)"
 
 run_gate "scripts/repo-health/dev-janitor.sh"
 assert_contains "- bash scripts/repo-health/dev-janitor.test.sh (dev janitor script changed)"

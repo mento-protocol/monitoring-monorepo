@@ -109,7 +109,7 @@ overrides `canonical` authority.
 
 Claude agents, commands, and security-review guidance use runtime-specific
 frontmatter or prompt text. Do not add generic documentation metadata to those
-files. Their seven supported paths are instead registered in
+files. Their six supported paths are instead registered in
 [`claude-runtime-document-registry.json`](claude-runtime-document-registry.json).
 Each entry is non-canonical, active, owned, classified, and points to one or
 more canonical sources. The catalog and garden packet render those pointers so
@@ -119,7 +119,7 @@ When adding, removing, or moving one of those runtime files, update the
 registry in the same change. `pnpm docs:index --check`, `pnpm docs:audit`, and
 `pnpm agent:context-check` fail if the registry is incomplete, has an invalid
 entry or source, or no longer matches the proposed runtime-file set. Keep this
-registry limited to its seven named Claude runtime documents; use normal
+registry limited to its six named Claude runtime documents; use normal
 frontmatter for other managed Markdown.
 
 ## Placement Rules

@@ -115,11 +115,13 @@ Rejected, and this is the deliberate scope limit of the decision. Those scripts
 are legitimately agent-maintained and change in most weeks; a digest pin would
 red on every intended edit, so the pin would be updated reflexively as part of
 the commit and would stop carrying information within a month. The repository
-already protects that surface where it matters and where the pin is not noise —
-`agent-autoreview.sh` hashes its own blob against a frozen-HEAD snapshot before
-an explicit-ref review, and `.gitattributes` plus `UPSTASH_MCP_LAUNCHER_SHA256`
-byte-pin one reviewed artifact ([ADR 0065](0065-scripts-file-size-watchlist-scope.md)
-records both). Prose is the surface where a pin is cheap, because normative
+already protects that surface where it matters and where the pin is not noise:
+`.gitattributes` plus `UPSTASH_MCP_LAUNCHER_SHA256` byte-pin one reviewed
+artifact ([ADR 0065](0065-scripts-file-size-watchlist-scope.md) records it).
+`agent-autoreview.sh` was the second such protection — it hashed its own blob
+against a frozen-HEAD snapshot before an explicit-ref review — until
+[ADR 0087](0087-autoreview-removal-thin-two-model-review.md) deleted it. The rejection
+stands on the reflex argument above, which never depended on either pin. Prose is the surface where a pin is cheap, because normative
 sentences are supposed to be stable: a rule that changes monthly is not a rule.
 
 **Pin whole sections rather than clauses.** Stronger coverage — a rule gutted

@@ -243,7 +243,6 @@ validator_repo="$(mktemp -d)"
     "agent:quality-gate": "true",
     "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh",
     "agent:context-check": "node scripts/context/check-agent-context.mjs",
-    "agent:autoreview": "./scripts/agent-autoreview.sh",
     "agent:prewarm": "node scripts/gate/agent-prewarm.mjs",
     "agent:prewarm:test": "node scripts/gate/agent-prewarm.test.mjs",
     "agent:review-materiality": "node scripts/pr/review-materiality.mjs",

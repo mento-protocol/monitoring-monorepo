@@ -98,9 +98,7 @@ policy in the local gate. It returns one ordered `{path, route, owner}` decision
 per input path. The family data sits beside it in
 `indexer-handler-invariant-families.mjs`, and the contract validates the whole
 list at import time, so a malformed family fails before any caller reads a
-decision. Prepared autoreview bundles still carry their own copy of the same
-contract inside `scripts/agent-autoreview-core.mjs`; the autoreview removal
-retires that copy.
+decision.
 
 The gate classifies with the source in its own checkout, so it cannot see a new
 exact owner or a false-to-true reclassification that a candidate revision adds.
@@ -155,9 +153,9 @@ or `config/`, a new root `config*.yaml` file, a new root `vitest*` input, or a
 new `scripts/test-*.mjs` wrapper also runs the inventory assertion without
 inheriting a checklist route. Other unlisted paths outside `src/` and `test/`
 stay outside this classifier.
-Core-only edits route the autoreview suite, the routing-table suite, and the
-gate self-test. The core is also an explicit freshness-signature input and a
-Turbo input beside the routing-table directory.
+Family or contract edits route the routing-table suite, the focused contract
+suite, and the gate self-test. Both modules are explicit freshness-signature
+inputs, and the routing-table directory is a Turbo input.
 
 The dry-run gate maps changed paths to package checks and PR checklists. That
 mapping is a Node engine reading a data table — see
@@ -193,7 +191,7 @@ edit limited to root tooling scripts such as `scripts.agent:quality-gate`,
 `scripts.agent:review-materiality:test`, `scripts.agent:context-check`,
 `scripts.agent:context-budget`, `scripts.agent:context-budget:test`,
 `scripts.agent:closeout-review`, `scripts.agent:closeout-review:test`,
-`scripts.agent:autoreview`, `scripts.agent:autoreview:test`, `scripts.issue:board`,
+`scripts.issue:board`,
 `scripts.issue:board:test`, `scripts.issue:claim`, `scripts.issue:groom`,
 `scripts.issue:review`, `scripts.issue:release`, every `scripts.sentry:*` entry (the runners and their
 `:test` suites), `scripts.docs:index`, `scripts.docs:index:test`,
@@ -348,8 +346,8 @@ settlement owns a post-baseline daemon through an exact guardian tombstone. An
 incomplete chain stays ambiguous and keeps the scheduler barrier. No fallback
 signals by a reusable PID or process group.
 The quality-gate self-test stays ordered inside its worktree
-because it temporarily mutates tracked fixture files; this keeps
-source-fingerprinting tests such as autoreview from observing synthetic drift.
+because it temporarily mutates tracked fixture files; this keeps other mapped
+commands from observing synthetic drift.
 A browser setup failure still lets independent lint/typecheck/unit/knip
 feedback run. `--fail-fast` stays sequential so it still stops before starting
 the next mapped command. Parallel workers use Bash job-control groups on macOS
@@ -680,25 +678,10 @@ routing-table suite uses it to read `implementation_signature()` and to drive
 
 ### Script path pins
 
-These four path-pin classes complement the full inventory in
+These three path-pin classes complement the full inventory in
 [ADR 0064](../adr/0064-scripts-module-directories.md). Move each pin with its
-file in the same PR. The autoreview feedback-runtime pins use the staged move
-procedure below.
+file in the same PR.
 
-- **Autoreview runtime pins.** `agent-autoreview.sh` pins its sibling runtime,
-  `gate/darwin-process-identity.c`,
-  `gate/darwin-process-identity-runtime.inc.c`,
-  `gate/darwin-process-identity-helper.mjs`,
-  `gate/darwin-process-lineage-model.mjs`,
-  `gate/darwin-process-lineage-state.mjs`,
-  `gate/darwin-process-lineage.mjs`,
-  `gate/mapped-command-process-identity.mjs`, and optional
-  `pr-feedback-state-claude.mjs` and
-  `pr-ready-state-review-signals.mjs`. Changes to the six Darwin runtime files
-  route both `pnpm agent:autoreview:test` and
-  `pnpm agent:quality-gate:test`. Feedback blobs use `origin/main`. Move
-  feedback paths in three merges: add copies and fallback; repoint; remove old
-  paths after no pre-move wrapper remains.
 - **Gate routing pins.** The gate excludes stub-repo tests with
   `$script_source_dir == $repo_root/scripts`, and pairs
   `bootstrap/codex-cloud-setup.{sh,test.sh}` for offline tests. It routes
@@ -746,17 +729,13 @@ procedure below.
   [0064](../adr/0064-scripts-module-directories.md) and
   [0076](../adr/0076-fair-quality-gate-coordinator.md) own those constraints.
 - **Gate mapping pins.** The signature and three Turbo inputs pin
-  `gate/routing-table/**`, `gate/mapping*`, and
-  `agent-autoreview-core.mjs` plus its sealed exact-patch suppression JSON.
+  `gate/routing-table/**` and `gate/mapping*`.
   `gate/routing-table/indexer-handler-invariant-{contract,families}.mjs` hold
   the handler-invariant classifier; the signature lists both by name, and an
   edit to either routes the handler-invariant checklist and
   `scripts/indexer-handler-invariant-contract.test.mjs`.
-  Runtime hashes use `$script_source_dir`; suites use `$repo_root`. Core and
-  suppression-policy edits route the autoreview suite; the two classifier
-  modules share the core's arm and route it as well, because the core still
-  holds a duplicate copy of the same data. The removal PR retires that suite and
-  the shared arm with it. Missing pins freeze the stamp.
+  Runtime hashes use `$script_source_dir`; suites use `$repo_root`. Missing
+  pins freeze the stamp.
   [ADR 0069](../adr/0069-gate-routing-table-as-data.md) owns this contract.
 
 ### Where the plan comes from ([ADR 0069](../adr/0069-gate-routing-table-as-data.md))
@@ -1070,7 +1049,7 @@ Different selected values cannot share a mapped verdict. The mapped-command
 launcher removes child-only test and validator injections. This includes
 `ESLINT_BASELINE_INPUT`, inherited `ESLINT_BASELINE_MAIN`, alert-rule fixture
 paths, validator root overrides, focused child-test controls, and ambient
-cloud-provider credentials that the autoreview tests can forward. These values
+cloud-provider credentials a mapped test could forward. These values
 stay outside the shared key because mapped descendants cannot read them. An
 assignment inside a mapped command still applies. CI package lint jobs run
 outside this launcher, so their `ESLINT_BASELINE_MAIN` assignment remains
@@ -2606,47 +2585,6 @@ baseline and run the closeout review after the applicable direct checks. After
 accepted fixes, rerun the affected direct checks and the closeout. Card step 4
 owns that flow.
 
-Superseded from here to the end of the autoreview material:
-[`pr-operating-card.md`](pr-operating-card.md) step 4 owns the closeout review.
-Everything below that describes `agent-autoreview` is machinery the removal PR
-retires — read it as history, not instruction.
-
-**Stage timing and capture deadlines.** The wrapper and helper append
-best-effort stage JSONL to `.tmp/agent-autoreview/durations.jsonl`; override
-the directory with `AGENT_AUTOREVIEW_DURATIONS_DIR` or enable stderr summaries
-with `AGENT_AUTOREVIEW_STAGE_SUMMARY`. Base lookup and `--feedback-pr auto`
-use `AGENT_AUTOREVIEW_GH_DEADLINE_SECONDS` (60 seconds by default); feedback
-capture uses `AGENT_AUTOREVIEW_FEEDBACK_DEADLINE_SECONDS` (120 seconds by
-default). Evidence capture spends one shared budget,
-`AGENT_AUTOREVIEW_CAPTURE_DEADLINE_SECONDS` (600 seconds by default), across
-every capture a run performs in each runtime. Timeouts fail closed and name the
-stage that ran out. Linux signals the detached process group. Before the first
-Darwin deadline child starts, the wrapper snapshots its native lineage runtime,
-then compiles and proves the private native helper's runtime capabilities. It
-publishes a same-boot receipt only after that proof and its cache revalidation
-succeed. A successor settlement process repeats that full authority check when
-its worktree has no receipt for a durable lineage obligation. It reuses the
-accepted census as its first recovery census and stays inside the original
-settlement deadline. It captures each child's nonreusable kernel identity while the parent
-relation is live. Every status check and signal uses that exact identity and
-requires the receipt. The standalone wrapper settles each child and its
-descendants through `darwin-coherent-lineage-v2`; the helper never sends a
-numeric PID or negative-PID signal on Darwin. A prebound recovery watcher owns
-the same obligation if the wrapper exits without cleanup. The watcher starts
-its monotonic deadline before bootstrap. Bootstrap retries typed census
-contention within that deadline. While the parent chain is coherent, the
-watcher durably records exact owned or ambiguous descendants. It does not
-record unrelated process churn. Each 200 ms census cycle makes one native
-snapshot call. After typed contention, the watcher rechecks the private action,
-controller, launcher, and remaining time. The watcher atomically publishes
-private `armed` evidence after it validates its controller, launcher, action
-marker, and exact lineage. The wrapper does not release deadline work until it
-validates that evidence and confirms that the exact watcher identity remains
-live. Normal finalization publishes the private `settle` action. The watcher
-then becomes the only settlement writer. Setup abort paths publish `cancel`
-instead. Settlement retries typed contention inside its existing monotonic
-deadline. Expiry preserves the lineage state and recovery barrier.
-
 The Sentry broker probe and CI-gate extractor each use a detached Bash
 group-leader supervisor. Their children inherit every declared quality-gate
 marker descriptor before their first instruction when the declaration is still
@@ -2680,120 +2618,6 @@ inherit. A stop request, parent pipe EOF, or target exit settles the group while
 the leader is live. Node never signals a returned numeric PID or process-group
 ID after that leader is reaped.
 
-This adapter uses the repo-local helper at `scripts/agent-autoreview.mjs` and
-keeps the repo's branch-local target: merge-base-to-`HEAD` commits plus current
-tracked and untracked work. It includes deterministic Mento checks and selected
-repo checklist/feedback context. Review bundles are never silently truncated.
-When a semantic prompt is too large, the helper losslessly partitions the
-complete bundle into a bounded pass index for prepared-bundle handoff. One
-fresh-context reviewer must inspect every listed pass so cross-pass contracts
-remain visible. Direct Codex or Claude execution fails closed instead of
-launching independent semantic passes, and bundle preparation fails if the full
-review cannot fit the bounded pass budget.
-
-Because the published changed-path and prompt metadata are line-oriented, paths
-containing tabs or line breaks are rejected before review; rename such a path
-before running autoreview.
-
-Autoreview runs the review in an isolated, credential-stripped workspace. The
-complete shell, helper, Darwin containment, and mapped-command
-process-identity runtime closure is pinned to protected `main`. Evidence capture is
-bounded and fail-closed, prepared bundles are identity- and manifest-checked,
-and sensitive inputs are rejected before they reach a semantic engine. Every one
-of those checks fails closed, and none of them is a knob. Operators need only
-the invocation contract in this runbook; the defenses themselves are background
-in [`autoreview-runtime-trust.md`](autoreview-runtime-trust.md).
-
-One consequence reaches the invocation contract: a dirty or committed change to
-the autoreview runtime itself fails closed and must be reviewed from a separate
-trusted checkout with an explicit compatible `AUTOREVIEW_HELPER`, using the
-procedure below.
-
-An interrupted or unverified prepared bundle must not be reviewed. A failed
-destination reservation is never recursively deleted, so inspect and remove an
-incomplete, unmarked destination before retrying. Prepared bundles also reject
-`--dry-run`: publication requires completed content validation, the main prompt,
-and every strictly ordered, deterministic indexed bounded pass. Direct
-`--bundle-output` publication refuses to replace an existing destination, so a
-failed multi-pass write cannot corrupt a previously valid index — use a fresh
-output path or deliberately remove the old set first.
-
-When `--base` is omitted, automatic PR-base lookup falls back to `origin/main`
-only when GitHub CLI is absent or the lookup confirms zero matching PRs.
-Malformed output, multiple matching PRs, and operational lookup failures fail
-closed because they cannot prove the correct review target. When GitHub CLI is
-available, automatic lookup requires a canonical `github.com` origin, ignores
-inherited `GH_HOST` and `GH_REPO`, and addresses that origin repository
-explicitly. A unique match must also belong to the current repository owner,
-preventing a same-named branch in a fork from selecting the wrong PR. Pass
-`--base` explicitly as the offline escape hatch.
-When prepared-bundle feedback selection is `auto`, the adapter resolves the
-unique PR base, number, and canonical repository slug together and reuses that
-one GitHub snapshot for the frozen diff and `feedback-state.json`. Missing
-GitHub CLI, zero or multiple matches, and malformed metadata fail closed.
-An explicit `--base` therefore requires an explicit `--feedback-pr` number
-instead of `auto`. Commit-mode reviews also require an explicit feedback PR
-number because the current branch's automatic PR cannot prove membership for an
-arbitrary selected commit.
-
-Direct supplemental-evidence paths must be repo-relative, regular UTF-8 files
-confined to the worktree. A quiet semantic reviewer emits a progress heartbeat
-every 60 seconds.
-
-Inside an active Codex sandbox, and only when no engine was selected explicitly,
-the adapter defaults to the helper's local deterministic engine because nested
-`codex exec` is unavailable there. An explicit engine selection through
-`--engine codex`, `--engine claude`, or `AUTOREVIEW_ENGINE` takes precedence
-and fails closed if that engine is unavailable; it never silently falls back.
-
-The helper resolves each external CLI in one order: an absolute path in
-`AUTOREVIEW_<COMMAND>_BIN` (`AUTOREVIEW_CODEX_BIN`, `AUTOREVIEW_CLAUDE_BIN`),
-then `PATH`, then the well-known install directories `/opt/homebrew/bin`,
-`/usr/local/bin`, and `~/.local/bin`. That last list keeps the reviewer working
-from agent-isolation and CI shells whose `PATH` omits the local package
-manager's bin directory; set `AUTOREVIEW_EXTRA_BIN_DIRS` to replace it, or to an
-empty value to search `PATH` alone. Every candidate still passes the same
-trusted-executable checks, so the wider search never widens what the reviewer
-will execute. An engine that resolves to nothing fails with the override
-variable and the probed paths instead of a bare command-not-found exit. Set
-`AUTOREVIEW_TRACE_COMMANDS=1` to log which candidate won.
-
-A resolved codex that exits 127 **and** cannot report `--version` in the same
-isolated environment is a launcher shim, not a working engine: shims re-resolve
-the real CLI from a `PATH` the reviewer deliberately withholds, so the search
-drops that candidate and continues. An engine that answers `--version` keeps its
-own exit 127 as a review failure, and the search never silently swaps in a
-different installation behind it. The probe spawns through the same
-snapshot-revalidating path as every other trusted executable, captures no pipes
-a descendant could hold open, and is bounded at 15 seconds by a `SIGKILL` sweep
-of its own process group on Linux. On Darwin the shell wrapper binds the helper
-to an exact lineage before launch. The wrapper settles that lineage on normal
-exit and an autonomous exact-identity watcher settles it if the wrapper exits
-or is killed. A probe that times out counts as failed, and the message says so.
-When every candidate is a shim, one message names each with the reason its probe
-failed and carries the engine's error.
-
-Set `AUTOREVIEW_HELPER` only when intentionally testing or replacing the
-pinned repo helper with a compatible implementation of its CLI contract.
-Prepared-bundle replacements receive only the final prompt handoff and must
-support the helper's `--bundle-output`, `--bundle-output-display`, and
-`--trusted-input-root` flags. In the owning checkout an explicit override is
-accepted only when the current shell wrapper matches pinned protected main and
-the complete compatible runtime closure can be materialized from that same
-protected object. Otherwise the command fails closed with the
-separate-trusted-checkout
-instruction used for runtime-changing reviews; a wrapper nested anywhere inside
-the reviewed checkout is never treated as external. The old autoreview
-`--parallel-tests` path is removed. Step 3 of the [PR operating
-card](pr-operating-card.md) owns direct author checks; required CI owns merge
-admission.
-
-The repo command itself is executable code from the active checkout. The
-committed/pre-change runtime comparisons protect review integrity when the
-runtime is unchanged; they do not turn an untrusted checkout into trusted
-executable code. Merge-review provenance must not pass through the reviewed
-checkout's package manager, package scripts, or package-manager configuration.
-
 This preflight is **not merge-specific**. Any adapter call that trusts repository
 identity — `pr:feedback-state`, `pr:ready-state`, a gate, a review — needs it, so an
 ordinary babysit run binds identity before its first such call, not only when a conflict
@@ -2821,148 +2645,15 @@ refreshes both pins before another adapter call.
 ### Retired two-axis autoreview execution
 
 The binding replacement is in [`pr-operating-card.md`](pr-operating-card.md)
-steps 3-4. The runtime-specific legacy steps below remain historical.
+steps 3-4, which also own the two reconciliation axes a conflict repair
+reviews. The runtime-specific legacy steps ran the autoreview machinery that
+[ADR 0087](../adr/0087-autoreview-removal-thin-two-model-review.md) removed.
 
-For each review axis, compare its immutable base tree with the immutable final
-tree before any autoreview entrypoint runs. Treat the axis as runtime-sensitive
-only when
-`scripts/agent-autoreview.sh`, `scripts/agent-autoreview.mjs`,
-`scripts/agent-autoreview-core.mjs`,
-`scripts/agent-autoreview-secret-suppressions.json`,
-`scripts/gate/darwin-process-identity.c`,
-`scripts/gate/darwin-process-identity-runtime.inc.c`,
-`scripts/gate/darwin-process-identity-helper.mjs`,
-`scripts/gate/darwin-process-lineage-model.mjs`,
-`scripts/gate/darwin-process-lineage-state.mjs`,
-`scripts/gate/darwin-process-lineage.mjs`, or
-`scripts/gate/mapped-command-process-identity.mjs` differs. Compare the modes
-and blob IDs for all eleven paths on both axes. Fail closed on any Git, blob,
-mode, or comparison error. If neither axis is sensitive, use the clean final
-checkout's absolute wrapper and explicit helper. Invoke it through `/bin/bash`
-from the reviewed checkout. Never use `pnpm agent:autoreview` for this
-merge-review sequence.
-
-For a runtime-changing PR, pin an immutable `trusted_oid` from the verified base
-repository. It must be the last independently reviewed commit before every
-runtime change found on the review axes. Retain the independent-review evidence.
-Do not infer trust from ancestry alone. Prove that the helper protocol supports
-bundle preparation, numeric feedback capture, explicit branch bases, and bound
-pre/post manifest verification. Protected main is acceptable only with both the
-review and compatibility evidence and only when it predates the runtime change
-under review.
-
-Create a clean detached physical checkout at `trusted_oid` outside the reviewed
-worktree. Require its `HEAD` to equal `trusted_oid` and its worktree to be clean.
-Require the wrapper, helper, core, exact-patch suppression JSON, both Darwin
-identity sources, Darwin helper, Darwin lineage model, Darwin lineage state
-runtime, Darwin lineage entry point, and mapped-command process-identity modes
-and blob IDs to match `trusted_oid`.
-Stop concurrent writers to both checkouts. From the reviewed checkout directory,
-use the same absolute trusted wrapper and explicit compatible
-`AUTOREVIEW_HELPER` for every required axis preparation. Invoke the wrapper
-through `/bin/bash`. Use that exact trusted wrapper and helper for every
-pre-review manifest check and retained-digest post-review check. Never
-substitute the reviewed checkout's package script or wrapper.
-
-Before and after every preparation or verification invocation, repeat the
-normalized `origin` identity check; require the retained base and protected-main
-refs to keep their pinned OIDs; require the reviewed checkout to remain clean at
-its immutable final head; and repeat the selected eleven-file runtime closure's
-physical-root, mode, and blob checks. Repeat the detached `trusted_oid` and
-clean checks when the runtime is external. Any check error or drift invalidates
-the invocation.
-
-The basic one-axis call shape is:
-
-```bash
-reviewed_checkout=/absolute/path/to/reviewed-checkout
-trusted_checkout=/absolute/path/to/trusted-pre-change-checkout
-review_base_oid="$base_oid" # full immutable OID for this review axis
-bundle_parent="$(mktemp -d)" || exit 1
-bundle="$bundle_parent/context-bundle"
-autoreview_wrapper="$trusted_checkout/scripts/agent-autoreview.sh"
-autoreview_helper="$trusted_checkout/scripts/agent-autoreview.mjs"
-
-run_trusted_autoreview() {
-  (
-    cd "$reviewed_checkout" || exit 1
-    AUTOREVIEW_HELPER="$autoreview_helper" \
-      /bin/bash "$autoreview_wrapper" "$@"
-  )
-}
-
-run_trusted_autoreview --prepare-bundle-dir "$bundle" \
-  --feedback-pr <number> -- --mode branch --base "$review_base_oid"
-run_trusted_autoreview --verify-bundle-dir "$bundle"
-# Retain the printed manifest digest outside the bundle. After semantic review:
-run_trusted_autoreview --verify-bundle-dir "$bundle" \
-  --expected-bundle-manifest <retained-digest>
-```
-
-For a runtime-insensitive review, set `autoreview_wrapper` and
-`autoreview_helper` to the absolute final-checkout paths and use the same direct
-call shape. Never point `trusted_checkout` at the runtime-changing checkout.
-For multiple axes, allocate a distinct absent bundle path for each immutable
-base outside both worktrees, then repeat the preparation and both manifest
-checks with that base. Prepare and preverify every bundle, complete every
-semantic review, then postverify every retained digest through the same bound
-runner.
-
-Only after every postverification passes, run the sequential suite without the
-package manager:
-
-```bash
-(
-  cd "$reviewed_checkout" || exit 1
-  AUTOREVIEW_TEST_FOCUS=suite /bin/bash \
-    "$reviewed_checkout/scripts/agent-autoreview.test.sh" --jobs 1
-)
-```
-
-The suite is behavior evidence and establishes no review provenance. Require
-terminal success, then repeat the origin, retained-ref, final-head, clean-state,
-runtime-identity, and trusted-root checks. Any fix, `HEAD` movement, dirty
-worktree, origin identity drift, base or protected-ref drift, trusted-runtime or
-provenance drift, failed compatibility check, sequential-suite failure, or
-manifest mismatch invalidates every result. Restart preflight, both gates, both
-bundle preparations, both semantic reviews and postverifications, and the
-direct sequential suite from the new clean final head.
-
-For a true Codex semantic pass from inside Codex, prepare a repo-context bundle
-and pass that bundle to a fresh-context reviewer:
-
-```bash
-pnpm agent:autoreview --prepare-bundle-dir /tmp/autoreview-bundle
-pnpm agent:autoreview --verify-bundle-dir /tmp/autoreview-bundle
-pnpm agent:autoreview --verify-bundle-dir /tmp/autoreview-bundle \
-  --expected-bundle-manifest <digest-printed-by-the-pre-review-check>
-```
-
-Use a directory outside the repo worktree whose parent already exists so
-local-mode bundles do not include their own generated files. Every canonical
-ancestor of that parent must be owned by the current user or root; a
-group/other-writable ancestor is accepted only when its sticky bit protects
-other users' entries (for example `/tmp`). The bundle contains changed paths,
-patch files, repo-selected checklist/prompt context, and the helper's
-`autoreview-prompt.md`. Add `--feedback-pr <number>` to include the current
-`pr:feedback-state` ledger as a review dataset for feedback-fix batches.
-Prepared-bundle mode owns that prompt path, so do not combine
-`--prepare-bundle-dir` with `--bundle-output`.
-The generated README names the exact producing wrapper in both verification
-commands; a runtime-changing review must not replace those commands with the
-reviewed checkout's package script.
-Retain the pre-review digest in reviewer state outside the bundle. After the
-fresh-context reviewer has read every bounded pass, repeat
-`--verify-bundle-dir` with that digest as `--expected-bundle-manifest`; both
-checks must pass and must name the same digest. They detect persistent drift,
-not a malicious same-UID process that can mutate and restore files between
-checks, so an external helper must leave no background writer behind.
-
-Autoreview answers whether the source bundle contains review findings. It does
-not prove CLI/API behavior, generated artifacts, deployment/runtime behavior,
-or a UI interaction. Keep every applicable direct author, browser, generation,
-integration, and runtime check in the validation record. The final PR all-clear
-still comes from `pnpm pr:ready-state`, not autoreview.
+The closeout review answers whether the source contains review findings. It
+does not prove CLI/API behavior, generated artifacts, deployment/runtime
+behavior, or a UI interaction. Keep every applicable direct author, browser,
+generation, integration, and runtime check in the validation record. The final
+PR all-clear still comes from `pnpm pr:ready-state`, not from a review.
 
 To classify review depth and likely context-update requirements before or after
 the direct author checks, use:
@@ -3084,13 +2775,12 @@ because that validator's own allowlist rejects ref spellings the gate accepts �
 and reads the previous peg policy out of that commit, so
 the gate asks whether the plan text names the base at all rather than carrying a
 list of such commands — a future verb that passes the base down inherits tip
-binding on its own, and a false positive costs only the stricter binding. Two
-commands read a branch tip they never name, so the predicate also carries a
+binding on its own, and a false positive costs only the stricter binding. One
+command reads a branch tip it never names, so the predicate also carries a
 short marker list for them: `docs:navigation-eval -- --validate` tests ancestry
-against `refs/remotes/origin/main`, and the autoreview suite reads
-protected-main checklist blobs at `origin/main^{commit}`. Both mean the DEFAULT
-branch rather than the gate's base, so they are listed instead of being handed
-`--base`; a listed command only ever gets the stricter binding. A marker match
+against `refs/remotes/origin/main`. It means the DEFAULT branch rather than the
+gate's base, so it is listed instead of being handed `--base`; a listed command
+only ever gets the stricter binding. A marker match
 also binds `+default-branch:<oid>` as a second component, because on a stacked
 PR the base tip and the merge-base hold still while `origin/main` advances —
 and that advance is what changes these commands' answers. The

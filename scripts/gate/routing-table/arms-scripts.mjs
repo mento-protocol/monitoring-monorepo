@@ -32,11 +32,6 @@ export const SCRIPT_ARMS = [
         command: "pnpm agent:quality-gate:test",
         reason: "quality-gate process containment changed",
       },
-      {
-        why: "Autoreview materializes and compiles both native identity sources as part of its trusted Darwin containment runtime.",
-        command: "pnpm agent:autoreview:test",
-        reason: "autoreview Darwin containment runtime changed",
-      },
     ],
   },
   {
@@ -229,18 +224,6 @@ export const SCRIPT_ARMS = [
               {
                 command: "pnpm agent:quality-gate:test",
                 reason: "quality-gate coordinator changed",
-              },
-            ],
-          },
-          {
-            patterns: [
-              "scripts/agent-autoreview.sh",
-              "scripts/agent-autoreview.test.sh",
-            ],
-            effects: [
-              {
-                command: "pnpm agent:autoreview:test",
-                reason: "agent autoreview adapter changed",
               },
             ],
           },

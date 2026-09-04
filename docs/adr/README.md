@@ -79,7 +79,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0064](0064-scripts-module-directories.md)                  | `scripts/` may use module subdirectories; basenames and pinned paths constrain moves |
 | [0065](0065-scripts-file-size-watchlist-scope.md)           | `scripts/` sits inside the file-size watchlist, with named-mechanism exemptions      |
 | [0066](0066-coderabbit-replaces-bugbot-third-reviewer.md)   | CodeRabbit replaces Cursor BugBot as the third advisory PR reviewer                  |
-| [0068](0068-sentry-fixture-authoring-policy.md)             | Adversarial fixtures are authored to scan clean; no value or line registry           |
+| [0068](0068-sentry-fixture-authoring-policy.md)             | Archived: adversarial fixtures authored to scan clean; both enforcers deleted        |
 | [0069](0069-gate-routing-table-as-data.md)                  | The gate's routing table is data, compiled by the repo's own bash-`case` translator  |
 | [0070](0070-sentry-requeue-settlement-sentinel.md)          | The archive's terminal label is withheld from the re-queue's shed and read back      |
 | [0072](0072-md-only-docs-checks-job.md)                     | The Markdown globs route to a small `docs-checks` job; some Markdown runs both jobs  |
@@ -88,7 +88,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0076](0076-fair-quality-gate-coordinator.md)               | Fair weighted coordination replaces machine-wide full-run gate exclusion             |
 | [0077](0077-operator-triggered-backlog-sweep.md)            | Backlog sweeps start from an operator, run isolated workers, and stop at READY       |
 | [0078](0078-staged-verification-redesign.md)                | Staged existing-CI replacement of the mandatory local gate                           |
-| [0079](0079-sealed-exact-file-patch-secret-suppression.md)  | Autoreview permits only sealed exact-file-patch secret suppression                   |
+| [0079](0079-sealed-exact-file-patch-secret-suppression.md)  | Archived: sealed exact-file-patch secret suppression for autoreview                  |
 | [0080](0080-merge-base-freshness-stamp.md)                  | The gate's freshness stamp binds the merge-base, with tip binding kept where read    |
 | [0081](0081-narrow-dependabot-auto-merge-exception.md)      | One narrow Dependabot group can auto-merge through a two-stage trust boundary        |
 | [0082](0082-persistent-issue-board-mutation-mutex.md)       | One persistent compare-and-swap Git ref serializes issue-board helper mutations      |
@@ -96,6 +96,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0084](0084-github-ui-operator-merge.md)                    | Use GitHub for ordinary pull request merges                                          |
 | [0085](0085-review-eval-cli-versions-bind-the-cell.md)      | Provider CLI versions bind the review-eval cell, not the plan                        |
 | [0086](0086-review-eval-lane-any-grid-multi-draw.md)        | The experiment lane runs any grid at N draws and decides on paired evidence          |
+| [0087](0087-autoreview-removal-thin-two-model-review.md)    | Remove the autoreview machinery; keep a thin two-model closeout review               |
 
 ### shared-config
 

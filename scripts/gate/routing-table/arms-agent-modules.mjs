@@ -12,8 +12,7 @@
 
 /**
  * The first third of the per-module dispatch under `scripts/*.mjs`: the agent
- * gate and autoreview helpers, the context and documentation tooling, and the
- * PR helpers.
+ * gate helpers, the context and documentation tooling, and the PR helpers.
  *
  * Each arm names exact module paths and the focused suite that covers them.
  * This is a list, not a hierarchy, and the staleness check is what keeps it
@@ -35,7 +34,7 @@ export const AGENT_MODULE_ARMS = [
     ],
   },
   {
-    why: "Autoreview imports the Darwin lineage modules and materializes the identity helper as part of its trusted runtime. These shared sources must exercise both consumers.",
+    why: "The gate materializes the identity helper and reads the lineage modules as part of its own trusted runtime. Autoreview was the second consumer until ADR 0087 removed it; the gate suite is now the only cover these sources have.",
     patterns: [
       "scripts/gate/darwin-process-identity-helper.mjs",
       "scripts/gate/darwin-process-lineage-model.mjs",
@@ -46,10 +45,6 @@ export const AGENT_MODULE_ARMS = [
       {
         command: "pnpm agent:quality-gate:test",
         reason: "quality-gate process containment changed",
-      },
-      {
-        command: "pnpm agent:autoreview:test",
-        reason: "autoreview Darwin containment runtime changed",
       },
     ],
   },
@@ -66,15 +61,11 @@ export const AGENT_MODULE_ARMS = [
     ],
   },
   {
-    why: "The marker helper is shared by the gate, autoreview, the Sentry probe, and the CI gate extractor. A change must exercise every spawn surface and the routing oracle.",
+    why: "The marker helper is shared by the gate, the Sentry probe, and the CI gate extractor. A change must exercise every spawn surface and the routing oracle.",
     patterns: ["scripts/gate/mapped-command-process-identity*.mjs"],
     effects: [
       {
         command: "pnpm agent:quality-gate:test",
-        reason: "mapped-command marker inheritance changed",
-      },
-      {
-        command: "pnpm agent:autoreview:test",
         reason: "mapped-command marker inheritance changed",
       },
       {
@@ -115,25 +106,15 @@ export const AGENT_MODULE_ARMS = [
     ],
   },
   {
-    why: "The invariant contract exports the indexer-family source that arms-packages.mjs compiles. The gate routes from the source in its own checkout, so it cannot see a candidate revision's new owner or false-to-true reclassification before that source lands. A change to the families or contract source therefore routes the checklist unconditionally. This intentionally overroutes unrelated edits to keep the classifier and the checklist in step. Such an edit must also exercise the data-table parity suite and the live gate regression suite. The autoreview core still holds a duplicate copy of the same data until the removal PR, so it stays on this arm with its own consumers.",
+    why: "The invariant contract exports the indexer-family source that arms-packages.mjs compiles. The gate routes from the source in its own checkout, so it cannot see a candidate revision's new owner or false-to-true reclassification before that source lands. A change to the families or contract source therefore routes the checklist unconditionally. This intentionally overroutes unrelated edits to keep the classifier and the checklist in step. Such an edit must also exercise the data-table parity suite and the live gate regression suite.",
     patterns: [
-      "scripts/agent-autoreview-core.mjs",
       "scripts/gate/routing-table/indexer-handler-invariant-contract.mjs",
       "scripts/gate/routing-table/indexer-handler-invariant-families.mjs",
     ],
     effects: [
       {
-        command: "pnpm agent:autoreview:test",
-        reason: "agent autoreview helper changed",
-      },
-      {
         checklist: "docs/pr-checklists/indexer-handler-invariants.md",
         reason: "indexer invariant routing source changed",
-      },
-      {
-        why: "The scanner half of the #1943/#1970 canary (ADR 0068). Widening `credentialAssignmentKey`'s vocabulary re-traps the renamed Sentry fixtures, and nothing else would say so until the next autoreview run refused.",
-        command: "node scripts/sentry/fixture-scan-canary.test.mjs",
-        reason: "autoreview secret scanner changed",
       },
       {
         command: "pnpm gate:routing-table:test",
@@ -157,25 +138,6 @@ export const AGENT_MODULE_ARMS = [
         command:
           "node --test scripts/indexer-handler-invariant-contract.test.mjs",
         reason: "indexer handler invariant contract changed",
-      },
-    ],
-  },
-  {
-    patterns: [
-      "scripts/agent-autoreview.mjs",
-      "scripts/agent-autoreview-secret-suppressions.json",
-      "scripts/agent-autoreview-core.test.mjs",
-      "scripts/agent-autoreview-target-guard.test.mjs",
-    ],
-    effects: [
-      {
-        command: "pnpm agent:autoreview:test",
-        reason: "agent autoreview helper changed",
-      },
-      {
-        why: "The scanner half of the #1943/#1970 canary (ADR 0068). Widening `credentialAssignmentKey`'s vocabulary re-traps the renamed Sentry fixtures, and nothing else would say so until the next autoreview run refused.",
-        command: "node scripts/sentry/fixture-scan-canary.test.mjs",
-        reason: "autoreview secret scanner changed",
       },
     ],
   },

@@ -30,7 +30,7 @@ const READ_SCOPES = Object.freeze({ actions: "read", contents: "read", "pull-req
 // prettier-ignore
 const ADMISSION_STEP_HASH = "18f1c3741064363a488462c96fd34772c3b66eeee4a3f4bd2fb2a86275c3a203", CHECKOUT_STEP_HASH = "2d39e2e5293845e1c63f0f2e95ab8eb7e3d65360955c5b2c54ea1bddff57c22d", PROTECTED_DRIFT_STEP_HASH = "e587efe489b709485e5fa08d31854e4549522eaf1059e654e524688b76ce480e", SUMMARY_STEP_HASH = "b6def63e8f5ccb7e13a6460f546cb391bf0e86350876470a787f038ea7cebb10";
 const CI_GRAPH_HASH =
-    "adf597c037054cfd86f69bb8adf517ac0bce8aee80bc0da6f915f330da1de2b7",
+    "82ab6334799d0da0d747cfb91188a036971418785e22ad6a75bd8bf844c12e9b",
   BASELINE_HASH =
     "467641beda8b2b45d49d0c62429d8e95f62b05c1db96f6665b106012a09cef12";
 // prettier-ignore
@@ -146,11 +146,11 @@ function checkCandidateGraph(root, errors) {
   const allSteps = stepsOf(ci), runs = allSteps.map(([, step]) => String(step.run ?? ""));
   add(errors, runs.every((run) => !run.includes("${{ inputs.audit_")), "audit inputs must enter shell steps through quoted environment variables");
   const selfActions = allSteps.filter(([, step]) => /^(?:\.\/|\$\/)/u.test(String(step.uses ?? "")));
-  add(errors, selfActions.length === 21 && selfActions.every(([, step]) => [PNPM_ACTION, BASELINE_ACTION].includes(step.uses)), "CI may use only the protected local actions from the running commit");
+  add(errors, selfActions.length === 20 && selfActions.every(([, step]) => [PNPM_ACTION, BASELINE_ACTION].includes(step.uses)), "CI may use only the protected local actions from the running commit");
   const actionlintBindings = raw.match(/# GitHub resolves \$\/ from the running commit; actionlint lacks support\.\n\s*# trunk-ignore\(actionlint\/action\)\n\s*(?:- )?uses: \$\/\.github\/actions\//gu) ?? [];
-  add(errors, actionlintBindings.length === 21 && (raw.match(/trunk-ignore\(actionlint\//gu) ?? []).length === 21, "protected self actions need only line-scoped actionlint exceptions");
+  add(errors, actionlintBindings.length === 20 && (raw.match(/trunk-ignore\(actionlint\//gu) ?? []).length === 20, "protected self actions need only line-scoped actionlint exceptions");
   const pnpm = selfActions.filter(([, step]) => step.uses === PNPM_ACTION);
-  add(errors, pnpm.length === 15 && pnpm.every(([job, step]) => stable(step.with) === stable(job === "production-infra-contract" ? { "restore-cache": CACHE_OFF, "write-cache": WRITE_CACHE } : { "restore-cache": CACHE_OFF })), "every audit pnpm install must disable persistent cache reads and writes");
+  add(errors, pnpm.length === 14 && pnpm.every(([job, step]) => stable(step.with) === stable(job === "production-infra-contract" ? { "restore-cache": CACHE_OFF, "write-cache": WRITE_CACHE } : { "restore-cache": CACHE_OFF })), "every audit pnpm install must disable persistent cache reads and writes");
 }
 
 // prettier-ignore
@@ -207,7 +207,7 @@ function checkColdAuthority(root, errors) {
   const codecov = allSteps.filter(([, step]) => String(step.uses ?? "").startsWith("codecov/codecov-action@"));
   add(errors, codecov.length === 9 && codecov.every(([, step]) => step.if === CODECOV_IF && step.with?.token === "${{ secrets.CODECOV_TOKEN }}"), "Codecov must remain unavailable to audit calls");
   const timeline = allSteps.filter(([, step]) => String(step.uses ?? "").startsWith("Kesin11/actions-timeline@"));
-  add(errors, timeline.length === 19 && timeline.every(([, step]) => step.if === "always() && !inputs.no_skip_audit"), "post-candidate timeline actions must not run in audit mode");
+  add(errors, timeline.length === 17 && timeline.every(([, step]) => step.if === "always() && !inputs.no_skip_audit"), "post-candidate timeline actions must not run in audit mode");
   const artifacts = allSteps.filter(([, step]) => String(step.uses ?? "").startsWith("actions/upload-artifact@"));
   add(errors, artifacts.length === 1 && artifacts[0][1].if === "failure() && !inputs.no_skip_audit", "UI failure artifacts must not run in audit mode");
   const restores = allSteps.filter(([, step]) => String(step.uses ?? "").startsWith("actions/cache/restore@"));

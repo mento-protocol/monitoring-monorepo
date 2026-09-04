@@ -53,13 +53,8 @@ validators. Inventories, pinned hashes, and identities stay with their domain.
 
 ## Why Files Stay Flat
 
-Move each pin class with its files. Keep `agent-autoreview.sh` feedback pins.
+Move each pin class with its files.
 
-- **Autoreview pins.** `agent-autoreview.sh` pins runtime,
-  sealed `agent-autoreview-secret-suppressions.json` (ADR 0079),
-  `pr-feedback-state-claude.mjs` and
-  `pr-ready-state-review-signals.mjs`; feedback uses `origin/main`. Use ADR
-  0064's three-merge sequence.
 - **Gate routing pins.** Stub-repo tests require
   `$script_source_dir == $repo_root/scripts`.
   `bootstrap/codex-cloud-setup.{sh,test.sh}` pair offline.
@@ -84,11 +79,11 @@ Move each pin class with its files. Keep `agent-autoreview.sh` feedback pins.
   signatures, fixtures, literals, and `.coderabbit.yaml` review scope together
   (ADRs 0064 and 0076).
 - **Gate mapping pins.** Signatures and Turbo inputs pin
-  `gate/routing-table/**`, `gate/mapping*`, the autoreview core, and sealed
-  policy. Runtime hashes use `$script_source_dir`; suites use `$repo_root`.
-  Core and inventory edits route autoreview and parity suites.
+  `gate/routing-table/**` and `gate/mapping*`. Runtime hashes use
+  `$script_source_dir`; suites use `$repo_root`. Family and inventory edits
+  route the parity suites.
   Setup, marker, SessionEnd, and package-policy edits route focused setup
-  suite. Missing pins freeze the stamp (ADRs 0069 and 0079). Three exact pins:
+  suite. Missing pins freeze the stamp (ADR 0069). Three exact pins:
   `.dependency-cruiser.cjs` and root `package.json` both name
   `gate/mapping/engine.test.mjs` (scanned roots);
   `gate/mapping/post-passes.mjs` schedules `code-health:deps` itself.
@@ -102,7 +97,6 @@ Move each pin class with its files. Keep `agent-autoreview.sh` feedback pins.
   `scripts/docs/check-verification-redesign-evidence*.mjs`.
 - **Sentry suite manifest.** `scripts/sentry/gate/sentry-suite-manifest.json`
   enforces two-way path equality with `findSentrySuites()`; moves fail closed.
-  `sentry/fixture-scan-canary.test.mjs` re-pins four (ADR 0068).
 - **Workflow pins.** `check-ci-contract{,.test}.mjs` pins CI.
   `check-no-skip-audit{,.test}.mjs` pins admission, SHAs, caches, skips,
   `repo-health/dependency-cruiser-root-contract.test.mjs`, and the retained
@@ -157,7 +151,7 @@ in the same PR.
   scripts. Add focused tests beyond lint and syntax. Add required CI wiring if
   no fixed job owns them.
 - No ESLint `max-lines` reaches this tree. The file-size watchlist reports it
-  instead — tests aside, three trust-root files exempt:
+  instead — tests aside, and the exemption list is now empty:
   [ADR 0065](../docs/adr/0065-scripts-file-size-watchlist-scope.md).
 - `pnpm tf plan/apply platform` owns one private saved plan. Never accept a
   caller plan path, or print, upload, or cache either plan form. Mechanism and

@@ -285,8 +285,8 @@ echo "==> Configuring GitHub integration mode"
 # probe accepts it) or set a GH_REPO env var in the environment settings.
 #
 # The token is read inline as a presence check and never bound to a local
-# variable: this file's whole body is new text to the autoreview secret scanner
-# after the move, and a bare token assignment reads as a literal credential.
+# variable: a bare token assignment reads as a literal credential to the secret
+# scanners that watch this file.
 if [[ -n "${GH_TOKEN:-${GITHUB_TOKEN:-}}" ]]; then
   # Reinstall unless a gh that already supports `--slurp` is on PATH.
   if ! { command -v gh >/dev/null 2>&1 && gh api --help 2>/dev/null | grep -q -- '--slurp'; }; then

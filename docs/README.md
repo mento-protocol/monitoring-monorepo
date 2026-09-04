@@ -57,7 +57,6 @@ Authority: non-canonical
 - [`.claude/agents/indexer-explorer.md`](../.claude/agents/indexer-explorer.md); sources: [`indexer-envio/AGENTS.md`](../indexer-envio/AGENTS.md); [`docs/pr-checklists/indexer-handler-invariants.md`](pr-checklists/indexer-handler-invariants.md)
 - [`.claude/agents/infra-reader.md`](../.claude/agents/infra-reader.md); sources: [`AGENTS.md`](../AGENTS.md); [`docs/terraform.md`](terraform.md)
 - [`.claude/claude-security-guidance.md`](../.claude/claude-security-guidance.md); sources: [`AGENTS.md`](../AGENTS.md); [`docs/pr-checklists/recurring-review-patterns.md`](pr-checklists/recurring-review-patterns.md)
-- [`.claude/commands/autoreview.md`](../.claude/commands/autoreview.md); sources: [`docs/notes/agent-quality-gate-mechanics.md`](notes/agent-quality-gate-mechanics.md); [`docs/notes/pr-operating-card.md`](notes/pr-operating-card.md)
 - [`.claude/commands/babysit-indexer-deploy.md`](../.claude/commands/babysit-indexer-deploy.md); sources: [`.agents/skills/deploy-indexer/SKILL.md`](../.agents/skills/deploy-indexer/SKILL.md); [`docs/deployment.md`](deployment.md)
 - [`.claude/commands/verify-ui.md`](../.claude/commands/verify-ui.md); sources: [`docs/notes/dashboard-verification.md`](notes/dashboard-verification.md)
 
@@ -198,7 +197,6 @@ Authority: canonical
 - [`docs/adr/0065-scripts-file-size-watchlist-scope.md`](adr/0065-scripts-file-size-watchlist-scope.md) — scripts/ is inside the file-size watchlist, with named-mechanism exemptions
 - [`docs/adr/0066-coderabbit-replaces-bugbot-third-reviewer.md`](adr/0066-coderabbit-replaces-bugbot-third-reviewer.md) — CodeRabbit replaces Cursor BugBot as the third PR review bot
 - [`docs/adr/0067-pool-criticality-is-depletion-risk.md`](adr/0067-pool-criticality-is-depletion-risk.md) — Pool criticality is depletion risk, not deviation magnitude
-- [`docs/adr/0068-sentry-fixture-authoring-policy.md`](adr/0068-sentry-fixture-authoring-policy.md) — Adversarial fixtures are authored to scan clean; no value or line registry
 - [`docs/adr/0069-gate-routing-table-as-data.md`](adr/0069-gate-routing-table-as-data.md) — The quality gate's routing table is data, compiled by the repo's own bash-case translator
 - [`docs/adr/0070-sentry-requeue-settlement-sentinel.md`](adr/0070-sentry-requeue-settlement-sentinel.md) — A withheld terminal label serializes the Sentry archive settlement against the triage re-queue
 - [`docs/adr/0071-susds-launch-aligned-daily-sampler.md`](adr/0071-susds-launch-aligned-daily-sampler.md) — sUSDS actuals use a launch-aligned bounded daily sampler
@@ -208,7 +206,6 @@ Authority: canonical
 - [`docs/adr/0076-fair-quality-gate-coordinator.md`](adr/0076-fair-quality-gate-coordinator.md) — Fair local quality-gate coordination across worktrees
 - [`docs/adr/0077-operator-triggered-backlog-sweep.md`](adr/0077-operator-triggered-backlog-sweep.md) — Operator-triggered backlog sweep with isolated workers
 - [`docs/adr/0078-staged-verification-redesign.md`](adr/0078-staged-verification-redesign.md) — Staged replacement of the mandatory local gate with existing CI
-- [`docs/adr/0079-sealed-exact-file-patch-secret-suppression.md`](adr/0079-sealed-exact-file-patch-secret-suppression.md) — Autoreview permits only sealed exact-file-patch secret suppression
 - [`docs/adr/0080-merge-base-freshness-stamp.md`](adr/0080-merge-base-freshness-stamp.md) — The gate's freshness stamp binds the merge-base
 - [`docs/adr/0081-narrow-dependabot-auto-merge-exception.md`](adr/0081-narrow-dependabot-auto-merge-exception.md) — Narrow Dependabot auto-merge exception
 - [`docs/adr/0082-persistent-issue-board-mutation-mutex.md`](adr/0082-persistent-issue-board-mutation-mutex.md) — Persistent Issue-Board Mutation Mutex
@@ -216,11 +213,14 @@ Authority: canonical
 - [`docs/adr/0084-github-ui-operator-merge.md`](adr/0084-github-ui-operator-merge.md) — Use GitHub for ordinary pull request merges
 - [`docs/adr/0085-review-eval-cli-versions-bind-the-cell.md`](adr/0085-review-eval-cli-versions-bind-the-cell.md) — Provider CLI versions bind the review-eval cell, not the plan
 - [`docs/adr/0086-review-eval-lane-any-grid-multi-draw.md`](adr/0086-review-eval-lane-any-grid-multi-draw.md) — The experiment lane runs any grid at N draws and decides on paired evidence
+- [`docs/adr/0087-autoreview-removal-thin-two-model-review.md`](adr/0087-autoreview-removal-thin-two-model-review.md) — Remove the autoreview machinery; keep a thin two-model closeout review
 
 Authority: non-canonical
 
 - [`docs/adr/0020-swr-polling-read-model.md`](adr/0020-swr-polling-read-model.md) — Read model is SWR polling plus bounded snapshot composition at current scale (archived)
+- [`docs/adr/0068-sentry-fixture-authoring-policy.md`](adr/0068-sentry-fixture-authoring-policy.md) — Adversarial fixtures are authored to scan clean; no value or line registry (archived)
 - [`docs/adr/0075-pr-merge.md`](adr/0075-pr-merge.md) — One sanctioned operator merge path (archived)
+- [`docs/adr/0079-sealed-exact-file-patch-secret-suppression.md`](adr/0079-sealed-exact-file-patch-secret-suppression.md) — Autoreview permits only sealed exact-file-patch secret suppression (archived)
 - [`docs/adr/README.md`](adr/README.md)
 
 ## package-readmes-reference
@@ -240,10 +240,6 @@ Authority: canonical
 - [`integration-probes/README.md`](../integration-probes/README.md)
 - [`README.md`](../README.md)
 - [`SPEC.md`](../SPEC.md)
-
-Authority: non-canonical
-
-- [`docs/notes/autoreview-runtime-trust.md`](notes/autoreview-runtime-trust.md)
 
 ## notes-plans-archive
 

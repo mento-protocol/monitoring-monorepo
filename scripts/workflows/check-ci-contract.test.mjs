@@ -33,8 +33,6 @@ const FILTER_FIXTURES = Object.freeze([
   ["codeHealth", ".dependency-cruiser.cjs", "docs/notes/example.md"],
   ["rootScripts", "scripts/workflows/check-ci-contract.mjs", UI_SOURCE],
   ["docs", "docs/notes/example.md", UI_SOURCE],
-  ["autoreviewSuite", "scripts/agent-autoreview.sh", UI_SOURCE],
-  ["autoreviewRootRuntime", "scripts/agent-autoreview.mjs", UI_SOURCE],
   ["versionSkew", "ui-dashboard/package.json", UI_SOURCE],
 ]);
 

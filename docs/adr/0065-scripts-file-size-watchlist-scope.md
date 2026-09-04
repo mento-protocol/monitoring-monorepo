@@ -85,16 +85,14 @@ an issue and never fails a `--fail-on` run. It is never silently dropped: a
 dropped row is the failure class this programme's P0 phase fixed in the
 deploy-anchor test, where a check that matched nothing still exited 0.
 
-Three files qualify, all in the autoreview trust root. Neither mechanism below
-makes a split physically impossible — both are path lists that a determined
-change could extend. Both make extending them a change to how the autoreview
-wrapper proves its own integrity, and this repository does not make that change
-to satisfy a line count.
-
-| File                                                | Mechanism                                                                                                                                                                                                                                                                                                                                                                                                      |
-| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `agent-autoreview.sh`                               | `verify_current_wrapper_matches_ref` hashes the wrapper's own blob against the frozen-HEAD snapshot before an explicit branch or commit review. A sourced sibling falls outside the identity that check proves, so moving bulk out weakens the property rather than preserving it.                                                                                                                             |
-| `agent-autoreview.mjs`, `agent-autoreview-core.mjs` | The wrapper materializes the entry point, core, sealed exact-patch suppression JSON, Darwin identity sources and lineage modules, and `gate/mapped-command-process-identity.mjs` under a 2 MB aggregate cap. Explicit trust lists, private nested directories, no-follow copies, file modes, and protected-ref blob checks attest the complete runtime. Splitting either large helper changes that trust root. |
+**There are currently no exemptions.** Three files qualified when this ADR was
+written, all in the autoreview trust root: the `agent-autoreview.sh` wrapper,
+which hashed its own blob against a frozen-HEAD snapshot, and the two large
+helpers `agent-autoreview.mjs` and `agent-autoreview-core.mjs`, which that
+wrapper materialized under a 2 MB aggregate cap.
+[ADR 0087](0087-autoreview-removal-thin-two-model-review.md) deleted all three,
+so `SCRIPTS_EXEMPTIONS` is now an empty list. The mechanism above stays; only
+its contents are gone.
 
 **Nothing whose split is merely expensive is exempt.** `agent-quality-gate.sh`
 is the largest example and stays measured at the hard cap without an exemption.
@@ -114,14 +112,12 @@ the reorganization already brought under the cap carries no entry.
 
 **The list is reviewed with this ADR, on its 90-day interval, and whenever one
 of the named mechanisms changes.** `file-size-watchlist.test.mjs` enforces the
-three ways it rots. The exempt path set is spelled out in the test, and the test
-also asserts this file records each path, so adding or dropping an entry reds
-until this record moves with it. Each exempted file must still exist and still
-be above the watch threshold, so one that shrank or moved reds. And the wrapper
-must still carry all ten non-shell runtime entries in each trust list and the
-2 MB cap the reason cites. A
-further test proves the suppression is the exemption's work, not the scope's, by
-scanning identical content at an exempt path and at a plain sibling.
+ways it rots. The exempt path set is spelled out in the test, and the test also
+asserts this record agrees that the list is empty, so adding or dropping an
+entry reds until this record moves with it. A further test proves the
+suppression is the exemption's work, not the scope's: it scans identical content
+at two paths, first with neither listed and then with one listed through the
+live `SCRIPTS_EXEMPTIONS` array.
 
 ## Alternatives considered
 
@@ -137,8 +133,9 @@ Rejected on measurement: of the test files a plan named unsplittable, only
 `deploy-staging-contract.test.mjs` actually cannot take a sibling. A Sentry
 suite may extract non-suite helper modules — the gate closes over its transitive
 imports, so only a new `*.test.mjs` is barred. `tf-stacks.test.mjs` and
-`agent-autoreview.test.sh` are facades that may import or source extracted
-siblings. Writing those as mechanical bars would have put false reasons in the
+`agent-autoreview.test.sh` were facades that may import or source extracted
+siblings; [ADR 0087](0087-autoreview-removal-thin-two-model-review.md) has since deleted the
+second. Writing those as mechanical bars would have put false reasons in the
 report; writing them honestly leaves 36 actionable rows nobody will work, which
 is how a watchlist gets ignored from its first run.
 
@@ -210,8 +207,8 @@ that nothing holds in place.
 - The subsystem-local gate this leaves in place:
   `scripts/sentry/ci-wiring/check-sentry-suites-in-ci.test.mjs`, "the checker's
   own files stay under the file-size hard cap"
-- Trust-root pins: `verify_current_wrapper_matches_ref` and
-  `materialize_filesystem_autoreview_runtime` in `scripts/agent-autoreview.sh`
+- The retired trust-root pins that justified the three original exemptions:
+  [ADR 0087](0087-autoreview-removal-thin-two-model-review.md)
 - Test-split costs behind the exclusion:
   [`scripts/sentry/gate/sentry-suite-manifest.json`](../../scripts/sentry/gate/sentry-suite-manifest.json)
   and [ADR 0062](0062-sentry-suites-self-run-gate.md); `verifyExemptRoute` in

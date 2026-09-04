@@ -46,9 +46,6 @@ const expectedScripts = {
   "agent:closeout-review": "node scripts/pr/closeout-review.mjs",
   "agent:closeout-review:test":
     "node --test scripts/pr/closeout-review.test.mjs",
-  "agent:autoreview": "./scripts/agent-autoreview.sh",
-  "agent:autoreview:test":
-    "AUTOREVIEW_TEST_FOCUS=suite bash scripts/agent-autoreview.test.sh",
   "issue:board": "node scripts/pr/agent-issue-board.mjs",
   "issue:board:test": "node scripts/pr/agent-issue-board.test.mjs",
   "issue:claim": "node scripts/pr/agent-issue-board.mjs claim",
