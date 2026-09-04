@@ -132,13 +132,15 @@ policy file yet, so neither failure can be mistaken for a skip.
 An audit of every emitted command then found two that the emitter fix cannot
 reach, because the ref they read is not the gate's base. `docs:navigation-eval
 -- --validate` tests ancestry against `refs/remotes/origin/main` as the DEFAULT
-branch, and the autoreview suite reads protected-main checklist blobs at
-`origin/main^{commit}`. Handing either the gate's `--base` would change what it
-asserts — on a stacked PR the default branch is still `main`. These are named in
-a short marker list inside the predicate, the fallback this ADR otherwise
-rejects, and the reasoning holds because the failure is asymmetric: a listed
-command only ever gets the stricter binding, so a stale entry costs a re-run
-while a missing one costs a skipped check. The residual is that a rename makes a
+branch, and the autoreview suite read protected-main checklist blobs at
+`origin/main^{commit}`.
+[ADR 0086](0086-autoreview-removal-thin-two-model-review.md) has since deleted
+that suite, so the navigation eval is the only marker command left. Handing it
+the gate's `--base` would change what it asserts — on a stacked PR the default
+branch is still `main`. It is named in a short marker list inside the predicate,
+the fallback this ADR otherwise rejects, and the reasoning holds because the
+failure is asymmetric: a listed command only ever gets the stricter binding, so
+a stale entry costs a re-run while a missing one costs a skipped check. The residual is that a rename makes a
 marker stale silently; the `markerbound` stamps-freshness fixture is what
 notices, since it asserts tip binding for a real navigation-eval plan.
 
@@ -153,9 +155,9 @@ default branch that is absent and later appears still busts the stamp — and th
 navigation eval itself reports an unreachable default branch as an error, so a
 run cannot be stamped green in that state anyway. Such a plan also keeps tip
 binding, which nothing measured requires; it is strictly stricter, and the
-autoreview marker's runtime behaviour was established from its source rather
-than by running it, which is not a gap worth trading for a narrower binding on
-two rare commands.
+marker's runtime behaviour was established from its source rather than by
+running it, which is not a gap worth trading for a narrower binding on one rare
+command.
 
 ## Consequences
 

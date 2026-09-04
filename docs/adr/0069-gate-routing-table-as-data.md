@@ -128,10 +128,10 @@ two public exports) and `indexer-handler-invariant-families.mjs` (the data). The
 contract exports a detached, deeply frozen family view and consumes that same
 view for its `{path, route, owner}` decisions. It validates the family schema
 before export: unknown fields, invalid types, overlapping exact owners, and
-Bash-unsafe literal paths fail import. `scripts/agent-autoreview-core.mjs` holds
-a duplicate copy of the same data until the autoreview removal PR deletes it; a
-parity test keeps the two in step, and an edit to either source routes the
-handler-invariant checklist.
+Bash-unsafe literal paths fail import. `scripts/agent-autoreview-core.mjs` held
+a duplicate copy of the same data, kept in step by a parity test, until [ADR 0086](0086-autoreview-removal-thin-two-model-review.md)
+deleted it. The contract is now the single source, and an edit to it or to the
+family data routes the handler-invariant checklist.
 
 `arms-packages.mjs` derives two first-match arms from that view. Explicit
 `route: false` families form the excluded arm. Routed exact paths form the
@@ -173,18 +173,15 @@ and the indexer CI job runs it for every indexer change. A new module below
 `src/` or `test/`, root config YAML, root Vitest input, indexer test wrapper,
 ABI, or config file must gain an explicit owner in the PR that adds it.
 
-Autoreview imports the classifier from the same selected runtime as its helper.
-For a wrapper-attested runtime, the wrapper verifies the sealed runtime
-identity and content manifest immediately before and after the classifier
-process. A difference at either boundary fails before checklist decisions are
-used. A prepared runtime keeps its existing prepared-runtime trust contract.
-When a candidate changes `scripts/agent-autoreview-core.mjs` or either
-`gate/routing-table/indexer-handler-invariant-*.mjs` module, the classifier that
-decides comes from the reviewing checkout and cannot see a new owner or a
-false-to-true reclassification in the candidate revision. Each of those three
-paths therefore selects the handler-invariant checklist. This source trigger
-intentionally routes unrelated edits. Executing the candidate classifier
-would break the protected-main trust boundary.
+Autoreview imported the classifier from its own attested runtime, and verified
+that runtime's sealed identity and content manifest around every classifier
+process. [ADR 0086](0086-autoreview-removal-thin-two-model-review.md) deleted the wrapper, so the gate is the only consumer left. When
+a candidate changes either `gate/routing-table/indexer-handler-invariant-*.mjs`
+module, the classifier that decides still comes from the gate's own checkout and
+cannot see a new owner or a false-to-true reclassification in the candidate
+revision. Both paths therefore select the handler-invariant checklist. This
+source trigger intentionally routes unrelated edits. Executing the candidate
+classifier would break that trust boundary.
 
 ### 2. Patterns are compiled by the repo's own translator, never by a glob library
 
@@ -332,9 +329,10 @@ stderr is a separate change with its own fixture work.
 Six pins land with the table:
 
 1. **`implementation_signature()`** gains every module in the directory, suites
-   included — the two handler-invariant classifier modules among them — plus
-   `scripts/agent-autoreview-core.mjs`, which keeps its entry while it holds the
-   duplicate family copy. That is the same treatment `scripts/agent-quality-gate.test.sh` and
+   included — the two handler-invariant classifier modules among them.
+   `scripts/agent-autoreview-core.mjs` carried an entry too while it held the
+   duplicate family copy; [ADR 0086](0086-autoreview-removal-thin-two-model-review.md) removed both the file and the entry. That is the
+   same treatment `scripts/agent-quality-gate.test.sh` and
    `scripts/terraform/terraform-fmt-check.test.mjs` already get, since a suite is
    part of what the gate proves about itself. An entry it cannot
    `stat` hashes as `__missing__`, which **freezes** the signature, so
@@ -394,17 +392,19 @@ runbook (`docs/notes/agent-quality-gate-mechanics.md:274-575`) and hardened as
 recently as PRs 1916 and 1926. A Node rewrite re-derives all of it with no oracle
 but a bash suite that itself drives bash fixtures.
 
-**A bash entry point attesting a Node engine, as `agent-autoreview.sh` does.**
-Rejected on threat model. Autoreview attests its runtime because it reviews a
-possibly hostile branch and must not let that branch rewrite its own reviewer.
+**A bash entry point attesting a Node engine, as `agent-autoreview.sh` did.**
+Rejected on threat model. Autoreview attested its runtime because it reviewed a
+possibly hostile branch and could not let that branch rewrite its own reviewer.
 The gate's contract is the opposite: "The repo command itself is executable code
 from the active checkout… Inspect a potentially hostile branch from a separate
 trusted checkout rather than invoking that branch's package scripts"
 (`docs/notes/agent-quality-gate-mechanics.md:799-803`). The gate exists to run
 the checkout's own `pnpm` aliases and test suites; attesting its own runtime and
-then executing the branch's suites buys nothing. ADR 0065 already ratifies the
-asymmetry: all three exempt trust-root files are `agent-autoreview*`, and it
-states that `agent-quality-gate.sh` "stays in the report".
+then executing the branch's suites buys nothing. ADR 0065 already ratified the
+asymmetry: all three exempt trust-root files were `agent-autoreview*`, and it
+states that `agent-quality-gate.sh` "stays in the report". [ADR 0086](0086-autoreview-removal-thin-two-model-review.md) deleted those
+three files, so `SCRIPTS_EXEMPTIONS` is now empty and the gate still stays in
+the report.
 
 **Adding the gate to `SCRIPTS_EXEMPTIONS` and closing 1498.** Would clear the
 row. Rejected: it is the padding alternative ADR 0065 already rejected, and the
@@ -522,9 +522,9 @@ gate is not a trust root.
 - **The indexer family extension rides on the table.** It adds the focused
   parity command to JS and TypeScript indexer modules and focused external
   runtime or test-support inputs, and narrows the handler-invariant checklist to
-  its owned paths. Other changed-path classes keep their prior plan, except that
-  the autoreview-core source class now receives the checklist and both gate
-  suites by design.
+  its owned paths. Other changed-path classes keep their prior plan. The
+  autoreview-core source class received the checklist and both gate suites by
+  design until [ADR 0086](0086-autoreview-removal-thin-two-model-review.md) deleted that source.
 - **Issue 1498's original split is rejected.** Its acceptance criteria named sourced
   `scripts/lib/gate-*.sh` helpers for the watchdog, stamps and executor —
   exactly the residual layers this decision keeps together in bash. Moving

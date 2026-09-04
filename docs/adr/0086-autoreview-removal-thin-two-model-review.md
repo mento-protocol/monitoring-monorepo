@@ -138,6 +138,14 @@ superseded by this record.
   and mapping pins are unchanged.
 - [ADR 0079](0079-sealed-exact-file-patch-secret-suppression.md) is archived: it
   described a runtime that no longer exists.
+- [ADR 0064](0064-scripts-module-directories.md)'s sweep checklist, `case`
+  routing bullets, `origin/main` materialization hazard, and evidence pointers
+  named the wrapper and the two removed `ci.yml` filters. They are amended in
+  place; the move procedure itself is unchanged.
+- [ADR 0080](0080-merge-base-freshness-stamp.md)'s default-branch marker list
+  had two commands. The autoreview suite was the second, so
+  `docs:navigation-eval -- --validate` is now the only marker command, in the
+  gate and in that ADR.
 
 The frozen verification-evidence manifest keeps its scoped allowance for
 `scripts/agent-autoreview.sh:.*gate_stat`, because

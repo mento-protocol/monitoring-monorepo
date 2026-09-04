@@ -199,7 +199,7 @@ test("classification is single-valued and explicit metadata overrides defaults",
   assert.deepEqual(override.errors, []);
 });
 
-test("Claude runtime registry gives all seven projections owned non-canonical metadata", () => {
+test("Claude runtime registry gives every projection owned non-canonical metadata", () => {
   withRepo((repo) => {
     const { files } = writeRuntimeRegistryFixture(repo);
     const first = buildDocumentationInventory({ repoRoot: repo, files });
@@ -223,6 +223,41 @@ test("Claude runtime registry gives all seven projections owned non-canonical me
     assert.match(rendered, /; sources:/);
     assert.match(rendered, /\[`AGENTS\.md`\]/);
   });
+});
+
+// docs/context-standards.md states the registry's size in prose, and nothing
+// recomputed it when ADR 0086 removed a runtime document. Pin the prose to the
+// list, so the next added or removed runtime document reds here.
+const COUNT_WORDS = [
+  "zero",
+  "one",
+  "two",
+  "three",
+  "four",
+  "five",
+  "six",
+  "seven",
+  "eight",
+  "nine",
+  "ten",
+];
+
+test("context-standards states the registry's current size", () => {
+  const count = COUNT_WORDS[CLAUDE_RUNTIME_DOCUMENT_PATHS.length];
+  assert.ok(count, "the registry outgrew the spelled-out counts");
+  const standards = readFileSync(
+    fileURLToPath(new URL("../../docs/context-standards.md", import.meta.url)),
+    "utf8",
+  );
+  for (const sentence of [
+    `Their ${count} supported paths are instead registered in`,
+    `registry limited to its ${count} named Claude runtime documents`,
+  ]) {
+    assert.ok(
+      standards.includes(sentence),
+      `docs/context-standards.md does not say "${sentence}"`,
+    );
+  }
 });
 
 test("Claude runtime registry fails closed for invalid entries and proposed-tree drift", () => {
