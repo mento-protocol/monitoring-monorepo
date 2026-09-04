@@ -140,10 +140,23 @@ If root `package.json` changed, first run
    If pre-commit changes a file, stop before push. Apply its author-check rows
    and step 4 to the committed tree. Do not publish unchecked formatter changes.
 
-4. **Review.** Freeze the scope baseline first — the initial request,
-   target/owner, changed-file set, and non-test changed-line count — as the
-   reference Babysit (step 6) checks new additions against. Then, for a
-   non-trivial completed batch, run the closeout review.
+4. **Review.** Freeze the scope baseline first, before any review-driven
+   edit: the initial request, target/owner, changed-file set, the merge-base
+   SHA, the tree SHA (or dirty fingerprint), and the non-test changed-line
+   count against that merge base: `git diff --numstat` added lines, new files
+   staged first, over paths outside `*.test.*`, `*.spec.*`, `__tests__`,
+   `fixtures`, and `test`/`tests` directories. Record those numbers once;
+   they go into `## Validation` at step 5. **Every pass in this step and in
+   step 6 reads this one baseline.** A later pass never re-freezes, because a
+   per-pass baseline sees only its own delta and hides cumulative growth.
+   After each review-driven fix round, recount the branch's own non-test
+   changed lines the same way, new files staged first, against the current
+   merge base, so a later base integration adds nothing to the count. The stop threshold is twice the baseline; for a
+   baseline under 50 lines it is 100 lines instead. When the count reaches
+   the threshold, stop and report the growth to the user before the next
+   round; the user decides whether to continue, split, or cut, and a continue
+   names the new threshold. Then, for a non-trivial completed batch, run the
+   closeout review.
 
    **Test the validation claims against what the run actually establishes.**
    On a re-run for an open PR that is its `## Validation` section; on the first
@@ -249,7 +262,8 @@ If root `package.json` changed, first run
    in full, all four sections: `## The Problem` (maximum three bullets — old
    behavior, what failed, concrete effect), `## The Solution` (new behavior,
    why it improves the situation, material limits), then `## Details`
-   (implementation specifics) and `## Validation` (commands and results).
+   (implementation specifics) and `## Validation` (commands, results, and the
+   step-4 scope baseline).
    Write the opening for an engineer who has not read the diff.
    `scripts/pr/check-pr-description.mjs` enforces the first two sections and
    their order in CI; raw HTML other than comments and code blocks do not
@@ -368,13 +382,16 @@ If root `package.json` changed, first run
    sample, they do not enumerate; review is a batch-boundary verifier, not the
    inner edit loop. Never force-push or amend while babysitting,
    and `git fetch` before every push because reviewers push mid-session. Check
-   new additions against the scope baseline frozen at step 4; classify each as
+   new additions against the scope baseline frozen at step 4, never a
+   re-frozen one (a babysit-only entry with none recorded follows
+   [`pr-ready-state.md`](pr-ready-state.md)); classify each as
    in-scope, follow-up, or stop; **file a labeled GitHub issue before deferring
    any valid follow-up** and link it from the PR's `## Deferrals` section. A
    bot finding is a valid follow-up only when the defect is observed, the wrong
    outcome is operator-visible, and the fix is small; otherwise answer it as an
-   evidence-backed won't-fix, which needs no issue. Warn
-   as the diff approaches twice the baseline. Do not pause solely for cycle count
+   evidence-backed won't-fix, which needs no issue. The
+   step-4 growth stop applies here too: when the non-test count reaches the
+   step-4 threshold, report and wait for the user. Do not pause solely for cycle count
    before five review-triggered patch cycles are complete; pause for
    reclassification before starting a sixth. Authority:
    [`agent-issue-workflow.md`](agent-issue-workflow.md) for the deferral and
