@@ -175,13 +175,16 @@ ABI, or config file must gain an explicit owner in the PR that adds it.
 
 Autoreview imported the classifier from its own attested runtime, and verified
 that runtime's sealed identity and content manifest around every classifier
-process. [ADR 0086](0086-autoreview-removal-thin-two-model-review.md) deleted the wrapper, so the gate is the only consumer left. When
-a candidate changes either `gate/routing-table/indexer-handler-invariant-*.mjs`
-module, the classifier that decides still comes from the gate's own checkout and
-cannot see a new owner or a false-to-true reclassification in the candidate
-revision. Both paths therefore select the handler-invariant checklist. This
-source trigger intentionally routes unrelated edits. Executing the candidate
-classifier would break that trust boundary.
+process. It loaded only the core copy of the family data, which
+`scripts/indexer-handler-invariant-contract.test.mjs` kept in step with this
+one. [ADR 0086](0086-autoreview-removal-thin-two-model-review.md) deleted the
+wrapper and that copy, so the gate is the only consumer left. When a candidate
+changes either `gate/routing-table/indexer-handler-invariant-*.mjs` module, the
+classifier that decides still comes from the gate's own checkout and cannot see
+a new owner or a false-to-true reclassification in the candidate revision. Both
+paths therefore select the handler-invariant checklist. This source trigger
+intentionally routes unrelated edits. Executing the candidate classifier would
+break that trust boundary.
 
 ### 2. Patterns are compiled by the repo's own translator, never by a glob library
 
