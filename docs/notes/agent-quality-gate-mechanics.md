@@ -2661,8 +2661,18 @@ pnpm agent:quality-gate --base "$premerge_oid" --head HEAD --run
 `base_oid..final_head` shows what the branch adds to the new base. `premerge_oid..final_head`
 shows what the merge changed about the branch — the axis that catches a resolution which
 silently drops branch behaviour, since such a resolution looks clean against the new base.
-Only after both gates pass, run the closeout review from card step 4 against the
-final head, then push.
+
+The closeout review takes both axes for the same reason. The gates above are
+behaviour evidence; only a source review of `premerge_oid..final_head` reads what
+the resolution dropped, and a review of `base_oid..final_head` alone cannot see
+it. Both inputs are immutable OIDs, so neither call fetches:
+
+```bash
+pnpm agent:closeout-review --base "$base_oid"
+pnpm agent:closeout-review --base "$premerge_oid"
+```
+
+Push only after both gates and both reviews pass.
 
 The closeout review answers whether the source contains review findings. It
 does not prove CLI/API behavior, generated artifacts, deployment/runtime
