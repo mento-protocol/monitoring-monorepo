@@ -3,7 +3,7 @@ title: Fair local quality-gate coordination across worktrees
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-30
+last_verified: 2026-09-02
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -13,14 +13,17 @@ garden_lane: adrs-architecture
 
 # ADR 0076 — Fair local quality-gate coordination across worktrees
 
-**Status:** Accepted (Aug 2026). In force on branches that contain this change.
+**Status:** Accepted (Aug 2026), narrowed by the M5 cutover on 2026-09-02. The
+coordinator remains in force for the callable legacy diagnostic and rollback
+compatibility. Normal `/ship` author checks do not use it. Pre-push starts no
+repository verification, lock, or wait.
 **Scope:** ci/process
 
 ## Context
 
 [ADR 0007](0007-agent-quality-gate-and-merge-oracle.md) established the local
-agent quality gate. Several agents and pre-push hooks now run that gate from
-linked worktrees on one machine.
+agent quality gate. Before M5, several agents and pre-push hooks ran that gate
+from linked worktrees on one machine.
 
 Unrestricted overlap is unsafe. Issue
 [#1802](https://github.com/mento-protocol/monitoring-monorepo/issues/1802)
@@ -1156,13 +1159,9 @@ its capacity and named resources until a token-scoped drainer acknowledges
 
 ## Consequences
 
-- Independent gate-registered lint, typecheck, and unit-test work from different
-  worktrees can progress together within one machine budget.
-- The same worktree still runs one full gate request at a time. This is required
-  for local outputs and result files.
-- Dashboard coverage, browser, and build work still run without competing gate
-  commands. Their fair barrier can pause new admission while current work
-  drains.
+- During optional diagnostic runs, independent lint, typecheck, and unit-test
+  work can progress within one machine budget. Each worktree remains
+  serialized. Dashboard coverage, browser, and build work retain their barrier.
 - Exact matching requests execute once. Their queue and execution results stay
   bound to one source, plan, environment, toolchain, and policy identity.
 - Older worktrees still observe the legacy lock during rollout. They do not
@@ -1265,51 +1264,10 @@ They do not predict production gate duration.
 - Local `.tmp/agent-quality-gate/durations.jsonl` records captured on
   2026-08-21 — 1,710 seconds total for 14 seconds of recorded execution, and
   1,306 seconds total for about 64 seconds of recorded execution.
-- Runtime files: `scripts/gate/quality-gate-coordinator.mjs`,
-  `quality-gate-coordinator.sh`, `quality-gate-coordinator-support.sh`,
-  `quality-gate-coordinator-policy.mjs`,
-  `quality-gate-coordinator-environment.mjs`,
-  `quality-gate-coordinator-client.mjs`,
-  `quality-gate-coordinator-lifecycle.mjs`,
-  `quality-gate-coordinator-core.mjs`,
-  `quality-gate-coordinator-primitives.mjs`,
-  `quality-gate-coordinator-requests.mjs`,
-  `quality-gate-coordinator-scheduler.mjs`,
-  `quality-gate-coordinator-server.mjs`,
-  `quality-gate-coordinator-startup-attestation.mjs`,
-  `quality-gate-coordinator-socket.mjs`,
-  `quality-gate-coordinator-state.mjs`,
-  `quality-gate-coordinator-legacy.mjs`,
-  `quality-gate-coordinator-journal.mjs`,
-  `quality-gate-coordinator-journal-fields.mjs`,
-  `quality-gate-coordinator-drain.mjs`,
-  `quality-gate-coordinator-result-record.mjs`,
-  `quality-gate-coordinator-results.mjs`, and
-  `quality-gate-coordinator-retention.mjs`.
-- Darwin containment and service files:
-  `scripts/gate/darwin-broker-launch-preflight.mjs`,
-  `darwin-process-identity.c`, `darwin-process-identity-runtime.inc.c`,
-  `darwin-process-identity-helper.mjs`,
-  `darwin-process-lineage-model.mjs`, `darwin-process-lineage-state.mjs`,
-  `darwin-process-lineage.mjs`,
-  `darwin-process-lineage.sh`,
-  `mapped-command-process-identity.mjs`, and `trunk-check-once.sh`.
-- Test and benchmark files: `scripts/agent-quality-gate.test.sh`,
-  `scripts/gate/quality-gate-coordinator.test.mjs`,
-  `quality-gate-coordinator-policy.test.mjs`,
-  `agent-quality-gate-scheduler.integration.test.mjs`,
-  `agent-quality-gate-scheduler-benchmark.mjs`,
-  `agent-quality-gate-scheduler-fixture.mjs`,
-  `agent-quality-gate-scheduler-fixture-support.mjs`,
-  `agent-quality-gate-fixture-processes.mjs`, and
-  `agent-quality-gate-scheduler-tool-fixture.mjs`.
-- Focused containment tests:
-  `scripts/gate/darwin-broker-launch-preflight.test.mjs`,
-  `darwin-process-identity.test.mjs`, `darwin-process-lineage.test.mjs`,
-  `mapped-command-process-identity.test.mjs`, `trunk-check-once.test.sh`,
-  `scripts/agent-autoreview.test.sh`,
-  `scripts/sentry/broker/sentry-mcp-broker.test.mjs`, and
-  `scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-extract.test.mjs`.
+- Runtime, containment, test, fixture, and benchmark files under
+  `scripts/gate/`, plus the focused gate and Sentry tests that exercise those
+  files.
 - Integration entry point: `scripts/agent-quality-gate.sh`.
-- Related decision: [ADR 0007](0007-agent-quality-gate-and-merge-oracle.md),
-  which owns why the local gate is required before push.
+- Related decisions: [ADR 0007](0007-agent-quality-gate-and-merge-oracle.md)
+  records the pre-M5 gate; [ADR 0078](0078-staged-verification-redesign.md)
+  makes it optional and required CI authoritative.

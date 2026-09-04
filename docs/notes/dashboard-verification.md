@@ -3,7 +3,7 @@ title: Dashboard Local and Browser Verification
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-25
+last_verified: 2026-09-02
 doc_type: runbook
 scope: ui-dashboard
 review_interval_days: 90
@@ -173,9 +173,9 @@ For `pnpm build` plus `pnpm start`:
 - The persisted SWR build salt is derived from
   `VERCEL_DEPLOYMENT_ID ?? VERCEL_GIT_COMMIT_SHA ?? "dev"` and inlined as
   `NEXT_PUBLIC_SWR_CACHE_BUILD_SALT`. Do not configure the public mirror. The
-  agent quality gate supplies its own stable local deployment identity for the
-  build-backed size check, so operator-local Vercel placeholders are ignored on
-  that path.
+  optional legacy gate supplies its own stable local deployment identity for
+  its build-backed size check, so operator-local Vercel placeholders are
+  ignored on that diagnostic path.
 - `.next/cache/fetch-cache` survives `next start` restarts; remove it before a
   true cold-cache measurement.
 
@@ -190,8 +190,8 @@ separately. Non-Sentry 429s and failed GraphQL/API calls are regressions.
 `.next-fixture`) via `next start`, alongside
 `tests/browser/fixtures/hasura-fixture-server.mjs`, then runs Playwright under
 `tests/browser/`. There is no `next dev` server: the build is produced at most
-once per gate run (the turbo `test:browser` task `dependsOn` the cached
-`fixture-build` task) and reused across re-runs. Direct callers compare the
+once per browser-test invocation (the Turbo `test:browser` task `dependsOn`
+the cached `fixture-build` task) and reused across re-runs. Direct callers compare the
 stored Turbo task hash with the current `fixture-build` hash and rebuild stale
 or unverifiable output. The fixture server publishes an identity over its local
 source closure, scenario, and response delay; the runner reuses port 3211 only
@@ -200,10 +200,10 @@ process on mismatch. Use the package scripts, not a direct `playwright test`,
 so this preflight runs. The fixture server is the
 only GraphQL source for these tests; never point it at hosted Hasura/Envio. The app-level
 harness covers App Router navigation, URL state, hydration, CSP, SWR request
-behavior, and real browser focus. On a fresh checkout, install Chromium once
-with `pnpm exec playwright install chromium`; the quality gate does this
-automatically. The fixture build snapshots and restores `next-env.d.ts` around
-the `next build` that rewrites it.
+behavior, and real browser focus. The setup script attempts to install
+Chromium. On a fresh checkout that still lacks it, run
+`pnpm exec playwright install chromium`. The fixture build snapshots and
+restores `next-env.d.ts` around the `next build` that rewrites it.
 
 The fixture Hasura server listens on a fixed port (`3211`) baked into the build;
 the Next server port is OS-assigned at runtime. Only the fixture URL, not the
@@ -247,8 +247,11 @@ normally be clean because the full-score floor is 100. Fix warnings or use a
 narrow `// react-doctor-disable-next-line <rule-id>` with a one-line rationale
 when a finding is genuinely inapplicable.
 
-Run `pnpm dashboard:react-doctor:diff` from the root for the CI-equivalent diff
-scan, `pnpm react-doctor` inside the package for a full scan, and
+Run `REACT_DOCTOR_BASE_REF=<base-remote>/<base-ref> pnpm --filter
+@mento-protocol/ui-dashboard react-doctor:diff` for the CI-equivalent scan
+against the resolved PR base. The root `pnpm dashboard:react-doctor:diff` alias
+hardcodes `origin/main`; use it only for a main-base PR after fetching that
+ref. Run `pnpm react-doctor` inside the package for a full scan. Run
 `pnpm react-doctor:score` for the enforced 100/100 score. The standalone CLI
 and `react-doctor.config.json` are authoritative even where noisy rules are
 disabled in ESLint.

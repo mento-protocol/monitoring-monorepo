@@ -98,7 +98,8 @@ not run them against production destinations casually.
 
 ### 5. Validate and open the PR
 
-From the repository root, run:
+Before the first command, apply the step 3 lifecycle and install review in the
+[PR operating card](../docs/notes/pr-operating-card.md) to step 4's `package.json` change. Then run:
 
 ```bash
 pnpm --filter @mento-protocol/governance-watchdog lint
@@ -107,7 +108,8 @@ pnpm --filter @mento-protocol/governance-watchdog test:coverage
 pnpm --filter @mento-protocol/governance-watchdog build
 ```
 
-Then run the gate or gates from step 3 of the
+Treat `test:coverage` as satisfying the unit-test row. Then apply every other
+matching direct author check from step 3 of the
 [PR operating card](../docs/notes/pr-operating-card.md).
 
 The PR must contain the TypeScript handler, source guard, filter input,

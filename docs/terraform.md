@@ -3,7 +3,7 @@ title: Terraform Stacks
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-20
+last_verified: 2026-09-02
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -54,8 +54,9 @@ Without a stack, `pnpm tf validate` validates every registered stack. It formats
 tracked and non-ignored untracked Terraform, then runs backend-free init and
 validate. On Darwin, it applies the [immutable provider trust and cache
 rules](notes/agent-quality-gate-mechanics.md). Land trust updates through
-reviewed `main` and CI. Then refresh `origin/main` and rerun the gate. Gitignored
-operator `*.tfvars` stay outside the source check.
+reviewed `main` and CI. Then refresh `origin/main` and rerun
+`pnpm tf validate <stack>`. Gitignored operator `*.tfvars` stay outside the
+source check.
 
 For stacks with `ci.apply == "push-main-production-infra-environment"`, local
 apply requires a clean `main` at `origin/main` unless the operator deliberately

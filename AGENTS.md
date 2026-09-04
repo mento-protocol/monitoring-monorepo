@@ -3,7 +3,7 @@ title: Monitoring Monorepo Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-13
+last_verified: 2026-09-02
 doc_type: agent-instructions
 scope: repo-wide
 review_interval_days: 90
@@ -17,7 +17,7 @@ live in [`SPEC.md`](SPEC.md).
 
 ## Operating Rule (read this before opening PRs)
 
-The full claim → implement → gate → review → ship → babysit → ready-state →
+The full claim → implement → author checks → review → ship → babysit → ready-state →
 merge loop, plus production closeout when required, is one card:
 [`docs/notes/pr-operating-card.md`](docs/notes/pr-operating-card.md). Read it
 first; open the authority docs it names only when a step needs their depth.
@@ -153,7 +153,7 @@ Codex routing and skill ownership are in
 [`docs/notes/codex-agent-skills.md`](docs/notes/codex-agent-skills.md); Claude
 commands live under `.claude/commands/`.
 
-Run `./scripts/setup.sh` in a new clone or worktree. Hosted setup and Worktrunk
-hooks are in
+Run `./scripts/setup.sh` only from a trusted canonical branch. Hosted setup,
+Worktrunk hooks, and the trust boundary are in
 [`docs/notes/worktree-and-web-setup.md`](docs/notes/worktree-and-web-setup.md);
 service prerequisites stay in package READMEs.

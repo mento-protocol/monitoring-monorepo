@@ -1,4 +1,4 @@
-<!-- agent-context: title="Mento v3 Envio HyperIndex Indexer" status=active owner=eng canonical=true last_verified=2026-08-23 doc_type=reference scope=indexer-envio review_interval_days=90 garden_lane=package-readmes-reference -->
+<!-- agent-context: title="Mento v3 Envio HyperIndex Indexer" status=active owner=eng canonical=true last_verified=2026-09-02 doc_type=reference scope=indexer-envio review_interval_days=90 garden_lane=package-readmes-reference -->
 
 # Mento v3 Envio HyperIndex Indexer
 
@@ -161,11 +161,13 @@ When a new `@mento-protocol/contracts` version is published:
 2. Update the affected namespace in both
    `shared-config/deployment-namespaces.json` and
    `indexer-envio/config/deployment-namespaces.json`.
-3. Run `pnpm install` from the repository root.
+3. Inspect lifecycle and install effects as required by step 3 of the
+   [PR operating card](../docs/notes/pr-operating-card.md). Then run
+   `pnpm install` from the repository root.
 4. From `indexer-envio/`, run `pnpm generate:abis` and commit any vendored ABI
    changes.
-5. Run `pnpm check:yaml-addresses`, then run codegen and the dashboard and
-   indexer typechecks selected by the root quality gate.
+5. Run `pnpm check:yaml-addresses`. Then apply the indexer code-generation and
+   direct dashboard and indexer package checks from the same card.
 
 ### Adding a contract to the index
 

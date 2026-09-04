@@ -2,7 +2,7 @@
 
 Real-time monitoring infrastructure for Mento v3 on-chain pools — a multichain [Envio HyperIndex](https://docs.envio.dev/) indexer paired with a Next.js 16 + Plotly.js dashboard.
 
-<!-- agent-context: title="Mento Monitoring Monorepo" status=active owner=eng canonical=true last_verified=2026-08-28 doc_type=reference scope=repo-wide review_interval_days=90 garden_lane=package-readmes-reference -->
+<!-- agent-context: title="Mento Monitoring Monorepo" status=active owner=eng canonical=true last_verified=2026-09-02 doc_type=reference scope=repo-wide review_interval_days=90 garden_lane=package-readmes-reference -->
 
 **Live dashboard:** [monitoring.mento.org](https://monitoring.mento.org)
 
@@ -80,15 +80,12 @@ production-cutover matrix is
 - Node.js 24 LTS
 - [pnpm](https://pnpm.io/) 11.x
 - Docker (for local indexer dev — runs Postgres + Hasura)
-- On macOS, the Xcode Command Line Tools. Install them with
-  `xcode-select --install`. The quality gate uses their selected macOS SDK and
-  Clang toolchain for exact Darwin process identity.
 
 ### Install
 
-For a fresh clone or manually-created worktree, prefer the setup script so
-workspace deps, postinstall hooks, Playwright Chromium, and Envio codegen are
-handled in one place:
+From a trusted canonical clone or worktree, use the setup script for workspace
+dependencies, lifecycle hooks, Playwright, and Envio codegen. See the
+[bootstrap trust boundary](./docs/notes/worktree-and-web-setup.md#bootstrap-trust-boundary).
 
 ```bash
 ./scripts/setup.sh
@@ -111,19 +108,17 @@ Also configure the optional maintenance script for cached container resumes:
 ./scripts/bootstrap/codex-cloud-maintenance.sh
 ```
 
-These scripts perform the frozen install, Envio codegen, agent-context checks,
-and cached-container maintenance. Codex Cloud does not inherit a developer's
-local `~/.agents` directory, so the repo vendors its required autoreview helper.
-The helper trust boundary, prepared-bundle workflow, external-runtime procedure,
-and fail-closed checks live in
-[`docs/notes/agent-quality-gate-mechanics.md`](./docs/notes/agent-quality-gate-mechanics.md).
-Autoreview remains source review, so the quality gate and applicable browser or
-runtime verification are still required.
+These scripts perform the frozen install, Envio codegen, context checks, and
+cached-container maintenance. They still verify the legacy autoreview helper
+until issue #2128; this is not the normal review entry point. Normal delivery
+uses the direct author checks, bound `agent:closeout-review`, and verifier flow
+in [PR operating card](./docs/notes/pr-operating-card.md) steps 3-4. Keep
+browser and runtime evidence separate.
 
-The maintenance path runs after Codex checks out the task branch in a cached
-container; it refreshes `origin/main`, verifies the autoreview helper, syncs
-branch lockfile changes with `pnpm install --frozen-lockfile --prefer-offline`,
-reruns Envio codegen, and validates the agent context.
+After checkout in a cached container, maintenance refreshes `origin/main`,
+verifies the retained legacy helper, syncs the branch lockfile with
+`pnpm install --frozen-lockfile --prefer-offline`, regenerates Envio types, and
+validates agent context.
 
 If you install manually, verify the dashboard can resolve its Sentry package
 after `pnpm install`:
@@ -204,8 +199,8 @@ pnpm --filter @mento-protocol/ui-dashboard test:browser
 
 The browser suite starts the Next.js app with a local GraphQL fixture server so
 it can exercise routing, focus, hydration, and degraded query states without
-hitting hosted Hasura/Envio. The agent quality gate installs Playwright
-Chromium before running it; for direct fresh-checkout runs, install it once with
+hitting hosted Hasura/Envio. The setup script attempts to install Playwright
+Chromium. If a fresh checkout still lacks it, install it once with
 `pnpm --filter @mento-protocol/ui-dashboard exec playwright install chromium`.
 
 ### Targeted Mutation Baseline

@@ -114,8 +114,8 @@ place a human still reads the batch.
 
 ## Roles
 
-**The orchestrator** is the session the operator invoked. It runs no quality
-gate, edits no source file, and opens no PR — prohibitions that keep concurrent
+**The orchestrator** is the session the operator invoked. It runs no author
+check, edits no source file, and opens no PR — prohibitions that keep concurrent
 workers out of each other's trees, and so bind only while separate workers
 exist. A runtime that cannot spawn one works the batch sequentially, taking both
 roles, one issue at a time. Merging is not one of those prohibitions: that
@@ -129,8 +129,8 @@ way to notice.
 
 Every worker command runs from inside its own clone. `git clone` does not move
 the shell and a worker can inherit the orchestrator's directory, so a brief
-that only says which path to clone into would let setup, the branch, the
-edits, and the gate run in the orchestrator's checkout — the tree the whole
+that only says which path to clone into would let setup, the branch, the edits,
+and the author checks run in the orchestrator's checkout — the tree the whole
 scheme exists to keep workers out of.
 
 A worker's clone path is derived from its issue number, so it is deterministic
@@ -138,7 +138,7 @@ and can already exist — an interrupted run leaves one behind, and a released
 issue can be selected again later. An existing directory is resumed only on
 proof that it belongs to this sweep — a `.git/sweep-owner` file written
 immediately after the clone and holding the sweep id, kept inside `.git/` so it
-never shows up as untracked state a gate or a push can trip over. The
+never shows up as untracked state that blocks validation or shipping. The
 orchestrator fixes that id once, before the first claim, and gives it to every
 worker; a clone whose marker was never written cannot be resumed, only
 abandoned for a fresh path. Remote and branch are not that
@@ -152,19 +152,20 @@ suffix. A checkout whose contents have not been established is never deleted;
 it can hold uncommitted work, and nothing available to the sweep tells that
 apart from litter.
 
-Every checkout runs `./scripts/setup.sh`, fresh or resumed. That script sets
-`core.hooksPath`, so a checkout that only ran `pnpm install` has no pre-push
-hook — and a worker there could push without the gate these boundaries forbid
-bypassing. The marker is written straight after the clone, so an interruption
-between the two leaves an owned checkout with no hooks; rerunning is free, since
-the script skips its own work when inputs are unchanged.
+Every checkout runs `./scripts/setup.sh`. Before resuming one, inspect
+`git status --short`, committed, staged, unstaged, and untracked changes. Review
+lifecycle and install effects for any `.node-version`, package manifest,
+lockfile, pnpm configuration, or patch change before setup. Stop if the change
+set is unclear. Before fresh setup, fetch and run
+`git switch --detach origin/main`. Setup prepares the staged formatter,
+dependencies, codegen, and browser tools; markers skip unchanged work.
 
 The split exists because subagents cannot wait across turns. A subagent that
-ends its turn to wait for a gate stalls permanently — nothing re-invokes it,
-and the background process it was waiting on has no one left to observe it. So
-a worker polls its own gate and push inside the turn that started them, and the
-orchestrator exists for the residue: re-invoking a worker that went quiet
-anyway, and collecting the facts only workers can see.
+ends its turn while an author check is running stalls permanently. Nothing
+re-invokes it, and the background process has no one left to record its result.
+A worker polls its author checks and push inside the turn that started them.
+The orchestrator re-invokes a worker that went quiet and collects the facts
+only workers can see.
 
 ## Eligibility
 
@@ -219,8 +220,9 @@ An issue enters a batch only when all of the following hold:
   That label is the repo's existing ownership area
   ([`agent-issue-workflow.md`](agent-issue-workflow.md)), so "same subsystem" is
   a lookup rather than a per-batch judgement. Otherwise the second PR pays for
-  a merge, a re-gate, and a fresh review round caused only by its sibling.
-  `pkg:tooling` is the one area where a path test replaces that lookup, below.
+  a merge, repeated author checks, and a fresh review round caused only by its
+  sibling. `pkg:tooling` is the one area where a path test replaces that
+  lookup, below.
 - **Outside its own grooming veto window** — a candidate whose newest
   _trusted_ `sweep-groomed:` marker comment is less than 12 hours old waits
   for the next run, whatever version that marker carries, and the report names
@@ -367,40 +369,32 @@ usage window.
 
 ## Preflight
 
-The orchestrator verifies, before anything is claimed: `origin/main` fetched, a
-clean session worktree, working `gh` auth, and that
-`git remote get-url --push origin` serves `mento-protocol/monitoring-monorepo`.
-It does **not** probe the gate's lock.
+Before anything is claimed, the orchestrator verifies a clean session worktree,
+working `gh` auth, and that both effective `origin` URLs serve
+`mento-protocol/monitoring-monorepo`. It fetches `origin/main` only after these checks pass.
+It does not probe or change the legacy gate's lock.
 
 A fork checkout is a stop. The operating card refuses every fork head and tells
 a fork to stop rather than first-publish, and workers inherit this checkout's
-remote — so a sweep started from a fork would claim, implement, and gate a
+remote — so a sweep started from a fork would claim, implement, and validate a
 whole batch that can never open a PR. That is the preflight's whole purpose:
 each check here costs one command, and skipping one fails late, with issues
-already claimed and a worker mid-gate.
+already claimed and a worker mid-validation.
 
-That omission is deliberate. Gate `--run` requests share a transient
-machine-wide coordinator that admits independent work from different worktrees
-under a weighted capacity, and a new gate joins a compatible coordinator rather
-than queueing behind it
-([`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md)). The
-coordinator adopts the legacy `run.lock` while scheduled or recovery work
-exists, so `run.lock/owner` names a live pid for as long as anyone on the
-machine is gating — hours at a time under ordinary parallel work. A sweep that
-treated that record as a busy signal would refuse to start in the normal case.
-Local workers wait with `--lock-wait 3600`. Hosted workers use the hook's exact
-1,800-second default so the push can reuse the warm stamp. Both waits span
-scheduler admission, a command lease, a coalesced result, and an older legacy
-holder. No sweep passes `--no-lock` or deletes the lock directory: the gate owns
-its reclaim rules, and a record that looks stale from outside is routinely a
-live holder inside a long browser suite.
+Workers apply the direct author checks from operating-card step 3 in isolated
+checkouts. The batch cap remains the CPU and memory bound. Run no more than
+three ordinary command-heavy check sets at once. Run dashboard coverage or
+scoped related tests, browser work, production builds, and size-limit work
+alone. Other workers can keep editing. A browser check that finds its fixed
+port in use fails and reports the conflict. It never waits for, stops, or
+reuses another process.
 
 ## Resilience duties
 
 These belong to the orchestrator, and they are what makes an unattended run
 survive the night:
 
-- **Wake a quiet worker.** Workers poll their own gate and push in-turn, so the
+- **Wake a quiet worker.** Workers poll their own author checks and push in-turn, so the
   orchestrator carries no timers and never learns a worker's pids. Its duty is
   the residue: a worker parked at a turn end, or silent while its siblings
   advance, gets a message naming where it stopped and what comes next.
@@ -409,17 +403,16 @@ survive the night:
   operator-decision items, and any checkout conflict — exist only inside a
   worker's turn. The orchestrator records each closing message as it arrives
   and asks for what is missing before writing the report.
-- **Gate concurrency within the coordinator's capacity.** Worker gates are
-  scheduled by the gate coordinator and count against its capacity, 3 by
-  default, so a batch of 4 runs at most three at once. Non-gate worker work
-  stays outside the coordinator, which is safe on the `node_modules` axis
-  because no two workers share a checkout, and bounded on CPU and memory only
-  by the batch cap and that capacity.
+- **Author-check concurrency stays bounded.** A batch of four runs at most
+  three ordinary command-heavy check sets at once. Dashboard coverage or scoped
+  related tests, browser work, production builds, and size-limit work run alone.
+  Other workers can keep editing. Each worker owns its checkout, so no
+  package-manager process can recreate or invalidate another's `node_modules`.
 - **Serialized instructions.** One checkout per worker, and no instruction ever
   names another worker's path.
 - **Resume, never restart, after a usage-limit interruption.** The worker's
   clone still holds its branch, its claim, and often an open PR. A restart
-  re-claims an issue already `agent-active`, re-runs a passed gate, and can
+  re-claims an issue already `agent-active`, repeats completed author checks, and can
   open a second PR on the same branch. The orchestrator also records each
   worker's allocated clone path and hands it back on any respawn: a worker
   displaced to a suffixed path cannot recognise its own checkout from the
@@ -468,13 +461,10 @@ oid="$(git rev-parse FETCH_HEAD)"   # the commit this fetch just wrote
 git rev-parse "$oid:<path>"         # one blob or tree id; non-zero when absent
 ```
 
-Fetch the validated push URL, not the remote name. Preflight grades
-`git remote get-url --push origin`, and a remote that carries a `pushurl`
-fetches from a different URL than it pushes to, so `git fetch origin main`
-would resolve every path in the pass against a URL no check ever read. Naming
-the validated URL binds the read to the repository Preflight approved, and it
-leaves Preflight one check on one URL — the check the fork stop needs — rather
-than a second check whose only reader is this pass.
+Fetch the validated push URL, not the remote name. Preflight verifies both
+effective `origin` URLs. A remote that carries a `pushurl` fetches from a
+different URL than it pushes to, so naming the validated push URL here binds
+this later tree read to the canonical repository the sweep publishes to.
 
 Pin `FETCH_HEAD`, not `origin/main`. Every fetch writes the commit it fetched
 there, while a fetch by URL updates no remote-tracking ref at all and a clone
@@ -815,12 +805,12 @@ while it runs:
 - **Never weaken or widen a control that blocks the run.** Root
   [`AGENTS.md`](../../AGENTS.md) states it, and the hand-off procedure and its
   one narrow exception are in the
-  [operating card](pr-operating-card.md). A gate refusal, a failing hook, a
-  denied permission, or a sandbox block is reported and handed to an independent
-  session. Reclassifying the blocking change as a separate task does not
-  qualify.
-- **Never bypass hooks.** No `--no-verify`, no hook-skipping environment
-  variable, no push that dodges the pre-push gate.
+  [operating card](pr-operating-card.md). A required author-check or CI failure,
+  a failing hook, a denied permission, or a sandbox block is reported and
+  handed to an independent session. Reclassifying the blocking change as a
+  separate task does not qualify.
+- **Never bypass retained hooks.** No `--no-verify` or hook-skipping environment
+  variable.
 - **Release a bad pick honestly.** A misgroomed issue, or a worker that stalls
   before opening a PR, runs
   `pnpm issue:release --issue <n> --claim-id <claim-id>` — add
