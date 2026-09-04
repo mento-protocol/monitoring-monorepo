@@ -1,0 +1,1921 @@
+{
+  "schema_version": 1,
+  "source_sha": "2205db7c27e6d732f94b5096274d58bebf896375",
+  "definitions": {
+    "whole_file": "Physical lines in the gate entry points, dedicated canonical gate documents, every scripts/gate/** file, and the required author, closeout-review, guardrail, setup-contract, pre-commit, and Trunk surfaces.",
+    "matching_lines": "Unique fixed-pattern legacy or replacement lines in other tracked files, verification aliases, full Turbo input filters that pin gate sources, and the full legacy Trunk gate action block."
+  },
+  "entries": [
+    {
+      "path": ".agents/roles/standards-enforcer.md",
+      "surface": "instruction",
+      "count_mode": "whole-file",
+      "lines": 29,
+      "sha256": "9efc8abf7df88894db8b065062f90868e46a4515d6f345fcb314106b6dcb100d"
+    },
+    {
+      "path": ".agents/roles/verifier.md",
+      "surface": "instruction",
+      "count_mode": "whole-file",
+      "lines": 33,
+      "sha256": "87d5ba67e6cd3a5282253d28fcc877c85bf1ce9e7a166567c5b354427d2cd9ed"
+    },
+    {
+      "path": ".agents/skills/babysit-pr/SKILL.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "81783a3719eeff081eda020055be96cfca413f155deac3d0e1a85afe50da1561"
+    },
+    {
+      "path": ".agents/skills/backlog-sweep/SKILL.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 11,
+      "sha256": "cc0a42d38ac563e4af8c916e2b56026d95874d91b8b97a9342547be9b039e0fc"
+    },
+    {
+      "path": ".agents/skills/doc-garden/SKILL.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "483807e3cb605b685241e8702a01f0a8fb590884c82cd91a4d83c4c652d1daa9"
+    },
+    {
+      "path": ".agents/skills/monorepo-import/SKILL.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "86a45ed84681c2695e45dd4bc3a3fe7d8f1c42a37d5481e9466207e9e3f4cb2c"
+    },
+    {
+      "path": ".agents/skills/ship/SKILL.md",
+      "surface": "instruction",
+      "count_mode": "whole-file",
+      "lines": 67,
+      "sha256": "5927e7217fe550278f3aef4ef0e3bff10ff4b12e717a344cd08724ee8624a68b"
+    },
+    {
+      "path": ".claude/babysit-pr.sh",
+      "surface": "shell-reference",
+      "count_mode": "matching-lines",
+      "lines": 2,
+      "sha256": "d3c480e0895931bed7cbf87874c70abf3b6fba63aa92afb96a8b0e089e6c1f2b"
+    },
+    {
+      "path": ".claude/commands/autoreview.md",
+      "surface": "instruction",
+      "count_mode": "whole-file",
+      "lines": 22,
+      "sha256": "88b885a967106d3cc5aa9e02023056465d0167f870a5ce0c8a804a3ab08409e1"
+    },
+    {
+      "path": ".claude/settings.json",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 5,
+      "sha256": "e6474fc847975018a1fc2818febc5448395dee7fb52cd5ed59d35f5d7502ffc1"
+    },
+    {
+      "path": ".claude/skills/babysit-pr/SKILL.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "81783a3719eeff081eda020055be96cfca413f155deac3d0e1a85afe50da1561"
+    },
+    {
+      "path": ".claude/skills/backlog-sweep/SKILL.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 11,
+      "sha256": "cc0a42d38ac563e4af8c916e2b56026d95874d91b8b97a9342547be9b039e0fc"
+    },
+    {
+      "path": ".claude/skills/doc-garden/SKILL.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "483807e3cb605b685241e8702a01f0a8fb590884c82cd91a4d83c4c652d1daa9"
+    },
+    {
+      "path": ".claude/skills/monorepo-import/SKILL.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "86a45ed84681c2695e45dd4bc3a3fe7d8f1c42a37d5481e9466207e9e3f4cb2c"
+    },
+    {
+      "path": ".claude/skills/ship/SKILL.md",
+      "surface": "instruction",
+      "count_mode": "whole-file",
+      "lines": 67,
+      "sha256": "5927e7217fe550278f3aef4ef0e3bff10ff4b12e717a344cd08724ee8624a68b"
+    },
+    {
+      "path": ".coderabbit.yaml",
+      "surface": "yaml-or-inline-shell",
+      "count_mode": "matching-lines",
+      "lines": 3,
+      "sha256": "beba65e097060e21193f6fde6dc733af7a2fecf40f3480cd4c87d7931b26aa6b"
+    },
+    {
+      "path": ".github/ISSUE_TEMPLATE/agent-task.yml",
+      "surface": "yaml-or-inline-shell",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "8849c48405077422f3b33a9e4ed01a51c1cd6c0a63bec3b22b80c05fdc7ddd8e"
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "surface": "yaml-or-inline-shell",
+      "count_mode": "matching-lines",
+      "lines": 28,
+      "sha256": "f33008c54488ad61f005cc7be08fc225215cdbca014c06ab577673e5a758434d"
+    },
+    {
+      "path": ".github/workflows/metrics-bridge.yml",
+      "surface": "yaml-or-inline-shell",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "e44656563aac997c99413b294847e004e3393e956cc7b7780e31f9f4971df799"
+    },
+    {
+      "path": ".github/workflows/sentry-triage-agent.yml",
+      "surface": "yaml-or-inline-shell",
+      "count_mode": "matching-lines",
+      "lines": 2,
+      "sha256": "f7dc2c765e72f4a382884789790694c68745c95d7447578ceb1ae7780c9a3379"
+    },
+    {
+      "path": ".trunk/hooks/pre-commit",
+      "surface": "hook",
+      "count_mode": "whole-file",
+      "lines": 32,
+      "sha256": "0fbb0e7c6150b3ed18571af172ceccc64c3a8f751ab4d31c2a81957faf11898c"
+    },
+    {
+      "path": ".trunk/trunk.yaml",
+      "surface": "yaml-or-inline-shell",
+      "count_mode": "whole-file",
+      "lines": 144,
+      "sha256": "adf1390ee5f4a64f7ec714b0b0356c24348a5460fbd36d1fe7315651314d5a83"
+    },
+    {
+      "path": "AGENTS.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "225e8d15bd030ab0aecefbf1ab81c20ae48765b21957fc34a5ac035ba1ca2746"
+    },
+    {
+      "path": "README.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 3,
+      "sha256": "38464bdc16c0a5d336f936d7219c598550b3aa42a7cb311d1619facccb3ca31e"
+    },
+    {
+      "path": "aegis/.gitignore",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "59697aa79114a3fd854e163245f693e6950688d2be96256d850bc8348f374701"
+    },
+    {
+      "path": "aegis/AGENTS.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "b5838faad1d7e2ef362d329d68693574f3416a3c98ab5c8db071bdf2cc53e76d"
+    },
+    {
+      "path": "aegis/terraform/.gitignore",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "7fd290c56c7b6dba2f9121a3b03cb93831c13bd20cef4b274c85d19f15259778"
+    },
+    {
+      "path": "alerts/AGENTS.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 2,
+      "sha256": "73319c7981a47bc3a95ed3afaf755a8fc1d661bfccdfa16195eb63667be4d790"
+    },
+    {
+      "path": "alerts/infra/.gitignore",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "2fb90408683344508e1527cc18f7e1ab5becedbfbe2ecd1a986e57fa5b4b57b2"
+    },
+    {
+      "path": "alerts/peg-policy-publication/.gitignore",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "f482badb2523d45c8be652d77e042a0b6261a4a43588f67a6f5749d85abcee3c"
+    },
+    {
+      "path": "alerts/rules/.gitignore",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "b3cb7c97cb0ccc9fa4aa044669d99b78ca7e7f0426193443101ede65ddb2889c"
+    },
+    {
+      "path": "bootstrap-worktree.sh",
+      "surface": "shell-reference",
+      "count_mode": "matching-lines",
+      "lines": 3,
+      "sha256": "8cc707e79ec22d19035cf691814576c9aa5eb3d46a3c0c265cd22ce44cf9b886"
+    },
+    {
+      "path": "docs/PLAN-ai-review-process.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 2,
+      "sha256": "b31ea8a8571166963ce05245865edfd7800d6bbb603f64b32a97d689bb5323ed"
+    },
+    {
+      "path": "docs/PLAN-progressive-verification-graph.html",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 3,
+      "sha256": "7ba568d96b454d5211bf149231b5157d665762f2fd35a8d6cbcc1a2999b1cf40"
+    },
+    {
+      "path": "docs/PLAN-progressive-verification-graph.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 25,
+      "sha256": "d8e4935c9367c8b8054c5d93fc81e1b6c71854612e50b574269f6f87299d70ab"
+    },
+    {
+      "path": "docs/PLAN-trove-history-page.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "bad460ec56b2758726d606136246fa79c7303c73ac2ddcc0ec9686968900fb38"
+    },
+    {
+      "path": "docs/README.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 5,
+      "sha256": "3e34f3f8afe44c0d4f97695806d011a1609277fba41978ba63d199e9798f4e04"
+    },
+    {
+      "path": "docs/adr/0001-monorepo-independent-deploys.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "216749c549bc8aba9de7f01a93d5db9bcc5ec1758c6fcd411384d2c75ec9a624"
+    },
+    {
+      "path": "docs/adr/0007-agent-quality-gate-and-merge-oracle.md",
+      "surface": "instruction",
+      "count_mode": "whole-file",
+      "lines": 71,
+      "sha256": "48fcefe6020c20cefcae73dd7e23cd1ef0061520e864f732ef8bc8f467ee3f7f"
+    },
+    {
+      "path": "docs/adr/0008-mandatory-hazard-checklists.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 2,
+      "sha256": "761cd366028e82953425aace6b8d7ce5cf021e29bd131e9d9a7bcefad949d8a3"
+    },
+    {
+      "path": "docs/adr/0024-plotly-basic-dist-bundle-budgets.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 2,
+      "sha256": "e4d11d7838e250f7a378fd120720105b0c2e055680a44229edf0e61e7ae3a4ef"
+    },
+    {
+      "path": "docs/adr/0025-fixture-browser-tests-react-doctor.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "d38643e65adaf862f567340fbf74f92691df7c0e9730228005615a5d9681547d"
+    },
+    {
+      "path": "docs/adr/0031-governance-watchdog-standalone-root.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "68c8378af32164212c2a4ffcbb28176def7a22a2b5072226f85d91fa51e10e30"
+    },
+    {
+      "path": "docs/adr/0033-adr-process-and-gate.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 2,
+      "sha256": "38b6000ac669025db04c1ca7657e07f95a6281f09d63ff3abac6e29b710a2414"
+    },
+    {
+      "path": "docs/adr/0043-peg-registry-service-local.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "3d8c15516820e3c757451a6199a39368e52f1cdb211d354f534b9528d14fec3e"
+    },
+    {
+      "path": "docs/adr/0044-peg-thresholds-gated-rules-plane.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "5a5a99e370e3d7bbae99018f6e9538896d816f46538c2ef227933257f60ea710"
+    },
+    {
+      "path": "docs/adr/0062-sentry-suites-self-run-gate.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 2,
+      "sha256": "975559acf587d3bec76da82cf2609a4332ded009acf2569ac5a9dcf625d1fc14"
+    },
+    {
+      "path": "docs/adr/0064-scripts-module-directories.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 18,
+      "sha256": "ce324c40f35ed3f7004497726bfa0d8e0c96c2ef3e1a0610b032eb9a1f822d33"
+    },
+    {
+      "path": "docs/adr/0065-scripts-file-size-watchlist-scope.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 3,
+      "sha256": "1ca1c7a93983d48e9d05b510489baa076d674fc7eaa275d30a3288c11e5bd38f"
+    },
+    {
+      "path": "docs/adr/0068-sentry-fixture-authoring-policy.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 2,
+      "sha256": "b1926d0b435e470d1c9fb56bf7bb6a557daaad5246f8609de1d242a4334c0beb"
+    },
+    {
+      "path": "docs/adr/0069-gate-routing-table-as-data.md",
+      "surface": "instruction",
+      "count_mode": "whole-file",
+      "lines": 521,
+      "sha256": "c3cda5ee8f1aaf2d49f02d0f75743d805f9df0d8248df7d115e2363589dad0cd"
+    },
+    {
+      "path": "docs/adr/0072-md-only-docs-checks-job.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 28,
+      "sha256": "4df7158a0d5e4a890b24c5828070bf468e62ad8c20b73362aaac321e2e4f232f"
+    },
+    {
+      "path": "docs/adr/0073-guardrail-prose-pinned-in-ci.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 2,
+      "sha256": "6370965ab35e4b0b8f96a3a36a00dcc1ea44b51a50011e068764132e8f8de5b9"
+    },
+    {
+      "path": "docs/adr/0076-fair-quality-gate-coordinator.md",
+      "surface": "instruction",
+      "count_mode": "whole-file",
+      "lines": 1273,
+      "sha256": "9fe80fc11a4ea4d04c8aee3cb5eee3bfaa3d0ed23039b5b330f891dff2dd6de5"
+    },
+    {
+      "path": "docs/adr/0077-operator-triggered-backlog-sweep.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 8,
+      "sha256": "95c04959b110da40a0d290ff42b8185f1ea8f7b690e9cabaf540c848f2ec1bf2"
+    },
+    {
+      "path": "docs/adr/0078-staged-verification-redesign.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 15,
+      "sha256": "7cbc6f5123d04420d5bb77c89a1468f7b91b9dd1924a416a4a4431b87eceb587"
+    },
+    {
+      "path": "docs/adr/0079-sealed-exact-file-patch-secret-suppression.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "e1a27aa88335d024d71b5ed55ccbd6e92c5773d890e2a623da83764d2cdf12b7"
+    },
+    {
+      "path": "docs/adr/0080-merge-base-freshness-stamp.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 7,
+      "sha256": "193f552a108821a4149aae0cc048e5c56bbb66d792f5e9fa454f823b02f9bb3f"
+    },
+    {
+      "path": "docs/adr/0082-persistent-issue-board-mutation-mutex.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "05a5eeb00b96bdb1103c02e53ae6208fa9611b76944a75a5def06a4438648490"
+    },
+    {
+      "path": "docs/adr/README.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 2,
+      "sha256": "bcf9300da3cad51b0d78b4bd21c836f016a267f6d595e0c741227854e3dbb6ac"
+    },
+    {
+      "path": "docs/claude-runtime-document-registry.json",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "8c5620a53f78d6fc3ed4cf0aadcdf0241cc8e25e118ea25e6070eed4762a13ea"
+    },
+    {
+      "path": "docs/evals/documentation-navigation-2026-07-post-garden-alerts-escalation.json",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 2,
+      "sha256": "8075dd829efc11834e9b75824ee433e1d686d1c70f47c6e8d55c10e5ab578770"
+    },
+    {
+      "path": "docs/evals/documentation-navigation-2026-07-post-garden.json",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 7,
+      "sha256": "6de8163eaad0e2561e5cb7e9e83f680228c197f83f02544480f8df77bd89061d"
+    },
+    {
+      "path": "docs/evals/documentation-navigation-2026-08-post-route.json",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 8,
+      "sha256": "b7d8aa801f244e82460fcb36a3aa7533c715f806abb6a508dca36d8dbf17be9a"
+    },
+    {
+      "path": "docs/evals/documentation-navigation-baseline-fixtures.json",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 3,
+      "sha256": "6e8199f615edfe9814abb18042bd6cbcd366a0b3474d65112166bb64d817c70e"
+    },
+    {
+      "path": "docs/evals/documentation-navigation-baseline.json",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 9,
+      "sha256": "9730b8cb48dc22c29e5b1bb53972d60985315a29bbd146fdafc08c1b701b7777"
+    },
+    {
+      "path": "docs/evals/documentation-navigation-fixtures.json",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 3,
+      "sha256": "6f6a8c3305ceae1ad3a5e816646fcf6464805d3c324a2c1058a998953bf61011"
+    },
+    {
+      "path": "docs/evals/documentation-navigation.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 2,
+      "sha256": "09b9fb35d9497308669dd40ca6ffb98f0849da4025003d53db9378c561fba601"
+    },
+    {
+      "path": "docs/evals/review-skill-finder-reports/pr-1995-draw1.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 3,
+      "sha256": "b76442adf5ff04431735a2a134d9bf505b5f5127d6da5455b49ccbfaf4d59316"
+    },
+    {
+      "path": "docs/evals/review-skill-finder-reports/pr-1995-draw2.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 3,
+      "sha256": "7398c85b61f97d0eb5261f3402db2c35bc13bc7a1fc2874b4fd9797b5e55b879"
+    },
+    {
+      "path": "docs/evals/review-skill-fixtures.json",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "c4890cdfa6cf2c6e93424e3c9f96357418b4562ad9c24a4b975fe0bc003e5dd1"
+    },
+    {
+      "path": "docs/evals/review-skill-judge-calibration.json",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 19,
+      "sha256": "aa930bb14f90b5c747706771685eb0696100e1ce9e64ab8595440b55fde017dd"
+    },
+    {
+      "path": "docs/evals/review-skill-runs/2026-08-28-76c7cde7-full-1afd9abd/calibration.json",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 7,
+      "sha256": "5e78b065d3ca37bb0e2f9e97a6b21923e032918f15ea9186a178234e1b226f8a"
+    },
+    {
+      "path": "docs/evals/review-skill-runs/2026-08-28-76c7cde7-full-1afd9abd/result-1984-pipeline-1.json",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 2,
+      "sha256": "a57d252b9edc91d662dcf673e3465989eaf056e8c9f6053c88539456dd4467f6"
+    },
+    {
+      "path": "docs/evals/review-skill-runs/2026-08-28-76c7cde7-full-1afd9abd/result-1984-pipeline-2.json",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 2,
+      "sha256": "c21f044b6ae3ff2b9adc86ace7a191dc40a546fb882313240739bfd2d7cbcf52"
+    },
+    {
+      "path": "docs/evals/review-skill-runs/2026-08-28-76c7cde7-full-1afd9abd/result-1990-replay-2.json",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 2,
+      "sha256": "8e927369fb75f7ebfb1aef323f7550ff9a0ccc57ef22fefbb9a240d6af2eaa95"
+    },
+    {
+      "path": "docs/evals/review-skill-runs/2026-08-28-76c7cde7-full-1afd9abd/result-1995-control-1.json",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 9,
+      "sha256": "401df3d5ff1444db9ac0e1eae34aceec262d81949e802b85e268a45783751b4e"
+    },
+    {
+      "path": "docs/evals/review-skill-runs/2026-08-28-76c7cde7-full-1afd9abd/result-1995-pipeline-1.json",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 8,
+      "sha256": "8d8abc84c5c1a4e0b9bd633e5bd635539999bf5f6b120d10069516a4d1efc1dc"
+    },
+    {
+      "path": "docs/evals/review-skill-runs/2026-08-28-76c7cde7-full-1afd9abd/result-1995-pipeline-2.json",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 9,
+      "sha256": "0fbca439e7d147978194a25584cef7a9edb4640f716a57688b7470f3be653e85"
+    },
+    {
+      "path": "docs/evals/review-skill-runs/2026-08-28-76c7cde7-full-1afd9abd/result-1995-replay-1.json",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 12,
+      "sha256": "11f718be27418d88da4714b9373b15447990cbeeaea652b75af73469306e86f9"
+    },
+    {
+      "path": "docs/evals/review-skill-runs/2026-08-28-76c7cde7-full-1afd9abd/result-1995-replay-2.json",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 9,
+      "sha256": "aa702668a236b50fe869ee45d8043e9fcc5e2e836705ae913ffb9aed73a846a3"
+    },
+    {
+      "path": "docs/evals/review-skill-truth/pr-1984.json",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 2,
+      "sha256": "b4962d6a8d66726541a482351c06f5397da4ee2658f1d64676790482f7e87766"
+    },
+    {
+      "path": "docs/evals/review-skill-truth/pr-1995.json",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 13,
+      "sha256": "1493526f59e95669a6888f3e1bf77b3f7ad815bbf52959c505e02932be5ecbed"
+    },
+    {
+      "path": "docs/evals/review-skill.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 2,
+      "sha256": "150f4a43c226354159f830d3eec93f8e716ba3c695a16b0347b3b1dcc5601740"
+    },
+    {
+      "path": "docs/metrics/verification-redesign-baseline.json",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 13,
+      "sha256": "121f1598b74c55a9a888de35408d9f14e37fd9108490b05c209acd2e03b411aa"
+    },
+    {
+      "path": "docs/metrics/verification-redesign-control-plane-before.json",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 87,
+      "sha256": "2aeec153548a440101e96416112c1199ba55e835b94a20c21ddc2432433a0754"
+    },
+    {
+      "path": "docs/metrics/verification-redesign-local-gate-source-bound-sample.json",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 3,
+      "sha256": "ae64a703b4ee16338630b1ac0cd28c6cc305430d556ee98c8726b020c1b411c4"
+    },
+    {
+      "path": "docs/metrics/verification-redesign-local-gate-source.patch",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 200,
+      "sha256": "1dce787ccb8c59709f9bd6a4650eba9c3a037e5dc88bb0dfaf4c16876f4a51a2"
+    },
+    {
+      "path": "docs/metrics/verification-redesign-m2-complexity.json",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 3,
+      "sha256": "1d45c7823660eb93f14642806c15f73a8e42bd3d083a791bdd44783edede9936"
+    },
+    {
+      "path": "docs/metrics/verification-redesign-m3-complexity.json",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 4,
+      "sha256": "0b39cec3e00b90ece4437cad368cde2e5d1ba8571f563f42e2831ad6b193ccbb"
+    },
+    {
+      "path": "docs/metrics/verification-redesign-m4-complexity.json",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 10,
+      "sha256": "a181366e46aeb4633916b1073205fa93ee8cf4b1e55eb87284f2811992b3f2ad"
+    },
+    {
+      "path": "docs/metrics/verification-redesign-m4-shadow-evidence.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 3,
+      "sha256": "c5eaade0bca9fef0c6febd06e2c11beae0e29a784d2dfbe37af2e69ae1d3cec4"
+    },
+    {
+      "path": "docs/metrics/verification-redesign-safeguards.jsonl",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 22,
+      "sha256": "59eece9a55a244e117884375f74d564e6fe5fa92517d613c471b571f22878030"
+    },
+    {
+      "path": "docs/notes/agent-issue-workflow.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 2,
+      "sha256": "978e780b76c61d03774d216d51f34b71c962d2cbef281c6fffffa249f490f28a"
+    },
+    {
+      "path": "docs/notes/agent-quality-gate-mechanics.md",
+      "surface": "instruction",
+      "count_mode": "whole-file",
+      "lines": 3257,
+      "sha256": "e93a9fc87c77f78d996a7d5c5b0c2677b5b06d54b6168d8778a1f72d3b94c67a"
+    },
+    {
+      "path": "docs/notes/autoreview-runtime-trust.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 2,
+      "sha256": "9f6ee4e4adf9f0af128a6ea6cebfb05062a99559026945565a6ccc2efe970be8"
+    },
+    {
+      "path": "docs/notes/backlog-sweep.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 8,
+      "sha256": "7e005040db4c1679c1b87cc706a95d1766ebf82f067ff1edd0a354468d0f245b"
+    },
+    {
+      "path": "docs/notes/codex-agent-skills.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 4,
+      "sha256": "31dba341c2bf495977e973b73aaa1facca8b6ba00356c17300200ceff4d2214f"
+    },
+    {
+      "path": "docs/notes/codex-cloud-setup.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 2,
+      "sha256": "c7aa566b5f032c33d2295b5a26dfc50a7de8995b321e23f12d68ac300baa2b61"
+    },
+    {
+      "path": "docs/notes/dashboard-verification.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "ba888ab7f791c26651cbaf3cf10f7168b43e42c9479f381e3f51b56fee4355a4"
+    },
+    {
+      "path": "docs/notes/file-size-watch.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 21,
+      "sha256": "22585f4478b266c62a1fc41b336a57922b77d0bd86e89436742b06642e15c43a"
+    },
+    {
+      "path": "docs/notes/github-tooling-surfaces.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "5538032c4b3a58992e0ab7a7fa732a3fe89e67f1f72b029f0a4d69d1c968e539"
+    },
+    {
+      "path": "docs/notes/peg-monitoring.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "7f923d298a03a3d5408827579956391709507fbe68dc33e270b8c2f426c256b3"
+    },
+    {
+      "path": "docs/notes/pr-operating-card.md",
+      "surface": "instruction",
+      "count_mode": "whole-file",
+      "lines": 597,
+      "sha256": "3d4801243f028c81285fb54580b94f1113fd0973179861b0b19e6f34ae5360ee"
+    },
+    {
+      "path": "docs/notes/pr-ready-state.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 3,
+      "sha256": "de7232fd599e0d379e93f99dfa0239c1676e667f54ff5d1a56e46d4fa4d4fe06"
+    },
+    {
+      "path": "docs/notes/quick-commands.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 5,
+      "sha256": "4e24839dff75122ea9fb1ebe906dca2c69bb74eae773f14cc2f4707bc3da043e"
+    },
+    {
+      "path": "docs/notes/sentry-triage-pipeline.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 3,
+      "sha256": "547df8cfede7f1d6bbd330abc5f180e2aa39c13c3ab1217d368fc56b5d430af7"
+    },
+    {
+      "path": "docs/notes/verification-redesign-phase-0-evidence.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 21,
+      "sha256": "0359bd3d5c0ae7d310f5a510105c6961c626733cd773298dc24189ba5f8d665a"
+    },
+    {
+      "path": "docs/notes/worktree-and-web-setup.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 8,
+      "sha256": "cd5ead100e71ed017594f09263080129d7755dd17da8c236f9c8a358529e3943"
+    },
+    {
+      "path": "docs/pr-checklists/architecture-decisions.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "793887824960998aae3882acd31b8d646cf5ede23a857e9d97c9d6138172d406"
+    },
+    {
+      "path": "docs/pr-checklists/ci-workflow-gates.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "603412d3d377c0c9f9f71b4a7bf96488f212352e2ebc54610955dbdff583469c"
+    },
+    {
+      "path": "docs/pr-checklists/code-health.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 2,
+      "sha256": "8b9316419100a382a8d6bb48d28e654f3f28702e11a7ec2e23114d808135104b"
+    },
+    {
+      "path": "docs/pr-checklists/indexer-handler-invariants.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 2,
+      "sha256": "faf01c1c9c2725acc75e75c33dec0c4ac0344733d2b7d31510440863da01fb94"
+    },
+    {
+      "path": "docs/pr-checklists/recurring-review-patterns.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 2,
+      "sha256": "ca3cf329c41ee836174e22ffba12f7ee17f4f7db2a75f781e9a7d7eae6e9400e"
+    },
+    {
+      "path": "docs/pr-checklists/review-prompt-exclusions.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "bc3539ce550ee3757fe843a534f025db317c4f02fc8eebffd05acd7df93106f5"
+    },
+    {
+      "path": "docs/terraform.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "f04492b9bae1a82ab24996e6b8b69cbec309ed2ea62e5d68b58d9d4f561206b4"
+    },
+    {
+      "path": "governance-watchdog/.gitignore",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 2,
+      "sha256": "f49bd9afd3e34e59635fd42d9adf3f4630a8cc23b6e1be2ea970800bba72b932"
+    },
+    {
+      "path": "governance-watchdog/ADDING_EVENTS.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 3,
+      "sha256": "2d5f476198dc17cd26eee77e543602262b174cb95a17ef24fcfeeff303f26ef0"
+    },
+    {
+      "path": "indexer-envio/AGENTS.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 2,
+      "sha256": "3e6fc9ca48ac555ca0117e8a13fa1a73a138b4647a7117acd2c9dfd8e7f04a73"
+    },
+    {
+      "path": "indexer-envio/README.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 2,
+      "sha256": "fa84b977c9dd9e72e542e2421ac635f247cc1f33ab096b567f0f1d40910a7de1"
+    },
+    {
+      "path": "indexer-envio/vitest.config.ts",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "8d4b91c66c0ef6fff1c2e079b05afbdb4372107083a650641a63f95d133a6413"
+    },
+    {
+      "path": "package.json",
+      "surface": "alias",
+      "count_mode": "matching-lines",
+      "lines": 11,
+      "sha256": "2f4cbe2e2389eeecc66418e1c9a1e25d11f8c86c09bfadd217e91d5d714b01da"
+    },
+    {
+      "path": "scripts/AGENTS.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 10,
+      "sha256": "2be30deb2d7b81dfbc0bf9a8c8c2220fa2a5c6a6cf3356db53509ece6080b059"
+    },
+    {
+      "path": "scripts/agent-autoreview-core.mjs",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "69b8ebe38c5534ec35aaf24af7d1ad66dfe3f31afb1be8e2d22a3977266a36b6"
+    },
+    {
+      "path": "scripts/agent-autoreview.mjs",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 11,
+      "sha256": "69a78f21d4649b46dc1a6dcbbeee4e0a719a91c1aac4fac8ac3a5e7201b986a4"
+    },
+    {
+      "path": "scripts/agent-autoreview.sh",
+      "surface": "shell-reference",
+      "count_mode": "matching-lines",
+      "lines": 67,
+      "sha256": "78c75660e1e7d17009dcf6a7be8990b633ba0d39e835af7b55ddc702da091399"
+    },
+    {
+      "path": "scripts/agent-autoreview.test.sh",
+      "surface": "shell-reference",
+      "count_mode": "matching-lines",
+      "lines": 48,
+      "sha256": "759d1cf2b6da9e45c376583b799418db732c338490cb5e419c611ba94193c657"
+    },
+    {
+      "path": "scripts/agent-quality-gate.sh",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 12352,
+      "sha256": "59c210448a46ab692bb9e2e7f836347bbc4e1783c7a8f5c0d592c70ca05b0798"
+    },
+    {
+      "path": "scripts/agent-quality-gate.test.sh",
+      "surface": "test",
+      "count_mode": "whole-file",
+      "lines": 26167,
+      "sha256": "16b30091c88da5f51c49c18eb12d684724fae0ffd4038bbf39129f92ea90442a"
+    },
+    {
+      "path": "scripts/bootstrap/agent-setup-contract.test.sh",
+      "surface": "test",
+      "count_mode": "whole-file",
+      "lines": 280,
+      "sha256": "e87a4a2e5a6abe738b4cba990d9c787b54af2b60a2fa2061364eb88942acf721"
+    },
+    {
+      "path": "scripts/bootstrap/claude-code-web-setup.sh",
+      "surface": "shell-reference",
+      "count_mode": "matching-lines",
+      "lines": 2,
+      "sha256": "6f648a9b932bdd4cf7711cd98a6295a0566050b0db995f8a28e0399b5a62fd1f"
+    },
+    {
+      "path": "scripts/bootstrap/codex-cloud-setup.sh",
+      "surface": "shell-reference",
+      "count_mode": "matching-lines",
+      "lines": 2,
+      "sha256": "da5afc596faa72cadb57238beebb0739b2bb885a6e219b7d51ba6ad57a1cf115"
+    },
+    {
+      "path": "scripts/check-agent-quality-gate-package-scripts.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 159,
+      "sha256": "bcd913d1fce77a38e5fa2d668c6f52b6fb79e783cc77b7e98199af925db4cb6f"
+    },
+    {
+      "path": "scripts/coderabbit-config.test.mjs",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 12,
+      "sha256": "fcc761c687ff5f58f58a93e24e1f3419a462acf8b37d944c562da12eddd11087"
+    },
+    {
+      "path": "scripts/context/check-agent-context.mjs",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "b407538f8862f89a2b16d6504d8e876ac6071a09d134325c5d7f3971d87a84f0"
+    },
+    {
+      "path": "scripts/context/check-agent-context.test.mjs",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "9d9d5f8159a633d021eb0324dfefa6b7b8e20f2217f3125ba79da412c70f5faf"
+    },
+    {
+      "path": "scripts/context/check-settings-contract.mjs",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 5,
+      "sha256": "48701c6c4c38e871dc9998c166dda143cb5fa6c1d7d9f3c083859fc677ff5952"
+    },
+    {
+      "path": "scripts/context/check-settings-contract.test.mjs",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 8,
+      "sha256": "4a82a6e9b3e6048f6270d74254560cd53052d4af116ecf2b85ffe1edf6ff55b3"
+    },
+    {
+      "path": "scripts/docs/check-verification-redesign-evidence-source-patch.test.mjs",
+      "surface": "test",
+      "count_mode": "whole-file",
+      "lines": 92,
+      "sha256": "7bd053fbd5fae8fb33a1387955a9cb933a7ab7add027c0a35bc36c1b4723e5a0"
+    },
+    {
+      "path": "scripts/docs/check-verification-redesign-evidence.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 367,
+      "sha256": "3695f4a00fea1bcb3d38a25225c45c7f412ce72a6dd36bc1f733b13c35ddae66"
+    },
+    {
+      "path": "scripts/docs/check-verification-redesign-evidence.test.mjs",
+      "surface": "test",
+      "count_mode": "whole-file",
+      "lines": 622,
+      "sha256": "15fae955ee388fa82174e1be18e7349d4f9c459e6f70c45a450bd85c7e233155"
+    },
+    {
+      "path": "scripts/docs/docs-garden-issue-helpers.mjs",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "11758f334024ccaecacdaab3279aca8882754e3e7f557d87541dc8f707c3b23d"
+    },
+    {
+      "path": "scripts/docs/docs-garden-issue.test.mjs",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 2,
+      "sha256": "09c951f900018a95e4341f629e50255a7cbfc6cc417b61886c2f0c649326242e"
+    },
+    {
+      "path": "scripts/docs/docs-navigation-eval.test.mjs",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "5bf608380fe613bc9948af3ff624a19a11b41279152ec631657f17b49c063b3d"
+    },
+    {
+      "path": "scripts/eslint-baseline-diff.test.mjs",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "4068085f47af1af25c46d2a4957fd0168ff95fb0a31c45d0c69d11440d34f08a"
+    },
+    {
+      "path": "scripts/gate/agent-prewarm.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 457,
+      "sha256": "5a22486117833df6f9c8b74a703b020cb54777ded0d6586c1c434941eb6160ff"
+    },
+    {
+      "path": "scripts/gate/agent-prewarm.test.mjs",
+      "surface": "test",
+      "count_mode": "whole-file",
+      "lines": 227,
+      "sha256": "8b909d7ed22ec89fec347108b2d246a8b059ba6e0c796edc9796d35303e524e7"
+    },
+    {
+      "path": "scripts/gate/agent-quality-gate-fixture-processes.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 298,
+      "sha256": "17ad0f58870df2ea9f13b510365ad3198998ed1b3c0d550d967f2b5bc4295e91"
+    },
+    {
+      "path": "scripts/gate/agent-quality-gate-scheduler-benchmark.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 592,
+      "sha256": "ea7479e51e377136662656fdf171429aec43de29872fb513bb2aa5de3b26bb34"
+    },
+    {
+      "path": "scripts/gate/agent-quality-gate-scheduler-fixture-support.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 54,
+      "sha256": "3e11175a3cd80df04eb908e3f50491bee279542177736460bba9c1eca8d16a07"
+    },
+    {
+      "path": "scripts/gate/agent-quality-gate-scheduler-fixture.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 800,
+      "sha256": "cd62a7943791e580e36b246088e3e89ed65abe4e62d7eb461057ffdb9f369db5"
+    },
+    {
+      "path": "scripts/gate/agent-quality-gate-scheduler-tool-fixture.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 89,
+      "sha256": "52f966b55d5db4800727f8db836250cceb381f1a80f0a8e919a57dd4187edd63"
+    },
+    {
+      "path": "scripts/gate/agent-quality-gate-scheduler.integration.test.mjs",
+      "surface": "test",
+      "count_mode": "whole-file",
+      "lines": 1645,
+      "sha256": "ddbb46a6ca71b0e6fbcff14bbc1b9afc0e290181deade6a5a9791b2820e17700"
+    },
+    {
+      "path": "scripts/gate/darwin-broker-launch-preflight.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 2326,
+      "sha256": "e1d63122180a9b29e515aefa13c96cb06d7022b693c56b787c347e8fba50ac96"
+    },
+    {
+      "path": "scripts/gate/darwin-broker-launch-preflight.test.mjs",
+      "surface": "test",
+      "count_mode": "whole-file",
+      "lines": 1714,
+      "sha256": "b870bba633792c5c723f798771dcb5cd0864842f279d603292e14a50cf9c78e9"
+    },
+    {
+      "path": "scripts/gate/darwin-process-identity-helper.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 1311,
+      "sha256": "daae20f43f84718a752f5e9fd31820ffb9da3e59e75d6983bf811cbe6edfd39b"
+    },
+    {
+      "path": "scripts/gate/darwin-process-identity-runtime.inc.c",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 657,
+      "sha256": "3935539f4f6e84dad5c539a5a4e9028899f76f2a6956dd7b91dce818d890a3d1"
+    },
+    {
+      "path": "scripts/gate/darwin-process-identity.c",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 785,
+      "sha256": "19bc5245b9a2c8013db4ce81aa427ce55cd1f62afd7aa4015b186ccea7b6ba05"
+    },
+    {
+      "path": "scripts/gate/darwin-process-identity.test.mjs",
+      "surface": "test",
+      "count_mode": "whole-file",
+      "lines": 1881,
+      "sha256": "c7beb05bbd1fe9902394fac8489de166347564682a85c78e613ea353890625a9"
+    },
+    {
+      "path": "scripts/gate/darwin-process-lineage-model.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 793,
+      "sha256": "874f5017af320b11636db93755672fb19c12b241970b89ddcb6767e6939861fa"
+    },
+    {
+      "path": "scripts/gate/darwin-process-lineage-state.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 1466,
+      "sha256": "002f4c2b7be827ade5529ec1c03aaf632f6f4fc73bb695fb908cb340a61577f1"
+    },
+    {
+      "path": "scripts/gate/darwin-process-lineage.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 1712,
+      "sha256": "32bb1139cf405cd61529335d1b3c6186ed41d300fe36244083e7037f00d4eafc"
+    },
+    {
+      "path": "scripts/gate/darwin-process-lineage.sh",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 776,
+      "sha256": "d58b14691e2ba82d098bb5211570d062d0857e4778a72567b28650fa07fa4b93"
+    },
+    {
+      "path": "scripts/gate/darwin-process-lineage.test.mjs",
+      "surface": "test",
+      "count_mode": "whole-file",
+      "lines": 3995,
+      "sha256": "82343f3c45f8b86d47180553f2ff401e9ffec43c4c77e211ebeeff9169ad9d63"
+    },
+    {
+      "path": "scripts/gate/lockfile-scope.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 121,
+      "sha256": "7ae840852b3ea83e8ad7f7f0aafb5e9a7c74c15e2cc0e216289885ad2824efb3"
+    },
+    {
+      "path": "scripts/gate/lockfile-scope.test.mjs",
+      "surface": "test",
+      "count_mode": "whole-file",
+      "lines": 212,
+      "sha256": "452127e9b39ca1c3ba75309b70bcae0e29e3ccf6a52b16f980220b409583cba9"
+    },
+    {
+      "path": "scripts/gate/mapped-command-process-identity.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 244,
+      "sha256": "5a3586a929a31581dc77bb0f5b5165e7218dc07bc0b17770c7ff090be5881a0b"
+    },
+    {
+      "path": "scripts/gate/mapped-command-process-identity.test.mjs",
+      "surface": "test",
+      "count_mode": "whole-file",
+      "lines": 598,
+      "sha256": "0a4be839e71c40c43d7a14c28a3818d30bdc273d4b4a51bb612f5acd2138653b"
+    },
+    {
+      "path": "scripts/gate/mapping.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 480,
+      "sha256": "6ddbd8725ce38c06fa0ba4239f7689877d8112197383ff74e953953162f53293"
+    },
+    {
+      "path": "scripts/gate/mapping/engine.test.mjs",
+      "surface": "test",
+      "count_mode": "whole-file",
+      "lines": 1494,
+      "sha256": "fc1b1484777f83836a4cebec82bd5bea6ba4541821027432ddbbb9814923056c"
+    },
+    {
+      "path": "scripts/gate/mapping/facts.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 495,
+      "sha256": "a68af518d7ec71664cae567515368f40200758e4967c7d3753f5d6f5454b84a7"
+    },
+    {
+      "path": "scripts/gate/mapping/plan.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 154,
+      "sha256": "8a5ceeb15eb044ca3426222132d5f9b2b763c4e0daf5ddfca3c8f6796fc32d83"
+    },
+    {
+      "path": "scripts/gate/mapping/post-passes.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 554,
+      "sha256": "91bc27e2ab73d9beee84be3117a372d0d1cf3f2d7c32289384b31844058089c2"
+    },
+    {
+      "path": "scripts/gate/mapping/route.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 241,
+      "sha256": "3ae78cb2664f3edbd09927abad6a9bd4a888f6b980d50d89a3d6cf6c959b4f33"
+    },
+    {
+      "path": "scripts/gate/mapping/shell-quote.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 152,
+      "sha256": "a63629d9f5af30da86ba6f45a0022297505bc4e3593ffe8b241c4bfabd0a2b0d"
+    },
+    {
+      "path": "scripts/gate/mapping/shell-quote.test.mjs",
+      "surface": "test",
+      "count_mode": "whole-file",
+      "lines": 259,
+      "sha256": "3d80e1e6cdf1a7dbc1c67d8df2fc2393dfb851d319e17cda9e3e00b33b21f1bb"
+    },
+    {
+      "path": "scripts/gate/mapping/verbs.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 388,
+      "sha256": "29ec5a8d4dac26fd2368c773b3bf0c13f05fc72267e1cd16bf26c3aa8c835065"
+    },
+    {
+      "path": "scripts/gate/quality-gate-coordinator-client.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 290,
+      "sha256": "b210085e0a569e69fce5b1adf3cd613f41c0915a39975d5c5db9d445537b2b5b"
+    },
+    {
+      "path": "scripts/gate/quality-gate-coordinator-core.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 649,
+      "sha256": "ca59c2def93efbc7fcaf6bf3ec94fa3b76021941936f1a7776ad07f092889667"
+    },
+    {
+      "path": "scripts/gate/quality-gate-coordinator-drain.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 126,
+      "sha256": "697f69a0699804c4a67bbfe43f11ee5277871f57eb0966131a0bc9cafcddb3b1"
+    },
+    {
+      "path": "scripts/gate/quality-gate-coordinator-environment.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 2507,
+      "sha256": "34b5ddad3088983cfbfc7bf32ae2af7b9a9610c23ac455a76e8fdd6794393ebd"
+    },
+    {
+      "path": "scripts/gate/quality-gate-coordinator-journal-fields.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 171,
+      "sha256": "f865b74b5cefac6516c0af52977457094fcba77e1f2126d966ef6b7fa31fa6ba"
+    },
+    {
+      "path": "scripts/gate/quality-gate-coordinator-journal.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 607,
+      "sha256": "a96b44b4abcdcac9606f085d06cc0f3c305ff90c35ff13616b4bcc7053816009"
+    },
+    {
+      "path": "scripts/gate/quality-gate-coordinator-legacy.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 1793,
+      "sha256": "9a5a02ecb27b32aaac4606e29af3fe678696efff171cc1dc5c152e30bb564f57"
+    },
+    {
+      "path": "scripts/gate/quality-gate-coordinator-lifecycle.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 92,
+      "sha256": "5d52f675c03c58236beeefa6d352fa9676d637cf7e290224d97bbade90f6d9b4"
+    },
+    {
+      "path": "scripts/gate/quality-gate-coordinator-policy.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 218,
+      "sha256": "13547aff9563fe72f27e9eeb314aa19b8367c7846e545a9434352c74b0c9d458"
+    },
+    {
+      "path": "scripts/gate/quality-gate-coordinator-policy.test.mjs",
+      "surface": "test",
+      "count_mode": "whole-file",
+      "lines": 2305,
+      "sha256": "c044d48c51f5f67832ee618811500996a06c9728166ba3ba650e5880e3d4c8e2"
+    },
+    {
+      "path": "scripts/gate/quality-gate-coordinator-primitives.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 207,
+      "sha256": "3632b84704f45ca6e50816bd96648d901fefcdf98d68e0e141978cdb8e053e92"
+    },
+    {
+      "path": "scripts/gate/quality-gate-coordinator-requests.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 464,
+      "sha256": "25709b91e095f15e1314063cddf22f17cdaa96d135238d049471eef94e6ead5b"
+    },
+    {
+      "path": "scripts/gate/quality-gate-coordinator-result-record.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 93,
+      "sha256": "2f5c5d1027ecd370052a40e683a2cfad4eadc86e9f2250b9a120e11bc04d78c1"
+    },
+    {
+      "path": "scripts/gate/quality-gate-coordinator-results.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 363,
+      "sha256": "5e2f0326f16990d6130511611743341236cb0404abe45b7e6c35589d233ac526"
+    },
+    {
+      "path": "scripts/gate/quality-gate-coordinator-retention.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 491,
+      "sha256": "0db8db8a078c1cfb8fb517c7300a06f8793eda031ee32b210513a63a5b004195"
+    },
+    {
+      "path": "scripts/gate/quality-gate-coordinator-scheduler.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 243,
+      "sha256": "9632e41af02ea863f21ab9868a578e3ce3787699d5b62b033bfe268b814c3217"
+    },
+    {
+      "path": "scripts/gate/quality-gate-coordinator-server.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 630,
+      "sha256": "e90e1dd80e1c7d8b30ac046b8946dceaa0b8d20a9f1e7d836e20211dbdda7ee3"
+    },
+    {
+      "path": "scripts/gate/quality-gate-coordinator-socket.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 325,
+      "sha256": "abd40b82e48df054fb7a49d26470003514d8d37ea10424656b9473c66c3923f3"
+    },
+    {
+      "path": "scripts/gate/quality-gate-coordinator-startup-attestation.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 363,
+      "sha256": "3497c731d1ecb1402979bbf142cf95c7749525440e12a6e69a815cb3ee74db6a"
+    },
+    {
+      "path": "scripts/gate/quality-gate-coordinator-state.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 377,
+      "sha256": "247cb3fa6b533ecb56362096f69adef2d40df0edffeb4f5048dbf77ae7fe0598"
+    },
+    {
+      "path": "scripts/gate/quality-gate-coordinator-submodule-state.test.mjs",
+      "surface": "test",
+      "count_mode": "whole-file",
+      "lines": 361,
+      "sha256": "cdf873b3d3b89f935eefa22bd1fd66c4437494cadf90be757c964cef18a7ba7f"
+    },
+    {
+      "path": "scripts/gate/quality-gate-coordinator-support.sh",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 997,
+      "sha256": "59498e6da2b9dd1e8e22fc5d8922caaf60e7d8e5cb7b04c082df8a23597414ba"
+    },
+    {
+      "path": "scripts/gate/quality-gate-coordinator.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 610,
+      "sha256": "4b459380d17efe93a21869678d2a407925a61f829d71ca74b31246929df6fbbf"
+    },
+    {
+      "path": "scripts/gate/quality-gate-coordinator.sh",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 814,
+      "sha256": "78eeb9b68dfb84616194e19810f22c6187b4a728742cd4369006802815fbe03c"
+    },
+    {
+      "path": "scripts/gate/quality-gate-coordinator.test.mjs",
+      "surface": "test",
+      "count_mode": "whole-file",
+      "lines": 8555,
+      "sha256": "3d4b13b7f7738693d42dfa6fbb2a529f61ad0e18ae4a4f097d4dabfe048352ff"
+    },
+    {
+      "path": "scripts/gate/routing-table/arms-agent-modules.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 549,
+      "sha256": "1ade8490e8f37d3d96e926807ab5be8c6331d07c4ec4b311b59247afa05caa9c"
+    },
+    {
+      "path": "scripts/gate/routing-table/arms-alerts.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 170,
+      "sha256": "6ad94a4dc03afac932c45816d4c0d36b362c24e967434b69eaf656925ec1e0b1"
+    },
+    {
+      "path": "scripts/gate/routing-table/arms-packages.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 546,
+      "sha256": "aa69a9cf75be15629261383491b4245e08bed2f8b437222b79c8d7b8c1e599bb"
+    },
+    {
+      "path": "scripts/gate/routing-table/arms-script-modules.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 56,
+      "sha256": "a472a5574bf0bff1720522fb6b484937dc21ae5cf3785c453301f3c03742b217"
+    },
+    {
+      "path": "scripts/gate/routing-table/arms-scripts.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 371,
+      "sha256": "b3d13d058ab4af46e9c3f38e4b023afc8aab910c57cf6547cd4c498d95e222c6"
+    },
+    {
+      "path": "scripts/gate/routing-table/arms-sentry-modules.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 344,
+      "sha256": "19b6bf6899f67bfeb23ab99dc9b38ed448a6c3a7a41ee74a997645e2610c3309"
+    },
+    {
+      "path": "scripts/gate/routing-table/arms-services.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 301,
+      "sha256": "b17e5fa108a25c1c5b156093233b7084c17f9f62a07864f819778980f45085ed"
+    },
+    {
+      "path": "scripts/gate/routing-table/arms-tooling-modules.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 609,
+      "sha256": "3fb48b1cac2ff3b033bccc740c2a2bbc31629c90c8aadd811ee258c55bcbbcd9"
+    },
+    {
+      "path": "scripts/gate/routing-table/arms-workflows.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 575,
+      "sha256": "4b67d7b663e7284ab7ef8881af597fc55efd87597a85b8499d40de09ad9180b1"
+    },
+    {
+      "path": "scripts/gate/routing-table/checks.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 362,
+      "sha256": "0b0dfcc19f1425373745af1af2992dc03bdfa514b42588398c186a5439f5181f"
+    },
+    {
+      "path": "scripts/gate/routing-table/groups-head.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 638,
+      "sha256": "ddb5103a26f13e5710df747f412414de7066dffe8351503439bfa5c5f7c8b435"
+    },
+    {
+      "path": "scripts/gate/routing-table/groups-tail.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 407,
+      "sha256": "bba976c23b4db1ef50f5ddfebfeff67a50a0bb0e1be92422cebebe6114dd7073"
+    },
+    {
+      "path": "scripts/gate/routing-table/index.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 125,
+      "sha256": "4202c1bd70dd2570fcdf5b411abb8e8324a732e2bf6b40df6cbaf45c8ec7dea6"
+    },
+    {
+      "path": "scripts/gate/routing-table/indexer-invariant-parity.test.mjs",
+      "surface": "test",
+      "count_mode": "whole-file",
+      "lines": 583,
+      "sha256": "547e0fe61e60bcbf0c31c46ba851a677ae71292ee11d835b17fa572fd7813b40"
+    },
+    {
+      "path": "scripts/gate/routing-table/pattern-oracle.test.mjs",
+      "surface": "test",
+      "count_mode": "whole-file",
+      "lines": 515,
+      "sha256": "ab0543ab31d498fb66d602f58a74ff5d46dbf82bc81d544fb30e827a21f9d67d"
+    },
+    {
+      "path": "scripts/gate/routing-table/pattern.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 253,
+      "sha256": "13bfb0f339396d962c8ed1ac88439ff40d395bbdc523807e2304783b02207c05"
+    },
+    {
+      "path": "scripts/gate/routing-table/pins.test.mjs",
+      "surface": "test",
+      "count_mode": "whole-file",
+      "lines": 217,
+      "sha256": "ebc9a99ce102ca4a735da7ffccbe991c5cc2f5f1690eda698cb6667c8fb6100b"
+    },
+    {
+      "path": "scripts/gate/routing-table/routing-table.test.mjs",
+      "surface": "test",
+      "count_mode": "whole-file",
+      "lines": 825,
+      "sha256": "8bb5dc2317da07fd3adf4c8103da535dad5315fb952e3f02ab6863f0a96f0063"
+    },
+    {
+      "path": "scripts/gate/routing-table/schema.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 502,
+      "sha256": "a3be2a3684177f3754eaa1d8f2574f7cb7d29c7d55a19e67b3a15c55f5dc5cb9"
+    },
+    {
+      "path": "scripts/gate/run-handles.sh",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 911,
+      "sha256": "e8549a1364dda172879a4d3ad1df35a6324f899be1f2e440d0bffd6e2ce155b9"
+    },
+    {
+      "path": "scripts/gate/trunk-check-once.sh",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 606,
+      "sha256": "a47889b36e6b5586d8f1ed95fd4602c41f0148ab788c09510d4e62507187e2ed"
+    },
+    {
+      "path": "scripts/gate/trunk-check-once.test.sh",
+      "surface": "test",
+      "count_mode": "whole-file",
+      "lines": 632,
+      "sha256": "859b5fc3deac6265969f25964dcf2025c9fe13480841c6ea4ebe429acc591248"
+    },
+    {
+      "path": "scripts/pr/check-adr-reminder.mjs",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 6,
+      "sha256": "0d7f69267c83209f122d4dcce4d5fa0016b44600dd2c217650e595147f087e8f"
+    },
+    {
+      "path": "scripts/pr/closeout-review-exec.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 400,
+      "sha256": "d03eed1d1131665803e8984af0351363316e0f06c118475c74aa4c3490bec75c"
+    },
+    {
+      "path": "scripts/pr/closeout-review-git.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 290,
+      "sha256": "f7a16a3d0ed0df3a9c5d22824378a7ba82b670e4d90a7c6050146f378ca3921b"
+    },
+    {
+      "path": "scripts/pr/closeout-review.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 387,
+      "sha256": "22d4269e455849a6da888b2426445a5dd3d23d0ca70ffac02ff9f8960cb3d404"
+    },
+    {
+      "path": "scripts/pr/closeout-review.test.mjs",
+      "surface": "test",
+      "count_mode": "whole-file",
+      "lines": 1098,
+      "sha256": "77b4769638a8a521599c37875f72dd884342af7a2d7a5e667a16e076c35453f5"
+    },
+    {
+      "path": "scripts/pr/pr-feedback-state.test.mjs",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 14,
+      "sha256": "fdf9a9ceaa8d8b22dc89ef52d0f4b2933e0046c6a21c237b49716f5512aacd2f"
+    },
+    {
+      "path": "scripts/pr/review-materiality.mjs",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 5,
+      "sha256": "8c60941dc299fea3bf878d576a61d22717def99302d0173275d7aa48e18fc01d"
+    },
+    {
+      "path": "scripts/pr/review-materiality.test.mjs",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 3,
+      "sha256": "52f9e861dd2476abfbe3e052d115d6f349ea7cea9133204eda7d18b21f66bd9d"
+    },
+    {
+      "path": "scripts/production-infra-identity-contract/dependabot-auto-merge.test.mjs",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "9b14cb554491492be0296b79499a08e2904989a0494bcf1405ee19f4278e490c"
+    },
+    {
+      "path": "scripts/production-infra-identity-contract/routing.test.mjs",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 4,
+      "sha256": "b5f98f9dbaf07fc1c64d1b8ffc8d63e66f460a8cacb8d18d3ec8547a6ede78ea"
+    },
+    {
+      "path": "scripts/repo-health/check-guardrail-prose.mjs",
+      "surface": "implementation",
+      "count_mode": "whole-file",
+      "lines": 279,
+      "sha256": "a2f5bc02ca3a0e05f2630063d7ec89c31de6c09ca913a2900d0a307abf289148"
+    },
+    {
+      "path": "scripts/repo-health/check-guardrail-prose.test.mjs",
+      "surface": "test",
+      "count_mode": "whole-file",
+      "lines": 588,
+      "sha256": "8132e078f9416a4d5517e996717a5c1f4451f6a28e20db62ef35c3e3dbba0647"
+    },
+    {
+      "path": "scripts/repo-health/file-size-watchlist.test.mjs",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 15,
+      "sha256": "f91652d2819ad341802722de77fd942b740a947b93650b604217d0707cc4337a"
+    },
+    {
+      "path": "scripts/repo-health/guardrail-prose.json",
+      "surface": "configuration-reference",
+      "count_mode": "whole-file",
+      "lines": 88,
+      "sha256": "748816f52ce1e73c789b1a30a325b9683c033d6e3d0972886eb7c4d959ba593e"
+    },
+    {
+      "path": "scripts/review/install-review-eval-launchd.sh",
+      "surface": "shell-reference",
+      "count_mode": "matching-lines",
+      "lines": 7,
+      "sha256": "c15a37879035ef1e97a68b5b6fd3b039b000883bb2cfc2c3112da89743c36789"
+    },
+    {
+      "path": "scripts/review/install-review-eval-launchd.test.mjs",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 8,
+      "sha256": "fa77ec3fbbbd42a86fe9e82c44633fca6192931bbb73e334014cf6e1526e1ce8"
+    },
+    {
+      "path": "scripts/review/testdata/review-eval-split-equivalence/contract.json.txt",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "7223888cc6bd15c9bdb3bf1f6929a516719dd497ee6d2f1bc577a6405e8202e9"
+    },
+    {
+      "path": "scripts/sentry/autofix/sentry-autofix-family-handled.mjs",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "8b4fab8147b1b5d1142c3dd0f8bb04d0af66954dc6b93c70495292ec595ef2c5"
+    },
+    {
+      "path": "scripts/sentry/broker/mapped-command-process-identity.mjs",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 2,
+      "sha256": "58a8fbda2f0e122333858b0c0518d8f1e15b74d525e7ad1994446ec285896a38"
+    },
+    {
+      "path": "scripts/sentry/broker/sentry-mcp-broker.test.mjs",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 3,
+      "sha256": "e797a8e19d683ef46d89406538431b1ca8506edf5925f192d86832b4892461bf"
+    },
+    {
+      "path": "scripts/sentry/broker/sentry-mcp-probe.mjs",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 4,
+      "sha256": "c59decc88b1f99b5c5cb924723e35bd53a80998ca8ba09b2f646df605243e3fc"
+    },
+    {
+      "path": "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-core.mjs",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "b305ccfbadd2c018c9bbe2b3129643ba41d75dc4bdfba3594362c11cc7c50892"
+    },
+    {
+      "path": "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-coverage.test.mjs",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 5,
+      "sha256": "f7a60550f26afc0bbbdd36bc33c62eb081697378833cf0d61ff8a5271fec8ffc"
+    },
+    {
+      "path": "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-extract.mjs",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 3,
+      "sha256": "8149f0f217ee6ffcbcfe74cb4bf81fe2be309988abffa4f4ae07c8c05a7fdd39"
+    },
+    {
+      "path": "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-extract.test.mjs",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 7,
+      "sha256": "70a207438c243046e90bc9fdf2656672d87ac06e6686b9fafb8e58b73d92089a"
+    },
+    {
+      "path": "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-fixtures.mjs",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 6,
+      "sha256": "d807d8cbcc73f0eb1eb0cfad0b3cca13eb11d583c47f8a7070d64b783730293e"
+    },
+    {
+      "path": "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-job.test.mjs",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "409ee3cd524e6b8b56c0fea51af98787ed13b7621d81be2ca5fdae7dda16eff2"
+    },
+    {
+      "path": "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-probe.mjs",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 15,
+      "sha256": "317da3c86d9f13e7be19d7a8b8988d8e77f2c2f4a7152dac250f38c46226221b"
+    },
+    {
+      "path": "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-probe.test.mjs",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 10,
+      "sha256": "ca8c95b079a2f3ec414f91e4b8fa3529d3b8b6f90b50a10b91fc6a41d863594f"
+    },
+    {
+      "path": "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-lifecycle.test.mjs",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 7,
+      "sha256": "dd131eb4e965188fff9e31dab17eb56614ef3ddaf18c3113ea627616f5de5673"
+    },
+    {
+      "path": "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-probes.mjs",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 10,
+      "sha256": "5a239333ee4d0e89c73d725f6a233dc805f90ec69f19dfbc6a27edf57d5a5732"
+    },
+    {
+      "path": "scripts/sentry/ci-wiring/check-sentry-suites-in-ci.test.mjs",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 2,
+      "sha256": "c816954306c0a255f9f2a15b81b7528fabb294b9dd33f294d11ea87fa949e445"
+    },
+    {
+      "path": "scripts/sentry/fixture-scan-canary.test.mjs",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "4cad8293017b13a24a8ffc20438247103528aeda55ccf857714816bd30e550ba"
+    },
+    {
+      "path": "scripts/sentry/gate/sentry-suite-manifest.json",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "57eb43731f7ca56af615a13e8ffcb61c4f707b582eca52b3aa71b8d098d25f3b"
+    },
+    {
+      "path": "scripts/sentry/triage/sentry-triage-brief.test.mjs",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "18c47324d4f33d60b510433bb13d6efdc29da2a14accb9d3f456b0225f84bde1"
+    },
+    {
+      "path": "scripts/sentry/triage/sentry-triage-queue-contract.mjs",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "07e3df7f583c064f65f0a509e4534d39bf1a05ad2f0ec2864cec34fbc528b5bf"
+    },
+    {
+      "path": "scripts/sentry/triage/sentry-triage-requeue.mjs",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "a500be6e18243243a59e25a54121a5b06953e3261a90d33e9736ac0f9fb7b328"
+    },
+    {
+      "path": "scripts/sentry/triage/sentry-triage-requeue.test.mjs",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "d15b367ac43a7c2d52837aec6b728091d03e4dd55a77a9628601c0002085d917"
+    },
+    {
+      "path": "scripts/setup.sh",
+      "surface": "shell-reference",
+      "count_mode": "matching-lines",
+      "lines": 4,
+      "sha256": "4f3f5a4559b32eb6d64cfea515cbf8eae0f47a69798ab02ad53e7b3fccb63be0"
+    },
+    {
+      "path": "scripts/workflows/check-ci-contract.mjs",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "02dcbb5393dce7922d45fbda06f9ea3bd0366bdaec56d8eb9530f9e0e0ad9ad5"
+    },
+    {
+      "path": "scripts/workflows/check-no-skip-audit.mjs",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 7,
+      "sha256": "d902e2817c73b6d8e5bc69991f8c5de86e6f157f0f78190bdcfb99ce161e6dd3"
+    },
+    {
+      "path": "scripts/workflows/check-no-skip-audit.test.mjs",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 16,
+      "sha256": "ab37377fd0c899d596fe8a14e6bc073dca3947db5e0f059efa4e40bfcdad5235"
+    },
+    {
+      "path": "scripts/workflows/check-pr-validation-boundary.mjs",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 2,
+      "sha256": "2096cb26cf8a32defa2582b1fe67fcba6a724fe37615076fdefd3c72159f5c3f"
+    },
+    {
+      "path": "scripts/workflows/check-pr-validation-boundary.test.mjs",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 4,
+      "sha256": "21f008f45b9207eeb4ebc7de0c8d60ccb6671435c2e23e64a443f675ed66a930"
+    },
+    {
+      "path": "shared-config/AGENTS.md",
+      "surface": "instruction",
+      "count_mode": "matching-lines",
+      "lines": 2,
+      "sha256": "4a4b324ba357edb5f96ee63ef9bf1366b3e246ed05d3df00812c65cdcfdf088c"
+    },
+    {
+      "path": "terraform/.gitignore",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 1,
+      "sha256": "bbb6a4d2d552d4c12abb699fcf87284895de9da732a0469e48d324d844f8c8d7"
+    },
+    {
+      "path": "turbo.json",
+      "surface": "configuration-reference",
+      "count_mode": "matching-lines",
+      "lines": 95,
+      "sha256": "226c1db28d1538a5a11a9d51fefcfb51f194b6e21b734e16500a3fe373b09c6e"
+    }
+  ],
+  "totals": {
+    "files": 271,
+    "counted_lines": 111269,
+    "by_surface": {
+      "alias": 11,
+      "configuration-reference": 884,
+      "hook": 32,
+      "implementation": 48934,
+      "instruction": 6229,
+      "shell-reference": 135,
+      "test": 54865,
+      "yaml-or-inline-shell": 179
+    }
+  }
+}
