@@ -148,11 +148,11 @@ test("the committed contract passes every offline check", () => {
   assert.equal(result.ok, true);
   assert.equal(result.checked.offline, true);
   assert.deepEqual(scorableTotals(committed.contract), {
-    prs: 6,
-    scorable: 34,
-    p1: 12,
+    prs: 9,
+    scorable: 51,
+    p1: 16,
   });
-  assert.equal(gridFixtures(committed.contract).length, 3);
+  assert.equal(gridFixtures(committed.contract).length, 6);
   assert.equal(committed.digest, sha256File(contractPath));
   assert.equal(committed.digest.length, 64);
 });
@@ -302,6 +302,57 @@ test("a flipped byte in a frozen finder report fails its digest", () => {
   }
 });
 
+test("a truth finding marked duplicate_of is refused as a scorable id", () => {
+  const root = stageFrozenInputs();
+  try {
+    const contract = clone(committed.contract);
+    const fixture = fixtureForPr(contract, 2121);
+    const file = path.join(root, fixture.truth_file);
+    const truth = JSON.parse(readFileSync(file, "utf8"));
+    const acted = truth.findings.filter((finding) => finding.acted_on === true);
+    const [kept, duplicate] = acted;
+    duplicate.duplicate_of = kept.id;
+    writeFileSync(file, JSON.stringify(truth, null, 1));
+    fixture.truth_sha256 = sha256File(file);
+    const ids = acted.map((finding) => finding.id);
+    fixture.scorable_ids = ids;
+    fixture.p1_ids = [];
+    const problems = () =>
+      checkFixtures({ contract, repoRoot: root }).problems.join("\n");
+    assert.match(
+      problems(),
+      new RegExp(`names ${duplicate.id},.*duplicate_of ${kept.id}`),
+    );
+    // Dropping it is accepted: the duplicate leaves the derived set too, so
+    // the acted-on comparison no longer demands it back.
+    fixture.scorable_ids = ids.filter((id) => id !== duplicate.id);
+    assert.doesNotMatch(problems(), /duplicate_of|_ids/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a grid fixture carries exactly two frozen finder reports", () => {
+  const exactlyTwo = (contract) =>
+    checkFixtures({ contract, repoRoot }).problems.filter((problem) =>
+      problem.includes("needs exactly two"),
+    );
+  assert.deepEqual(exactlyTwo(committed.contract), []);
+  const short = clone(committed.contract);
+  const shortFixture = gridFixtures(short)[0];
+  const [first] = shortFixture.finder_reports;
+  shortFixture.finder_reports = [first];
+  assert.deepEqual(exactlyTwo(short), [
+    `PR ${shortFixture.pr} is a grid fixture with 1 frozen finder reports; a grid fixture needs exactly two`,
+  ]);
+  const long = clone(committed.contract);
+  const longFixture = gridFixtures(long)[0];
+  longFixture.finder_reports = [...longFixture.finder_reports, first];
+  assert.deepEqual(exactlyTwo(long), [
+    `PR ${longFixture.pr} is a grid fixture with 3 frozen finder reports; a grid fixture needs exactly two`,
+  ]);
+});
+
 test("a flipped byte in either run prompt fails its digest", () => {
   for (const name of ["request", "handoff"]) {
     const root = stageFrozenInputs();
@@ -355,7 +406,12 @@ test("missing frozen files are reported rather than thrown", () => {
     const missing = result.problems.filter((problem) =>
       problem.includes("is missing"),
     );
-    assert.equal(missing.length, 6 + 6 + 2);
+    // One truth file per fixture, every frozen finder report, both prompts.
+    const frozen = committed.contract.fixtures.reduce(
+      (total, fixture) => total + 1 + (fixture.finder_reports ?? []).length,
+      Object.keys(committed.contract.prompts).length,
+    );
+    assert.equal(missing.length, frozen);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -414,7 +470,8 @@ test("online mode resolves every eval tag against the pinned commit", () => {
   });
   assert.deepEqual(result.problems, []);
   assert.equal(result.checked.offline, false);
-  assert.equal(calls.length, 6 * 2 * 2);
+  // Two refs per fixture, each resolved and then proved present.
+  assert.equal(calls.length, committed.contract.fixtures.length * 2 * 2);
   assert.ok(
     calls.every((args) => args[0] === "-C" && args[1] === "/src/monorepo"),
   );

@@ -1,0 +1,112 @@
+{
+ "pr": 2039,
+ "title": "fix(cloud): fail early on missing shipping capabilities",
+ "base": "main",
+ "base_sha": "18e6e13b2c3115a78e8dc33a99a47d9543a67eee",
+ "first_head": "3409e991f81053e7f42a07bb6fc8ddbd0a3598dc",
+ "last_head": "8d41674a8b30f196909905fc11475b2f69beeb52",
+ "commits": 4,
+ "reviewers": [
+  "chatgpt-codex-connector[bot]",
+  "claude[bot]",
+  "coderabbitai[bot]"
+ ],
+ "findings": [
+  {
+   "id": 3846756487,
+   "author": "claude[bot]",
+   "path": "scripts/bootstrap/codex-cloud-setup.sh",
+   "line": 195,
+   "severity": "P2",
+   "title": "[P2] correctness/quality: this only probes PR read access (GET .../pulls), but the docs (docs/notes/codex-cloud-setup.md:46-47) and PR description say",
+   "acted_on": true,
+   "declined": false,
+   "body": "[P2] correctness/quality: this only probes PR **read** access (`GET .../pulls`), but the docs (docs/notes/codex-cloud-setup.md:46-47) and PR description say setup verifies \"pull-request read/write access.\" Opening a PR or posting a review comment needs the `pull_requests: write` scope, which is a distinct GitHub permission from repo Contents and isn't exercised by this probe or by `verify_origin_write_access`. A token with Contents:write but PR:read would sail through setup and still fail later at `gh pr create`/comment time \u2014 the exact \"fails only at ship time\" failure mode this PR is meant to close.\n\nWorth at minimum tightening the doc claim to \"pull-request read access\" if a write probe is out of scope for now.\n\n[Fix this \u2192](https://claude.ai/code?q=In%20scripts%2Fbootstrap%2Fcodex-cloud-setup.sh%2C%20verify_github_api_capabilities()%20only%20checks%20GitHub%20pull-request%20READ%20access%2C%20but%20docs%2Fnotes%2Fcodex-cloud-setup.md%20claims%20setup%20verifies%20%22pull-request%20read%2Fwrite%20access.%22%20Either%20add%20a%20lightweight%20PR-write%20capability%20probe%2C%20or%20correct%20the%20doc%20wording%20at%20docs%2Fnotes%2Fcodex-cloud-setup.md%20lines%2046-52%20to%20say%20%22read%22%20only.%20Branch%3A%20fix%2Fcodex-cloud-capability-probes&repo=mento-protocol/monitoring-monorepo)"
+  },
+  {
+   "id": 3846756810,
+   "author": "claude[bot]",
+   "path": "scripts/bootstrap/codex-cloud-setup.sh",
+   "line": 179,
+   "severity": "P2",
+   "title": "[P2] quality/consistency: verifyorigingitauth (line 158-161, just above) explicitly skips its GitHub probe when origin isn't a github.com remote, to s",
+   "acted_on": true,
+   "declined": false,
+   "body": "[P2] quality/consistency: `verify_origin_git_auth` (line 158-161, just above) explicitly skips its GitHub probe when `origin` isn't a `github.com` remote, to support the `CODEX_CLOUD_ORIGIN_URL` override in `codex-cloud-git-helpers.sh`. Neither `verify_github_api_capabilities` nor `verify_origin_write_access` (below) carries that same guard \u2014 both call `gh repo view`/`gh api`/`git push origin` unconditionally. For a non-GitHub origin override this now hard-fails setup where it previously degraded gracefully, silently narrowing an existing escape hatch."
+  },
+  {
+   "id": 3846756913,
+   "author": "chatgpt-codex-connector[bot]",
+   "path": "scripts/bootstrap/codex-cloud-setup.sh",
+   "line": 195,
+   "severity": "P2",
+   "title": "Verify pull-request write access before accepting the token",
+   "acted_on": true,
+   "declined": false,
+   "body": "**<sub><sub>![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)</sub></sub>  Verify pull-request write access before accepting the token**\n\n`gh api --help` states that its default method is `GET`, so this call only proves that the token can list pull requests. A token with Contents write but Pull requests read-only passes both API checks and the branch probe, then fails later when `.agents/skills/ship/SKILL.md` runs `gh pr create` or `gh pr edit`, defeating this setup change's fail-early goal. Add a non-destructive check that verifies the pull-request mutation permission.\n\nAGENTS.md reference: [AGENTS.md:L20-L23](https://github.com/mento-protocol/monitoring-monorepo/blob/3409e991f81053e7f42a07bb6fc8ddbd0a3598dc/AGENTS.md#L20-L23)\n\nUseful? React with \ud83d\udc4d\u00a0/ \ud83d\udc4e.",
+   "duplicate_of": 3846756487
+  },
+  {
+   "id": 3846756918,
+   "author": "chatgpt-codex-connector[bot]",
+   "path": "scripts/bootstrap/codex-cloud-setup.sh",
+   "line": 242,
+   "severity": "P2",
+   "title": "Preserve the cleanup fallback after a failed deletion",
+   "acted_on": true,
+   "declined": false,
+   "body": "**<sub><sub>![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)</sub></sub>  Preserve the cleanup fallback after a failed deletion**\n\nWhen the explicit branch deletion fails, setting `created=false` before returning prevents the `EXIT` trap from retrying cleanup. A transient failure therefore leaves the probe branch on the remote even though the function installs a fallback specifically for that case; keep the flag true until deletion succeeds so the trap gets one final attempt.\n\nUseful? React with \ud83d\udc4d\u00a0/ \ud83d\udc4e."
+  },
+  {
+   "id": 3846756922,
+   "author": "chatgpt-codex-connector[bot]",
+   "path": "scripts/bootstrap/codex-cloud-setup.sh",
+   "line": 192,
+   "severity": "P2",
+   "title": "Make the temporary branch name globally unique",
+   "acted_on": true,
+   "declined": false,
+   "body": "**<sub><sub>![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)</sub></sub>  Make the temporary branch name globally unique**\n\nThe seconds-resolution timestamp and `$$` do not uniquely identify a Cloud session: PID namespaces commonly reuse shell PIDs, and Bash also keeps `$$` unchanged across sibling subshells. If two setup runs overlap within one second, they can push the same probe ref; one run may reject the other's commit or delete the shared ref, causing the other run's deletion to fail even though both credentials are valid. Add a random component or use a collision-resistant temporary-ref scheme.\n\nUseful? React with \ud83d\udc4d\u00a0/ \ud83d\udc4e."
+  },
+  {
+   "id": 3846757143,
+   "author": "claude[bot]",
+   "path": "scripts/bootstrap/codex-cloud-setup.sh",
+   "line": 231,
+   "severity": "P3",
+   "title": "[P3] suggestion: this probe mutates the real origin repo on every setup run (creates + deletes a branch), rather than using git push --dry-run, which ",
+   "acted_on": true,
+   "declined": false,
+   "body": "[P3] suggestion: this probe mutates the real `origin` repo on every setup run (creates + deletes a branch), rather than using `git push --dry-run`, which GitHub still authenticates and permission-checks server-side without writing the ref. That would give the same fail-early signal with no branch-creation side effect and no risk of a permanently orphaned `codex-cloud-write-probe-*` branch if the explicit delete step (line 217) fails for a reason unrelated to permissions (e.g. an org-wide signed-commit or push-protection rule). Given AGENTS.md's ADR rule for architecture decisions with a real alternative, it's worth a one-line rationale (here or in an ADR) for why the real push+delete was chosen over `--dry-run`."
+  },
+  {
+   "id": 3846757191,
+   "author": "coderabbitai[bot]",
+   "path": "docs/notes/codex-cloud-setup.md",
+   "line": 70,
+   "severity": "P1",
+   "title": "Document the distribution package source.",
+   "acted_on": true,
+   "declined": false,
+   "body": "**Document the distribution package source.**\n\nWhen `CODEX_CLOUD_INSTALL_PLAYWRIGHT_DEPS` is enabled, the Cloud setup runs `playwright install --with-deps chromium` and requires the apt package source. Add the Debian/Ubuntu repository or approved package proxy to the outbound-access list. Without it, fail-closed setup can stop before Chromium installs.\n\n\u2705 Addressed in commit 6a65f85"
+  },
+  {
+   "id": 3846757203,
+   "author": "coderabbitai[bot]",
+   "path": "scripts/bootstrap/codex-cloud-setup.sh",
+   "line": 243,
+   "severity": "P2",
+   "title": "Keep cleanup enabled after a delete failure.",
+   "acted_on": true,
+   "declined": false,
+   "body": "**Keep cleanup enabled after a delete failure.**\n\nLine 218 clears `created` before the EXIT trap runs. If the first delete fails, `cleanup_probe_ref` makes no retry and the temporary branch can remain on `origin`. Keep `created=true` until deletion succeeds. Add a fixture where creation succeeds and the first delete fails.\n\n\u2705 Addressed in commit 6a65f85",
+   "duplicate_of": 3846756918
+  }
+ ],
+ "counts": {
+  "total": 8,
+  "acted_on": 8,
+  "declined": 0,
+  "P1": 1
+ }
+}

@@ -1,0 +1,113 @@
+{
+ "pr": 2035,
+ "title": "feat(scripts): Arkham intel-marathon pass 2 \u2014 populatedTags fix, cross-chain discovery, quota-aware sweep",
+ "base": "main",
+ "base_sha": "4250874f8e5138e8ad60c774ad7b8e412e8b8b73",
+ "first_head": "297c65bf413d247ae59cf9e5f1895b58b6e613b6",
+ "last_head": "ffe212ac3be48d1750571148b2956a72126cc53c",
+ "commits": 12,
+ "reviewers": [
+  "chatgpt-codex-connector[bot]",
+  "claude[bot]",
+  "coderabbitai[bot]",
+  "cursor[bot]"
+ ],
+ "findings": [
+  {
+   "id": 3845594538,
+   "author": "claude[bot]",
+   "path": "ui-dashboard/scripts/intel-marathon/tier1-bulk-enrich.mjs",
+   "line": 997,
+   "severity": "P1",
+   "title": "[P1] flushWrites() permanently drops a whole batch of already-attested writes on any transient Upstash failure, and the circuit breaker won't catch it",
+   "acted_on": true,
+   "declined": false,
+   "body": "**[P1] `flushWrites()` permanently drops a whole batch of already-attested writes on any transient Upstash failure, and the circuit breaker won't catch it.**\n\n`pendingWrites.splice(0, pendingWrites.length)` (line 921) removes the batch from the queue *before* `flushNewWrites`/`flushRefreshWrites` make the network call. If `pipeline()` throws (network blip, Upstash 5xx, a single command's `.error`), the whole batch \u2014 up to `HSET_BATCH` (100) entries \u2014 is lost: nothing is retried, and there's no code path that puts it back.\n\nThis is worse than a one-off loss because every address in that batch already has a `{address, status}` line in `progressFile` from the per-address loop (line 1010), written *before* the flush is attempted. On resume, `processed` (built from `progressFile`, lines 804-818) treats those addresses as done, so they're never retried \u2014 the label write for a fully-fetched, quality-gate-passed address is gone for good.\n\nIt also can't self-report: the `catch` at line 1014 attributes the flush error to whatever address happens to be mid-iteration and calls `noteFailure()`, but `recordResult()` (line 973) resets `consecutiveErrors = 0` on every successful Arkham fetch, which runs *before* the next flush attempt. So a sustained Upstash outage never accumulates `MAX_CONSECUTIVE_ERRORS` \u2014 the run keeps calling Arkham (burning the 10k-lookup trial quota) for the full queue while silently writing nothing, and the circuit breaker built to catch exactly this kind of \"API stopped working\" scenario never trips.\n\nGiven the 70+ minute / 68k-address unattended run this is designed for, and that the whole point of the CAS/HSETNX design is race-safety across that window, this seems worth fixing before a full production run: retry the flush (or re-queue the batch back into `pendingWrites` on failure) rather than discarding it, and/or don't record `{address, status}` as \"processed\" until the corresponding write has actually landed.\n\n[Fix this \u2192](https://claude.ai/code?q=In%20ui-dashboard%2Fscripts%2Fintel-marathon%2Ftier1-bulk-enrich.mjs%2C%20on%20branch%20feat%2Fintel-pass-2%3A%20flushWrites()%20around%20line%20919-926%20splices%20pendingWrites%20before%20calling%20flushNewWrites%2FflushRefreshWrites%2C%20so%20if%20the%20Upstash%20pipeline%20call%20throws%20the%20whole%20batch%20of%20writes%20is%20permanently%20lost%20-%20and%20since%20each%20address%20already%20has%20a%20%7Baddress%2C%20status%7D%20line%20in%20the%20progress%20file%20written%20before%20the%20flu"
+  },
+  {
+   "id": 3845596185,
+   "author": "claude[bot]",
+   "path": "ui-dashboard/scripts/intel-marathon/tier1-bulk-enrich.mjs",
+   "line": 328,
+   "severity": "P2",
+   "title": "[P2] HARDPAGECAP truncation isn't treated as an incomplete-discovery source, even though it is one.",
+   "acted_on": true,
+   "declined": false,
+   "body": "**[P2] `HARD_PAGE_CAP` truncation isn't treated as an incomplete-discovery source, even though it is one.**\n\n`discoverAll()` aborts the run when a source **errors** (`failedSources`, checked here), matching the header comment's \"a partial set looks identical to full coverage afterwards.\" But `pageSource()` can also return `capped: true` when a single source exceeds `HARD_PAGE_CAP` (250k rows) \u2014 that's logged as a `\u26a0 HARD_PAGE_CAP hit \u2014 truncated` warning (line 286) and otherwise ignored; it doesn't join `failedSources` and doesn't trigger the abort/`--allow-partial-discovery` gate.\n\nThat's the same failure mode the abort exists to prevent \u2014 a silently incomplete discovery set \u2014 just triggered by row count instead of an exception. Low risk at today's scale (68,433 total addresses, well under any single source's cap), but if it's hit it'd defeat the \"abort rather than sweep partial\" guarantee this function otherwise enforces."
+  },
+  {
+   "id": 3845603922,
+   "author": "coderabbitai[bot]",
+   "path": "ui-dashboard/scripts/intel-marathon/run.sh",
+   "line": 60,
+   "severity": "P2",
+   "title": "Match the exact tfvars key.",
+   "acted_on": true,
+   "declined": false,
+   "body": "**Match the exact tfvars key.**\n\nLine 60 matches any key that starts with `$tfkey`. For example, `arkham_api_key_backup` can supply `ARKHAM_API_KEY` when it appears before `arkham_api_key`. Require whitespace and `=` after the key.\n\n\u2705 Addressed in commits 0754c83 to 5f9e96a"
+  },
+  {
+   "id": 3845603940,
+   "author": "coderabbitai[bot]",
+   "path": "ui-dashboard/scripts/intel-marathon/tier1-bulk-enrich.mjs",
+   "line": 689,
+   "severity": "P2",
+   "title": "Cap unique tags in both sanitizers.",
+   "acted_on": true,
+   "declined": false,
+   "body": "**Cap unique tags in both sanitizers.**\n\nThe shared helper uses the same slice-before-dedup order. If `MAX_TAGS_COUNT` means 20 unique tags, move the slice after dedup in both implementations. Otherwise, retain the current order and remove this concern. Refresh merges can let duplicate or blank tags consume the 20-item window and discard later unique tags.\n\n\u2705 Addressed in commits 0754c83 to 5f9e96a"
+  },
+  {
+   "id": 3845603944,
+   "author": "coderabbitai[bot]",
+   "path": "ui-dashboard/scripts/intel-marathon/tier1-bulk-enrich.mjs",
+   "line": 997,
+   "severity": "P1",
+   "title": "A failed flush discards the pending batch and marks the addresses as processed.",
+   "acted_on": true,
+   "declined": false,
+   "body": "**A failed flush discards the pending batch and marks the addresses as processed.**\n\n`flushWrites` splices the batch out of `pendingWrites` before it calls `pipeline`. `pipeline` throws on a transport error or on any per-command error. The spliced entries are then unreachable, so up to `HSET_BATCH` enrichment results are lost.\n\nTwo call sites make the loss silent:\n\n- Line 1012 calls `flushWrites` inside the per-address `try`. An Upstash failure is caught by the `catch` at Line 1014, recorded against the current address as an Arkham error, and counted by `noteFailure`. The run continues.\n- Every address in the lost batch already has a `{address, status}` line in `progressFile`, so the resume filter at Line 854 skips it on the next run. The addresses are never re-enriched, and their quota is already spent.\n\nRestore the batch on failure so a later flush retries it.\n\n\u2705 Addressed in commits 0754c83 to 5f9e96a",
+   "duplicate_of": 3845594538
+  },
+  {
+   "id": 3845607361,
+   "author": "chatgpt-codex-connector[bot]",
+   "path": "ui-dashboard/scripts/intel-marathon/tier2-light-forensic.mjs",
+   "line": 395,
+   "severity": "P1",
+   "title": "Preserve Tier 2 tags when merging capped labels",
+   "acted_on": true,
+   "declined": false,
+   "body": "**<sub><sub>![P1 Badge](https://img.shields.io/badge/P1-orange?style=flat)</sub></sub>  Preserve Tier 2 tags when merging capped labels**\n\nFor addresses whose Tier 1 entry already contains 20 tags\u2014which this change now makes possible by restoring `populatedTags`\u2014appending Arkham tags after `ctp:` and `type:` here does not preserve the forensic tags. The write path later builds a set with `existingEntry.tags` first and slices it to 20, so the newly derived counterparty and contract tags fall beyond the cap and are silently discarded. Prioritize those derived tags again when merging with the existing entry so the light-forensic pass records its results for richly tagged addresses.\n\nUseful? React with \ud83d\udc4d\u00a0/ \ud83d\udc4e."
+  },
+  {
+   "id": 3845607372,
+   "author": "chatgpt-codex-connector[bot]",
+   "path": "ui-dashboard/scripts/intel-marathon/tier1-bulk-enrich.mjs",
+   "line": 311,
+   "severity": "P2",
+   "title": "Abort when discovery reaches the hard page cap",
+   "acted_on": true,
+   "declined": false,
+   "body": "**<sub><sub>![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)</sub></sub>  Abort when discovery reaches the hard page cap**\n\nWhen any discovery source exceeds 250,000 rows, `pageSource` returns `capped: true`, but this branch only prints a warning and never adds the source to `failedSources`. The default run therefore proceeds without `--allow-partial-discovery` and spends Arkham quota on a silently truncated registry, contrary to the new fail-closed discovery behavior. Treat a capped source as incomplete and abort unless partial discovery was explicitly allowed.\n\nUseful? React with \ud83d\udc4d\u00a0/ \ud83d\udc4e.",
+   "duplicate_of": 3845596185
+  },
+  {
+   "id": 3845618202,
+   "author": "cursor[bot]",
+   "path": "ui-dashboard/scripts/intel-marathon/tier1-bulk-enrich.mjs",
+   "line": 774,
+   "severity": "P1",
+   "title": "Refresh wipes forensic tags",
+   "acted_on": true,
+   "declined": false,
+   "body": "### Refresh wipes forensic tags\n\n**High Severity**\n\n`buildWriteEntry` unions `fresh.tags` ahead of the existing tag list, then `sanitizeEntry` keeps only the first 20. Arkham often returns enough ids to fill that cap alone, so a refresh drops prior `ctp:` / `type:` forensic tags that tier2 wrote into `labels`. Pass-2 refreshes therefore undo tier2 attribution for heavily tagged addresses.\n\n<div><a href=\"https://cursor.com/open?link=eyJ2ZXJzaW9uIjoxLCJ0eXBlIjoiQlVHQk9UX0ZJWF9JTl9DVVJTT1IiLCJkYXRhIjp7InJlZGlzS2V5IjoiYnVnYm90OjJmMzQ0NzQwLTFkMDAtNDY2MC04OGMwLWFiMGU2ODc3OTMxYSIsImVuY3J5cHRpb25LZXkiOiJBZGo3TGNYY0otSWxQOU9CSUtxWDlQQVlYM3FrbHBBUUI3MG1nT2FSR2JrIiwiYnJhbmNoIjoiZmVhdC9pbnRlbC1wYXNzLTIiLCJyZXBvT3duZXIiOiJtZW50by1wcm90b2NvbCIsInJlcG9OYW1lIjoibW9uaXRvcmluZy1tb25vcmVwbyIsInByb3ZpZGVyIjoiZ2l0aHViIn19\" target=\"_blank\" rel=\"noopener noreferrer\"><picture><source media=\"(prefers-color-scheme: dark)\" srcset=\"https://cursor.com/assets/images/fix-in-cursor-dark.png\"><source media=\"(prefers-color-scheme: light)\" srcset=\"https://cursor.com/assets/images/fix-in-cursor-light.png\"><img alt=\"Fix in Cursor\" width=\"115\" height=\"28\" src=\"https://cursor.com/assets/images/fix-in-cursor-dark.png\"></picture></a>&nbsp;<a href=\"https://cursor.com/agents?link=eyJ2ZXJzaW9uIjoxLCJ0eXBlIjoiQlVHQk9UX0ZJWF9JTl9XRUIiLCJkYXRhIjp7InJlZGlzS2V5IjoiYnVnYm90OjJmMzQ0NzQwLTFkMDAtNDY2MC04OGMwLWFiMGU2ODc3OTMxYSIsImVuY3J5cHRpb25LZXkiOiJBZGo3TGNYY0otSWxQOU9CSUtxWDlQQVlYM3FrbHBBUUI3MG1nT2FSR2JrIiwiYnJhbmNoIjoiZmVhdC9pbnRlbC1wYXNzLTIiLCJyZXBvT3duZXIiOiJtZW50by1wcm90b2NvbCIsInJlcG9OYW1lIjoibW9uaXRvcmluZy1tb25vcmVwbyIsInByTnVtYmVyIjoyMDM1LCJjb21taXRTaGEiOiIyOTdjNjViZjQxM2QyNDdhZTU5Y2Y5ZTVmMTg5NWI1OGI2ZTYxM2I2IiwicHJvdmlkZXIiOiJnaXRodWIifX0\" target=\"_blank\" rel=\"noopener noreferrer\"><picture><source media=\"(prefers-color-scheme: dark)\" srcset=\"https://cursor.com/assets/images/fix-in-web-dark.png\"><source media=\"(prefers-color-scheme: light)\" srcset=\"https://cursor.com/assets/images/fix-in-web-light.png\"><img alt=\"Fix in Web\" width=\"99\" height=\"28\" src=\"https://cursor.com/assets/images/fix-in-web-dark.png\"></picture></a></div>\n\n<sup>Reviewed by [Cursor Bugbot](https://cursor.com/bugbot) for commit 297c65bf413d247ae59cf9e5f1895b58b6e613b6. Configure [here](https://www.cursor.com/dashboard/bugbot).</sup>"
+  }
+ ],
+ "counts": {
+  "total": 8,
+  "acted_on": 8,
+  "declined": 0,
+  "P1": 4
+ }
+}
