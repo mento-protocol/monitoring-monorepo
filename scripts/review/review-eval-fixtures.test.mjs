@@ -332,6 +332,35 @@ test("a truth finding marked duplicate_of is refused as a scorable id", () => {
   }
 });
 
+test("a duplicate_of that names no other plain finding is reported", () => {
+  const root = stageFrozenInputs();
+  try {
+    const contract = clone(committed.contract);
+    const fixture = fixtureForPr(contract, 2121);
+    const file = path.join(root, fixture.truth_file);
+    const truth = JSON.parse(readFileSync(file, "utf8"));
+    const [first, second, third] = truth.findings;
+    const problems = () => {
+      writeFileSync(file, JSON.stringify(truth, null, 1));
+      fixture.truth_sha256 = sha256File(file);
+      return checkFixtures({ contract, repoRoot: root }).problems.join("\n");
+    };
+    second.duplicate_of = second.id;
+    assert.match(
+      problems(),
+      new RegExp(`${second.id} is the finding's own id`),
+    );
+    second.duplicate_of = 1;
+    assert.match(problems(), /duplicate_of 1 names no finding in this truth/);
+    // A chain is refused too: it would drop both copies of one defect.
+    second.duplicate_of = first.id;
+    third.duplicate_of = second.id;
+    assert.match(problems(), /names a finding that is itself a duplicate/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("a grid fixture carries exactly two frozen finder reports", () => {
   const exactlyTwo = (contract) =>
     checkFixtures({ contract, repoRoot }).problems.filter((problem) =>

@@ -54,9 +54,13 @@ from `gh api --paginate --slurp` and are flattened as values, so a body holding
 `][` survives. Two independent bots sometimes raise one defect twice; the
 harvester cannot tell, so a curator adds `"duplicate_of": <earliest id>` to the
 later record afterwards, and `--check-fixtures` refuses a `scorable_ids` or
-`p1_ids` entry that names it. The six 2026-08-21 keys are not re-harvested
-here, so they still carry findings raised on later heads: issue 2289 tracks
-re-harvesting them and the denominator change that would follow.
+`p1_ids` entry that names it, a `duplicate_of` that names no finding in the
+same file, its own finding, or another duplicate. A truth file's `counts` is
+the raw harvest total and predates those hand-added marks, so the scorable
+denominator is the contract's `scorable_ids`, not `counts`. The six 2026-08-21
+keys are not re-harvested here, so they still carry findings raised on later
+heads: issue 2289 tracks re-harvesting them and the denominator change that
+would follow.
 
 The answer key never travels with the exam. It lives on `main`; the fixture is
 a detached checkout at a 2026-08 commit and is materialized under

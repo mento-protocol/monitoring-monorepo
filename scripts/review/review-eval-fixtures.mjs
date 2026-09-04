@@ -284,6 +284,25 @@ function checkTruthFile({ repoRoot, fixture, problems }) {
       .filter((finding) => Number.isSafeInteger(finding.duplicate_of))
       .map((finding) => [finding.id, finding.duplicate_of]),
   );
+  // A curator writes duplicate_of by hand after the harvest, so a typo has to
+  // fail the check: the target must be a different finding in this same file,
+  // and not itself a duplicate, or a chain would drop a defect nobody scores.
+  const findingIds = new Set(truth.findings.map((finding) => finding.id));
+  for (const [id, target] of duplicates) {
+    const wrong =
+      id === target
+        ? "is the finding's own id"
+        : !findingIds.has(target)
+          ? "names no finding in this truth file"
+          : duplicates.has(target)
+            ? "names a finding that is itself a duplicate"
+            : null;
+    if (wrong) {
+      problems.push(
+        `PR ${fixture.pr} finding ${id} duplicate_of ${target} ${wrong}`,
+      );
+    }
+  }
   for (const field of ["scorable_ids", "p1_ids"]) {
     for (const id of Array.isArray(fixture[field]) ? fixture[field] : []) {
       if (!duplicates.has(id)) continue;
