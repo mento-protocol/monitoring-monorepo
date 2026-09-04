@@ -29,7 +29,7 @@ on:
       - docs/evals/review-skill**
       - scripts/review/**
       # Publication relies on the scoped cells/ rule to keep raw model output
-      # out of Git and autoreview bundles.
+      # out of Git and out of any review input.
       - .gitignore
       # Every contract-job command below runs a `review:eval*` alias. A PR that
       # renames or removes one breaks this workflow while touching neither path
