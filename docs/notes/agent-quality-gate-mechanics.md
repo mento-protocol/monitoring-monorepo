@@ -2672,7 +2672,14 @@ pnpm agent:closeout-review --base "$base_oid"
 pnpm agent:closeout-review --base "$premerge_oid"
 ```
 
-Push only after both gates and both reviews pass.
+Those two calls are only the second model. Card step 4 is a two-model handoff,
+so finish it once per axis: keep each run's `report:` path and header, then
+invoke the `review` skill for that axis with that report and that axis's diff,
+under step 4's four instructions. A single skill pass over
+`base_oid..final_head` leaves `premerge_oid..final_head` with one reviewer,
+which is the axis this section exists for.
+
+Push only after both gates and both handoffs pass.
 
 The closeout review answers whether the source contains review findings. It
 does not prove CLI/API behavior, generated artifacts, deployment/runtime
