@@ -43,8 +43,9 @@ not discovered in review.
 ## Consequences
 
 - Checklists are canonical context (ADR 0005). Root and relevant package entry
-  points hard-link the applicable checklist, while the local quality gate maps
-  changed data-flow paths to mandatory review.
+  points hard-link the applicable checklist. Step 2 of the PR operating card
+  requires the stateful data and UI checklist for matching changes. Step 3
+  requires the matching direct author checks.
 - Recurring automated-review hazards are canonicalized so bots don't re-litigate
   settled patterns.
 
@@ -52,4 +53,5 @@ not discovered in review.
 
 - [`docs/pr-checklists/stateful-data-ui.md`](../pr-checklists/stateful-data-ui.md), [`docs/pr-checklists/recurring-review-patterns.md`](../pr-checklists/recurring-review-patterns.md).
 - Enforced from [`AGENTS.md`](../../AGENTS.md), relevant package `AGENTS.md`
-  routes, and `scripts/agent-quality-gate.sh`.
+  routes, and steps 2 and 3 of
+  [`docs/notes/pr-operating-card.md`](../notes/pr-operating-card.md).

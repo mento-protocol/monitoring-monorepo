@@ -189,8 +189,9 @@ does not change the gated-policy ownership or two-phase rollover contract.
   human sign-off on anything that can page or justify a breaker trip.
 - The alerts stack gains its first `jsondecode`-driven rule group; the
   pattern is available for future per-asset rule classes.
-- The integrity check joins the quality gate and CI, so a registry/threshold
-  mismatch fails before review.
+- The [PR operating card](../notes/pr-operating-card.md) requires the integrity
+  check before review. CI runs the check again before merge, so a registry or
+  threshold mismatch blocks delivery.
 
 ## Evidence
 

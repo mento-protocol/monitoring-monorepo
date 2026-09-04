@@ -15,9 +15,10 @@ garden_lane: adrs-architecture
 
 **Status:** Accepted (Apr–Jun 2026), amended by the M5 cutover on 2026-09-02.
 [ADR 0078](0078-staged-verification-redesign.md) supersedes the mandatory local
-gate. The gate remains a callable diagnostic and a required-CI regression
-suite. The direct `/ship` author checks replace it in normal local delivery.
-The hosted two-projection all-clear and Codex approval gate remain in force.
+gate. The gate remains callable as a manual diagnostic. Its regression suite is
+also manual and no longer runs in required CI. The direct `/ship` author checks
+replace the gate in normal local delivery. The hosted two-projection all-clear
+and Codex approval gate remain in force.
 **Scope:** ci/process
 
 ## Context

@@ -32,8 +32,10 @@ Two gates:
   production build from `.next-fixture` with `next start`;
   `test:browser:production` forces a fresh fixture build. The fixture GraphQL
   server uses fixed port 3211, while the Next port is assigned at runtime.
-- **react-doctor** runs as a **score gate** (must end at 100) plus a per-PR diff gate
-  (`react-doctor:diff`) wired into the local quality gate and CI.
+- **react-doctor** runs as a **score gate** (must end at 100) plus a per-PR diff
+  gate (`react-doctor:diff`). Step 3 of the
+  [PR operating card](../notes/pr-operating-card.md) requires the diff gate for
+  dashboard React or client source. Required CI runs both gates.
 
 ## Alternatives considered
 
