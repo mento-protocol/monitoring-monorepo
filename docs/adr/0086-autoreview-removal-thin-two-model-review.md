@@ -36,8 +36,10 @@ carrying no measurable recall.
 
 `codex exec review` is a first-party subcommand of a CLI the operator already
 runs. It reads the working tree itself, needs no bundle, and reports findings
-under a `Full review comments:` or `Review comment:` heading. A 160-line wrapper
-around it gives the same second model at a fraction of the surface.
+under a `Full review comments:` or `Review comment:` heading. Wrapping it takes
+1,077 lines across three modules — 387 in `scripts/pr/closeout-review.mjs`, 400
+in `closeout-review-exec.mjs` and 290 in `closeout-review-git.mjs` — against the
+roughly 37,200 this removes. Same second model, a fraction of the surface.
 
 ## Decision
 
