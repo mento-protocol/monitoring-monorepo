@@ -56,7 +56,7 @@ pnpm agent:review-materiality      # Classify review depth + context-update sign
 pnpm agent:closeout-review         # Second-model source review; prints `report: <path>`; exit 1 = findings, 2 = closeout failed, no usable review
 pnpm agent:closeout-review --base <base-remote>/<baseRefName>  # Fork or stacked PR; otherwise it resolves the base itself
 pnpm agent:closeout-review:test    # Suite for the closeout review tool
-pnpm review:eval:experiment -- --help  # Non-ledger paired screen; canonical qualification reruns all 24 cells
+pnpm review:eval:experiment -- --help  # Non-ledger paired screen; qualification reruns every canonical cell
 pnpm review:eval:experiment -- --validate-plan <campaign-dir> --json  # Validate one candidate campaign without a model call
 pnpm review:eval:experiment -- --run <campaign-dir> --stage screen --dry-run --json  # List paid lanes without a model call
 pnpm docs:index --write            # Regenerate docs/README.md from tracked + non-ignored untracked Markdown

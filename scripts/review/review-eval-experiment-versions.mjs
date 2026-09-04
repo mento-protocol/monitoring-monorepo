@@ -6,6 +6,23 @@
 // The two value guards below live here for that reason and the contract reads
 // them from here rather than keeping a second copy.
 
+import { spawnSync } from "node:child_process";
+
+/** The live version of one provider CLI, probed once and never cached. */
+export function providerVersion(name, env) {
+  const result = spawnSync(name, ["--version"], {
+    env,
+    encoding: "utf8",
+    timeout: 10_000,
+  });
+  if (result.error || result.status !== 0 || !String(result.stdout).trim()) {
+    throw new Error(
+      `${name} version probe failed: ${result.error?.message ?? result.stderr ?? `exit ${result.status}`}`,
+    );
+  }
+  return String(result.stdout).trim();
+}
+
 export function isObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

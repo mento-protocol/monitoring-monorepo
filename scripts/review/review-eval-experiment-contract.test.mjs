@@ -38,6 +38,10 @@ import {
   skillDigest,
 } from "./review-eval-run-plan.mjs";
 import { scorerDigest } from "./review-eval-score.mjs";
+import {
+  experimentFixtures,
+  experimentPolicy,
+} from "./review-eval-experiment-grid.mjs";
 
 const repoRoot = fileURLToPath(new URL("../../", import.meta.url));
 const contractBytes = readFileSync(
@@ -110,13 +114,15 @@ test("digestObject and plan validation are stable across persistence", () => {
   );
 });
 
-test("harness source identity binds six exact paths and their bytes", () => {
+test("harness source identity binds every module path and its bytes", () => {
   assert.deepEqual(EXPERIMENT_SOURCE_FILES, [
     "scripts/review/review-eval-experiment.mjs",
     "scripts/review/review-eval-experiment-contract.mjs",
     "scripts/review/review-eval-experiment-decision.mjs",
+    "scripts/review/review-eval-experiment-grid.mjs",
     "scripts/review/review-eval-experiment-cache.mjs",
     "scripts/review/review-eval-experiment-runtime.mjs",
+    "scripts/review/review-eval-experiment-novelty.mjs",
     "scripts/review/review-eval-experiment-versions.mjs",
   ]);
   const virtualRoot = "/virtual-review-experiment";
@@ -198,11 +204,13 @@ test("a campaign contains exactly one candidate", () => {
       }),
     /exactly one candidate/,
   );
-  const incompletePanel = structuredClone(contract);
-  incompletePanel.fixtures.find((fixture) => fixture.pr === 1990).p1_ids.pop();
+  // The panel is the contract's grid, so a grid too narrow to pair is the
+  // only shape planning refuses.
+  const narrowed = structuredClone(contract);
+  narrowed.fixtures.find((fixture) => fixture.grid === true).grid = false;
   assert.throws(
-    () => makePlan({ contract: incompletePanel }),
-    /P1 opportunities/,
+    () => makePlan({ contract: narrowed }),
+    /at least 3 grid fixtures/,
   );
 });
 
@@ -212,21 +220,29 @@ test("screen, holdout, and live stages use the required paired panels", () => {
   const holdout = stagePlanFor({ plan, stage: "holdout" });
   const live = stagePlanFor({ plan, stage: "live-paired" });
 
+  // Every grid fixture the contract carries gets a lane, at whatever width the
+  // grid has grown to.
+  const gridPrs = contract.fixtures
+    .filter((fixture) => fixture.grid === true)
+    .map((fixture) => fixture.pr)
+    .sort((left, right) => left - right);
+  assert.deepEqual(
+    screen.lanes.map((lane) => lane.pr),
+    gridPrs,
+  );
   assert.deepEqual(
     screen.lanes.map((lane) => lane.source.report_index),
-    [0, 0, 0],
+    gridPrs.map(() => 0),
   );
   assert.deepEqual(
     holdout.lanes.map((lane) => lane.source.report_index),
-    [1, 1, 1],
+    gridPrs.map(() => 1),
   );
   assert.deepEqual(
     screen.lanes.map((lane) => lane.sequence),
-    [
-      ["incumbent", "candidate"],
-      ["candidate", "incumbent"],
-      ["incumbent", "candidate"],
-    ],
+    gridPrs.map((_pr, index) =>
+      index % 2 === 0 ? ["incumbent", "candidate"] : ["candidate", "incumbent"],
+    ),
   );
   assert.equal(live.enabled, true);
   for (const lane of live.lanes) {
@@ -240,6 +256,50 @@ test("screen, holdout, and live stages use the required paired panels", () => {
   assert.throws(
     () => stagePlanFor({ plan, stage: "unknown" }),
     /unknown experiment stage/,
+  );
+});
+
+test("a two-draw campaign keys every lane and cell on its draw", () => {
+  const plan = makePlan({ draws: 2 });
+  assert.equal(plan.draws, 2);
+  const screen = stagePlanFor({ plan, stage: "screen" });
+  const prs = new Set(screen.lanes.map((lane) => lane.pr));
+  assert.equal(screen.lanes.length, prs.size * 2);
+  const [first, second] = screen.lanes.filter(
+    (lane) => lane.pr === screen.lanes[0].pr,
+  );
+  assert.deepEqual(
+    [first.lane_id, second.lane_id],
+    [`screen-pr-${first.pr}-d0`, `screen-pr-${first.pr}-d1`],
+  );
+  // The two draws read the same frozen report through opposite arm orders.
+  assert.deepEqual(first.source, second.source);
+  assert.notDeepEqual(first.sequence, second.sequence);
+
+  const rawIdentity = (lane) =>
+    rawCacheIdentity({
+      plan,
+      stage: "screen",
+      lane,
+      treatment: "candidate",
+      cliVersions,
+    });
+  assert.equal(rawIdentity(first).draw, 0);
+  assert.equal(rawIdentity(second).draw, 1);
+  assert.notEqual(rawIdentity(first).digest, rawIdentity(second).digest);
+  const rawDigest = "a".repeat(64);
+  assert.notEqual(
+    scoreCacheIdentity({ plan, rawDigest, draw: 0, cliVersions }).digest,
+    scoreCacheIdentity({ plan, rawDigest, draw: 1, cliVersions }).digest,
+  );
+  const scoreDigest = "b".repeat(64);
+  assert.notEqual(
+    novelCacheIdentity({ plan, scoreDigest, draw: 0, cliVersions }).digest,
+    novelCacheIdentity({ plan, scoreDigest, draw: 1, cliVersions }).digest,
+  );
+  assert.throws(
+    () => makePlan({ draws: 6 }),
+    /draws must be an integer 1\.\.5/,
   );
 });
 
@@ -422,7 +482,7 @@ test("cache identities key on the live version of each phase's providers", () =>
 
 test("a record's recorded phase provenance is read strictly", () => {
   const record = {
-    cell_id: "screen-pr-1990-candidate",
+    cell_id: "screen-pr-1990-d0-candidate",
     cli_versions: { raw: { claude: "claude 1" }, score: { judge: "judge 1" } },
   };
   assert.deepEqual(recordedPhaseCliVersions({ record, phase: "score" }), {
@@ -440,7 +500,7 @@ test("a record's recorded phase provenance is read strictly", () => {
   );
   assert.throws(
     () => recordedPhaseCliVersions({ record, phase: "novel" }),
-    /screen-pr-1990-candidate stores no novel runtime provenance/,
+    /screen-pr-1990-d0-candidate stores no novel runtime provenance/,
   );
   assert.throws(
     () =>
@@ -468,10 +528,10 @@ test("a record's recorded phase provenance is read strictly", () => {
   );
 });
 
-test("the qualification manifest is the canonical 24-cell rerun", () => {
+test("the qualification manifest is the contract's own full rerun", () => {
   const plan = makePlan();
   const expectedCells = planCells({ contract, kind: "full" });
-  assert.equal(plan.qualification.cell_count, 24);
+  assert.equal(plan.qualification.cell_count, expectedCells.length);
   assert.deepEqual(plan.qualification.cells, expectedCells);
   assert.equal(plan.qualification.experiment_artifact_reuse_allowed, false);
   assert.equal(plan.qualification.skill_digest, skillDigest(candidateRoot));
@@ -570,7 +630,7 @@ test("drift is read from the records, and only from phases that ran", () => {
       provider: "claude",
       planned: planned.claude,
       live: upgraded,
-      cell_ids: ["screen-pr-1990-candidate"],
+      cell_ids: ["screen-pr-1990-d0-candidate"],
     },
   ]);
   const decision = evaluateExperimentDecision({
@@ -582,11 +642,11 @@ test("drift is read from the records, and only from phases that ran", () => {
   assert.equal(
     decision.reasons[0],
     `runtime drift: claude ${planned.claude} -> ${upgraded} ` +
-      "on screen-pr-1990-candidate",
+      "on screen-pr-1990-d0-candidate",
   );
   assert.equal(decision.reasons.length > 1, true);
   assert.deepEqual(decision.runtime_drift.cell_ids, [
-    "screen-pr-1990-candidate",
+    "screen-pr-1990-d0-candidate",
   ]);
   const clean = evaluateExperimentDecision({
     plan,
@@ -602,15 +662,18 @@ test("drift reporting fails closed on a record it cannot read", () => {
   const planned = plan.inputs.cli_versions;
   const upgraded = { raw: { claude: "claude 2.1.259" } };
   const broken = (cliVersions) => [
-    { cell_id: "screen-pr-1990-candidate", cli_versions: upgraded },
-    { cell_id: "screen-pr-1990-incumbent", cli_versions: cliVersions },
+    { cell_id: "screen-pr-1990-d0-candidate", cli_versions: upgraded },
+    { cell_id: "screen-pr-1990-d0-incumbent", cli_versions: cliVersions },
   ];
   // Skipping any of these would report the first cell's upgrade as the whole
   // story and present the second cell as a clean, on-plan run.
   for (const [cliVersions, message] of [
-    [undefined, /screen-pr-1990-incumbent stores no runtime provenance/],
-    [null, /screen-pr-1990-incumbent stores no runtime provenance/],
-    ["claude 2.1.259", /screen-pr-1990-incumbent stores no runtime provenance/],
+    [undefined, /screen-pr-1990-d0-incumbent stores no runtime provenance/],
+    [null, /screen-pr-1990-d0-incumbent stores no runtime provenance/],
+    [
+      "claude 2.1.259",
+      /screen-pr-1990-d0-incumbent stores no runtime provenance/,
+    ],
     [{ stage: { claude: "claude 2" } }, /names unknown cache phase "stage"/],
     [{ raw: "claude 2" }, /raw CLI versions must be an object/],
     [
@@ -629,7 +692,7 @@ test("drift reporting fails closed on a record it cannot read", () => {
       planned,
       records: broken({ raw: { claude: planned.claude }, score: {} }),
     }).cell_ids,
-    ["screen-pr-1990-candidate"],
+    ["screen-pr-1990-d0-candidate"],
   );
 });
 
@@ -650,13 +713,13 @@ test("a novelty judge that drifts alone still names its cell", () => {
       provider: "judge",
       planned: planned.judge,
       live: upgraded,
-      cell_ids: ["screen-pr-1995-incumbent"],
+      cell_ids: ["screen-pr-1995-d0-incumbent"],
     },
   ]);
   assert.equal(
     runtimeDriftReason(drift),
     `runtime drift: judge ${planned.judge} -> ${upgraded} ` +
-      "on screen-pr-1995-incumbent",
+      "on screen-pr-1995-d0-incumbent",
   );
 });
 
@@ -698,9 +761,141 @@ test("a combined decision names every transition across both stages", () => {
   assert.equal(
     decision.reasons[0],
     `runtime drift: claude ${planned.claude} -> ${screenClaude} ` +
-      "on screen-pr-1990-candidate; " +
+      "on screen-pr-1990-d0-candidate; " +
       `claude ${planned.claude} -> ${holdoutClaude} on ` +
       drift.providers[1].cell_ids.join(", "),
   );
   assert.equal(decision.runtime_drift.cell_ids.length, 7);
+});
+
+// The screens this lane has already read, decided again by today's rule. Each
+// case is a screen the incumbent and a candidate produced on PRs 1990, 1995 and
+// 1999 at one draw, replayed through a contract narrowed to those three
+// fixtures: the panel the counts were drawn from, and the panel whose
+// thresholds they derive.
+const RECORDED_PRS = [1990, 1995, 1999];
+const recordedContract = structuredClone(contract);
+for (const fixture of recordedContract.fixtures) {
+  fixture.grid = fixture.grid === true && RECORDED_PRS.includes(fixture.pr);
+  if (!fixture.grid) fixture.finder_reports = [];
+}
+const recordedPlan = makePlan({ contract: recordedContract });
+
+// Claim counts are equal across the arms, so no case turns on claim inflation.
+function screenArm(lane, treatment, known, p1) {
+  const ordinary = lane.fixture.scorable_ids.filter(
+    (id) => !lane.fixture.p1_ids.includes(id),
+  );
+  const matched = [
+    ...lane.fixture.p1_ids.slice(0, p1),
+    ...ordinary.slice(0, known - p1),
+  ];
+  assert.equal(matched.length, known, `PR ${lane.pr} cannot match ${known}`);
+  return {
+    ok: true,
+    campaign_id: recordedPlan.campaign_id,
+    candidate_id: recordedPlan.candidate.id,
+    stage: "screen",
+    cell_id: `${lane.lane_id}-${treatment}`,
+    pr: lane.pr,
+    treatment,
+    claims_count: 24,
+    matched_ids: matched,
+    leak: { suspected: false },
+    empty: false,
+  };
+}
+
+/** One screen, as `pr -> [incumbent known, P1, candidate known, P1]`. */
+function decideScreen(byPr) {
+  return evaluateExperimentDecision({
+    plan: recordedPlan,
+    candidateId: recordedPlan.candidate.id,
+    stage: "screen",
+    recordsByStage: {
+      screen: recordedPlan.stages.screen.lanes.flatMap((lane) => {
+        const [known, p1, candidateKnown, candidateP1] = byPr[lane.pr];
+        return [
+          screenArm(lane, "incumbent", known, p1),
+          screenArm(lane, "candidate", candidateKnown, candidateP1),
+        ];
+      }),
+    },
+  });
+}
+
+test("the recorded screens keep their verdicts under the paired rule", () => {
+  assert.deepEqual(
+    recordedPlan.stages.screen.lanes.map((lane) => lane.pr),
+    RECORDED_PRS,
+  );
+  // 15 -> 19 known, 4 -> 5 P1, per-PR nets +2, +2, 0.
+  const netGain = decideScreen({
+    1990: [3, 2, 5, 3],
+    1995: [4, 1, 6, 1],
+    1999: [8, 1, 8, 1],
+  });
+  assert.deepEqual(netGain.metrics.known, {
+    incumbent: 15,
+    candidate: 19,
+    net: 4,
+  });
+  assert.deepEqual(netGain.metrics.p1, { incumbent: 4, candidate: 5, net: 1 });
+  assert.deepEqual(
+    netGain.metrics.per_pr.map((row) => row.known.net),
+    [2, 2, 0],
+  );
+  assert.equal(netGain.status, "PROMISING");
+  // Two of the three lanes differ, so the flip distribution is four wide and
+  // one assignment reaches the observed sum. Reported, never gating.
+  assert.deepEqual(netGain.metrics.sign_flip, {
+    pairs: 3,
+    informative_pairs: 2,
+    p_value: 0.25,
+  });
+
+  // 16 -> 16: nothing moved, and no lane differs.
+  const flat = decideScreen({
+    1990: [5, 2, 5, 2],
+    1995: [5, 1, 5, 1],
+    1999: [6, 1, 6, 1],
+  });
+  assert.equal(flat.metrics.known.net, 0);
+  assert.equal(flat.status, "INCONCLUSIVE");
+  assert.deepEqual(flat.reasons, ["known net missed"]);
+  assert.equal(flat.metrics.sign_flip.informative_pairs, 0);
+
+  // 17 -> 18, P1 4 -> 4, per-PR nets +1, 0, 0: one match short of the bar.
+  const shallow = decideScreen({
+    1990: [4, 2, 5, 2],
+    1995: [5, 1, 5, 1],
+    1999: [8, 1, 8, 1],
+  });
+  assert.equal(shallow.metrics.known.net, 1);
+  assert.equal(shallow.metrics.p1.net, 0);
+  assert.equal(shallow.status, "INCONCLUSIVE");
+  assert.deepEqual(shallow.reasons, ["known net missed"]);
+
+  // 18 -> 17 known and 5 -> 4 P1: a P1 loss rejects whatever the net.
+  const rejected = decideScreen({
+    1990: [5, 3, 5, 3],
+    1995: [5, 1, 4, 0],
+    1999: [8, 1, 8, 1],
+  });
+  assert.equal(rejected.metrics.known.net, -1);
+  assert.equal(rejected.metrics.p1.net, -1);
+  // Minus one is short of the negated bar; the P1 loss rejects this screen.
+  assert.equal(rejected.status, "REJECT");
+
+  // The live grid sets its own bar, and it can only be wider than this one.
+  const live = makePlan();
+  assert.deepEqual(
+    live.policy,
+    experimentPolicy({ fixtures: experimentFixtures(contract) }),
+  );
+  assert.equal(
+    live.policy.screen.known_net_min >=
+      recordedPlan.policy.screen.known_net_min,
+    true,
+  );
 });

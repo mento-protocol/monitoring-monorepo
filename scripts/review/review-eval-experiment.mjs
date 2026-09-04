@@ -3,7 +3,6 @@
 // Small non-ledger review-skill experiment CLI. Only --run without --dry-run
 // invokes model providers.
 
-import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -26,6 +25,12 @@ import {
   validateExperimentPlan,
 } from "./review-eval-experiment-contract.mjs";
 import {
+  DEFAULT_DRAWS,
+  experimentDraws,
+  MAX_DRAWS,
+} from "./review-eval-experiment-grid.mjs";
+import {
+  providerVersion,
   recordRuntimeDrift,
   stageProbeProviders,
   stageRuntimeChange,
@@ -60,6 +65,7 @@ const OPTION_SPEC = {
   contract: { type: "string" },
   "cache-dir": { type: "string" },
   concurrency: { type: "string" },
+  draws: { type: "string" },
   "live-paired": { type: "boolean" },
   "dry-run": { type: "boolean" },
   json: { type: "boolean" },
@@ -113,6 +119,9 @@ export function parseExperimentArgs(argv) {
   if (mode !== "plan" && values["live-paired"]) {
     throw new Error("--live-paired is valid only with --plan");
   }
+  if (mode !== "plan" && values.draws !== undefined) {
+    throw new Error("--draws is valid only with --plan");
+  }
   const campaignDir =
     mode === "validate-plan" ? values["validate-plan"] : values.run;
   return {
@@ -132,6 +141,9 @@ export function parseExperimentArgs(argv) {
       values.concurrency,
       "concurrency",
       DEFAULT_CONCURRENCY,
+    ),
+    draws: experimentDraws(
+      positiveInteger(values.draws, "draws", DEFAULT_DRAWS),
     ),
     includeLivePaired: values["live-paired"] === true,
     dryRun: values["dry-run"] === true,
@@ -154,12 +166,14 @@ Plan options:
   --candidate ID=PATH       One candidate skill
   --incumbent PATH          Paired incumbent; default ${DEFAULT_SKILL_DIR}
   --out ABS_DIR             Campaign artifact directory
+  --draws N                 Paired draws per fixture, 1..${MAX_DRAWS},
+                            default ${DEFAULT_DRAWS}
   --live-paired             Plan the optional live-finder stage
 
 Run options:
   --stage STAGE             screen, holdout, or live-paired
   --cache-dir PATH          Mutable fixture cache outside the repository
-  --concurrency N           Fixture lanes, 1..3
+  --concurrency N           PR fixture trees run at once, 1..3
   --dry-run                 Print the planned lanes without a model call
 
 Shared options:
@@ -209,20 +223,6 @@ export function assertOutsideRepository(target, repoRoot, label) {
 
 export function isExperimentEntryPoint(entryPath, moduleUrl = import.meta.url) {
   return Boolean(entryPath) && moduleUrl === pathToFileURL(entryPath).href;
-}
-
-function providerVersion(name, env) {
-  const result = spawnSync(name, ["--version"], {
-    env,
-    encoding: "utf8",
-    timeout: 10_000,
-  });
-  if (result.error || result.status !== 0 || !String(result.stdout).trim()) {
-    throw new Error(
-      `${name} version probe failed: ${result.error?.message ?? result.stderr ?? `exit ${result.status}`}`,
-    );
-  }
-  return String(result.stdout).trim();
 }
 
 function writePlan(file, plan) {
@@ -292,6 +292,7 @@ async function planCampaign(options) {
       codex: providerVersion("codex", env),
     },
     includeLivePaired: options.includeLivePaired,
+    draws: options.draws,
   });
   const planFile = path.join(artifactRoot, "plan.json");
   writePlan(planFile, plan);

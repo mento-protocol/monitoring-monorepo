@@ -29,6 +29,13 @@ experiment cannot replace canonical qualification.
 
 ## Decision
 
+[ADR 0086](0086-review-eval-lane-any-grid-multi-draw.md) supersedes this
+decision on the panel: the grid is every contract fixture marked `grid: true`,
+`--draws N` repeats each fixture, and every number written below as a count —
+the fixed PR list, the three-lane panel, 12 P1 opportunities, the 24-cell
+manifest, and the promote and reject bars — is derived from the grid and the
+draws instead. Everything else here stands.
+
 ADR 0085 supersedes this decision on one point: the plan records provider CLI
 versions and each cache identity binds the live version of the provider its
 phase invokes. The bullet below that names provider CLI versions among what the
