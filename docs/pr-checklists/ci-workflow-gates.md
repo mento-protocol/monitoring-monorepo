@@ -3,7 +3,7 @@ title: CI Workflow Gates Checklist
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-01
+last_verified: 2026-09-04
 doc_type: checklist
 scope: ci/process
 review_interval_days: 90
@@ -115,11 +115,12 @@ intentionally ineligible. Update or rebase its branch, then read fresh immutable
 inputs. Treat this refusal as fail-closed admission, not a workflow failure.
 
 The audit runs every retained deterministic CI job. It runs the focused agent
-setup and package-policy contract and the focused indexer handler invariant
-contract. It does not execute the legacy local-gate Bash regression suite,
-routing-table suites, or indexer route parity suite. Ordinary CI keeps those
-legacy steps during the post-cutover canary. The audit still runs the retained
-package-script validator before dependency installation.
+setup and package-policy contract, indexer handler invariant contract, and
+dependency-cruiser root contract. Neither ordinary CI nor the audit executes
+the legacy local-gate Bash regression suite. The audit also excludes the
+routing-table suites and indexer route parity suite that ordinary CI retains
+during the post-cutover canary. The audit still runs the retained package-script
+validator before dependency installation.
 
 - [ ] Keep the dispatcher read-only. Do not forward repository or environment
       secrets. Do not use `secrets: inherit`. Called jobs still receive GitHub's
@@ -153,20 +154,22 @@ package-script validator before dependency installation.
 - [ ] Skip Codecov, UI failure artifacts, and timeline actions in audit mode.
 - [ ] Use the separate audit aggregate with no `allowed-skips`. Keep the normal
       pull request aggregate and its reviewed conditional skips unchanged.
-- [ ] Keep the exact legacy local-gate steps conditional on
-      `!inputs.no_skip_audit`. Do not exclude a retained package, policy, trust,
+- [ ] Keep the exact legacy selector steps conditional on
+      `!inputs.no_skip_audit`. Reject any reintroduction of the legacy Bash gate
+      regression suite. Do not exclude a retained package, policy, trust,
       documentation, browser, build, generation, or test command.
 - [ ] Reject package-execution path drift during the evidence window. Ordinary
       CI remains the validation path for package, dependency, and toolchain PRs.
 - [ ] Reject evidence-instrument drift during admission. Protect `ci.yml`, the
-      dispatcher, the no-skip checker and runtime parser, both focused contract
+      dispatcher, the no-skip checker and runtime parser, all focused contract
       definitions, and both protected local action trees. Do not count
       instrument-changing pull requests.
 - [ ] Keep every package-execution admission path family in the ordinary
       `controlPlane` filter. A qualifying ordinary-force-all proof must run
       every retained job to success.
-- [ ] Keep the focused setup/package-policy and indexer handler invariant
-      steps exact, unconditional, and blocking in audit mode.
+- [ ] Keep the focused setup/package-policy, indexer handler invariant, and
+      dependency-cruiser root steps exact, unconditional, and blocking in audit
+      mode.
 - [ ] Keep the audit step-skip allowlist closed. Every retained command must
       execute and remain blocking. Reject equivalent legacy entry points.
 - [ ] Keep both routing-table suite invocations outside the retained target.

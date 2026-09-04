@@ -117,28 +117,15 @@ for (const job of PIN_ORDER_JOBS) {
   });
 }
 
-test("required CI independently pins the quality-gate contract suite", () => {
-  // This assertion lives in the independently invoked Sentry CI-wiring suite,
-  // not in agent-quality-gate.test.sh. The suite under test therefore cannot
-  // remove its own CI step without this required check failing.
-  const validatorIndexes = exactRunIndexes(CI.jobs?.scripts, VALIDATOR_RUN);
+test("required CI excludes the legacy quality-gate contract suite", () => {
   const qualityGateIndexes = exactRunIndexes(
     CI.jobs?.scripts,
     QUALITY_GATE_TEST_RUN,
   );
-  assert.equal(
-    validatorIndexes.length,
-    1,
-    `the \`scripts\` job must contain exactly \`run: ${VALIDATOR_RUN}\``,
-  );
-  assert.equal(
-    qualityGateIndexes.length,
-    1,
-    `the \`scripts\` job must contain exactly \`run: ${QUALITY_GATE_TEST_RUN}\``,
-  );
-  assert.ok(
-    validatorIndexes[0] < qualityGateIndexes[0],
-    `the \`scripts\` job must run \`${VALIDATOR_RUN}\` before \`${QUALITY_GATE_TEST_RUN}\``,
+  assert.deepEqual(
+    qualityGateIndexes,
+    [],
+    `the \`scripts\` job must not run the optional legacy suite \`${QUALITY_GATE_TEST_RUN}\``,
   );
 
   const sentinelNeeds = Array.isArray(CI.jobs?.ci?.needs)

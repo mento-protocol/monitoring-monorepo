@@ -3,7 +3,7 @@ title: PR Operating Card
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-03
+last_verified: 2026-09-04
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -122,7 +122,11 @@ If root `package.json` changed, first run
    result in the PR's `## Validation` section as `passed`, `failed`, or
    `not run: <reason>`.
    A failed author check blocks the ready handoff and cannot be relabeled.
-   Record an unavailable tool as `not run`. Required CI remains merge authority and owns routine coverage and Knip, broad dependency and supply-chain audits, full-browser suites, and legacy-gate self-tests. A table row or triggered checklist can require a focused policy or configuration check.
+   Record an unavailable tool as `not run`. Required CI remains merge authority
+   and owns routine coverage and Knip, broad dependency and supply-chain audits,
+   and full-browser suites. The optional legacy diagnostic and its self-tests
+   are outside required CI during M6 observation. A table row or triggered
+   checklist can require a focused policy or configuration check.
 
    Apply only the rows affected by a material fix before publishing the new
    head. Before a base integration, pin the fetched base as `base_oid` and the

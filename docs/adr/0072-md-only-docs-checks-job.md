@@ -3,7 +3,7 @@ title: The Markdown globs route to a small docs-checks CI job instead of the scr
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-27
+last_verified: 2026-09-04
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -13,8 +13,13 @@ garden_lane: adrs-architecture
 
 # ADR 0072 — the Markdown globs route to `docs-checks`, not the long-running `scripts` job
 
-**Status:** Accepted (Aug 2026), in force.
+**Status:** Accepted (Aug 2026), amended 2026-09-04, in force.
 **Scope:** ci/process
+
+The 2026-09-04 M6 amendment removed `agent:quality-gate:test` from required CI.
+The `docs-checks` split and its `gate:routing-table:test` coverage remain in
+force. References below to keeping the legacy gate suite in `scripts` describe
+the original decision and no longer define current CI behavior.
 
 ## Context
 
