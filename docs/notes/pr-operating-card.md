@@ -36,9 +36,10 @@ target, or a failed identity lookup before the agent executes repository code.
 Fetch the base only after its repository and remote are bound. Keep these
 values as the authority for author checks and publication, and re-read them
 before each publication mutation in step 5. Before step 1, inspect resolved-base
-and working-tree changes, including untracked files, for package manifests,
-package-manager configuration, lockfiles, and patches. Review lifecycle and
-install effects before any package-manager command, including the claim command.
+and working-tree changes, including untracked files, for `.node-version`, package
+manifests, package-manager configuration, lockfiles, and patches. Review
+lifecycle and install effects before any package-manager command, including the
+claim command.
 If root `package.json` changed, first run
 `node scripts/check-agent-quality-gate-package-scripts.mjs`.
 
@@ -575,8 +576,9 @@ These bind regardless of which step you are on:
   beyond the repair, or using this path for anything the control was correctly
   refusing, is the thing this rule exists to prevent.
 
-- **Inspect package-script, package-manager, lockfile, and patch changes before
-  any package-manager command.** Record the applicable author-check results.
+- **Inspect `.node-version`, package-script, package-manager, lockfile, and patch
+  changes before any package-manager command.** Record the applicable
+  author-check results.
   Never treat a failed or unavailable command as a pass.
 - **Secrets are IaC-owned and Terraform apply needs human approval** — plan
   first, never one-off `gh secret set` / `vercel env add` /

@@ -154,10 +154,11 @@ apart from litter.
 
 Every checkout runs `./scripts/setup.sh`. Before resuming one, inspect
 `git status --short`, committed, staged, unstaged, and untracked changes. Review
-lifecycle and install effects for any manifest, lockfile, pnpm configuration,
-or patch change before setup. Stop if the change set is unclear. Before fresh
-setup, fetch and run `git switch --detach origin/main`. Setup prepares the staged
-formatter, dependencies, codegen, and browser tools; markers skip unchanged work.
+lifecycle and install effects for any `.node-version`, package manifest,
+lockfile, pnpm configuration, or patch change before setup. Stop if the change
+set is unclear. Before fresh setup, fetch and run
+`git switch --detach origin/main`. Setup prepares the staged formatter,
+dependencies, codegen, and browser tools; markers skip unchanged work.
 
 The split exists because subagents cannot wait across turns. A subagent that
 ends its turn while an author check is running stalls permanently. Nothing

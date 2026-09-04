@@ -12,7 +12,7 @@
     "**Forensic drafts stay local.** Use the `forensic-report` skill"
   ],
   "docs/notes/pr-operating-card.md": [
-    "inspect resolved-base and working-tree changes, including untracked files, for package manifests, package-manager configuration, lockfiles, and patches. Review lifecycle and install effects before any package-manager command, including the claim command.",
+    "inspect resolved-base and working-tree changes, including untracked files, for `.node-version`, package manifests, package-manager configuration, lockfiles, and patches. Review lifecycle and install effects before any package-manager command, including the claim command.",
     "If root `package.json` changed, first run `node scripts/check-agent-quality-gate-package-scripts.mjs`.",
     "**Run the repository preflight first.** Automatic setup can finish before agent control under a [separate trust boundary](worktree-and-web-setup.md); this preflight does not attest it.",
     "With no PR, bind the intended base before author checks. Use `main` only after confirming the work is not stacked; stop and ask if unclear.",
@@ -47,7 +47,7 @@
     "| Root tooling, control plane, standalone service, or alert delivery/rule input | Run the focused existing contract named by the nearest scoped `AGENTS.md`. Do not add a root selector. For `alerts/rules/**`, run `pnpm alerts:rules:lint`. For `alerts/infra/onchain-event-listeners/**` or `alerts/infra/channels/**`, run the alerts-onchain-event-handler package lint, typecheck, and test. For its Safe ABI, event-hash generator, or event-hash output, run its `build:event-hashes` script and inspect the generated JSON diff. Run `node --check` on each surviving changed `governance-watchdog/infra/quicknode-filter-functions/*.js` file. |",
     "Record each applicable result in the PR's `## Validation` section as `passed`, `failed`, or `not run: <reason>`.",
     "Pre-push starts no repository check, fetch, lock, or wait.",
-    "**Inspect package-script, package-manager, lockfile, and patch changes before any package-manager command.**"
+    "**Inspect `.node-version`, package-script, package-manager, lockfile, and patch changes before any package-manager command.**"
   ],
   "docs/notes/worktree-and-web-setup.md": [
     "Disable automatic setup before checking out an untrusted, fork, or cross-repository head."
