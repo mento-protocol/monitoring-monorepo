@@ -76,13 +76,14 @@ Widening a routing glob is separable from the move it protects, and doing it
 first means the move cannot be the commit that goes quiet.
 
 Because `*` matches `/`, the pair reaches a `deploy-*.sh` basename under any
-`scripts/` subdirectory rather than one fixed directory. That is deliberate on
-both arms: `collectDeployWrappers()` in `check-deploy-root-anchors.test.mjs`
-walks `scripts/` recursively, so routing pinned to a single directory would once
-again be narrower than the check it schedules. The one live path it newly
-reaches is `scripts/lib/deploy-guard.sh`, the guard every wrapper sources before
-it mutates anything, which is precisely when both the check and the Cloud Run
-checklist should run. Both suites pin it. One consequence for later edits: a
+`scripts/` subdirectory rather than one fixed directory. That was deliberate on
+both arms and still is on the surviving one: `collectDeployWrappers()` in
+`check-deploy-root-anchors.test.mjs` walks `scripts/` recursively, so routing
+pinned to a single directory would once again be narrower than the check it
+schedules. The one live path it newly reaches is `scripts/lib/deploy-guard.sh`,
+the guard every wrapper sources before it mutates anything, which is precisely
+when the root-anchor check should run. `agent-quality-gate.test.sh` pins it; the
+Cloud Run checklist that pinned it from the other side went with the wrapper. One consequence for later edits: a
 `case` takes the first matching arm, so a new arm for a path of the shape
 `scripts/<dir>/deploy-*.sh` goes ABOVE the pair or it never runs.
 

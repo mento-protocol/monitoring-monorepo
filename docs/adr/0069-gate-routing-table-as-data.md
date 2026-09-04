@@ -350,10 +350,12 @@ Six pins land with the table:
 2. Routing arms and CI steps make the equality test run in both drift
    directions: `scripts/gate/routing-table/*.mjs` schedules its suite and —
    because of pin 1 — the gate self-test; the gate's own arm schedules the
-   routing-table suite; and the required `ci` job runs it too. A core-only edit
-   schedules both gate suites, and the indexer job runs the focused parity test.
+   routing-table suite; and the required `ci` job runs it too. The indexer job
+   runs the focused parity test. A core-only edit scheduled both gate suites
+   until [ADR 0086](0086-autoreview-removal-thin-two-model-review.md) deleted the core.
 3. `turbo.json` inputs, beside the two existing gate entries in all three tasks,
-   include both the table directory and its external core source.
+   include the table directory. Its external core source had an entry beside it
+   until [ADR 0086](0086-autoreview-removal-thin-two-model-review.md) deleted that file.
 4. Import-time schema validation and the pairing lint, failing closed.
 5. The `scripts/AGENTS.md` pin registry, which ADR 0064 requires for any new pin.
 6. ADR 0064's sweep-checklist item 9, so a `scripts/` move updates the data as
