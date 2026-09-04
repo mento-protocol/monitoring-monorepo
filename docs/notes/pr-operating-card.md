@@ -147,8 +147,9 @@ If root `package.json` changed, first run
    `## Validation` at step 5. **Every pass in this step and in step 6 reads
    this one baseline.** A later pass never re-freezes, because a per-pass
    baseline sees only its own delta and hides cumulative growth. After each
-   review-driven fix round, recount non-test changed lines against the same
-   merge base. When the count approaches twice the baseline, stop and report
+   review-driven fix round, recount the branch's own non-test changed lines
+   against the current merge base, so a later base integration adds nothing
+   to the count. When the count approaches twice the baseline, stop and report
    the growth to the user before the next round; the user decides whether to
    continue, split, or cut. Then, for a non-trivial completed batch, run the
    closeout review.

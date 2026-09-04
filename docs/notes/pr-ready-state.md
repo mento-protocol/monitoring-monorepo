@@ -488,7 +488,9 @@ Field expectations:
    `Won't fix: <technical reason why>`; never resolve a thread before replying.
 2. Read the scope baseline the operating card's step 4 froze before the first
    review pass (request, target/owner, changed files, merge-base SHA, non-test
-   changed-line count). Do not re-freeze it here. Batch review fixes locally,
+   changed-line count). Do not re-freeze it here. When no baseline was
+   recorded, as on a babysit-only entry to a PR opened elsewhere, freeze one
+   from the PR's opening head and say so. Batch review fixes locally,
    auditing sibling surfaces before pushing. Classify additions as in-scope,
    follow-up, or stop; open an issue labeled per
    [`agent-issue-workflow.md`](agent-issue-workflow.md) before deferring valid
