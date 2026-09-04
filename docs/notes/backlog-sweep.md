@@ -634,6 +634,8 @@ it is the same click the `agent-ready` promotion already needs.
   `needs-grooming` beside an `agent-active` a claim added a moment earlier. The
   pass proposes the state instead — `needs-grooming` for an unlabeled candidate,
   never `agent-ready` — and an operator or a mutex-owning helper applies it.
+  `issue:groom` takes that mutex for the routing labels below and refuses state
+  labels outright.
 
   Promotion to `agent-ready` was never the pass's to make: it is the human
   judgement that an issue is implementable as written. When the body already
@@ -654,11 +656,74 @@ the comment cannot be posted, write no label for that issue and record the
 failure. When a label write then fails, post one follow-up comment naming the
 label that did not land; the marker stays, so the window still holds.
 
-Label writes go through `gh issue edit --add-label`. No issue-board helper
-offers a routing-label write: `issue:claim`, `issue:review`, and `issue:release`
-move state labels and Project ownership fields only. The pass writes no Project
-field, and it never touches the state label of an owned issue — one carrying
-`agent-active` or `in-pr` belongs to a live claim.
+Label writes go through `pnpm issue:groom`, one call per issue:
+
+```bash
+pnpm issue:groom --issue <n> --add-label pkg:tooling,kind:workflow
+```
+
+The helper holds the ADR 0082 per-issue mutex, re-reads the issue's live labels
+inside the serialized section, and applies them only when the set the write
+would produce still fails the sweep predicate. The snapshot check above is the
+pass's own rule; this read is what makes it hold against a state label that
+lands between the two. Two more cases are refused before anything is written.
+The same read refuses an issue a live claim already owns. A routing label the
+repository does not define is refused before the mutex is taken at all, because
+`gh issue edit` fails on an unknown label only after the write is attempted,
+where a failure strands the lock. It re-reads once more after the
+write and removes exactly the labels it added when they completed eligibility. A
+label that did not complete it stays: removing a correct `kind:*` would leave
+the issue eligible anyway and lose the label. When that read does not show the
+labels it just wrote, the helper proves nothing: it holds the mutex for an
+operator rather than reporting success. The helper writes no state label and no
+Project field:
+`issue:claim`, `issue:review`, and `issue:release` own queue state and
+ownership. Never write routing labels with raw `gh issue edit` — that call takes
+no mutex, so its no-widening check is computed from a snapshot the write cannot
+re-check.
+
+Exit codes say what happened, and the pass records each against the issue:
+
+|  Exit | Meaning                                                                                                                |
+| ----: | ---------------------------------------------------------------------------------------------------------------------- |
+|     0 | The labels were applied.                                                                                               |
+|     3 | A requested label is a queue-state label, is not a routing label, or is not one the repo defines. Nothing was written. |
+|     4 | The resulting label set would satisfy the sweep predicate. Nothing was written.                                        |
+|     5 | The write landed, left the issue sweep-eligible, and was removed again.                                                |
+|     6 | The removal left the issue sweep-eligible. The mutex is held.                                                          |
+|     7 | A concurrent write left the issue sweep-eligible. This call did not cause it.                                          |
+|     8 | A live claim owns the issue (`agent-active` or `in-pr`). Nothing was written.                                          |
+|     9 | The confirming read did not show the labels this call wrote. The mutex is held.                                        |
+| other | The outcome is unknown and the mutex may still be held.                                                                |
+
+Exit 3, 4, 5, and 8 all end with the labels this call tried to add still off the
+issue — a requested label that was already on the issue before this call is
+untouched and stays, exit code notwithstanding — and the marker comment already
+lists the full requested set in its `applied` field. Post one follow-up comment
+naming only the labels that did not land, the one the marker rule above already
+requires for a failed write. Record the exit 4, exit 5, and exit 8 labels as
+proposed in the run report. Exit 3 refuses the label itself before the mutex and
+before any write, so record those labels as refused and keep them out of
+`proposed`. Never amend the marker: the skip key reads `applied`, so a label left
+there that is not on the issue re-grooms the issue next run with no record of
+why. Exit 8 also means the issue left the pass's reach: a claim owns it now, so
+leave its labels to the session that owns it.
+
+Exit 6, exit 7, exit 9, and any other nonzero exit go to the operator. Exit 6
+holds the per-issue mutex until an operator clears it, and names the labels to
+remove by hand when they are still on the issue, or the label set that still
+satisfies the predicate when they are not. Exit 7 reports an issue a concurrent
+write made sweep-eligible; this call's labels did not cause it and are correct,
+so the helper keeps them. Exit 9 reports a write the confirming read did not
+show: the call cannot say whether its own labels are on the issue, so the mutex
+stays held until a person reads it. Any other nonzero exit means the outcome is
+unknown and the mutex may still be held, so report the message verbatim. Move to
+the next candidate in every case, and never retry the write.
+
+The pass never touches the state label of an owned issue — one carrying
+`agent-active` or `in-pr` belongs to a live claim. `issue:groom` holds that rule
+from inside the mutex and refuses an owned issue with exit 8, so a claim landing
+after the roster snapshot cannot be groomed over.
 
 ### The marker comment
 

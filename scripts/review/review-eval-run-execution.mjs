@@ -7,6 +7,15 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { defaultRunGit } from "./review-eval-fixtures.mjs";
+// The parser and the envelope live in a dependency-free module of their own:
+// the orchestrator's sealed source snapshot carries that file and the cell
+// writer loads its parser out of the snapshot, not out of the live checkout.
+import {
+  claudeStreamEnvelope,
+  parseClaudeStream,
+  SESSION_TEXT_BUDGET_CHARS,
+  sessionText,
+} from "./review-eval-stream.mjs";
 
 const CLAUDE_MAX_TURNS = 80;
 const CLAUDE_TOOLS = [
@@ -184,8 +193,15 @@ export function claudeArgv({
     effort,
     "--setting-sources",
     "",
+    // The stream, not the single-shot envelope. `--output-format json` reports
+    // only the last assistant message in its `result` field, so a reviewer that
+    // files its report, runs one more tool call and then posts a short addendum
+    // is scored on the addendum alone. `claudeStreamEnvelope()` rebuilds the
+    // envelope the rest of the harness reads from the session.
+    // `--verbose` is what the CLI requires beside `stream-json` under `-p`.
     "--output-format",
-    "json",
+    "stream-json",
+    "--verbose",
     "--permission-mode",
     "bypassPermissions",
     // `--allowed-tools` grants permission but does not limit which built-in
@@ -202,6 +218,15 @@ export function claudeArgv({
   ];
 }
 
+// The stream parser and the session envelope are re-exported so every existing
+// importer of this module keeps its import path.
+export {
+  claudeStreamEnvelope,
+  parseClaudeStream,
+  sessionText,
+  SESSION_TEXT_BUDGET_CHARS,
+};
+
 export function claudeExec({
   prompt,
   model,
@@ -210,6 +235,12 @@ export function claudeExec({
   allowedTools = CLAUDE_TOOLS,
   maxTurns = CLAUDE_MAX_TURNS,
   env = scrubbedEnv(),
+  // Every caller of this function is a judge: the scoring pass, the calibration
+  // replays, and the experiment lane's extract, match and novelty calls. A
+  // judge's answer is its final message, so its envelope keeps final-message
+  // `result` semantics. Contestant cells run through their own lane and ask for
+  // the whole session.
+  resultText = "final",
 }) {
   const args = claudeArgv({ prompt, model, effort, allowedTools, maxTurns });
   return new Promise((resolve, reject) => {
@@ -229,7 +260,9 @@ export function claudeExec({
       else resolve(value);
     };
     // The same wall clock `spawnSync` enforced, and the same output ceiling: a
-    // judge that never returns must fail its cell, not hold the run open.
+    // judge that never returns must fail its cell, not hold the run open. The
+    // ceiling now bounds the whole event stream rather than one envelope, so it
+    // covers the tool results the session streamed as well.
     const timer = setTimeout(() => {
       child.kill("SIGKILL");
       finish(new Error(`claude did not finish within ${EXEC_TIMEOUT_MS} ms`));
@@ -254,7 +287,16 @@ export function claudeExec({
     });
     child.on("close", (code, signal) => {
       if (code === 0) {
-        finish(null, stdout);
+        try {
+          finish(
+            null,
+            JSON.stringify(
+              claudeStreamEnvelope(stdout, { label: "claude", resultText }),
+            ),
+          );
+        } catch (error) {
+          finish(error);
+        }
         return;
       }
       finish(

@@ -101,20 +101,23 @@ Setup POSTs to `https://api.osv.dev/v1/querybatch` to prove osv-scanner egress.
 Set `CODEX_CLOUD_CHECK_OSV_EGRESS=false` only when that check is intentionally
 unavailable and the resulting quality-gate limitation is accepted.
 
-## Autoreview helper
+## Legacy autoreview helper
 
 The default helper is `scripts/agent-autoreview.mjs`. Set `AUTOREVIEW_HELPER`
 only for an intentional compatible executable override. The helper and
 prepared-bundle trust contracts live in
 [`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md); do not
-duplicate them here.
+duplicate them here. Setup retains this compatibility check until issue #2128
+removes or reclassifies the old runtime. Normal closeout review uses
+`pnpm agent:closeout-review --base <base-remote>/<baseRefName>` and the
+`review`-skill verifier flow in operating-card step 4.
 
 ## Maintenance contract
 
 Maintenance runs after a cached container checks out the task branch. It skips
 apt and tool installation, then re-establishes Git/origin state, refreshes
-`origin/main`, enables repo hooks, activates pnpm, verifies the autoreview
-helper, syncs the branch lockfile with:
+`origin/main`, enables repo hooks, activates pnpm, verifies the retained legacy
+autoreview helper, syncs the branch lockfile with:
 
 ```bash
 CI=true pnpm install --frozen-lockfile --prefer-offline

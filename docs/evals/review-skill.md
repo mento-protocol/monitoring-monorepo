@@ -85,6 +85,29 @@ committed booleans, so no model is ever re-invoked to compare two months. A
 condition's dollars are its contestant cells alone; what the judges cost is
 recorded once per row as `scoring_usd`, and the report prints both.
 
+A cell is scored on its session, not on its last message alone. The CLI's
+single-shot envelope carries only the last one, so a reviewer that filed its
+report, ran one more tool call and then posted a short addendum was scored on
+the addendum. Each lane captures the session stream instead and rebuilds the
+transcript from the assistant messages, in order, joined by a blank line.
+
+Capture is budgeted, and the budget is the judges'. The claim splitter reads the
+first 40 000 characters of a transcript and the match judge the first 30 000, so
+a session long enough to push its report past those cuts was judged on the notes
+that came before it. The transcript therefore starts at the final message and
+adds whole earlier messages, newest first, while the total fits in 30 000
+characters — the smaller of the two limits, defined once in
+`review-eval-stream.mjs` and read by the scorer, so capture and judging cannot
+drift apart. The final message is never dropped and never split: one that
+exceeds the budget alone is kept whole and the scorer truncates it as before. A
+cell records `assistant_messages` and `assistant_messages_kept`, so a trimmed
+session is visible after the fact. A sub-agent's own messages stay out: they are
+the reviewer's internal delegation, not the report it filed. Judge calls keep
+last-message semantics, because a judge's answer is its final message. Scoring
+the session also means an interim note the reviewer later retracted, when it
+fits the budget, is extracted as a claim like any other: a move in
+`wrong_claims` after this change can come from that, not from the skill.
+
 A condition counts a PR as zero-finding only when every draw that completed
 for that PR emitted no parseable claim. One empty draw beside a productive one
 is sampling variance, not a condition that found nothing.
@@ -185,15 +208,24 @@ complete owner record atomically. A process also claims a stale lock before it
 removes the lock, so two starters cannot both reclaim one killed run. The runner
 creates one private directory under the checkout's physical git directory. It
 copies and sources `run-eval-source-snapshot.sh` from that directory first. The
-helper copies the wrapper and the other two sourced helpers, creates a PID-bound
-random owner marker, seals the directory, and restarts the wrapper. The
+helper copies the wrapper, the other two sourced helpers, and the two node
+modules the cell path loads — `review-eval-cell-writer.mjs` and the
+dependency-free `review-eval-stream.mjs` it imports — creates a PID-bound
+random owner marker, seals the directory, and restarts the wrapper. Those two
+module names are exact pins in both `ORCHESTRATOR_FILES`
+(`review-eval-run-plan.mjs`) and `run-eval-source-snapshot.sh`: the
+orchestrator digest hashes them and the snapshot copies them, so a move
+updates both lists in the same PR. The
 restarted process accepts only that sealed, non-symlink direct child. The
 read-only directory and files prevent in-place writes and entry replacement
-before a later helper source. Cleanup unlinks only the four fixed source files
+before a later helper source. Cleanup unlinks only the six fixed source files
 and the authenticated marker, then removes the empty directory. Every later
-helper stage uses the same snapshot. Before a paid cell starts, the snapshot
-helper recomputes the framed source digest and requires the persistent plan to
-record the same digest. An edit during planning makes the run stop instead of
+helper stage uses the same snapshot, and the cell writer runs from it: reading
+the stream parser out of the spec worktree instead let it change between two
+cells of one run while every cell fingerprint stayed identical. Before a paid
+cell starts, the snapshot helper recomputes the framed source digest over all
+six and requires the persistent plan to record the same digest. An edit during
+planning makes the run stop instead of
 executing bytes outside its recorded provenance. The skill
 under test is snapshotted once, before the first cell, and every cell stages
 from that snapshot: the plan records one skill
@@ -203,18 +235,23 @@ digest refuses the run instead of mixing two treatments into one row. Every
 cell writes its own resumable output directory, and a failed cell is never
 cached — a finder that exits non-zero fails its cell even when it wrote a
 partial report, because a truncated review cached is a permanent zero-recall
-score. A cached cell is reused only when its stored
+score. A contestant is bounded in bytes as well as in time: its stream runs
+under a 64 MiB file-size limit, the ceiling the node path already enforced, so a
+runaway session fails its cell instead of filling the disk and then the reader's
+heap. The cell writer is pre-flighted before the paid call, so a writer that
+cannot load costs nothing; one that fails afterwards keeps its directory and the
+stream it paid for, as `stream.jsonl` and `stream.err`, and the cell re-runs.
+A cached cell is reused only when its stored
 fingerprint — skill digest, kind, contract digest, the two CLI versions, the
 finder argv digest and the orchestrator digest — matches the current run. The
-one cache-compatibility rule accepts the recorded pre-split orchestrator digest
-only when the current digest is the exact reviewed four-source split with
-the sealed source-snapshot provenance guard. It requires one complete,
-historically valid legacy treatment pair: `installed` with `dirty: false`, or a
-normalized absolute candidate path with `dirty: true`. Raw-cell reuse stays
-keyed to the recorded skill bytes. The tests reconstruct the pre-split
-bytes from the extracted payloads and exercise the stable-source behavior of the
-final wrapper. An edit to the wrapper or any of the three helpers changes the
-current digest and disables this rule. The
+one cache-compatibility rule that once accepted the recorded pre-split
+orchestrator digest is closed: the stream-capture change moved the wrapper's
+digest, and a cell cached under the old runtime recorded only the reviewer's
+final message, so folding it into a run that scores whole sessions would mix
+two capture regimes in one row. The audited transition pair stays in
+`review-eval-run-cell.mjs` as the record of what was permitted, and the tests
+assert the path is closed. The 24 pre-split cells re-run under the current
+runtime. The
 scorer preserves that fingerprint and a separate installed-or-candidate
 treatment identity in every result and in `calibration.json`. Local validation
 and CI check both records against the plan. Changing only the row and plan
@@ -330,8 +367,8 @@ merges. After it succeeds, use the normal `ship` workflow. Stage only
 `docs/evals/review-skill-ledger.jsonl` and the selected detail directory. Give
 the workflow `$PR_BODY` as the PR description. The scoped `.gitignore` rule
 keeps each run's `cells/` resume cache, raw model transcripts, and tool output
-out of Git and autoreview bundles. Scored `result-*.json` evidence remains in
-the detail directory above `cells/` and stays eligible for the commit. There is
+out of Git and out of any review input. Scored `result-*.json` evidence remains
+in the detail directory above `cells/` and stays eligible for the commit. There is
 no auto-merge. A human reads the report and approves.
 
 A run that fails publishes the same way. Its `status: failed` row is already in
@@ -436,9 +473,52 @@ The plan binds these inputs:
   and prompt digests.
 - Incumbent and candidate skill digests.
 - Finder, verifier, control, and judge model and effort settings.
-- Claude and Codex CLI versions, scorer identity, and the five-module experiment
-  harness digest.
+- Scorer identity and the six-module experiment harness digest.
 - Stage lanes, treatment order, and the canonical rerun manifest.
+
+The plan records the Claude and Codex CLI versions instead of binding them.
+`--validate-plan` and `--run` rebuild the plan from its recorded versions, so a
+stored plan stays valid after a provider upgrade, and they probe the live
+versions separately. A live difference is a warning: `--validate-plan` reports
+`cli_version_drift` and stays `ok`, and `--run` writes one line to stderr.
+
+Cell identity follows the canonical lane exactly. Every cache identity carries
+the live version of each provider its own phase invokes — the contestant CLI for
+a raw cell, the finder CLI as well on a `live-paired` lane, the judge CLI for a
+score or novelty cell that calls the judge. A phase that reaches its answer
+without a provider records the empty set instead: an empty reviewer transcript
+is scored with no judge call, and a cell with no claim is classified with none,
+so a judge upgrade neither reruns those cells nor is charged with their drift.
+A cache entry whose phase invokes a changed provider is never found, so that
+cell reruns and no phase mixes runtimes; a completed stage result and an entry
+independent of the changed provider are still reused. Each artifact stores the
+versions it ran under, and a later phase rebuilds an earlier artifact's identity
+from the record's stored versions, so a judge upgraded between a screen and its
+holdout still loads the screen scores, and a stage retried after a failure
+reports the runtime that produced each artifact rather than the runtime of the
+retry. The stage decision names every transition with the cells it touched,
+screen cells included once a holdout decision folds them in, so a flip on a
+straddling pair reads as a possible runtime change rather than a skill change.
+Every cell of one stage is keyed on the versions `--run` probes when that stage
+starts, immediately before its first arm, not on the versions probed when the
+campaign loaded: a provider that ships between the two would otherwise key the
+cells on a version no cell ran under. The load-time probe reports plan drift and
+nothing else. A CLI that auto-updates while the stage runs leaves the cells that
+ran after the update keyed on the earlier version; `--run` re-probes after the
+arms and after novelty, and a change between those probes is written to stderr
+and named in the decision and the stage payload as
+`runtime_change_during_stage`, keyed by the stage that saw it, for the stage as
+a whole and never per cell. A holdout decision reads the screen records, so it
+carries the screen's recorded change beside its own. Each re-probe reads only
+the providers that stage can invoke: every stage runs the contestant and the
+judge through the Claude CLI, and only a `live-paired` stage spawns Codex, so a
+Codex release during a frozen-report stage is not reported as a change no cell
+could have used.
+
+What the canonical lane keeps free of the two versions is its ledger
+comparability key, not its cell fingerprint. `claude` and `codex` ship far more
+often than the suite runs, so keying the ledger on them would start a fresh
+lineage at every upgrade.
 
 The screen uses the first frozen report for PRs 1990, 1995, and 1999. It runs
 six verifier arms. Each fixture lane runs the two arms sequentially in its
@@ -628,21 +708,21 @@ would recompute its verdict against a truth index and thresholds the run never
 saw. The default selection is the newest row of this contract, and `--row` on an
 older one is refused; pass `--contract` with the archived contract to read it.
 
-| drift vector      | control                                                                                                      |
-| ----------------- | ------------------------------------------------------------------------------------------------------------ |
-| fixture content   | eval tags plus a tree-hash check in `build-fixture.sh`, whose bytes are in `scorerDigest()`                  |
-| truth content     | committed verbatim, per-file `sha256`, never re-derived from the API                                         |
-| scorable set      | explicit frozen id list in the contract                                                                      |
-| run prompts       | frozen files with `sha256` in the contract                                                                   |
-| scoring pipeline  | `scorerDigest()` over the scorer, run, result-shape, ledger, report and fixture files and every judge prompt |
-| judge model       | model id and CLI version in the row, plus 40 calibration pairs every run                                     |
-| calibration set   | its `sha256` is bound into `comparability_key`                                                               |
-| reviewed model    | isolated by the `control` condition; model id and CLI version recorded                                       |
-| skill text        | `skill_digest` over every file in the skill directory, symlinks refused — this is the treatment              |
-| finder command    | `argv` pinned in the contract; `finder_argv_digest` records what a cell spawned                              |
-| orchestrator      | length-framed digest over the wrapper and three helpers: in the key and every cell fingerprint               |
-| machine and shell | host, CLI versions, `--setting-sources ""`, clean worktree of `origin/main`                                  |
-| CLI upgrade       | versions in every cell fingerprint; a pair across one is labelled in the verdict, not in the key             |
+| drift vector      | control                                                                                                                                |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| fixture content   | eval tags plus a tree-hash check in `build-fixture.sh`, whose bytes are in `scorerDigest()`                                            |
+| truth content     | committed verbatim, per-file `sha256`, never re-derived from the API                                                                   |
+| scorable set      | explicit frozen id list in the contract                                                                                                |
+| run prompts       | frozen files with `sha256` in the contract                                                                                             |
+| scoring pipeline  | `scorerDigest()` over the scorer, run, result-shape, ledger, report and fixture files and every judge prompt                           |
+| judge model       | model id and CLI version in the row, plus 40 calibration pairs every run                                                               |
+| calibration set   | its `sha256` is bound into `comparability_key`                                                                                         |
+| reviewed model    | isolated by the `control` condition; model id and CLI version recorded                                                                 |
+| skill text        | `skill_digest` over every file in the skill directory, symlinks refused — this is the treatment                                        |
+| finder command    | `argv` pinned in the contract; `finder_argv_digest` records what a cell spawned                                                        |
+| orchestrator      | length-framed digest over the wrapper, its three helpers, the cell writer and the stream parser: in the key and every cell fingerprint |
+| machine and shell | host, CLI versions, `--setting-sources ""`, clean worktree of `origin/main`                                                            |
+| CLI upgrade       | versions in every cell fingerprint; a pair across one is labelled in the verdict, not in the key                                       |
 
 **Judge calibration runs before every scoring pass.** Forty frozen
 `(claim, defect, verdict)` pairs replay through the current judge. Agreement
@@ -748,6 +828,17 @@ not evidence that the configuration still works. The ledger is. If
 unverified: a failed run leaves a `kind: "full"` trace row, and that row
 records that the harness tried, not that the pairing still scores.
 
+Two paired screens run on 2026-09-02 asked whether adding the repo's own local
+review adapter to that pairing found anything the pairing missed. Over PRs
+1990, 1995 and 1999, the incumbent flow and the flow carrying the extra pass
+scored 14 against 14 and 13 against 13 of 22 known defects, and 5 against 5 and
+4 against 4 of the P1 subset. The adapter's own pass returned 1, 0 and 1
+findings, none of them new; on PR 1995 it reported the patch correct while five
+known defects went unfound. On this evidence issue 2239 drops that adapter from
+the operating flow: the two-model operating point above is what carries the
+recall. The adapter and its runtime are still in the tree at this commit; a
+later change in that issue's stack deletes them.
+
 ## What this evaluation cannot tell you
 
 - **The sample is small and will stay small.** Thirty-four defects, six PRs,
@@ -796,6 +887,8 @@ path must exist on `main` before the first run after the moving commit.
 | `scripts/review/review-eval-run-cell.mjs`                   | cell identity, cache reuse, and leak signals             |
 | `scripts/review/review-eval-run-score.mjs`                  | cell scoring, condition folds, rows, and freshness plans |
 | `scripts/review/review-eval-score.mjs`                      | scorer logic and scoring-module digest ownership         |
+| `scripts/review/review-eval-stream.mjs`                     | dependency-free stream parser, session budget, envelope  |
+| `scripts/review/review-eval-cell-writer.mjs`                | one finished contestant stream to one cell result        |
 | `scripts/review/review-eval-plan-evidence.mjs`              | plan, result, and calibration evidence checks            |
 | `scripts/review/review-eval-run-evidence.mjs`               | matrix completeness and evidence reuse checks            |
 | `scripts/review/review-eval-appended.mjs`                   | appended-row evidence revalidation                       |

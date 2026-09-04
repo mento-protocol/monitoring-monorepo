@@ -17,7 +17,7 @@ live in [`SPEC.md`](SPEC.md).
 
 ## Operating Rule (read this before opening PRs)
 
-The full claim → implement → author checks → autoreview → ship → babysit → ready-state →
+The full claim → implement → author checks → review → ship → babysit → ready-state →
 merge loop, plus production closeout when required, is one card:
 [`docs/notes/pr-operating-card.md`](docs/notes/pr-operating-card.md). Read it
 first; open the authority docs it names only when a step needs their depth.

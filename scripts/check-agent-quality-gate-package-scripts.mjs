@@ -43,12 +43,16 @@ const expectedScripts = {
     "node scripts/workflows/check-ci-contract.mjs && node scripts/workflows/check-no-skip-audit.mjs && node --test scripts/workflows/check-ci-contract.test.mjs scripts/workflows/check-no-skip-audit.test.mjs scripts/workflows/check-pr-validation-boundary.test.mjs scripts/workflows/check-workflow-permissions-drift.test.mjs",
   "adr:check": "node scripts/pr/check-adr-reminder.mjs",
   "adr:check:test": "node scripts/pr/check-adr-reminder.test.mjs",
+  "agent:closeout-review": "node scripts/pr/closeout-review.mjs",
+  "agent:closeout-review:test":
+    "node --test scripts/pr/closeout-review.test.mjs",
   "agent:autoreview": "./scripts/agent-autoreview.sh",
   "agent:autoreview:test":
     "AUTOREVIEW_TEST_FOCUS=suite bash scripts/agent-autoreview.test.sh",
   "issue:board": "node scripts/pr/agent-issue-board.mjs",
   "issue:board:test": "node scripts/pr/agent-issue-board.test.mjs",
   "issue:claim": "node scripts/pr/agent-issue-board.mjs claim",
+  "issue:groom": "node scripts/pr/agent-issue-board.mjs groom",
   "issue:review": "node scripts/pr/agent-issue-board.mjs review",
   "issue:release": "node scripts/pr/agent-issue-board.mjs release",
   "sentry:ingest": "node scripts/sentry/triage/sentry-triage-ingest.mjs",

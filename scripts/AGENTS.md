@@ -16,7 +16,7 @@ Read the relevant [ADR](../docs/adr/README.md) before changing script behavior.
 
 ## Scope
 
-`scripts/` holds deploy, maintenance, gate, and code-health tools.
+`scripts/` holds repository tools.
 
 ## Layout
 
@@ -42,19 +42,18 @@ subdirectories.
 `redrive-onchain-deadletter.{mjs,test.mjs}` stays flat under
 `alerts/infra/`; ADR 0064 gives the lint reason.
 
-`lib/` holds cores multiple clusters read: `hcl.mjs` (Terraform HCL),
+`lib/` holds shared cores: `hcl.mjs` (Terraform HCL),
 `workflow-yaml.mjs` (Actions and shell parsing), `pnpm-override-selector.mjs`
 (pnpm overrides), and `gh-issue-lifecycle.mjs` (GitHub issue and label
-mechanics), which doc schedulers also read. Local projection keeps only
-`agent-ready` on create and all lifecycle labels on closed repair. ADR 0064
-lists readers.
+mechanics). Doc schedulers also read the last one. Local projection keeps only
+`agent-ready` on create and all lifecycle labels on closed repair. ADR 0064 lists
+readers.
 `peg-policy-digest.mjs` defines the peg version-digest contract for both
 validators. Inventories, pinned hashes, and identities stay with their domain.
 
 ## Why Files Stay Flat
 
-Move all 15 pin classes with their files; keep `agent-autoreview.sh`
-feedback-runtime pins.
+Move each pin class with its files. Keep `agent-autoreview.sh` feedback pins.
 
 - **Autoreview pins.** `agent-autoreview.sh` pins runtime,
   sealed `agent-autoreview-secret-suppressions.json` (ADR 0079),
@@ -71,9 +70,10 @@ feedback-runtime pins.
   `deploy/deploy-indexer-verify{,-analysis}{,.test}.mjs` and
   `deploy/deploy-indexer-verify-status-identity.mjs` share an any-depth arm;
   both run. `pr/agent-issue-board{,.test}.mjs` and
-  `pr/issue-board-{backfill,cli,commands,lock,ownership,projects,release,state,sync,sync-lock,transactions,transport}.mjs`
-  route `pnpm issue:board:test`; CI reruns it after failures (ADR 0082
-  confinement).
+  `pr/issue-board-{backfill,cli,commands,groom,lock,ownership,projects,release,state,sync{,-lock},transactions,transport}.mjs`
+  route `pnpm issue:board:test`; CI reruns failures (ADR 0082).
+  `pr/closeout-review{,-exec,-git,.test}.mjs` route
+  `pnpm agent:closeout-review:test`.
   `repo-health/check-guardrail-prose{,.test}.mjs` and
   `repo-health/guardrail-prose.json` route the guardrail suite. `ci.yml`,
   quick-commands, and the manifest pin it (ADR 0073).
@@ -93,10 +93,9 @@ feedback-runtime pins.
   `gate/mapping/engine.test.mjs` (scanned roots);
   `gate/mapping/post-passes.mjs` schedules `code-health:deps` itself.
 - **Review-eval pins.** The runbook tracks `scripts/review/run-eval*.sh`,
-  `install-review-eval-launchd*`, the launchd plist, and
-  `review-eval-*publication*` with their tests. Its file table,
-  `review:eval:experiment`, and ADR 0083 pin
-  `scripts/review/review-eval-experiment*.mjs`.
+  `install-review-eval-launchd*`, `review-eval-*publication*`, and the
+  sealed cell modules in `ORCHESTRATOR_FILES`. Its file table and ADR 0083
+  pin `scripts/review/review-eval-experiment*.mjs`.
 - **Navigation-eval pin.** `forbidden_sources` in
   `docs/evals/documentation-navigation-fixtures.json` names its source.
 - **Verification evidence.** `.gitattributes` pins
@@ -131,7 +130,7 @@ feedback-runtime pins.
   EOL; `UPSTASH_MCP_LAUNCHER_SHA256` hashes it. Moves change both. See
   [`docs/notes/upstash-mcp-operator.md`](../docs/notes/upstash-mcp-operator.md).
 
-**List new `scripts/` path pins here.** Unlisted pins break silently.
+**List every new `scripts/` path pin here.**
 
 ## Sweep Checklist for a Move
 

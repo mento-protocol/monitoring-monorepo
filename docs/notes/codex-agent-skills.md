@@ -44,22 +44,19 @@ logs when a personal server may contain credential-bearing arguments; inspect
 only redacted structural fields such as server name, enabled state, and
 transport presence.
 
-## Autoreview routing
+## Closeout review routing
 
-`autoreview` is pinned through `scripts/agent-autoreview.mjs` and exposed as
-`pnpm agent:autoreview`; Claude Code's `/autoreview` command is a thin shim. The
-command reviews the complete branch-local target. Oversized targets use a
-lossless prepared-bundle index that one fresh-context reviewer must inspect in
-full.
+The closeout review is `scripts/pr/closeout-review.mjs`, exposed as
+`pnpm agent:closeout-review`. It execs `codex exec review` over the branch diff
+under a read-only sandbox and writes the report to a gitignored file.
 
-The target-selection, engine-isolation, sensitive-input, runtime-trust,
-prepared-bundle, and runtime-changing-PR contracts live in
-[`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md). Keep that
-note as their single owner instead of copying implementation details here.
-Autoreview is source review only. The direct author checks selected by step 3
-of the [PR operating card](pr-operating-card.md), browser checks,
-generated-artifact checks, runtime verification, and final PR readiness remain
-separate.
+[`pr-operating-card.md`](pr-operating-card.md) step 4 owns the flow: when to run
+it, how to hand the report to the `review` skill, and what to do in a Claude
+cloud session with no `codex` on PATH or inside an active Codex session, where
+nested `codex exec` is unavailable. Keep that step as the single owner instead
+of copying the contract here. The closeout is source review only: direct author
+checks, browser checks, generated-artifact checks, runtime verification, and
+final PR readiness remain separate.
 
 ## Claude global-store shadowing
 
@@ -138,7 +135,7 @@ and maintenance behavior live in
 The repo-local `ship` and `babysit-pr` skills under `.agents/skills/` have exact
 `.claude/skills/` mirrors. They preserve the familiar workflow names while
 backing behavior with the repo-visible PR operating card and commands such as
-`pnpm agent:autoreview` and `pnpm pr:ready-state`.
+`pnpm agent:closeout-review` and `pnpm pr:ready-state`.
 
 The `doc-garden` skill uses the same exact-mirror contract. It turns a generated
 bounded packet into evidence-backed dispositions, guarded semantic edits,
@@ -157,7 +154,8 @@ from a receipt, claims each issue by number, and hands each to its own worker
 that ships a ready-for-review PR. Which surface runs those workers is the
 runtime's to decide — Codex uses whatever parallel-execution surface it
 provides. With none, the session works the batch sequentially and takes both
-roles itself: the orchestrator's no-edit, no-gate, no-ship prohibitions exist to
+roles itself: the orchestrator's no-edit, no-author-check, no-ship
+prohibitions exist to
 keep concurrent workers out of each other's trees, so they do not bind when
 there is exactly one actor. The isolated checkout per issue, the duties, and the
 report contract hold either way. It never merges. It stops at READY and prints

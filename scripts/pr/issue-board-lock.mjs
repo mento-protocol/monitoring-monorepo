@@ -43,6 +43,7 @@ const OWNER_FIELDS_BY_OPERATION = Object.freeze({
     OPTIONAL_PROJECT_FIELDS.branch,
     OPTIONAL_PROJECT_FIELDS.claimedAt,
   ]),
+  groom: Object.freeze([]),
   sync: Object.freeze([]),
 });
 

@@ -503,12 +503,15 @@ Field expectations:
    Use the resolved PR base, not a fixed `origin/main`, for every diff-based
    author check, including stacked PRs.
 4. For non-trivial behavioral, workflow, security, data-flow, or UI batches,
-   run `pnpm agent:autoreview` as a structured source-review closeout at the
-   batch boundary rather than as an inner loop. Verify accepted findings before
-   editing and rerun applicable author checks plus autoreview if those fixes
-   change the batch. The exact target, prepared-bundle, isolation, and trust contracts live
-   in [`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md);
-   keep behavioral and runtime verification in the validation record.
+   run `pnpm agent:closeout-review --base
+<base-remote>/<baseRefName>` as a structured source-review closeout against
+   the preflight-bound base. Run it at the batch boundary rather than as an
+   inner loop. Verify accepted findings
+   before editing and rerun applicable direct author checks plus the closeout if those fixes
+   change the batch. The handoff to the `review` skill, the base resolution, and
+   the no-`codex` branch live in
+   [`pr-operating-card.md`](pr-operating-card.md) step 4; keep behavioral and
+   runtime verification in the validation record.
 5. Run the suggested invocation pair above: `pnpm --silent pr:feedback-state`
    for the feedback sweep, then, once its ledger is clean, `pnpm pr:ready-state`
    for the final required-readiness decision. Add `--watch --compact

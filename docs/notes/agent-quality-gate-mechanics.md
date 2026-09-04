@@ -37,6 +37,9 @@ pnpm agent:quality-gate --run    # execute the safe local mapped commands
 The local-only diagnostic never deploys or applies Terraform. Run it only when
 the retained mapping is useful for diagnosis. It is not an author checkpoint.
 
+Normal closeout review uses `pnpm agent:closeout-review`. It is owned by
+[`pr-operating-card.md`](pr-operating-card.md) step 4, not by this runbook.
+
 The package command executes `./scripts/agent-quality-gate.sh` directly. This
 preserves the script's Bash `-p` startup boundary; it does not
 grant operating-system privileges. The prologue clears the remaining inherited
@@ -47,11 +50,8 @@ The checked-in Claude permission grants approval-free execution only for
 `./scripts/agent-quality-gate.sh`. It does not grant the `pnpm` package alias
 because the active branch controls that alias before the gate can validate it.
 
-`pnpm agent:autoreview` reviews source only. `pnpm agent:autoreview:test` runs
-all families with at most three workers and bounded progress/timings, which the
-mapped gate preserves. `-- --jobs 1` changes only scheduling. CI uses that mode
-on `ubuntu-latest` for runtime or fixture changes; required `ci` demands success
-when selected.
+`pnpm agent:closeout-review` reviews source only. The applicable direct author
+checks still own tests, browser checks, and generated-artifact checks.
 
 Background `--run` gates and `git push`: a 600s foreground kill writes no
 freshness stamp, so the next run cannot use `--skip-if-fresh`. Each run appends
@@ -192,9 +192,10 @@ edit limited to root tooling scripts such as `scripts.agent:quality-gate`,
 `scripts.agent:prewarm:test`, `scripts.agent:review-materiality`,
 `scripts.agent:review-materiality:test`, `scripts.agent:context-check`,
 `scripts.agent:context-budget`, `scripts.agent:context-budget:test`,
+`scripts.agent:closeout-review`, `scripts.agent:closeout-review:test`,
 `scripts.agent:autoreview`, `scripts.agent:autoreview:test`, `scripts.issue:board`,
-`scripts.issue:board:test`, `scripts.issue:claim`, `scripts.issue:review`,
-`scripts.issue:release`, every `scripts.sentry:*` entry (the runners and their
+`scripts.issue:board:test`, `scripts.issue:claim`, `scripts.issue:groom`,
+`scripts.issue:review`, `scripts.issue:release`, every `scripts.sentry:*` entry (the runners and their
 `:test` suites), `scripts.docs:index`, `scripts.docs:index:test`,
 `scripts.docs:audit`, `scripts.docs:audit:test`, `scripts.docs:garden`,
 `scripts.docs:garden:test`, `scripts.docs:navigation-eval`,
@@ -709,7 +710,7 @@ procedure below.
   `deploy/deploy-indexer-verify{,-analysis}{,.test}.mjs` and
   `deploy/deploy-indexer-verify-status-identity.mjs` use one any-depth arm;
   both verifier tests run. The exact `pr/agent-issue-board{,.test}.mjs`,
-  `pr/issue-board-{backfill,cli,commands,projects,state,sync,transport}.mjs`,
+  `pr/issue-board-{backfill,cli,commands,groom,projects,state,sync,transport}.mjs`,
   and `pr/issue-board-{lock,ownership,release,sync-lock,transactions}.mjs` set
   routes to `pnpm issue:board:test`. Required CI runs it after failures. ADR
   0082 owns confinement. Exact
@@ -721,7 +722,11 @@ procedure below.
   The exact
   `sentry/broker/mapped-command-process-identity.mjs` bridge routes
   `pnpm sentry:broker:test`. It keeps the probe's local import on the same
-  canonical helper that the workflow stages.
+  canonical helper that the workflow stages. The exact
+  `pr/closeout-review{,-exec,-git,.test}.mjs` set routes
+  `node --test scripts/pr/closeout-review.test.mjs`; root `package.json`,
+  `check-agent-quality-gate-package-scripts.mjs`, and `gate/mapping/facts.mjs`
+  name both `agent:closeout-review` aliases.
 - **Gate runtime pins.** Before `cd`, `agent-quality-gate.sh` resolves
   `gate/run-handles.sh`, coordinator files,
   `gate/darwin-broker-launch-preflight.mjs`,
@@ -2591,8 +2596,14 @@ workers. Browser tests and size-limit can rewrite `next-env.d.ts`. Use
 same-machine spare workers only for read-only work. Run concurrent validation
 outside the coordinator only on another machine. Complete normal direct checks
 before an optional diagnostic. For a non-trivial batch, freeze the card's scope
-baseline and run autoreview after the applicable direct checks. After accepted
-fixes, rerun the affected direct checks and autoreview.
+baseline and run the closeout review after the applicable direct checks. After
+accepted fixes, rerun the affected direct checks and the closeout. Card step 4
+owns that flow.
+
+Superseded from here to the end of the autoreview material:
+[`pr-operating-card.md`](pr-operating-card.md) step 4 owns the closeout review.
+Everything below that describes `agent-autoreview` is machinery the removal PR
+retires — read it as history, not instruction.
 
 **Stage timing and capture deadlines.** The wrapper and helper append
 best-effort stage JSONL to `.tmp/agent-autoreview/durations.jsonl`; override
@@ -2803,6 +2814,10 @@ refreshes both pins before another adapter call.
 
 ### The two review axes
 
+Superseded: [`pr-operating-card.md`](pr-operating-card.md) step 4 owns the
+closeout review. The autoreview sections below describe machinery the removal
+PR retires; read them as history, not instruction.
+
 A conflict repair is reviewed against **two** axes, because either alone can miss a
 regression the other catches. Pin both inputs as immutable commit IDs before merging:
 `base_oid` for the fetched base and `premerge_oid` for the published PR head as it stood
@@ -2981,7 +2996,7 @@ The command reports `trivial`, `standard`, or `full` materiality from changed
 path risk and diff size, plus whether the change likely needs AGENTS, README,
 runbook, checklist, or skill context updates. It is advisory and does not
 replace the applicable author checks from step 3 of the
-[PR operating card](pr-operating-card.md), `pnpm agent:autoreview`, or
+[PR operating card](pr-operating-card.md), `pnpm agent:closeout-review`, or
 `pnpm pr:ready-state`.
 
 To warm Turbo's local cache for the Turbo-backed package tasks mapped by the

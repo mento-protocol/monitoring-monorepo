@@ -28,7 +28,7 @@ bootstrap; setup has a separate [trust boundary](../../../docs/notes/worktree-an
 | Decision                                                       | Authority                                                                                   |
 | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
 | Author-check triggers and result records                       | [`pr-operating-card.md`](../../../docs/notes/pr-operating-card.md#the-loop)                 |
-| Autoreview engine, bundle preparation and verification         | [`agent-quality-gate-mechanics.md`](../../../docs/notes/agent-quality-gate-mechanics.md)    |
+| Closeout review and the handoff to the `review` skill          | [`pr-operating-card.md`](../../../docs/notes/pr-operating-card.md) step 4                   |
 | Readiness and feedback projections                             | [`pr-ready-state.md`](../../../docs/notes/pr-ready-state.md)                                |
 | Surface detection, gh capability gate, gh→MCP mapping          | [`github-tooling-surfaces.md`](../../../docs/notes/github-tooling-surfaces.md)              |
 | UI browser verification and the `## Visual comparison` section | [`dashboard-verification.md`](../../../docs/notes/dashboard-verification.md)                |
@@ -47,12 +47,17 @@ bootstrap; setup has a separate [trust boundary](../../../docs/notes/worktree-an
   result in `## Validation`. Reapply affected rows after a material fix, base
   integration, or formatter change during commit. Pre-push runs no repository
   verification.
-  Then run the closeout review for non-trivial behavioural, workflow, security,
-  data-flow, infrastructure, or UI changes. **Which closeout depends on the surface**, and a bare
-  `pnpm agent:autoreview` is not always it: inside an active Codex session that
-  silently selects the local deterministic engine, so the prepared-bundle
-  fresh-context flow is required instead. Card step 4 owns the choice — follow
-  it rather than the bare command.
+  Then run `pnpm agent:closeout-review --base <base-remote>/<baseRefName>` for
+  non-trivial behavioural, workflow, security, data-flow, infrastructure, or UI
+  changes. Use the base that preflight bound, and hand the printed report path
+  to the `review` skill. Exit 1 means the report carries
+  findings. Exit 2 means the closeout failed and there is no usable review: the
+  target moved, codex failed or timed out, the report came back empty, or the
+  tool never started. Block on a 2 and report the reason the script printed.
+  With no `codex` on PATH, skip the script and run the `review` skill alone.
+  Disclose that single-source coverage in `## Validation`. Inside an active
+  Codex session, run the closeout from a Claude session or an operator shell.
+  Card step 4 owns the flow.
 - **PRs open ready for review.** Drafts suppress the automated AI reviews this
   workflow depends on.
 - **`scripts/pr/check-pr-description.mjs` enforces `## The Problem` then

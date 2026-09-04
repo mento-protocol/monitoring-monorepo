@@ -113,18 +113,20 @@ Also configure the optional maintenance script for cached container resumes:
 
 These scripts perform the frozen install, Envio codegen, agent-context checks,
 and cached-container maintenance. Codex Cloud does not inherit a developer's
-local `~/.agents` directory, so the repo vendors its required autoreview helper.
-The helper trust boundary, prepared-bundle workflow, external-runtime procedure,
-and fail-closed checks live in
-[`docs/notes/agent-quality-gate-mechanics.md`](./docs/notes/agent-quality-gate-mechanics.md).
-Autoreview remains source review. Apply the direct author checks in step 3 of
-the [PR operating card](./docs/notes/pr-operating-card.md), plus applicable
-browser or runtime verification.
+local `~/.agents` directory. The setup scripts still verify the repo-vendored
+legacy autoreview helper until issue #2128 removes or reclassifies it. That
+setup check is not the normal review entry point. Apply the direct author
+checks in step 3 of the
+[PR operating card](./docs/notes/pr-operating-card.md). Then use
+`pnpm agent:closeout-review --base <base-remote>/<baseRefName>` and the
+`review`-skill verifier flow from card step 4. Keep applicable browser and
+runtime verification separate.
 
 The maintenance path runs after Codex checks out the task branch in a cached
-container; it refreshes `origin/main`, verifies the autoreview helper, syncs
-branch lockfile changes with `pnpm install --frozen-lockfile --prefer-offline`,
-reruns Envio codegen, and validates the agent context.
+container; it refreshes `origin/main`, verifies the retained legacy autoreview
+helper, syncs branch lockfile changes with
+`pnpm install --frozen-lockfile --prefer-offline`, reruns Envio codegen, and
+validates the agent context.
 
 If you install manually, verify the dashboard can resolve its Sentry package
 after `pnpm install`:

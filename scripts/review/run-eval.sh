@@ -90,6 +90,7 @@ cleanup_source_snapshot_bootstrap() {
   if [[ $RUN_EVAL_BOOTSTRAP_SOURCE_OWNED -eq 1 ]]; then
     chmod 0700 "$RUN_EVAL_SOURCE_SNAPSHOT" >/dev/null 2>&1 || true
     rm -f -- "$RUN_EVAL_SOURCE_SNAPSHOT"/run-eval{,-source-snapshot,-lifecycle,-runtime}.sh
+    rm -f -- "$RUN_EVAL_SOURCE_SNAPSHOT"/review-eval-{cell-writer,stream}.mjs
     if [[ $RUN_EVAL_SOURCE_NONCE =~ ^[[:alnum:]]{12}$ ]]; then
       rm -f -- "$RUN_EVAL_SOURCE_SNAPSHOT/.review-eval-owner.$RUN_EVAL_SOURCE_NONCE"
     fi

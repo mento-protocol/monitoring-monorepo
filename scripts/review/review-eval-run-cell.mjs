@@ -12,6 +12,14 @@ const MIN_VERBATIM_TITLE_WORDS = 6;
 // paid work starts. Permit only that audited transition so the 24 paid cells
 // cached before the refactor remain reusable. The current digest binds the
 // wrapper and all three helpers. Any later edit closes this compatibility path.
+//
+// CLOSED. The cell runtime now captures the whole `stream-json` session instead
+// of the CLI's last-message envelope, so `run-eval-runtime.sh` moved and the
+// digest below is no longer any live orchestrator's. That is the right outcome
+// rather than a stale pin: a cell cached under the old runtime recorded only the
+// reviewer's final message, and folding one into a run that records whole
+// sessions would mix two capture regimes inside one row. The pair stays as the
+// audit record of the transition that was permitted.
 const ORCHESTRATOR_REUSE_TRANSITIONS = new Map([
   [
     "5cdfbd0e709af2d68c193d484b724706b339ab0562d14b283f5fc38eebe9ae49",
