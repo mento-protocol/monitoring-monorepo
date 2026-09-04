@@ -207,7 +207,11 @@ test("a campaign contains exactly one candidate", () => {
   // The panel is the contract's grid, so a grid too narrow to pair is the
   // only shape planning refuses.
   const narrowed = structuredClone(contract);
-  narrowed.fixtures.find((fixture) => fixture.grid === true).grid = false;
+  for (const fixture of narrowed.fixtures
+    .filter((entry) => entry.grid)
+    .slice(2)) {
+    fixture.grid = false;
+  }
   assert.throws(
     () => makePlan({ contract: narrowed }),
     /at least 3 grid fixtures/,
@@ -749,7 +753,7 @@ test("a combined decision names every transition across both stages", () => {
     drift.providers.map((entry) => [entry.live, entry.cell_ids.length]),
     [
       [screenClaude, 1],
-      [holdoutClaude, 6],
+      [holdoutClaude, holdout.length],
     ],
   );
   const decision = evaluateExperimentDecision({
@@ -765,7 +769,7 @@ test("a combined decision names every transition across both stages", () => {
       `claude ${planned.claude} -> ${holdoutClaude} on ` +
       drift.providers[1].cell_ids.join(", "),
   );
-  assert.equal(decision.runtime_drift.cell_ids.length, 7);
+  assert.equal(decision.runtime_drift.cell_ids.length, 1 + holdout.length);
 });
 
 // The screens this lane has already read, decided again by today's rule. Each

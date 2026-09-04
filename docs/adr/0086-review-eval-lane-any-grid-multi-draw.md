@@ -55,6 +55,8 @@ informative pairs, and an exact one-sided p-value — as a non-gating diagnostic
 
 ## Evidence
 
-`review-eval-experiment-grid.mjs` derives the panel and its bars,
-`review-eval-experiment-contract.test.mjs` replays four recorded screens on the
-narrowed contract, and `review-eval-experiment-grid.test.mjs` a six-fixture grid.
+`review-eval-experiment-grid.mjs` derives the panel and its bars;
+`review-eval-experiment-novelty.mjs` holds novelty enrichment, moved out of the
+runtime for the 600-line cap of ADR 0065; `review-eval-experiment-contract.test.mjs`
+replays four recorded screens on the narrowed contract, and
+`review-eval-experiment-grid.test.mjs` a six-fixture grid.
