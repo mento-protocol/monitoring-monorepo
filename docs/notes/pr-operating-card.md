@@ -520,8 +520,8 @@ These bind regardless of which step you are on:
   `## Deferrals`. Every issue an agent files carries a state label, a `kind:*`,
   at least one `pkg:*`, and exactly one `risk:*` set by the
   [Low-risk rule](agent-issue-workflow.md#low-risk-rule). An evidence-backed
-  won't-fix is not a deferral, and it is the default for a bot finding that is
-  hypothetical, cosmetic, or would need a new mechanism to close.
+  won't-fix is not a deferral, and it is the default for any bot finding that
+  fails one or more of the three follow-up conditions above.
 - **Never weaken a control that is blocking your own work.** Do not widen,
   disable, or soften the quality gate, the sandbox or permission config, branch
   protection, or a safety-boundary rule to unblock the change you are making
