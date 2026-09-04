@@ -25,11 +25,11 @@ import {
 } from "./agent-autoreview-core.mjs";
 
 const REPO = resolve(fileURLToPath(new URL("../", import.meta.url)));
-const CONTRACT_MODULE =
-  "scripts/gate/routing-table/indexer-handler-invariant-contract.mjs";
-const FAMILIES_MODULE =
-  "scripts/gate/routing-table/indexer-handler-invariant-families.mjs";
-const read = (relative) => readFileSync(`${REPO}/${relative}`, "utf8");
+const TABLE = `${REPO}/scripts/gate/routing-table`;
+const FAMILIES_SOURCE = readFileSync(
+  `${TABLE}/indexer-handler-invariant-families.mjs`,
+  "utf8",
+);
 
 function walkFiles(directory) {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -99,14 +99,15 @@ const currentIndexerSources = walkModuleFiles(
 const currentIndexerTests = walkModuleFiles(
   `${REPO}/indexer-envio/test`,
 ).sort();
+const focusedExternalIndexerInputs = [
+  ...walkFiles(`${REPO}/indexer-envio/abis`),
+  ...walkFiles(`${REPO}/indexer-envio/config`),
+  ...focusedRootIndexerInputs,
+  ...focusedIndexerScriptTestRuntimeInputs,
+].sort();
 
 test("every focused external input has an explicit contract owner", () => {
-  const paths = [
-    ...walkFiles(`${REPO}/indexer-envio/abis`),
-    ...walkFiles(`${REPO}/indexer-envio/config`),
-    ...focusedRootIndexerInputs,
-    ...focusedIndexerScriptTestRuntimeInputs,
-  ].sort();
+  const paths = focusedExternalIndexerInputs;
   assert.equal(paths.length, 45, "focused external-input inventory changed");
   const decisions = getIndexerHandlerInvariantChecklistDecisions(paths);
   for (const decision of decisions) {
@@ -196,22 +197,16 @@ test("the live indexer module inventory keeps its routing totals", () => {
       excluded,
       `${label} excluded total`,
     );
-    for (const decision of decisions) {
-      assert.equal(
-        typeof decision.route,
-        "boolean",
-        `${label} route is boolean`,
+    for (const { path: decisionPath, route, owner } of decisions) {
+      assert.equal(typeof route, "boolean", `${label} route is boolean`);
+      assert.ok(
+        typeof owner === "string" && owner !== "",
+        `${label} owner is a non-empty string`,
       );
-      assert.equal(
-        typeof decision.owner,
-        "string",
-        `${label} owner is a string`,
-      );
-      assert.notEqual(decision.owner, "", `${label} owner is non-empty`);
       assert.notEqual(
-        decision.owner,
+        owner,
         "future-module",
-        `${label} path has an explicit current owner: ${decision.path}`,
+        `${label} path has an explicit current owner: ${decisionPath}`,
       );
     }
   }
@@ -231,91 +226,76 @@ test("the live indexer module inventory keeps its routing totals", () => {
   );
 });
 
+// Route is a property of the owner, not of the path: no owner carries both
+// dispositions. Naming the excluded owners once keeps every pin below literal
+// without repeating a boolean on all 39 rows.
+const EXCLUDED_OWNERS = new Set([
+  "abi-nonruntime-inputs",
+  "liquity-type-only",
+  "rpc-logging-only",
+  "source-excluded-type-only",
+  "test-excluded",
+  "wormhole-type-only",
+  "wormhole-warning-only",
+]);
+
 test("named indexer modules keep their exact routing owner", () => {
-  for (const [candidatePath, route, owner] of [
-    ["indexer-envio/src/swap.ts", true, "source-runtime"],
-    ["indexer-envio/src/pool/types.ts", false, "source-excluded-type-only"],
-    ["indexer-envio/src/handlers/broker.ts", true, "handler-modules"],
+  for (const [candidatePath, owner] of [
+    ["indexer-envio/src/swap.ts", "source-runtime"],
+    ["indexer-envio/src/pool/types.ts", "source-excluded-type-only"],
+    ["indexer-envio/src/handlers/broker.ts", "handler-modules"],
     [
       "indexer-envio/src/handlers/liquity/troveManagerPreloadContext.ts",
-      false,
       "liquity-type-only",
     ],
-    ["indexer-envio/src/rpc/effects.ts", true, "rpc-effects"],
-    ["indexer-envio/src/rpc/log.ts", false, "rpc-logging-only"],
-    ["indexer-envio/src/rpc/http-test-mock-bridge.ts", true, "rpc-effects"],
-    ["indexer-envio/src/rpc/http-test-mocks.ts", true, "rpc-effects"],
-    ["indexer-envio/src/pool/self-heal.ts", true, "pool-runtime"],
-    ["indexer-envio/src/bridge.ts", true, "source-runtime"],
-    ["indexer-envio/src/constants.ts", true, "source-runtime"],
-    ["indexer-envio/src/wormhole/chainIds.ts", true, "wormhole-runtime"],
-    ["indexer-envio/src/wormhole/detail.ts", true, "wormhole-runtime"],
-    [
-      "indexer-envio/src/wormhole/handlerContext.ts",
-      false,
-      "wormhole-type-only",
-    ],
-    ["indexer-envio/src/wormhole/nttAddresses.ts", true, "wormhole-runtime"],
-    ["indexer-envio/src/wormhole/pairing.ts", true, "wormhole-runtime"],
-    [
-      "indexer-envio/src/wormhole/scratchWarnings.ts",
-      false,
-      "wormhole-warning-only",
-    ],
-    ["indexer-envio/src/wormhole/status.ts", true, "wormhole-runtime"],
-    ["indexer-envio/test/bridge.test.ts", true, "invariant-tests"],
-    ["indexer-envio/test/feeTokenAllowlist.test.ts", true, "invariant-tests"],
+    ["indexer-envio/src/rpc/effects.ts", "rpc-effects"],
+    ["indexer-envio/src/rpc/log.ts", "rpc-logging-only"],
+    ["indexer-envio/src/rpc/http-test-mock-bridge.ts", "rpc-effects"],
+    ["indexer-envio/src/rpc/http-test-mocks.ts", "rpc-effects"],
+    ["indexer-envio/src/pool/self-heal.ts", "pool-runtime"],
+    ["indexer-envio/src/bridge.ts", "source-runtime"],
+    ["indexer-envio/src/constants.ts", "source-runtime"],
+    ["indexer-envio/src/wormhole/chainIds.ts", "wormhole-runtime"],
+    ["indexer-envio/src/wormhole/detail.ts", "wormhole-runtime"],
+    ["indexer-envio/src/wormhole/handlerContext.ts", "wormhole-type-only"],
+    ["indexer-envio/src/wormhole/nttAddresses.ts", "wormhole-runtime"],
+    ["indexer-envio/src/wormhole/pairing.ts", "wormhole-runtime"],
+    ["indexer-envio/src/wormhole/scratchWarnings.ts", "wormhole-warning-only"],
+    ["indexer-envio/src/wormhole/status.ts", "wormhole-runtime"],
+    ["indexer-envio/test/bridge.test.ts", "invariant-tests"],
+    ["indexer-envio/test/feeTokenAllowlist.test.ts", "invariant-tests"],
     [
       "indexer-envio/test/helpers/indexerTestHarness.ts",
-      true,
       "test-invariant-support",
     ],
-    [
-      "indexer-envio/test/hermeticGuard.test.ts",
-      true,
-      "test-invariant-support",
-    ],
-    ["indexer-envio/test/self-heal.test.ts", true, "invariant-tests"],
-    ["indexer-envio/test/startBlockInvariant.test.ts", true, "invariant-tests"],
-    ["indexer-envio/test/swap.test.ts", true, "invariant-tests"],
-    [
-      "indexer-envio/test/wormholeScratchWarnings.test.ts",
-      false,
-      "test-excluded",
-    ],
-    ["indexer-envio/abis/FPMM.json", true, "abi-runtime-inputs"],
+    ["indexer-envio/test/hermeticGuard.test.ts", "test-invariant-support"],
+    ["indexer-envio/test/self-heal.test.ts", "invariant-tests"],
+    ["indexer-envio/test/startBlockInvariant.test.ts", "invariant-tests"],
+    ["indexer-envio/test/swap.test.ts", "invariant-tests"],
+    ["indexer-envio/test/wormholeScratchWarnings.test.ts", "test-excluded"],
+    ["indexer-envio/abis/FPMM.json", "abi-runtime-inputs"],
     [
       "indexer-envio/abis/liquity/AddressesRegistry.json",
-      false,
       "abi-nonruntime-inputs",
     ],
     [
       "indexer-envio/abis/wormhole/NttDeployHelper.json",
-      false,
       "abi-nonruntime-inputs",
     ],
-    ["indexer-envio/config/fx-calendar.json", true, "config-runtime-inputs"],
-    ["indexer-envio/config.yaml", true, "root-runtime-inputs"],
-    [
-      "indexer-envio/config.multichain.mainnet.yaml",
-      true,
-      "root-runtime-inputs",
-    ],
-    ["indexer-envio/schema.graphql", true, "root-runtime-inputs"],
-    [
-      "indexer-envio/scripts/test-reserve-yield.mjs",
-      true,
-      "test-runtime-inputs",
-    ],
-    ["indexer-envio/stryker.config.mjs", true, "test-runtime-inputs"],
-    ["indexer-envio/vitest.config.ts", true, "test-runtime-inputs"],
-    ["indexer-envio/vitest.fail-closed.config.ts", true, "test-runtime-inputs"],
-    ["indexer-envio/vitest.hermetic-setup.ts", true, "test-runtime-inputs"],
-    ["indexer-envio/vitest.mutation.config.ts", true, "test-runtime-inputs"],
+    ["indexer-envio/config/fx-calendar.json", "config-runtime-inputs"],
+    ["indexer-envio/config.yaml", "root-runtime-inputs"],
+    ["indexer-envio/config.multichain.mainnet.yaml", "root-runtime-inputs"],
+    ["indexer-envio/schema.graphql", "root-runtime-inputs"],
+    ["indexer-envio/scripts/test-reserve-yield.mjs", "test-runtime-inputs"],
+    ["indexer-envio/stryker.config.mjs", "test-runtime-inputs"],
+    ["indexer-envio/vitest.config.ts", "test-runtime-inputs"],
+    ["indexer-envio/vitest.fail-closed.config.ts", "test-runtime-inputs"],
+    ["indexer-envio/vitest.hermetic-setup.ts", "test-runtime-inputs"],
+    ["indexer-envio/vitest.mutation.config.ts", "test-runtime-inputs"],
   ]) {
     assert.deepEqual(
       getIndexerHandlerInvariantChecklistDecisions([candidatePath]),
-      [{ path: candidatePath, route, owner }],
+      [{ path: candidatePath, route: !EXCLUDED_OWNERS.has(owner), owner }],
       `${candidatePath} keeps its exact routing owner`,
     );
   }
@@ -347,20 +327,8 @@ test("unowned modules fall back without inheriting a broad owner", () => {
       );
     }
   }
-  assert.deepEqual(
-    getIndexerHandlerInvariantChecklistDecisions([
-      "indexer-envio/test/documentation-catalog.test.ts",
-    ]),
-    [
-      {
-        path: "indexer-envio/test/documentation-catalog.test.ts",
-        route: false,
-        owner: "future-module",
-      },
-    ],
-    "an unowned test module does not route the handler-invariant checklist",
-  );
   for (const [candidatePath, owner] of [
+    ["indexer-envio/test/documentation-catalog.test.ts", "future-module"],
     ["indexer-envio/src/handlers/documentation-catalog.ts", "future-module"],
     ["indexer-envio/src/rpc/documentation-catalog.ts", "future-module"],
     [
@@ -469,10 +437,7 @@ test("the extracted contract answers exactly like the autoreview core", () => {
   const inventory = [
     ...currentIndexerSources,
     ...currentIndexerTests,
-    ...walkFiles(`${REPO}/indexer-envio/abis`),
-    ...walkFiles(`${REPO}/indexer-envio/config`),
-    ...focusedRootIndexerInputs,
-    ...focusedIndexerScriptTestRuntimeInputs,
+    ...focusedExternalIndexerInputs,
   ].sort();
   assert.deepEqual(
     getIndexerHandlerInvariantChecklistDecisions(inventory),
@@ -486,10 +451,16 @@ async function assertMalformedFamiliesFailImport(label, rewrite, expected) {
   const contractPath = `${directory}/indexer-handler-invariant-contract.mjs`;
   const familiesPath = `${directory}/indexer-handler-invariant-families.mjs`;
   try {
-    copyFileSync(`${REPO}/${CONTRACT_MODULE}`, contractPath);
-    const source = read(FAMILIES_MODULE);
-    const changed = rewrite(source);
-    assert.notEqual(changed, source, `${label} fixture changed no source`);
+    copyFileSync(
+      `${TABLE}/indexer-handler-invariant-contract.mjs`,
+      contractPath,
+    );
+    const changed = rewrite(FAMILIES_SOURCE);
+    assert.notEqual(
+      changed,
+      FAMILIES_SOURCE,
+      `${label} fixture changed no source`,
+    );
     writeFileSync(familiesPath, changed, "utf8");
     await assert.rejects(import(pathToFileURL(contractPath).href), expected);
   } finally {
