@@ -84,19 +84,22 @@ test("experiment CLI runs from an entry path with escaped characters", (context)
   );
 });
 
+const planArgv = [
+  "--plan",
+  "--candidate",
+  "prompt-a=/tmp/prompt-a",
+  "--out",
+  "/tmp/campaign-a",
+];
+
 test("experiment CLI plans one named candidate", () => {
-  const options = parseExperimentArgs([
-    "--plan",
-    "--candidate",
-    "prompt-a=/tmp/prompt-a",
-    "--out",
-    "/tmp/campaign-a",
-    "--live-paired",
-  ]);
+  const options = parseExperimentArgs([...planArgv, "--live-paired"]);
   assert.equal(options.mode, "plan");
   assert.equal(options.candidate, "prompt-a=/tmp/prompt-a");
   assert.equal(options.includeLivePaired, true);
   assert.equal(options.concurrency, 3);
+  assert.equal(options.draws, 1);
+  assert.equal(parseExperimentArgs([...planArgv, "--draws", "3"]).draws, 3);
 });
 
 test("experiment CLI validates and runs an existing campaign", () => {
@@ -134,6 +137,16 @@ for (const [name, argv, message] of [
     "positive concurrency",
     ["--run", "/tmp/run", "--stage", "screen", "--concurrency", "0"],
     /positive integer/,
+  ],
+  [
+    "draws range",
+    ["--plan", "--candidate", "a=/tmp/a", "--out", "/tmp/run", "--draws", "6"],
+    /draws must be an integer 1\.\.5/,
+  ],
+  [
+    "draws scope",
+    ["--run", "/tmp/run", "--stage", "screen", "--draws", "2"],
+    /valid only with --plan/,
   ],
   [
     "dry-run scope",

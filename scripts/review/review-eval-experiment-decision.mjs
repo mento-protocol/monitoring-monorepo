@@ -3,8 +3,38 @@
 import { stagePlanFor } from "./review-eval-experiment-contract.mjs";
 import { runtimeDriftReason } from "./review-eval-experiment-versions.mjs";
 
+/** Above this many non-zero differences the exact p-value is not computed. */
+const EXACT_FLIP_MAX_PAIRS = 20;
+
 function isObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * The exact one-sided sign-flip p-value over the paired differences, or null
+ * when more than `EXACT_FLIP_MAX_PAIRS` of them are non-zero. It is reported as
+ * a diagnostic: no verdict reads it.
+ *
+ * Under the null the two arms are exchangeable inside a pair, so every
+ * difference could have carried either sign. The value is the share of the
+ * 2**k flip assignments whose sum reaches the observed net, or falls to it when
+ * the net is negative. A zero difference flips to itself and cancels out of
+ * both tails, so only the non-zero differences are enumerated.
+ */
+export function signFlipPValue(differences) {
+  const informative = differences.filter((value) => value !== 0);
+  if (informative.length > EXACT_FLIP_MAX_PAIRS) return null;
+  const net = informative.reduce((sum, value) => sum + value, 0);
+  const assignments = 2 ** informative.length;
+  let tail = 0;
+  for (let mask = 0; mask < assignments; mask += 1) {
+    let sum = 0;
+    for (let index = 0; index < informative.length; index += 1) {
+      sum += (mask >> index) & 1 ? -informative[index] : informative[index];
+    }
+    if (net >= 0 ? sum >= net : sum <= net) tail += 1;
+  }
+  return tail / assignments;
 }
 function count(value) {
   return Number.isSafeInteger(value) && value >= 0;
@@ -22,6 +52,7 @@ function policyFor(plan) {
     policy?.combined?.candidate_p1_min,
     policy?.combined?.p1_net_min,
     policy?.combined?.gaining_prs_min,
+    policy?.combined?.nonnegative_prs_min,
     policy?.combined?.wrong_claim_delta_max,
     policy?.claim_inflation?.absolute_delta_min,
     policy?.claim_inflation?.ratio_min,
@@ -57,6 +88,8 @@ function plannedRecords({ plan, candidateId, stage }) {
       candidateId,
       stage,
       cell_id: `${lane.lane_id}-${treatment}`,
+      lane_id: lane.lane_id,
+      draw: lane.draw ?? 0,
       pr: lane.pr,
       treatment,
       scorableIds: lane.fixture.scorable_ids,
@@ -127,6 +160,10 @@ function validateRecord(record, wanted) {
     issues,
     usable: {
       ...record,
+      // The lane the plan owed this arm, so a draw is paired with its own twin
+      // rather than pooled with the other draws of its PR.
+      lane_id: wanted.lane_id,
+      draw: wanted.draw,
       known: record.matched_ids.length,
       p1: record.matched_ids.filter((id) => p1.has(id)).length,
     },
@@ -200,8 +237,26 @@ function invalidDecision({ candidateId, stage, issues }) {
   });
 }
 
+/**
+ * One paired difference per lane: the same frozen report, the same draw, both
+ * arms. Pairing inside the lane is what the sign-flip diagnostic rests on, and
+ * it keeps a PR whose verifier ran hot from swamping a PR whose runs were
+ * quiet.
+ */
+function pairedDifferences(records) {
+  const lanes = new Map();
+  for (const record of records) {
+    const key = `${record.stage}:${record.lane_id}`;
+    const entry = lanes.get(key) ?? { incumbent: 0, candidate: 0 };
+    entry[record.treatment] += record.known;
+    lanes.set(key, entry);
+  }
+  return [...lanes.values()].map((entry) => entry.candidate - entry.incumbent);
+}
+
 function aggregate(inspections) {
   const records = inspections.flatMap((inspection) => inspection.usable);
+  const differences = pairedDifferences(records);
   const prs = [...new Set(records.map((record) => record.pr))].sort(
     (left, right) => left - right,
   );
@@ -238,6 +293,14 @@ function aggregate(inspections) {
     nonnegative_prs: perPr.filter((row) => row.known.net >= 0).length,
     gaining_prs: perPr.filter((row) => row.known.net > 0).length,
     per_pr: perPr,
+    // Reported, never gating. A tied lane widens `pairs` without widening the
+    // flip distribution, so both counts are recorded and `informative_pairs`
+    // is what the p-value was computed over.
+    sign_flip: {
+      pairs: differences.length,
+      informative_pairs: differences.filter((value) => value !== 0).length,
+      p_value: signFlipPValue(differences),
+    },
   };
 }
 
@@ -273,24 +336,26 @@ export function claimInflationRequiresNovelty({
   };
 }
 
-function recallFailures(metrics, stage, policy) {
-  const threshold = stage === "holdout" ? policy.combined : policy.screen;
-  const checks =
-    stage === "holdout"
+/**
+ * Every bar a `PROMISING` result has to clear: the paired net, no net P1 loss,
+ * and a non-negative net on at least half the PRs, so a net that one lucky PR
+ * carried alone never promotes. The holdout adds the two combined bars.
+ */
+function recallFailures(metrics, stage, threshold) {
+  const checks = [
+    [metrics.known.net < threshold.known_net_min, "known net"],
+    [metrics.p1.net < threshold.p1_net_min, "P1 net"],
+    [
+      metrics.nonnegative_prs < threshold.nonnegative_prs_min,
+      "nonnegative PRs",
+    ],
+    ...(stage === "holdout"
       ? [
-          [metrics.known.net < threshold.known_net_min, "known net"],
           [metrics.p1.candidate < threshold.candidate_p1_min, "candidate P1"],
-          [metrics.p1.net < threshold.p1_net_min, "P1 net"],
           [metrics.gaining_prs < threshold.gaining_prs_min, "gaining PRs"],
         ]
-      : [
-          [metrics.known.net < threshold.known_net_min, "known net"],
-          [metrics.p1.net < threshold.p1_net_min, "P1 net"],
-          [
-            metrics.nonnegative_prs < threshold.nonnegative_prs_min,
-            "nonnegative PRs",
-          ],
-        ];
+      : []),
+  ];
   return checks
     .filter(([failed]) => failed)
     .map(([, label]) => `${label} missed`);
@@ -326,9 +391,13 @@ function stageDecision({
   }
 
   const metrics = aggregate(inspections);
-  const failures = recallFailures(metrics, stage, policy);
+  const threshold = stage === "holdout" ? policy.combined : policy.screen;
+  const failures = recallFailures(metrics, stage, threshold);
   if (failures.length > 0) {
-    const clearRegression = metrics.known.net <= -2 || metrics.p1.net < 0;
+    // A loss the size of the stage's own promote bar is a regression the lane
+    // calls, rather than a bar it merely missed.
+    const clearRegression =
+      metrics.known.net <= -threshold.known_net_min || metrics.p1.net < 0;
     return decision(clearRegression ? "REJECT" : "INCONCLUSIVE", {
       candidate_id: candidateId,
       stage,

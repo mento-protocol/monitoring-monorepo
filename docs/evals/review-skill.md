@@ -501,7 +501,7 @@ The plan binds these inputs:
   and prompt digests.
 - Incumbent and candidate skill digests.
 - Finder, verifier, control, and judge model and effort settings.
-- Scorer identity and the six-module experiment harness digest.
+- Scorer identity and the experiment harness digest.
 - Stage lanes, treatment order, and the canonical rerun manifest.
 
 The plan records the Claude and Codex CLI versions instead of binding them.
@@ -548,16 +548,19 @@ comparability key, not its cell fingerprint. `claude` and `codex` ship far more
 often than the suite runs, so keying the ledger on them would start a fresh
 lineage at every upgrade.
 
-The screen uses the first frozen report for PRs 1990, 1995, and 1999. It runs
-six verifier arms. Each fixture lane runs the two arms sequentially in its
-planned `AB` or `BA` order. At most three fixture lanes run at once.
+The screen reads the first frozen report of every fixture the contract marks
+`grid: true`, at least three. `--draws N` repeats each fixture 1..5 times
+(default 1) against that report, so a difference between draws is verifier
+variance and a stage costs `grid x draws x 2` arms. Each lane runs its arms in
+its planned order, draws of one PR run in sequence on its shared fixture tree,
+and up to three PRs run at once.
 
-The screen returns `PROMISING` only when the candidate has at least two net
-known matches, no net P1 loss, and a non-negative known-match delta on at least
-two PRs. A known-match net of minus two or less, any P1 net loss, an empty
-candidate arm, or a candidate hard leak returns `REJECT`. Other misses return
-`INCONCLUSIVE`. If claim inflation requires classification, more than one extra
-wrong claim also returns `REJECT`.
+Both stages decide on the paired per-lane difference in known matches, against
+bars derived from the panel. The screen returns `PROMISING` only when the net
+reaches `max(2, round(0.06 x scorable ids x draws))`, with no net P1 loss and a
+non-negative net on at least half the PRs. A net loss reaching that bar, any P1
+net loss, an empty candidate arm, a candidate hard leak, or more than one extra
+wrong claim under inflation returns `REJECT`; other misses are `INCONCLUSIVE`.
 
 Run the holdout only after a `PROMISING` screen:
 
@@ -566,13 +569,13 @@ pnpm review:eval:experiment -- --run "$experiment_root" \
   --stage holdout --json
 ```
 
-The holdout uses the complementary frozen report for each grid fixture. It adds
-six verifier arms. Its decision combines those arms with the six screen arms. A
-finalist needs at least three net known matches, at least 9 of 12 candidate P1
-matches, at least two net P1 matches, gains on at least two PRs, and no more
-than one extra wrong claim. A known-match net of minus two or less, any net P1
-loss, or more than one extra wrong claim returns `REJECT`. Other threshold
-misses return `INCONCLUSIVE`.
+The holdout uses the complementary frozen report of each grid fixture and
+combines its arms with the screen's, at `max(3, round(0.06 x scorable x draws x
+2))`. A finalist also needs `round(0.75 x P1 opportunities)` candidate P1
+matches, `max(2, round(P1 opportunities / 6))` net P1 matches, gains on half the
+PRs, and no more than one extra wrong claim; both P1 bars are zero on a grid
+with no P1 defect. Each decision reports `sign_flip` — pairs, informative pairs,
+and an exact one-sided p-value, `null` above twenty — as a non-gating diagnostic.
 
 Claim extraction and known-defect matching run first. Novel-claim
 classification runs only when claim inflation requires it or the candidate
@@ -589,8 +592,8 @@ pnpm review:eval:experiment -- --run "$experiment_root" \
 
 The live stage generates one current finder output for each grid fixture. It
 delivers the same final UTF-8 suffix of at most 30,000 bytes to both verifier
-arms. It applies the screen thresholds to its own six arms. It confirms the
-experiment only. It is not the canonical pipeline score.
+arms. It applies the screen thresholds to its own `grid x draws x 2` arms. It
+confirms the experiment only. It is not the canonical pipeline score.
 
 The artifact root must be outside the repository. Completed artifacts use these
 paths:

@@ -5,7 +5,6 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { gridFixtures, PIPELINE_DRAWS } from "./review-eval-fixtures.mjs";
 import {
   finderArgvDigest as canonicalFinderArgvDigest,
   planCells,
@@ -19,6 +18,13 @@ import {
   nonempty,
   phaseVersionsFor,
 } from "./review-eval-experiment-versions.mjs";
+import {
+  DEFAULT_DRAWS,
+  experimentDraws,
+  experimentFixtures,
+  experimentPolicy,
+  stageLanes,
+} from "./review-eval-experiment-grid.mjs";
 
 export const EXPERIMENT_SCHEMA_VERSION = 1;
 export const EXPERIMENT_NAMESPACE = "review-skill-experiments/v1";
@@ -32,36 +38,21 @@ export const EXPERIMENT_STAGES = Object.freeze([
   "holdout",
   "live-paired",
 ]);
-export const SCREEN_PRS = Object.freeze([1990, 1995, 1999]);
-export const MAX_FIXTURE_LANES = 3;
+/**
+ * Fixture trees the runner works at once, one PR each. Every draw of a PR
+ * shares that PR's tree, so this caps cost, never panel size.
+ */
+export const LANE_CONCURRENCY_MAX = 3;
 export const EXPERIMENT_SOURCE_FILES = Object.freeze([
   "scripts/review/review-eval-experiment.mjs",
   "scripts/review/review-eval-experiment-contract.mjs",
   "scripts/review/review-eval-experiment-decision.mjs",
+  "scripts/review/review-eval-experiment-grid.mjs",
   "scripts/review/review-eval-experiment-cache.mjs",
   "scripts/review/review-eval-experiment-runtime.mjs",
+  "scripts/review/review-eval-experiment-novelty.mjs",
   "scripts/review/review-eval-experiment-versions.mjs",
 ]);
-
-export const DEFAULT_EXPERIMENT_POLICY = Object.freeze({
-  screen: Object.freeze({
-    known_net_min: 2,
-    p1_net_min: 0,
-    nonnegative_prs_min: 2,
-  }),
-  combined: Object.freeze({
-    known_net_min: 3,
-    candidate_p1_min: 9,
-    p1_opportunities: 12,
-    p1_net_min: 2,
-    gaining_prs_min: 2,
-    wrong_claim_delta_max: 1,
-  }),
-  claim_inflation: Object.freeze({
-    absolute_delta_min: 3,
-    ratio_min: 1.25,
-  }),
-});
 
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const CANDIDATE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
@@ -203,77 +194,7 @@ function frozenInputs(contract) {
   return { prompts, fixtures };
 }
 
-// The experiment lane screens on its own pinned panel, so it selects those
-// fixtures out of the grid instead of requiring the grid to be exactly them: a
-// fixture added to the grid for the main eval must not silently rewrite the
-// lane's cell count or its comparability key.
-function experimentFixtures(contract) {
-  const grid = new Map(
-    gridFixtures(contract).map((entry) => [entry.pr, entry]),
-  );
-  const fixtures = SCREEN_PRS.map((pr) => grid.get(pr)).filter(Boolean);
-  if (fixtures.length !== MAX_FIXTURE_LANES) {
-    throw new Error(
-      `experiment requires grid fixtures ${SCREEN_PRS.join(", ")}`,
-    );
-  }
-  for (const fixture of fixtures) {
-    if ((fixture.finder_reports ?? []).length < 2) {
-      throw new Error(`PR ${fixture.pr} requires two frozen finder reports`);
-    }
-  }
-  const p1Opportunities = fixtures.reduce(
-    (total, fixture) => total + fixture.p1_ids.length * 2,
-    0,
-  );
-  if (p1Opportunities !== DEFAULT_EXPERIMENT_POLICY.combined.p1_opportunities) {
-    throw new Error(`experiment panel has ${p1Opportunities} P1 opportunities`);
-  }
-  return fixtures;
-}
-
-/** A is the incumbent. B is the candidate. */
-export function treatmentOrder({ fixtureIndex, candidateIndex = 0 }) {
-  if (candidateIndex !== 0) {
-    throw new Error("one-candidate campaigns use candidateIndex 0");
-  }
-  if (!Number.isSafeInteger(fixtureIndex) || fixtureIndex < 0) {
-    throw new Error("fixtureIndex must be a non-negative integer");
-  }
-  return fixtureIndex % 2 === 0 ? "AB" : "BA";
-}
-
-function laneFixture(fixture) {
-  return {
-    first_head: fixture.first_head,
-    base_sha: fixture.base_sha,
-    truth_file: fixture.truth_file,
-    truth_sha256: fixture.truth_sha256,
-    scorable_ids: [...fixture.scorable_ids],
-    p1_ids: [...fixture.p1_ids],
-  };
-}
-
-function stageSource({ stage, fixture, finderIdentity }) {
-  if (stage === "live-paired") {
-    return {
-      kind: "live-finder",
-      finder_id: `live-pr-${fixture.pr}`,
-      shared: true,
-      finder_argv_digest: finderIdentity,
-    };
-  }
-  const reportIndex = stage === "screen" ? 0 : 1;
-  const report = fixture.finder_reports[reportIndex];
-  return {
-    kind: "frozen-report",
-    report_index: reportIndex,
-    file: report.file,
-    sha256: report.sha256,
-  };
-}
-
-function stagesFor({ contract, finderIdentity, includeLivePaired }) {
+function stagesFor({ contract, finderIdentity, includeLivePaired, draws }) {
   const fixtures = experimentFixtures(contract);
   return Object.fromEntries(
     EXPERIMENT_STAGES.map((stage) => [
@@ -281,36 +202,11 @@ function stagesFor({ contract, finderIdentity, includeLivePaired }) {
       {
         stage,
         enabled: stage !== "live-paired" || includeLivePaired === true,
-        lanes: fixtures.map((fixture, fixtureIndex) => {
-          const pairedOrder = treatmentOrder({ fixtureIndex });
-          return {
-            lane_id: `${stage}-pr-${fixture.pr}`,
-            pr: fixture.pr,
-            paired_order: pairedOrder,
-            fixture: laneFixture(fixture),
-            source: stageSource({ stage, fixture, finderIdentity }),
-            sequence:
-              pairedOrder === "AB"
-                ? ["incumbent", "candidate"]
-                : ["candidate", "incumbent"],
-          };
-        }),
+        draws,
+        lanes: stageLanes({ stage, fixtures, draws, finderIdentity }),
       },
     ]),
   );
-}
-
-/**
- * The size of a canonical full rerun, derived from the contract so a wider
- * grid does not fail planning against a number calibrated for a narrower one.
- */
-export function fullRerunCellCount(contract) {
-  const fixtures = contract?.fixtures ?? [];
-  const replays = gridFixtures(contract).reduce(
-    (total, fixture) => total + (fixture.finder_reports ?? []).length,
-    0,
-  );
-  return PIPELINE_DRAWS * fixtures.length + replays + fixtures.length;
 }
 
 export function canonicalRerunManifest({
@@ -322,12 +218,12 @@ export function canonicalRerunManifest({
   cliVersions,
   treatmentId = "candidate",
 }) {
+  // The count is the contract's own: `planCells` derives it from the fixtures
+  // the contract carries, so a grid that widens does not fail planning against
+  // a number calibrated for a narrower one.
   const cells = planCells({ contract, kind: "full" });
-  const expected = fullRerunCellCount(contract);
-  if (cells.length !== expected) {
-    throw new Error(
-      `canonical full rerun must contain ${expected} cells, got ${cells.length}`,
-    );
+  if (cells.length === 0) {
+    throw new Error("canonical full rerun must contain at least one cell");
   }
   const body = {
     kind: "canonical-full-rerun",
@@ -355,8 +251,10 @@ export function buildExperimentPlan({
   cliVersions = null,
   identities = null,
   includeLivePaired = false,
+  draws = DEFAULT_DRAWS,
 }) {
   if (!isObject(contract)) throw new Error("contract is missing");
+  const drawCount = experimentDraws(draws);
   const contractIdentity = assertDigest(contractDigest, "contractDigest");
   const incumbentIdentity = treatment(incumbent, { incumbent: true });
   const candidateIdentity = treatment(oneCandidate(candidate, candidates));
@@ -367,7 +265,12 @@ export function buildExperimentPlan({
   const milliseconds = Date.parse(plannedAt);
   if (!Number.isFinite(milliseconds)) throw new Error("plannedAt is invalid");
   const planned = new Date(milliseconds).toISOString();
-  const stages = stagesFor({ contract, finderIdentity, includeLivePaired });
+  const stages = stagesFor({
+    contract,
+    finderIdentity,
+    includeLivePaired,
+    draws: drawCount,
+  });
   const seed = {
     namespace: EXPERIMENT_NAMESPACE,
     planned_at: planned,
@@ -384,6 +287,7 @@ export function buildExperimentPlan({
     canonical_verdict_eligible: false,
     experiment_statuses: [...EXPERIMENT_STATUSES],
     contract_digest: contractIdentity,
+    draws: drawCount,
     inputs: {
       scorer_digest: scorerIdentity,
       harness_source_digest: experimentSourceDigest(),
@@ -392,7 +296,10 @@ export function buildExperimentPlan({
       models,
       ...frozenInputs(contract),
     },
-    policy: structuredClone(DEFAULT_EXPERIMENT_POLICY),
+    policy: experimentPolicy({
+      fixtures: experimentFixtures(contract),
+      draws: drawCount,
+    }),
     incumbent: incumbentIdentity,
     candidate: candidateIdentity,
     stages,
@@ -477,6 +384,7 @@ export function validateExperimentPlan({
       candidate: plan.candidate,
       cliVersions: plan?.inputs?.cli_versions,
       includeLivePaired: plan.stages?.["live-paired"]?.enabled === true,
+      draws: plan.draws ?? DEFAULT_DRAWS,
     });
     const differences = planDifferences(
       stableValue(plan),
@@ -508,6 +416,13 @@ function treatmentFor(plan, name) {
 
 function withDigest(identity) {
   return { ...identity, digest: digestObject(identity) };
+}
+
+function drawIndex(value) {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new Error("cache identity draw must be a non-negative integer");
+  }
+  return value;
 }
 
 /** `phaseVersionsFor` states how a cache identity is keyed on versions. */
@@ -549,6 +464,9 @@ export function rawCacheIdentity({
     stage,
     lane_id: plannedLane.lane_id,
     pr: plannedLane.pr,
+    // Two draws of one lane read the same report through the same arm, so only
+    // the draw index keeps their cells apart in the cache.
+    draw: drawIndex(plannedLane.draw ?? 0),
     treatment: treatmentName,
     skill_digest: selectedTreatment.skill_digest,
     contract_digest: plan.contract_digest,
@@ -567,6 +485,7 @@ export function rawCacheIdentity({
 export function scoreCacheIdentity({
   plan,
   rawDigest,
+  draw = 0,
   cliVersions,
   phaseVersions = null,
 }) {
@@ -575,6 +494,7 @@ export function scoreCacheIdentity({
     namespace: EXPERIMENT_NAMESPACE,
     phase: "score",
     plan_digest: plan.plan_digest,
+    draw: drawIndex(draw),
     raw_digest: assertDigest(rawDigest, "rawDigest"),
     scorer_digest: plan.inputs.scorer_digest,
     judge: plan.inputs.models.judge,
@@ -585,6 +505,7 @@ export function scoreCacheIdentity({
 export function novelCacheIdentity({
   plan,
   scoreDigest,
+  draw = 0,
   cliVersions,
   phaseVersions = null,
 }) {
@@ -593,6 +514,7 @@ export function novelCacheIdentity({
     namespace: EXPERIMENT_NAMESPACE,
     phase: "novel",
     plan_digest: plan.plan_digest,
+    draw: drawIndex(draw),
     score_digest: assertDigest(scoreDigest, "scoreDigest"),
     scorer_digest: plan.inputs.scorer_digest,
     judge: plan.inputs.models.judge,

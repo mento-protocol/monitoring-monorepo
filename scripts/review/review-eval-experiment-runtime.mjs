@@ -12,24 +12,20 @@ import {
 } from "./review-eval-run-cell.mjs";
 import { finderArgvDigest } from "./review-eval-run-plan.mjs";
 import {
-  classifyNovel,
   extractClaims,
   matchClaims,
   scorerDigest,
 } from "./review-eval-score.mjs";
 import {
-  MAX_FIXTURE_LANES,
-  novelCacheIdentity,
+  LANE_CONCURRENCY_MAX,
   rawCacheIdentity,
   scoreCacheIdentity,
   stagePlanFor,
 } from "./review-eval-experiment-contract.mjs";
-import {
-  phaseCliVersions,
-  recordedPhaseCliVersions,
-} from "./review-eval-experiment-versions.mjs";
+import { phaseCliVersions } from "./review-eval-experiment-versions.mjs";
 import {
   assertExperimentConcurrency,
+  assertExperimentScorer,
   defaultExperimentContestantExec,
   defaultExperimentFinderExec,
   defaultExperimentPrepareFixture,
@@ -48,24 +44,17 @@ import {
   renderExperimentHandoff,
   resetExperimentFixture,
   stageExperimentSkill,
-  validateNovelExperimentPayload,
   validateRawExperimentPayload,
   validateScoreExperimentPayload,
   writeExperimentCache,
 } from "./review-eval-experiment-cache.mjs";
 
 export const parseContestantEnvelope = parseExperimentContestantEnvelope;
-
-export function assertExperimentScorer(plan, scorerDigestNow = scorerDigest) {
-  const current = scorerDigestNow();
-  if (current !== plan.inputs.scorer_digest) {
-    throw new Error(
-      `experiment plan uses scorer ${plan.inputs.scorer_digest.slice(0, 8)}; ` +
-        `the current scorer is ${current.slice(0, 8)}; re-plan before scoring`,
-    );
-  }
-  return current;
-}
+// The optional classification phase keeps its own module; both it and the
+// scorer guard are re-exported here so the runtime stays one import for its
+// callers.
+export { assertExperimentScorer } from "./review-eval-experiment-cache.mjs";
+export { enrichExperimentNovelty } from "./review-eval-experiment-novelty.mjs";
 
 async function laneSource({
   plan,
@@ -246,6 +235,7 @@ export function createExperimentArmExecutor({
     const scoreIdentity = scoreCacheIdentity({
       plan,
       rawDigest,
+      draw: lane.draw ?? 0,
       phaseVersions: scoreVersions,
     });
     let scoreEntry = readCache({
@@ -333,6 +323,7 @@ export function createExperimentArmExecutor({
       stage,
       cell_id: experimentCellId(lane, treatment),
       pr: lane.pr,
+      draw: lane.draw ?? 0,
       treatment,
       output: raw.output,
       // How much of the session `output` carries, beside the text itself.
@@ -355,6 +346,25 @@ export function createExperimentArmExecutor({
   };
 }
 
+/**
+ * The stage's lanes grouped by PR, each group in its planned order.
+ *
+ * One materialized fixture directory serves every lane of a PR: the cache is
+ * keyed on the PR and its head, not on the lane. Each cell resets that tree and
+ * stages `.skill/` inside it, so two draws of one PR running at the same time
+ * would delete each other's working tree. A group therefore runs strictly in
+ * sequence, and only whole groups — separate trees — run concurrently.
+ */
+function laneGroups(lanes) {
+  const groups = new Map();
+  for (const lane of lanes) {
+    const group = groups.get(lane.pr);
+    if (group) group.push(lane);
+    else groups.set(lane.pr, [lane]);
+  }
+  return [...groups.values()];
+}
+
 export async function runExperimentRuntimeStage({
   plan,
   stage,
@@ -362,7 +372,7 @@ export async function runExperimentRuntimeStage({
   artifactRoot,
   repoRoot,
   fixtureCacheDir,
-  concurrency = MAX_FIXTURE_LANES,
+  concurrency = LANE_CONCURRENCY_MAX,
   prepareFixture = defaultExperimentPrepareFixture,
   finderExec = defaultExperimentFinderExec,
   reset = resetFixture,
@@ -373,11 +383,10 @@ export async function runExperimentRuntimeStage({
   if (stagePlan.enabled !== true) {
     throw new Error(`experiment stage ${stage} is disabled`);
   }
-  if (
-    !Array.isArray(stagePlan.lanes) ||
-    stagePlan.lanes.length > MAX_FIXTURE_LANES
-  ) {
-    throw new Error(`experiment stage ${stage} exceeds three fixture lanes`);
+  // The lane count is the grid times the draws. Only how many PRs run at once
+  // is capped; a wider panel costs wall time, not correctness.
+  if (!Array.isArray(stagePlan.lanes) || stagePlan.lanes.length === 0) {
+    throw new Error(`experiment stage ${stage} plans no fixture lane`);
   }
   const env = armOptions.env ?? scrubbedEnv({ roots: [repoRoot] });
   const executeArm = createExperimentArmExecutor({
@@ -390,41 +399,48 @@ export async function runExperimentRuntimeStage({
     env,
     ...armOptions,
   });
-  const laneRuns = await mapExperimentLimit(
-    stagePlan.lanes,
+  const materialize = (lane) =>
+    prepareFixture({ plan, stage, contract, lane, fixtureCacheDir, repoRoot });
+  const groupRuns = await mapExperimentLimit(
+    laneGroups(stagePlan.lanes),
     concurrency,
-    async (lane) => {
-      const fixture = await prepareFixture({
-        plan,
-        stage,
-        contract,
-        lane,
-        fixtureCacheDir,
-        repoRoot,
-      });
+    async (group) => {
+      // One source per PR group. On a live-paired stage the finder runs once
+      // for the PR and every draw and both arms read that identical report, so
+      // a difference between two draws is verifier variance and never a second
+      // finder output.
       const source = await laneSource({
         plan,
         contract,
-        lane,
-        fixture,
+        lane: group[0],
+        fixture: await materialize(group[0]),
         repoRoot,
         env,
         reset,
         finderExec,
       });
-      const records = [];
-      for (const treatment of lane.sequence) {
-        records.push(await executeArm({ lane, treatment, fixture, source }));
+      const runs = [];
+      for (const lane of group) {
+        const fixture = await materialize(lane);
+        const records = [];
+        for (const treatment of lane.sequence) {
+          records.push(await executeArm({ lane, treatment, fixture, source }));
+        }
+        runs.push({
+          lane_id: lane.lane_id,
+          pr: lane.pr,
+          draw: lane.draw ?? 0,
+          paired_order: lane.paired_order,
+          sequence: [...lane.sequence],
+          records,
+        });
       }
-      return {
-        lane_id: lane.lane_id,
-        pr: lane.pr,
-        paired_order: lane.paired_order,
-        sequence: [...lane.sequence],
-        records,
-      };
+      return runs;
     },
   );
+  // Groups are built in first-appearance order and concatenated, so the lane
+  // and record order is the plan's own.
+  const laneRuns = groupRuns.flat();
   return {
     campaign_id: plan.campaign_id,
     candidate_id: plan.candidate.id,
@@ -433,165 +449,4 @@ export async function runExperimentRuntimeStage({
     lanes: laneRuns.map(({ records: _records, ...lane }) => lane),
     records: laneRuns.flatMap((lane) => lane.records),
   };
-}
-
-export async function enrichExperimentNovelty({
-  plan,
-  records,
-  contract,
-  artifactRoot,
-  repoRoot,
-  cliVersions,
-  fixtureCacheDir,
-  concurrency = MAX_FIXTURE_LANES,
-  prepareFixture = defaultExperimentPrepareFixture,
-  judgeExec = claudeExec,
-  reset = resetFixture,
-  loadTruth = defaultExperimentTruth,
-  readCache = readExperimentCache,
-  writeCache = writeExperimentCache,
-  scorerDigestNow = scorerDigest,
-  env = scrubbedEnv({ roots: [repoRoot] }),
-}) {
-  assertExperimentConcurrency(concurrency);
-  const groups = new Map();
-  for (const record of records) {
-    const lane = stagePlanFor({ plan, stage: record.stage }).lanes.find(
-      (candidate) => candidate.pr === record.pr,
-    );
-    if (!lane || record.cell_id !== experimentCellId(lane, record.treatment)) {
-      throw new Error(
-        `record ${record.cell_id} has no planned experiment lane`,
-      );
-    }
-    const key = String(record.pr);
-    if (!groups.has(key)) groups.set(key, { lane, records: [] });
-    groups.get(key).records.push({ lane, record });
-  }
-  const judge = (request) => judgeExec({ ...request, env });
-  const enrichedGroups = await mapExperimentLimit(
-    [...groups.values()],
-    concurrency,
-    async ({ lane, records: laneRecords }) => {
-      const fixture = await prepareFixture({
-        plan,
-        stage: laneRecords[0].record.stage,
-        contract,
-        lane,
-        fixtureCacheDir,
-        repoRoot,
-      });
-      const truth = await loadTruth({ repoRoot, lane, contract });
-      const enriched = [];
-      for (const { lane: recordLane, record } of laneRecords) {
-        // A record's score artifact is keyed on the versions that produced it,
-        // not on today's probe: a judge upgraded between a screen and its
-        // holdout must still find the screen scores it recorded.
-        const scoreIdentity = scoreCacheIdentity({
-          plan,
-          rawDigest: record.raw_digest,
-          phaseVersions: recordedPhaseCliVersions({ record, phase: "score" }),
-        });
-        const scoreEntry = readCache({
-          artifactRoot,
-          kind: "score",
-          identity: scoreIdentity,
-        });
-        if (
-          !scoreEntry ||
-          scoreEntry.artifact.content_digest !== record.score_digest
-        ) {
-          throw new Error(
-            `${record.cell_id} score cache differs from its record`,
-          );
-        }
-        const score = validateScoreExperimentPayload(
-          scoreEntry.payload,
-          record.raw_digest,
-          scoreIdentity.cli_versions,
-          record.cell_id,
-        );
-        // A record already enriched under an earlier runtime keeps that
-        // artifact; only a novelty verdict written now carries the live judge.
-        let identity =
-          record.cli_versions?.novel === undefined
-            ? null
-            : novelCacheIdentity({
-                plan,
-                scoreDigest: record.score_digest,
-                phaseVersions: recordedPhaseCliVersions({
-                  record,
-                  phase: "novel",
-                }),
-              });
-        let entry = identity
-          ? readCache({ artifactRoot, kind: "novel", identity })
-          : null;
-        if (!entry) {
-          // `classifyNovel` returns without a judge call when no claim has
-          // text, so such a cell records the empty provider set.
-          identity = novelCacheIdentity({
-            plan,
-            scoreDigest: record.score_digest,
-            phaseVersions: phaseCliVersions({
-              phase: "novel",
-              cliVersions,
-              invokesJudge: score.claims.some(
-                (claim) => claim.trim().length > 0,
-              ),
-            }),
-          });
-          entry = readCache({ artifactRoot, kind: "novel", identity });
-        }
-        const reused = entry !== null;
-        if (!entry) {
-          await resetExperimentFixture({
-            reset,
-            fixture,
-            lane: recordLane,
-            label: `${record.cell_id}-novel`,
-          });
-          assertExperimentScorer(plan, scorerDigestNow);
-          const verdict = await classifyNovel({
-            claims: score.claims,
-            matchedIds: score.matched_ids,
-            truthFindings: truth.findings,
-            exec: judge,
-            fixturePath: fixture.path,
-            ...experimentModel(plan, "judge"),
-          });
-          assertExperimentScorer(plan, scorerDigestNow);
-          entry = writeCache({
-            artifactRoot,
-            kind: "novel",
-            identity,
-            payload: {
-              score_digest: record.score_digest,
-              // The judge runtime that classified these claims, or the empty
-              // set when the classification needed no judge.
-              cli_versions: identity.cli_versions,
-              verdict,
-            },
-          });
-        }
-        const payload = validateNovelExperimentPayload(
-          entry.payload,
-          record.score_digest,
-          identity.cli_versions,
-          record.cell_id,
-        );
-        enriched.push({
-          ...record,
-          wrong_claims: payload.verdict.novelWrong,
-          novel_real: payload.verdict.novelReal,
-          cli_versions: { ...record.cli_versions, novel: payload.cli_versions },
-          novel_digest: entry.artifact.content_digest,
-          cache_reuse: { ...record.cache_reuse, novel: reused },
-          artifacts: { ...record.artifacts, novel: entry.file },
-        });
-      }
-      return enriched;
-    },
-  );
-  return enrichedGroups.flat();
 }
