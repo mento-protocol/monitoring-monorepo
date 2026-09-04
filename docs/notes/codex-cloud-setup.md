@@ -103,14 +103,11 @@ unavailable and the resulting quality-gate limitation is accepted.
 
 ## Legacy autoreview helper
 
-The default helper is `scripts/agent-autoreview.mjs`. Set `AUTOREVIEW_HELPER`
-only for an intentional compatible executable override. The helper and
-prepared-bundle trust contracts live in
-[`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md); do not
-duplicate them here. Setup retains this compatibility check until issue #2128
-removes or reclassifies the old runtime. Normal closeout review uses
-`pnpm agent:closeout-review --base <base-remote>/<baseRefName>` and the
-`review`-skill verifier flow in operating-card step 4.
+Setup retains `scripts/agent-autoreview.mjs` as a compatibility check until
+issue #2128. Set `AUTOREVIEW_HELPER` only for a compatible executable override.
+Its legacy trust contracts remain in
+[`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md). Normal
+delivery uses the bound closeout and verifier flow in operating-card step 4.
 
 ## Maintenance contract
 
