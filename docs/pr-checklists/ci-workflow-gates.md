@@ -118,8 +118,8 @@ The audit runs every retained deterministic CI job. It runs the focused agent
 setup and package-policy contract and the focused indexer handler invariant
 contract. It does not execute the legacy local-gate Bash regression suite,
 routing-table suites, or indexer route parity suite. Ordinary CI keeps those
-legacy steps while the mandatory local gate remains active. The audit still
-runs the retained package-script validator before dependency installation.
+legacy steps during the post-cutover canary. The audit still runs the retained
+package-script validator before dependency installation.
 
 - [ ] Keep the dispatcher read-only. Do not forward repository or environment
       secrets. Do not use `secrets: inherit`. Called jobs still receive GitHub's

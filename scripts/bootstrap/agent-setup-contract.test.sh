@@ -201,6 +201,36 @@ web_deps_marker_block="$(
 grep -q 'shared-config/scripts/build.mjs' <<< "$web_deps_marker_block" ||
   fail "scripts/bootstrap/claude-code-web-setup.sh no longer invalidates its dependency marker when the clean-build wrapper changes"
 
+# M5 keeps staged formatting and removes repository checks from pre-push.
+[[ -x .trunk/hooks/pre-commit ]] ||
+  fail ".trunk/hooks/pre-commit must remain executable"
+[[ ! -e .trunk/hooks/pre-push ]] ||
+  fail ".trunk/hooks/pre-push must stay absent after local cutover"
+sed -n '/^actions:$/,$p' .trunk/trunk.yaml |
+  sed -n '/^  enabled:$/,/^  [^[:space:]]/p' |
+  grep -Fqx -- "    - trunk-fmt-pre-commit" ||
+  fail ".trunk/trunk.yaml must keep trunk-fmt-pre-commit enabled"
+! grep -Eq -- \
+  'trunk-check-pre-push|agent-quality-gate-pre-push|git_hooks: \[pre-push\]|--pre-push' \
+  .trunk/trunk.yaml || fail ".trunk/trunk.yaml retained a pre-push marker"
+
+for hosted_setup in \
+  scripts/bootstrap/claude-code-web-setup.sh \
+  scripts/bootstrap/codex-cloud-maintenance.sh \
+  scripts/bootstrap/codex-cloud-setup.sh; do
+  grep -Fq -- "git config core.hooksPath .trunk/hooks" "$hosted_setup" ||
+    fail "$hosted_setup no longer installs the tracked pre-commit hook path"
+  ! grep -Fq -- "agent.qualityGate.cloudPrePushRequireFresh" "$hosted_setup" ||
+    fail "$hosted_setup restored hosted pre-push freshness"
+done
+! grep -Fq -- "agent.qualityGate.cloudPrePushRequireFresh" \
+  .claude/hooks/session-start.sh ||
+  fail ".claude/hooks/session-start.sh restored hosted pre-push freshness"
+! grep -Fq -- "Before every push from a server/worktree" scripts/setup.sh ||
+  fail "scripts/setup.sh restored the mandatory manual pre-push checklist"
+! grep -Eq -- '/usr/bin/xcrun|xcode-select' scripts/setup.sh ||
+  fail "scripts/setup.sh restored the optional legacy gate's Xcode prerequisite"
+
 # The pre-install validator must reject a changed trusted alias. This fixture
 # proves the validator itself fails closed without running pnpm install.
 validator_repo="$(mktemp -d)"

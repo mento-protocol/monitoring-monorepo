@@ -13,8 +13,8 @@ usage() {
   cat <<'USAGE'
 Usage: scripts/agent-quality-gate.sh [--dry-run|--run] [--base <ref>] [--head <ref>] [--changed-paths-file <file>] [--allow-package-script-changes] [--fail-fast|--keep-going] [--skip-if-fresh] [--pre-push] [--parallel <n>] [--full-local-tests]
 
-Maps changed paths to the local commands and PR checklists an agent should run
-before opening or updating a PR. Defaults to dry-run.
+Maps changed paths for the retained optional legacy diagnostic. Normal author
+checks come from the PR operating card. Defaults to dry-run.
 
 Options:
   --dry-run      Print the mapped commands/checklists without running them.
@@ -32,10 +32,10 @@ Options:
                  With --run, skip execution when the previous successful run
                  used the same base, changed paths, command plan, gate
                  implementation, validated file content, toolchain, material
-                 environment, runtime, and scheduler policy. Intended for the
-                 pre-push hook only.
-  --pre-push     Mark this invocation as the git pre-push hook. Hosted setup
-                 uses this to refuse a cold gate inside a blocking git push.
+                 environment, runtime, and scheduler policy. Intended only for
+                 retained --pre-push compatibility.
+  --pre-push     Enable retained git pre-push compatibility behavior. Normal
+                 setup does not install or invoke this path.
   --parallel <n> With --run, execute independent quality commands with up to
                  n concurrent jobs. Default: auto, capped at 4. Fail-fast mode
                  stays sequential so it still stops before starting the next
@@ -857,8 +857,8 @@ if [[ -z "$allow_package_script_changes" ]]; then
 fi
 
 # Use a repo-local scratch dir for tmpfiles so we don't depend on TMPDIR
-# being writable — pre-push hooks fork off trunk's daemon, which may carry
-# a TMPDIR that's outside a host sandbox's writable allowlist. Select and
+# being writable. Compatibility hook callers and hosted runtimes may carry a
+# TMPDIR that's outside a host sandbox's writable allowlist. Select and
 # export the effective directory before the coordinator adapter copy so the
 # default coordinator and dry-run paths use the same validated fallback.
 # Mapped subprocesses (e.g. agent-quality-gate.test.sh's bare `mktemp -d`)
@@ -986,13 +986,14 @@ success_stamp_file="$scratch_dir/last-success.stamp"
 # that lost one flaky check resume the commands that already passed instead of
 # re-executing everything. Bounded by prune_command_stamps below.
 command_stamps_file="$scratch_dir/command-stamps.tsv"
-# An exact-signature success may cover the manual-run-to-pre-push interval even
-# for the slowest mapped suites. Keep this fixed rather than environment-
-# configurable so callers cannot extend validation reuse beyond two hours.
+# An exact-signature success may cover a manual run followed by explicit
+# --pre-push compatibility, even for the slowest mapped suites. Keep this fixed
+# rather than environment-configurable so callers cannot extend validation
+# reuse beyond two hours.
 success_stamp_ttl_seconds=$((2 * 60 * 60))
-# Trunk's pre-push hook callback runs the gate without a TTY and strips most
-# env vars from the calling shell. Re-assert non-interactive markers so the
-# mapped commands (e.g. pnpm install) take the CI codepath instead of asking
+# The explicit --pre-push compatibility callback can run without a TTY and with
+# most caller environment variables removed. Re-assert non-interactive markers
+# so mapped commands (e.g. pnpm install) take the CI codepath instead of asking
 # for TTY confirmation.
 export CI="${CI:-true}"
 
@@ -6672,9 +6673,11 @@ acquire_gate_run_lock_legacy() {
         echo "Holder pid ${owner_pid:-unknown} is still alive; let it finish, then retry." >&2
       fi
       echo "Running the gate directly? --no-lock starts anyway and accepts the contention." >&2
-      # The pre-push hook passes a fixed command line and Trunk strips the
-      # environment, so neither escape hatch is reachable from a failed push.
-      echo "Pushing? Fetch the hook's base, then warm the matching stamp with 'git fetch --quiet origin main && ./scripts/agent-quality-gate.sh --run --parallel 3 --base origin/main'; the hook's --skip-if-fresh path can then exit before coordinator registration." >&2
+      if [[ "$pre_push" == "1" || "$pre_push" == "true" ]]; then
+        # The explicit compatibility invocation may use a fixed command line
+        # and a stripped environment, so it cannot add the escape hatch itself.
+        echo "Pushing through the retained compatibility path? Fetch its base, then warm the matching stamp with 'git fetch --quiet origin main && ./scripts/agent-quality-gate.sh --run --parallel 3 --base origin/main'; its --skip-if-fresh path can then exit before coordinator registration." >&2
+      fi
       # GitHub issue #1894. Every other outcome states itself on stdout — a green
       # run ends "All mapped commands passed." — but this one used to speak on
       # stderr alone, so a caller reading the gate's stdout saw the reassuring
@@ -6968,8 +6971,8 @@ fi
 #
 # Routing classification runs from the gate's own source tree, not the repo
 # under test, so a `scripts/` move must repoint this literal in the same commit.
-# Nothing in CI runs the gate for real; the gate self-test is what exercises this
-# import there, and a developer's pre-push is where a stale path bites first.
+# Required CI exercises this import through the gate self-test. A direct
+# diagnostic execution can encounter a stale path first.
 # The loader below therefore exits 3 and names the module it could not resolve,
 # instead of letting the failure read as a generic classifier fault. The verdict
 # is validated for the same reason: a classifier that answered something other
@@ -7018,7 +7021,7 @@ NODE
 if [[ "$routing_classifier_status" -ne 0 ]]; then
   if [[ "$routing_classifier_status" -eq 3 ]]; then
     echo "error: routing-sensitive path classifier could not be loaded from ${routing_classifier_path}" >&2
-    echo "       scripts/agent-quality-gate.sh imports this module at pre-push time; moving it requires repointing that path in the same commit." >&2
+    echo "       scripts/agent-quality-gate.sh imports this module during diagnostic/runtime execution; moving it requires repointing that path in the same commit." >&2
   fi
   echo "error: failed to classify routing-sensitive changed paths" >&2
   exit 2
@@ -7073,7 +7076,7 @@ mapper_path="$script_source_dir/gate/mapping.mjs"
 # read as one.
 if [[ ! -f "$mapper_path" ]]; then
   echo "error: gate mapping engine could not be loaded from ${mapper_path}" >&2
-  echo "       scripts/agent-quality-gate.sh runs this module at pre-push time; moving it requires repointing that path in the same commit." >&2
+  echo "       scripts/agent-quality-gate.sh runs this module during diagnostic/runtime execution; moving it requires repointing that path in the same commit." >&2
   exit 2
 fi
 
@@ -7511,9 +7514,9 @@ write_command_plan "$command_plan_file"
 # changed-path set comes from `git diff "$base_ref...$head_ref"`. Under tip
 # binding every advance of `origin/main` invalidated every warm stamp on the
 # machine, even when the branch's own bytes and its merge-base had not moved.
-# The pre-push hook fetches `origin main` immediately before it runs the gate,
-# so a warm-up that merely overlapped somebody else's merge paid for the whole
-# gate a second time.
+# The former pre-push hook fetched `origin main` immediately before it ran the
+# gate. A warm-up that merely overlapped somebody else's merge then paid for the
+# whole gate a second time.
 #
 # Three guards keep the narrower binding from weakening anything.
 #
@@ -7659,11 +7662,11 @@ validated_content_hash="$(validation_content_signature)"
 
 # `allow_package_script_changes` only gates the pre-run package-script refusal,
 # which is a no-op unless `package_script_risk_changed`. Fold it out of the
-# freshness stamp in the common no-risk case so a warm manual run (which may pass
-# --allow-package-script-changes defensively) produces the SAME stamp as the
-# flag-less pre-push hook — otherwise warm-then-push never skips. When package
-# risk IS present, keep the real value so an unacknowledged hook run cannot reuse
-# an acknowledged manual run.
+# freshness stamp in the common no-risk case so a warm manual run (which may
+# pass --allow-package-script-changes defensively) produces the SAME stamp as
+# an explicit --pre-push compatibility run. When package risk IS present, keep
+# the real value so an unacknowledged compatibility run cannot reuse an
+# acknowledged manual run.
 if [[ "$package_script_risk_changed" == "true" ]]; then
   stamp_allow_package_scripts="${allow_package_script_changes:-false}"
 else
@@ -7673,10 +7676,10 @@ fi
 gate_coordinator_freshness_context=""
 gate_coordinator_execution_head=""
 
-# The coordinator execution fingerprint binds HEAD. The pre-push workflow must
-# also accept a warm run made immediately before committing the same validated
-# bytes. Build a separate compatibility context from every execution-fingerprint
-# input except HEAD; stamp_line already carries base, paths, plan,
+# The coordinator execution fingerprint binds HEAD. Retained --pre-push
+# compatibility must also accept a warm run made immediately before committing
+# the same validated bytes. Build a separate compatibility context from every
+# execution-fingerprint input except HEAD; stamp_line already carries base, paths, plan,
 # implementation, content, and package-risk policy. Equality therefore means
 # that only HEAD can differ. Legacy and --no-lock runs keep the v3 stamp.
 gate_coordinator_freshness_context_hash() {
@@ -7871,6 +7874,9 @@ is_fresh_success_stamp() {
 }
 
 echo "Agent quality gate"
+echo "Retained diagnostic only."
+echo "Normal path: use /ship author checks and required CI."
+echo "Retirement requires the completed #2128 canary and separate human approval."
 echo
 echo "Base: ${base_ref}"
 echo "Head: ${head_ref}"
@@ -8028,12 +8034,7 @@ fi
 
 if [[ "$package_script_risk_changed" == true && "$allow_package_script_changes" != "1" && "$allow_package_script_changes" != "true" ]]; then
   echo "Refusing to run because package manifests, patches, or lockfile changed." >&2
-  if [[ "$(git config --bool --get agent.qualityGate.cloudPrePushRequireFresh 2>/dev/null || true)" == "true" ]]; then
-    echo "Review package scripts, lifecycle hooks, and dependency install scripts first." >&2
-    echo "For hosted warm-then-push, set 'git config agent.qualityGate.allowPackageScriptChanges true', then rerun the same direct gate command so the hook reuses that acknowledgement." >&2
-  else
-    echo "Review package scripts, lifecycle hooks, and dependency install scripts first, then re-run with --allow-package-script-changes if they are safe." >&2
-  fi
+  echo "Review package scripts, lifecycle hooks, and dependency install scripts first, then re-run with --allow-package-script-changes if they are safe." >&2
   if gate_coordinator_requested; then
     gate_coordinator_report_no_work_failure 2 "pre-execution policy" \
       "No mapped command ran in this request"
@@ -8084,9 +8085,9 @@ fi
 gate_lock_test_delay "${AGENT_QUALITY_GATE_LOCK_HELD_DELAY_SECONDS:-}"
 
 # Re-check freshness after the wait. The run we queued behind may have stamped
-# this exact fingerprint while we waited — the pre-push hook queued behind the
-# manual warm-up run is precisely that case — and re-running its work would
-# throw away the reason the hook passes --skip-if-fresh at all.
+# this exact fingerprint while we waited. An explicit --pre-push compatibility
+# run queued behind a manual warm-up is precisely that case. Re-running its work
+# would discard the reason compatibility mode accepts --skip-if-fresh.
 if ! declare -F gate_coordinator_is_active >/dev/null 2>&1 ||
   ! gate_coordinator_is_active; then
   if [[ "$skip_if_fresh" == "1" || "$skip_if_fresh" == "true" ]]; then
@@ -8218,9 +8219,8 @@ print_failed_command_output() {
 # egress and answers "Proxy tunneling failed: Forbidden" for anything outside its
 # allowlist — the launcher exits non-zero before a single linter runs, and the
 # stamp-exempt Trunk arm would make an otherwise-clean gate unable to exit 0.
-# `.trunk/hooks` already models the answer for commits and pushes: warn, name the
-# allowlist fix, skip. The gate takes the same posture, with one restriction that
-# keeps it honest — only a PROVISIONING failure may downgrade. A provisioned
+# The retained diagnostic warns, names the allowlist fix, and leaves enforcement
+# to CI. Only a PROVISIONING failure may downgrade. A provisioned
 # Trunk that finds real problems still fails the gate, so the probe runs AFTER
 # the command failed and asks the launcher whether it can produce a CLI at all.
 is_trunk_command() {
@@ -12013,8 +12013,8 @@ run_prerequisite_phase() {
   # WITHIN themselves: a failed step must stop before its dependents — and
   # before later steps in the SAME phase (e.g. `terraform validate` after a
   # failed `terraform init`) — run. This preserves the old --fail-fast
-  # prerequisite behavior even though the hook now drops global --fail-fast so
-  # the independent quality pool keeps going. Serialized dashboard checks and
+  # prerequisite behavior even when the caller selects global keep-going so the
+  # independent quality pool continues. Serialized dashboard checks and
   # the parallel pool are NOT prerequisites (serialized only for the .next
   # mutex), so they are run keep-going and still collect their own feedback.
   local previous_fail_fast="$fail_fast"
@@ -12041,7 +12041,7 @@ run_quality_phase() {
 
   # Split setup out FIRST, so it reaches run_prerequisite_phase on every path.
   # While the partition lived below the sequential early-return, --parallel 1
-  # and the hook's keep-going setting let a failed setup command's dependents
+  # and global keep-going let a failed setup command's dependents
   # run anyway: `terraform validate` after a failed `terraform init`, the
   # typechecks after a failed shared-config build, and the trusted `pnpm
   # <alias>` commands after the failed package-script validator that exists to

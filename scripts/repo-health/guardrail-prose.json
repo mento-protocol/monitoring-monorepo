@@ -12,9 +12,77 @@
     "**Forensic drafts stay local.** Use the `forensic-report` skill"
   ],
   "docs/notes/pr-operating-card.md": [
+    "inspect resolved-base and working-tree changes, including untracked files, for `.node-version`, package manifests, package-manager configuration, lockfiles, and patches. Review lifecycle and install effects before any package-manager command, including the claim command.",
+    "If root `package.json` changed, first run `node scripts/check-agent-quality-gate-package-scripts.mjs`.",
+    "**Run the repository preflight first.** Automatic setup can finish before agent control under a [separate trust boundary](worktree-and-web-setup.md); this preflight does not attest it.",
+    "With no PR, bind the intended base before author checks. Use `main` only after confirming the work is not stacked; stop and ask if unclear.",
     "**Agent sessions never merge a PR without the user's explicit, direct approval of that specific merge.**",
     "**Agent sessions never merge without explicit approval** for that specific merge",
     "**Knowingly deferred work needs a GitHub issue first**, linked from `## Deferrals`.",
-    "**Package-script, package-manager, and lockfile changes require explicit acknowledgement** through the gate; never bypass the refusal."
+    "First run `./tools/trunk fmt <surviving-changed-files>` on each intended changed file that exists in the final tree. Use deleted paths and both sides of a rename to select matching rows, but never pass a missing path to Trunk.",
+    "| Source in a workspace package | Run each script that exists for that package: `pnpm --filter <package-name> lint`, `pnpm --filter <package-name> typecheck`, and its normal unit-test command. Governance Watchdog uses `pnpm --filter @mento-protocol/governance-watchdog test:unit`; its generic `test` needs a local service. For `metrics-bridge/src/metrics.ts`, `metrics-bridge/src/cdp-metrics.ts`, `metrics-bridge/src/peg/metrics.ts`, or `metrics-bridge/src/peg/listing-metrics.ts`, also run `pnpm alerts:rules:lint`. |",
+    "| Dashboard React or client source | Also run `REACT_DOCTOR_BASE_REF=<resolved-pr-base> pnpm --filter @mento-protocol/ui-dashboard react-doctor:diff`. |",
+    "| Dashboard UI or visual output, route or interaction, browser test, or frontend build/runtime path | Also run `pnpm dashboard:build`, then follow [`dashboard-verification.md`](dashboard-verification.md) for the changed UI or runtime path, console, interaction, breakpoints, and applicable auth states. |",
+    "| Dashboard bundle input listed in the `dashboard` path filter in `.github/workflows/size-limit.yml` | When `shared-config/**` changes, first run `pnpm --filter @mento-protocol/config build`. After any required install and shared-config build, run `pnpm dashboard:build`, then `pnpm dashboard:size-limit`. Run a command once if another row also selects it. |",
+    "| `alerts/rules/peg-thresholds.json`, `metrics-bridge/peg-registry.json`, `shared-config/chain-metadata.json`, `shared-config/deployment-namespaces.json`, `shared-config/oracle-reporters.json`, `shared-config/src/chains.ts`, `shared-config/src/oracle-reporters.ts`, or `shared-config/src/tokens.ts` | Run `node scripts/alerts/check-peg-registry-integrity.mjs --base-ref <resolved-pr-base-oid>`. |",
+    "| `shared-config/src/thresholds.ts`, `alerts/rules/main.tf`, or `alerts/rules/rules-fpmms.tf` | Run `node scripts/alerts/check-deviation-threshold-drift.mjs`. For `shared-config/src/thresholds.ts`, also run `pnpm --filter @mento-protocol/indexer-envio exec vitest run deviationThresholdSharedConfigSync`. |",
+    "| Indexer schema, configuration, ABI, entry point, handler reachability, or reserve-yield handler/RPC source | Run each affected code-generation variant from [`../../indexer-envio/AGENTS.md`](../../indexer-envio/AGENTS.md). For reserve-yield handler/RPC source, `indexer-envio/src/EventHandlers.ts`, or `indexer-envio/config.multichain.mainnet.yaml`, run `pnpm --filter @mento-protocol/indexer-envio indexer:reserve-yield:test`. Run affected non-mainnet variants first and `pnpm indexer:codegen` last. Inspect the generated diff before indexer package checks. |",
+    "| Dashboard GraphQL query or schema consumer, `indexer-envio/schema.graphql`, or `scripts/envio-schema-stubs.graphql` | Run `pnpm dashboard:codegen` and inspect the generated diff. For `indexer-envio/schema.graphql` or `scripts/envio-schema-stubs.graphql`, also run `pnpm --filter @mento-protocol/ui-dashboard test` and `pnpm --filter @mento-protocol/metrics-bridge test`. |",
+    "| `.node-version`, package manifest, lockfile, pnpm configuration, or patch | Inspect lifecycle and install effects. For root `package.json`, require the preflight package-script validator to pass. Run `CI=true pnpm install --frozen-lockfile` from the repository root. When one of these inputs changes under `alerts/infra/onchain-event-handler`, `alerts/infra/oncall-announcer`, or `governance-watchdog`, also run `CI=true pnpm install --frozen-lockfile --ignore-scripts --lockfile-dir .` from that root. For either alert function's `pnpm-workspace.yaml`, also run `node --test scripts/supply-chain/alerts-uuid-overrides.test.mjs`. Complete the installs before code generation or the applicable package rows. |",
+    "| Package Vitest configuration or hermetic setup | Run `node scripts/repo-health/check-hermetic-vitest-setup.mjs`. |",
+    "| Trunk configuration or local Git hook | Run `./tools/trunk check --ci --all` and `node scripts/workflows/check-github-action-pins.mjs`. Also run `bash scripts/bootstrap/agent-setup-contract.test.sh` when hook or Trunk action behavior changes. |",
+    "| Shell file, hosted agent setup, or hook | Run `bash -n` on each surviving changed shell file. Run `bash scripts/bootstrap/agent-setup-contract.test.sh` when hosted setup or hook behavior changes. |",
+    "| Markdown file; or agent instruction, role, command, skill, runtime configuration, or catalog-visible document metadata | Run `pnpm docs:index --check` for every Markdown change. For an agent instruction, role, command, skill, runtime configuration, or catalog-visible document metadata, also run `pnpm agent:context-check`, `pnpm agent:context-budget:test`, and `pnpm agent:context-budget --strict`. |",
+    "| Mirrored agent skill content or mirror checker | Run `node scripts/repo-health/check-skills-mirror.mjs` and `node scripts/repo-health/check-skills-mirror.test.mjs`. |",
+    "| Guardrail prose pin list or pinned normative text | Run `node scripts/repo-health/check-guardrail-prose.mjs` and `node scripts/repo-health/check-guardrail-prose.test.mjs`. |",
+    "| GitHub Actions workflow or action, or protected PR admission boundary | Run `pnpm ci:contract:test`, `node scripts/workflows/check-github-action-pins.mjs`, and `node scripts/workflows/check-autofix-ci-trust.mjs`. |",
+    "| `.coderabbit.yaml` | Run `pnpm coderabbit:config:test`. |",
+    "| `.lighthouserc.cjs` | Run `node scripts/lighthouse-config.test.mjs`. |",
+    "| `.gitignore` | Run `pnpm review:eval:test`. |",
+    "| Upstash MCP configuration, runtime, pin, operator contract, or forensic-report skill mirror, including its package, lockfile, and Terraform inputs | Run `node --test scripts/mcp/upstash-mcp-config.test.mjs`. |",
+    "| `terraform.stacks.json` | Run `pnpm tf:test`. |",
+    "| New top-level package/service root with `AGENTS.md` or `package.json`, new workspace package registration, new Terraform stack registration, or new GitHub Actions workflow file | Run `pnpm adr:check --base <resolved-pr-base> --include-untracked`. |",
+    "Use the resolved PR base, not a fixed `origin/main`, for every diff-based author check, including stacked PRs.",
+    "Derive changed paths for both `base_oid..final_head` and `prior_head_oid..final_head`. Apply the union of the author-check rows selected by those ranges to `final_head`;",
+    "| Root tooling, control plane, standalone service, or alert delivery/rule input | Run the focused existing contract named by the nearest scoped `AGENTS.md`. Do not add a root selector. For `alerts/rules/**`, run `pnpm alerts:rules:lint`. For `alerts/infra/onchain-event-listeners/**` or `alerts/infra/channels/**`, run the alerts-onchain-event-handler package lint, typecheck, and test. For its Safe ABI, event-hash generator, or event-hash output, run its `build:event-hashes` script and inspect the generated JSON diff. Run `node --check` on each surviving changed `governance-watchdog/infra/quicknode-filter-functions/*.js` file. |",
+    "Record each applicable result in the PR's `## Validation` section as `passed`, `failed`, or `not run: <reason>`.",
+    "Pre-push starts no repository check, fetch, lock, or wait.",
+    "**Inspect `.node-version`, package-script, package-manager, lockfile, and patch changes before any package-manager command.**"
+  ],
+  "docs/notes/worktree-and-web-setup.md": [
+    "Disable automatic setup before checking out an untrusted, fork, or cross-repository head."
+  ],
+  ".agents/skills/ship/SKILL.md": [
+    "Run its preflight before agent-invoked repository code.",
+    "Stop fork or cross-repository heads.",
+    "Use the resolved base for all diff checks. Before a new PR, bind and reuse its intended base. Use `main` only for unstacked work.",
+    "Apply every matching row in card",
+    "Pre-push runs no repository verification."
+  ],
+  ".claude/skills/ship/SKILL.md": [
+    "Run its preflight before agent-invoked repository code.",
+    "Stop fork or cross-repository heads.",
+    "Use the resolved base for all diff checks. Before a new PR, bind and reuse its intended base. Use `main` only for unstacked work.",
+    "Apply every matching row in card",
+    "Pre-push runs no repository verification."
+  ],
+  ".agents/roles/verifier.md": [
+    "Inspect the branch diff against the existing PR base or the bound intended base for a new PR. Use that base for every diff-based author check, including stacked PRs."
+  ],
+  "docs/notes/pr-ready-state.md": [
+    "Use the resolved PR base, not a fixed `origin/main`, for every diff-based author check, including stacked PRs.",
+    "Bind `--repo` to the base repository — checkout inference can select the wrong same-number PR on fork PRs."
+  ],
+  ".agents/skills/backlog-sweep/SKILL.md": [
+    "git remote -v # origin fetch and push must serve mento-protocol/monitoring-monorepo git status --porcelain # must print nothing git fetch origin main # only after both origin URLs pass",
+    "Use the operating-card preflight to bind `BASE_REMOTE` and `baseRefName` to the fetched PR base, or verified `origin/main` without a PR.",
+    "Run dashboard coverage or scoped related tests, browser work, production builds, and size-limit work without another command-heavy check set."
+  ],
+  ".claude/skills/backlog-sweep/SKILL.md": [
+    "Run dashboard coverage or scoped related tests, browser work, production builds, and size-limit work without another command-heavy check set."
+  ],
+  "docs/notes/agent-quality-gate-mechanics.md": [
+    "This mapping describes the optional retained diagnostic. Normal author work follows the matching direct checks in step 3 of the [PR operating card](pr-operating-card.md) and does not invoke the gate.",
+    "The [PR operating card](pr-operating-card.md#the-loop) owns normal direct author checks and closeout sequencing."
   ]
 }

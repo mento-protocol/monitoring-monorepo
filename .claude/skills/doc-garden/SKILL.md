@@ -5,7 +5,7 @@ title: Documentation Garden Skill
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-22
+last_verified: 2026-09-02
 doc_type: skill
 scope: repo-wide
 review_interval_days: 90
@@ -89,9 +89,9 @@ pnpm agent:context-check
 pnpm agent:context-budget --strict
 ```
 
-Run the quality gate through step 3 of the operating card. Hosted sessions use
-the exact direct warm command from that step. Local sessions use
-`pnpm agent:quality-gate --run`.
+Apply the direct author checks from step 3 of the
+[operating card](../../../docs/notes/pr-operating-card.md). Record each
+applicable result in the PR validation section as that step requires.
 
 Summarize the disposition and evidence for every packet file in the PR body.
 Open a normal ready-for-review PR, use `Closes #<issue>` only when the entire

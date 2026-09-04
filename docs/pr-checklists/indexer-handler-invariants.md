@@ -3,7 +3,7 @@ title: Indexer Handler Invariants
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-29
+last_verified: 2026-09-02
 doc_type: checklist
 scope: indexer-envio
 review_interval_days: 90
@@ -204,5 +204,5 @@ When a new heal step changes Pool fields or entity-kind classification:
 - Exercise dashboard-dependent queries against local Hasura with a
   representative high-history pool to expose row-cap assumptions.
 - Prove new entity IDs under two writes in the same block.
-- Run the package tests selected by the quality gate in step 3 of the
-  [PR operating card](../notes/pr-operating-card.md).
+- Apply the indexer author checks and applicable code-generation rows in step 3
+  of the [PR operating card](../notes/pr-operating-card.md).

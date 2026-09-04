@@ -28,13 +28,6 @@ fi
 REPO_ROOT="${CLAUDE_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 SETUP_SCRIPT="$REPO_ROOT/scripts/bootstrap/claude-code-web-setup.sh"
 
-# Cached remote sessions can resume after this hook updates but before the
-# heavy startup setup runs again. Apply the lightweight hosted pre-push policy
-# on every remote source before the resume/compact early exit.
-if git -C "$REPO_ROOT" rev-parse --git-dir >/dev/null 2>&1; then
-  git -C "$REPO_ROOT" config agent.qualityGate.cloudPrePushRequireFresh true
-fi
-
 # Inspect SessionStart payload on stdin (best-effort: if stdin is not present
 # or the payload is unparsable, default to running the bootstrap rather than
 # silently skipping). Only `startup` triggers the heavy install/codegen path.

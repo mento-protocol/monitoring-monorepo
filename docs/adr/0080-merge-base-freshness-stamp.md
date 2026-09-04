@@ -3,7 +3,7 @@ title: The gate's freshness stamp binds the merge-base
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-30
+last_verified: 2026-09-02
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -13,14 +13,16 @@ garden_lane: adrs-architecture
 
 # ADR 0080 — The freshness stamp binds the merge-base, not the base tip
 
-**Status:** Accepted (Aug 2026), in force.
+**Status:** Accepted (Aug 2026), narrowed by the M5 cutover on 2026-09-02. The
+freshness stamp remains part of the callable legacy diagnostic and rollback
+compatibility. No installed pre-push hook consumes it.
 **Scope:** ci/process
 
 ## Context
 
 `scripts/agent-quality-gate.sh --run` writes a whole-run freshness stamp so a
 later `--skip-if-fresh` run can exit without re-executing the mapped commands.
-The pre-push hook in `.trunk/trunk.yaml` is the main consumer: it runs
+Before M5, the pre-push hook in `.trunk/trunk.yaml` was the main consumer. It ran
 `git fetch --quiet origin main` and then the gate with `--skip-if-fresh --base
 origin/main`.
 

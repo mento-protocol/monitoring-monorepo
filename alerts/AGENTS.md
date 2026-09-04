@@ -3,7 +3,7 @@ title: Alerts Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-09-02
 doc_type: agent-instructions
 scope: alerts
 review_interval_days: 90
@@ -53,10 +53,11 @@ routing.
 
 - `pnpm tf validate alerts-rules` / `pnpm tf validate alerts-delivery`; Peg test: `docs/notes/peg-monitoring.md`.
 - `pnpm alerts:rules:plan` and `pnpm alerts:infra:plan` — must show 0 changes against existing state unless the PR intentionally changes the stack.
-- `pnpm --filter @mento-protocol/alerts-onchain-event-handler typecheck` and `test:coverage` — green on handler changes. Lint/knip are wired but verify they pass too after dep bumps.
-- `pnpm --filter @mento-protocol/alerts-oncall-announcer typecheck` and `test:coverage` — green on on-call announcer changes. Lint/knip are wired too.
+- On handler changes, run the onchain-event-handler package lint, typecheck, and normal test.
+- On on-call announcer changes, run the oncall-announcer package lint, typecheck, and normal test.
 - `pnpm alerts:watcher:test` — required on `alerts/infra/sentry-ingest-watcher/` changes.
 - `bash alerts/infra/scripts/fix-webhook-state.test.sh` — required when changing the shared QuickNode state-ID parser, repair tool, or listener replacement provisioner.
-- `pnpm agent:quality-gate` for any combined edit — path-aware routing.
+- For a combined edit, apply every matching direct author check in step 3 of
+  the [PR operating card](../docs/notes/pr-operating-card.md).
 
 For Cloud Function deploy verification, follow `docs/pr-checklists/terraform-cloudrun.md`.

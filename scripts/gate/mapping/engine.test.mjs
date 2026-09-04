@@ -1318,6 +1318,7 @@ test("the root manifest classifies into its four closed classes", () => {
   const cases = [
     // A tooling script pointer and nothing else.
     [(m) => (m.scripts["docs:index"] = "node b.mjs"), "root-tooling-scripts"],
+    [(m) => (m.scripts["issue:groom"] = "node b.mjs"), "root-tooling-scripts"],
     // A script that is not on the tooling list.
     [(m) => (m.scripts.build = "false"), "package-scripts"],
     // Descriptive metadata only.

@@ -1,6 +1,12 @@
 // One classifier owns handler-invariant routing for the quality gate data
 // model. Callers receive a detached, deeply frozen view so they can derive
 // their own representation without changing later decisions.
+//
+// Import nothing but the sibling data module. The fail-closed fixture in
+// scripts/indexer-handler-invariant-contract.test.mjs copies this file alone
+// into a temporary directory beside a mutated families module, so a second
+// import would not resolve there. That is also why this file carries its own
+// deep-freeze rather than sharing the one in index.mjs.
 import { INDEXER_HANDLER_INVARIANT_FAMILIES } from "./indexer-handler-invariant-families.mjs";
 
 const VALIDATED_INDEXER_HANDLER_INVARIANT_FAMILIES =

@@ -3,7 +3,7 @@ title: Normative guardrail sentences are pinned in CI, and scripts are not
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-26
+last_verified: 2026-09-02
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -136,10 +136,11 @@ edit is not the working model here.
 
 **Run the check only in the local pre-push gate.** The gate already routes it
 from both directions — an edit to the checker or the pin list, and an edit to
-any protected prose file, `CLAUDE.md` included. Rejected as the only route: the local gate is
-skippable by anything that does not run it, including a web session or an edit
-landed through the GitHub UI, and the pins are worth exactly what the weakest
-route enforces. It stays as the fast local signal; CI is the binding one.
+any protected prose file, `CLAUDE.md` included. Rejected as the only route: the
+local gate is skippable by anything that does not run it, including a web
+session or an edit landed through the GitHub UI, and the pins are worth exactly
+what the weakest route enforces. M5 retired that local route. Required CI is
+the binding route.
 
 ## Consequences
 

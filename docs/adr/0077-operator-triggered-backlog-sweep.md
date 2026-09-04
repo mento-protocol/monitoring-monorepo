@@ -13,7 +13,7 @@ garden_lane: adrs-architecture
 
 # ADR 0077 — Operator-triggered backlog sweep with isolated workers
 
-**Status:** Accepted (Aug 2026). In force on branches that contain this change.
+**Status:** Accepted (Aug 2026), amended by M5 in 2026-09.
 **Scope:** process
 
 ## Context
@@ -30,17 +30,12 @@ Issue
 tracked stage 2. Its grooming decisions settled the trust model in favour of an
 operator-started run rather than a scheduled one.
 
-Three constraints shaped the design.
+Subagents cannot wait across turns. A worker polls each author check in-turn.
+The orchestrator re-invokes a worker that goes quiet.
 
-Subagents cannot wait across turns. A subagent that ends its turn to watch a
-gate is never re-invoked, so an unattended batch that parks on a gate produces
-nothing overnight.
-
-Gate runs are scheduled, not serialized. Since
-[ADR 0076](0076-fair-quality-gate-coordinator.md) a transient machine-wide
-coordinator admits independent work from different worktrees under a weighted
-capacity, and a new gate joins a compatible coordinator instead of queueing
-behind it.
+M5 replaced worker gates. Each worker uses the direct author checks in step 3 of
+the operating card. The legacy coordinator now serves only the diagnostic gate.
+The sweep schedules direct checks by local CPU and memory use.
 
 Review rounds dominate cost. One shipped PR costs roughly 3% of the weekly
 usage window, and each push buys another bot review round whose findings cost
@@ -53,8 +48,9 @@ claims each issue by number, and drives each through its own worker to a
 ready-for-review PR. It stops at READY and prints the PR links for the operator.
 
 - **The operator starts every run.** No schedule, no self-triggering.
-- **The session is an orchestrator.** It runs no gate, edits no source file, and
-  opens no PR. It selects, claims, keeps workers moving, and writes the report.
+- **The session is an orchestrator.** It runs no author check, edits no source
+  file, and opens no PR. It selects, claims, keeps workers moving, and writes the
+  report.
 - **One worker per issue, one isolated checkout per worker.** Each worker owns a
   clone it alone commits from, proven by a marker inside `.git/`.
 - **Claims use the issue-board transaction.** Each issue gets a stable Claim ID,
@@ -69,9 +65,8 @@ ready-for-review PR. It stops at READY and prints the PR links for the operator.
   use the same-Claim-ID explicit rebind after it creates a PR branch.
 - **Workers poll their own long processes in-turn.** The orchestrator holds no
   timers; it re-invokes a worker that has gone quiet.
-- **Concurrency is bounded by the gate coordinator's capacity.** Worker gates
-  are scheduled by it and count against it; the batch is capped at 4 and
-  defaults to 2.
+- **Local resources bound author-check concurrency.** Run at most three ordinary
+  check sets at once. Run resource-heavy checks alone while other workers edit.
 - **The run stops at READY.** The sweep never merges.
 
 After a human merges a partial-stage sweep PR, the separate issue lifecycle can
@@ -206,10 +201,9 @@ installs. Rejected: two workers committing from one tree push each other's work,
 and a repair applied through the wrong checkout lands on the wrong branch with
 nothing to notice it. Isolation is what makes a worker's branch its own.
 
-**Machine-wide gate serialization, as the loop was first written.** Rejected
-because it no longer describes the gate. Under the coordinator the adopted
-`run.lock` names a live pid for as long as anyone on the machine is gating, so
-treating that record as a busy signal refuses a sweep in the ordinary case.
+**Machine-wide author-check scheduling.** Rejected for normal workers. Direct
+checks run in isolated checkouts under the sweep's local resource bound. The
+legacy coordinator remains only for the diagnostic gate.
 
 **Cron-triggered autonomy.** A sweep that starts itself needs answers this
 design does not have: what stops a run burning the usage window unattended, and
@@ -235,9 +229,8 @@ Issues outside that set stay manual, which is the intended cost. The amendment
 above adds the pass that keeps that set from being empty, and bounds the delay
 it introduces at 12 hours per groomed issue.
 
-Bounding concurrency at the coordinator's capacity means a batch of 4 runs at
-most three gates at once. Throughput is capped by machine capacity rather than
-by how many issues qualify.
+A batch of 4 runs at most three ordinary check sets at once. Heavy checks run
+alone while other workers edit. Required CI owns merge admission.
 
 Because the sweep stops at READY, merge approval remains a human step for every
 PR it opens.
@@ -250,10 +243,8 @@ PR it opens.
   [#2071](https://github.com/mento-protocol/monitoring-monorepo/issues/2071),
   whose grooming decisions chose the operator-triggered form.
 - [`.agents/skills/backlog-sweep/SKILL.md`](../../.agents/skills/backlog-sweep/SKILL.md)
-  is the procedure that enforces the decision, mirrored byte-identically into
-  `.claude/skills/backlog-sweep/SKILL.md`. That mirror is enforced by
-  `scripts/repo-health/check-skills-mirror.mjs`, which the Agent Quality Gate
-  routes on any change to either tree.
+  and its byte-identical `.claude` mirror implement the decision. Operating-card
+  step 3 and required CI run the mirror checker and its tests.
 - [`docs/notes/backlog-sweep.md`](../notes/backlog-sweep.md) is the canonical
   contract the skill produces against — eligibility, boundaries, resilience
   duties, and the report.
@@ -263,9 +254,8 @@ PR it opens.
   `pkg:tooling` path test, all documented in the two files above. Issues 2240,
   2242, 2246, 2247, and 2256 carry the `sweep-groomed:v2` marker contract that
   followed from reviewing it.
-- The concurrency bound is the gate coordinator's own capacity, default 3,
-  recorded in [ADR 0076](0076-fair-quality-gate-coordinator.md) and
-  [`docs/notes/agent-quality-gate-mechanics.md`](../notes/agent-quality-gate-mechanics.md).
+- The skill and canonical backlog-sweep runbook enforce the sweep-local
+  resource bound.
 - The never-merge boundary rests on the operating card and
   [ADR 0084](0084-github-ui-operator-merge.md). The sweep stops at READY. A
   human can merge through the GitHub UI.
@@ -278,5 +268,7 @@ PR it opens.
   receipt, and the exclusion ledger.
 - [`docs/notes/pr-operating-card.md`](../notes/pr-operating-card.md) — the PR
   loop every worker runs.
-- [ADR 0076](0076-fair-quality-gate-coordinator.md) — the gate coordinator this
-  design's concurrency bound depends on.
+- [ADR 0076](0076-fair-quality-gate-coordinator.md) — the legacy diagnostic
+  coordinator, narrowed by M5; normal workers do not use it.
+- [ADR 0078](0078-staged-verification-redesign.md) — direct author checks and
+  required CI after M5.

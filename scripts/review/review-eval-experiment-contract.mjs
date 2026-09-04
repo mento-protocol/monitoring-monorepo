@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { gridFixtures } from "./review-eval-fixtures.mjs";
+import { gridFixtures, PIPELINE_DRAWS } from "./review-eval-fixtures.mjs";
 import {
   finderArgvDigest as canonicalFinderArgvDigest,
   planCells,
@@ -203,15 +203,16 @@ function frozenInputs(contract) {
   return { prompts, fixtures };
 }
 
+// The experiment lane screens on its own pinned panel, so it selects those
+// fixtures out of the grid instead of requiring the grid to be exactly them: a
+// fixture added to the grid for the main eval must not silently rewrite the
+// lane's cell count or its comparability key.
 function experimentFixtures(contract) {
-  const fixtures = gridFixtures(contract).sort(
-    (left, right) => left.pr - right.pr,
+  const grid = new Map(
+    gridFixtures(contract).map((entry) => [entry.pr, entry]),
   );
-  const prs = fixtures.map(({ pr }) => pr);
-  if (
-    fixtures.length !== MAX_FIXTURE_LANES ||
-    JSON.stringify(prs) !== JSON.stringify(SCREEN_PRS)
-  ) {
+  const fixtures = SCREEN_PRS.map((pr) => grid.get(pr)).filter(Boolean);
+  if (fixtures.length !== MAX_FIXTURE_LANES) {
     throw new Error(
       `experiment requires grid fixtures ${SCREEN_PRS.join(", ")}`,
     );
@@ -299,6 +300,19 @@ function stagesFor({ contract, finderIdentity, includeLivePaired }) {
   );
 }
 
+/**
+ * The size of a canonical full rerun, derived from the contract so a wider
+ * grid does not fail planning against a number calibrated for a narrower one.
+ */
+export function fullRerunCellCount(contract) {
+  const fixtures = contract?.fixtures ?? [];
+  const replays = gridFixtures(contract).reduce(
+    (total, fixture) => total + (fixture.finder_reports ?? []).length,
+    0,
+  );
+  return PIPELINE_DRAWS * fixtures.length + replays + fixtures.length;
+}
+
 export function canonicalRerunManifest({
   contract,
   contractDigest,
@@ -309,9 +323,10 @@ export function canonicalRerunManifest({
   treatmentId = "candidate",
 }) {
   const cells = planCells({ contract, kind: "full" });
-  if (cells.length !== 24) {
+  const expected = fullRerunCellCount(contract);
+  if (cells.length !== expected) {
     throw new Error(
-      `canonical full rerun must contain 24 cells, got ${cells.length}`,
+      `canonical full rerun must contain ${expected} cells, got ${cells.length}`,
     );
   }
   const body = {

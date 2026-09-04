@@ -1129,44 +1129,13 @@ assert_turbo_task_has_input "react-doctor:score" '$TURBO_ROOT$/.npmrc'
 assert_turbo_task_has_input "react-doctor:score" '$TURBO_ROOT$/.node-version'
 assert_turbo_task_has_input "react-doctor:score" '$TURBO_ROOT$/turbo.json'
 
-# The public command must reach the protected Bash shebang before any inherited
-# startup control can run. Pin both the prologue and the direct Trunk hook so a
-# later wrapper or explicit `bash` invocation cannot silently remove that
-# boundary while the dynamic cases below continue to pass for another reason.
+# Pin the public diagnostic's protected Bash prologue and the staged pre-commit
+# formatter. The focused setup contract owns the removed pre-push surfaces.
 node - <<'NODE' ||
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const gate = fs.readFileSync("scripts/agent-quality-gate.sh", "utf8");
 const trunk = fs.readFileSync(".trunk/trunk.yaml", "utf8");
-const hostedSetups = [
-  "scripts/bootstrap/claude-code-web-setup.sh",
-  "scripts/bootstrap/codex-cloud-maintenance.sh",
-  "scripts/bootstrap/codex-cloud-setup.sh",
-];
-const hostedGateEntryPoints = [
-  ".agents/skills/ship/SKILL.md",
-  ".claude/skills/ship/SKILL.md",
-  ".agents/roles/verifier.md",
-  ".github/ISSUE_TEMPLATE/agent-task.yml",
-  "docs/notes/quick-commands.md",
-  "scripts/docs/docs-garden-issue-helpers.mjs",
-];
-const sweepWorkerEntryPoints = [
-  ".agents/skills/backlog-sweep/SKILL.md",
-  ".claude/skills/backlog-sweep/SKILL.md",
-];
-const resolvedBaseEntryPoints = [
-  ".agents/skills/ship/SKILL.md",
-  ".claude/skills/ship/SKILL.md",
-  ".agents/roles/verifier.md",
-  "docs/notes/pr-operating-card.md",
-  "docs/notes/pr-ready-state.md",
-];
-const sweepLockEntryPoints = [
-  ".agents/skills/backlog-sweep/SKILL.md",
-  ".claude/skills/backlog-sweep/SKILL.md",
-  "docs/notes/backlog-sweep.md",
-];
 const activeTrunkLines = trunk
   .split("\n")
   .filter((line) => !line.trimStart().startsWith("#"))
@@ -1180,77 +1149,19 @@ const prologue = [
   "",
 ].join("\n");
 assert.ok(gate.startsWith(prologue), "quality-gate public Bash prologue drifted");
-assert.match(
-  activeTrunkLines,
-  /^[ \t]*run: git fetch --quiet origin main && \.\/scripts\/agent-quality-gate\.sh --run --parallel 3 --skip-if-fresh --pre-push --base origin\/main[ \t]*$/mu,
-  "Trunk pre-push must execute the protected gate entry directly",
-);
-assert.doesNotMatch(
-  activeTrunkLines,
-  /(?:^|[^\w./])(?:(?:\/bin\/)?bash[ \t]+(?:\.\/)?scripts\/agent-quality-gate\.sh|scripts\/agent-quality-gate\.sh)/mu,
-  "Trunk pre-push must not bypass or CDPATH-resolve the protected gate entry",
-);
-for (const setupPath of hostedSetups) {
-  const setup = fs.readFileSync(setupPath, "utf8");
-  assert.match(
-    setup,
-    /^git config core\.hooksPath \.trunk\/hooks\ngit config agent\.qualityGate\.cloudPrePushRequireFresh true$/mu,
-    `${setupPath} must require a fresh hosted pre-push stamp`,
-  );
-}
-for (const entryPointPath of hostedGateEntryPoints) {
-  const entryPoint = fs.readFileSync(entryPointPath, "utf8");
-  assert.match(
-    entryPoint,
-    /\.\/scripts\/agent-quality-gate\.sh --run --parallel 3 --base origin\/main/u,
-    `${entryPointPath} must use the exact hosted pre-push warm command`,
-  );
-}
-for (const entryPointPath of sweepWorkerEntryPoints) {
-  const entryPoint = fs.readFileSync(entryPointPath, "utf8");
-  assert.match(
-    entryPoint,
-    /After `\.\/scripts\/setup\.sh` in each fresh or resumed\n  clone, set `agent\.qualityGate\.cloudPrePushRequireFresh=true` when that boolean\n  is hosted\. Unset the key when it is local\./u,
-    `${entryPointPath} must propagate the setup type into every worker clone`,
-  );
-}
-for (const entryPointPath of resolvedBaseEntryPoints) {
-  const entryPoint = fs.readFileSync(entryPointPath, "utf8");
-  assert.match(
-    entryPoint,
-    /resolved base[\s\S]{0,120}not[\s\S]{0,40}`origin\/main`|hosted fork and stacked PRs/iu,
-    `${entryPointPath} must preserve fork and stacked resolved-base validation`,
-  );
-}
-const claudeSessionStart = fs.readFileSync(
-  ".claude/hooks/session-start.sh",
-  "utf8",
-);
-const claudeHostedConfigIndex = claudeSessionStart.indexOf(
-  "git -C \"$REPO_ROOT\" config agent.qualityGate.cloudPrePushRequireFresh true",
-);
-const claudeSourceFilterIndex = claudeSessionStart.indexOf('case "$SOURCE" in');
-assert.ok(claudeHostedConfigIndex >= 0, "Claude resume hosted config is missing");
 assert.ok(
-  claudeHostedConfigIndex < claudeSourceFilterIndex,
-  "Claude resume hosted config must precede the source filter",
-);
-for (const entryPointPath of sweepLockEntryPoints) {
-  const entryPoint = fs.readFileSync(entryPointPath, "utf8");
-  assert.match(
-    entryPoint,
-    /Local workers wait with `--lock-wait 3600`\.[\s\S]{0,140}Hosted workers use[\s\S]{0,80}1,800-second default/u,
-    `${entryPointPath} must preserve local and hosted sweep lock waits`,
-  );
-}
-const gateMechanics = fs.readFileSync(
-  "docs/notes/agent-quality-gate-mechanics.md",
-  "utf8",
+  fs.existsSync(".trunk/hooks/pre-commit"),
+  "tracked pre-commit formatter hook is missing",
 );
 assert.match(
-  gateMechanics,
-  /so a warm\n`\.\/scripts\/agent-quality-gate\.sh --run --parallel 3 --base origin\/main` satisfies/u,
-  "gate mechanics must name the exact reusable pre-push warm command",
+  activeTrunkLines,
+  /^[ \t]*- trunk-fmt-pre-commit[ \t]*$/mu,
+  "Trunk staged pre-commit formatting must stay enabled",
+);
+assert.match(
+  gate,
+  /echo "Retained diagnostic only\."[\s\S]*echo "Normal path: use \/ship author checks and required CI\."[\s\S]*echo "Retirement requires the completed #2128 canary and separate human approval\."/u,
+  "retained gate must state its diagnostic status and retirement boundary",
 );
 const freshnessSkipIndex = gate.indexOf(
   'echo "Previous successful agent quality gate run is still fresh; skipping mapped commands."',
@@ -1262,13 +1173,8 @@ const lockAcquisitionIndex = gate.lastIndexOf("\nacquire_gate_run_lock\n");
 assert.ok(freshnessSkipIndex >= 0, "quality-gate freshness skip is missing");
 assert.ok(hostedRefusalIndex > freshnessSkipIndex, "hosted refusal must follow freshness reuse");
 assert.ok(lockAcquisitionIndex > hostedRefusalIndex, "hosted refusal must precede lock acquisition");
-assert.match(
-  gate,
-  /start '\.\/scripts\/agent-quality-gate\.sh --run --parallel 3 --base origin\/main' as an observable background task\./u,
-  "hosted refusal must warm the exact hook launcher, base, and parallelism",
-);
 NODE
-  fail "expected the public quality-gate entry contract to remain pinned"
+  fail "expected the public diagnostic and local-cutover contract to remain pinned"
 
 # The public pnpm entry executes the gate by its `#!/bin/bash -p` shebang. A
 # caller-controlled non-interactive startup file must not run before the gate
@@ -8350,9 +8256,7 @@ done < <(cd "$repo_root" && git ls-files 'scripts/gate/routing-table/*.mjs')
   fail "expected the routing table to have at least 15 tracked modules, found ${#routing_table_modules[@]} — enumeration found nothing to check"
 # The two indexer handler-invariant modules are claimed by an earlier arm in
 # the agent-module table, which routes the same two commands under its own
-# reason. Enumeration still covers them: every routing-table module must route
-# the routing-table suite and the gate suite, whichever arm claims it, so the
-# expected reason is selected per module rather than dropped.
+# reason. Enumeration still covers them; only the expected reason differs.
 for routing_table_module in "${routing_table_modules[@]}"; do
   run_gate "$routing_table_module"
   case "$routing_table_module" in
@@ -10022,8 +9926,11 @@ STUB
       > "$output_file" 2>&1 || hosted_package_risk_exit=$?
   [[ "$hosted_package_risk_exit" -eq 2 ]] ||
     fail "cold hosted package-risk run exited ${hosted_package_risk_exit} instead of 2"
-  grep -Fq -- "git config agent.qualityGate.allowPackageScriptChanges true" "$output_file" ||
-    fail "cold hosted package-risk run did not explain the reusable acknowledgement"
+  grep -Fq -- "re-run with --allow-package-script-changes if they are safe" "$output_file" ||
+    fail "cold hosted package-risk diagnostic did not explain the explicit acknowledgement"
+  if grep -Fq -- "git config agent.qualityGate.allowPackageScriptChanges true" "$output_file"; then
+    fail "cold hosted package-risk diagnostic printed retired warm-then-push guidance"
+  fi
 
   git config --unset agent.qualityGate.cloudPrePushRequireFresh
   : > "$output_file"
@@ -17592,9 +17499,8 @@ rm -rf "$no_lock_fallback_fixture_dir"
 no_lock_fallback_fixture_dir=""
 
 # --- Cross-run mutual exclusion (GitHub issue #1802) -------------------------
-# Two gate runs on one machine starve each other, and the pre-push hook starts
-# one of its own while a manual run is still going, so `--run` takes a
-# machine-wide mkdir lock. What has to hold: a live holder makes the second run
+# Two gate runs on one machine can starve each other, so `--run` takes a
+# machine-wide mkdir lock. A live holder must make the second run
 # wait rather than race, a holder that was killed never wedges the next run,
 # and both escape hatches (--no-lock, an inherited nested-run marker) still
 # start immediately.
@@ -17737,12 +17643,25 @@ STUB
   assert_contains "Waiting for the agent quality gate run lock"
   assert_contains "held by pid ${live_holder_pid}"
   assert_contains "timed out after"
-  # The pre-push hook cannot pass --no-lock, so the timeout must also name the
-  # recovery that works from a failed push.
+  assert_contains "Running the gate directly? --no-lock starts anyway and accepts the contention."
+  assert_not_contains "Pushing through the retained compatibility path?"
+  [[ -d "$gate_lock_root/run.lock" ]] ||
+    fail "a run that never acquired the lock must not delete the holder's lock"
+
+  # Only an explicit --pre-push compatibility invocation names the retained
+  # warm-then-push recovery.
+  sleep 120 &
+  compatibility_holder_pid=$!
+  write_lock_owner "$compatibility_holder_pid"
+  compatibility_exit="$(run_locked_gate --pre-push)"
+  kill "$compatibility_holder_pid" 2>/dev/null || true
+  [[ "$compatibility_exit" == "2" ]] ||
+    fail "expected a contended compatibility run to exit 2 after --lock-wait, got $compatibility_exit"
+  assert_contains "Pushing through the retained compatibility path?"
   assert_contains "git fetch --quiet origin main && ./scripts/agent-quality-gate.sh --run --parallel 3 --base origin/main"
   assert_contains "before coordinator registration"
   [[ -d "$gate_lock_root/run.lock" ]] ||
-    fail "a run that never acquired the lock must not delete the holder's lock"
+    fail "a compatibility run that never acquired the lock must not delete the holder's lock"
 
   # GitHub issue #1894: the same expiry, read the way a piped caller reads it.
   # Every other outcome states itself on stdout — a green run ends "All mapped

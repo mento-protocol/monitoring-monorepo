@@ -12,9 +12,9 @@ garden_lane: operator-runbooks
 
 # Codex Cloud Setup and Maintenance
 
-Codex Cloud does not inherit a developer's local `~/.agents`, `~/.codex`, or
-`~/.claude` directories. Configure the environment setup script and optional
-cached-container maintenance script as:
+Codex Cloud does not inherit local agent directories. On a trusted canonical
+branch under the [bootstrap boundary](worktree-and-web-setup.md#bootstrap-trust-boundary),
+configure setup and optional cached-container maintenance as:
 
 ```bash
 ./scripts/bootstrap/codex-cloud-setup.sh

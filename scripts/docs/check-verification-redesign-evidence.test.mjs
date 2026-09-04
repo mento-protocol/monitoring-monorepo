@@ -246,6 +246,14 @@ test("validateInventory rejects a missing id", () => {
   assert.throws(() => validateInventory(records), /Safeguard needs id/u);
 });
 
+function commitAll(repoRoot, message) {
+  execFileSync("git", ["-C", repoRoot, "add", "-A"]);
+  execFileSync("git", ["-C", repoRoot, "commit", "-qm", message]);
+}
+function assertManifestThrows(repoRoot, pattern) {
+  assert.throws(() => buildManifest({ repoRoot, source: "HEAD" }), pattern);
+}
+
 function withGitFixture(run) {
   const root = fs.mkdtempSync(join(tmpdir(), "verification-evidence-"));
   try {
@@ -259,6 +267,11 @@ function withGitFixture(run) {
     ]);
     execFileSync("git", ["-C", root, "config", "user.name", "Fixture"]);
     const files = {
+      ...Object.fromEntries(
+        ".agents/roles/standards-enforcer.md .agents/skills/ship/SKILL.md .claude/skills/ship/SKILL.md .trunk/hooks/pre-commit docs/notes/pr-operating-card.md scripts/bootstrap/agent-setup-contract.test.sh scripts/docs/check-verification-redesign-evidence-source-patch.test.mjs scripts/docs/check-verification-redesign-evidence.mjs scripts/docs/check-verification-redesign-evidence.test.mjs scripts/pr/closeout-review-exec.mjs scripts/pr/closeout-review-git.mjs scripts/pr/closeout-review.mjs scripts/pr/closeout-review.test.mjs scripts/repo-health/check-guardrail-prose.mjs scripts/repo-health/check-guardrail-prose.test.mjs scripts/repo-health/guardrail-prose.json"
+          .split(" ")
+          .map((path) => [path, "replacement surface\n"]),
+      ),
       ".agents/roles/verifier.md": "Use --run.\n",
       ".agents/skills/backlog-sweep/SKILL.md":
         "git config agent.qualityGate.allowPackageScriptChanges true\nThe coordinator adopts run.lock.\nUse --allow-package-script-changes.\nUse --full-local-tests.\nUse --lock-wait.\nDo not use --no-lock.\nSet --command-timeout.\n",
@@ -282,7 +295,7 @@ function withGitFixture(run) {
         "        Runs the path-aware agent quality gate before push. The gate maps the",
         "        branch diff to the required local checks instead of always running the",
         "        full monorepo pre-push suite.",
-        "      run: ./scripts/agent-quality-gate.sh --run --skip-if-fresh",
+        "      run: ./scripts/agent-quality-gate.sh --run --skip-if-fresh --pre-push --base origin/main",
         "      triggers:",
         "        - git_hooks: [pre-push]",
         "  enabled:",
@@ -323,7 +336,7 @@ function withGitFixture(run) {
       "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-probe.mjs":
         'const continuation = "facts.mjs";\n',
       "package.json":
-        '{\n  "scripts": {"agent:quality-gate": "./scripts/agent-quality-gate.sh"}\n}\n',
+        '{\n  "scripts": {\n    "agent:quality-gate": "./scripts/agent-quality-gate.sh",\n    "verification:inventory:check": "inventory",\n    "verification:manifest:write": "write",\n    "verification:manifest:check": "check",\n    "verification:evidence:check": "evidence",\n    "agent:closeout-review": "closeout",\n    "agent:closeout-review:test": "closeout test"\n  }\n}\n',
       "README.md": "Use the quality gate.\nUnrelated line.\n",
       "docs/adr/0007-agent-quality-gate-and-merge-oracle.md":
         "Gate decision.\nMerge oracle.\n",
@@ -334,6 +347,7 @@ function withGitFixture(run) {
       "docs/evals/review-skill.md": "The review evaluator owns run.lock.\n",
       "docs/notes/agent-quality-gate-mechanics.md":
         'Use --run.\nUse --parallel.\nUse --fail-fast.\nUse --repo-root.\nUse --changed-paths-file.\nUse --real-tree.\nUse --base "$base_ref" --head "$head_ref".\nUse command-not-started.\nUse gate_lock_recover_hidden_record.\nUse gate_test_families.\nVitest related --run is unrelated.\nGeneric --base other is unrelated.\n--parallel-tests is unrelated.\ncommand-not-started-extra is unrelated.\n',
+      "docs/notes/pr-ready-state.md": "Run direct author checks.\nUnrelated.\n",
       "docs/pr-checklists/review-prompt-exclusions.md": "Use --run.\n",
       "turbo.json": [
         "{",
@@ -360,8 +374,7 @@ function withGitFixture(run) {
       fs.mkdirSync(dirname(target), { recursive: true });
       fs.writeFileSync(target, content);
     }
-    execFileSync("git", ["-C", root, "add", "."]);
-    execFileSync("git", ["-C", root, "commit", "-qm", "fixture"]);
+    commitAll(root, "fixture");
     run(root);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -404,6 +417,12 @@ test("buildManifest counts whole files and matching reference lines", () => {
       ],
     );
     assert.equal(manifest.totals.counted_lines, 112);
+    assert.deepEqual(manifest.definitions, {
+      whole_file:
+        "Physical lines in the gate entry points, dedicated canonical gate documents, every scripts/gate/** file, the package-script pin checker, and the full pre-push hook. The gate-rooted set includes retained shared-consumer code.",
+      matching_lines:
+        "Unique fixed-pattern lines in other tracked files, full Turbo input filters that pin gate sources, and the full Trunk gate action block.",
+    });
     assert.equal(
       manifest.entries.some(
         ({ path }) =>
@@ -442,14 +461,126 @@ test("buildManifest counts whole files and matching reference lines", () => {
   });
 });
 
+test("buildManifest accepts pre-push removal only with Trunk config", () => {
+  withGitFixture((repoRoot) => {
+    fs.rmSync(join(repoRoot, ".trunk/hooks/pre-push"));
+    fs.writeFileSync(
+      join(repoRoot, ".trunk/trunk.yaml"),
+      [
+        "actions:",
+        "  disabled:",
+        "    - trunk-announce",
+        "  enabled:",
+        "    - trunk-fmt-pre-commit",
+        "    - trunk-upgrade-available",
+        "",
+      ].join("\n"),
+    );
+    commitAll(repoRoot, "remove pre-push");
+
+    const manifest = buildManifest({ repoRoot, source: "HEAD" });
+    const byPath = new Map(
+      manifest.entries.map((entry) => [entry.path, entry]),
+    );
+    const replacementPaths =
+      ".agents/roles/standards-enforcer.md .agents/roles/verifier.md .agents/skills/ship/SKILL.md .claude/skills/ship/SKILL.md .trunk/hooks/pre-commit .trunk/trunk.yaml docs/notes/pr-operating-card.md scripts/bootstrap/agent-setup-contract.test.sh scripts/docs/check-verification-redesign-evidence-source-patch.test.mjs scripts/docs/check-verification-redesign-evidence.mjs scripts/docs/check-verification-redesign-evidence.test.mjs scripts/pr/closeout-review-exec.mjs scripts/pr/closeout-review-git.mjs scripts/pr/closeout-review.mjs scripts/pr/closeout-review.test.mjs scripts/repo-health/check-guardrail-prose.mjs scripts/repo-health/check-guardrail-prose.test.mjs scripts/repo-health/guardrail-prose.json".split(
+        " ",
+      );
+    assert.deepEqual(
+      replacementPaths.map((path) => byPath.get(path)?.count_mode),
+      replacementPaths.map(() => "whole-file"),
+    );
+    assert.equal(byPath.get("package.json")?.lines, 7);
+    assert.equal(byPath.get("docs/notes/pr-ready-state.md")?.lines, 1);
+    assert.equal(byPath.has(".trunk/hooks/pre-push"), false);
+
+    fs.rmSync(join(repoRoot, ".agents/skills/ship/SKILL.md"));
+    commitAll(repoRoot, "remove replacement");
+    assertManifestThrows(
+      repoRoot,
+      /Missing replacement manifest path: \.agents\/skills\/ship\/SKILL\.md/u,
+    );
+    fs.writeFileSync(
+      join(repoRoot, ".agents/skills/ship/SKILL.md"),
+      "replacement surface\n",
+    );
+    commitAll(repoRoot, "restore replacement");
+
+    fs.rmSync(join(repoRoot, ".trunk/trunk.yaml"));
+    commitAll(repoRoot, "remove config");
+    assertManifestThrows(
+      repoRoot,
+      /Missing manifest path: \.trunk\/trunk\.yaml/u,
+    );
+  });
+});
+
+for (const [name, removeOneSide] of [
+  [
+    "buildManifest rejects a retained hook without the Trunk action",
+    (repoRoot) =>
+      fs.writeFileSync(
+        join(repoRoot, ".trunk/trunk.yaml"),
+        "actions:\n  enabled: []\n",
+      ),
+  ],
+  [
+    "buildManifest rejects a retained Trunk action without the hook",
+    (repoRoot) => fs.rmSync(join(repoRoot, ".trunk/hooks/pre-push")),
+  ],
+]) {
+  test(name, () => {
+    withGitFixture((repoRoot) => {
+      removeOneSide(repoRoot);
+      commitAll(repoRoot, name);
+      assertManifestThrows(repoRoot, /must be retained or removed together/u);
+    });
+  });
+}
+
+test("buildManifest rejects partial pre-push removal", () => {
+  withGitFixture((repoRoot) => {
+    fs.writeFileSync(
+      join(repoRoot, ".trunk/trunk.yaml"),
+      [
+        "actions:",
+        "  definitions:",
+        "    - id: agent-quality-gate-pre-push",
+        "      triggers:",
+        "        - git_hooks: [pre-push]",
+        "",
+      ].join("\n"),
+    );
+    commitAll(repoRoot, "partially remove pre-push");
+
+    assertManifestThrows(repoRoot, /partially removed or malformed/u);
+  });
+});
+
+test("buildManifest rejects malformed pre-push run residue", () => {
+  withGitFixture((repoRoot) => {
+    fs.writeFileSync(
+      join(repoRoot, ".trunk/trunk.yaml"),
+      [
+        "actions:",
+        "  definitions:",
+        "    - run: ./scripts/agent-quality-gate.sh --run --pre-push --base origin/main",
+        "",
+      ].join("\n"),
+    );
+    commitAll(repoRoot, "leave malformed pre-push run");
+
+    assertManifestThrows(repoRoot, /partially removed or malformed/u);
+  });
+});
+
 test("buildManifest parses compact Turbo input filters", () => {
   withGitFixture((repoRoot) => {
     fs.writeFileSync(
       join(repoRoot, "turbo.json"),
       '{"tasks":{"fixture":{"inputs":["scripts/gate/**"]}}}\n',
     );
-    execFileSync("git", ["-C", repoRoot, "add", "turbo.json"]);
-    execFileSync("git", ["-C", repoRoot, "commit", "-qm", "compact turbo"]);
+    commitAll(repoRoot, "compact turbo");
     const manifest = buildManifest({ repoRoot, source: "HEAD" });
     assert.equal(
       manifest.entries.find(({ path }) => path === "turbo.json")?.lines,
@@ -463,12 +594,8 @@ test("buildManifest rejects a missing required whole-file path", () => {
     fs.rmSync(
       join(repoRoot, "scripts/check-agent-quality-gate-package-scripts.mjs"),
     );
-    execFileSync("git", ["-C", repoRoot, "add", "-u"]);
-    execFileSync("git", ["-C", repoRoot, "commit", "-qm", "remove path"]);
-    assert.throws(
-      () => buildManifest({ repoRoot, source: "HEAD" }),
-      /Missing manifest path/u,
-    );
+    commitAll(repoRoot, "remove path");
+    assertManifestThrows(repoRoot, /Missing manifest path/u);
   });
 });
 

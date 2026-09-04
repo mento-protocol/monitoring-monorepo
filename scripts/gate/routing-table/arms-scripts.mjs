@@ -205,7 +205,7 @@ export const SCRIPT_ARMS = [
                 reason: "agent quality gate mapping changed",
               },
               {
-                why: "routing-table.test.mjs reads this file: it asserts `implementation_signature()` lists every routing-table module and no module that is gone. A missing entry hashes as `__missing__` and FREEZES the freshness signature, so `--skip-if-fresh` reuses a stale stamp and skips real pre-push work — the ADR 0064 failure that reds nowhere else. The table's own arm covers a table-only edit; this covers the other direction, where somebody edits the gate's signature list and does not touch the table (ADR 0069).",
+                why: "routing-table.test.mjs reads this file: it asserts `implementation_signature()` lists every routing-table module and no module that is gone. A missing entry hashes as `__missing__` and FREEZES the freshness signature, so `--skip-if-fresh` reuses a stale stamp and skips real diagnostic work — the ADR 0064 failure that reds nowhere else. The table's own arm covers a table-only edit; this covers the other direction, where somebody edits the gate's signature list and does not touch the table (ADR 0069).",
                 command: "pnpm gate:routing-table:test",
                 reason:
                   "gate holds the routing table's implementation-signature pin",
