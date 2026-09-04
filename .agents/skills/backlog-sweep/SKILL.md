@@ -499,8 +499,9 @@ Then spawn one worker subagent per issue. Give each a brief containing:
   the operating-card preflight to bind `BASE_REMOTE` and `baseRefName` to the
   fetched PR base, or verified `origin/main` without a PR. Inspect `git status --short`,
   `git diff "$BASE_REMOTE/$baseRefName"...HEAD`, `git diff --cached`, `git diff`,
-  and untracked files. Inspect lifecycle and install effects for manifests,
-  lockfiles, pnpm configuration, or patches; stop if the scope is unclear.
+  and untracked files. Inspect lifecycle and install effects for
+  `.node-version`, package manifests, lockfiles, pnpm configuration, or patches;
+  stop if the scope is unclear.
 
   Run `./scripts/setup.sh` in every resumed clone only after that inspection. In
   a fresh clone, fetch and run `git switch --detach origin/main` before setup.
@@ -537,11 +538,11 @@ Then spawn one worker subagent per issue. Give each a brief containing:
   check enforces formatting in CI.
 - **The author checks:** Apply step 3 of the
   [operating card](../../../docs/notes/pr-operating-card.md). Inspect any
-  manifest, lockfile, pnpm configuration, or patch change before the first
-  package-manager command. Run the selected direct commands in the order that
-  step defines. Record every result as `passed`, `failed`, or `not run` with its
-  reason. The legacy quality gate is diagnostic and is not the normal worker
-  path.
+  `.node-version`, package manifest, lockfile, pnpm configuration, or patch
+  change before the first package-manager command. Run the selected direct
+  commands in the order that step defines. Record every result as `passed`,
+  `failed`, or `not run` with its reason. The legacy quality gate is diagnostic
+  and is not the normal worker path.
 
   Start a long author check with the runtime's background mechanism and poll it
   to completion inside the same turn. Judge the command by its exit status,

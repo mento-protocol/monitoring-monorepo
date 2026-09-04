@@ -470,7 +470,10 @@ would recreate the local gate.
 - [M2 additive complexity manifest](../metrics/verification-redesign-m2-complexity.json)
 - [M3 additive complexity manifest](../metrics/verification-redesign-m3-complexity.json)
 - [M4 additive complexity manifest](../metrics/verification-redesign-m4-complexity.json)
-- Issues #2006, #2032, #2042, #2094, #2122, #2123, #2124, #2125, and #2126
+- [Control-plane after manifest](../metrics/verification-redesign-control-plane-after.json)
+- [M5 complexity receipt](../metrics/verification-redesign-m5-complexity.json)
+- Issues #2006, #2032, #2042, #2094, #2122, #2123, #2124, #2125, #2126, and
+  #2127
 - ADRs [0007](0007-agent-quality-gate-and-merge-oracle.md),
   [0069](0069-gate-routing-table-as-data.md),
   [0072](0072-md-only-docs-checks-job.md),
