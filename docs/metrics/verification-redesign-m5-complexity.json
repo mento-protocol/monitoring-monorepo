@@ -1,0 +1,708 @@
+{
+  "schemaVersion": 1,
+  "baseSha": "9cd832ad650f68fd8c51d393498271a318562314",
+  "sourceSha": "d92b96ab7727f309e07d2de566d7585d94fd9aa9",
+  "sourceBoundaryCommit": "d92b96ab7727f309e07d2de566d7585d94fd9aa9",
+  "cutoverImplementationCommit": "bc58e096d3ea9a1bca48a7d7f70e83b43d8f1bc9",
+  "baseline": "M5 early-cutover complexity and control-plane receipt for issue #2127.",
+  "scope": "Every M5 path changed from baseSha through sourceSha, except this receipt and the generated after manifest. Both receipts bind to sourceSha and therefore self-exclude.",
+  "derivation": {
+    "method": "Use git diff --numstat from baseSha through sourceSha. Classify active agent instructions and operating runbooks as procedure; executable scripts as check; test files as test; hook and configuration files separately; architecture, plan, and evidence prose as doc.",
+    "trackedCommand": "git diff --numstat 9cd832ad650f68fd8c51d393498271a318562314 d92b96ab7727f309e07d2de566d7585d94fd9aa9",
+    "receiptPath": "docs/metrics/verification-redesign-m5-complexity.json",
+    "afterManifestPath": "docs/metrics/verification-redesign-control-plane-after.json",
+    "receiptsSelfExcluded": true
+  },
+  "beforeManifest": {
+    "path": "docs/metrics/verification-redesign-control-plane-before.json",
+    "sourceSha": "a5692c4570d7fe33255c2ce863d7f79264a9ddb0",
+    "sha256": "2aeec153548a440101e96416112c1199ba55e835b94a20c21ddc2432433a0754",
+    "totals": {
+      "files": 223,
+      "counted_lines": 101595,
+      "by_surface": {
+        "alias": 5,
+        "configuration-reference": 380,
+        "hook": 33,
+        "implementation": 46174,
+        "instruction": 5192,
+        "shell-reference": 126,
+        "test": 49641,
+        "yaml-or-inline-shell": 44
+      }
+    }
+  },
+  "afterManifest": {
+    "path": "docs/metrics/verification-redesign-control-plane-after.json",
+    "sourceSha": "d92b96ab7727f309e07d2de566d7585d94fd9aa9",
+    "sha256": "95b39e412419b6704e6fb0425de752227c395bfa2f72ffff080e62333da3fdfe",
+    "totals": {
+      "files": 271,
+      "counted_lines": 111283,
+      "by_surface": {
+        "alias": 11,
+        "configuration-reference": 884,
+        "hook": 32,
+        "implementation": 48937,
+        "instruction": 6232,
+        "shell-reference": 134,
+        "test": 54874,
+        "yaml-or-inline-shell": 179
+      }
+    }
+  },
+  "manifestComparison": {
+    "filesDelta": 48,
+    "countedLinesDelta": 9688,
+    "bySurface": {
+      "alias": {
+        "before": 5,
+        "after": 11,
+        "delta": 6
+      },
+      "configuration-reference": {
+        "before": 380,
+        "after": 884,
+        "delta": 504
+      },
+      "hook": {
+        "before": 33,
+        "after": 32,
+        "delta": -1
+      },
+      "implementation": {
+        "before": 46174,
+        "after": 48937,
+        "delta": 2763
+      },
+      "instruction": {
+        "before": 5192,
+        "after": 6232,
+        "delta": 1040
+      },
+      "shell-reference": {
+        "before": 126,
+        "after": 134,
+        "delta": 8
+      },
+      "test": {
+        "before": 49641,
+        "after": 54874,
+        "delta": 5233
+      },
+      "yaml-or-inline-shell": {
+        "before": 44,
+        "after": 179,
+        "delta": 135
+      }
+    },
+    "interpretation": "The raw manifest keeps the complete legacy runtime and counts repository evolution since the pre-M1 baseline. It is a control-plane inventory. It is not the M5 phase diff or the final gate-specific deletion denominator."
+  },
+  "files": [
+    {
+      "path": ".agents/roles/standards-enforcer.md",
+      "category": "procedure",
+      "additions": 4,
+      "deletions": 2
+    },
+    {
+      "path": ".agents/roles/verifier.md",
+      "category": "procedure",
+      "additions": 11,
+      "deletions": 20
+    },
+    {
+      "path": ".agents/skills/backlog-sweep/SKILL.md",
+      "category": "procedure",
+      "additions": 87,
+      "deletions": 172
+    },
+    {
+      "path": ".agents/skills/doc-garden/SKILL.md",
+      "category": "procedure",
+      "additions": 4,
+      "deletions": 4
+    },
+    {
+      "path": ".agents/skills/monorepo-import/SKILL.md",
+      "category": "procedure",
+      "additions": 6,
+      "deletions": 5
+    },
+    {
+      "path": ".agents/skills/ship/SKILL.md",
+      "category": "procedure",
+      "additions": 23,
+      "deletions": 30
+    },
+    {
+      "path": ".claude/commands/autoreview.md",
+      "category": "procedure",
+      "additions": 12,
+      "deletions": 19
+    },
+    {
+      "path": ".claude/hooks/session-start.sh",
+      "category": "hook",
+      "additions": 0,
+      "deletions": 7
+    },
+    {
+      "path": ".claude/skills/backlog-sweep/SKILL.md",
+      "category": "procedure",
+      "additions": 87,
+      "deletions": 172
+    },
+    {
+      "path": ".claude/skills/doc-garden/SKILL.md",
+      "category": "procedure",
+      "additions": 4,
+      "deletions": 4
+    },
+    {
+      "path": ".claude/skills/monorepo-import/SKILL.md",
+      "category": "procedure",
+      "additions": 6,
+      "deletions": 5
+    },
+    {
+      "path": ".claude/skills/ship/SKILL.md",
+      "category": "procedure",
+      "additions": 23,
+      "deletions": 30
+    },
+    {
+      "path": ".github/ISSUE_TEMPLATE/agent-task.yml",
+      "category": "configuration",
+      "additions": 1,
+      "deletions": 3
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "category": "configuration",
+      "additions": 15,
+      "deletions": 15
+    },
+    {
+      "path": ".trunk/hooks/pre-push",
+      "category": "hook",
+      "additions": 0,
+      "deletions": 33
+    },
+    {
+      "path": ".trunk/trunk.yaml",
+      "category": "configuration",
+      "additions": 0,
+      "deletions": 12
+    },
+    {
+      "path": "AGENTS.md",
+      "category": "procedure",
+      "additions": 4,
+      "deletions": 4
+    },
+    {
+      "path": "README.md",
+      "category": "procedure",
+      "additions": 16,
+      "deletions": 21
+    },
+    {
+      "path": "aegis/AGENTS.md",
+      "category": "procedure",
+      "additions": 1,
+      "deletions": 1
+    },
+    {
+      "path": "alerts/AGENTS.md",
+      "category": "procedure",
+      "additions": 5,
+      "deletions": 4
+    },
+    {
+      "path": "docs/PLAN-progressive-verification-graph.html",
+      "category": "doc",
+      "additions": 33,
+      "deletions": 29
+    },
+    {
+      "path": "docs/PLAN-progressive-verification-graph.md",
+      "category": "doc",
+      "additions": 65,
+      "deletions": 52
+    },
+    {
+      "path": "docs/adr/0007-agent-quality-gate-and-merge-oracle.md",
+      "category": "doc",
+      "additions": 11,
+      "deletions": 6
+    },
+    {
+      "path": "docs/adr/0033-adr-process-and-gate.md",
+      "category": "doc",
+      "additions": 11,
+      "deletions": 9
+    },
+    {
+      "path": "docs/adr/0064-scripts-module-directories.md",
+      "category": "doc",
+      "additions": 7,
+      "deletions": 6
+    },
+    {
+      "path": "docs/adr/0069-gate-routing-table-as-data.md",
+      "category": "doc",
+      "additions": 27,
+      "deletions": 81
+    },
+    {
+      "path": "docs/adr/0073-guardrail-prose-pinned-in-ci.md",
+      "category": "doc",
+      "additions": 6,
+      "deletions": 5
+    },
+    {
+      "path": "docs/adr/0076-fair-quality-gate-coordinator.md",
+      "category": "doc",
+      "additions": 16,
+      "deletions": 58
+    },
+    {
+      "path": "docs/adr/0077-operator-triggered-backlog-sweep.md",
+      "category": "doc",
+      "additions": 24,
+      "deletions": 32
+    },
+    {
+      "path": "docs/adr/0078-staged-verification-redesign.md",
+      "category": "doc",
+      "additions": 23,
+      "deletions": 11
+    },
+    {
+      "path": "docs/adr/0080-merge-base-freshness-stamp.md",
+      "category": "doc",
+      "additions": 5,
+      "deletions": 3
+    },
+    {
+      "path": "docs/metrics/verification-redesign-safeguards.jsonl",
+      "category": "doc",
+      "additions": 17,
+      "deletions": 16
+    },
+    {
+      "path": "docs/notes/agent-quality-gate-mechanics.md",
+      "category": "procedure",
+      "additions": 69,
+      "deletions": 82
+    },
+    {
+      "path": "docs/notes/backlog-sweep.md",
+      "category": "procedure",
+      "additions": 51,
+      "deletions": 61
+    },
+    {
+      "path": "docs/notes/codex-agent-skills.md",
+      "category": "procedure",
+      "additions": 13,
+      "deletions": 11
+    },
+    {
+      "path": "docs/notes/codex-cloud-setup.md",
+      "category": "procedure",
+      "additions": 11,
+      "deletions": 11
+    },
+    {
+      "path": "docs/notes/dashboard-verification.md",
+      "category": "procedure",
+      "additions": 15,
+      "deletions": 12
+    },
+    {
+      "path": "docs/notes/peg-monitoring.md",
+      "category": "procedure",
+      "additions": 2,
+      "deletions": 2
+    },
+    {
+      "path": "docs/notes/pr-operating-card.md",
+      "category": "procedure",
+      "additions": 140,
+      "deletions": 107
+    },
+    {
+      "path": "docs/notes/pr-ready-state.md",
+      "category": "procedure",
+      "additions": 13,
+      "deletions": 15
+    },
+    {
+      "path": "docs/notes/quick-commands.md",
+      "category": "procedure",
+      "additions": 8,
+      "deletions": 12
+    },
+    {
+      "path": "docs/notes/sentry-triage-pipeline.md",
+      "category": "procedure",
+      "additions": 10,
+      "deletions": 8
+    },
+    {
+      "path": "docs/notes/worktree-and-web-setup.md",
+      "category": "procedure",
+      "additions": 20,
+      "deletions": 14
+    },
+    {
+      "path": "docs/pr-checklists/architecture-decisions.md",
+      "category": "procedure",
+      "additions": 12,
+      "deletions": 9
+    },
+    {
+      "path": "docs/pr-checklists/ci-workflow-gates.md",
+      "category": "procedure",
+      "additions": 2,
+      "deletions": 2
+    },
+    {
+      "path": "docs/pr-checklists/code-health.md",
+      "category": "procedure",
+      "additions": 15,
+      "deletions": 17
+    },
+    {
+      "path": "docs/pr-checklists/indexer-handler-invariants.md",
+      "category": "procedure",
+      "additions": 3,
+      "deletions": 3
+    },
+    {
+      "path": "docs/pr-checklists/recurring-review-patterns.md",
+      "category": "procedure",
+      "additions": 18,
+      "deletions": 10
+    },
+    {
+      "path": "docs/pr-checklists/review-prompt-exclusions.md",
+      "category": "procedure",
+      "additions": 2,
+      "deletions": 5
+    },
+    {
+      "path": "docs/terraform.md",
+      "category": "procedure",
+      "additions": 4,
+      "deletions": 3
+    },
+    {
+      "path": "governance-watchdog/ADDING_EVENTS.md",
+      "category": "procedure",
+      "additions": 4,
+      "deletions": 2
+    },
+    {
+      "path": "indexer-envio/AGENTS.md",
+      "category": "procedure",
+      "additions": 8,
+      "deletions": 3
+    },
+    {
+      "path": "indexer-envio/README.md",
+      "category": "procedure",
+      "additions": 6,
+      "deletions": 4
+    },
+    {
+      "path": "scripts/AGENTS.md",
+      "category": "procedure",
+      "additions": 22,
+      "deletions": 23
+    },
+    {
+      "path": "scripts/agent-autoreview.mjs",
+      "category": "check",
+      "additions": 1,
+      "deletions": 1
+    },
+    {
+      "path": "scripts/agent-autoreview.test.sh",
+      "category": "test",
+      "additions": 1,
+      "deletions": 1
+    },
+    {
+      "path": "scripts/agent-quality-gate.sh",
+      "category": "check",
+      "additions": 48,
+      "deletions": 48
+    },
+    {
+      "path": "scripts/agent-quality-gate.test.sh",
+      "category": "test",
+      "additions": 35,
+      "deletions": 114
+    },
+    {
+      "path": "scripts/bootstrap/agent-setup-contract.test.sh",
+      "category": "test",
+      "additions": 30,
+      "deletions": 0
+    },
+    {
+      "path": "scripts/bootstrap/claude-code-web-setup.sh",
+      "category": "check",
+      "additions": 2,
+      "deletions": 3
+    },
+    {
+      "path": "scripts/bootstrap/codex-cloud-maintenance.sh",
+      "category": "check",
+      "additions": 0,
+      "deletions": 1
+    },
+    {
+      "path": "scripts/bootstrap/codex-cloud-setup.sh",
+      "category": "check",
+      "additions": 0,
+      "deletions": 1
+    },
+    {
+      "path": "scripts/check-agent-quality-gate-package-scripts.mjs",
+      "category": "check",
+      "additions": 1,
+      "deletions": 0
+    },
+    {
+      "path": "scripts/docs/check-verification-redesign-evidence.mjs",
+      "category": "check",
+      "additions": 85,
+      "deletions": 16
+    },
+    {
+      "path": "scripts/docs/check-verification-redesign-evidence.test.mjs",
+      "category": "test",
+      "additions": 139,
+      "deletions": 12
+    },
+    {
+      "path": "scripts/docs/docs-garden-issue-helpers.mjs",
+      "category": "check",
+      "additions": 1,
+      "deletions": 3
+    },
+    {
+      "path": "scripts/docs/docs-garden-issue.test.mjs",
+      "category": "test",
+      "additions": 3,
+      "deletions": 2
+    },
+    {
+      "path": "scripts/gate/mapping/shell-quote.mjs",
+      "category": "check",
+      "additions": 3,
+      "deletions": 3
+    },
+    {
+      "path": "scripts/gate/routing-table/arms-scripts.mjs",
+      "category": "check",
+      "additions": 1,
+      "deletions": 1
+    },
+    {
+      "path": "scripts/gate/routing-table/index.mjs",
+      "category": "check",
+      "additions": 1,
+      "deletions": 1
+    },
+    {
+      "path": "scripts/pr/closeout-review.mjs",
+      "category": "check",
+      "additions": 3,
+      "deletions": 0
+    },
+    {
+      "path": "scripts/pr/closeout-review.test.mjs",
+      "category": "test",
+      "additions": 7,
+      "deletions": 0
+    },
+    {
+      "path": "scripts/pr/review-materiality.mjs",
+      "category": "check",
+      "additions": 8,
+      "deletions": 7
+    },
+    {
+      "path": "scripts/pr/review-materiality.test.mjs",
+      "category": "test",
+      "additions": 9,
+      "deletions": 5
+    },
+    {
+      "path": "scripts/repo-health/check-guardrail-prose.test.mjs",
+      "category": "test",
+      "additions": 5,
+      "deletions": 2
+    },
+    {
+      "path": "scripts/repo-health/guardrail-prose.json",
+      "category": "configuration",
+      "additions": 69,
+      "deletions": 1
+    },
+    {
+      "path": "scripts/setup.sh",
+      "category": "check",
+      "additions": 4,
+      "deletions": 22
+    },
+    {
+      "path": "scripts/workflows/check-no-skip-audit.test.mjs",
+      "category": "test",
+      "additions": 2,
+      "deletions": 2
+    },
+    {
+      "path": "shared-config/AGENTS.md",
+      "category": "procedure",
+      "additions": 9,
+      "deletions": 5
+    }
+  ],
+  "totals": {
+    "procedure": {
+      "additions": 750,
+      "deletions": 914,
+      "net": -164
+    },
+    "check": {
+      "additions": 158,
+      "deletions": 107,
+      "net": 51
+    },
+    "configuration": {
+      "additions": 85,
+      "deletions": 31,
+      "net": 54
+    },
+    "hook": {
+      "additions": 0,
+      "deletions": 40,
+      "net": -40
+    },
+    "doc": {
+      "additions": 245,
+      "deletions": 308,
+      "net": -63
+    },
+    "test": {
+      "additions": 231,
+      "deletions": 138,
+      "net": 93
+    },
+    "all": {
+      "additions": 1469,
+      "deletions": 1538,
+      "net": -69
+    }
+  },
+  "replacementSpecific": {
+    "definition": "The M5 replacement is a direct author procedure plus focused static checks. Procedure, check, configuration, and hook additions count as implementation. Architecture, plan, and evidence prose count as documentation.",
+    "implementationAdditions": {
+      "procedure": 750,
+      "check": 158,
+      "configuration": 85,
+      "hook": 0,
+      "total": 993
+    },
+    "testAdditions": 231,
+    "documentationAdditions": 245,
+    "testToImplementationRatio": 0.2326,
+    "replacementControlPlaneNetDeletion": {
+      "definition": "Procedure, check, configuration, hook, and test lines. Architecture, plan, and evidence prose do not enter this result.",
+      "additions": 1224,
+      "deletions": 1230,
+      "net": -6,
+      "additionsBelowDeletions": true,
+      "statement": "The budgeted M5 replacement control plane deletes 6 more lines than it adds."
+    },
+    "phaseScopedNetDeletion": {
+      "additions": 1469,
+      "deletions": 1538,
+      "net": -69,
+      "additionsBelowDeletions": true,
+      "statement": "The M5 phase-scoped diff deletes 69 more lines than it adds."
+    },
+    "limits": {
+      "newOrchestrationScripts": [],
+      "newServices": [],
+      "newReplacementImplementationFiles": [],
+      "newReplacementImplementationFilesOver500Lines": [],
+      "generatedReceiptPathsExcludedFromReplacementFileLimit": [
+        "docs/metrics/verification-redesign-control-plane-after.json",
+        "docs/metrics/verification-redesign-m5-complexity.json"
+      ],
+      "twiceImplementationAdditions": 1986,
+      "testAdditionsUnderTwiceImplementationAdditions": true
+    }
+  },
+  "removedLocalAutomation": {
+    "trackedPrePushHookRemoved": true,
+    "trunkPrePushActionRemoved": true,
+    "hostedSetupFreshnessRequirementRemoved": true,
+    "replacementPrePushAdded": false,
+    "stagedPreCommitFormattingRetained": true
+  },
+  "forbiddenMechanisms": [],
+  "phaseClaim": {
+    "mode": "early-local-cutover",
+    "localCutoverActive": true,
+    "legacyGateRuntimeRetained": true,
+    "legacyRequiredCiRetained": true,
+    "claimsPostCutoverCanaryComplete": false,
+    "claimsFinalDeletionDenominator": false,
+    "claimsFinal80PercentDeletion": false,
+    "statement": "M5 removes mandatory repository verification from local push. The direct author-check table and required CI become the normal path. Issue #2128 owns the 10-PR, seven-day canary, source allocation, final denominator, and any later deletion approval."
+  },
+  "evidence": {
+    "humanApproval": "https://github.com/mento-protocol/monitoring-monorepo/issues/2127#issuecomment-5507740185",
+    "rulesetBefore": "https://github.com/mento-protocol/monitoring-monorepo/issues/2127#issuecomment-5507910457",
+    "rulesetAfter": "https://github.com/mento-protocol/monitoring-monorepo/issues/2127#issuecomment-5507919323",
+    "prerequisiteReceipt": "https://github.com/mento-protocol/monitoring-monorepo/issues/2127#issuecomment-5511541326",
+    "graphPinPr": 2218,
+    "graphPinMergeSha": "3597a3f21ba52071544302d94c55a558064af4ee",
+    "protectedMainRun": 33637419758,
+    "protectedMainRunConclusion": "success",
+    "currentBaseProtection": {
+      "rulesetId": 13494367,
+      "strictRequiredStatusChecksPolicy": true,
+      "requiredContexts": [
+        {
+          "context": "Vercel",
+          "integrationId": 8329
+        },
+        {
+          "context": "Vercel Preview Comments",
+          "integrationId": 8329
+        },
+        {
+          "context": "Code Quality",
+          "integrationId": 15368
+        },
+        {
+          "context": "ci",
+          "integrationId": 15368
+        },
+        {
+          "context": "Sentry suites",
+          "integrationId": 15368
+        }
+      ]
+    }
+  }
+}

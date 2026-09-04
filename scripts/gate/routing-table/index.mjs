@@ -51,7 +51,7 @@
  *
  * `implementation_signature()` in the gate lists every module in this directory.
  * An entry it cannot `stat` hashes as `__missing__`, which FREEZES the
- * signature, so `--skip-if-fresh` reuses a stale stamp and skips real pre-push
+ * signature, so `--skip-if-fresh` reuses a stale stamp and skips real diagnostic
  * work. Adding a module here without adding it there is the one mistake in this
  * directory that fails silently. `scripts/AGENTS.md` records the pin.
  */

@@ -295,7 +295,7 @@ function parseArgs(argv) {
       case "--parallel-tests":
         next();
         throw new Error(
-          "--parallel-tests was removed; run the local or hosted gate command from docs/notes/pr-operating-card.md step 3 before autoreview",
+          "--parallel-tests was removed; run the applicable direct author checks from docs/notes/pr-operating-card.md step 3 before autoreview",
         );
       case "--timeout-seconds":
         args.timeoutSeconds = Number.parseInt(next(), 10);

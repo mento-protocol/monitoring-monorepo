@@ -3,7 +3,7 @@ title: Staged replacement of the mandatory local gate with existing CI
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-02
+last_verified: 2026-09-03
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -13,10 +13,10 @@ garden_lane: adrs-architecture
 
 # ADR 0078 — staged replacement of the mandatory local gate with existing CI
 
-**Status:** Accepted (Aug 2026), amended 2026-09-02. The migration is in force.
-The operator approved an early local cutover before the original pre-cutover
-sample. The current gate stays mandatory until the approved cutover change
-lands.
+**Status:** Accepted (Aug 2026), amended 2026-09-03. The M5 early local cutover
+is in force. The operator approved it before the original pre-cutover sample.
+The legacy gate remains callable as a diagnostic and remains covered in
+required CI. Issue #2128 owns the post-cutover canary and retirement evidence.
 [ADR 0007](0007-agent-quality-gate-and-merge-oracle.md) remains active for the
 hosted two-projection all-clear and Codex approval gate. This ADR supersedes
 only its mandatory-local-gate target state. [ADR
@@ -187,6 +187,14 @@ reachability, and dashboard GraphQL consumer changes require their applicable
 code generation. Other workspace packages use their direct lint, typecheck,
 and test commands when those scripts exist.
 
+Dashboard bundle inputs require a fresh shared-config build when applicable, a
+fresh dashboard production build, and the bundle-size check. Peg-registry
+authority inputs and shared thresholds require the existing integrity and
+cross-package parity checks in the author-check table. Reserve-yield inputs,
+alert and schema cross-consumers, deployable QuickNode filters, Safe event-hash
+sources, and Upstash MCP trust surfaces use their focused existing contracts.
+Routine coverage and Knip, broad dependency and supply-chain audits, full-browser suites, and legacy-gate self-tests remain CI-only. A focused policy or configuration check stays local only when the table or a triggered checklist selects it.
+
 These local results shorten feedback. Required CI remains merge authority. A
 manual push can omit author checks, but it cannot omit required CI.
 
@@ -286,9 +294,9 @@ cohort would prolong a local bottleneck that the operator already had to skip.
 It would also measure an intermediate local workflow that the approved cutover
 removes.
 
-Issue #2127 may therefore remove repository verification from pre-push after
-the graph-pin repair reaches protected `main`, protected-main CI passes, and
-strict current-base checking is active. The cutover must keep staged formatting
+Issue #2127 therefore removes repository verification from pre-push after the
+graph-pin repair reaches protected `main`, protected-main CI passes, and strict
+current-base checking is active. The cutover keeps staged formatting
 on pre-commit. It must add the fixed `/ship` author-check trigger table. It must
 also keep the full legacy gate available in required CI and as a diagnostic.
 Required CI remains merge authority.
@@ -399,8 +407,9 @@ shadow evidence stays in GitHub runs and the later Markdown evidence record.
 
 ## Rollback
 
-Before legacy deletion, restore the recorded ruleset first and revert the
-cutover commit. The retained gate runtime then resumes the mandatory hook.
+Before legacy deletion, keep required CI and strict current-base protection.
+Revert the cutover commit. The retained gate runtime then resumes the mandatory
+hook.
 
 After legacy deletion, first revert the retirement commit. Restore the gate
 runtime, coordinator, aliases, tests, and mixed-version lock behavior before
@@ -461,7 +470,10 @@ would recreate the local gate.
 - [M2 additive complexity manifest](../metrics/verification-redesign-m2-complexity.json)
 - [M3 additive complexity manifest](../metrics/verification-redesign-m3-complexity.json)
 - [M4 additive complexity manifest](../metrics/verification-redesign-m4-complexity.json)
-- Issues #2006, #2032, #2042, #2094, #2122, #2123, #2124, #2125, and #2126
+- [Control-plane after manifest](../metrics/verification-redesign-control-plane-after.json)
+- [M5 complexity receipt](../metrics/verification-redesign-m5-complexity.json)
+- Issues #2006, #2032, #2042, #2094, #2122, #2123, #2124, #2125, #2126, and
+  #2127
 - ADRs [0007](0007-agent-quality-gate-and-merge-oracle.md),
   [0069](0069-gate-routing-table-as-data.md),
   [0072](0072-md-only-docs-checks-job.md),

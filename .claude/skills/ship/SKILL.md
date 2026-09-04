@@ -1,11 +1,11 @@
 ---
 name: ship
-description: '[repo-skill] Ship monitoring-monorepo changes through the repo''s Codex-compatible workflow: preflight, quality gate, closeout review, commit, push, PR create/update, readiness babysitting, and required production closeout. Use when the user says "ship it", "/ship", "push this", "open a PR", "create a PR", "publish this", or "send it" in this repo.'
+description: '[repo-skill] Ship monitoring-monorepo changes through the repo''s Codex-compatible workflow: preflight, direct author checks, closeout review, commit, push, PR create/update, readiness babysitting, and required production closeout. Use when the user says "ship it", "/ship", "push this", "open a PR", "create a PR", "publish this", or "send it" in this repo.'
 title: Ship Skill
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-22
+last_verified: 2026-09-02
 doc_type: skill
 scope: repo-wide
 review_interval_days: 90
@@ -20,14 +20,14 @@ loads the user-global `ship` skill instead of this file
 ([`codex-agent-skills.md`](../../../docs/notes/codex-agent-skills.md#claude-global-store-shadowing)),
 so a rule written here and nowhere else would reach Codex only.
 
-Work [`pr-operating-card.md`](../../../docs/notes/pr-operating-card.md) from
-step 2 through step 9. It owns the PR description shape, the ready-for-review
-default, `Closes` vs `Refs`, the babysit and ready-state contracts, merge
-hygiene, and production closeout.
+After bootstrap, work
+[`pr-operating-card.md`](../../../docs/notes/pr-operating-card.md) steps 2-9.
+Run its preflight before agent-invoked repository code. It does not attest
+bootstrap; setup has a separate [trust boundary](../../../docs/notes/worktree-and-web-setup.md#bootstrap-trust-boundary).
 
 | Decision                                                       | Authority                                                                                   |
 | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| Gate mapping and path routing                                  | [`agent-quality-gate-mechanics.md`](../../../docs/notes/agent-quality-gate-mechanics.md)    |
+| Author-check triggers and result records                       | [`pr-operating-card.md`](../../../docs/notes/pr-operating-card.md#the-loop)                 |
 | Closeout review and the handoff to the `review` skill          | [`pr-operating-card.md`](../../../docs/notes/pr-operating-card.md) step 4                   |
 | Readiness and feedback projections                             | [`pr-ready-state.md`](../../../docs/notes/pr-ready-state.md)                                |
 | Surface detection, gh capability gate, gh→MCP mapping          | [`github-tooling-surfaces.md`](../../../docs/notes/github-tooling-surfaces.md)              |
@@ -37,27 +37,20 @@ hygiene, and production closeout.
 
 ## What this repo adds
 
-- **Gate before publish**: Follow card step 3 and validate against the resolved
-  PR base. A local setup runs `pnpm agent:quality-gate --run` against that base.
-  In a hosted setup, run the resolved-base gate first when the resolved base
-  tracking ref is not `origin/main`. This includes fork and stacked PRs. Then
-  fetch `origin/main` and warm the hook with
-  `./scripts/agent-quality-gate.sh --run --parallel 3 --base origin/main`. If the
-  resolved base is `origin/main`, this hook warm is also the resolved-base
-  gate. Then run `pnpm agent:closeout-review` for non-trivial behavioural,
-  workflow, security, data-flow, infrastructure, or UI changes, and hand its
-  printed report path to the `review` skill. Exit 1 means the report carries
-  findings. Exit 2 means the closeout failed and there is no usable review: the
-  target moved, codex failed or timed out, the report came back empty, or the
-  tool never started. Block on a 2 and report the reason the script printed.
-  One cause falls back instead — with no `codex` on PATH the script is skipped
-  and the `review` skill runs alone, as single-source coverage to disclose in
-  `## Validation`. Card step 4 owns the flow — follow it rather than a bare
-  command.
-- **Resolve the base repo from evidence.** A fork checkout uses its parent as
-  `BASE_REPO`; never substitute a fork's `origin` for its parent. Bind every
-  `gh pr view`, feedback-state, and ready-state call with `--repo <BASE_REPO>`.
-  A failed GitHub query is not evidence that no PR exists.
+- **Repository identity before agent-invoked code**: After bootstrap, resolve
+  `CURRENT_REPO`, `BASE_REPO`, the PR, remotes, and base. Stop fork or
+  cross-repository heads. Bind probes to `BASE_REPO`; a failed query does not
+  prove that no PR exists. Use the resolved base for all diff checks. Before a
+  new PR, bind and reuse its intended base. Use `main` only for unstacked work.
+- **Author checks before ready publication**: Apply every matching row in card
+  step 3. Format every intended changed file before those checks. Record each
+  result in `## Validation`. Reapply affected rows after a material fix, base
+  integration, or formatter change during commit. Pre-push runs no repository
+  verification.
+  For a non-trivial change, run `pnpm agent:closeout-review --base
+"$BASE_REMOTE/$baseRefName"` with the preflight-bound base. Hand its report to
+  the `review` skill. Card step 4 owns base-integration axes, exit handling, and
+  the limited single-source fallback.
 - **PRs open ready for review.** Drafts suppress the automated AI reviews this
   workflow depends on.
 - **`scripts/pr/check-pr-description.mjs` enforces `## The Problem` then
@@ -67,8 +60,8 @@ hygiene, and production closeout.
 - **Never post routine or duplicate `@codex review` requests**, and never tag
   `chatgpt-codex-connector` directly.
 - **Deep security scan** (`claude-security`) is developer-installed and Claude
-  Code only. This repo does not declare it. Where unavailable, aim the gate and
-  closeout review at the sensitive surfaces and record
+  Code only. This repo does not declare it. Where unavailable, aim the direct
+  author checks and closeout review at the sensitive surfaces and record
   `Claude Security scan: skipped (<surface>)` in the final summary.
 - **Done is not merge when Done means includes live behaviour.** Card step 9
   owns the closeout.

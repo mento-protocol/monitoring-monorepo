@@ -37,9 +37,9 @@
  * on the LOCALE, not on the build. Measured, `printf %q` of `aéb` gives
  * `$'a\303\251b'` under `LC_ALL=C` and `aéb` under `LC_ALL=en_US.UTF-8` on both
  * builds — and with the locale unset, 3.2.57 escapes where 5.3.15 does not. The
- * gate's own pre-push hook runs with a stripped environment, so both answers
- * are reachable on one machine. `shellQuote` refuses those too. No tracked path
- * in this repository carries a non-ASCII byte.
+ * retained `--pre-push` compatibility path can run with a stripped environment,
+ * so both answers are reachable on one machine. `shellQuote` refuses those too.
+ * No tracked path in this repository carries a non-ASCII byte.
  *
  * `shell-quote.test.mjs` asks bash itself rather than trusting this comment.
  */
