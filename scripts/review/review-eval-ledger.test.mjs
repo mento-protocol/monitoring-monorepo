@@ -26,16 +26,15 @@ import {
   ROW_REQUIRED_KEYS,
   validateLedgerRow,
 } from "./review-eval-ledger.mjs";
-import { plannedMatrix } from "./review-eval-fixtures.mjs";
+import { loadContract, plannedMatrix } from "./review-eval-fixtures.mjs";
 import { planCells } from "./review-eval-run.mjs";
 import { aggregateDraws } from "./review-eval-score.mjs";
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
-const contract = JSON.parse(
-  readFileSync(
-    path.join(repoRoot, "docs/evals/review-skill-fixtures.json"),
-    "utf8",
-  ),
+// The digest covers the committed bytes, exactly as the CLI reads it: it is how
+// `checkLedger` tells a row scored under this contract from legal history.
+const { contract, digest: committedContractDigest } = loadContract(
+  path.join(repoRoot, "docs/evals/review-skill-fixtures.json"),
 );
 const schema = JSON.parse(
   readFileSync(
@@ -711,9 +710,13 @@ test("plannedMatrix is the matrix planCells actually builds", () => {
 });
 
 test("the committed ledger passes its own contract check", () => {
+  // `--check-ledger` names the current contract by its digest, and so does
+  // this: every committed row was scored under a contract this one has since
+  // replaced, and a row is judged against the contract it ran on.
   const checked = checkLedger({
     path: path.join(repoRoot, "docs/evals/review-skill-ledger.jsonl"),
     contract,
+    contractDigest: committedContractDigest,
   });
   assert.deepEqual(checked.problems, []);
 });

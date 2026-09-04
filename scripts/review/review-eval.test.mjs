@@ -28,7 +28,9 @@ import { fileURLToPath } from "node:url";
 
 import {
   forbiddenShasForFixture,
+  gridFixtures,
   loadContract,
+  PIPELINE_DRAWS,
 } from "./review-eval-fixtures.mjs";
 import {
   baselinePreflightProblems,
@@ -101,6 +103,11 @@ const ledgerRelative = "docs/evals/review-skill-ledger.jsonl";
 const { contract, digest: contractDigest } = loadContract(
   path.join(repoRoot, contractRelative),
 );
+// Read from the committed contract rather than transcribed, so a fixture that
+// joins the suite or the grid widens these cases instead of failing them.
+const grid = gridFixtures(contract);
+const scorableIn = (fixtures) =>
+  fixtures.reduce((total, fixture) => total + fixture.scorable_ids.length, 0);
 const planEnv = {
   REVIEW_EVAL_CLAUDE_CLI: "2.1.14",
   REVIEW_EVAL_CODEX_CLI: "0.48.2",
@@ -554,7 +561,15 @@ test("--check-fixtures --offline passes on the committed contract", () => {
   assert.equal(output.contract_digest, contractDigest);
   assert.deepEqual(
     [output.prs, output.scorable, output.p1, output.grid],
-    [6, 34, 12, 3],
+    [
+      contract.fixtures.length,
+      scorableIn(contract.fixtures),
+      contract.fixtures.reduce(
+        (total, fixture) => total + fixture.p1_ids.length,
+        0,
+      ),
+      grid.length,
+    ],
   );
 });
 
@@ -675,17 +690,25 @@ test("--check-ledger reports freshness from executed_at alone", () => {
 
 test("planCells builds the documented matrices", () => {
   const canary = planCells({ contract, kind: "canary" });
-  assert.equal(canary.length, 3);
+  assert.equal(canary.length, grid.length);
   assert.ok(canary.every((cell) => cell.condition === "replay"));
   assert.ok(canary.every((cell) => cell.finder_report));
 
   const full = planCells({ contract, kind: "full" });
   const byCondition = (name) =>
     full.filter((cell) => cell.condition === name).length;
-  assert.equal(full.length, 24);
-  assert.equal(byCondition("pipeline"), 12);
-  assert.equal(byCondition("replay"), 6);
-  assert.equal(byCondition("control"), 6);
+  // Two pipeline draws of every fixture, one replay of every frozen report the
+  // grid carries, and one control cell per fixture.
+  const pipeline = PIPELINE_DRAWS * contract.fixtures.length;
+  const replay = grid.reduce(
+    (total, fixture) => total + fixture.finder_reports.length,
+    0,
+  );
+  const control = contract.fixtures.length;
+  assert.equal(full.length, pipeline + replay + control);
+  assert.equal(byCondition("pipeline"), pipeline);
+  assert.equal(byCondition("replay"), replay);
+  assert.equal(byCondition("control"), control);
   assert.ok(
     full
       .filter((cell) => cell.condition === "control")
@@ -705,7 +728,7 @@ test("--plan writes plan.json and pins the comparability key", () => {
     const plan = JSON.parse(result.stdout);
     assert.equal(plan.kind, "canary");
     assert.equal(plan.baseline_selection, "automatic");
-    assert.equal(plan.cells.length, 3);
+    assert.equal(plan.cells.length, grid.length);
     assert.equal(
       plan.comparability_key,
       comparabilityKey({ contract, contractDigest }),
@@ -3426,10 +3449,12 @@ test("scorePlan folds stubbed cells into a schema-valid ledger row", async () =>
     assert.equal(Object.keys(scored.row.conditions).length, 1);
     const replay = scored.row.conditions.replay;
     assert.equal(replay.draws, 1);
-    assert.equal(replay.recall.opportunities, 22);
-    assert.equal(replay.usd, 10.5);
-    assert.equal(replay.novel_real, 3);
-    assert.equal(replay.wrong_claims, 3);
+    // One canary cell per grid fixture, each stubbed with the same single
+    // claim at $3.50, over that fixture's frozen scorable ids in one draw.
+    assert.equal(replay.recall.opportunities, scorableIn(grid));
+    assert.equal(replay.usd, grid.length * 3.5);
+    assert.equal(replay.novel_real, grid.length);
+    assert.equal(replay.wrong_claims, grid.length);
     assert.equal(
       readLedger(path.join(root, ledgerRelative)).length,
       0,
@@ -4058,8 +4083,13 @@ test("scorePlan reports a partial matrix and refuses an empty one", async () => 
       calibrationSet,
     });
     assert.equal(scored.row.status, "partial");
-    assert.equal(scored.missing.length, 2);
-    assert.match(scored.row.notes, /2 cell\(s\) missing/);
+    // One cell of the canary matrix was written; every other one is missing.
+    const missing = plan.cells.length - 1;
+    assert.equal(scored.missing.length, missing);
+    assert.match(
+      scored.row.notes,
+      new RegExp(`${missing} cell\\(s\\) missing`),
+    );
     const scoredResult = JSON.parse(
       readFileSync(
         path.join(

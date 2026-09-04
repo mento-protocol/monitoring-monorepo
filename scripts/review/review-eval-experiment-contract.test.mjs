@@ -12,12 +12,14 @@ import path from "node:path";
 import test, { after } from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { gridFixtures, PIPELINE_DRAWS } from "./review-eval-fixtures.mjs";
 import {
   buildExperimentPlan,
   canonicalRerunManifest,
   digestObject,
   EXPERIMENT_SOURCE_FILES,
   experimentSourceDigest,
+  fullRerunCellCount,
   novelCacheIdentity,
   rawCacheIdentity,
   scoreCacheIdentity,
@@ -468,10 +470,23 @@ test("a record's recorded phase provenance is read strictly", () => {
   );
 });
 
-test("the qualification manifest is the canonical 24-cell rerun", () => {
+test("the qualification manifest is the canonical full rerun", () => {
   const plan = makePlan();
   const expectedCells = planCells({ contract, kind: "full" });
-  assert.equal(plan.qualification.cell_count, 24);
+  // Two pipeline draws of every fixture, one replay per frozen grid report,
+  // and one control cell per fixture. A grid fixture added to the contract
+  // moves this count rather than failing the manifest against a literal.
+  const replays = gridFixtures(contract).reduce(
+    (total, fixture) => total + fixture.finder_reports.length,
+    0,
+  );
+  const expectedCount =
+    PIPELINE_DRAWS * contract.fixtures.length +
+    replays +
+    contract.fixtures.length;
+  assert.equal(expectedCells.length, expectedCount);
+  assert.equal(fullRerunCellCount(contract), expectedCount);
+  assert.equal(plan.qualification.cell_count, expectedCount);
   assert.deepEqual(plan.qualification.cells, expectedCells);
   assert.equal(plan.qualification.experiment_artifact_reuse_allowed, false);
   assert.equal(plan.qualification.skill_digest, skillDigest(candidateRoot));

@@ -13,7 +13,7 @@ garden_lane: operator-runbooks
 # Review skill evaluation
 
 This evaluation measures whether the `review` skill still finds real defects in
-real pull requests from this repository. It replays six merged PRs at the
+real pull requests from this repository. It replays nine merged PRs at the
 commit they had before review, runs the reviewer against them, and scores the
 result against the defects that human-reviewed CI bots actually raised and the
 author actually fixed. It runs on a developer Mac under launchd; CI never holds
@@ -31,9 +31,32 @@ review threads, or the merge is taking a memory test, not a review.
 
 The **answer key** is `docs/evals/review-skill-truth/pr-<n>.json`: the defects
 four independent CI reviewers raised on that head and the author then fixed.
-It was harvested once, on 2026-08-21, and frozen as bytes. It is never
+It was harvested on 2026-08-21 for six PRs and on 2026-09-04 for three more,
+and frozen as bytes each time. It is never
 re-derived from the GitHub API, because comments get edited, bodies get deleted
 and bots get renamed. The contract records a `sha256` for every truth file.
+
+`scripts/review/review-eval-harvest-truth.mjs` harvests a new key, keeping the
+2026-08-21 severity rule, key order and byte style. Six rules differ from that
+`extract_truth.py` harvest, so its keys are not byte-comparable with the six it
+froze. The first head is the earliest submitted bot review's `commit_id`, not
+`commits[0]`, because a bot raises a finding against the head it read. Findings
+are that head's bot-authored root comments alone, and the tool prints how many
+it dropped for sitting on a later head, because that count moves the
+denominator. Dispositions read only the pull request author's replies, so a bot
+quoting `Fixed in` no longer marks a finding fixed. Title and body are derived
+after `<details>` blocks, HTML comments and a leading CodeRabbit badge line are
+stripped, so a collapsed analysis chain cannot push the finding statement past
+the 2500-character body cut; severity still reads the raw body, where the badge
+lives. `base_sha` is `git merge-base <first head> <the PR's base ref>` with
+that ref fetched through `--src`, not the moving `meta.base.sha`. Pages come
+from `gh api --paginate --slurp` and are flattened as values, so a body holding
+`][` survives. Two independent bots sometimes raise one defect twice; the
+harvester cannot tell, so a curator adds `"duplicate_of": <earliest id>` to the
+later record afterwards, and `--check-fixtures` refuses a `scorable_ids` or
+`p1_ids` entry that names it. The six 2026-08-21 keys are not re-harvested
+here, so they still carry findings raised on later heads: issue 2289 tracks
+re-harvesting them and the denominator change that would follow.
 
 The answer key never travels with the exam. It lives on `main`; the fixture is
 a detached checkout at a 2026-08 commit and is materialized under
@@ -184,8 +207,8 @@ Then plan and run. `--plan` prints the matrix and the cost estimate without
 spending anything.
 
 ```bash
-pnpm review:eval -- --plan --kind canary --json   # 3 cells, about $15, ~25 min
-pnpm review:eval -- --plan --kind full --json     # 24 cells, about $88, ~2 h
+pnpm review:eval -- --plan --kind canary --json   # 6 cells, about $22, ~40 min
+pnpm review:eval -- --plan --kind full --json     # 39 cells, about $145, ~3 h
 pnpm review:eval:run --kind canary                # the monthly smoke test
 pnpm review:eval:run --kind full                  # the quarterly score of record
 ```
@@ -444,8 +467,9 @@ Its only statuses are `PROMISING`, `REJECT`, and `INCONCLUSIVE`.
 
 Planning and validation do not call a model. Both modes validate local inputs
 and probe the provider CLI versions. Planning writes `plan.json` with the
-complete campaign and canonical 24-cell rerun manifest before paid work can
-start.
+complete campaign and canonical full-rerun manifest before paid work can
+start. Its cell count is derived from the contract, so a fixture added to the
+suite or the grid widens it.
 
 ```bash
 experiment_root="$HOME/.cache/mento-review-eval-experiments/manual-$(date -u +%Y%m%dT%H%M%SZ)"
@@ -594,7 +618,7 @@ operator-started local experiment.
 The plan contains a `canonical-full-rerun` manifest with
 `experiment_artifact_reuse_allowed: false`. No importer exists. Experiment
 results and caches never qualify as canonical evidence. Run the selected
-candidate through the canonical 24-cell runner:
+candidate through the canonical full runner:
 
 ```bash
 pnpm review:eval:run --skill-ref /absolute/path/to/review-candidate \
@@ -626,14 +650,15 @@ keeps running and the next scheduled run asks for a full run again instead of
 dropping back to canaries for another cadence window.
 
 A canary is a floor test, never a ranking: RED when `replay` matches fewer
-than nine of the twenty-two grid defects, or any run emits no parseable
+than sixteen of the thirty-nine grid defects, or any run emits no parseable
 finding.
 
 ## The noise rule
 
-**Never rank on fewer than three defects.** Thirty-four defects across six PRs
-with two draws is 68 opportunities, and draws on the same defect are
-correlated, so the effective sample is smaller than it looks. The
+**Never rank on fewer than three defects.** Fifty-one defects across nine PRs
+with two draws is 102 raw scoring opportunities that the scorer collapses to 51
+paired per-defect outcomes, and draws on the same defect are correlated, so the
+effective sample is smaller than it looks. The
 pre-registered red line is `b − c ≥ 6` net flips on the paired per-defect
 vectors; at `b + c = 10`, `b = 8` gives a one-sided p of about 0.055. Anything
 below six flips is the noise floor. The rule is written down here so nobody
@@ -841,7 +866,7 @@ later change in that issue's stack deletes them.
 
 ## What this evaluation cannot tell you
 
-- **The sample is small and will stay small.** Thirty-four defects, six PRs,
+- **The sample is small and will stay small.** Fifty-one defects, nine PRs,
   one repository, one two-week era of 2026. The design detects roughly a
   ten-point regression. A five-point real degradation passes as green.
 - **The truth is a lower bound.** It is what four CI reviewers happened to
@@ -892,6 +917,7 @@ path must exist on `main` before the first run after the moving commit.
 | `scripts/review/review-eval-plan-evidence.mjs`              | plan, result, and calibration evidence checks            |
 | `scripts/review/review-eval-run-evidence.mjs`               | matrix completeness and evidence reuse checks            |
 | `scripts/review/review-eval-appended.mjs`                   | appended-row evidence revalidation                       |
+| `scripts/review/review-eval-harvest-truth.mjs`              | answer-key harvester: first head, findings, frozen bytes |
 | `scripts/review/review-eval-publication.mjs`                | current-key-safe local publication preparation           |
 | `scripts/review/review-eval-publication.test.mjs`           | publication confinement and PR-body shape tests          |
 | `scripts/review/review-eval-freshness-publication.mjs`      | publication-safe staleness issue synchronization         |
