@@ -160,11 +160,22 @@ test("base_sha is the merge-base of the first head and the fetched base ref", ()
   // The base ref is fetched last, so FETCH_HEAD names the base, not the head.
   assert.deepEqual(calls, [
     "fetch origin refs/pull/7/head",
+    `fetch origin ${HEAD}`,
     "fetch origin refs/heads/main",
     `merge-base ${HEAD} FETCH_HEAD`,
   ]);
   assert.throws(() => resolve("../evil"), /not a usable branch/);
   assert.throws(() => resolve("main", () => ""), /merge-base gave/);
+  // A force-push leaves the reviewed head off refs/pull/N/head, so fetching it
+  // by sha fails; the message names the sha instead of leaking git plumbing.
+  const forcePushed = ({ args }) => {
+    if (args[0] === "fetch" && args[2] === HEAD) throw new Error("no such ref");
+    return args[0] === "merge-base" ? `${BASE}\n` : "";
+  };
+  assert.throws(
+    () => resolve("main", forcePushed),
+    new RegExp(`first head ${HEAD} could not be fetched.*force-pushed`),
+  );
 });
 
 test("a harvest writes one key per PR in the frozen key order", () => {

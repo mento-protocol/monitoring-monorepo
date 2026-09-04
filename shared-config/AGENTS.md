@@ -3,7 +3,7 @@ title: Shared Config Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-09-02
 doc_type: agent-instructions
 scope: shared-config
 review_interval_days: 90
@@ -44,7 +44,11 @@ calendar data, thresholds, and shared ABIs.
 
 ## Verification
 
-The shared-config mapping for `pnpm agent:quality-gate --run` covers lint,
-typecheck, tests, coverage, knip, clean build, direct-consumer typechecks,
-dashboard bundle size, and conditional indexer mirror checks. Consumer-only
-mappings clean-build this package before loading its ignored `dist/` output.
+Run the direct package checks from step 3 of the
+[PR operating card](../docs/notes/pr-operating-card.md). Also run
+`pnpm --filter @mento-protocol/config build` before a direct consumer check so
+the consumer loads current `dist/` output. Apply the dashboard bundle-input row
+in step 3 to every `shared-config/**` change. Run its shared-config build,
+dashboard build, and dashboard size-limit checks before review. Required CI
+owns coverage, Knip, downstream consumer, and conditional indexer-mirror
+coverage.

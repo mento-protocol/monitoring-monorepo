@@ -25,8 +25,16 @@ const RETAINED = new Set(Object.keys(DISPOSITION_FIELDS).slice(0, 3));
 const REQUIRED_RISKS = new Set(Array.from({ length: 13 }, (_, i) => i + 1));
 const DUPLICATE_TARGET_RULE = "duplicate_of needs an acyclic retained target.";
 const GIT_OPTIONS = { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 };
-const WHOLE_FILE_PATHS = new Set(
-  ".trunk/hooks/pre-push docs/adr/0007-agent-quality-gate-and-merge-oracle.md docs/adr/0069-gate-routing-table-as-data.md docs/adr/0076-fair-quality-gate-coordinator.md docs/notes/agent-quality-gate-mechanics.md scripts/agent-quality-gate.sh scripts/agent-quality-gate.test.sh scripts/check-agent-quality-gate-package-scripts.mjs".split(
+const OPTIONAL_WHOLE_FILE_PATHS = new Set([".trunk/hooks/pre-push"]);
+const TRUNK_PRE_PUSH_MARKER =
+  /trunk-check-pre-push|agent-quality-gate-pre-push|git_hooks:\s*\[pre-push\]|agent-quality-gate\.sh.*(?:--skip-if-fresh|--pre-push)/u;
+const REQUIRED_WHOLE_FILE_PATHS = new Set(
+  "docs/adr/0007-agent-quality-gate-and-merge-oracle.md docs/adr/0069-gate-routing-table-as-data.md docs/adr/0076-fair-quality-gate-coordinator.md docs/notes/agent-quality-gate-mechanics.md scripts/agent-quality-gate.sh scripts/agent-quality-gate.test.sh scripts/check-agent-quality-gate-package-scripts.mjs".split(
+    " ",
+  ),
+);
+const REQUIRED_REPLACEMENT_WHOLE_FILE_PATHS = new Set(
+  ".agents/roles/standards-enforcer.md .agents/roles/verifier.md .agents/skills/ship/SKILL.md .claude/commands/autoreview.md .claude/skills/ship/SKILL.md .trunk/hooks/pre-commit .trunk/trunk.yaml docs/notes/pr-operating-card.md scripts/bootstrap/agent-setup-contract.test.sh scripts/docs/check-verification-redesign-evidence-source-patch.test.mjs scripts/docs/check-verification-redesign-evidence.mjs scripts/docs/check-verification-redesign-evidence.test.mjs scripts/pr/closeout-review-exec.mjs scripts/pr/closeout-review-git.mjs scripts/pr/closeout-review.mjs scripts/pr/closeout-review.test.mjs scripts/repo-health/check-guardrail-prose.mjs scripts/repo-health/check-guardrail-prose.test.mjs scripts/repo-health/guardrail-prose.json".split(
     " ",
   ),
 );
@@ -36,6 +44,10 @@ const EXCLUDED_REFERENCE_PATH =
   /^(?:ui-dashboard\/scripts\/(?:arkham-smoke-test\.mjs|intel-marathon\/tier1-bulk-enrich\.mjs)|indexer-envio\/\.cursor\/rules\/subgraph-migration\.mdc)$/u;
 const REFERENCE_PATTERN =
   /agent[:-](?:quality-gate|prewarm)|\bagent\.qualityGate(?:\.|\b)|gate:routing-table:test|scripts\/gate\/|(?:^|["'`(])(?:\.\.?\/)*gate\/|\$[^"'\s]*\\?\/gate(?:\\?\/|["':])|["']gate["']\s*,\s*["'][^"']+\.(?:c|mjs|sh)["']|\.terraform-agent-gate(?:\/|\b)|skip-if-fresh|--(?:allow-package-script-changes|full-local-tests|lock-wait|no-lock|command-timeout|command-not-started)(?!-)|\b(?:AGENT_(?:QUALITY|GATE|PREWARM)|AGENTQG|QUALITY_GATE)_[A-Z0-9_]+|\bAGENT_TURBO_SHARED_CACHE\b|\bagentqg[:-]|inheritGateMarkerStdio|mapped-command-process-identity\.mjs|\bdarwin-process-(?:identity|lineage)[a-z0-9._-]*|\b(?:portable-marker-v1|request-marker-empty-v1|darwin-coherent-lineage-v2|darwin-unique-lineage-v1|coordinator-owner-v1)\b|\btrunk-check-once(?:\.test)?\.sh/i;
+const REPLACEMENT_REFERENCE_PATTERN =
+  /agent:closeout-review|(?:direct )?(?:author|package) checks?|author[- ](?:check(?: table| rows?| contract| mapping| triggers?)|checkpoint)|PR operating card|optional legacy (?:gate|diagnostic)|Required CI (?:runs|owns|remains)|pre-(?:commit hook|push verification)|code-generation variant|non-mainnet variants first|staged formatting on pre-commit/i;
+const REPLACEMENT_ALIAS_PATTERN =
+  /^\s*"(?:agent:closeout-review(?::test)?|verification:[^"]+)"\s*:/u;
 const matchesReference = (p, line) =>
   REFERENCE_PATTERN.test(line) ||
   SCOPED_REFERENCE_PATTERN.test(`${p}:${line}`) ||
@@ -146,28 +158,60 @@ const nlines = (s) => (s ? s.split("\n").length - +s.endsWith("\n") : 0);
 function surfaceFor(path, wholeFile) {
   if (path.startsWith(".trunk/hooks/")) return "hook";
   if (/\.md$/u.test(path) || path.endsWith("AGENTS.md")) return "instruction";
+  if (/\.ya?ml$/u.test(path)) return "yaml-or-inline-shell";
+  if (path === "scripts/repo-health/guardrail-prose.json")
+    return "configuration-reference";
   if (wholeFile)
     return /\.test\.[^/]+$/u.test(path) ? "test" : "implementation";
   if (path === "package.json") return "alias";
-  if (/\.ya?ml$/u.test(path)) return "yaml-or-inline-shell";
   if (/\.sh$/u.test(path)) return "shell-reference";
   return "configuration-reference";
 }
-function countReferenceLines(path, content) {
+function countReferenceLines(path, content, replacementActive) {
   const lines = content.split("\n");
   const selected = new Set();
   lines.forEach((line, index) => {
-    if (matchesReference(path, line)) selected.add(index);
+    if (
+      matchesReference(path, line) ||
+      (replacementActive &&
+        (REPLACEMENT_REFERENCE_PATTERN.test(line) ||
+          (path === "package.json" && REPLACEMENT_ALIAS_PATTERN.test(line))))
+    )
+      selected.add(index);
   });
   if (path === ".trunk/trunk.yaml") {
+    const legacyMarkerIndexes = lines.flatMap((line, index) =>
+      TRUNK_PRE_PUSH_MARKER.test(line) ? [index] : [],
+    );
+    if (legacyMarkerIndexes.length === 0) return selected.size;
+
     const start = lines.findIndex((line) =>
       line.includes("- trunk-check-pre-push"),
+    );
+    const definition = lines.findIndex(
+      (line) => line.trim() === "- id: agent-quality-gate-pre-push",
+    );
+    const run = lines.findIndex((line) =>
+      /run: .*agent-quality-gate\.sh.*(?:--skip-if-fresh|--pre-push)/u.test(
+        line,
+      ),
+    );
+    const trigger = lines.findIndex((line) =>
+      /git_hooks:\s*\[pre-push\]/u.test(line),
     );
     const end = lines.findLastIndex(
       (line) => line.trim() === "- agent-quality-gate-pre-push",
     );
-    if (start < 0 || end < start)
-      fail("Cannot locate the Trunk quality-gate action block.");
+    if (
+      start < 0 ||
+      definition <= start ||
+      run <= definition ||
+      trigger <= run ||
+      end <= trigger
+    )
+      fail(
+        "Trunk quality-gate action block is partially removed or malformed.",
+      );
     for (let index = start; index <= end; index += 1) selected.add(index);
   }
   if (path === "turbo.json") {
@@ -195,17 +239,35 @@ export function buildManifest({ repoRoot = DEFAULT_ROOT, source }) {
     .map((entry) => entry.match(/^\d+ blob [0-9a-f]+\t(.+)$/u)?.[1])
     .filter(Boolean)
     .sort();
-  for (const path of WHOLE_FILE_PATHS)
+  for (const path of REQUIRED_WHOLE_FILE_PATHS)
     if (!paths.includes(path)) fail(`Missing manifest path: ${path}`);
+  const hookPresent = paths.includes(".trunk/hooks/pre-push");
+  const trunkConfig = paths.includes(".trunk/trunk.yaml")
+    ? git(repoRoot, ["show", `${sourceSha}:.trunk/trunk.yaml`])
+    : fail("Missing manifest path: .trunk/trunk.yaml");
+  const trunkActionPresent = TRUNK_PRE_PUSH_MARKER.test(trunkConfig);
+  if (hookPresent !== trunkActionPresent)
+    fail(
+      "The pre-push hook and Trunk quality-gate action must be retained or removed together.",
+    );
+  const replacementActive = !hookPresent && !trunkActionPresent;
+  for (const path of replacementActive
+    ? REQUIRED_REPLACEMENT_WHOLE_FILE_PATHS
+    : [])
+    if (!paths.includes(path))
+      fail(`Missing replacement manifest path: ${path}`);
   const entries = [];
   for (const path of paths) {
     const wholeFile =
-      WHOLE_FILE_PATHS.has(path) || path.startsWith("scripts/gate/");
+      OPTIONAL_WHOLE_FILE_PATHS.has(path) ||
+      REQUIRED_WHOLE_FILE_PATHS.has(path) ||
+      path.startsWith("scripts/gate/") ||
+      (replacementActive && REQUIRED_REPLACEMENT_WHOLE_FILE_PATHS.has(path));
     const content = git(repoRoot, ["show", `${sourceSha}:${path}`]);
     if (content.includes("\0")) continue;
     const lines = wholeFile
       ? nlines(content)
-      : countReferenceLines(path, content);
+      : countReferenceLines(path, content, replacementActive);
     if (lines === 0) continue;
     entries.push({
       path,
@@ -233,12 +295,19 @@ export function buildManifest({ repoRoot = DEFAULT_ROOT, source }) {
   return {
     schema_version: 1,
     source_sha: sourceSha,
-    definitions: {
-      whole_file:
-        "Physical lines in the gate entry points, dedicated canonical gate documents, every scripts/gate/** file, the package-script pin checker, and the full pre-push hook. The gate-rooted set includes retained shared-consumer code.",
-      matching_lines:
-        "Unique fixed-pattern lines in other tracked files, full Turbo input filters that pin gate sources, and the full Trunk gate action block.",
-    },
+    definitions: replacementActive
+      ? {
+          whole_file:
+            "Physical lines in the gate entry points, dedicated canonical gate documents, every scripts/gate/** file, and the required author, closeout-review, guardrail, setup-contract, pre-commit, and Trunk surfaces.",
+          matching_lines:
+            "Unique fixed-pattern legacy or replacement lines in other tracked files, verification aliases, full Turbo input filters that pin gate sources, and the full legacy Trunk gate action block.",
+        }
+      : {
+          whole_file:
+            "Physical lines in the gate entry points, dedicated canonical gate documents, every scripts/gate/** file, the package-script pin checker, and the full pre-push hook. The gate-rooted set includes retained shared-consumer code.",
+          matching_lines:
+            "Unique fixed-pattern lines in other tracked files, full Turbo input filters that pin gate sources, and the full Trunk gate action block.",
+        },
     entries,
     totals,
   };

@@ -13,7 +13,9 @@
 // the title and the 2500-character body cut, while severity reads the raw body,
 // where the badge lives. base_sha is the merge-base of the first head and the
 // base ref fetched through --src. Pages come from `--paginate --slurp` and are
-// flattened as values, not by splicing "][" out of them.
+// flattened as values, not by splicing "][" out of them. `counts` is the raw
+// harvest total: it predates the `duplicate_of` marks a curator adds by hand,
+// so the scorable denominator is the contract's scorable_ids, not counts.
 //
 // Usage: --pr N (repeatable) [--out-dir DIR] [--repo owner/name] [--src, a
 // checkout of --repo] [--dry-run: no file; key to stdout, summary to stderr]
@@ -124,13 +126,22 @@ export function defaultGh({ repo, apiPath, paginate }) {
 }
 export const defaultGit = ({ args, cwd }) =>
   execFileSync("git", args, { cwd, encoding: "utf8", stdio: "pipe" });
-// The head is fetched first and the base ref last, so FETCH_HEAD names the
+// The heads are fetched first and the base ref last, so FETCH_HEAD names the
 // base. A wrong --src shares no history with the head, so merge-base fails.
+// The selected sha is fetched by object name as well, because a force-push
+// leaves it off refs/pull/N/head; GitHub serves an arbitrary commit sha.
 export function resolveBaseSha({ pr, sha, baseRef, src, git }) {
   if (!BRANCH.test(String(baseRef)) || String(baseRef).includes("..")) {
     throw new Error(`PR ${pr} base ref is not a usable branch: ${baseRef}`);
   }
   git({ args: ["fetch", "origin", `refs/pull/${pr}/head`], cwd: src });
+  try {
+    git({ args: ["fetch", "origin", sha], cwd: src });
+  } catch {
+    throw new Error(
+      `PR ${pr} first head ${sha} could not be fetched from origin; the PR was likely force-pushed after that head was reviewed`,
+    );
+  }
   git({ args: ["fetch", "origin", `refs/heads/${baseRef}`], cwd: src });
   const merge = ["merge-base", sha, "FETCH_HEAD"];
   const base = git({ args: merge, cwd: src }).trim();
@@ -203,7 +214,7 @@ export function runHarvest(argv, options = {}) {
     const bytes = serializeTruth(truth);
     const outPath = path.join(outDir, `pr-${pr}.json`);
     if (!dry) mkdirSync(outDir, { recursive: true });
-    if (dry) process.stdout.write(bytes);
+    if (dry) process.stdout.write(`${bytes}\n`);
     else writeFileSync(outPath, bytes);
     (dry ? process.stderr : process.stdout).write(`${summary}\n`);
     return { truth, summary, outPath, bytes };

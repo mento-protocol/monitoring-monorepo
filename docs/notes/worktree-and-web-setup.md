@@ -3,7 +3,7 @@ title: New Worktree / Clone Setup and Claude Code on the Web Setup
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-28
+last_verified: 2026-09-02
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -12,13 +12,18 @@ garden_lane: operator-runbooks
 
 # New Worktree / Clone Setup and Claude Code on the Web Setup
 
-The invocation pointer lives in the "Agent Tooling and Setup" section of root
-`AGENTS.md`. This note holds the underlying mechanics.
+## Bootstrap trust boundary
+
+Setup can run repository code before agent control. Disable automatic setup
+before checking out an untrusted, fork, or cross-repository head. If a platform
+cannot enforce this order, do not use automatic setup there. Inspect the diff
+without execution and apply approved changes on a trusted canonical branch.
+The later [repository preflight](pr-operating-card.md) does not attest bootstrap.
 
 ## New Worktree / Clone Setup
 
-macOS setup requires the Xcode Command Line Tools (`xcode-select --install`)
-for the Darwin gate helper. Linux does not need them.
+Setup does not require the Xcode Command Line Tools. On macOS, install them with
+`xcode-select --install` only before you run the optional legacy gate.
 
 After creating a new worktree manually or cloning the repo, run:
 
@@ -26,9 +31,9 @@ After creating a new worktree manually or cloning the repo, run:
 ./scripts/setup.sh
 ```
 
-This configures the tracked git hooks, installs dependencies, builds
-`shared-config`, and ensures Envio codegen has produced the generated type
-facade required for `indexer-envio` TypeScript to compile. It also attempts to
+This configures the tracked pre-commit formatting hook, installs dependencies,
+builds `shared-config`, and ensures Envio codegen has produced the generated
+type facade required for `indexer-envio` TypeScript to compile. It also attempts to
 install Playwright Chromium for dashboard browser tests. A blocked browser
 download warns and continues; run
 `pnpm --filter @mento-protocol/ui-dashboard exec playwright install --with-deps chromium`
@@ -50,7 +55,7 @@ Playwright installer marker because `--with-deps` also provisions host libraries
 there.
 
 Fresh per-PR worktrees start warm because `setup.sh`,
-`bootstrap-worktree.sh`, and the agent quality gate all point Turbo at one
+`bootstrap-worktree.sh`, and the optional legacy gate all point Turbo at one
 shared local cache directory outside any worktree. The mechanics, the fallback
 when that directory is unset or unwritable, and the `AGENT_TURBO_SHARED_CACHE=0`
 opt-out are owned by
@@ -107,8 +112,9 @@ the Trusted defaults:
   `tools/trunk` reads `$TRUNK_CACHE`, else `$XDG_CACHE_HOME/trunk`, else
   `~/.cache/trunk`, so prewarming only the last one misses a session that sets
   either override.
-- The quality gate classifies that cold-cache 403 as environment-blocked and
-  skips its Trunk arm instead of hard-failing; a 404 stays a hard failure. See
+- The optional legacy gate classifies that cold-cache 403 as
+  environment-blocked and skips its Trunk arm instead of hard-failing; a 404
+  stays a hard failure. See
   [agent-quality-gate-mechanics.md](agent-quality-gate-mechanics.md).
 
 If the container's Node major is older than the repo's `.node-version` (for
@@ -135,9 +141,9 @@ denied path in a hosted or sandboxed session.
 
 Repo-local `ship` and `babysit-pr` skill adapters live under `.claude/skills/`
 (mirrored under `.agents/skills/` for Codex), so the familiar `/ship` and
-`/babysit-pr` workflows resolve to repo-visible commands (`pnpm
-agent:quality-gate`, `pnpm agent:closeout-review`, `pnpm pr:ready-state`)
-without needing a developer's personal skills present.
+`/babysit-pr` workflows resolve to the repo-visible PR operating card,
+`pnpm agent:closeout-review`, and `pnpm pr:ready-state` without needing a
+developer's personal skills present.
 
 ### GitHub access in hosted sessions: gh is unreliable
 

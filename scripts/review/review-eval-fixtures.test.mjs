@@ -332,6 +332,108 @@ test("a truth finding marked duplicate_of is refused as a scorable id", () => {
   }
 });
 
+test("a duplicate_of that names no other plain finding is reported", () => {
+  const root = stageFrozenInputs();
+  try {
+    const contract = clone(committed.contract);
+    const fixture = fixtureForPr(contract, 2121);
+    const file = path.join(root, fixture.truth_file);
+    const truth = JSON.parse(readFileSync(file, "utf8"));
+    const [first, second, third] = truth.findings;
+    const problems = () => {
+      writeFileSync(file, JSON.stringify(truth, null, 1));
+      fixture.truth_sha256 = sha256File(file);
+      return checkFixtures({ contract, repoRoot: root }).problems.join("\n");
+    };
+    second.duplicate_of = second.id;
+    assert.match(
+      problems(),
+      new RegExp(`${second.id} is the finding's own id`),
+    );
+    second.duplicate_of = 1;
+    assert.match(problems(), /duplicate_of 1 names no finding in this truth/);
+    // A chain is refused too: it would drop both copies of one defect.
+    second.duplicate_of = first.id;
+    third.duplicate_of = second.id;
+    assert.match(problems(), /names a finding that is itself a duplicate/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a duplicate_of that is a string instead of an integer is reported", () => {
+  const root = stageFrozenInputs();
+  try {
+    const contract = clone(committed.contract);
+    const fixture = fixtureForPr(contract, 2121);
+    const file = path.join(root, fixture.truth_file);
+    const truth = JSON.parse(readFileSync(file, "utf8"));
+    const [, second] = truth.findings;
+    second.duplicate_of = String(second.id - 1);
+    writeFileSync(file, JSON.stringify(truth, null, 1));
+    fixture.truth_sha256 = sha256File(file);
+    const problems = () =>
+      checkFixtures({ contract, repoRoot: root }).problems.join("\n");
+    assert.match(
+      problems(),
+      new RegExp(
+        `finding ${second.id} duplicate_of "${second.id - 1}" is not a safe integer`,
+      ),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a duplicate_of that is null is reported", () => {
+  const root = stageFrozenInputs();
+  try {
+    const contract = clone(committed.contract);
+    const fixture = fixtureForPr(contract, 2121);
+    const file = path.join(root, fixture.truth_file);
+    const truth = JSON.parse(readFileSync(file, "utf8"));
+    const [, second] = truth.findings;
+    second.duplicate_of = null;
+    writeFileSync(file, JSON.stringify(truth, null, 1));
+    fixture.truth_sha256 = sha256File(file);
+    const problems = () =>
+      checkFixtures({ contract, repoRoot: root }).problems.join("\n");
+    assert.match(
+      problems(),
+      new RegExp(
+        `finding ${second.id} duplicate_of null is not a safe integer`,
+      ),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a duplicate_of target that is not acted_on is reported", () => {
+  const root = stageFrozenInputs();
+  try {
+    const contract = clone(committed.contract);
+    const fixture = fixtureForPr(contract, 2121);
+    const file = path.join(root, fixture.truth_file);
+    const truth = JSON.parse(readFileSync(file, "utf8"));
+    const [first, second] = truth.findings;
+    first.acted_on = false;
+    second.duplicate_of = first.id;
+    writeFileSync(file, JSON.stringify(truth, null, 1));
+    fixture.truth_sha256 = sha256File(file);
+    const problems = () =>
+      checkFixtures({ contract, repoRoot: root }).problems.join("\n");
+    assert.match(
+      problems(),
+      new RegExp(
+        `finding ${second.id} duplicate_of ${first.id} names a finding that is not acted_on`,
+      ),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("a grid fixture carries exactly two frozen finder reports", () => {
   const exactlyTwo = (contract) =>
     checkFixtures({ contract, repoRoot }).problems.filter((problem) =>

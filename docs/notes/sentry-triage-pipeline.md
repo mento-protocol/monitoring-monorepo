@@ -3,7 +3,7 @@ title: Sentry Triage Pipeline
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-01
+last_verified: 2026-09-02
 scope: ci/process
 doc_type: runbook
 review_interval_days: 90
@@ -796,7 +796,8 @@ wrapper crossed the 600-line soft cap. The guard is part of the wrapper's
 runtime import closure, so the workflow stages it read-only with the rest — an
 unstaged guard would be loaded from the agent-writable checkout, which is the
 whole point of the staging step. It has no suite of its own: the wrapper's suite
-covers it, and the quality gate routes the guard's path there.
+covers it. Run `node scripts/sentry/triage/sentry-triage-agent-comment.test.mjs`
+when the guard changes.
 
 The wrapper also **checks the broker process directly**, in the instant before
 it hands the body to `gh`, because a polled marker lags the death it reports and
@@ -2021,14 +2022,15 @@ immediately before its child runs, and the shared checkout is swept afterwards,
 so a suite that writes there is named even though it can no longer change a
 verdict.
 
-`scripts/sentry/ci-wiring/check-sentry-suites-in-ci.test.mjs` is the gate's static half and runs
+`scripts/sentry/ci-wiring/check-sentry-suites-in-ci.test.mjs` is the Sentry
+suite gate's static half and runs
 as the last step of the same job, after the install it needs for `js-yaml`. It
-carries what the gate cannot see: that the gate job still exists, is
+carries what the suite gate cannot see: that the gate job still exists, is
 unconditional, matches ADR 0062's canonical shape key for key, and reaches the
 required `ci` context; that the one suite the gate does not run
 (`sentry-provider-contract.test.mjs`, imported by `tf-stacks.test.mjs`) really
 is run by the unconditional `production-infra-contract` job; and that the local
-quality gate's `sentry:*` allowlist stays pinned to exact commands. It parses
+legacy gate's `sentry:*` allowlist stays pinned to exact commands. It parses
 ci.yml rather than searching it, and compares the job by exact equality, so an
 `if:`, a `continue-on-error:`, a `working-directory:`, an `env:`, a `|| true`, a
 reordered step or a key nobody has thought of all fail it by name.
@@ -2050,9 +2052,9 @@ To run one suite on its own — the gate names the file it failed on — invoke 
 by path, e.g. `node scripts/sentry/triage/sentry-triage-ingest.test.mjs` or
 `node --test scripts/sentry/broker/sentry-mcp-broker.test.mjs`.
 
-The `pnpm sentry:*:test` aliases still run these suites for interactive use and
-in the local pre-push gate; the CI gate is the backstop, and the pin validator
-keeps the aliases the local gate trusts safe.
+The `pnpm sentry:*:test` aliases run these suites for direct author checks. The
+required CI Sentry suite gate is the backstop. The pin validator also keeps the
+aliases used by the optional legacy gate safe.
 
 ```bash
 # Read-only previews that require local credentials:

@@ -3,7 +3,7 @@ title: PR Operating Card
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-01
+last_verified: 2026-09-03
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -21,6 +21,27 @@ first; the hard invariants below and in the Non-negotiables section are binding
 even when you never open an authority.
 
 ## The loop
+
+**Run the repository preflight first.** Automatic setup can finish before agent
+control under a [separate trust boundary](worktree-and-web-setup.md); this
+preflight does not attest it. Before step 1 or any repository command, resolve
+`CURRENT_REPO`, `BASE_REPO`, the target PR when one exists, `BASE_REMOTE`,
+`HEAD_REMOTE`, and `baseRefName` with the exact step 5 rules. Read
+`headRepository`, `headRepositoryOwner`, and `isCrossRepository` for an
+existing PR. With no PR, bind the intended base before author checks. Use
+`main` only after confirming the work is not stacked; stop and ask if unclear.
+Require a non-fork checkout whose `origin` serves `CURRENT_REPO`. Stop on a
+fork checkout, a cross-repository head, an ambiguous
+target, or a failed identity lookup before the agent executes repository code.
+Fetch the base only after its repository and remote are bound. Keep these
+values as the authority for author checks and publication, and re-read them
+before each publication mutation in step 5. Before step 1, inspect resolved-base
+and working-tree changes, including untracked files, for `.node-version`, package
+manifests, package-manager configuration, lockfiles, and patches. Review
+lifecycle and install effects before any package-manager command, including the
+claim command.
+If root `package.json` changed, first run
+`node scripts/check-agent-quality-gate-package-scripts.mjs`.
 
 1. **Claim.** Before substantive edits, claim from the ready queue:
 
@@ -50,84 +71,74 @@ even when you never open an authority.
    an architecture change that constrains future work records an ADR in the
    same PR. When a change adds or alters a command, script, env var, hook, or
    ordered runbook, audit every live entry point and runbook in the same PR.
-   Adding, renaming, or removing a doc needs `pnpm docs:index --write` in
-   the same PR, or the gate's `docs:index --check` fails.
+   After adding, renaming, or removing a doc, or changing its catalog metadata,
+   run `pnpm docs:index --write` in the same PR or `docs:index --check` fails.
    Before touching or moving docs, read
    [`../context-standards.md`](../context-standards.md).
 
-3. **Gate.** Before opening or updating an agent-authored PR, inspect then run
-   the mapped local-only checks. **Resolve the target and remotes first** when
-   this run will reach step 5 — the repo-identity preflight in
-   [`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md) governs
-   any adapter call that trusts repository identity, and this gate is one. In a
-   Claude cloud session, where `origin` is a credential-proxy URL that can
-   never satisfy the canonical-origin requirement, the content-based cloud
-   binding in
-   [`github-tooling-surfaces.md`](github-tooling-surfaces.md) replaces that
-   preflight for every such call — gate, ship, and babysit alike. On a
-   branch with no PR yet and an unambiguous `origin`, the local checks below are
-   safe to run first; in a fork or ambiguous-remote checkout they are not, and
-   step 5's resolution comes before this step rather than after it:
+3. **Author checks.** Apply every matching row below after the change is
+   coherent and before the first ready-for-review publication. Invoke the
+   existing commands directly. Do not add a selector or wrapper. First run
+   `./tools/trunk fmt <surviving-changed-files>` on each intended changed file
+   that exists in the final tree. Use deleted paths and both sides of a rename
+   to select matching rows, but never pass a missing path to Trunk. Start the
+   checks only after formatting is complete.
 
-   ```bash
-   pnpm agent:quality-gate          # inspect mapped commands and checklists
-   pnpm agent:quality-gate --run    # execute the safe local mapped commands
-   ```
+   | Change trigger                                                                                                                                                                                                                                                                                           | Required direct author checks                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+   | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+   | Source in a workspace package                                                                                                                                                                                                                                                                            | Run each script that exists for that package: `pnpm --filter <package-name> lint`, `pnpm --filter <package-name> typecheck`, and its normal unit-test command. Governance Watchdog uses `pnpm --filter @mento-protocol/governance-watchdog test:unit`; its generic `test` needs a local service. For `metrics-bridge/src/metrics.ts`, `metrics-bridge/src/cdp-metrics.ts`, `metrics-bridge/src/peg/metrics.ts`, or `metrics-bridge/src/peg/listing-metrics.ts`, also run `pnpm alerts:rules:lint`.                                                                                                                                                     |
+   | Dashboard React or client source                                                                                                                                                                                                                                                                         | Also run `REACT_DOCTOR_BASE_REF=<resolved-pr-base> pnpm --filter @mento-protocol/ui-dashboard react-doctor:diff`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+   | Dashboard UI or visual output, route or interaction, browser test, or frontend build/runtime path                                                                                                                                                                                                        | Also run `pnpm dashboard:build`, then follow [`dashboard-verification.md`](dashboard-verification.md) for the changed UI or runtime path, console, interaction, breakpoints, and applicable auth states.                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+   | Dashboard bundle input listed in the `dashboard` path filter in `.github/workflows/size-limit.yml`                                                                                                                                                                                                       | When `shared-config/**` changes, first run `pnpm --filter @mento-protocol/config build`. After any required install and shared-config build, run `pnpm dashboard:build`, then `pnpm dashboard:size-limit`. Run a command once if another row also selects it.                                                                                                                                                                                                                                                                                                                                                                                          |
+   | `alerts/rules/peg-thresholds.json`, `metrics-bridge/peg-registry.json`, `shared-config/chain-metadata.json`, `shared-config/deployment-namespaces.json`, `shared-config/oracle-reporters.json`, `shared-config/src/chains.ts`, `shared-config/src/oracle-reporters.ts`, or `shared-config/src/tokens.ts` | Run `node scripts/alerts/check-peg-registry-integrity.mjs --base-ref <resolved-pr-base-oid>`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+   | `shared-config/src/thresholds.ts`, `alerts/rules/main.tf`, or `alerts/rules/rules-fpmms.tf`                                                                                                                                                                                                              | Run `node scripts/alerts/check-deviation-threshold-drift.mjs`. For `shared-config/src/thresholds.ts`, also run `pnpm --filter @mento-protocol/indexer-envio exec vitest run deviationThresholdSharedConfigSync`.                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+   | Indexer schema, configuration, ABI, entry point, handler reachability, or reserve-yield handler/RPC source                                                                                                                                                                                               | Run each affected code-generation variant from [`../../indexer-envio/AGENTS.md`](../../indexer-envio/AGENTS.md). For reserve-yield handler/RPC source, `indexer-envio/src/EventHandlers.ts`, or `indexer-envio/config.multichain.mainnet.yaml`, run `pnpm --filter @mento-protocol/indexer-envio indexer:reserve-yield:test`. Run affected non-mainnet variants first and `pnpm indexer:codegen` last. Inspect the generated diff before indexer package checks.                                                                                                                                                                                       |
+   | Dashboard GraphQL query or schema consumer, `indexer-envio/schema.graphql`, or `scripts/envio-schema-stubs.graphql`                                                                                                                                                                                      | Run `pnpm dashboard:codegen` and inspect the generated diff. For `indexer-envio/schema.graphql` or `scripts/envio-schema-stubs.graphql`, also run `pnpm --filter @mento-protocol/ui-dashboard test` and `pnpm --filter @mento-protocol/metrics-bridge test`.                                                                                                                                                                                                                                                                                                                                                                                           |
+   | `.node-version`, package manifest, lockfile, pnpm configuration, or patch                                                                                                                                                                                                                                | Inspect lifecycle and install effects. For root `package.json`, require the preflight package-script validator to pass. Run `CI=true pnpm install --frozen-lockfile` from the repository root. When one of these inputs changes under `alerts/infra/onchain-event-handler`, `alerts/infra/oncall-announcer`, or `governance-watchdog`, also run `CI=true pnpm install --frozen-lockfile --ignore-scripts --lockfile-dir .` from that root. For either alert function's `pnpm-workspace.yaml`, also run `node --test scripts/supply-chain/alerts-uuid-overrides.test.mjs`. Complete the installs before code generation or the applicable package rows. |
+   | Package Vitest configuration or hermetic setup                                                                                                                                                                                                                                                           | Run `node scripts/repo-health/check-hermetic-vitest-setup.mjs`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+   | Trunk configuration or local Git hook                                                                                                                                                                                                                                                                    | Run `./tools/trunk check --ci --all` and `node scripts/workflows/check-github-action-pins.mjs`. Also run `bash scripts/bootstrap/agent-setup-contract.test.sh` when hook or Trunk action behavior changes.                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+   | Shell file, hosted agent setup, or hook                                                                                                                                                                                                                                                                  | Run `bash -n` on each surviving changed shell file. Run `bash scripts/bootstrap/agent-setup-contract.test.sh` when hosted setup or hook behavior changes.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+   | Markdown file; or agent instruction, role, command, skill, runtime configuration, or catalog-visible document metadata                                                                                                                                                                                   | Run `pnpm docs:index --check` for every Markdown change. For an agent instruction, role, command, skill, runtime configuration, or catalog-visible document metadata, also run `pnpm agent:context-check`, `pnpm agent:context-budget:test`, and `pnpm agent:context-budget --strict`.                                                                                                                                                                                                                                                                                                                                                                 |
+   | Mirrored agent skill content or mirror checker                                                                                                                                                                                                                                                           | Run `node scripts/repo-health/check-skills-mirror.mjs` and `node scripts/repo-health/check-skills-mirror.test.mjs`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+   | Guardrail prose pin list or pinned normative text                                                                                                                                                                                                                                                        | Run `node scripts/repo-health/check-guardrail-prose.mjs` and `node scripts/repo-health/check-guardrail-prose.test.mjs`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+   | GitHub Actions workflow or action, or protected PR admission boundary                                                                                                                                                                                                                                    | Run `pnpm ci:contract:test`, `node scripts/workflows/check-github-action-pins.mjs`, and `node scripts/workflows/check-autofix-ci-trust.mjs`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+   | `.coderabbit.yaml`                                                                                                                                                                                                                                                                                       | Run `pnpm coderabbit:config:test`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+   | `.lighthouserc.cjs`                                                                                                                                                                                                                                                                                      | Run `node scripts/lighthouse-config.test.mjs`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+   | `.gitignore`                                                                                                                                                                                                                                                                                             | Run `pnpm review:eval:test`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+   | Upstash MCP configuration, runtime, pin, operator contract, or forensic-report skill mirror, including its package, lockfile, and Terraform inputs                                                                                                                                                       | Run `node --test scripts/mcp/upstash-mcp-config.test.mjs`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+   | `terraform.stacks.json`                                                                                                                                                                                                                                                                                  | Run `pnpm tf:test`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+   | New top-level package/service root with `AGENTS.md` or `package.json`, new workspace package registration, new Terraform stack registration, or new GitHub Actions workflow file                                                                                                                         | Run `pnpm adr:check --base <resolved-pr-base> --include-untracked`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+   | Root tooling, control plane, standalone service, or alert delivery/rule input                                                                                                                                                                                                                            | Run the focused existing contract named by the nearest scoped `AGENTS.md`. Do not add a root selector. For `alerts/rules/**`, run `pnpm alerts:rules:lint`. For `alerts/infra/onchain-event-listeners/**` or `alerts/infra/channels/**`, run the alerts-onchain-event-handler package lint, typecheck, and test. For its Safe ABI, event-hash generator, or event-hash output, run its `build:event-hashes` script and inspect the generated JSON diff. Run `node --check` on each surviving changed `governance-watchdog/infra/quicknode-filter-functions/*.js` file.                                                                                 |
 
-   `--run` maps changed paths to the safe local checks (lint, typecheck, tests,
-   browser suite) and stamps freshness so a later pre-push `--skip-if-fresh`
-   cache-hits. Every base ref below lives on the **resolved base remote** —
-   `BASE_REMOTE` from step 5's resolution when it ran first, plain `origin`
-   only in the non-fork single-remote case above; in a fork checkout `origin`
-   serves the fork, so an `origin/...` base diffs the wrong repository and
-   real changes skip their mapped checks. Fetch every base the gate will diff
-   against first — `git fetch <base-remote> main`, plus `<baseRefName>` for a
-   stacked PR, whose tracking ref is otherwise stale or absent: an unfetched
-   base diffs against history the branch has already moved past, and the hook
-   fetches before it runs the gate in any case. The freshness stamp binds the
-   **merge-base**, not the base tip, so an advance of `main` that leaves the
-   merge-base alone keeps a warm stamp; a rebase moves the merge-base and
-   still costs a full re-run. That applies only to plans that never read the
-   base: a plan naming the base ref or its tip — `react-doctor:diff`, the ADR
-   reminder, and the peg registry check — keeps tip binding, so any base
-   advance re-runs it. A bare invocation
-   diffs against `origin/main`; a fork checkout must pass
-   `--base <base-remote>/main`, and a stacked PR (base not `main`) must
-   resolve `baseRefName` and pass `--base <base-remote>/<baseRefName>` — a
-   child change that reverses a parent-introduced path can vanish from the
-   `main`-based diff, scheduling no checks for it. It does not run `trunk fmt` — run
-   `./tools/trunk fmt` (the checked-in launcher; a global `trunk` may not exist)
-   before committing so the required Code Quality CI stays green. The gate never
-   deploys and never applies Terraform. It **refuses package-script,
-   package-manager, or lockfile changes until their lifecycle risk is reviewed
-   and explicitly acknowledged** — do not bypass the refusal; review the surface
-   and pass `--allow-package-script-changes`. Before invoking a full gate,
-   ensure that no direct validation, dashboard server, or browser suite outside
-   the coordinator is active on the same machine. From invocation until the
-   gate exits, do not start uncoordinated work there. Use same-machine spare
-   workers only for read-only work. Run concurrent validation outside the
-   coordinator from a fully hydrated checkout on another machine. Concurrent
-   `--run` gates from different worktrees share weighted machine capacity. The
-   default capacity is 3. Evidence-backed heavy dashboard commands form fair
-   barriers and run alone. Requests from the same worktree remain serialized.
-   Exact matching requests share one exact terminal result. A Trunk-qualified
-   result reaches active followers but is never retained or
-   reused. Background the `--run` gate and the `git push`; a 600s foreground
-   kill discards the freshness stamp. Hosted setup requires this fresh stamp
-   before pre-push. A cold hosted pre-push exits before scheduler registration
-   or mapped work. Fetch `origin/main`, then run
-   `./scripts/agent-quality-gate.sh --run --parallel 3 --base origin/main` as an
-   observable background task. The launcher, base, and parallelism must match
-   the hook's freshness key. This hook warm does not replace validation against
-   the resolved PR base. When the resolved base tracking ref is not
-   `origin/main`, including fork and stacked PRs, run the required resolved-base
-   gate first. Then warm this separate `origin/main` stamp. Retry the push after
-   both gates pass. Local setup keeps the normal cold pre-push run. If the hosted
-   branch has package-script risk, review it first. Then set
-   `git config agent.qualityGate.allowPackageScriptChanges true` before the warm
-   run so the hook uses the same acknowledgement.
-   Authority:
-   [`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md).
+   Use the resolved PR base, not a fixed `origin/main`, for every diff-based
+   author check, including stacked PRs. Fetch it before the check. The root
+   React Doctor alias uses `origin/main`. Use the explicit table command for
+   any other base.
+
+   Run mutable checks in this order: inspect package-manager changes; run the
+   frozen install when its row applies; run code generation; run package lint,
+   typecheck, tests, integrity, and parity checks; run React Doctor, build,
+   size-limit, and browser checks; then run step 4. Record each applicable
+   result in the PR's `## Validation` section as `passed`, `failed`, or
+   `not run: <reason>`.
+   A failed author check blocks the ready handoff and cannot be relabeled.
+   Record an unavailable tool as `not run`. Required CI remains merge authority and owns routine coverage and Knip, broad dependency and supply-chain audits, full-browser suites, and legacy-gate self-tests. A table row or triggered checklist can require a focused policy or configuration check.
+
+   Apply only the rows affected by a material fix before publishing the new
+   head. Before a base integration, pin the fetched base as `base_oid` and the
+   existing branch head as `prior_head_oid`. Merge the exact `base_oid`. After
+   the resolution is committed, pin `final_head`, require a clean tree, and
+   require both pinned inputs to be ancestors of it. Derive changed paths for
+   both `base_oid..final_head` and `prior_head_oid..final_head`. Apply the union
+   of the author-check rows selected by those ranges to `final_head`; record
+   both axes that selected a check, and run a shared check once. Conflict
+   resolution creates a new tree, so earlier results do not cover it. Do not
+   run the table on every commit or push. Pre-commit keeps staged formatting
+   only. Pre-push starts no repository check, fetch, lock, or wait. A manual
+   push can omit author checks. It cannot omit required CI.
+
+   If pre-commit changes a file, stop before push. Apply its author-check rows
+   and step 4 to the committed tree. Do not publish unchecked formatter changes.
 
 4. **Review.** Freeze the scope baseline first — the initial request,
    target/owner, changed-file set, and non-test changed-line count — as the
@@ -144,12 +155,30 @@ even when you never open an authority.
    command output behind a claim, so it cannot see the claims to test. Do it
    where the claims and their evidence are both in hand.
 
-   Then run the second model over the diff:
+   Without a base integration, run the second model over the branch diff:
 
    ```bash
-   pnpm agent:closeout-review            # resolves the base itself
-   pnpm agent:closeout-review --base <base-remote>/<baseRefName>
+   pnpm agent:closeout-review --base "$BASE_REMOTE/$baseRefName"
    ```
+
+   Pass the base that preflight bound. The command rejects a second `--base`.
+   Do not let it infer a different default branch for a stacked or not-yet-open
+   PR.
+
+   After a base integration, review both immutable reconciliation axes against
+   the same clean `final_head`:
+
+   ```bash
+   pnpm agent:closeout-review --base "$base_oid"
+   pnpm agent:closeout-review --base "$prior_head_oid"
+   ```
+
+   The current-base axis shows what the branch adds to the integrated base. The
+   prior-head axis shows what the integration changed about the branch and
+   catches a conflict resolution that drops branch behavior. Hand both complete
+   reports to the `review` skill. A finding or failed closeout on either axis
+   blocks the handoff. After a review fix, rerun the author-check union and both
+   closeout axes against the new final head.
 
    It prints `report: <path>` as its last line and exits 0 for a clean report,
    1 when the report carries findings, and 2 when the closeout failed — the
@@ -183,10 +212,10 @@ even when you never open an authority.
    `codex` configuration and can read the operator's `HOME`: it is not an
    isolated runtime.
 
-   Then invoke the `review` skill on the same diff and pass it four
+   Then invoke the `review` skill on each reviewed diff and pass it four
    instructions: the second-model pass already ran, so do not run the skill's
-   own second-model tooling; read the whole report file at `<path>` rather
-   than skimming it; the report covers merge base `<sha>` and head `<sha>`
+   own second-model tooling; read each whole report file at `<path>` rather
+   than skimming it; each report covers merge base `<sha>` and head `<sha>`
    (dirty: `<flag>`, `target_fingerprint: <sha256>`), so exclude it if that is
    not the pinned target — on a dirty tree the fingerprint, not the head sha,
    is what names the reviewed bytes; verify every claim against the code,
@@ -203,7 +232,8 @@ even when you never open an authority.
    against 32% for the solo reviewer) inlines the report text into the
    reviewer's prompt. Handing over a file path instead is an unmeasured
    deviation, which is why the read-the-whole-file instruction is explicit. The closeout is **source review only**: it runs no tests and
-   proves no behavior, so the mapped gate, browser, generated-artifact, and
+   proves no behavior, so the direct author checks, browser,
+   generated-artifact, and
    runtime checks still apply.
 
    `~/.claude/bin/codex-review.sh` is a different operator tool with a
@@ -228,7 +258,7 @@ even when you never open an authority.
    auto-review (`.coderabbit.yaml` keeps `reviews.auto_review.drafts` false)
    and the `pr-description.yml` CI check, which skips draft PRs; drafting is
    skipping review, not a staging step. A ship that updates an **existing draft** converts it to ready once
-   the gate passes — `pr:ready-state` holds draft state as a required blocker,
+   the author checks and closeout review pass — `pr:ready-state` holds draft state as a required blocker,
    so an unconverted draft never reaches all-clear. Use or keep draft only
    when the user asks or required validation is intentionally pending, and
    state that reason in the body. Link
@@ -242,8 +272,9 @@ even when you never open an authority.
    old Branch. Do not pass `--branch` to review. Authority:
    [`agent-issue-workflow.md`](agent-issue-workflow.md).
 
-   **Resolve the repository identities first.** Before any PR lookup, resolve
-   the checkout repository and its upstream base —
+   **Re-read the repository identities.** The preflight before step 1 resolves
+   the checkout repository and its upstream base. Before any publication
+   lookup or mutation, resolve them again —
    `gh repo view --json nameWithOwner,parent` locally, the session-attached
    repository metadata in a Claude cloud session. `CURRENT_REPO` is the
    checkout's own repository; a fork checkout uses its parent as `BASE_REPO`,
@@ -276,7 +307,8 @@ even when you never open an authority.
    scan is developer-installed and Claude Code only; this repo does not declare
    it. Where the diff touches authn/authz, secrets handling, injection surfaces,
    network-facing handlers, deploy/CI paths, or onchain code and the plugin is
-   unavailable, aim the gate and the closeout review at those surfaces instead,
+   unavailable, aim the direct author checks and closeout review at those
+   surfaces instead,
    and record `Claude Security scan: skipped (<surface>)` in the final summary so
    the deep pass can be run later from a session that has it. Never imitate or
    install it to fill the gap.
@@ -293,8 +325,8 @@ even when you never open an authority.
      step 6 refuses every fork head, so pushing to the fork's `origin` and
      opening a cross-repository PR creates one this same workflow can never
      drive to ready; surface that to the user instead. Otherwise verify
-     `origin` serves `CURRENT_REPO` and take the current branch as the head
-     ref.
+     `origin` serves `CURRENT_REPO`, require the preflight-bound
+     `baseRefName`, and take the current branch as the head ref.
 
    **Then commit the validated work**: stage only the intended files and create
    the ship commit before any push, or the remote receives the old commit while
@@ -304,12 +336,13 @@ even when you never open an authority.
    **Then push**, always with an explicit refspec: an existing PR takes
    `git push <head-remote> HEAD:<headRefName>`, never an implicit target or the
    local branch name; a first publication takes
-   `git push -u origin HEAD:<branch>` and the PR is created from that branch.
+   `git push -u origin HEAD:<branch>` and creates the PR with the same bound
+   `baseRefName`.
 
    **Integrating the base produces a new, unvalidated head.** Steps 3-4 ran
    against the pre-merge tree, so either integrate the base before step 3 or
-   rerun the gate and the closeout review against the merged head before
-   pushing. A conflict resolution is exercised, not assumed.
+   rerun the applicable author checks and the closeout review against the
+   merged head before pushing. A conflict resolution is exercised, not assumed.
 
    Either way, re-read the PR after pushing and require its `headRefOid` to
    equal local `HEAD` before treating anything as published. A fork checkout
@@ -321,9 +354,9 @@ even when you never open an authority.
    the target as step 5 defines: the target-PR precedence, `BASE_REPO`, both
    remotes, and
    `number,url,headRefName,headRefOid,baseRefName,headRepository,headRepositoryOwner,isCrossRepository`.
-   **Stop a fork head at that resolution, before the first repo-local probe,
-   gate, or fix** — the `.claude/babysit-pr.sh` refusal at gate time is the
-   backstop, not the first line. Sweep every feedback
+   **Stop a fork head at that resolution, before the first repo-local probe or
+   fix** — the `.claude/babysit-pr.sh` refusal is the backstop, not the first
+   line. Sweep every feedback
    surface:
    top-level comments, review bodies, inline comments and threads, annotations,
    and failing logs. **Reply before resolving**, on the correct surface, in
@@ -337,7 +370,10 @@ even when you never open an authority.
    and `git fetch` before every push because reviewers push mid-session. Check
    new additions against the scope baseline frozen at step 4; classify each as
    in-scope, follow-up, or stop; **file a labeled GitHub issue before deferring
-   any valid follow-up** and link it from the PR's `## Deferrals` section. Warn
+   any valid follow-up** and link it from the PR's `## Deferrals` section. A
+   bot finding is a valid follow-up only when the defect is observed, the wrong
+   outcome is operator-visible, and the fix is small; otherwise answer it as an
+   evidence-backed won't-fix, which needs no issue. Warn
    as the diff approaches twice the baseline. Do not pause solely for cycle count
    before five review-triggered patch cycles are complete; pause for
    reclassification before starting a sixth. Authority:
@@ -354,6 +390,11 @@ even when you never open an authority.
    left alone — check whether the same failure appears off this PR before
    attributing it. Chasing an unrelated failure puts unrelated changes on the
    branch.
+
+   After a material fix, rerun the step 3 rows whose inputs or surface changed.
+   Run step 4 again when its materiality rule applies. Publish the new head only
+   after each applicable author check is `passed` or truthfully recorded as
+   `not run: <reason>`.
 
    **A user correction updates the request baseline**: update the PR
    description before the next push, or current-head reviewers enforce the
@@ -517,9 +558,10 @@ These bind regardless of which step you are on:
   `## Deferrals`. Every issue an agent files carries a state label, a `kind:*`,
   at least one `pkg:*`, and exactly one `risk:*` set by the
   [Low-risk rule](agent-issue-workflow.md#low-risk-rule). An evidence-backed
-  won't-fix is not a deferral.
+  won't-fix is not a deferral, and it is the default for any bot finding that
+  fails one or more of the three follow-up conditions above.
 - **Never weaken a control that is blocking your own work.** Do not widen,
-  disable, or soften the quality gate, the sandbox or permission config, branch
+  disable, or soften the author-check contract, the sandbox or permission config, branch
   protection, or a safety-boundary rule to unblock the change you are making
   now — an agent that can widen its own gate has no gate. Stop and hand the
   control change to an independent session through a brief or an agent-ready
@@ -535,19 +577,14 @@ These bind regardless of which step you are on:
   operator's explicit consent to the specific repair, recorded on the issue or
   PR, and the repair stays narrowly scoped to restoring the control. It is
   still reviewed: use the last independently reviewed pre-change runtime for
-  the gate, or an independent reviewer for the diff. Widening the control
+  an executable control, or an independent reviewer for the diff. Widening the control
   beyond the repair, or using this path for anything the control was correctly
   refusing, is the thing this rule exists to prevent.
 
-- **Package-script, package-manager, and lockfile changes require explicit
-  acknowledgement** through the gate; never bypass the refusal.
-- **Background long `--run` gates and pushes**; do not run them in a 600s
-  foreground that a kill would truncate, and do not start an uncoordinated
-  direct validation command, dashboard server, or browser suite alongside a
-  gate. Use same-machine spare workers only for read-only work. Run concurrent
-  validation outside the coordinator from another machine. Let the gate
-  coordinator schedule concurrent gate work. Do not use `--no-lock` to bypass
-  its capacity, worktree lease, or named resources.
+- **Inspect `.node-version`, package-script, package-manager, lockfile, and patch
+  changes before any package-manager command.** Record the applicable
+  author-check results.
+  Never treat a failed or unavailable command as a pass.
 - **Secrets are IaC-owned and Terraform apply needs human approval** — plan
   first, never one-off `gh secret set` / `vercel env add` /
   `gcloud secrets versions add`.
@@ -557,7 +594,7 @@ These bind regardless of which step you are on:
 | Step                     | Authority doc                                                                                                  |
 | ------------------------ | -------------------------------------------------------------------------------------------------------------- |
 | Claim, defer, merge-sync | [`agent-issue-workflow.md`](agent-issue-workflow.md)                                                           |
-| Gate                     | [`agent-quality-gate-mechanics.md`](agent-quality-gate-mechanics.md)                                           |
+| Author checks            | step 3 here                                                                                                    |
 | Review closeout          | step 4 here                                                                                                    |
 | Ready-state              | [`pr-ready-state.md`](pr-ready-state.md)                                                                       |
 | Docs and drift           | [`../context-standards.md`](../context-standards.md)                                                           |

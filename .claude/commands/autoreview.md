@@ -1,30 +1,23 @@
 ---
 description: Run the repo-local structured closeout review
-argument-hint: "[agent:autoreview options]"
+argument-hint: "[additional options except --base]"
 ---
 
 # Auto Review
 
-Freeze the request, owner, changed files, and non-test changed-line count, then
-run:
+Resolve the base in repository preflight. Freeze the request, owner, changed
+files, and non-test changed-line count. Without a base integration, run:
 
 ```bash
-pnpm agent:autoreview $ARGUMENTS
+pnpm agent:closeout-review --base "$BASE_REMOTE/$baseRefName" $ARGUMENTS
 ```
 
-`docs/notes/agent-quality-gate-mechanics.md` owns engine selection, trusted
-bundle preparation/verification, runtime-change refusal handling, and other
-adapter mechanics. Follow it rather than duplicating those rules here.
+The command rejects a second `--base` in `$ARGUMENTS`. Do not infer another
+base for a stacked or not-yet-open PR. After a base integration, use both
+immutable axes from
+[operating-card step 4](../../docs/notes/pr-operating-card.md). Read every report
+and hand it to the `review` skill. That step owns the remaining rules.
 
-Test the validation claims as operating-card step 4 requires; that step owns
-the rule, so every review engine gets it.
-
-Verify every accepted finding before editing. If fixes are made, rerun focused
-checks and autoreview for that batch. Do not pause solely for cycle count before
-five review-triggered patch cycles are complete; pause for scope
-reclassification before starting a sixth. A clean source review is not test,
-browser, generated-artifact, CLI/API, or runtime proof, so retain every
-applicable gate.
-If an autoreview runtime change triggers the owning adapter's self-review
-refusal, keep it intact and follow the trusted pre-change sequence in the owner
-note.
+Verify each accepted finding. After a fix, rerun its direct author checks and
+the closeout. Source review does not prove tests, browser behavior, generated
+artifacts, CLI/API behavior, or runtime behavior. Keep that evidence separate.

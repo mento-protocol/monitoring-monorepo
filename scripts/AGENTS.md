@@ -3,7 +3,7 @@ title: Scripts Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-01
+last_verified: 2026-09-02
 doc_type: agent-instructions
 scope: scripts
 review_interval_days: 90
@@ -16,8 +16,7 @@ Read the relevant [ADR](../docs/adr/README.md) before changing script behavior.
 
 ## Scope
 
-`scripts/` holds deploy and maintenance tools, agent gates, and code-health
-checks.
+`scripts/` holds repository tools.
 
 ## Layout
 
@@ -43,19 +42,18 @@ subdirectories.
 `redrive-onchain-deadletter.{mjs,test.mjs}` stays flat under
 `alerts/infra/`; ADR 0064 gives the lint reason.
 
-`lib/` holds cores multiple clusters read: `hcl.mjs` (Terraform HCL),
+`lib/` holds shared cores: `hcl.mjs` (Terraform HCL),
 `workflow-yaml.mjs` (Actions and shell parsing), `pnpm-override-selector.mjs`
 (pnpm overrides), and `gh-issue-lifecycle.mjs` (GitHub issue and label
-mechanics), which doc schedulers also read. Local projection keeps only
-`agent-ready` on create and all lifecycle labels on closed repair. ADR 0064
-lists readers.
+mechanics). Doc schedulers also read the last one. Local projection keeps only
+`agent-ready` on create and all lifecycle labels on closed repair. ADR 0064 lists
+readers.
 `peg-policy-digest.mjs` defines the peg version-digest contract for both
 validators. Inventories, pinned hashes, and identities stay with their domain.
 
 ## Why Files Stay Flat
 
-Move all 15 pin classes with their files; keep `agent-autoreview.sh`
-feedback-runtime pins.
+Move each pin class with its files. Keep `agent-autoreview.sh` feedback pins.
 
 - **Autoreview pins.** `agent-autoreview.sh` pins runtime,
   sealed `agent-autoreview-secret-suppressions.json` (ADR 0079),
@@ -73,8 +71,9 @@ feedback-runtime pins.
   `deploy/deploy-indexer-verify-status-identity.mjs` share an any-depth arm;
   both run. `pr/agent-issue-board{,.test}.mjs` and
   `pr/issue-board-{backfill,cli,commands,groom,lock,ownership,projects,release,state,sync{,-lock},transactions,transport}.mjs`
-  route `pnpm issue:board:test`; CI reruns it on failure (ADR 0082
-  confinement).
+  route `pnpm issue:board:test`; CI reruns failures (ADR 0082).
+  `pr/closeout-review{,-exec,-git,.test}.mjs` route
+  `pnpm agent:closeout-review:test`.
   `repo-health/check-guardrail-prose{,.test}.mjs` and
   `repo-health/guardrail-prose.json` route the guardrail suite. `ci.yml`,
   quick-commands, and the manifest pin it (ADR 0073).
@@ -131,7 +130,7 @@ feedback-runtime pins.
   EOL; `UPSTASH_MCP_LAUNCHER_SHA256` hashes it. Moves change both. See
   [`docs/notes/upstash-mcp-operator.md`](../docs/notes/upstash-mcp-operator.md).
 
-**List new `scripts/` path pins here.** Unlisted pins break silently.
+**List every new `scripts/` path pin here.**
 
 ## Sweep Checklist for a Move
 
@@ -152,14 +151,13 @@ in the same PR.
   before mutation. `deploy-indexer:promote` acts on a registered remote
   deployment; use it through the `deploy-indexer` skill after its clean-tree
   preflight, verification, and production approval.
-- Do not add `--no-verify` to normal Git commands. `deploy-indexer.sh` uses it
-  only for `envio` trigger-ref pushes, which intentionally skip redundant
-  pre-push hooks; never generalize it.
+- Only `deploy-indexer.sh`'s isolated `envio` trigger-ref push may use
+  `--no-verify`. Never use it in developer Git commands.
 - New deploy scripts print target, commit, and rollback/verification around
   mutation.
-- New Node root scripts need `pnpm lint:scripts` coverage; new shell scripts must
-  pass `bash -n`. Add a focused command to `scripts/agent-quality-gate.sh` for
-  behavior syntax and lint cannot verify.
+- Run `pnpm lint:scripts` for new Node root scripts and `bash -n` for new shell
+  scripts. Add focused tests beyond lint and syntax. Add required CI wiring if
+  no fixed job owns them.
 - No ESLint `max-lines` reaches this tree. The file-size watchlist reports it
   instead — tests aside, three trust-root files exempt:
   [ADR 0065](../docs/adr/0065-scripts-file-size-watchlist-scope.md).
@@ -175,8 +173,9 @@ in the same PR.
 
 ## Verification
 
-Run the gate from operating-card step 3. It routes `bash -n`,
-`pnpm lint:scripts`, and focused tests. Add
-`pnpm agent:quality-gate:test` for gate routing changes,
-`node scripts/check-deploy-root-anchors.test.mjs` for deploy wrappers, and
-`pnpm agent:context-check` plus `pnpm docs:index` after a move.
+Apply [PR operating card step 3](../docs/notes/pr-operating-card.md) to each
+changed root tool: `bash -n <changed-shell-script>`, `pnpm lint:scripts`, and
+its focused test. Required CI owns the legacy gate self-test. Deploy wrappers
+also run
+`node scripts/check-deploy-root-anchors.test.mjs`. After a move, run
+`pnpm agent:context-check` and `pnpm docs:index --check`.
