@@ -22,8 +22,8 @@ The later [repository preflight](pr-operating-card.md) does not attest bootstrap
 
 ## New Worktree / Clone Setup
 
-macOS setup requires the Xcode Command Line Tools (`xcode-select --install`)
-for the optional legacy gate's Darwin helper. Linux does not need them.
+Setup does not require the Xcode Command Line Tools. On macOS, install them with
+`xcode-select --install` only before you run the optional legacy gate.
 
 After creating a new worktree manually or cloning the repo, run:
 

@@ -228,6 +228,8 @@ done
   fail ".claude/hooks/session-start.sh restored hosted pre-push freshness"
 ! grep -Fq -- "Before every push from a server/worktree" scripts/setup.sh ||
   fail "scripts/setup.sh restored the mandatory manual pre-push checklist"
+! grep -Eq -- '/usr/bin/xcrun|xcode-select' scripts/setup.sh ||
+  fail "scripts/setup.sh restored the optional legacy gate's Xcode prerequisite"
 
 # The pre-install validator must reject a changed trusted alias. This fixture
 # proves the validator itself fails closed without running pnpm install.

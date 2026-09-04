@@ -2,10 +2,9 @@
 # setup.sh — run this once after creating a new worktree or cloning the repo.
 #
 # What it does:
-#   1. Verify the native Darwin toolchain when running on macOS
-#   2. Install all pnpm workspace dependencies when needed
-#   3. Install Playwright Chromium for ui-dashboard browser tests when needed
-#   4. Run Envio codegen when needed
+#   1. Install all pnpm workspace dependencies when needed
+#   2. Install Playwright Chromium for ui-dashboard browser tests when needed
+#   3. Run Envio codegen when needed
 #
 # Why codegen is needed:
 #   The indexer-envio package imports Envio's generated type facade from
@@ -20,14 +19,6 @@ cd "$REPO_ROOT"
 
 # shellcheck source=scripts/lib/install-marker.sh
 source "$REPO_ROOT/scripts/lib/install-marker.sh"
-
-if [ "$(/usr/bin/uname -s)" = "Darwin" ] &&
-  { [ ! -x /usr/bin/xcrun ] ||
-    ! /usr/bin/xcrun --sdk macosx --find clang >/dev/null 2>&1; }; then
-  echo "ERROR: the macOS Xcode Command Line Tools are required by the quality gate." >&2
-  echo "Install them with: xcode-select --install" >&2
-  exit 1
-fi
 
 # Shared Turbo cache across worktrees (GitHub issue #1411): keep the local Turbo
 # filesystem cache at one stable per-repo location outside any worktree so a

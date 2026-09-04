@@ -80,9 +80,6 @@ production-cutover matrix is
 - Node.js 24 LTS
 - [pnpm](https://pnpm.io/) 11.x
 - Docker (for local indexer dev — runs Postgres + Hasura)
-- On macOS, the Xcode Command Line Tools. Install them with
-  `xcode-select --install`. The optional legacy gate uses their selected macOS
-  SDK and Clang toolchain for exact Darwin process identity.
 
 ### Install
 
