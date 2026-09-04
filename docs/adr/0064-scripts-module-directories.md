@@ -301,10 +301,11 @@ routing, not procedure.
    `implementation_signature()`. Repoint every occurrence. `$script_source_dir`
    is the required anchor: the gate runs against stub fixture repositories where
    `$repo_root` is a temp directory with no `scripts/` tree, so a repo-root
-   anchor misses the helper on every fixture run. Required CI runs the
-   regression suites. Before M5, `agent-quality-gate.test.sh` was the only
-   exercise for these helpers outside a developer's pre-push; it remains their
-   CI exercise. P11 moved `lockfile-scope.mjs` into `gate/`, added it to
+   anchor misses the helper on every fixture run. Before M5,
+   `agent-quality-gate.test.sh` was the only exercise for these helpers outside
+   a developer's pre-push. The M6 control repair removed that suite from
+   required CI. It remains a manual diagnostic until legacy gate retirement.
+   P11 moved `lockfile-scope.mjs` into `gate/`, added it to
    `implementation_signature()` (issue 1905), and made a
    helper the gate cannot find exit 2 instead of falling toward the full suite —
    its caller reads a nonzero exit as "cannot narrow", so the old behaviour

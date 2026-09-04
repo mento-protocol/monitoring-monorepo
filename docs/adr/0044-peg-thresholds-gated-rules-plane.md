@@ -189,8 +189,12 @@ does not change the gated-policy ownership or two-phase rollover contract.
   human sign-off on anything that can page or justify a breaker trip.
 - The alerts stack gains its first `jsondecode`-driven rule group; the
   pattern is available for future per-asset rule classes.
-- The integrity check joins the quality gate and CI, so a registry/threshold
-  mismatch fails before review.
+- Step 3 of the [PR operating card](../notes/pr-operating-card.md) requires
+  authors to run the base-bound integrity command before the first
+  ready-for-review publication:
+  `node scripts/alerts/check-peg-registry-integrity.mjs --base-ref <resolved-pr-base-oid>`.
+  Required CI runs the integrity check again before merge, so a registry or
+  threshold mismatch blocks delivery.
 
 ## Evidence
 

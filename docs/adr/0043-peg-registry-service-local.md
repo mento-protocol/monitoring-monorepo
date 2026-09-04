@@ -55,15 +55,17 @@ unpublished.
   by feed address (canonical in `oracle-reporters.json`), tokens by chain +
   address (canonical in shared-config tokens). A referential-
   integrity check script — sibling to the existing threshold-drift check,
-  wired into the quality gate and CI — fails the build when a referenced
-  feed or token does not exist upstream. Pool references cannot be proven
-  statically (pools are discovered on-chain), so the activated bridge resolves
-  every `(chain, pool)` against Hasura at startup and re-validates continuously
-  with each structural poll. It fails that asset's `indexed-pool` coverage path
-  closed and publishes `mento_peg_indexed_pool_reachable` whenever resolution
-  stops (retired pool, resync, partial backend failure), not only when it never
-  resolved. A distinct ops alert on that metric is required before the peg
-  signal becomes alert-authoritative.
+  required by step 3 of the
+  [PR operating card](../notes/pr-operating-card.md) for affected inputs and run
+  by CI — fails the build when a referenced feed or token does not exist
+  upstream. Pool references cannot be proven statically (pools are discovered
+  on-chain), so the activated bridge resolves every `(chain, pool)` against
+  Hasura at startup and re-validates continuously with each structural poll. It
+  marks that asset's `indexed-pool` coverage path as unreachable by publishing
+  `mento_peg_indexed_pool_reachable = 0` whenever resolution stops (retired
+  pool, resync, partial backend failure), not only when it never resolved. This
+  makes the coverage path fail closed. A distinct ops alert on that metric is
+  required before the peg signal becomes alert-authoritative.
 - Schema decisions that the first adversarial review forced:
   - Asset keys are internal slugs (`europ-schuman`), never tickers; the
     onboarding census binds by contract address / issuer identity (ticker

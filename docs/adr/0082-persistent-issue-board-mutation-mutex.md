@@ -250,10 +250,11 @@ present.
 
 The required `production-infra-contract` CI job runs `pnpm issue:board:test`
 for every pull request, including after another step fails. It skips the proof
-only when the job is cancelled. The local quality gate also routes changes to
-the issue board helper file set to this suite. This CI step keeps the
-repository-wide proof active when a new owner mutation appears outside that
-file set.
+only when the job is cancelled. For changes to the issue board helper file set,
+step 3 of the [PR operating card](../notes/pr-operating-card.md) requires the
+focused contract named by [`scripts/AGENTS.md`](../../scripts/AGENTS.md):
+`pnpm issue:board:test`. The CI step keeps the repository-wide proof active when
+a new owner mutation appears outside that file set.
 
 The compiler proof cannot reduce a GraphQL document that depends on mutable
 state, runtime-only branches, function results, or other dynamic data. The

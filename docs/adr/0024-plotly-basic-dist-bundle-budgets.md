@@ -26,8 +26,10 @@ the dashboard doesn't use. Unbudgeted, the chart layer silently bloats the bundl
 
 Use Plotly's minified **`basic-dist-min`** build (no `scattergl`/WebGL traces)
 and enforce **bundle-size budgets** with `pnpm dashboard:size-limit`. The
-quality gate runs the size task through Turbo, where it depends on the
-dashboard build. Charts render through the shared
+[PR operating card](../notes/pr-operating-card.md) requires authors to run
+`pnpm dashboard:build` and then `pnpm dashboard:size-limit` for matching bundle
+inputs. Required CI runs the Turbo `size-limit` task for matching changes. That
+task depends on the dashboard build. Charts render through the shared
 `@/lib/react-plotly-basic` factory.
 
 The dashboard intentionally satisfies `react-plotly.js`'s `plotly.js` peer with
@@ -47,8 +49,9 @@ imports the lean bundle through `react-plotly.js/factory`.
 
 - Anything needing a WebGL trace type would require reconsidering the dist and its
   size impact — not a silent import.
-- `size-limit` reads the built `.next`; direct invocations need a fresh
-  `pnpm dashboard:build`, while the quality-gate Turbo task builds first.
+- `size-limit` reads the built `.next`. Run `pnpm dashboard:build` before a
+  direct `pnpm dashboard:size-limit` invocation. The required CI Turbo task
+  declares `build` as a dependency.
 
 ## Evidence
 
