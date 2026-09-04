@@ -211,9 +211,12 @@ The audit excludes legacy local-gate self-tests from the replacement target.
 
 The repair extracts retained SessionEnd, setup-marker, package-policy,
 autoreview owner, and autoreview schema assertions into two focused suites.
-Both moves are done and `RETAINED_EXTRACTED_STEPS` runs both suites:
-`bash scripts/bootstrap/agent-setup-contract.test.sh` and
-`node --test scripts/indexer-handler-invariant-contract.test.mjs`.
+Both moves are done. `ci.yml` runs the two suites — `node --test
+scripts/indexer-handler-invariant-contract.test.mjs` in the `indexer` job and
+`bash scripts/bootstrap/agent-setup-contract.test.sh` in the `scripts` job — and
+`RETAINED_EXTRACTED_STEPS` in `scripts/workflows/check-no-skip-audit.mjs` pins
+both steps so neither can leave CI unnoticed. Changing a registration is a
+`ci.yml` edit that the constant must follow.
 [ADR 0086](0086-autoreview-removal-thin-two-model-review.md) has since deleted the
 autoreview source the owner and schema assertions compared against, so the
 second suite checks one copy of the family data instead of two; the suite and

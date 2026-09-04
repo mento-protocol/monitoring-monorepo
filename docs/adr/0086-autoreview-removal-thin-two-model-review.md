@@ -157,10 +157,10 @@ superseded by this record.
   named the autoreview tests as the credential-forwarding case the mapped-command
   launcher scrubs. The suite is gone; the launcher still scrubs.
 - [ADR 0078](0078-staged-verification-redesign.md)'s M4 move covered autoreview
-  owner and schema assertions. Both extraction suites still run under
-  `RETAINED_EXTRACTED_STEPS`; deleting the autoreview core leaves
-  `scripts/indexer-handler-invariant-contract.test.mjs` checking one copy of the
-  family data instead of two.
+  owner and schema assertions. `ci.yml` still runs both extraction suites, and
+  `RETAINED_EXTRACTED_STEPS` still pins both steps; deleting the autoreview core
+  leaves `scripts/indexer-handler-invariant-contract.test.mjs` checking one copy
+  of the family data instead of two.
 
 The frozen verification-evidence manifest keeps its scoped allowance for
 `scripts/agent-autoreview.sh:.*gate_stat`, because
