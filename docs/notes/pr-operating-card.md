@@ -158,11 +158,12 @@ If root `package.json` changed, first run
    Without a base integration, run the second model over the branch diff:
 
    ```bash
-   pnpm agent:closeout-review --base <base-remote>/<baseRefName>
+   pnpm agent:closeout-review --base "$BASE_REMOTE/$baseRefName"
    ```
 
-   Pass the base that preflight bound. Do not let the command infer a different
-   default branch for a stacked or not-yet-open PR.
+   Pass the base that preflight bound. The command rejects a second `--base`.
+   Do not let it infer a different default branch for a stacked or not-yet-open
+   PR.
 
    After a base integration, review both immutable reconciliation axes against
    the same clean `final_head`:

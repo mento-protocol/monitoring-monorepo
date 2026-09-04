@@ -48,7 +48,7 @@ bootstrap; setup has a separate [trust boundary](../../../docs/notes/worktree-an
   integration, or formatter change during commit. Pre-push runs no repository
   verification.
   For a non-trivial change, run `pnpm agent:closeout-review --base
-<base-remote>/<baseRefName>` with the preflight-bound base. Hand its report to
+"$BASE_REMOTE/$baseRefName"` with the preflight-bound base. Hand its report to
   the `review` skill. Card step 4 owns base-integration axes, exit handling, and
   the limited single-source fallback.
 - **PRs open ready for review.** Drafts suppress the automated AI reviews this

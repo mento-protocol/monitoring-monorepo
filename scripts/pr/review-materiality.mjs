@@ -342,14 +342,14 @@ function recommendedReview(tier) {
   if (tier === "standard") {
     return [
       "Run the applicable direct author checks from docs/notes/pr-operating-card.md step 3.",
-      "Run pnpm agent:closeout-review --base <base-remote>/<baseRefName> before pushing.",
+      'Run pnpm agent:closeout-review --base "$BASE_REMOTE/$baseRefName" before pushing.',
       VERIFIER_HANDOFF,
     ];
   }
 
   return [
     "Run the applicable direct author checks from docs/notes/pr-operating-card.md step 3.",
-    "Run pnpm agent:closeout-review --base <base-remote>/<baseRefName> before pushing.",
+    'Run pnpm agent:closeout-review --base "$BASE_REMOTE/$baseRefName" before pushing.',
     VERIFIER_HANDOFF,
     "Identify every applicable checklist from the changed surfaces and scoped instructions, then audit sibling surfaces before the next push.",
   ];

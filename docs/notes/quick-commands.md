@@ -50,7 +50,7 @@ pnpm agent:quality-gate            # Optional legacy diagnostic: inspect its ret
 pnpm agent:quality-gate --run      # Optional legacy diagnostic: execute its retained mapping
 pnpm agent:context-check           # Validate repo-visible agent instructions, links, and routing
 pnpm agent:review-materiality      # Classify review depth + context-update signals for current diff
-pnpm agent:closeout-review --base <base-remote>/<baseRefName>  # Second-model source review against the preflight-bound base; prints `report: <path>`; exit 1 = findings, 2 = closeout failed
+pnpm agent:closeout-review --base "$BASE_REMOTE/$baseRefName"  # Requires the preflight-bound variables; prints `report: <path>`; exit 1 = findings, 2 = closeout failed
 pnpm agent:closeout-review:test    # Suite for the closeout review tool
 pnpm review:eval:experiment -- --help  # Non-ledger paired screen; canonical qualification reruns all 24 cells
 pnpm review:eval:experiment -- --validate-plan <campaign-dir> --json  # Validate one candidate campaign without a model call

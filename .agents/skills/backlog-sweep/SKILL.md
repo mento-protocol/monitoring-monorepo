@@ -551,7 +551,7 @@ Then spawn one worker subagent per issue. Give each a brief containing:
   blocks the ready handoff as the operating card specifies.
 
 - **The closeout:** Run `pnpm agent:closeout-review --base
-<base-remote>/<baseRefName>` with the preflight-bound base, then give its
+"$BASE_REMOTE/$baseRefName"` with the preflight-bound base, then give its
   report to the `review` skill. For a base integration, use both axes from card
   step 4. That step owns exit handling, fallback, findings, and validation
   claims.

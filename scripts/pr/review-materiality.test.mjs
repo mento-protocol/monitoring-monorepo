@@ -248,7 +248,7 @@ test("classifies root script changes as full and requiring context", () => {
   // Pinned so the advice cannot drift back to a command the repo no longer has.
   assertEqual(
     report.recommendedReview[1],
-    "Run pnpm agent:closeout-review --base <base-remote>/<baseRefName> before pushing.",
+    'Run pnpm agent:closeout-review --base "$BASE_REMOTE/$baseRefName" before pushing.',
   );
   // The finder pass alone is not the closeout; card step 4 needs the verifier.
   assertEqual(
@@ -912,7 +912,7 @@ test("line-count threshold promotes otherwise simple docs to standard", () => {
   // A standard change gets the whole two-model closeout, not the finder alone.
   assertEqual(
     report.recommendedReview[1],
-    "Run pnpm agent:closeout-review --base <base-remote>/<baseRefName> before pushing.",
+    'Run pnpm agent:closeout-review --base "$BASE_REMOTE/$baseRefName" before pushing.',
   );
   assertEqual(
     report.recommendedReview[2],

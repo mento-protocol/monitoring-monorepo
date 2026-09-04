@@ -618,6 +618,23 @@ test("an unknown argument is refused with the usage line", (t) => {
   assert.match(run.stderr, /usage: closeout-review/);
 });
 
+test("a duplicate --base is refused before it can replace the bound base", (t) => {
+  const repo = makeRepo(t);
+  fakeCodex(repo.bin, 'echo "clean"');
+
+  const run = runScript(repo, [
+    "--base",
+    "base",
+    "--base",
+    "HEAD",
+    "--no-fetch",
+  ]);
+
+  assert.equal(run.status, 2);
+  assert.match(run.stderr, /--base can be provided only once/);
+  assert.equal(run.reportPath, null);
+});
+
 /**
  * A fake `gh` answering the two queries `resolveBase` makes: `repo view` and
  * `pr list`. `defaultBranch` is what `repo view` reports; `pulls` is the JSON
