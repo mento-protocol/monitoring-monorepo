@@ -555,16 +555,23 @@ test("canary rows only pass or fail, and never rank", () => {
         }),
       },
     });
+  // A canary scores the grid in one draw, so the floor has to sit inside the
+  // grid's own opportunities and a row that reaches it passes.
+  const floor = rules.canary_min_matched_grid;
+  assert.equal(floor <= gridIds.length, true);
   assert.equal(
-    verdict({ contract, row: canary(10), baselineRow: baseline() }).verdict,
+    verdict({ contract, row: canary(floor), baselineRow: baseline() }).verdict,
     "GREEN",
   );
-  const low = verdict({ contract, row: canary(8) });
+  const low = verdict({ contract, row: canary(floor - 1) });
   assert.equal(low.verdict, "RED");
-  assert.match(low.reasons[0], /below canary_min_matched_grid 9/);
+  assert.match(
+    low.reasons[0],
+    new RegExp(`below canary_min_matched_grid ${floor}`),
+  );
   const silent = verdict({
     contract,
-    row: canary(10, { zero_finding_prs: 1 }),
+    row: canary(floor, { zero_finding_prs: 1 }),
   });
   assert.equal(silent.verdict, "RED");
   assert.match(silent.reasons[0], /no parseable finding on 1 PR/);
@@ -572,13 +579,13 @@ test("canary rows only pass or fail, and never rank", () => {
   assert.equal(
     verdict({
       contract,
-      row: canary(rules.canary_min_matched_grid + 11),
+      row: canary(gridIds.length),
       baselineRow: baseline(),
     }).verdict,
     "GREEN",
   );
   assert.equal(
-    verdict({ contract, row: { ...canary(10), status: "partial" } }).verdict,
+    verdict({ contract, row: { ...canary(floor), status: "partial" } }).verdict,
     "INCOMPLETE",
   );
 });

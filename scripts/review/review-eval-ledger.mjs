@@ -595,8 +595,8 @@ export function contractScorableIdsByPr(contract) {
  *
  * A canary is checked too. It is a floor test rather than a score of record, but
  * `canaryVerdict` reads its matched count against `canary_min_matched_grid`, so
- * a canary that ran one of the three grid PRs and calls itself complete passes
- * that floor on a third of the evidence it claims.
+ * a canary that ran one of the six grid PRs and calls itself complete passes
+ * that floor on a sixth of the evidence it claims.
  *
  * The draw count is checked because it is the other axis of the same claim:
  * a `kind: "full"` row with `draws: 1` under pipeline has half the planned
@@ -738,6 +738,13 @@ export function compareLedgers(oldRows, newRows) {
 /**
  * Validate the committed ledger against the contract. `baseRows` is optional:
  * pass the rows at the merge base to fold the append-only check in here.
+ *
+ * `contractDigest` is how a caller says which contract is current, and every
+ * caller reading a real ledger owes it. A row scored under a retired contract
+ * then gets the shape checks alone: its conditions, PR coverage and draws are
+ * claims about the panel it ran on, and this contract's panel is a different
+ * one. Omitting the digest holds every row, however old, to the contract passed
+ * here, so a widened grid reads as coverage the old rows dropped.
  */
 export function checkLedger({ path, contract, contractDigest, baseRows }) {
   const problems = [];

@@ -274,26 +274,81 @@ function checkTruthFile({ repoRoot, fixture, problems }) {
     return;
   }
 
+  // Two independent bots raise the same defect often enough that the truth
+  // records the second one with `duplicate_of` pointing at the first. Scoring
+  // either copy would pay a finder twice for one defect and inflate the
+  // denominator, so a duplicate is never scorable: it is dropped from the
+  // derived sets, and naming one in the contract is a problem, not a warning.
+  const duplicates = new Map(
+    truth.findings
+      .filter((finding) => Number.isSafeInteger(finding.duplicate_of))
+      .map((finding) => [finding.id, finding.duplicate_of]),
+  );
+  // A present duplicate_of that is not a safe integer (e.g. a quoted id)
+  // falls out of the map above and must not leave the finding scorable.
+  for (const finding of truth.findings) {
+    const value = finding.duplicate_of;
+    if (value === undefined || Number.isSafeInteger(value)) {
+      continue;
+    }
+    problems.push(
+      `PR ${fixture.pr} finding ${finding.id} duplicate_of ${JSON.stringify(value)} is not a safe integer`,
+    );
+  }
+  // A curator writes duplicate_of by hand after the harvest, so a typo has to
+  // fail the check: the target must be a different finding in this same file,
+  // and not itself a duplicate, or a chain would drop a defect nobody scores.
+  const findingsById = new Map(
+    truth.findings.map((finding) => [finding.id, finding]),
+  );
+  for (const [id, target] of duplicates) {
+    const targetFinding = findingsById.get(target);
+    const wrong =
+      id === target
+        ? "is the finding's own id"
+        : !targetFinding
+          ? "names no finding in this truth file"
+          : duplicates.has(target)
+            ? "names a finding that is itself a duplicate"
+            : targetFinding.acted_on !== true
+              ? "names a finding that is not acted_on"
+              : null;
+    if (wrong) {
+      problems.push(
+        `PR ${fixture.pr} finding ${id} duplicate_of ${target} ${wrong}`,
+      );
+    }
+  }
+  for (const field of ["scorable_ids", "p1_ids"]) {
+    for (const id of Array.isArray(fixture[field]) ? fixture[field] : []) {
+      if (!duplicates.has(id)) continue;
+      problems.push(
+        `PR ${fixture.pr} ${field} names ${id}, which the truth marks duplicate_of ${duplicates.get(id)}; score the earlier comment instead`,
+      );
+    }
+  }
+  const scorableFindings = truth.findings.filter(
+    (finding) => finding.acted_on === true && !duplicates.has(finding.id),
+  );
+
   // The frozen id list is the denominator. Recomputing it from the acted_on
   // predicate at score time would let a parser change move the denominator
   // silently, so both are computed and required to agree.
-  const actedOn = truth.findings
-    .filter((finding) => finding.acted_on === true)
-    .map((finding) => finding.id);
-  const p1 = truth.findings
-    .filter((finding) => finding.acted_on === true && finding.severity === "P1")
-    .map((finding) => finding.id);
+  const withoutDuplicates = (ids) =>
+    Array.isArray(ids) ? ids.filter((id) => !duplicates.has(id)) : ids;
   compareIdSets({
     label: `PR ${fixture.pr} scorable_ids`,
-    frozen: fixture.scorable_ids,
-    derived: actedOn,
+    frozen: withoutDuplicates(fixture.scorable_ids),
+    derived: scorableFindings.map((finding) => finding.id),
     derivedLabel: "acted-on truth findings",
     problems,
   });
   compareIdSets({
     label: `PR ${fixture.pr} p1_ids`,
-    frozen: fixture.p1_ids,
-    derived: p1,
+    frozen: withoutDuplicates(fixture.p1_ids),
+    derived: scorableFindings
+      .filter((finding) => finding.severity === "P1")
+      .map((finding) => finding.id),
     derivedLabel: "acted-on P1 truth findings",
     problems,
   });
@@ -324,9 +379,12 @@ function checkFinderReports({ repoRoot, fixture, seenReportFiles, problems }) {
     problems.push(`PR ${fixture.pr} finder_reports must be an array`);
     return;
   }
-  if (fixture.grid === true && reports.length === 0) {
+  // A grid cell replays one frozen finder report per draw, and the lane draws
+  // twice. One report would silently score both draws against the same
+  // handoff; three would leave a draw unmatched. Only two is a runnable grid.
+  if (fixture.grid === true && reports.length !== 2) {
     problems.push(
-      `PR ${fixture.pr} is a grid fixture with no frozen finder report`,
+      `PR ${fixture.pr} is a grid fixture with ${reports.length} frozen finder reports; a grid fixture needs exactly two`,
     );
   }
   if (fixture.grid !== true && reports.length > 0) {

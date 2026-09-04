@@ -6,7 +6,8 @@
   "provenance": {
     "source": "~/.agents/skills/.skill-audit/bench2 (benchmark v2, closed 2026-08-24)",
     "truth_method": "defects raised by independent CI reviewers on the PR head and then fixed by the author; harvested by bench2/extract_truth.py, frozen here as bytes, never re-derived",
-    "excluded": "PR 1978 harvested but has 0 acted-on findings"
+    "excluded": "PR 1978 harvested but has 0 acted-on findings",
+    "harvest_2026_09": "PRs 2035, 2039, 2121 harvested 2026-09-04 by scripts/review/review-eval-harvest-truth.mjs (rules listed in its header: earliest bot-review head, bot root comments, author-only dispositions, details blocks stripped, base from the PR base ref; later-head findings dropped: 16, 3, 0); four same-defect bot duplicates carry duplicate_of and are not scorable; two finder reports per PR captured with the pinned finder argv in the eval fixture"
   },
   "sut": {
     "finder": {
@@ -233,14 +234,121 @@
       ],
       "grid": false,
       "finder_reports": []
+    },
+    {
+      "pr": 2035,
+      "title": "feat(scripts): Arkham intel-marathon pass 2 — populatedTags fix, cross-chain discovery, quota-aware sweep",
+      "first_head": "297c65bf413d247ae59cf9e5f1895b58b6e613b6",
+      "base_sha": "4250874f8e5138e8ad60c774ad7b8e412e8b8b73",
+      "tag_head": "eval/review-skill/v1/pr-2035/head",
+      "tag_base": "eval/review-skill/v1/pr-2035/base",
+      "truth_file": "docs/evals/review-skill-truth/pr-2035.json",
+      "truth_sha256": "d2c2e70908b5648748375c25464044ace97ddc0810e1401fded8effb8ecb5e62",
+      "scorable_ids": [
+        3845594538,
+        3845596185,
+        3845603922,
+        3845603940,
+        3845607361,
+        3845618202
+      ],
+      "p1_ids": [
+        3845594538,
+        3845607361,
+        3845618202
+      ],
+      "grid": true,
+      "finder_reports": [
+        {
+          "file": "docs/evals/review-skill-finder-reports/pr-2035-draw1.md",
+          "sha256": "2ca7b2197720c097a33264e41864388593a517ffcb8b3c69b8abe73b04db9175",
+          "source": "codex exec review gpt-5.6-sol high (codex-cli 0.153.2) in the eval fixture under the harness env scrub, captured 2026-09-04, draw 1",
+          "chars": 2465
+        },
+        {
+          "file": "docs/evals/review-skill-finder-reports/pr-2035-draw2.md",
+          "sha256": "c1461bae47d3d1b861108b845253f157cb6de4bab2cbea9ab13a6fdeed43b12c",
+          "source": "codex exec review gpt-5.6-sol high (codex-cli 0.153.2) in the eval fixture under the harness env scrub, captured 2026-09-04, draw 2",
+          "chars": 1790
+        }
+      ]
+    },
+    {
+      "pr": 2039,
+      "title": "fix(cloud): fail early on missing shipping capabilities",
+      "first_head": "3409e991f81053e7f42a07bb6fc8ddbd0a3598dc",
+      "base_sha": "18e6e13b2c3115a78e8dc33a99a47d9543a67eee",
+      "tag_head": "eval/review-skill/v1/pr-2039/head",
+      "tag_base": "eval/review-skill/v1/pr-2039/base",
+      "truth_file": "docs/evals/review-skill-truth/pr-2039.json",
+      "truth_sha256": "b11bc034cdeaf9642b04da607711894f682dfdc72f36060efd43d00b6864f71e",
+      "scorable_ids": [
+        3846756487,
+        3846756810,
+        3846756918,
+        3846756922,
+        3846757143,
+        3846757191
+      ],
+      "p1_ids": [
+        3846757191
+      ],
+      "grid": true,
+      "finder_reports": [
+        {
+          "file": "docs/evals/review-skill-finder-reports/pr-2039-draw1.md",
+          "sha256": "41adbc4b14c8e249f00580d48b28c0c693d48a737777d73e60959ac9abe50006",
+          "source": "codex exec review gpt-5.6-sol high (codex-cli 0.153.2) in the eval fixture under the harness env scrub, captured 2026-09-04, draw 1",
+          "chars": 1967
+        },
+        {
+          "file": "docs/evals/review-skill-finder-reports/pr-2039-draw2.md",
+          "sha256": "2fa679489de5460e8436c48fbc5aa5f18607da46dd9d6ef10107852030517d65",
+          "source": "codex exec review gpt-5.6-sol high (codex-cli 0.153.2) in the eval fixture under the harness env scrub, captured 2026-09-04, draw 2",
+          "chars": 2194
+        }
+      ]
+    },
+    {
+      "pr": 2121,
+      "title": "feat(dashboard): add data-backed trove social previews",
+      "first_head": "75cfaeb631ea3143f05e97af8a21bd0ac2498362",
+      "base_sha": "d994c6af00e3d29d245f1211d474f8a7f52deb2a",
+      "tag_head": "eval/review-skill/v1/pr-2121/head",
+      "tag_base": "eval/review-skill/v1/pr-2121/base",
+      "truth_file": "docs/evals/review-skill-truth/pr-2121.json",
+      "truth_sha256": "9d1b9e04fb0de7d1757f8178c941d9738ead6175fa8f8b164dc7985b8d3c8845",
+      "scorable_ids": [
+        3882085361,
+        3882086206,
+        3882090788,
+        3882119274,
+        3882119284
+      ],
+      "p1_ids": [],
+      "grid": true,
+      "finder_reports": [
+        {
+          "file": "docs/evals/review-skill-finder-reports/pr-2121-draw1.md",
+          "sha256": "252fc09855672b5cce2d27861e0f425d73089d91804cbe313a0bd4bd3fb7af8f",
+          "source": "codex exec review gpt-5.6-sol high (codex-cli 0.153.2) in the eval fixture under the harness env scrub, captured 2026-09-04, draw 1",
+          "chars": 2616
+        },
+        {
+          "file": "docs/evals/review-skill-finder-reports/pr-2121-draw2.md",
+          "sha256": "3190aa57276285a1ebd73cc92912e3d2d630137b672b189a129c0f12447c2788",
+          "source": "codex exec review gpt-5.6-sol high (codex-cli 0.153.2) in the eval fixture under the harness env scrub, captured 2026-09-04, draw 2",
+          "chars": 940
+        }
+      ]
     }
   ],
   "verdict_rules": {
     "noise_floor_defects": 3,
     "regression_net_flips": 6,
     "p1_recall_floor": 0.6,
-    "wrong_claims_ratio_ceiling": 2.0,
-    "canary_min_matched_grid": 9
+    "wrong_claims_ratio_ceiling": 2,
+    "canary_min_matched_grid": 16
   },
   "cadence_days": {
     "canary": 30,

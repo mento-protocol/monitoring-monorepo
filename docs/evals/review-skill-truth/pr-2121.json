@@ -1,0 +1,77 @@
+{
+ "pr": 2121,
+ "title": "feat(dashboard): add data-backed trove social previews",
+ "base": "main",
+ "base_sha": "d994c6af00e3d29d245f1211d474f8a7f52deb2a",
+ "first_head": "75cfaeb631ea3143f05e97af8a21bd0ac2498362",
+ "last_head": "b372ca068481b385f50335c305cde2f92070d5ae",
+ "commits": 8,
+ "reviewers": [
+  "chatgpt-codex-connector[bot]",
+  "claude[bot]",
+  "coderabbitai[bot]"
+ ],
+ "findings": [
+  {
+   "id": 3882085361,
+   "author": "claude[bot]",
+   "path": "ui-dashboard/src/lib/site-metadata.ts",
+   "line": 33,
+   "severity": "P2",
+   "title": "[P2] resolveMetadataBase trusts client-supplied X-Forwarded-Host/Host with no allowlist",
+   "acted_on": true,
+   "declined": false,
+   "body": "**[P2] `resolveMetadataBase` trusts client-supplied `X-Forwarded-Host`/`Host` with no allowlist**\n\nThe round-trip check at line 35 (`candidate.host === host`) only guards against URL-parsing artifacts (e.g. userinfo-smuggling like `attacker.com@monitoring.mento.org`); it does not restrict the accepted host to a known set. Any syntactically valid hostname an attacker sends in `X-Forwarded-Host` (or `Host`, if no proxy overwrites it) is accepted as the page's `metadataBase`, which Next.js then uses to build the absolute `og:image`/`twitter:image` URLs embedded in the page's `<meta>` tags.\n\nImpact is bounded today \u2014 `generateMetadata` calls `headers()`, which opts this route out of static/ISR caching, so this can't become a stored cache-poisoning bug the way it could on a statically-cached route. But it's still unauthenticated header trust with no allowlist, and the repo already has a safer, server-controlled alternative for exactly this \"resolve the preview-deployment origin\" use case: `process.env.VERCEL_URL` (or `VERCEL_PROJECT_PRODUCTION_URL`), which `trove-og-data.ts`'s own cache-salting already treats as the trusted Vercel-supplied identifier (`VERCEL_DEPLOYMENT_ID ?? VERCEL_GIT_COMMIT_SHA`).\n\nSuggest either validating the parsed host against an allowlist (production origin, `*.vercel.app`, `localhost`/`127.0.0.1`) before trusting it, or preferring `process.env.VERCEL_URL` server-side and falling back to the `Host` header only for local dev.\n\n[Fix this \u2192](https://claude.ai/code?q=Harden%20resolveMetadataBase%20in%20ui-dashboard%2Fsrc%2Flib%2Fsite-metadata.ts%20%28branch%20trove-history-ui-polish%29%3A%20it%20currently%20accepts%20any%20syntactically%20valid%20X-Forwarded-Host%2FHost%20header%20value%20as%20the%20metadataBase%20origin%20with%20no%20allowlist.%20Add%20validation%20against%20a%20known-host%20allowlist%20%28production%20origin%2C%20*.vercel.app%2C%20localhost%2F127.0.0.1%29%2C%20or%20prefer%20process.env.VERCEL_URL%2FVERCEL_PROJECT_PRODUCTION_URL%20server-side%20and%20only%20fall%20back%20to%20header-derived%20host%20for%20local%20dev.%20Update%20ui-dashboard%2Fsrc%2Flib%2F__tests__%2Fsite-metadata.test.ts%20accordingly.&repo=mento-protocol/monitoring-monorepo)"
+  },
+  {
+   "id": 3882086206,
+   "author": "claude[bot]",
+   "path": "ui-dashboard/src/app/cdps/[symbol]/troves/[troveId]/_lib/trove-og-data.ts",
+   "line": 152,
+   "severity": "P2",
+   "title": "[P2] icrTone's warning threshold duplicates icrTextClass in the same lib folder",
+   "acted_on": true,
+   "declined": false,
+   "body": "**[P2] `icrTone`'s warning threshold duplicates `icrTextClass` in the same `_lib` folder**\n\n`icrTone` re-implements the exact same `icrBps < mcrBps` / `icrBps < Math.ceil(mcrBps * 1.2)` threshold math as `icrTextClass` in `./format.ts:44-49` \u2014 same folder, no module-boundary reason to duplicate (unlike the documented `trove-cells.tsx` mirror, which crosses a route-private boundary on purpose per that file's own header comment). If the \"warn within 20% of MCR\" band ever changes, it's easy to update one and miss the other.\n\nConsider factoring the shared threshold into one function (e.g. `icrSeverity(icrBps, mcrBps): \"critical\" | \"warning\" | \"healthy\" | \"neutral\"`) that both `icrTextClass` (mapping to a CSS class) and `icrTone` (mapping to a `TroveOgTone`) call.\n\n[Fix this \u2192](https://claude.ai/code?q=In%20ui-dashboard%2Fsrc%2Fapp%2Fcdps%2F%5Bsymbol%5D%2Ftroves%2F%5BtroveId%5D%2F_lib%2F%20%28branch%20trove-history-ui-polish%29%3A%20trove-og-data.ts%27s%20icrTone%20duplicates%20the%20icrBps%20%3C%20mcrBps%20%2F%20icrBps%20%3C%20Math.ceil%28mcrBps%20*%201.2%29%20threshold%20math%20already%20in%20format.ts%27s%20icrTextClass%2C%20both%20in%20the%20same%20_lib%20folder.%20Extract%20a%20shared%20icrSeverity%28icrBps%2C%20mcrBps%29%20helper%20returning%20a%20severity%20enum%20that%20both%20icrTextClass%20and%20icrTone%20map%20to%20their%20respective%20output%20types%2C%20so%20the%20threshold%20has%20one%20source%20of%20truth.&repo=mento-protocol/monitoring-monorepo"
+  },
+  {
+   "id": 3882090788,
+   "author": "coderabbitai[bot]",
+   "path": "ui-dashboard/src/lib/site-metadata.ts",
+   "line": 15,
+   "severity": "P2",
+   "title": "Recognize the IPv6 loopback host.",
+   "acted_on": true,
+   "declined": false,
+   "body": "**Recognize the IPv6 loopback host.**\n\nWith `Host: [::1]:3210`, this function selects `https`. The generated social-image URL then uses an unreachable local HTTPS origin. Recognize `[::1]` as a local host and add a regression test.\n\n\u2705 Addressed in commits 3b5a941 to c063605"
+  },
+  {
+   "id": 3882119274,
+   "author": "chatgpt-codex-connector[bot]",
+   "path": "ui-dashboard/src/app/cdps/[symbol]/troves/[troveId]/_lib/trove-og-data.ts",
+   "line": 176,
+   "severity": "P2",
+   "title": "Do not present event-time ICR as a fresh health signal",
+   "acted_on": true,
+   "declined": false,
+   "body": "**<sub><sub>![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)</sub></sub>  Do not present event-time ICR as a fresh health signal**\n\nWhen a Trove has no debt/collateral operation after an oracle-price change, `icrBps` remains the ratio computed at that earlier operation (`troveManager.ts` writes it only while handling a Trove update). The existing header therefore labels it as an indexed, non-live value in `trove-header-card.tsx:266-275`, but this social card colors it healthy/warning/critical and later stamps the query completion time as `fetchedAtMs`, so the five-minute age gate can treat an arbitrarily old ratio as fresh. Either derive a current ratio from current price data or carry the ICR observation time and visibly qualify its age instead of using fetch time.\n\nAGENTS.md reference: [ui-dashboard/AGENTS.md:L110-L118](https://github.com/mento-protocol/monitoring-monorepo/blob/75cfaeb631ea3143f05e97af8a21bd0ac2498362/ui-dashboard/AGENTS.md#L110-L118)\n\nUseful? React with \ud83d\udc4d\u00a0/ \ud83d\udc4e."
+  },
+  {
+   "id": 3882119284,
+   "author": "chatgpt-codex-connector[bot]",
+   "path": "ui-dashboard/src/app/cdps/[symbol]/troves/[troveId]/opengraph-image.tsx",
+   "line": 54,
+   "severity": "P2",
+   "title": "Bound the combined data and image cache age",
+   "acted_on": true,
+   "declined": false,
+   "body": "**<sub><sub>![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)</sub></sub>  Bound the combined data and image cache age**\n\nWhen `cachedFetch` returns a snapshot near its allowed five-minute age, this response may remain fresh for another 60 seconds and then be replayed under `stale-while-revalidate` for another 300 seconds, so status, balances, and ratio colors can be roughly eleven minutes old despite the preceding comment and PR contract claiming at most five minutes of stale replay. Reduce one of the cache windows or derive the response policy from the snapshot's remaining freshness so the end-to-end bound is actually five minutes.\n\nUseful? React with \ud83d\udc4d\u00a0/ \ud83d\udc4e."
+  }
+ ],
+ "counts": {
+  "total": 5,
+  "acted_on": 5,
+  "declined": 0,
+  "P1": 0
+ }
+}
