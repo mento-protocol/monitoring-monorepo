@@ -125,9 +125,16 @@ echo
 echo "-- Stale /private/tmp trees (report only, never deleted) --"
 tmp_count=0
 if [[ -d /private/tmp ]]; then
-  tmp_count="$( (find /private/tmp -maxdepth 1 -mindepth 1 -type d -iname '*monitoring*' 2>/dev/null || true) | wc -l | tr -d ' ')"
+  # `*autoreview*` outlives the tool it names. `agent-autoreview.sh` created
+  # `/private/tmp/agent-autoreview-command-runtime.*` runtimes and its EXIT trap
+  # left them whenever a helper could still hold same-UID writers or the
+  # directory identity had changed, and a killed run skipped the trap outright.
+  # Existing checkouts therefore still carry hundreds of megabytes of them, so
+  # the match stays until the leftovers are gone
+  # (docs/pr-checklists/recurring-review-patterns.md, "Retired local tooling").
+  tmp_count="$( (find /private/tmp -maxdepth 1 -mindepth 1 -type d \( -iname '*monitoring*' -o -iname '*autoreview*' \) 2>/dev/null || true) | wc -l | tr -d ' ')"
 fi
-echo "Found ${tmp_count} monitoring /private/tmp dir(s)"
+echo "Found ${tmp_count} monitoring/autoreview /private/tmp dir(s)"
 echo
 
 if [[ $apply -eq 1 ]]; then
