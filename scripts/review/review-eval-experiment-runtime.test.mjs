@@ -192,7 +192,11 @@ function makeHarness({
       },
     },
     policy: experimentPolicy({
-      fixtures: lanes.map((lane) => lane.fixture),
+      // One fixture per PR, as `experimentFixtures` yields: the policy applies
+      // `draws` itself, so passing every per-draw lane would count PRs twice.
+      fixtures: lanes
+        .filter((lane) => lane.draw === 0)
+        .map((lane) => lane.fixture),
       draws,
     }),
     incumbent: {

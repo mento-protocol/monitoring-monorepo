@@ -592,8 +592,8 @@ pnpm review:eval:experiment -- --run "$experiment_root" \
 
 The live stage generates one current finder output for each grid fixture. It
 delivers the same final UTF-8 suffix of at most 30,000 bytes to both verifier
-arms. It applies the screen thresholds to its own six arms. It confirms the
-experiment only. It is not the canonical pipeline score.
+arms. It applies the screen thresholds to its own `grid x draws x 2` arms. It
+confirms the experiment only. It is not the canonical pipeline score.
 
 The artifact root must be outside the repository. Completed artifacts use these
 paths:
