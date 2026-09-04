@@ -361,6 +361,30 @@ test("a duplicate_of that names no other plain finding is reported", () => {
   }
 });
 
+test("a duplicate_of that is a string instead of an integer is reported", () => {
+  const root = stageFrozenInputs();
+  try {
+    const contract = clone(committed.contract);
+    const fixture = fixtureForPr(contract, 2121);
+    const file = path.join(root, fixture.truth_file);
+    const truth = JSON.parse(readFileSync(file, "utf8"));
+    const [, second] = truth.findings;
+    second.duplicate_of = String(second.id - 1);
+    writeFileSync(file, JSON.stringify(truth, null, 1));
+    fixture.truth_sha256 = sha256File(file);
+    const problems = () =>
+      checkFixtures({ contract, repoRoot: root }).problems.join("\n");
+    assert.match(
+      problems(),
+      new RegExp(
+        `finding ${second.id} duplicate_of "${second.id - 1}" is not a safe integer`,
+      ),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("a grid fixture carries exactly two frozen finder reports", () => {
   const exactlyTwo = (contract) =>
     checkFixtures({ contract, repoRoot }).problems.filter((problem) =>

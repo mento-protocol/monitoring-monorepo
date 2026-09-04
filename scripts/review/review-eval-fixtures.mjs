@@ -284,6 +284,17 @@ function checkTruthFile({ repoRoot, fixture, problems }) {
       .filter((finding) => Number.isSafeInteger(finding.duplicate_of))
       .map((finding) => [finding.id, finding.duplicate_of]),
   );
+  // A present duplicate_of that is not a safe integer (e.g. a quoted id)
+  // falls out of the map above and must not leave the finding scorable.
+  for (const finding of truth.findings) {
+    const value = finding.duplicate_of;
+    if (value === undefined || value === null || Number.isSafeInteger(value)) {
+      continue;
+    }
+    problems.push(
+      `PR ${fixture.pr} finding ${finding.id} duplicate_of ${JSON.stringify(value)} is not a safe integer`,
+    );
+  }
   // A curator writes duplicate_of by hand after the harvest, so a typo has to
   // fail the check: the target must be a different finding in this same file,
   // and not itself a duplicate, or a chain would drop a defect nobody scores.
