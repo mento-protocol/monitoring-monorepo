@@ -115,7 +115,7 @@ intentionally ineligible. Update or rebase its branch, then read fresh immutable
 inputs. Treat this refusal as fail-closed admission, not a workflow failure.
 
 The audit runs every retained deterministic CI job. It runs the focused agent
-setup and package-policy contract and the focused indexer autoreview invariant
+setup and package-policy contract and the focused indexer handler invariant
 contract. It does not execute the legacy local-gate Bash regression suite,
 routing-table suites, or indexer route parity suite. Ordinary CI keeps those
 legacy steps during the post-cutover canary. The audit still runs the retained
@@ -165,7 +165,7 @@ package-script validator before dependency installation.
 - [ ] Keep every package-execution admission path family in the ordinary
       `controlPlane` filter. A qualifying ordinary-force-all proof must run
       every retained job to success.
-- [ ] Keep the focused setup/package-policy and indexer autoreview invariant
+- [ ] Keep the focused setup/package-policy and indexer handler invariant
       steps exact, unconditional, and blocking in audit mode.
 - [ ] Keep the audit step-skip allowlist closed. Every retained command must
       execute and remain blocking. Reject equivalent legacy entry points.

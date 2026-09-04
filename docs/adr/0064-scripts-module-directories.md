@@ -318,10 +318,19 @@ routing, not procedure.
    more literal. Those modules carry the same signature and `turbo.json` pins,
    and a move that misses the mapper refuses the run outright rather than going
    quiet — the gate checks for it before it calls it.
-   `scripts/gate/routing-table/arms-packages.mjs` also imports the indexer
-   family view from `scripts/agent-autoreview-core.mjs`. That external source
-   has its own signature entry, core-only routes to both gate suites, and exact
-   inputs in all three relevant Turbo tasks. Repoint all four pin classes
+   `scripts/gate/routing-table/arms-packages.mjs` also reads the indexer family
+   view, from two siblings in the same directory:
+   `indexer-handler-invariant-contract.mjs` validates and exposes it,
+   `indexer-handler-invariant-families.mjs` holds the data. The directory's own
+   pins above already cover both — an `implementation_signature()` entry each
+   and the `$TURBO_ROOT$/scripts/gate/routing-table/**` inputs in all three
+   relevant Turbo tasks — so no separate sweep follows a move within the
+   directory. Their contract test sits at
+   `scripts/indexer-handler-invariant-contract.test.mjs`, outside `scripts/gate/`
+   on purpose: `LEGACY_GATE_RUN` in `scripts/workflows/check-no-skip-audit.mjs`
+   matches a `scripts/gate` path inside a `ci.yml` `run:`, and would read the
+   retained step as a legacy gate step. Moving that test repoints the `ci.yml`
+   step, the `no-skip-audit.yml` path list, and `RETAINED_EXTRACTED_STEPS`
    together.
 10. `forbidden_sources` in `docs/evals/documentation-navigation-fixtures.json`
     names the navigation evaluation's own implementation, so a run cannot read

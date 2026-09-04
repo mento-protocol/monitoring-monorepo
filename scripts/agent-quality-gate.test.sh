@@ -7875,7 +7875,7 @@ indexer_invariant_positive_paths=(
 )
 for indexer_invariant_path in "${indexer_invariant_positive_paths[@]}"; do
   run_gate "$indexer_invariant_path"
-  assert_contains "- node --test scripts/agent-autoreview-indexer-invariant-contract.test.mjs (indexer autoreview invariant inventory changed)"
+  assert_contains "- node --test scripts/indexer-handler-invariant-contract.test.mjs (indexer handler invariant inventory changed)"
   assert_contains "- node --test scripts/gate/routing-table/indexer-invariant-parity.test.mjs (indexer invariant routing inventory changed)"
   assert_contains "- docs/pr-checklists/indexer-handler-invariants.md (indexer handler/RPC/self-heal invariant path changed)"
 done
@@ -7898,7 +7898,7 @@ indexer_invariant_negative_inventory_paths=(
 for indexer_invariant_path in "${indexer_invariant_negative_inventory_paths[@]}"; do
   run_gate "$indexer_invariant_path"
   assert_not_contains "docs/pr-checklists/indexer-handler-invariants.md"
-  assert_contains "- node --test scripts/agent-autoreview-indexer-invariant-contract.test.mjs (indexer autoreview invariant inventory changed)"
+  assert_contains "- node --test scripts/indexer-handler-invariant-contract.test.mjs (indexer handler invariant inventory changed)"
   assert_contains "- node --test scripts/gate/routing-table/indexer-invariant-parity.test.mjs (indexer invariant routing inventory changed)"
 done
 
@@ -7920,7 +7920,7 @@ for indexer_invariant_future_extension in ts tsx mts cts js jsx mjs cjs; do
   done
 done
 run_gate "${indexer_invariant_future_paths[@]}"
-assert_contains "- node --test scripts/agent-autoreview-indexer-invariant-contract.test.mjs (indexer autoreview invariant inventory changed)"
+assert_contains "- node --test scripts/indexer-handler-invariant-contract.test.mjs (indexer handler invariant inventory changed)"
 assert_contains "- node --test scripts/gate/routing-table/indexer-invariant-parity.test.mjs (indexer invariant routing inventory changed)"
 assert_not_contains "docs/pr-checklists/indexer-handler-invariants.md"
 
@@ -8261,10 +8261,22 @@ while IFS= read -r routing_table_module; do
 done < <(cd "$repo_root" && git ls-files 'scripts/gate/routing-table/*.mjs')
 ((${#routing_table_modules[@]} >= 15)) ||
   fail "expected the routing table to have at least 15 tracked modules, found ${#routing_table_modules[@]} — enumeration found nothing to check"
+# The two indexer handler-invariant modules are claimed by an earlier arm in
+# the agent-module table, which routes the same two commands under its own
+# reason. Enumeration still covers them; only the expected reason differs.
 for routing_table_module in "${routing_table_modules[@]}"; do
   run_gate "$routing_table_module"
-  assert_contains "- pnpm gate:routing-table:test (gate routing table changed)"
-  assert_contains "- pnpm agent:quality-gate:test (gate routing table is an implementation-signature input)"
+  case "$routing_table_module" in
+  scripts/gate/routing-table/indexer-handler-invariant-contract.mjs | \
+    scripts/gate/routing-table/indexer-handler-invariant-families.mjs)
+    assert_contains "- pnpm gate:routing-table:test (indexer invariant routing source changed)"
+    assert_contains "- pnpm agent:quality-gate:test (indexer invariant routing source changed)"
+    ;;
+  *)
+    assert_contains "- pnpm gate:routing-table:test (gate routing table changed)"
+    assert_contains "- pnpm agent:quality-gate:test (gate routing table is an implementation-signature input)"
+    ;;
+  esac
 done
 
 # Gate side: `implementation_signature()` lives in this file and must list every
@@ -11726,9 +11738,9 @@ STUB
   [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "9" ]] ||
     fail "fresh gate stamp was reused after the target routing-table suite changed"
 
-  # The routing table imports the indexer family view from the gate's source
-  # tree. A target-repo placeholder must not affect the signature, while the
-  # loaded source-tree copy must invalidate it independently.
+  # A pinned gate-runtime source loads from the gate's own source tree. A
+  # target-repo placeholder must not affect the signature, while the loaded
+  # source-tree copy must invalidate it independently.
   printf '// changed fixture autoreview core routing source\n' \
     >> scripts/agent-autoreview-core.mjs
   run_signature_gate_again
@@ -11745,7 +11757,7 @@ STUB
       --skip-if-fresh \
       > "$output_file" 2>&1
   [[ "$(cat "$signature_stamp_repo/.tmp/agent-quality-gate/trunk-count")" == "10" ]] ||
-    fail "fresh gate stamp was reused after the indexer routing source changed"
+    fail "fresh gate stamp was reused after the pinned autoreview core changed"
 
   # The signature has two path roots. Runtime modules come from the gate's own
   # checkout, while commands and configuration come from the repository under
@@ -13468,11 +13480,24 @@ assert_contains "- pnpm agent:autoreview:test (agent autoreview helper changed)"
 assert_contains "- docs/pr-checklists/indexer-handler-invariants.md (indexer invariant routing source changed)"
 assert_contains "$fixture_canary (autoreview secret scanner changed)"
 assert_contains "- pnpm gate:routing-table:test (indexer invariant routing source changed)"
-assert_contains "- node --test scripts/agent-autoreview-indexer-invariant-contract.test.mjs (indexer invariant routing source changed)"
+assert_contains "- node --test scripts/indexer-handler-invariant-contract.test.mjs (indexer invariant routing source changed)"
 assert_contains "- pnpm agent:quality-gate:test (indexer invariant routing source changed)"
 
-run_gate "scripts/agent-autoreview-indexer-invariant-contract.test.mjs"
-assert_contains "- node --test scripts/agent-autoreview-indexer-invariant-contract.test.mjs (indexer autoreview invariant contract changed)"
+run_gate "scripts/indexer-handler-invariant-contract.test.mjs"
+assert_contains "- node --test scripts/indexer-handler-invariant-contract.test.mjs (indexer handler invariant contract changed)"
+
+# The extracted contract and its family data carry the same conservative set as
+# the autoreview core copy they left: the gate classifies from its own checkout,
+# so it cannot see a candidate revision's new owner until that source lands.
+for indexer_invariant_source in \
+  "scripts/gate/routing-table/indexer-handler-invariant-contract.mjs" \
+  "scripts/gate/routing-table/indexer-handler-invariant-families.mjs"; do
+  run_gate "$indexer_invariant_source"
+  assert_contains "- docs/pr-checklists/indexer-handler-invariants.md (indexer invariant routing source changed)"
+  assert_contains "- pnpm gate:routing-table:test (indexer invariant routing source changed)"
+  assert_contains "- node --test scripts/indexer-handler-invariant-contract.test.mjs (indexer invariant routing source changed)"
+  assert_contains "- pnpm agent:quality-gate:test (indexer invariant routing source changed)"
+done
 
 run_gate "scripts/agent-autoreview-secret-suppressions.json"
 assert_contains "- pnpm agent:autoreview:test (agent autoreview helper changed)"

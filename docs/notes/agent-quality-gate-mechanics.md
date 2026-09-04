@@ -90,24 +90,24 @@ pnpm --filter @mento-protocol/ui-dashboard test:coverage
 
 Cross-layer/stateful UI work also applies
 [`docs/pr-checklists/stateful-data-ui.md`](../pr-checklists/stateful-data-ui.md).
-The handler-invariant classifier in `scripts/agent-autoreview-core.mjs` routes
+The handler-invariant classifier lives in
+`scripts/gate/routing-table/indexer-handler-invariant-contract.mjs`. It routes
 selected indexer runtime, invariant-test, and test-support changes to the protected
 [`docs/pr-checklists/indexer-handler-invariants.md`](../pr-checklists/indexer-handler-invariants.md)
-policy in the local gate and prepared autoreview bundles. It returns one
-ordered `{path, route, owner}` decision per input path. Autoreview loads the
-classifier from its selected attested runtime and validates the complete batch
-before it selects routed paths. A wrapper-attested runtime is checked against
-its sealed identity and content manifest before and after classifier import and
-execution. A difference at either boundary fails before the wrapper uses the
-decisions. Prepared runtimes retain their existing trust boundary.
+policy in the local gate. It returns one ordered `{path, route, owner}` decision
+per input path. The family data sits beside it in
+`indexer-handler-invariant-families.mjs`, and the contract validates the whole
+list at import time, so a malformed family fails before any caller reads a
+decision. Prepared autoreview bundles still carry their own copy of the same
+contract inside `scripts/agent-autoreview-core.mjs`; the autoreview removal
+retires that copy.
 
-That protected-main boundary creates deliberate version skew when a candidate
-changes `scripts/agent-autoreview-core.mjs`. The protected classifier cannot
-see a new exact owner or a false-to-true reclassification in the candidate.
-Therefore, a change to the core source itself selects the handler-invariant
-checklist in both autoreview and the local gate. This trigger intentionally
-routes unrelated core edits. Running the candidate classifier would weaken the
-trust boundary that the protected runtime provides.
+The gate classifies with the source in its own checkout, so it cannot see a new
+exact owner or a false-to-true reclassification that a candidate revision adds.
+Therefore, a change to the families or contract source itself selects the
+handler-invariant checklist. This trigger intentionally routes unrelated edits
+to those two modules. Classifying with the candidate's own source would let a
+candidate drop its own checklist.
 
 `getIndexerHandlerInvariantRoutingFamilies()` returns a detached, deeply
 frozen view of the same family data the classifier uses. Import-time validation
@@ -115,7 +115,7 @@ rejects malformed families, overlapping exact owners, and paths that cannot
 stay literal in a Bash `case`. The routing
 table derives an excluded-first, routed-second checklist dispatch from this
 view. The focused indexer parity test compares the table decisions with the
-core classifier and pins every current owner. The checklist arms contain exact
+contract classifier and pins every current owner. The checklist arms contain exact
 current paths only. Eighteen broad inventory patterns cover `.ts`, `.tsx`, `.mts`, `.cts`,
 `.js`, `.jsx`, `.mjs`, `.cjs`, and `.json` below `indexer-envio/src/` and
 `indexer-envio/test/`. The four JavaScript extensions match the package's
@@ -748,9 +748,15 @@ procedure below.
 - **Gate mapping pins.** The signature and three Turbo inputs pin
   `gate/routing-table/**`, `gate/mapping*`, and
   `agent-autoreview-core.mjs` plus its sealed exact-patch suppression JSON.
+  `gate/routing-table/indexer-handler-invariant-{contract,families}.mjs` hold
+  the handler-invariant classifier; the signature lists both by name, and an
+  edit to either routes the handler-invariant checklist and
+  `scripts/indexer-handler-invariant-contract.test.mjs`.
   Runtime hashes use `$script_source_dir`; suites use `$repo_root`. Core and
-  suppression-policy edits route the autoreview suite. Missing pins freeze the
-  stamp.
+  suppression-policy edits route the autoreview suite; the two classifier
+  modules share the core's arm and route it as well, because the core still
+  holds a duplicate copy of the same data. The removal PR retires that suite and
+  the shared arm with it. Missing pins freeze the stamp.
   [ADR 0069](../adr/0069-gate-routing-table-as-data.md) owns this contract.
 
 ### Where the plan comes from ([ADR 0069](../adr/0069-gate-routing-table-as-data.md))
