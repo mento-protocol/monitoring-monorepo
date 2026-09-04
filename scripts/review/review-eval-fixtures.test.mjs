@@ -148,11 +148,11 @@ test("the committed contract passes every offline check", () => {
   assert.equal(result.ok, true);
   assert.equal(result.checked.offline, true);
   assert.deepEqual(scorableTotals(committed.contract), {
-    prs: 6,
-    scorable: 34,
-    p1: 12,
+    prs: 9,
+    scorable: 51,
+    p1: 16,
   });
-  assert.equal(gridFixtures(committed.contract).length, 3);
+  assert.equal(gridFixtures(committed.contract).length, 6);
   assert.equal(committed.digest, sha256File(contractPath));
   assert.equal(committed.digest.length, 64);
 });
@@ -302,6 +302,97 @@ test("a flipped byte in a frozen finder report fails its digest", () => {
   }
 });
 
+test("a truth finding marked duplicate_of is refused as a scorable id", () => {
+  const root = stageFrozenInputs();
+  try {
+    const contract = clone(committed.contract);
+    const fixture = fixtureForPr(contract, 2121);
+    const file = path.join(root, fixture.truth_file);
+    const truth = JSON.parse(readFileSync(file, "utf8"));
+    const acted = truth.findings.filter((finding) => finding.acted_on === true);
+    const [kept, duplicate] = acted;
+    duplicate.duplicate_of = kept.id;
+    writeFileSync(file, JSON.stringify(truth, null, 1));
+    fixture.truth_sha256 = sha256File(file);
+    fixture.scorable_ids = acted.map((finding) => finding.id);
+    fixture.p1_ids = [];
+
+    // Naming the duplicate is a problem, and the message says which comment
+    // to score instead.
+    const named = checkFixtures({ contract, repoRoot: root });
+    assert.equal(named.ok, false);
+    assert.ok(
+      named.problems.some(
+        (problem) =>
+          problem.includes(`names ${duplicate.id}`) &&
+          problem.includes(`duplicate_of ${kept.id}`),
+      ),
+      named.problems.join("\n"),
+    );
+
+    // Dropping it is accepted: the duplicate leaves the denominator too, so
+    // the derived acted-on set no longer demands it back.
+    fixture.scorable_ids = fixture.scorable_ids.filter(
+      (id) => id !== duplicate.id,
+    );
+    const dropped = checkFixtures({ contract, repoRoot: root });
+    assert.deepEqual(
+      dropped.problems.filter(
+        (problem) =>
+          problem.includes("PR 2121") &&
+          (problem.includes("duplicate_of") || problem.includes("_ids")),
+      ),
+      [],
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a grid fixture carries exactly two frozen finder reports", () => {
+  const root = stageFrozenInputs();
+  try {
+    const exactlyTwo = (result) =>
+      result.problems.filter((problem) =>
+        problem.includes("needs exactly two"),
+      );
+    // Two is the shape the committed grid already has.
+    assert.deepEqual(
+      exactlyTwo(checkFixtures({ contract: committed.contract, repoRoot })),
+      [],
+    );
+
+    const short = clone(committed.contract);
+    const shortFixture = gridFixtures(short)[0];
+    shortFixture.finder_reports = shortFixture.finder_reports.slice(0, 1);
+    assert.deepEqual(exactlyTwo(checkFixtures({ contract: short, repoRoot })), [
+      `PR ${shortFixture.pr} is a grid fixture with 1 frozen finder reports; a grid fixture needs exactly two`,
+    ]);
+
+    const long = clone(committed.contract);
+    const longFixture = gridFixtures(long)[0];
+    const extra = "docs/evals/review-skill-finder-reports/pr-extra-draw3.md";
+    cpSync(
+      path.join(root, longFixture.finder_reports[0].file),
+      path.join(root, extra),
+    );
+    longFixture.finder_reports.push({
+      file: extra,
+      source: "a third draw nothing replays",
+      sha256: sha256File(path.join(root, extra)),
+      chars: readFileSync(path.join(root, extra), "utf8").length,
+    });
+    assert.deepEqual(
+      exactlyTwo(checkFixtures({ contract: long, repoRoot: root })),
+      [
+        `PR ${longFixture.pr} is a grid fixture with 3 frozen finder reports; a grid fixture needs exactly two`,
+      ],
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("a flipped byte in either run prompt fails its digest", () => {
   for (const name of ["request", "handoff"]) {
     const root = stageFrozenInputs();
@@ -355,7 +446,15 @@ test("missing frozen files are reported rather than thrown", () => {
     const missing = result.problems.filter((problem) =>
       problem.includes("is missing"),
     );
-    assert.equal(missing.length, 6 + 6 + 2);
+    // One truth file per fixture, every frozen finder report the grid carries,
+    // and both prompts.
+    const truthFiles = committed.contract.fixtures.length;
+    const reportFiles = committed.contract.fixtures.reduce(
+      (total, fixture) => total + (fixture.finder_reports ?? []).length,
+      0,
+    );
+    const promptFiles = Object.keys(committed.contract.prompts).length;
+    assert.equal(missing.length, truthFiles + reportFiles + promptFiles);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -414,7 +513,8 @@ test("online mode resolves every eval tag against the pinned commit", () => {
   });
   assert.deepEqual(result.problems, []);
   assert.equal(result.checked.offline, false);
-  assert.equal(calls.length, 6 * 2 * 2);
+  // Two refs per fixture, each resolved and then proved present.
+  assert.equal(calls.length, committed.contract.fixtures.length * 2 * 2);
   assert.ok(
     calls.every((args) => args[0] === "-C" && args[1] === "/src/monorepo"),
   );

@@ -13,7 +13,7 @@ garden_lane: operator-runbooks
 # Review skill evaluation
 
 This evaluation measures whether the `review` skill still finds real defects in
-real pull requests from this repository. It replays six merged PRs at the
+real pull requests from this repository. It replays nine merged PRs at the
 commit they had before review, runs the reviewer against them, and scores the
 result against the defects that human-reviewed CI bots actually raised and the
 author actually fixed. It runs on a developer Mac under launchd; CI never holds
@@ -31,9 +31,50 @@ review threads, or the merge is taking a memory test, not a review.
 
 The **answer key** is `docs/evals/review-skill-truth/pr-<n>.json`: the defects
 four independent CI reviewers raised on that head and the author then fixed.
-It was harvested once, on 2026-08-21, and frozen as bytes. It is never
+It was harvested on 2026-08-21 for six PRs and on 2026-09-04 for three more,
+and frozen as bytes each time. It is never
 re-derived from the GitHub API, because comments get edited, bodies get deleted
 and bots get renamed. The contract records a `sha256` for every truth file.
+
+`scripts/review/review-eval-harvest-truth.mjs` harvests a new key. It keeps
+the original severity rule and the frozen byte style. Six rules differ from the
+2026-08-21 `extract_truth.py` harvest, so a key it produces is not
+byte-comparable with the keys that harvest froze:
+
+- **First head** is the `commit_id` of the earliest submitted review by one of
+  the four CI bots, not `commits[0]`. A bot raises a finding against the head
+  it read, and on PR 1990 that head was a later push, so `commits[0]` named a
+  file the finding's path did not exist in.
+- **Findings** are the bot-authored root comments on that head. Comments on any
+  other head are dropped, and the tool prints how many, because that count is
+  the denominator the exam is scored against.
+- **Dispositions** read only replies written by the pull request author. Any
+  reviewer can write `Fixed in <sha>`, and CodeRabbit quotes the author's reply
+  back, so an unfiltered read let a bot mark a finding fixed.
+- **Title and body** are derived after every `<details>` block, every HTML
+  comment marker and a leading CodeRabbit badge line are stripped. A collapsed
+  analysis chain runs for thousands of characters and used to push the finding
+  statement past the 2500-character body and out of the characters the match
+  judge reads. Severity still reads the raw body, where the badge lives.
+- **`base_sha`** is `git merge-base <first head> <the PR's base ref>`, the base
+  ref fetched from `--repo` into a temporary ref in `--src`. The run refuses
+  when `--src`'s `origin` does not name `--repo`.
+- **Pages** come from `gh api --paginate --slurp` and are flattened
+  structurally, so a body containing `][` survives byte for byte.
+
+Dry-running the six 2026-08-21 keys through the fixed tool on 2026-09-04
+reproduces `first_head` and `base_sha` on all six. The acted-on id set matches
+on PRs 1982 and 1984. PR 1990 loses two findings and PRs 1995, 1999 and 2001
+lose one each, in every case a comment raised on a later head; no disposition
+changed and no finding was gained. Run it with `--dry-run` first; a harvest
+that changes a committed key also changes the contract's `sha256` and the
+frozen `scorable_ids`.
+
+Two independent bots sometimes raise one defect twice. The harvester cannot
+tell, so a curator adds `"duplicate_of": <earliest id>` to the later record
+after the harvest, keeping the provenance of both. `--check-fixtures` refuses a
+`scorable_ids` or `p1_ids` entry whose truth record carries that field: the
+earlier comment is the scorable one.
 
 The answer key never travels with the exam. It lives on `main`; the fixture is
 a detached checkout at a 2026-08 commit and is materialized under
@@ -184,8 +225,8 @@ Then plan and run. `--plan` prints the matrix and the cost estimate without
 spending anything.
 
 ```bash
-pnpm review:eval -- --plan --kind canary --json   # 3 cells, about $15, ~25 min
-pnpm review:eval -- --plan --kind full --json     # 24 cells, about $88, ~2 h
+pnpm review:eval -- --plan --kind canary --json   # 6 cells, about $22, ~40 min
+pnpm review:eval -- --plan --kind full --json     # 39 cells, about $145, ~3 h
 pnpm review:eval:run --kind canary                # the monthly smoke test
 pnpm review:eval:run --kind full                  # the quarterly score of record
 ```
@@ -444,8 +485,10 @@ Its only statuses are `PROMISING`, `REJECT`, and `INCONCLUSIVE`.
 
 Planning and validation do not call a model. Both modes validate local inputs
 and probe the provider CLI versions. Planning writes `plan.json` with the
-complete campaign and canonical 24-cell rerun manifest before paid work can
-start.
+complete campaign and canonical full-rerun manifest before paid work can start.
+The manifest's cell count is derived from the contract — two pipeline draws per
+fixture, one replay per frozen grid report, one control cell per fixture — so a
+fixture added to the grid widens it.
 
 ```bash
 experiment_root="$HOME/.cache/mento-review-eval-experiments/manual-$(date -u +%Y%m%dT%H%M%SZ)"
@@ -453,6 +496,7 @@ experiment_root="$HOME/.cache/mento-review-eval-experiments/manual-$(date -u +%Y
 pnpm review:eval:experiment -- --plan \
   --candidate candidate-a=/absolute/path/to/review-candidate \
   --out "$experiment_root" \
+  --draws 2 \
   --live-paired \
   --json
 
@@ -463,9 +507,22 @@ pnpm review:eval:experiment -- --run "$experiment_root" \
   --stage screen --json
 ```
 
-`--run` is the only mode that can call a model. `--dry-run` prints the
-planned fixture lanes and treatment order. It does not call a model or estimate
-cost.
+`--run` is the only mode that can call a model. `--dry-run` prints the planned
+fixture lanes, their treatment order, and the cells the stage owes in total and
+per arm, so the operator can price the stage before paying for it. It calls no
+model.
+
+The panel is every fixture the contract marks `grid: true`, in PR order, three
+or more of them. Adding a grid fixture widens the lane and moves its thresholds
+with it; no PR number is written into the harness. `--draws N` repeats each
+fixture as N independent lanes, default one and at most five. The cap is a spend
+guard, not a statistical one: each draw adds `grid x 2` paid cells to every
+stage, so widen the panel with fixtures rather than repeats. A larger `--draws`
+is refused, never clamped. Every draw of a lane replays the
+same frozen report through both arms, so a difference between two draws is
+verifier variance and nothing else. Cost is `grid x draws x 2` verifier cells
+per stage. Every draw of one PR shares that PR's fixture tree, so the draws of a
+PR run in sequence; at most three PRs run at once whatever the panel size.
 
 The plan binds these inputs:
 
@@ -473,8 +530,9 @@ The plan binds these inputs:
   and prompt digests.
 - Incumbent and candidate skill digests.
 - Finder, verifier, control, and judge model and effort settings.
-- Scorer identity and the six-module experiment harness digest.
-- Stage lanes, treatment order, and the canonical rerun manifest.
+- Scorer identity and the nine-module experiment harness digest.
+- The draw count, stage lanes, treatment order, every threshold derived from the
+  panel, and the canonical rerun manifest.
 
 The plan records the Claude and Codex CLI versions instead of binding them.
 `--validate-plan` and `--run` rebuild the plan from its recorded versions, so a
@@ -520,16 +578,58 @@ comparability key, not its cell fingerprint. `claude` and `codex` ship far more
 often than the suite runs, so keying the ledger on them would start a fresh
 lineage at every upgrade.
 
-The screen uses the first frozen report for PRs 1990, 1995, and 1999. It runs
-six verifier arms. Each fixture lane runs the two arms sequentially in its
-planned `AB` or `BA` order. At most three fixture lanes run at once.
+The screen uses the first frozen report of every grid fixture. Each lane runs
+its two arms sequentially in its planned `AB` or `BA` order, and the order
+alternates on the parity of the fixture index plus the draw index, so no fixture
+keeps one arm in front across the campaign.
 
-The screen returns `PROMISING` only when the candidate has at least two net
-known matches, no net P1 loss, and a non-negative known-match delta on at least
-two PRs. A known-match net of minus two or less, any P1 net loss, an empty
-candidate arm, or a candidate hard leak returns `REJECT`. Other misses return
-`INCONCLUSIVE`. If claim inflation requires classification, more than one extra
-wrong claim also returns `REJECT`.
+The decision reads one paired difference per lane: `d` is the candidate's known
+matches minus the incumbent's on the same report and the same draw. The screen
+returns `PROMISING` only when all of these hold.
+
+- The paired net reaches `max(2, round(0.06 x scorable ids x draws))`.
+- A one-sided exact sign-flip permutation test on the differences gives
+  `p_greater <= 0.10`. It binds at every panel width. Only the non-zero
+  differences are enumerated, and only they choose the method: a tied lane flips
+  to itself, so it changes neither tail of the distribution and never forces the
+  sampled path. Every flip is enumerated up to twenty informative pairs; above
+  that the test draws 20,000 flips from a generator seeded on the plan digest,
+  so the same campaign always reads the same p-value. Three same-direction
+  differences floor at 1/8 and four at 1/16, so a panel with fewer than four
+  informative differences in one direction cannot promote whatever its net. A
+  panel where no lane differs skips the test, because every flip gives the same
+  sum. The decision records both counts, as `pairs` and `informative_pairs`,
+  and names the p-value in its reasons.
+- No net P1 loss.
+- A non-negative per-PR net on at least `ceil(PRs / 2)` PRs.
+
+A paired net that reaches the reject bound, any P1 net loss, a significant
+permutation in the opposite direction, an empty candidate arm, or a candidate
+hard leak returns `REJECT`. Everything else returns `INCONCLUSIVE`. If claim
+inflation requires classification, more than one extra wrong claim also returns
+`REJECT`; that rule reads the claim totals, not the pairs. The decision records
+the p-value, the pair count, and the thresholds it applied.
+
+The reject bound is `-max(2, round(0.06 x scorable ids x draws))` at both
+stages, recorded in the thresholds as `known_net_reject_max`. It is derived
+from the screen rate rather than from the stage's own promote bar: the combined
+bar doubles with the second frozen report, and doubling the reject bound with it
+would stop calling a loss the screen already rejects.
+
+The six grid fixtures put 39 scorable and 10 P1 ids on the table, so at one draw
+the screen bar is two net matches over six pairs and the reject bound is minus
+two. Four of those six pairs differing in one direction already clears the
+alpha at 1/16. The retired three-PR single-draw panel could not: three lanes
+floor at 1/8, and the incumbent alone drew 15, 18, 16, 16 and 17 known matches
+on those inputs, so a verdict from three lanes was reading its own verifier
+spread. Three draws raise the bar to seven over eighteen pairs, which is where a
+half-match-per-cell effect separates from verifier noise.
+
+If the grid freezes no P1 defect at all, `candidate_p1_min` and `p1_net_min`
+are zero, the thresholds record `p1_gates: "not applicable"`, and `--plan`
+writes one warning line to stderr. Those bars are inert rather than impossible:
+at their floors a finalist would owe a P1 net of two out of zero opportunities.
+The known-defect bars are untouched, so such a panel still measures recall.
 
 Run the holdout only after a `PROMISING` screen:
 
@@ -538,13 +638,18 @@ pnpm review:eval:experiment -- --run "$experiment_root" \
   --stage holdout --json
 ```
 
-The holdout uses the complementary frozen report for each grid fixture. It adds
-six verifier arms. Its decision combines those arms with the six screen arms. A
-finalist needs at least three net known matches, at least 9 of 12 candidate P1
-matches, at least two net P1 matches, gains on at least two PRs, and no more
-than one extra wrong claim. A known-match net of minus two or less, any net P1
-loss, or more than one extra wrong claim returns `REJECT`. Other threshold
-misses return `INCONCLUSIVE`.
+The holdout uses the complementary frozen report for each grid fixture and adds
+one lane per fixture per draw. Its decision combines those pairs with the
+screen's under the same structure. The combined net bar is
+`max(3, round(0.06 x scorable ids x draws x 2))`; a finalist also needs 0.75 of
+the P1 opportunities matched, a P1 net of at least
+`max(2, round(P1 opportunities / 6))`, gains on at least `ceil(PRs / 2)` PRs,
+and no more than one extra wrong claim. P1 opportunities are the grid's P1 ids
+times the two frozen reports times the draws — 20 at six fixtures and one draw,
+which sets a 15-of-20 candidate P1 bar and a P1 net of three. A
+combined net of minus the combined threshold or worse, any net P1 loss, a
+significant permutation in the opposite direction, or more than one extra wrong
+claim returns `REJECT`. Other threshold misses return `INCONCLUSIVE`.
 
 Claim extraction and known-defect matching run first. Novel-claim
 classification runs only when claim inflation requires it or the candidate
@@ -559,10 +664,13 @@ pnpm review:eval:experiment -- --run "$experiment_root" \
   --stage live-paired --json
 ```
 
-The live stage generates one current finder output for each grid fixture. It
-delivers the same final UTF-8 suffix of at most 30,000 bytes to both verifier
-arms. It applies the screen thresholds to its own six arms. It confirms the
-experiment only. It is not the canonical pipeline score.
+The live stage generates one current finder output for each grid fixture,
+before that fixture's first draw. It delivers the same final UTF-8 suffix of at
+most 30,000 bytes to both verifier arms, and every draw of that fixture reads
+the identical report, so a difference between two draws is verifier variance
+and never a second finder output. It applies the screen thresholds
+to its own pairs. It confirms the experiment only. It is not the canonical
+pipeline score.
 
 The artifact root must be outside the repository. Completed artifacts use these
 paths:
@@ -575,16 +683,22 @@ paths:
   one scored response.
 - `cache/stage/<digest>.json` contains the complete stage records and decision.
 
-Each cache identity includes the plan digest. Live raw identities also include
+Each cache identity includes the plan digest and the draw index, so two draws of
+one lane never share a cell. Live raw identities also include
 the delivered finder-report digest. Score and novelty identities chain the raw
 and score artifact digests. The runner validates identities and content digests
 before reuse. It publishes a complete JSON file through a temporary file and an
 exclusive hard link to the final name. Readers ignore incomplete temporary
 files.
 
-A failed stage writes no completed stage entry. Cell-level raw, score, or
-novelty entries completed before the failure remain available. Run the same
-stage again to reuse exact entries and repeat missing or changed work. A new
+A failed stage writes no completed stage entry, and it stops rather than
+finishing the panel. The failing lane sets a stage-wide flag before its error is
+rethrown, and every PR group reads that flag before it starts another lane, so a
+concurrently running PR does not keep paying for draws whose stage can no longer
+produce a decision. Lanes already running finish: their cells are paid for
+either way, and a completed cell is cached for the rerun. Cell-level raw,
+score, or novelty entries completed before the failure remain available. Run the
+same stage again to reuse exact entries and repeat missing or changed work. A new
 live finder output changes the raw identity unless its delivered digest is the
 same. The experiment runner does not provide crash-lineage recovery, retry
 journals, a campaign lock, calibration receipts, host sandboxing, or
@@ -594,7 +708,7 @@ operator-started local experiment.
 The plan contains a `canonical-full-rerun` manifest with
 `experiment_artifact_reuse_allowed: false`. No importer exists. Experiment
 results and caches never qualify as canonical evidence. Run the selected
-candidate through the canonical 24-cell runner:
+candidate through the canonical full runner:
 
 ```bash
 pnpm review:eval:run --skill-ref /absolute/path/to/review-candidate \
@@ -626,14 +740,15 @@ keeps running and the next scheduled run asks for a full run again instead of
 dropping back to canaries for another cadence window.
 
 A canary is a floor test, never a ranking: RED when `replay` matches fewer
-than nine of the twenty-two grid defects, or any run emits no parseable
+than sixteen of the thirty-nine grid defects, or any run emits no parseable
 finding.
 
 ## The noise rule
 
-**Never rank on fewer than three defects.** Thirty-four defects across six PRs
-with two draws is 68 opportunities, and draws on the same defect are
-correlated, so the effective sample is smaller than it looks. The
+**Never rank on fewer than three defects.** Fifty-one defects across nine PRs
+with two draws is 102 raw scoring opportunities that the scorer collapses to 51
+paired per-defect outcomes, and draws on the same defect are correlated, so the
+effective sample is smaller than it looks. The
 pre-registered red line is `b − c ≥ 6` net flips on the paired per-defect
 vectors; at `b + c = 10`, `b = 8` gives a one-sided p of about 0.055. Anything
 below six flips is the noise floor. The rule is written down here so nobody
@@ -800,7 +915,7 @@ anchor because its machine clock was slow.
    materialization falls back to `refs/pull/<n>/head` and records
    `tag_pinned: false`. CI fetches tags for exactly this reason.
 3. Run `pnpm review:eval:run --kind full` from a clean checkout. Budget
-   about $88 and two hours.
+   about $145 and three hours for the 39-cell matrix.
 4. Prepare the artifacts with `review-eval-publication.mjs`, then use the
    `ship` workflow to open the ledger PR. Its body contains the complete
    generated report and the execution-authenticity limit. State that this row
@@ -830,8 +945,8 @@ records that the harness tried, not that the pairing still scores.
 
 ## What this evaluation cannot tell you
 
-- **The sample is small and will stay small.** Thirty-four defects, six PRs,
-  one repository, one two-week era of 2026. The design detects roughly a
+- **The sample is small and will stay small.** Fifty-one defects, nine PRs,
+  one repository, one three-week era of 2026. The design detects roughly a
   ten-point regression. A five-point real degradation passes as green.
 - **The truth is a lower bound.** It is what four CI reviewers happened to
   raise and the author happened to fix. It over-weights defects that are easy
@@ -881,6 +996,7 @@ path must exist on `main` before the first run after the moving commit.
 | `scripts/review/review-eval-plan-evidence.mjs`              | plan, result, and calibration evidence checks            |
 | `scripts/review/review-eval-run-evidence.mjs`               | matrix completeness and evidence reuse checks            |
 | `scripts/review/review-eval-appended.mjs`                   | appended-row evidence revalidation                       |
+| `scripts/review/review-eval-harvest-truth.mjs`              | answer-key harvester: first head, findings, frozen bytes |
 | `scripts/review/review-eval-publication.mjs`                | current-key-safe local publication preparation           |
 | `scripts/review/review-eval-publication.test.mjs`           | publication confinement and PR-body shape tests          |
 | `scripts/review/review-eval-freshness-publication.mjs`      | publication-safe staleness issue synchronization         |

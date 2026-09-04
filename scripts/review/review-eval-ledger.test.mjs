@@ -26,16 +26,15 @@ import {
   ROW_REQUIRED_KEYS,
   validateLedgerRow,
 } from "./review-eval-ledger.mjs";
-import { plannedMatrix } from "./review-eval-fixtures.mjs";
+import { loadContract, plannedMatrix } from "./review-eval-fixtures.mjs";
 import { planCells } from "./review-eval-run.mjs";
 import { aggregateDraws } from "./review-eval-score.mjs";
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
-const contract = JSON.parse(
-  readFileSync(
-    path.join(repoRoot, "docs/evals/review-skill-fixtures.json"),
-    "utf8",
-  ),
+// The digest covers the committed bytes, exactly as the CLI reads it: it is how
+// `checkLedger` tells a row scored under this contract from legal history.
+const { contract, digest: committedContractDigest } = loadContract(
+  path.join(repoRoot, "docs/evals/review-skill-fixtures.json"),
 );
 const schema = JSON.parse(
   readFileSync(
@@ -711,11 +710,63 @@ test("plannedMatrix is the matrix planCells actually builds", () => {
 });
 
 test("the committed ledger passes its own contract check", () => {
+  // `--check-ledger` names the current contract by its digest, and so does
+  // this: every committed row was scored under a contract this one has since
+  // replaced, and a row is judged against the contract it ran on.
   const checked = checkLedger({
     path: path.join(repoRoot, "docs/evals/review-skill-ledger.jsonl"),
     contract,
+    contractDigest: committedContractDigest,
   });
   assert.deepEqual(checked.problems, []);
+});
+
+test("PR coverage is judged against the contract the row was scored under", () => {
+  // A complete full run over every fixture but the last one.
+  const dropped = contract.fixtures.at(-1);
+  const kept = contract.fixtures.filter((fixture) => fixture.pr !== dropped.pr);
+  const conditions = {
+    pipeline: condition({ per_defect: idsFor(kept, [1, 0]) }),
+    replay: condition({
+      per_defect: idsFor(
+        kept.filter((fixture) => fixture.grid === true),
+        [1, 0],
+      ),
+    }),
+    control: condition({ per_defect: idsFor(kept, [1]), draws: 1 }),
+  };
+  // On the current contract that PR is planned in every condition, so the row
+  // claims a whole matrix on a panel it did not run.
+  withTempLedger(jsonl(row({ conditions })), (file) => {
+    const checked = checkLedger({
+      path: file,
+      contract,
+      contractDigest: DIGEST_A,
+    });
+    assert.equal(checked.ok, false);
+    assert.equal(
+      checked.problems.filter((problem) =>
+        problem.includes(`scores no defect from PR ${dropped.pr}`),
+      ).length,
+      3,
+    );
+  });
+
+  // The same row scored under a retired contract is legal history. Holding it
+  // to a PR that contract never had would fail every row the suite widened
+  // past, which is what the committed ledger is made of.
+  withTempLedger(
+    jsonl(row({ conditions, contract_digest: DIGEST_B })),
+    (file) => {
+      const checked = checkLedger({
+        path: file,
+        contract,
+        contractDigest: DIGEST_A,
+      });
+      assert.deepEqual(checked.problems, []);
+      assert.deepEqual(checked.comparableRows, []);
+    },
+  );
 });
 
 test("freshness ages the ledger from executed_at alone", () => {

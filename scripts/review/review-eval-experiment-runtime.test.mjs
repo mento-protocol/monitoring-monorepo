@@ -13,10 +13,10 @@ import path from "node:path";
 import test from "node:test";
 
 import {
-  DEFAULT_EXPERIMENT_POLICY,
   rawCacheIdentity,
   digestObject,
 } from "./review-eval-experiment-contract.mjs";
+import { experimentPolicy } from "./review-eval-experiment-stats.mjs";
 import {
   recordRuntimeDrift,
   runtimeDriftReason,
@@ -66,6 +66,7 @@ function contestantStream(messages, resultOverrides = {}) {
 
 function makeHarness({
   laneCount = 3,
+  draws = 1,
   live = false,
   stage: stageUnderTest = null,
   // Plan a screen stage beside the stage under test, so a holdout run has the
@@ -130,39 +131,43 @@ function makeHarness({
       };
       writeFileSync(truthFile, `${JSON.stringify(truth)}\n`);
       writeFileSync(reportFile, `Pinned finder report for PR ${pr}.\n`);
-      const pairedOrder = index % 2 === 0 ? "AB" : "BA";
-      return {
-        lane_id: `${stageName}-pr-${pr}`,
-        pr,
-        paired_order: pairedOrder,
-        fixture: {
-          first_head: head(index + 1),
-          base_sha: head(index + 11),
-          truth_file: path.relative(repoRoot, truthFile),
-          truth_sha256: sha256Bytes(readFileSync(truthFile)),
-          scorable_ids: [1],
-          p1_ids: [1],
-        },
-        source:
-          stageName === "live-paired"
-            ? {
-                kind: "live-finder",
-                finder_id: `live-pr-${pr}`,
-                shared: true,
-                finder_argv_digest: plannedFinderDigest,
-              }
-            : {
-                kind: "frozen-report",
-                report_index: 0,
-                file: path.relative(repoRoot, reportFile),
-                sha256: sha256Bytes(readFileSync(reportFile)),
-              },
-        sequence:
-          pairedOrder === "AB"
-            ? ["incumbent", "candidate"]
-            : ["candidate", "incumbent"],
-      };
-    });
+      // One lane per draw, in the plan's own fixture-major order.
+      return Array.from({ length: draws }, (_x, draw) => {
+        const pairedOrder = (index + draw) % 2 === 0 ? "AB" : "BA";
+        return {
+          lane_id: `${stageName}-pr-${pr}-d${draw}`,
+          pr,
+          draw,
+          paired_order: pairedOrder,
+          fixture: {
+            first_head: head(index + 1),
+            base_sha: head(index + 11),
+            truth_file: path.relative(repoRoot, truthFile),
+            truth_sha256: sha256Bytes(readFileSync(truthFile)),
+            scorable_ids: [1],
+            p1_ids: [1],
+          },
+          source:
+            stageName === "live-paired"
+              ? {
+                  kind: "live-finder",
+                  finder_id: `live-pr-${pr}`,
+                  shared: true,
+                  finder_argv_digest: plannedFinderDigest,
+                }
+              : {
+                  kind: "frozen-report",
+                  report_index: 0,
+                  file: path.relative(repoRoot, reportFile),
+                  sha256: sha256Bytes(readFileSync(reportFile)),
+                },
+          sequence:
+            pairedOrder === "AB"
+              ? ["incumbent", "candidate"]
+              : ["candidate", "incumbent"],
+        };
+      });
+    }).flat();
   const stage = stageUnderTest ?? (live ? "live-paired" : "screen");
   const lanes = lanesFor(stage);
   const screenLanes = withScreen ? lanesFor("screen") : null;
@@ -187,7 +192,13 @@ function makeHarness({
         },
       },
     },
-    policy: structuredClone(DEFAULT_EXPERIMENT_POLICY),
+    draws,
+    policy: experimentPolicy({
+      fixtures: lanes
+        .filter((lane) => lane.draw === 0)
+        .map((lane) => lane.fixture),
+      draws,
+    }),
     incumbent: {
       id: "incumbent",
       skill_ref: incumbentSkill,
@@ -200,9 +211,16 @@ function makeHarness({
     },
     stages: {
       ...(screenLanes
-        ? { screen: { stage: "screen", enabled: true, lanes: screenLanes } }
+        ? {
+            screen: {
+              stage: "screen",
+              enabled: true,
+              draws,
+              lanes: screenLanes,
+            },
+          }
         : {}),
-      [stage]: { stage, enabled: true, lanes },
+      [stage]: { stage, enabled: true, draws, lanes },
     },
   };
   const plan = { ...planBase, plan_digest: digestObject(planBase) };
@@ -319,11 +337,30 @@ test("runtime bounds fixture lanes and preserves each recorded pair order", asyn
     runExperimentRuntimeStage(baseOptions(harness, { plan: disabledPlan })),
     /stage screen is disabled/,
   );
-  const oversized = makeHarness({ laneCount: 4 });
-  t.after(oversized.cleanup);
+  // A panel wider than the concurrency cap runs; only three lanes run at once.
+  const wide = makeHarness({ laneCount: 4 });
+  t.after(wide.cleanup);
+  let widest = 0;
+  let running = 0;
+  const wideResult = await runExperimentRuntimeStage(
+    baseOptions(wide, {
+      concurrency: 3,
+      contestantExec: async () => {
+        running += 1;
+        widest = Math.max(widest, running);
+        await new Promise((resolve) => setImmediate(resolve));
+        running -= 1;
+        return contestantStream(["file.js:1 has a defect"]);
+      },
+    }),
+  );
+  assert.equal(wideResult.records.length, 8);
+  assert.equal(widest, 3);
+  const emptyPlan = structuredClone(harness.plan);
+  emptyPlan.stages[harness.stage].lanes = [];
   await assert.rejects(
-    runExperimentRuntimeStage(baseOptions(oversized)),
-    /exceeds three fixture lanes/,
+    runExperimentRuntimeStage(baseOptions(harness, { plan: emptyPlan })),
+    /plans no fixture lane/,
   );
 });
 
@@ -591,7 +628,7 @@ test("novel scoring follows base scoring and reuses its cache", async (t) => {
   );
   const holdoutLane = {
     ...structuredClone(harness.lanes[0]),
-    lane_id: `holdout-pr-${harness.lanes[0].pr}`,
+    lane_id: `holdout-pr-${harness.lanes[0].pr}-d0`,
   };
   harness.plan.stages.holdout = {
     stage: "holdout",
@@ -815,7 +852,7 @@ test("a novelty judge stores its own runtime and keeps it on reuse", async (t) =
 function holdoutStage(harness) {
   const lanes = harness.lanes.map((lane) => ({
     ...structuredClone(lane),
-    lane_id: `holdout-pr-${lane.pr}`,
+    lane_id: `holdout-pr-${lane.pr}-d0`,
   }));
   harness.plan.stages.holdout = { stage: "holdout", enabled: true, lanes };
   return lanes;
@@ -1212,13 +1249,14 @@ function seedStageResult(harness, stage, payload) {
 }
 
 /** One campaign run of a single stage, with the probe and hooks a test drives. */
-function stageRun(harness, { stage, probe, ...overrides }) {
+function stageRun(harness, { stage, probe, dryRun = false, ...overrides }) {
   return runStage(
     {
       stage,
       repoRoot: harness.repoRoot,
       fixtureCacheDir: harness.fixtureCacheDir,
       concurrency: 1,
+      dryRun,
     },
     {
       artifactRoot: harness.artifactRoot,
@@ -1240,6 +1278,32 @@ function stageRun(harness, { stage, probe, ...overrides }) {
     },
   );
 }
+
+test("a dry run prices the stage in cells without calling a model", async (t) => {
+  const harness = makeHarness({ laneCount: 3 });
+  t.after(harness.cleanup);
+  const result = await stageRun(harness, {
+    stage: harness.stage,
+    dryRun: true,
+    probe: () => {
+      throw new Error("a dry run probes no provider");
+    },
+    contestantExec: async () => {
+      throw new Error("a dry run calls no model");
+    },
+  });
+  assert.equal(result.dry_run, true);
+  assert.equal(result.draws, 1);
+  assert.deepEqual(result.cells, {
+    lanes: 3,
+    cells: 6,
+    per_arm: { incumbent: 3, candidate: 3 },
+  });
+  assert.deepEqual(
+    result.lanes.map((lane) => [lane.lane_id, lane.draw]),
+    harness.lanes.map((lane) => [lane.lane_id, lane.draw]),
+  );
+});
 
 test("a stage keys its cells on the versions probed when it starts", async (t) => {
   // The plan and the campaign loaded under 2.1.258; the CLI updated before the
@@ -1412,8 +1476,10 @@ const pairedContestant = async ({ treatment }) =>
 
 test("a holdout decision carries the change the screen recorded", async (t) => {
   const start = { claude: "2.1.258", codex: "0.48.2" };
+  // Four lanes, so the screen has four informative pairs and can reach the
+  // 1/16 the alpha needs; the holdout it feeds requires a PROMISING screen.
   const harness = makeHarness({
-    laneCount: 3,
+    laneCount: 4,
     stage: "holdout",
     withScreen: true,
     cliVersions: { ...start, judge: start.claude },
@@ -1498,4 +1564,266 @@ test("a judge upgrade between two runs reuses the contestant cell", async (t) =>
     raw: { claude: "claude-1" },
     score: { judge: "judge-2" },
   });
+});
+
+/**
+ * One materialized tree per PR, exactly as `materializeFixture` caches it: the
+ * key is the PR and its head, so every draw of a PR shares a working tree.
+ */
+function prTrees(harness) {
+  const trees = new Map();
+  return async ({ lane }) => {
+    if (!trees.has(lane.pr)) {
+      const fixturePath = path.join(harness.fixtureCacheDir, `pr-${lane.pr}`);
+      mkdirSync(fixturePath, { recursive: true });
+      trees.set(lane.pr, { path: fixturePath, forbidden: [] });
+    }
+    return trees.get(lane.pr);
+  };
+}
+
+test("one live finder output serves every draw and both arms of its PR", async (t) => {
+  const harness = makeHarness({ laneCount: 2, draws: 2, live: true });
+  t.after(harness.cleanup);
+  assert.equal(harness.lanes.length, 4);
+  const finderLanes = [];
+  const result = await runExperimentRuntimeStage(
+    baseOptions(harness, {
+      concurrency: 2,
+      prepareFixture: prTrees(harness),
+      finderExec: async ({ lane }) => {
+        finderLanes.push(lane.lane_id);
+        return `live finder report for PR ${lane.pr}`;
+      },
+    }),
+  );
+  // One call per PR, not one per lane: the finder is generated for the group
+  // and both draws replay it. A second call would make the two draws of a PR
+  // measure two different reports instead of the verifier's own spread.
+  assert.equal(finderLanes.length, 2);
+  assert.deepEqual(finderLanes.sort(), [
+    "live-paired-pr-2000-d0",
+    "live-paired-pr-2001-d0",
+  ]);
+  assert.equal(result.records.length, 8);
+
+  const payloads = result.records.map((record) => ({
+    pr: record.pr,
+    draw: record.draw,
+    ...JSON.parse(readFileSync(record.artifacts.raw, "utf8")).payload,
+  }));
+  for (const pr of [2000, 2001]) {
+    const own = payloads.filter((payload) => payload.pr === pr);
+    assert.equal(own.length, 4);
+    assert.deepEqual(
+      [...new Set(own.map((payload) => payload.source_digest))].length,
+      1,
+    );
+    assert.deepEqual(
+      [...new Set(own.map((payload) => payload.source_report))],
+      [`live finder report for PR ${pr}`],
+    );
+    assert.deepEqual([...new Set(own.map((payload) => payload.draw))], [0, 1]);
+  }
+  // The other direction: two PRs are two reports, so the digest is not simply
+  // constant across the stage.
+  assert.equal(
+    new Set(payloads.map((payload) => payload.source_digest)).size,
+    2,
+  );
+});
+
+test("one lane failure stops every group from starting another lane", async (t) => {
+  const harness = makeHarness({ laneCount: 2, draws: 2 });
+  t.after(harness.cleanup);
+  let announceSecondGroup;
+  const secondGroupRunning = new Promise((resolve) => {
+    announceSecondGroup = resolve;
+  });
+  const starts = [];
+  await assert.rejects(
+    runExperimentRuntimeStage(
+      baseOptions(harness, {
+        concurrency: 2,
+        prepareFixture: prTrees(harness),
+        contestantExec: async ({ lane, treatment }) => {
+          starts.push(`${lane.lane_id}-${treatment}`);
+          if (lane.pr === 2001) announceSecondGroup();
+          if (lane.pr === 2000 && lane.draw === 0) {
+            // Fail only once PR 2001 is genuinely mid-lane, so the stop has to
+            // cross from one group into another.
+            await secondGroupRunning;
+            throw new Error("PR 2000 draw 0 failed");
+          }
+          await new Promise((resolve) => setImmediate(resolve));
+          return contestantStream(["file.js:1 has a defect"]);
+        },
+      }),
+    ),
+    /PR 2000 draw 0 failed/,
+  );
+  // The lane that was already running finished both of its arms.
+  assert.equal(
+    starts.filter((id) => id.startsWith("screen-pr-2001-d0-")).length,
+    2,
+  );
+  // And no later draw was ever started, in either group: without the shared
+  // flag PR 2001 would have paid for its second draw after the stage could no
+  // longer produce a decision.
+  assert.equal(
+    starts.some((id) => id.includes("-d1-")),
+    false,
+  );
+  assert.equal(starts.length < harness.lanes.length * 2, true);
+});
+
+test("novelty refuses a record whose PR or draw is not its planned lane's", async (t) => {
+  const harness = makeHarness({ laneCount: 2, draws: 2 });
+  t.after(harness.cleanup);
+  const base = await runExperimentRuntimeStage(
+    baseOptions(harness, { prepareFixture: prTrees(harness) }),
+  );
+  const enrich = (records) =>
+    enrichExperimentNovelty({
+      plan: harness.plan,
+      records,
+      contract: harness.contract,
+      artifactRoot: harness.artifactRoot,
+      repoRoot: harness.repoRoot,
+      fixtureCacheDir: harness.fixtureCacheDir,
+      prepareFixture: prTrees(harness),
+      reset: async () => true,
+      cliVersions: harness.plan.inputs.cli_versions,
+      scorerDigestNow: () => harness.plan.inputs.scorer_digest,
+      judgeExec: judgeExec(),
+    });
+
+  // The control: the records as the runtime produced them enrich cleanly.
+  const enriched = await enrich(base.records);
+  assert.equal(enriched.length, base.records.length);
+
+  // A record whose `pr` disagrees with its cell id would group under one PR
+  // and be classified against another PR's fixture tree.
+  const first = base.records.find(
+    (record) => record.pr === 2000 && record.draw === 0,
+  );
+  await assert.rejects(
+    enrich([{ ...first, pr: 2001 }]),
+    /has no planned experiment lane/,
+  );
+
+  // A record whose `draw` disagrees keys its novelty cell on the other draw.
+  await assert.rejects(
+    enrich([{ ...first, draw: 1 }]),
+    /draw 1 is not the planned lane's/,
+  );
+});
+
+test("two draws of one PR never hold the same fixture tree at once", async (t) => {
+  const harness = makeHarness({ laneCount: 3, draws: 2 });
+  t.after(harness.cleanup);
+  assert.equal(harness.lanes.length, 6);
+  const prepareFixture = prTrees(harness);
+  const busy = new Set();
+  const overlaps = [];
+  const startedByPr = new Map();
+  let running = 0;
+  let widest = 0;
+  const contestantExec = async ({ lane, treatment }) => {
+    if (busy.has(lane.pr)) {
+      overlaps.push(`${lane.lane_id}-${treatment}`);
+    }
+    busy.add(lane.pr);
+    running += 1;
+    widest = Math.max(widest, running);
+    startedByPr.set(lane.pr, [
+      ...(startedByPr.get(lane.pr) ?? []),
+      `${lane.lane_id}-${treatment}`,
+    ]);
+    await new Promise((resolve) => setImmediate(resolve));
+    running -= 1;
+    busy.delete(lane.pr);
+    return contestantStream(["file.js:1 has a defect"]);
+  };
+  const result = await runExperimentRuntimeStage(
+    baseOptions(harness, { concurrency: 3, prepareFixture, contestantExec }),
+  );
+
+  // The bug this guards: two draws of one PR reset and re-stage one tree.
+  assert.deepEqual(overlaps, []);
+  // Three PR groups still run at once, so the cap is spent on trees that are
+  // genuinely independent.
+  assert.equal(widest, 3);
+
+  // The grid times the draws, times the two arms.
+  assert.equal(result.records.length, 12);
+  assert.deepEqual(
+    result.lanes.map((lane) => [lane.pr, lane.draw]),
+    [
+      [2000, 0],
+      [2000, 1],
+      [2001, 0],
+      [2001, 1],
+      [2002, 0],
+      [2002, 1],
+    ],
+  );
+  // Inside a PR the draws run in order, each lane's two arms in its own order.
+  for (const lane of harness.lanes) {
+    assert.equal(
+      startedByPr
+        .get(lane.pr)
+        .filter((entry) => entry.startsWith(`${lane.lane_id}-`)).length,
+      2,
+    );
+  }
+  assert.deepEqual(startedByPr.get(2000), [
+    "screen-pr-2000-d0-incumbent",
+    "screen-pr-2000-d0-candidate",
+    "screen-pr-2000-d1-candidate",
+    "screen-pr-2000-d1-incumbent",
+  ]);
+
+  // Each draw is its own cell: its own id, its own raw and score artifacts.
+  const firstDraw = result.records.filter((record) => record.draw === 0);
+  const secondDraw = result.records.filter((record) => record.draw === 1);
+  assert.equal(firstDraw.length, 6);
+  assert.equal(secondDraw.length, 6);
+  const cellFor = (draw, pr, treatment) =>
+    result.records.find(
+      (record) =>
+        record.draw === draw &&
+        record.pr === pr &&
+        record.treatment === treatment,
+    );
+  const early = cellFor(0, 2000, "candidate");
+  const late = cellFor(1, 2000, "candidate");
+  assert.equal(early.cell_id, "screen-pr-2000-d0-candidate");
+  assert.equal(late.cell_id, "screen-pr-2000-d1-candidate");
+  assert.notEqual(early.artifacts.raw, late.artifacts.raw);
+  assert.notEqual(early.artifacts.score, late.artifacts.score);
+  assert.notEqual(early.raw_digest, late.raw_digest);
+  assert.equal(
+    new Set(result.records.map((record) => record.artifacts.raw)).size,
+    12,
+  );
+
+  // The paid path wrote one entry per draw, so a rerun pays for none of them.
+  const reused = await runExperimentRuntimeStage(
+    baseOptions(harness, {
+      concurrency: 3,
+      prepareFixture,
+      contestantExec: async () => {
+        throw new Error("a cached draw must not call the contestant again");
+      },
+    }),
+  );
+  assert.equal(reused.records.length, 12);
+  for (const record of reused.records) {
+    assert.deepEqual(record.cache_reuse, { raw: true, score: true });
+  }
+  assert.deepEqual(
+    reused.records.map((record) => record.cell_id),
+    result.records.map((record) => record.cell_id),
+  );
 });

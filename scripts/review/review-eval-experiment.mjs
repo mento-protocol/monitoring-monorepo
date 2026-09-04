@@ -3,7 +3,6 @@
 // Small non-ledger review-skill experiment CLI. Only --run without --dry-run
 // invokes model providers.
 
-import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -11,21 +10,24 @@ import process from "node:process";
 import { pathToFileURL } from "node:url";
 import { parseArgs as parseNodeArgs } from "node:util";
 
-import {
-  canonicalPath,
-  checkFixtures,
-  loadContract,
-} from "./review-eval-fixtures.mjs";
+import { checkFixtures, loadContract } from "./review-eval-fixtures.mjs";
 import { DEFAULT_SKILL_DIR, expandHome } from "./review-eval-run-plan.mjs";
-import { scrubbedEnv, sourceCheckouts } from "./review-eval-run-execution.mjs";
+import { scrubbedEnv } from "./review-eval-run-execution.mjs";
 import {
   buildExperimentPlan,
+  DEFAULT_DRAWS,
   digestObject,
   EXPERIMENT_STAGES,
+  MAX_DRAWS,
   stagePlanFor,
-  validateExperimentPlan,
 } from "./review-eval-experiment-contract.mjs";
 import {
+  assertOutsideRepository,
+  validateExperimentPlan,
+} from "./review-eval-experiment-plan-check.mjs";
+import { stageCellCounts } from "./review-eval-experiment-stats.mjs";
+import {
+  providerVersion,
   recordRuntimeDrift,
   stageProbeProviders,
   stageRuntimeChange,
@@ -60,18 +62,24 @@ const OPTION_SPEC = {
   contract: { type: "string" },
   "cache-dir": { type: "string" },
   concurrency: { type: "string" },
+  draws: { type: "string" },
   "live-paired": { type: "boolean" },
   "dry-run": { type: "boolean" },
   json: { type: "boolean" },
   help: { type: "boolean", short: "h" },
 };
 
-function positiveInteger(value, name, fallback) {
+function boundedInteger(value, name, fallback, max = null) {
   if (value === undefined) return fallback;
-  if (!/^\d+$/.test(value) || Number(value) < 1) {
-    throw new Error(`--${name} must be a positive integer`);
+  const parsed = /^\d+$/.test(value) ? Number(value) : Number.NaN;
+  if (!(parsed >= 1) || (max !== null && parsed > max)) {
+    throw new Error(
+      max === null
+        ? `--${name} must be a positive integer`
+        : `--${name} must be an integer 1..${max}`,
+    );
   }
-  return Number(value);
+  return parsed;
 }
 
 export function parseExperimentArgs(argv) {
@@ -113,6 +121,9 @@ export function parseExperimentArgs(argv) {
   if (mode !== "plan" && values["live-paired"]) {
     throw new Error("--live-paired is valid only with --plan");
   }
+  if (mode !== "plan" && values.draws !== undefined) {
+    throw new Error("--draws is valid only with --plan");
+  }
   const campaignDir =
     mode === "validate-plan" ? values["validate-plan"] : values.run;
   return {
@@ -128,11 +139,12 @@ export function parseExperimentArgs(argv) {
     fixtureCacheDir: values["cache-dir"]
       ? path.resolve(expandHome(values["cache-dir"]))
       : null,
-    concurrency: positiveInteger(
+    concurrency: boundedInteger(
       values.concurrency,
       "concurrency",
       DEFAULT_CONCURRENCY,
     ),
+    draws: boundedInteger(values.draws, "draws", DEFAULT_DRAWS, MAX_DRAWS),
     includeLivePaired: values["live-paired"] === true,
     dryRun: values["dry-run"] === true,
     json: values.json === true,
@@ -154,12 +166,14 @@ Plan options:
   --candidate ID=PATH       One candidate skill
   --incumbent PATH          Paired incumbent; default ${DEFAULT_SKILL_DIR}
   --out ABS_DIR             Campaign artifact directory
+  --draws N                 Paired draws per fixture, 1..${MAX_DRAWS},
+                            default ${DEFAULT_DRAWS}
   --live-paired             Plan the optional live-finder stage
 
 Run options:
   --stage STAGE             screen, holdout, or live-paired
   --cache-dir PATH          Mutable fixture cache outside the repository
-  --concurrency N           Fixture lanes, 1..3
+  --concurrency N           PR fixture trees run at once, 1..3
   --dry-run                 Print the planned lanes without a model call
 
 Shared options:
@@ -186,43 +200,10 @@ function parseCandidate(value) {
   return { id, skill_ref: path.resolve(expandHome(value.slice(split + 1))) };
 }
 
-export function assertOutsideRepository(target, repoRoot, label) {
-  const resolved = canonicalPath(path.resolve(target));
-  const protectedRoots = new Set(
-    sourceCheckouts({ env: {}, roots: [repoRoot] }).map((root) =>
-      canonicalPath(path.resolve(root)),
-    ),
-  );
-  for (const repository of protectedRoots) {
-    const relative = path.relative(repository, resolved);
-    if (
-      relative === "" ||
-      (!relative.startsWith(`..${path.sep}`) &&
-        relative !== ".." &&
-        !path.isAbsolute(relative))
-    ) {
-      throw new Error(`${label} ${resolved} must be outside ${repository}`);
-    }
-  }
-  return resolved;
-}
+export { assertOutsideRepository };
 
 export function isExperimentEntryPoint(entryPath, moduleUrl = import.meta.url) {
   return Boolean(entryPath) && moduleUrl === pathToFileURL(entryPath).href;
-}
-
-function providerVersion(name, env) {
-  const result = spawnSync(name, ["--version"], {
-    env,
-    encoding: "utf8",
-    timeout: 10_000,
-  });
-  if (result.error || result.status !== 0 || !String(result.stdout).trim()) {
-    throw new Error(
-      `${name} version probe failed: ${result.error?.message ?? result.stderr ?? `exit ${result.status}`}`,
-    );
-  }
-  return String(result.stdout).trim();
 }
 
 function writePlan(file, plan) {
@@ -231,6 +212,19 @@ function writePlan(file, plan) {
     flag: "wx",
     mode: 0o600,
   });
+}
+
+/**
+ * One line for a grid that froze no P1 defect, or null. The P1 bars are zero in
+ * that case so the campaign can still finish, and a finalist that clears an
+ * inert gate has shown nothing about P1 recall.
+ */
+export function inertP1Warning(plan) {
+  if (plan?.policy?.opportunities?.p1_opportunities !== 0) return null;
+  return (
+    "this grid freezes no P1 defect, so the candidate P1 and P1 net gates " +
+    "are inert and every P1 threshold is zero"
+  );
 }
 
 /** One line naming an upgrade between the planned and the live provider CLI. */
@@ -292,9 +286,12 @@ async function planCampaign(options) {
       codex: providerVersion("codex", env),
     },
     includeLivePaired: options.includeLivePaired,
+    draws: options.draws,
   });
   const planFile = path.join(artifactRoot, "plan.json");
   writePlan(planFile, plan);
+  const inert = inertP1Warning(plan);
+  if (inert !== null) process.stderr.write(`warning: ${inert}\n`);
   return { artifact_root: artifactRoot, plan_file: planFile, plan };
 }
 
@@ -433,12 +430,17 @@ export async function runStage(options, campaign, overrides = {}) {
     throw new Error(`--concurrency cannot exceed ${DEFAULT_CONCURRENCY}`);
   }
   if (options.dryRun) {
+    // The cells this stage owes, in total and per arm, so the operator can
+    // price a stage before a paid run starts.
     return {
       dry_run: true,
       stage: options.stage,
+      draws: plan.draws ?? DEFAULT_DRAWS,
+      cells: stageCellCounts(stagePlan),
       lanes: stagePlan.lanes.map((lane) => ({
         lane_id: lane.lane_id,
         pr: lane.pr,
+        draw: lane.draw ?? 0,
         source: lane.source,
         sequence: lane.sequence,
       })),

@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { gridFixtures } from "./review-eval-fixtures.mjs";
+import { gridFixtures, PIPELINE_DRAWS } from "./review-eval-fixtures.mjs";
 import {
   finderArgvDigest as canonicalFinderArgvDigest,
   planCells,
@@ -13,12 +13,12 @@ import {
 } from "./review-eval-run-plan.mjs";
 import { scorerDigest as canonicalScorerDigest } from "./review-eval-score.mjs";
 import {
-  cliVersionDrift,
   cliVersionIdentity,
   isObject,
   nonempty,
   phaseVersionsFor,
 } from "./review-eval-experiment-versions.mjs";
+import { experimentPolicy } from "./review-eval-experiment-stats.mjs";
 
 export const EXPERIMENT_SCHEMA_VERSION = 1;
 export const EXPERIMENT_NAMESPACE = "review-skill-experiments/v1";
@@ -32,42 +32,41 @@ export const EXPERIMENT_STAGES = Object.freeze([
   "holdout",
   "live-paired",
 ]);
-export const SCREEN_PRS = Object.freeze([1990, 1995, 1999]);
-export const MAX_FIXTURE_LANES = 3;
+/** The grid is any size from this up; only concurrency is capped at three. */
+export const MIN_GRID_FIXTURES = 3;
+/**
+ * Fixture trees the runner works at once, one PR each. Every draw of a PR
+ * shares that PR's tree, so the runner never overlaps two of its lanes. Cost
+ * control, not panel size.
+ */
+export const LANE_CONCURRENCY_MAX = 3;
+export const DEFAULT_DRAWS = 1;
+/**
+ * The most draws one campaign may plan.
+ *
+ * Every draw multiplies the paid cells: at six grid fixtures a screen is
+ * `grid x draws x 2` verifier cells, so five draws already cost sixty cells a
+ * stage. The cap is a spend guard, not a statistical one — a wider panel is
+ * bought with more fixtures rather than more repeats of the same one.
+ */
+export const MAX_DRAWS = 5;
 export const EXPERIMENT_SOURCE_FILES = Object.freeze([
   "scripts/review/review-eval-experiment.mjs",
   "scripts/review/review-eval-experiment-contract.mjs",
+  "scripts/review/review-eval-experiment-plan-check.mjs",
   "scripts/review/review-eval-experiment-decision.mjs",
+  "scripts/review/review-eval-experiment-stats.mjs",
   "scripts/review/review-eval-experiment-cache.mjs",
   "scripts/review/review-eval-experiment-runtime.mjs",
+  "scripts/review/review-eval-experiment-novelty.mjs",
   "scripts/review/review-eval-experiment-versions.mjs",
 ]);
-
-export const DEFAULT_EXPERIMENT_POLICY = Object.freeze({
-  screen: Object.freeze({
-    known_net_min: 2,
-    p1_net_min: 0,
-    nonnegative_prs_min: 2,
-  }),
-  combined: Object.freeze({
-    known_net_min: 3,
-    candidate_p1_min: 9,
-    p1_opportunities: 12,
-    p1_net_min: 2,
-    gaining_prs_min: 2,
-    wrong_claim_delta_max: 1,
-  }),
-  claim_inflation: Object.freeze({
-    absolute_delta_min: 3,
-    ratio_min: 1.25,
-  }),
-});
 
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const CANDIDATE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const experimentRepoRoot = fileURLToPath(new URL("../../", import.meta.url));
 
-function stableValue(value) {
+export function stableValue(value) {
   if (Array.isArray(value)) return value.map(stableValue);
   if (!isObject(value)) return value;
   return Object.fromEntries(
@@ -203,17 +202,18 @@ function frozenInputs(contract) {
   return { prompts, fixtures };
 }
 
-function experimentFixtures(contract) {
+/**
+ * Every grid fixture the contract carries, by PR number. The lane takes the
+ * contract's grid as it stands rather than a pinned PR list: a fixture added to
+ * the grid joins the panel, and the derived thresholds move with it.
+ */
+export function experimentFixtures(contract) {
   const fixtures = gridFixtures(contract).sort(
     (left, right) => left.pr - right.pr,
   );
-  const prs = fixtures.map(({ pr }) => pr);
-  if (
-    fixtures.length !== MAX_FIXTURE_LANES ||
-    JSON.stringify(prs) !== JSON.stringify(SCREEN_PRS)
-  ) {
+  if (fixtures.length < MIN_GRID_FIXTURES) {
     throw new Error(
-      `experiment requires grid fixtures ${SCREEN_PRS.join(", ")}`,
+      `experiment requires at least ${MIN_GRID_FIXTURES} grid fixtures, got ${fixtures.length}`,
     );
   }
   for (const fixture of fixtures) {
@@ -221,25 +221,39 @@ function experimentFixtures(contract) {
       throw new Error(`PR ${fixture.pr} requires two frozen finder reports`);
     }
   }
-  const p1Opportunities = fixtures.reduce(
-    (total, fixture) => total + fixture.p1_ids.length * 2,
-    0,
-  );
-  if (p1Opportunities !== DEFAULT_EXPERIMENT_POLICY.combined.p1_opportunities) {
-    throw new Error(`experiment panel has ${p1Opportunities} P1 opportunities`);
-  }
   return fixtures;
 }
 
-/** A is the incumbent. B is the candidate. */
-export function treatmentOrder({ fixtureIndex, candidateIndex = 0 }) {
+export function experimentDraws(draws = DEFAULT_DRAWS) {
+  if (!Number.isSafeInteger(draws) || draws < 1 || draws > MAX_DRAWS) {
+    throw new Error(`draws must be an integer 1..${MAX_DRAWS}`);
+  }
+  return draws;
+}
+
+/**
+ * A is the incumbent. B is the candidate. Order alternates on the parity of the
+ * fixture and the draw together, so a fixture that always ran the incumbent
+ * first on draw 0 runs it second on draw 1 and order cannot ride along with a
+ * fixture across the campaign.
+ */
+export function treatmentOrder({
+  fixtureIndex,
+  drawIndex = 0,
+  candidateIndex = 0,
+}) {
   if (candidateIndex !== 0) {
     throw new Error("one-candidate campaigns use candidateIndex 0");
   }
-  if (!Number.isSafeInteger(fixtureIndex) || fixtureIndex < 0) {
-    throw new Error("fixtureIndex must be a non-negative integer");
+  for (const [label, value] of [
+    ["fixtureIndex", fixtureIndex],
+    ["drawIndex", drawIndex],
+  ]) {
+    if (!Number.isSafeInteger(value) || value < 0) {
+      throw new Error(`${label} must be a non-negative integer`);
+    }
   }
-  return fixtureIndex % 2 === 0 ? "AB" : "BA";
+  return (fixtureIndex + drawIndex) % 2 === 0 ? "AB" : "BA";
 }
 
 function laneFixture(fixture) {
@@ -272,7 +286,32 @@ function stageSource({ stage, fixture, finderIdentity }) {
   };
 }
 
-function stagesFor({ contract, finderIdentity, includeLivePaired }) {
+/**
+ * One lane per fixture per draw. Every draw of a lane replays the same frozen
+ * report through both arms, so a difference between two draws is verifier
+ * variance and nothing else.
+ */
+function stageLanes({ stage, fixtures, draws, finderIdentity }) {
+  return fixtures.flatMap((fixture, fixtureIndex) =>
+    Array.from({ length: draws }, (_unused, drawIndex) => {
+      const pairedOrder = treatmentOrder({ fixtureIndex, drawIndex });
+      return {
+        lane_id: `${stage}-pr-${fixture.pr}-d${drawIndex}`,
+        pr: fixture.pr,
+        draw: drawIndex,
+        paired_order: pairedOrder,
+        fixture: laneFixture(fixture),
+        source: stageSource({ stage, fixture, finderIdentity }),
+        sequence:
+          pairedOrder === "AB"
+            ? ["incumbent", "candidate"]
+            : ["candidate", "incumbent"],
+      };
+    }),
+  );
+}
+
+function stagesFor({ contract, finderIdentity, includeLivePaired, draws }) {
   const fixtures = experimentFixtures(contract);
   return Object.fromEntries(
     EXPERIMENT_STAGES.map((stage) => [
@@ -280,23 +319,28 @@ function stagesFor({ contract, finderIdentity, includeLivePaired }) {
       {
         stage,
         enabled: stage !== "live-paired" || includeLivePaired === true,
-        lanes: fixtures.map((fixture, fixtureIndex) => {
-          const pairedOrder = treatmentOrder({ fixtureIndex });
-          return {
-            lane_id: `${stage}-pr-${fixture.pr}`,
-            pr: fixture.pr,
-            paired_order: pairedOrder,
-            fixture: laneFixture(fixture),
-            source: stageSource({ stage, fixture, finderIdentity }),
-            sequence:
-              pairedOrder === "AB"
-                ? ["incumbent", "candidate"]
-                : ["candidate", "incumbent"],
-          };
-        }),
+        draws,
+        lanes: stageLanes({ stage, fixtures, draws, finderIdentity }),
       },
     ]),
   );
+}
+
+/**
+ * How many cells a canonical full rerun of this contract owes, derived from the
+ * contract itself rather than written down: two pipeline draws of every
+ * fixture, one replay of every frozen report the grid carries, and one control
+ * cell per fixture. A fixture joining the grid moves the count with it, so a
+ * wider grid does not fail planning against a number calibrated for a narrower
+ * one.
+ */
+export function fullRerunCellCount(contract) {
+  const fixtures = contract?.fixtures ?? [];
+  const replays = gridFixtures(contract).reduce(
+    (total, fixture) => total + (fixture.finder_reports ?? []).length,
+    0,
+  );
+  return PIPELINE_DRAWS * fixtures.length + replays + fixtures.length;
 }
 
 export function canonicalRerunManifest({
@@ -309,9 +353,10 @@ export function canonicalRerunManifest({
   treatmentId = "candidate",
 }) {
   const cells = planCells({ contract, kind: "full" });
-  if (cells.length !== 24) {
+  const expected = fullRerunCellCount(contract);
+  if (cells.length !== expected) {
     throw new Error(
-      `canonical full rerun must contain 24 cells, got ${cells.length}`,
+      `canonical full rerun must contain ${expected} cells, got ${cells.length}`,
     );
   }
   const body = {
@@ -340,8 +385,10 @@ export function buildExperimentPlan({
   cliVersions = null,
   identities = null,
   includeLivePaired = false,
+  draws = DEFAULT_DRAWS,
 }) {
   if (!isObject(contract)) throw new Error("contract is missing");
+  const drawCount = experimentDraws(draws);
   const contractIdentity = assertDigest(contractDigest, "contractDigest");
   const incumbentIdentity = treatment(incumbent, { incumbent: true });
   const candidateIdentity = treatment(oneCandidate(candidate, candidates));
@@ -352,7 +399,12 @@ export function buildExperimentPlan({
   const milliseconds = Date.parse(plannedAt);
   if (!Number.isFinite(milliseconds)) throw new Error("plannedAt is invalid");
   const planned = new Date(milliseconds).toISOString();
-  const stages = stagesFor({ contract, finderIdentity, includeLivePaired });
+  const stages = stagesFor({
+    contract,
+    finderIdentity,
+    includeLivePaired,
+    draws: drawCount,
+  });
   const seed = {
     namespace: EXPERIMENT_NAMESPACE,
     planned_at: planned,
@@ -369,6 +421,7 @@ export function buildExperimentPlan({
     canonical_verdict_eligible: false,
     experiment_statuses: [...EXPERIMENT_STATUSES],
     contract_digest: contractIdentity,
+    draws: drawCount,
     inputs: {
       scorer_digest: scorerIdentity,
       harness_source_digest: experimentSourceDigest(),
@@ -377,7 +430,10 @@ export function buildExperimentPlan({
       models,
       ...frozenInputs(contract),
     },
-    policy: structuredClone(DEFAULT_EXPERIMENT_POLICY),
+    policy: experimentPolicy({
+      fixtures: experimentFixtures(contract),
+      draws: drawCount,
+    }),
     incumbent: incumbentIdentity,
     candidate: candidateIdentity,
     stages,
@@ -404,87 +460,6 @@ export function stagePlanFor({ plan, stage }) {
   }
   return stagePlan;
 }
-
-const MAX_PLAN_DIFFERENCES = 8;
-
-/** Name the paths where a stored plan and its rebuild disagree. */
-function planDifferences(actual, expected, path = "", out = []) {
-  if (out.length >= MAX_PLAN_DIFFERENCES) return out;
-  if (JSON.stringify(actual) === JSON.stringify(expected)) return out;
-  if (isObject(actual) && isObject(expected)) {
-    for (const key of new Set([
-      ...Object.keys(actual),
-      ...Object.keys(expected),
-    ])) {
-      planDifferences(
-        actual[key],
-        expected[key],
-        path ? `${path}.${key}` : key,
-        out,
-      );
-    }
-    return out;
-  }
-  if (
-    Array.isArray(actual) &&
-    Array.isArray(expected) &&
-    actual.length === expected.length
-  ) {
-    for (const [index, item] of actual.entries()) {
-      planDifferences(item, expected[index], `${path}[${index}]`, out);
-    }
-    return out;
-  }
-  out.push(path || "plan");
-  return out;
-}
-
-/**
- * Rebuild the plan from its own recorded inputs, including the CLI versions it
- * was planned under, so a stored plan stays internally consistent forever. A
- * live probe passed as `cliVersions` is reported as drift, not as a problem.
- */
-export function validateExperimentPlan({
-  plan,
-  contract,
-  contractDigest = plan?.contract_digest,
-  cliVersions = null,
-}) {
-  const problems = [];
-  let drift = null;
-  try {
-    if (!isObject(plan)) throw new Error("plan must be an object");
-    const rebuilt = buildExperimentPlan({
-      contract,
-      contractDigest,
-      plannedAt: plan.planned_at,
-      incumbent: plan.incumbent,
-      candidate: plan.candidate,
-      cliVersions: plan?.inputs?.cli_versions,
-      includeLivePaired: plan.stages?.["live-paired"]?.enabled === true,
-    });
-    const differences = planDifferences(
-      stableValue(plan),
-      stableValue(rebuilt),
-    );
-    if (differences.length > 0) {
-      problems.push(
-        "plan differs from the complete deterministic campaign plan at " +
-          differences.join(", "),
-      );
-    } else if (JSON.stringify(plan) !== JSON.stringify(rebuilt)) {
-      problems.push("plan key order differs from the deterministic plan");
-    }
-    drift = cliVersionDrift({
-      planned: rebuilt.inputs.cli_versions,
-      live: cliVersions,
-    });
-  } catch (error) {
-    problems.push(error.message);
-  }
-  return { ok: problems.length === 0, problems, drift };
-}
-
 function treatmentFor(plan, name) {
   if (name === "incumbent") return plan.incumbent;
   if (name === "candidate") return plan.candidate;
@@ -493,6 +468,13 @@ function treatmentFor(plan, name) {
 
 function withDigest(identity) {
   return { ...identity, digest: digestObject(identity) };
+}
+
+function drawIndex(value) {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new Error("cache identity draw must be a non-negative integer");
+  }
+  return value;
 }
 
 /** `phaseVersionsFor` states how a cache identity is keyed on versions. */
@@ -534,6 +516,9 @@ export function rawCacheIdentity({
     stage,
     lane_id: plannedLane.lane_id,
     pr: plannedLane.pr,
+    // Two draws of one lane read the same report through the same arm, so only
+    // the draw index keeps their cells apart in the cache.
+    draw: drawIndex(plannedLane.draw),
     treatment: treatmentName,
     skill_digest: selectedTreatment.skill_digest,
     contract_digest: plan.contract_digest,
@@ -552,6 +537,7 @@ export function rawCacheIdentity({
 export function scoreCacheIdentity({
   plan,
   rawDigest,
+  draw = 0,
   cliVersions,
   phaseVersions = null,
 }) {
@@ -560,6 +546,7 @@ export function scoreCacheIdentity({
     namespace: EXPERIMENT_NAMESPACE,
     phase: "score",
     plan_digest: plan.plan_digest,
+    draw: drawIndex(draw),
     raw_digest: assertDigest(rawDigest, "rawDigest"),
     scorer_digest: plan.inputs.scorer_digest,
     judge: plan.inputs.models.judge,
@@ -570,6 +557,7 @@ export function scoreCacheIdentity({
 export function novelCacheIdentity({
   plan,
   scoreDigest,
+  draw = 0,
   cliVersions,
   phaseVersions = null,
 }) {
@@ -578,6 +566,7 @@ export function novelCacheIdentity({
     namespace: EXPERIMENT_NAMESPACE,
     phase: "novel",
     plan_digest: plan.plan_digest,
+    draw: drawIndex(draw),
     score_digest: assertDigest(scoreDigest, "scoreDigest"),
     scorer_digest: plan.inputs.scorer_digest,
     judge: plan.inputs.models.judge,

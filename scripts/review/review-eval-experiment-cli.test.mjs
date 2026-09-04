@@ -10,6 +10,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   assertOutsideRepository,
+  inertP1Warning,
   isExperimentEntryPoint,
   parseExperimentArgs,
 } from "./review-eval-experiment.mjs";
@@ -97,6 +98,33 @@ test("experiment CLI plans one named candidate", () => {
   assert.equal(options.candidate, "prompt-a=/tmp/prompt-a");
   assert.equal(options.includeLivePaired, true);
   assert.equal(options.concurrency, 3);
+  // One draw unless the operator asks for more.
+  assert.equal(options.draws, 1);
+  assert.equal(
+    parseExperimentArgs([
+      "--plan",
+      "--candidate",
+      "prompt-a=/tmp/prompt-a",
+      "--out",
+      "/tmp/campaign-a",
+      "--draws",
+      "4",
+    ]).draws,
+    4,
+  );
+  // Five draws is the cap, and it is accepted.
+  assert.equal(
+    parseExperimentArgs([
+      "--plan",
+      "--candidate",
+      "prompt-a=/tmp/prompt-a",
+      "--out",
+      "/tmp/campaign-a",
+      "--draws",
+      "5",
+    ]).draws,
+    5,
+  );
 });
 
 test("experiment CLI validates and runs an existing campaign", () => {
@@ -119,6 +147,16 @@ test("experiment CLI validates and runs an existing campaign", () => {
   assert.equal(run.concurrency, 2);
 });
 
+test("planning warns once when the grid freezes no P1 defect", () => {
+  const withP1 = { policy: { opportunities: { p1_opportunities: 22 } } };
+  assert.equal(inertP1Warning(withP1), null);
+  const inert = inertP1Warning({
+    policy: { opportunities: { p1_opportunities: 0 } },
+  });
+  assert.match(inert, /no P1 defect/);
+  assert.match(inert, /every P1 threshold is zero/);
+});
+
 for (const [name, argv, message] of [
   ["one mode", [], /choose exactly one/],
   ["exclusive modes", ["--plan", "--run", "/tmp/run"], /choose exactly one/],
@@ -134,6 +172,23 @@ for (const [name, argv, message] of [
     "positive concurrency",
     ["--run", "/tmp/run", "--stage", "screen", "--concurrency", "0"],
     /positive integer/,
+  ],
+  [
+    "draws scope",
+    ["--run", "/tmp/run", "--stage", "screen", "--draws", "2"],
+    /--draws is valid only with --plan/,
+  ],
+  [
+    "positive draws",
+    ["--plan", "--candidate", "a=/tmp/a", "--out", "/tmp/run", "--draws", "0"],
+    /--draws must be an integer 1\.\.5/,
+  ],
+  [
+    // Every draw multiplies the paid cells, so the cap is an error and not a
+    // clamp: a campaign that asked for six is not silently priced at five.
+    "draws over the cap",
+    ["--plan", "--candidate", "a=/tmp/a", "--out", "/tmp/run", "--draws", "6"],
+    /--draws must be an integer 1\.\.5/,
   ],
   [
     "dry-run scope",

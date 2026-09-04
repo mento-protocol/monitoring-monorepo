@@ -18,7 +18,8 @@ garden_lane: adrs-architecture
 
 ## Context
 
-The canonical review-skill evaluation has 24 model cells. It supplies the
+The canonical review-skill evaluation had 24 model cells when this decision
+was taken and has 39 since the 2026-09 grid widening. It supplies the
 ledger verdict, baseline, and freshness evidence. This matrix is too slow and
 costly for early prompt experiments.
 
@@ -35,6 +36,21 @@ phase invokes. The bullet below that names provider CLI versions among what the
 plan binds is superseded by that ADR; everything else here stands, so this ADR
 keeps `status: active` — the checklist's archive-and-`superseded_by` rule
 applies to a whole superseded decision, not to one clause.
+
+ADR 0086 supersedes this decision on the panel and the thresholds: the lane runs
+every fixture the contract marks `grid: true`, `--draws N` repeats each fixture
+as N paired lanes, and every threshold is derived from that panel instead of
+being written down. The bullets below that name the three grid fixtures, the six
+and twelve verifier arms, and the fixed screen and holdout counts are superseded
+by that ADR, as is the "six-module" count in the plan-binding bullet — the
+harness is nine modules and the digest still binds all of them. The manifest's
+"24-cell" count is superseded too: it is now derived from the contract, so a
+fixture added to the grid widens it. So is the three-lane concurrency cap, which
+now bounds PRs rather than lanes, because every draw of one PR shares that PR's
+fixture tree. At three fixtures and one draw ADR 0086's formulas reproduce the
+counts below. Its decision also reads paired differences and, once six or more
+of them are non-zero, a sign-flip permutation test. Everything else here stands,
+so this ADR keeps `status: active` for the same reason.
 
 Add a small staged experiment lane with these rules:
 

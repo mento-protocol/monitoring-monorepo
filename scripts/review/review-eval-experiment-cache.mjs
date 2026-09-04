@@ -22,9 +22,10 @@ import {
   claudeStreamEnvelope,
 } from "./review-eval-run-execution.mjs";
 import { expandHome, skillDigest } from "./review-eval-run-plan.mjs";
+import { scorerDigest } from "./review-eval-score.mjs";
 import {
   digestObject,
-  MAX_FIXTURE_LANES,
+  LANE_CONCURRENCY_MAX,
 } from "./review-eval-experiment-contract.mjs";
 
 const CACHE_KINDS = new Set(["raw", "score", "novel", "stage"]);
@@ -115,6 +116,18 @@ export function liveFinderHandoff(value, maxBytes = 30_000) {
   while (start < bytes.length && (bytes[start] & 0xc0) === 0x80) start += 1;
   const text = bytes.subarray(start).toString("utf8");
   return { text, digest: sha256Bytes(text) };
+}
+
+/** No cell is scored under a scorer the plan did not bind. */
+export function assertExperimentScorer(plan, scorerDigestNow = scorerDigest) {
+  const current = scorerDigestNow();
+  if (current !== plan.inputs.scorer_digest) {
+    throw new Error(
+      `experiment plan uses scorer ${plan.inputs.scorer_digest.slice(0, 8)}; ` +
+        `the current scorer is ${current.slice(0, 8)}; re-plan before scoring`,
+    );
+  }
+  return current;
 }
 
 export function experimentCellId(lane, treatment) {
@@ -257,9 +270,11 @@ export function assertExperimentConcurrency(concurrency) {
   if (
     !Number.isSafeInteger(concurrency) ||
     concurrency < 1 ||
-    concurrency > MAX_FIXTURE_LANES
+    concurrency > LANE_CONCURRENCY_MAX
   ) {
-    throw new Error(`fixture lane concurrency must be 1..${MAX_FIXTURE_LANES}`);
+    throw new Error(
+      `fixture lane concurrency must be 1..${LANE_CONCURRENCY_MAX}`,
+    );
   }
 }
 
