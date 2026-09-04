@@ -279,12 +279,6 @@ jobs:
               - scripts/**/*.cjs
               - scripts/**/*.js
               - scripts/**/*.sh
-              # The React Doctor wrappers live with the package they drive, but
-              # agent-quality-gate.test.sh copies and executes the diff wrapper
-              # in a stub repo. Without these two paths a wrapper edit would
-              # skip the suite that proves its branch cleanup.
-              - ui-dashboard/scripts/check-react-doctor-diff.sh
-              - ui-dashboard/scripts/check-react-doctor-score.sh
               # CodeRabbit reads .coderabbit.yaml from the PR's own source
               # branch and its findings feed the pr:feedback-state ledger, so a
               # config-only PR must still run the allowlist pin below. Without
@@ -358,8 +352,8 @@ jobs:
               # under the runtime-specific directories. The two Markdown globs
               # that used to sit here now live in the `docs` filter below
               # (ADR 0072): a Markdown-only diff runs the small `docs-checks`
-              # job, which carries nine of the eleven checks in this job that
-              # read the Markdown corpus — the two left behind fail only when a
+              # job, which carries nine of the ten checks in this job that read
+              # the Markdown corpus — the one left behind fails only when a
               # carried check fails. Markdown that arrives alongside any path
               # above still sets both filters, and both jobs run — including a
               # Markdown-only edit under `.agents/**` or `.claude/skills/**`,
@@ -1185,12 +1179,8 @@ jobs:
     needs: changes
     if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.rootScripts == 'true'
     runs-on: blacksmith-2vcpu-ubuntu-2404
-    # The quality-gate routing regression suite reached 39m02s on this runner
-    # in main CI run 33535970973, attempt 1, job 99950409872, after earlier job
-    # setup. The prior 40-minute cap cancelled the job before later steps could
-    # run. The waits bind real queue, cleanup, and no-signal
-    # guarantees, so keep a bounded 15-minute margin for the remaining steps
-    # and runner variance instead of weakening those assertions.
+    # The legacy gate regression suite no longer runs in required CI. Keep the
+    # existing job bound until M6 measures the retained root checks.
     timeout-minutes: 55
     permissions:
       contents: read
@@ -1219,8 +1209,8 @@ jobs:
         #   pre-install `node` step.
         #
         #   RUN — this job invokes trusted aliases directly (`pnpm lint:scripts`,
-        #   `pnpm agent:quality-gate:test`, the `docs:*` and `agent:context-*`
-        #   suites); the pin validator keeps that trust safe by rejecting a
+        #   the `docs:*` and `agent:context-*` suites); the pin validator keeps
+        #   that trust safe by rejecting a
         #   drifted command (e.g. an appended `&& <command>`) before it executes.
         #   check-sentry-suites-in-ci.test.mjs pins this ordering, because the
         #   `sentry:*` aliases the optional legacy diagnostic trusts are pinned
@@ -1254,10 +1244,10 @@ jobs:
         # Retained SessionEnd, setup-marker, and pre-install policy checks were
         # extracted from the legacy Bash gate suite.
         run: bash scripts/bootstrap/agent-setup-contract.test.sh
-      - name: Agent quality-gate routing regression suite
-        # Optional legacy diagnostic regression; no-skip measures required CI.
-        if: ${{ !inputs.no_skip_audit }}
-        run: pnpm agent:quality-gate:test
+      - name: Dependency-cruiser root contract
+        # Preserve the independent architecture-root equality that was embedded
+        # in the legacy gate suite.
+        run: node --test scripts/repo-health/dependency-cruiser-root-contract.test.mjs
       - name: Gate routing-table suite
         # ADR 0069. The gate's routing is data in scripts/gate/routing-table/,
         # compiled by the Node mapping engine; D5c retired the bash `case` arms
@@ -1500,7 +1490,7 @@ jobs:
     # Markdown edit at all: docs:audit:test, docs:garden:test and
     # check-agent-context.test.mjs build their fixtures in a temporary
     # repository or stub their inputs.
-    # Two more read this checkout and stay in `scripts` anyway, for a reason
+    # One more reads this checkout and stays in `scripts` anyway, for a reason
     # worth writing down:
     #   - docs:index:test has one live-tree case that builds the inventory
     #     over the tracked Markdown tree and asserts inventory.errors is
@@ -1509,13 +1499,6 @@ jobs:
     #     non-regular runtime document is rejected by the runtime registry
     #     that both carried checks import. No Markdown-only diff fails it while
     #     everything in this job stays green.
-    #   - agent:quality-gate:test pins the targeted-Trunk branch on the
-    #     tracked file docs/deployment.md, which flips to `--all` once that
-    #     path leaves the worktree. docs/deployment.md is also one of the
-    #     routing table's staleness subjects, so the gate routing-table step
-    #     below fails first on the rename or delete that would break it. That
-    #     coupling is transitive, not structural: drop docs/deployment.md from
-    #     the routing table and this suite loses its cover.
     # Splitting these out lets a Markdown-only PR finish in
     # minutes instead of waiting on the long-running scripts job. Each `run:`
     # string here
@@ -1599,11 +1582,8 @@ jobs:
         # exists, so renaming or deleting one of those documents is a
         # Markdown-only diff that breaks the gate. Without this step here, such
         # a PR would merge green and leave the gate pointing reviewers at a
-        # document that is not there. This is one of the two non-documentation
-        # steps of `scripts` that read the Markdown corpus; it also covers the
-        # other one, agent:quality-gate:test, whose docs/deployment.md
-        # assertion depends on a path this staleness check already names.
-        # The no-skip audit excludes both legacy local-gate suites.
+        # document that is not there. The no-skip audit excludes this legacy
+        # selector suite.
         if: ${{ !inputs.no_skip_audit }}
         run: pnpm gate:routing-table:test
       - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0

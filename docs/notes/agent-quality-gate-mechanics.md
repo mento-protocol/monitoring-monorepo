@@ -3,7 +3,7 @@ title: Agent Quality Gate — Mechanics
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-02
+last_verified: 2026-09-04
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -17,9 +17,9 @@ parallelism, caching, and package-script refusal guard. Normal delivery uses
 the direct author checks in
 [`pr-operating-card.md`](pr-operating-card.md#the-loop) plus required CI.
 Pre-push starts no repository verification. The complete gate remains callable
-as a diagnostic and remains covered in required CI. Issue #2128 owns its
-post-cutover observation and retirement receipt. Deletion needs separate human
-approval.
+as a diagnostic. Its regression suite does not run in required CI. Issue #2128
+owns its post-cutover observation and retirement receipt. Deletion needs
+separate human approval.
 
 Any pre-push or hosted hook-warm behavior below describes the dormant retained
 mode for diagnostic and rollback compatibility. No installed repository hook
@@ -3232,8 +3232,8 @@ Rules that keep the focus honest:
 - **Unset or empty runs everything.** The dispatch tests the value, not its
   presence, so `GATE_TEST_FOCUS` unset and `GATE_TEST_FOCUS=` behave alike: both
   run every family in registry order, which is the file order and the order this
-  suite has always used. `pnpm agent:quality-gate:test`, the gate's own mapped
-  self-test, and CI all run in that mode.
+  suite has always used. `pnpm agent:quality-gate:test` and the gate's own
+  mapped self-test run in that mode. Required CI does not invoke this suite.
 - **The focus is refused where it could answer for the whole suite.** A
   non-empty `GATE_TEST_FOCUS` exits 2 when any of `AGENTQG_RUN`,
   `AGENT_QUALITY_GATE_LOCK_HELD`, or `GITHUB_ACTIONS` holds a non-empty value,
