@@ -619,17 +619,7 @@ test("an unknown argument is refused with the usage line", (t) => {
 });
 
 test("a duplicate --base is refused before it can replace the bound base", (t) => {
-  const repo = makeRepo(t);
-  fakeCodex(repo.bin, 'echo "clean"');
-
-  const run = runScript(repo, [
-    "--base",
-    "base",
-    "--base",
-    "HEAD",
-    "--no-fetch",
-  ]);
-
+  const run = runScript(makeRepo(t), ["--base", "base", "--base", "HEAD"]);
   assert.equal(run.status, 2);
   assert.match(run.stderr, /--base can be provided only once/);
   assert.equal(run.reportPath, null);
