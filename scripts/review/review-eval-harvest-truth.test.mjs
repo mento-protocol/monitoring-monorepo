@@ -210,6 +210,7 @@ test("disposition reads the mandated reply forms", () => {
   assert.equal(isActedOn([], AUTHOR), false);
   assert.equal(isDeclined(say("Won't fix: covered upstream"), AUTHOR), true);
   assert.equal(isDeclined(say("won't fix, by design"), AUTHOR), true);
+  assert.equal(isDeclined(say("Won’t fix: typographic quote"), AUTHOR), true);
   assert.equal(isDeclined(say("Not applicable here"), AUTHOR), true);
   assert.equal(isDeclined(say("will fix next round"), AUTHOR), false);
 });

@@ -62,7 +62,9 @@ const BOT_AUTHOR_SET = new Set(BOT_AUTHORS);
 const SEVERITY_P1 = /P1|CRITICAL|High Severity|🔴|Major/;
 const SEVERITY_P2 = /P2|Medium Severity|Minor|🟡/;
 const ACTED_ON = /\bFixed in\b|\bfixed in\b/;
-const DECLINED = /[Ww]on't fix|Not applicable|not applicable/;
+// The apostrophe may be straight or typographic (U+2019): a reply typed in a
+// GitHub editor that curls quotes must still count as the author's decline.
+const DECLINED = /[Ww]on['’]t fix|Not applicable|not applicable/;
 const HTML_TAG = /<[^>]+>/g;
 const TITLE_NOISE = /[*_`#]|!\[[^\]]*\]\([^)]*\)/g;
 const DETAILS_TAG = /<details\b[^>]*>|<\/details\s*>/gi;
