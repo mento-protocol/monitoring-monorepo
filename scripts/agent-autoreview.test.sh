@@ -2694,7 +2694,7 @@ run_parallel_tests_removed_regression() {
 
   run_helper_in_repo_expect_failure "$review_repo" --mode local --engine local --parallel-tests true
   expect_stderr_contains "--parallel-tests was removed"
-  expect_stderr_contains "docs/notes/pr-operating-card.md step 3"
+  expect_stderr_contains "applicable direct author checks from docs/notes/pr-operating-card.md step 3"
 }
 
 run_review_target_metadata_regression() {

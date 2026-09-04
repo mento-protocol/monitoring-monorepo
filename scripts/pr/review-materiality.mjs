@@ -327,30 +327,31 @@ function classifyBySize(fileCount, lineChanges) {
  * two-model closeout is not a closeout.
  */
 const VERIFIER_HANDOFF =
-  "Hand that report to the review skill for the verifier pass; " +
+  "After a base integration, use both immutable axes from operating-card step 4. " +
+  "Hand each report to the review skill for the verifier pass; " +
   "with no codex on PATH, run the review skill alone and say so in ## Validation.";
 
 function recommendedReview(tier) {
   if (tier === "trivial") {
     return [
-      "Run the quality gate from operating-card step 3.",
+      "Run the applicable direct author checks from docs/notes/pr-operating-card.md step 3.",
       "Skip the closeout review unless the change is deceptively risky.",
     ];
   }
 
   if (tier === "standard") {
     return [
-      "Run the quality gate from operating-card step 3.",
-      "Run pnpm agent:closeout-review before pushing.",
+      "Run the applicable direct author checks from docs/notes/pr-operating-card.md step 3.",
+      'Run pnpm agent:closeout-review --base "$BASE_REMOTE/$baseRefName" before pushing.',
       VERIFIER_HANDOFF,
     ];
   }
 
   return [
-    "Run the quality gate from operating-card step 3.",
-    "Run pnpm agent:closeout-review before pushing.",
+    "Run the applicable direct author checks from docs/notes/pr-operating-card.md step 3.",
+    'Run pnpm agent:closeout-review --base "$BASE_REMOTE/$baseRefName" before pushing.',
     VERIFIER_HANDOFF,
-    "Read any mapped checklist and audit sibling surfaces before the next push.",
+    "Identify every applicable checklist from the changed surfaces and scoped instructions, then audit sibling surfaces before the next push.",
   ];
 }
 

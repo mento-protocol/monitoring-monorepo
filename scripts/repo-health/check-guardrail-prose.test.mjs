@@ -93,9 +93,12 @@ test("a present pinned sentence exits 0", () => {
   assert.match(output, /1 pinned sentences present across 1 files/);
 });
 
-test("a removed pinned sentence exits nonzero, names it, and says how to fix it", () => {
+test("a suffix-weakened pinned sentence exits nonzero, names it, and says how to fix it", () => {
   const fixture = newFixture({
-    files: { "AGENTS.md": "# Rules\n\n- Something else entirely.\n" },
+    files: {
+      "AGENTS.md":
+        "# Rules\n\n- **Never merge without explicit approval** except for automated merges.\n",
+    },
     pins: { "AGENTS.md": [PINNED_SENTENCE] },
   });
   const { status, output } = runChecker(fixture);

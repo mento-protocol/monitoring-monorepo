@@ -3,7 +3,7 @@ title: Agent Quality Gate — Mechanics
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-01
+last_verified: 2026-09-02
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -12,27 +12,36 @@ garden_lane: operator-runbooks
 
 # Agent Quality Gate — Mechanics
 
-This runbook owns gate invocation, path mapping, parallelism, caching, and the
-package-script refusal guard. Root `AGENTS.md` routes here.
+This runbook owns the retained legacy gate runtime, its path mapping,
+parallelism, caching, and package-script refusal guard. Normal delivery uses
+the direct author checks in
+[`pr-operating-card.md`](pr-operating-card.md#the-loop) plus required CI.
+Pre-push starts no repository verification. The complete gate remains callable
+as a diagnostic and remains covered in required CI. Issue #2128 owns its
+post-cutover observation and retirement receipt. Deletion needs separate human
+approval.
+
+Any pre-push or hosted hook-warm behavior below describes the dormant retained
+mode for diagnostic and rollback compatibility. No installed repository hook
+invokes that mode after M5.
 
 ## Invocation contract
 
-Before opening or updating an agent-authored PR:
+For an optional legacy diagnostic:
 
 ```bash
 pnpm agent:quality-gate          # inspect mapped commands and checklists
 pnpm agent:quality-gate --run    # execute the safe local mapped commands
-pnpm agent:closeout-review       # required for a non-trivial completed batch
 ```
 
-The closeout review is owned by
+The local-only diagnostic never deploys or applies Terraform. Run it only when
+the retained mapping is useful for diagnosis. It is not an author checkpoint.
+
+Normal closeout review uses `pnpm agent:closeout-review`. It is owned by
 [`pr-operating-card.md`](pr-operating-card.md) step 4, not by this runbook.
 
-The local-only gate never deploys or applies Terraform. Run it explicitly;
-do not assume the pre-push hook exists.
-
-The package command and Trunk hook execute `./scripts/agent-quality-gate.sh`
-directly. This preserves the script's Bash `-p` startup boundary; it does not
+The package command executes `./scripts/agent-quality-gate.sh` directly. This
+preserves the script's Bash `-p` startup boundary; it does not
 grant operating-system privileges. The prologue clears the remaining inherited
 Bash controls before it resolves a path or parses an argument. Do not invoke the
 gate as `bash scripts/agent-quality-gate.sh`; that bypasses the shebang boundary.
@@ -41,8 +50,8 @@ The checked-in Claude permission grants approval-free execution only for
 `./scripts/agent-quality-gate.sh`. It does not grant the `pnpm` package alias
 because the active branch controls that alias before the gate can validate it.
 
-`pnpm agent:closeout-review` reviews source only, so the mapped gate still owns
-tests, browser checks, and generated-artifact checks.
+`pnpm agent:closeout-review` reviews source only. The applicable direct author
+checks still own tests, browser checks, and generated-artifact checks.
 
 Background `--run` gates and `git push`: a 600s foreground kill writes no
 freshness stamp, so the next run cannot use `--skip-if-fresh`. Each run appends
@@ -64,8 +73,7 @@ eligible successes keep per-command stamps, so the later gate can avoid
 repeating them. Running a command directly proves it but records no per-command
 stamp.
 
-For a manual full-repository reproduction of the server-side pre-push baseline,
-including when hooks are absent or uncertain, use:
+For a manual full-repository legacy diagnostic, use:
 
 ```bash
 git fetch origin main:refs/remotes/origin/main
@@ -159,8 +167,9 @@ routing-sensitive source, the shared classifier adds the offline
 scheduled evaluation. Every tracked Markdown change runs `pnpm docs:index
 --check` and `pnpm docs:navigation-eval:test`. The second command enforces the
 navigation source budgets that the Markdown-only CI job checks. Review the
-output. Then run the local or hosted gate command from step 3 of the
-[PR operating card](pr-operating-card.md).
+output. This mapping describes the optional retained diagnostic. Normal author
+work follows the matching direct checks in step 3 of the
+[PR operating card](pr-operating-card.md) and does not invoke the gate.
 
 Every non-empty candidate change set also runs the Terraform-stack suite. The
 gate spells it `pnpm tf:test`, unless a root-tooling `package.json` edit already
@@ -185,8 +194,8 @@ edit limited to root tooling scripts such as `scripts.agent:quality-gate`,
 `scripts.agent:context-budget`, `scripts.agent:context-budget:test`,
 `scripts.agent:closeout-review`, `scripts.agent:closeout-review:test`,
 `scripts.agent:autoreview`, `scripts.agent:autoreview:test`, `scripts.issue:board`,
-`scripts.issue:board:test`, `scripts.issue:claim`, `scripts.issue:review`,
-`scripts.issue:release`, every `scripts.sentry:*` entry (the runners and their
+`scripts.issue:board:test`, `scripts.issue:claim`, `scripts.issue:groom`,
+`scripts.issue:review`, `scripts.issue:release`, every `scripts.sentry:*` entry (the runners and their
 `:test` suites), `scripts.docs:index`, `scripts.docs:index:test`,
 `scripts.docs:audit`, `scripts.docs:audit:test`, `scripts.docs:garden`,
 `scripts.docs:garden:test`, `scripts.docs:navigation-eval`,
@@ -2492,12 +2501,12 @@ live fixture. A new fixture whose liveness the suite asserts takes the same
 `$((RANDOM % 900 + 100))-$$` suffix the lock-race fixtures use, and every scan
 for it is scoped to that exact name.
 
-The pre-push hook reaches neither bypass. It runs a fixed command line, and
-Trunk strips these variables. If coordination fails, the hook exits non-zero.
-After the reported recovery or compatibility blocker clears, fetch the hook's
-base and warm the matching stamp with `git fetch --quiet origin main &&
+The dormant pre-push mode reaches neither bypass. It uses a fixed command line,
+and Trunk strips these variables. If coordination fails, the mode exits
+non-zero. After the reported recovery or compatibility blocker clears, fetch
+the old hook base and warm the matching stamp with `git fetch --quiet origin main &&
 ./scripts/agent-quality-gate.sh --run --parallel 3 --base origin/main`. A
-verified matching success lets the hook's `--skip-if-fresh` path exit before it
+verified matching success lets the dormant `--skip-if-fresh` path exit before it
 registers another request.
 
 Set `AGENT_QUALITY_GATE_DEBUG_STAMP=1` to print the active freshness-stamp
@@ -2507,7 +2516,7 @@ the v4 `coordinatorContext`. The output therefore follows the active base
 binding instead of assuming whether it is a tip or merge-base. It prints only
 the stored identifiers and hashes. It does not print raw environment values.
 The switch does not change the stamp or stdout. To diagnose a miss, capture the
-warm command and the hook's exact fetch-and-run command back to back. The first
+warm command and the dormant hook's exact fetch-and-run command back to back. The first
 changed line names the input that prevented reuse.
 
 **Heavy suites form barriers.** Dashboard coverage, its scoped `vitest related`
@@ -2579,21 +2588,23 @@ replacement provisioner map to
 `bash alerts/infra/scripts/fix-webhook-state.test.sh`; the handler test suite
 also executes that shell fixture in CI.
 
-The [PR operating card](pr-operating-card.md#the-loop) owns ordinary gate and
-closeout sequencing. A second `--run` request from another worktree joins the
-coordinator. A request from the same worktree waits for that worktree lease.
-Before a full gate starts, finish direct validation, dashboard servers, browser
-suites, and package-manager work that runs outside the coordinator on the same
-machine. Do not start uncoordinated work there until the gate exits. The
-coordinator can schedule only registered gate work. An unregistered
+The [PR operating card](pr-operating-card.md#the-loop) owns normal direct author
+checks and closeout sequencing. When an operator explicitly runs a full legacy
+diagnostic, a second `--run` request from another worktree joins the coordinator.
+A request from the same worktree waits for that worktree lease. Before the
+diagnostic starts, finish dashboard servers, browser suites, and package-manager
+work that runs outside the coordinator on the same machine. Do not start
+uncoordinated work there until the diagnostic exits. The coordinator can
+schedule only registered gate work. An unregistered
 package-manager process in the same worktree can change `node_modules`.
 Unregistered validation from another worktree can still starve the scheduled
 workers. Browser tests and size-limit can rewrite `next-env.d.ts`. Use
 same-machine spare workers only for read-only work. Run concurrent validation
-outside the coordinator only on another machine. Run focused checks first, then
-let the gate own the mapped batch. For a non-trivial batch, freeze the card's
-scope baseline and run the closeout review after the gate. After accepted
-fixes, rerun focused checks and the closeout. Card step 4 owns that flow.
+outside the coordinator only on another machine. Complete normal direct checks
+before an optional diagnostic. For a non-trivial batch, freeze the card's scope
+baseline and run the closeout review after the applicable direct checks. After
+accepted fixes, rerun the affected direct checks and the closeout. Card step 4
+owns that flow.
 
 Superseded from here to the end of the autoreview material:
 [`pr-operating-card.md`](pr-operating-card.md) step 4 owns the closeout review.
@@ -2773,8 +2784,9 @@ protected object. Otherwise the command fails closed with the
 separate-trusted-checkout
 instruction used for runtime-changing reviews; a wrapper nested anywhere inside
 the reviewed checkout is never treated as external. The old autoreview
-`--parallel-tests` path is removed: the mapped quality gate owns test execution
-and isolation.
+`--parallel-tests` path is removed. Step 3 of the [PR operating
+card](pr-operating-card.md) owns direct author checks; required CI owns merge
+admission.
 
 The repo command itself is executable code from the active checkout. The
 committed/pre-change runtime comparisons protect review integrity when the
@@ -2806,38 +2818,10 @@ call. Any error or drift stops the workflow and invalidates the result. Any
 refetch, including a conflict-triggered base refresh, restarts this preflight and
 refreshes both pins before another adapter call.
 
-### The two review axes
+### Retired two-axis autoreview execution
 
-Superseded: [`pr-operating-card.md`](pr-operating-card.md) step 4 owns the
-closeout review. The autoreview sections below describe machinery the removal
-PR retires; read them as history, not instruction.
-
-A conflict repair is reviewed against **two** axes, because either alone can miss a
-regression the other catches. Pin both inputs as immutable commit IDs before merging:
-`base_oid` for the fetched base and `premerge_oid` for the published PR head as it stood
-before the merge. Merge the exact `base_oid`, resolve, validate, and create the merge
-commit locally without pushing it.
-
-Pin the result as `final_head`, require a clean worktree, and require both inputs to be
-its ancestors:
-
-```bash
-git merge-base --is-ancestor "$base_oid" "$final_head" || exit 1
-git merge-base --is-ancestor "$premerge_oid" "$final_head" || exit 1
-```
-
-Then run the mapped gate against **both** axes, not just the new base:
-
-```bash
-pnpm agent:quality-gate --base "$base_oid" --head HEAD --run
-pnpm agent:quality-gate --base "$premerge_oid" --head HEAD --run
-```
-
-`base_oid..final_head` shows what the branch adds to the new base. `premerge_oid..final_head`
-shows what the merge changed about the branch — the axis that catches a resolution which
-silently drops branch behaviour, since such a resolution looks clean against the new base.
-Prepare, verify, and post-verify a separate review bundle per axis. Only after both
-post-verifications pass, run the sequential suite as separate behaviour evidence, then push.
+The binding replacement is in [`pr-operating-card.md`](pr-operating-card.md)
+steps 3-4. The runtime-specific legacy steps below remain historical.
 
 For each review axis, compare its immutable base tree with the immutable final
 tree before any autoreview entrypoint runs. Treat the axis as runtime-sensitive
@@ -2976,12 +2960,12 @@ checks, so an external helper must leave no background writer behind.
 
 Autoreview answers whether the source bundle contains review findings. It does
 not prove CLI/API behavior, generated artifacts, deployment/runtime behavior,
-or a UI interaction. Keep the mapped quality gate and every applicable browser,
-generation, integration, and runtime check in the validation record. The final
-PR all-clear still comes from `pnpm pr:ready-state`, not autoreview.
+or a UI interaction. Keep every applicable direct author, browser, generation,
+integration, and runtime check in the validation record. The final PR all-clear
+still comes from `pnpm pr:ready-state`, not autoreview.
 
 To classify review depth and likely context-update requirements before or after
-the mapped gate, use:
+the direct author checks, use:
 
 ```bash
 pnpm agent:review-materiality
@@ -2990,9 +2974,9 @@ pnpm agent:review-materiality
 The command reports `trivial`, `standard`, or `full` materiality from changed
 path risk and diff size, plus whether the change likely needs AGENTS, README,
 runbook, checklist, or skill context updates. It is advisory and does not
-replace the applicable gate command from step 3 of the
-[PR operating card](pr-operating-card.md),
-`pnpm agent:autoreview`, or `pnpm pr:ready-state`.
+replace the applicable author checks from step 3 of the
+[PR operating card](pr-operating-card.md), `pnpm agent:closeout-review`, or
+`pnpm pr:ready-state`.
 
 To warm Turbo's local cache for the Turbo-backed package tasks mapped by the
 same gate without running deploy, Terraform, mutation, codegen, or install
@@ -3010,8 +2994,11 @@ Turbo commands with bounded parallelism too (`--parallel <n>`, default `2`, or
 concurrent logs do not interleave. The same dashboard `.next` serialization rule
 applies to prewarm.
 
-The Trunk pre-push hook delegates to this same path-aware gate with
-`--parallel 3 --skip-if-fresh --pre-push`. Independent ordinary commands can run
+## Dormant pre-push compatibility
+
+Before M5, the Trunk pre-push hook delegated to this path-aware gate with
+`--parallel 3 --skip-if-fresh --pre-push`. The retained diagnostic mode keeps
+the same behavior for rollback compatibility. Independent ordinary commands can run
 concurrently within the global capacity. An all-capacity command runs after the
 active pool drains. The hook reuses a recent successful manual gate run when
 the whole-run freshness key is unchanged and the recorded success is no older
@@ -3028,8 +3015,8 @@ script/lifecycle diff first, then set
 both the manual warm run and the hook) so a just-passed acknowledged manual gate
 can satisfy the `--skip-if-fresh` check.
 
-Hosted setup sets `agent.qualityGate.cloudPrePushRequireFresh=true` in the
-repository git config. A hosted pre-push with a fresh exact stamp exits through
+Before M5, hosted setup set `agent.qualityGate.cloudPrePushRequireFresh=true` in
+the repository git config. A hosted pre-push with a fresh exact stamp exits through
 the normal freshness path. A cold or invalid stamp exits with status 2 before
 scheduler registration, lock acquisition, or mapped work. Fetch `origin/main`,
 run `./scripts/agent-quality-gate.sh --run --parallel 3 --base origin/main` as
@@ -3038,8 +3025,8 @@ launcher, base, and parallelism match the hook's freshness key. A `pnpm`
 launcher adds material lifecycle environment values and cannot warm this exact
 hook stamp. This hook warm does not replace validation against the resolved PR
 base. A stacked PR must pass its resolved-base gate first, then warm the separate
-`origin/main` hook stamp. Local setup leaves this option unset, so a cold local
-pre-push still runs the mapped gate.
+`origin/main` hook stamp. Before M5, local setup left this option unset, so a
+cold local pre-push ran the mapped gate.
 
 Coordinator coalescing and retained-result reuse use the complete execution key
 described above, including HEAD. The leader recomputes it before execution and

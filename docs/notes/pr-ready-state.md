@@ -495,22 +495,20 @@ Field expectations:
    cycle count before five
    review-triggered patch cycles are complete. Pause for reclassification before
    starting a sixth.
-3. Before invoking the gate, ensure that no direct validation, dashboard server,
-   or browser suite outside the coordinator is active on the same machine.
-   Concurrent `--run` gates from other worktrees can continue through the
-   coordinator. They share weighted machine capacity. From invocation until
-   this gate exits, do not start uncoordinated work there. Use same-machine spare
-   workers only for read-only work. Run the gate or gates from operating-card
-   step 3. Local PRs and hosted non-fork PRs targeting `origin/main` run one
-   pass. Hosted fork and stacked PRs run the resolved-base pass and the separate
-   `origin/main` hook warm. Run validation outside the coordinator from a fully
-   hydrated checkout on another machine.
+3. Apply the direct author-check table from step 3 of the
+   [operating card](pr-operating-card.md) before the ready handoff. Re-run each
+   applicable check after a material fix changes its surface. Record every
+   result in the validation record as the card requires. Do not substitute the
+   legacy diagnostic gate for these checks.
+   Use the resolved PR base, not a fixed `origin/main`, for every diff-based
+   author check, including stacked PRs.
 4. For non-trivial behavioral, workflow, security, data-flow, or UI batches,
-   run `pnpm agent:closeout-review` as a structured source-review closeout at
-   the batch boundary rather than as an inner loop. Verify accepted findings
-   before editing and rerun focused checks plus the closeout if those fixes
-   change the batch. The handoff to the `review` skill, the base resolution, and
-   the no-`codex` branch live in
+   follow operating-card step 4 with the preflight-bound base. After a base
+   integration, review both immutable reconciliation axes. Run at the batch
+   boundary rather than as an inner loop. Verify accepted findings before
+   editing. Rerun applicable direct author checks and the closeout when a fix
+   changes the batch. The handoff to the `review` skill, base resolution, and
+   no-`codex` branch live in
    [`pr-operating-card.md`](pr-operating-card.md) step 4; keep behavioral and
    runtime verification in the validation record.
 5. Run the suggested invocation pair above: `pnpm --silent pr:feedback-state`

@@ -182,12 +182,13 @@ await test("generated issue follows the Agent Task body and label contract", () 
   assert.ok(spec.body.includes("#1341"));
   assert.ok(spec.body.includes("## Generated audit packet"));
   assert.ok(spec.body.includes("docs-garden:operator-runbooks:1-of-2"));
-  assert.ok(spec.body.includes("pnpm agent:quality-gate --run  # local"));
   assert.ok(
     spec.body.includes(
-      "./scripts/agent-quality-gate.sh --run --parallel 3 --base origin/main  # hosted hook warm",
+      "Apply the direct author checks in docs/notes/pr-operating-card.md step 3.",
     ),
   );
+  assert.ok(!spec.body.includes("agent:quality-gate"));
+  assert.ok(!spec.body.includes("hook warm"));
   assert.ok(!spec.body.includes("@docs-team"));
   assert.ok(spec.body.includes("@\u200Bdocs-team"));
   assert.deepEqual(spec.labels, [

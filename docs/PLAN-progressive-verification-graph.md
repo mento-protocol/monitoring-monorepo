@@ -3,7 +3,7 @@ title: Simple Verification System Plan
 status: active
 owner: eng
 canonical: false
-last_verified: 2026-09-01
+last_verified: 2026-09-03
 doc_type: plan
 scope: repo-wide
 review_interval_days: 180
@@ -275,8 +275,11 @@ command would need base resolution, cross-package routing, generated-file
 rules, timeouts, and cloud fallbacks. That design would recreate the current
 gate. A draft push must remain a fast way to start CI.
 
-Use this fixed trigger table. Invoke the commands directly. Do not add a
-repository-wide selector or quick wrapper.
+The complete current trigger table is in
+[step 3 of the PR operating card](notes/pr-operating-card.md#the-loop). The
+table below is a non-normative summary of common package and UI triggers.
+Invoke commands directly. Do not add a repository-wide selector or quick
+wrapper.
 
 | Change trigger                         | Required local checkpoint                                                                                                                                                  |
 | -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -284,8 +287,14 @@ repository-wide selector or quick wrapper.
 | Typed source in a package              | Run that package's `typecheck` command at the same checkpoint.                                                                                                             |
 | Behavior change in a package           | Run focused tests while editing as useful. Run that package's normal `test` command once before review handoff.                                                            |
 | Generated input or consumer            | Run the owning code generator as soon as the schema, configuration, ABI, query, entry point, or handler reachability is coherent. Check the generated diff.                |
-| Dashboard React or client source       | Run `pnpm dashboard:react-doctor:diff` after the changed UI is coherent and before review handoff.                                                                         |
+| Dashboard React or client source       | Run `REACT_DOCTOR_BASE_REF=<resolved-pr-base> pnpm --filter @mento-protocol/ui-dashboard react-doctor:diff` after the changed UI is coherent and before review handoff.    |
 | New or changed UI interaction or route | Run the documented build when the route, server, or build boundary changes. Verify the changed route in a browser. Check the console and exercise the changed interaction. |
+
+Inspect install-affecting changes before any package-manager command. When
+they change, install the candidate graph with
+`CI=true pnpm install --frozen-lockfile` before code generation and package
+checks. Keep the small exact trust-configuration contract rows in the operating
+card.
 
 Use the package's CI-aligned local test command. Do not assume that every
 package's generic `test` alias is unattended. For Governance Watchdog behavior
@@ -313,8 +322,9 @@ sequence:
    `pnpm --filter @mento-protocol/ui-dashboard typecheck`, and
    `pnpm --filter @mento-protocol/ui-dashboard test`.
 5. When the page is feature-complete, run
-   `pnpm dashboard:react-doctor:diff` against the resolved current pull request
-   base. Run `pnpm dashboard:build` for the new route with the documented
+   `REACT_DOCTOR_BASE_REF=<resolved-pr-base> pnpm --filter
+@mento-protocol/ui-dashboard react-doctor:diff`. Run `pnpm dashboard:build`
+   for the new route with the documented
    non-secret build environment. Follow the dashboard browser runbook for the
    changed route, console, interaction, and applicable auth states.
 6. Push at any point when shared CI feedback is useful. Complete all applicable
@@ -709,9 +719,9 @@ measured work. Do not make a full CI rewrite a prerequisite for local relief.
 
 ## Migration
 
-Each phase is independently reversible. The mandatory local gate remains
-enforced until a separately approved cutover. Required CI remains the merge
-authority throughout the migration.
+Each phase is independently reversible. The operator approved the M5 early
+local cutover on 2026-09-02. Required CI remains the merge authority throughout
+the migration.
 
 ### Phase 0: Inventory and measure
 
@@ -822,7 +832,7 @@ scheduler tests to the replacement for a scheduler that will be deleted.
 The second implementation pull request stops here. Issue #2125 does not add or
 run the no-skip audit. It changes no hook, ruleset, or local gate behavior.
 
-### Phase 3: Add the no-skip audit and shadow (#2126)
+### Phase 3: Add the no-skip audit (#2126)
 
 Add an opt-in protected-default-branch no-skip workflow with a distinct run and
 display name. Keep its run ID and immutable inputs as operational evidence. Do
@@ -865,9 +875,10 @@ The approved execution ceiling is 45 runner-minutes for one run and 450
 runner-minutes for the initial sample. Stop after a run exceeds 45 minutes.
 Do not start another run when it could exceed the cumulative ceiling.
 
-Record at least 10 distinct pull requests over at least 7 calendar days,
-subject to the approved spend ceiling. Multiple heads from one pull request do
-not increase the pull-request count. Use one of these evidence forms:
+After M5 cutover, issue #2128 records at least 10 distinct merged pull requests
+over at least 7 calendar days, subject to the approved spend ceiling. Multiple
+heads from one pull request do not increase the pull-request count. Use one of
+these evidence forms:
 
 - For a pull request without package-execution or evidence-instrument drift,
   record ordinary CI and the distinct no-skip audit for the same immutable
@@ -896,47 +907,48 @@ For every head, record:
   observed numerator and cohort denominator.
 - Any product failure, flake, cancellation, or infrastructure failure.
 
-Record a local gate result when it is available for the same SHA. Do not make
-cutover depend on collecting ignored per-worktree state from every PR.
+Record a legacy diagnostic result only when it is deliberately available for
+the same SHA. The post-cutover canary does not depend on ignored per-worktree
+state.
 
 Use the existing historical routing corpus to test every remaining conditional
 filter. Add negative fixtures for workflow weakening, deleted files, renamed
 files, unknown paths, skipped jobs, cancelled jobs, and missing aggregate
 inputs.
 
-Issue #2126 owns both the no-skip implementation and this evidence window. Its
-implementation pull request uses `Refs`, and the issue stays open until the
-10-PR, 7-day receipt passes.
+Issue #2126 owns the no-skip implementation and its archived incident evidence.
+Issue #2128 owns the post-cutover 10-PR, 7-day canary.
 
 ### Phase 4: Human-approved cutover (#2127)
 
 Use a separate change and explicit human approval because this phase removes a
-control that blocks the acting agent.
+control that blocks the acting agent. The operator granted that approval on
+2026-09-02 and moved the observation window after cutover.
 
 Before changing the local contract:
 
-1. Verify that the existing `CI / ci` and all other live required contexts stay
-   required.
-2. Prove the required results on the exact current head.
-3. Record the current ruleset JSON and the exact cutover revert commit. Apply
-   only the current-base requirement that this plan needs.
-4. Verify a canary pull request for normal code, control-plane code, a renamed
-   file, an unknown path, a failed job, a cancelled job, and a stale head.
-5. Verify two close `main` commits without cross-cancellation.
-6. Before producing the after manifest, extend the Phase 0 manifest generator
+1. Merge the M4 graph-pin repair and require green protected-main CI for its
+   exact merge commit.
+2. Verify that the existing `CI / ci` and all other live required contexts stay
+   required. Enable current-base protection without changing those contexts.
+3. Record the current ruleset JSON and the exact cutover revert commit.
+4. Before producing the after manifest, extend the Phase 0 manifest generator
    to count replacement-owned checker and test files, verification aliases, and
    every changed control-plane block. Accept a Trunk configuration with both
    legacy gate markers absent after full action removal. Continue to reject a
    partial or malformed legacy block. Add fixtures for the present, fully
    removed, and partial or malformed states.
 
+Issue #2128 observes normal code, control-plane code, renamed and unknown paths,
+failed and cancelled jobs, stale heads, and close `main` commits after cutover.
+
 Then remove the mandatory full gate from the local push path. Keep the staged
 formatter on pre-commit. Add no pre-push verification command. Add the fixed
 trigger table and required author checkpoints to the operating card and
 publication workflow. Invoke existing package commands directly. Update the
-quick commands, setup, Worktrunk hooks, Trunk hook, ship and babysit skills,
-package scripts, and all stale gate instructions in the same change. Keep the
-old command available as a diagnostic during the observation period.
+quick commands, setup, Worktrunk hooks, Trunk hook, ship and babysit skills, and
+all stale gate instructions in the same change. Keep the package aliases and
+old command available as diagnostics during the observation period.
 
 The retained diagnostic keeps its coordinator, process drains, and legacy lock.
 Inventory active worktrees before deletion. Update setup and worktree entry
@@ -986,10 +998,9 @@ a separate plan and evidence that the current filters cannot meet the target.
 
 ## Acceptance Evidence
 
-Do not cut over until every unlabelled pre-cutover requirement passes. Evaluate
-requirements marked **Post-cutover soak** during the #2127 and #2128 soak.
-Evaluate requirements marked **Deletion gate** immediately before the separate
-Issue #2128 deletion approval.
+The M5 early local cutover is active. Evaluate **Post-cutover soak** requirements
+during the #2128 canary. Evaluate **Deletion gate** requirements immediately
+before the separate issue #2128 deletion approval.
 
 ### Coverage
 
@@ -1002,9 +1013,9 @@ Issue #2128 deletion approval.
   `needs`, conditional jobs, and allowed skips.
 - The aggregate fails for failed, cancelled, missing, and disallowed skipped
   jobs.
-- No shadow head has a product failure found only by no-skip CI because
+- No canary head has a product failure found only by no-skip CI because
   path-gated CI omitted the failing job.
-- The shadow sample covers all pull-request risk classes.
+- The canary sample covers all pull-request risk classes.
 
 ### Trust and merge behavior
 
@@ -1024,8 +1035,9 @@ Issue #2128 deletion approval.
 
 ### Speed and reliability
 
-Use the same shadow sample of at least 10 distinct pull requests over at least 7
-calendar days for head-level measures unless a larger denominator is stated.
+Use the same #2128 post-cutover sample of at least 10 distinct merged pull
+requests over at least 7 calendar days for head-level measures unless a larger
+denominator is stated.
 
 - **Post-cutover soak:** shared local gate queue time is zero seconds. The staged
   formatter and selected author commands still have their own measured runtime.
@@ -1071,20 +1083,21 @@ calendar days for head-level measures unless a larger denominator is stated.
 The rollback uses repository history and the existing ruleset. It needs no
 service recovery.
 
-If the static CI aggregate is wrong before cutover, keep the current gate and
-fix the CI workflow.
+Roll back M5 on the first confirmed author-check mapping omission. Confirmation
+requires all of these facts: `/ship` handled the PR; its changed surface matched
+a table trigger; the PR validation record omitted that check or marked it
+inapplicable; required CI ran the corresponding safeguard; and the safeguard
+failed deterministically because of the PR. A CI-only safeguard failure is not
+automatically a mapping omission.
 
-If a false success appears after cutover but before legacy deletion:
+For a confirmed omission:
 
-1. Stop merges through the normal ruleset administration path.
-2. Verify or restore the prior required-check configuration from the recorded
-   ruleset JSON. The record must include `CI / ci`, Code Quality, all Sentry
-   suite requirements, Vercel, and Vercel Preview Comments.
-3. Revert the recorded cutover commit to restore the mandatory gate hook and
-   its legacy implementation.
-4. Add a regression fixture for the missed safeguard.
-5. Correct the inventory or static job.
-6. Repeat the shadow acceptance period for the affected risk class.
+1. Stop merge handoffs.
+2. Revert the recorded M5 cutover commit to restore pre-push verification.
+3. Keep required CI and strict current-base protection.
+4. Add the missed case to the author table.
+5. Resume the #2128 canary only after the repair reaches green protected
+   `main`.
 
 If the legacy implementation was already deleted:
 
@@ -1096,7 +1109,7 @@ If the legacy implementation was already deleted:
 4. Restore the prior ruleset configuration.
 5. Revert the cutover commit to re-enable the mandatory hook only after the
    runtime is available.
-6. Add the regression fixture and repeat the affected shadow period.
+6. Add the regression fixture and restart the affected canary window.
 
 Never restore a hook before its runtime. Never clear live coordinator state
 during rollback.

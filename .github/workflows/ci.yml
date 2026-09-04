@@ -765,8 +765,9 @@ jobs:
         # separate from the legacy routing parity suite below.
         run: node --test scripts/indexer-handler-invariant-contract.test.mjs
       - name: Legacy indexer routing parity suite
-        # This remaining suite checks only the legacy local gate's table and
-        # checklist router. The no-skip audit measures retained commands.
+        # This remaining suite checks only the optional legacy diagnostic's
+        # table and checklist router. The no-skip audit measures retained
+        # commands.
         if: ${{ !inputs.no_skip_audit }}
         run: node --test scripts/gate/routing-table/indexer-invariant-parity.test.mjs
       - name: Test with coverage
@@ -1222,8 +1223,8 @@ jobs:
         #   suites); the pin validator keeps that trust safe by rejecting a
         #   drifted command (e.g. an appended `&& <command>`) before it executes.
         #   check-sentry-suites-in-ci.test.mjs pins this ordering, because the
-        #   `sentry:*` aliases the local quality gate trusts are pinned by the
-        #   same validator.
+        #   `sentry:*` aliases the optional legacy diagnostic trusts are pinned
+        #   by the same validator.
         run: node scripts/check-agent-quality-gate-package-scripts.mjs
       # GitHub resolves $/ from the running commit; actionlint lacks support.
       # trunk-ignore(actionlint/action)
@@ -1254,8 +1255,7 @@ jobs:
         # extracted from the legacy Bash gate suite.
         run: bash scripts/bootstrap/agent-setup-contract.test.sh
       - name: Agent quality-gate routing regression suite
-        # Keep the mandatory legacy gate safe during the shadow period. The
-        # no-skip audit measures only commands retained after gate retirement.
+        # Optional legacy diagnostic regression; no-skip measures required CI.
         if: ${{ !inputs.no_skip_audit }}
         run: pnpm agent:quality-gate:test
       - name: Gate routing-table suite
@@ -1265,9 +1265,8 @@ jobs:
         # pairing lint, the path staleness check, the /bin/bash oracle for the
         # pattern compiler, the closed verb set against the engine, and the
         # `implementation_signature()` pin that keeps the freshness stamp honest.
-        # It belongs in the required `ci` sentinel path for the same reason the
-        # routing regression suite above does: the local pre-push gate is the
-        # thing a contributor can bypass, and a broken table fails nowhere else.
+        # Required CI is authoritative and must reject a broken diagnostic
+        # table even when no author invokes the optional local diagnostic.
         # It is not part of the retained no-skip target command set.
         if: ${{ !inputs.no_skip_audit }}
         run: pnpm gate:routing-table:test
@@ -1277,8 +1276,8 @@ jobs:
         # findings now feed the pr:feedback-state ledger. The pin asserts the
         # committed config exactly equals the canonical object in the suite, so
         # weakening it fails required CI until the pin is edited in the same PR.
-        # This runs in CI, not only in the local pre-push gate, because the
-        # local gate is the thing a config-weakening PR would skip.
+        # Required CI is authoritative because any local author procedure can
+        # be skipped.
         run: pnpm coderabbit:config:test
       - name: Terraform source-format target regression suite
         # Proves ignored operator tfvars stay outside the explicit format target
@@ -1429,8 +1428,9 @@ jobs:
         # credential-shaped fixtures still scan clean as whole text under
         # scripts/agent-autoreview-core.mjs, and that none of the four paths has
         # vanished. It is NOT a `sentry-*.test.mjs`, so the `sentry-suites` gate
-        # neither enumerates nor runs it; this step and the local quality gate
-        # are its two routes. The `rootScripts` filter is `scripts/**`, so the
+        # neither enumerates nor runs it; required CI is its authoritative
+        # route, and the optional legacy diagnostic is a second route. The
+        # `rootScripts` filter is `scripts/**`, so the
         # scanner, the four suites and the canary itself all admit this job —
         # the same recursive entry every other scripts/ suite here relies on,
         # rather than a new enumerated list to keep in sync.
@@ -1696,8 +1696,8 @@ jobs:
         # The gate above proves the suites ran; it cannot prove its own job still
         # exists, is unconditional, and still reaches the required `ci` context —
         # so this pins that, re-proves the one suite the gate does not run
-        # (sentry-provider-contract, via `pnpm tf:test`), and holds the local
-        # gate's `sentry:*` allowlist to its pins. It ran in the path-gated
+        # (sentry-provider-contract, via `pnpm tf:test`), and holds the optional
+        # diagnostic's `sentry:*` allowlist to its pins. It ran in the path-gated
         # `scripts` job until this PR, where a dashboard-only, indexer-only or
         # non-Markdown doc-asset diff skipped it entirely.
         run: node scripts/sentry/ci-wiring/check-sentry-suites-in-ci.test.mjs
