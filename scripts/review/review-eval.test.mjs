@@ -6332,7 +6332,7 @@ test("the freshness workflow watches the frozen input directories", () => {
   // renames or removes one has to run this workflow.
   assert.match(workflow, /^ {6}- package\.json$/m);
   // Publication relies on the root ignore rule to keep raw cells out of Git
-  // and autoreview bundles, so an ignore-only edit must run this suite too.
+  // and out of any review input, so an ignore-only edit must run this suite too.
   assert.match(workflow, /^ {6}- \.gitignore$/m);
   const aliases = [
     ...new Set(
