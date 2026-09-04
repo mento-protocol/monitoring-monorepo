@@ -183,6 +183,44 @@ export async function removeIssueLabels(options, issue, labels) {
   );
 }
 
+const REPO_LABEL_PAGE_SIZE = 100;
+// A repository holds far fewer labels than this bound allows. A listing that
+// runs past it is a paging bug, and an incomplete list must not read as a
+// complete one.
+export const MAX_REPO_LABEL_PAGES = 20;
+
+/**
+ * Every label name the repository defines.
+ *
+ * `gh issue edit --add-label` fails on a label the repository does not define.
+ * For `groom` that failure lands after a write has been attempted, where the
+ * outcome is ambiguous and the per-issue mutex stays at LOCK. Reading the
+ * defined set first turns it into a refusal instead.
+ */
+export async function listRepoLabelNames(options, { json = ghJson } = {}) {
+  const names = new Set();
+  for (let page = 1; ; page += 1) {
+    if (page > MAX_REPO_LABEL_PAGES) {
+      throw new Error(
+        `label listing for ${options.repo} exceeded ${MAX_REPO_LABEL_PAGES} pages; refusing to treat an incomplete list as complete`,
+      );
+    }
+    const labels = await json([
+      "api",
+      `repos/${options.repo}/labels?per_page=${REPO_LABEL_PAGE_SIZE}&page=${page}`,
+    ]);
+    if (!Array.isArray(labels)) {
+      throw new Error(`unexpected non-array label listing for ${options.repo}`);
+    }
+    for (const label of labels) {
+      if (typeof label?.name === "string" && label.name.length > 0) {
+        names.add(label.name);
+      }
+    }
+    if (labels.length < REPO_LABEL_PAGE_SIZE) return names;
+  }
+}
+
 export async function commentOnIssue(options, issue, body) {
   if (!options.comment) return;
   await runGh(

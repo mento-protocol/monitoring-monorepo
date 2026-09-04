@@ -72,8 +72,8 @@ feedback-runtime pins.
   `deploy/deploy-indexer-verify{,-analysis}{,.test}.mjs` and
   `deploy/deploy-indexer-verify-status-identity.mjs` share an any-depth arm;
   both run. `pr/agent-issue-board{,.test}.mjs` and
-  `pr/issue-board-{backfill,cli,commands,lock,ownership,projects,release,state,sync,sync-lock,transactions,transport}.mjs`
-  route `pnpm issue:board:test`; CI reruns it after failures (ADR 0082
+  `pr/issue-board-{backfill,cli,commands,groom,lock,ownership,projects,release,state,sync{,-lock},transactions,transport}.mjs`
+  route `pnpm issue:board:test`; CI reruns it on failure (ADR 0082
   confinement).
   `repo-health/check-guardrail-prose{,.test}.mjs` and
   `repo-health/guardrail-prose.json` route the guardrail suite. `ci.yml`,

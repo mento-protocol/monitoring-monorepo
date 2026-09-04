@@ -8,9 +8,25 @@
 
 import { createHash } from "node:crypto";
 
-import { ISSUE_STATE_LABELS } from "../lib/gh-issue-lifecycle.mjs";
+import {
+  AGENT_ACTIVE_LABEL_DEFINITION,
+  IN_PR_LABEL_DEFINITION,
+  ISSUE_STATE_LABELS,
+} from "../lib/gh-issue-lifecycle.mjs";
 
 export { ISSUE_STATE_LABELS };
+
+/**
+ * The two queue-state labels that mean a live claim owns the issue.
+ *
+ * `agent-ready` and `needs-grooming` describe unowned work; these two say a
+ * session holds it. Helpers that must not touch owned work read the pair from
+ * here rather than restating it.
+ */
+export const ISSUE_OWNED_STATE_LABELS = Object.freeze([
+  AGENT_ACTIVE_LABEL_DEFINITION.name,
+  IN_PR_LABEL_DEFINITION.name,
+]);
 
 export const DEFAULT_REPO = "mento-protocol/monitoring-monorepo";
 export const DEFAULT_PROJECT_OWNER = "mento-protocol";
@@ -261,13 +277,36 @@ function labelsWithPrefix(issue, prefix) {
   return [...labelNames(issue)].filter((label) => label.startsWith(prefix));
 }
 
-function hasSweepRouting(issue) {
-  const riskLabels = labelsWithPrefix(issue, "risk:");
+function namesWithPrefix(labels, prefix) {
+  return [...labels].filter((label) => label.startsWith(prefix));
+}
+
+function hasSweepRoutingNames(labels) {
+  const riskLabels = namesWithPrefix(labels, "risk:");
   return (
     riskLabels.length === 1 &&
     riskLabels[0] === "risk:low" &&
-    labelsWithPrefix(issue, "pkg:").length === 1
+    namesWithPrefix(labels, "pkg:").length === 1
   );
+}
+
+function hasSweepRouting(issue) {
+  return hasSweepRoutingNames(labelNames(issue));
+}
+
+/**
+ * The backlog-sweep label predicate over label names alone.
+ *
+ * `hasSweepClaimAttributes` adds the Project and blocker conditions a claim
+ * also needs. This is the label half on its own, so a caller holding a
+ * prospective set — the labels a write is about to produce — can ask whether
+ * that write would leave the issue sweep-eligible. `agent-ready` belongs to the
+ * predicate because eligibility is the conjunction: which label completes it
+ * depends on what the issue already carries.
+ */
+export function satisfiesSweepLabelEligibility(labels) {
+  const names = labels instanceof Set ? labels : new Set(labels);
+  return names.has("agent-ready") && hasSweepRoutingNames(names);
 }
 
 /**

@@ -193,7 +193,8 @@ Claim, recovery, compensation, review, release, and backfill pass the capability
 through every owner-field write. Sync receives a capability with an empty field
 allowlist. It does not pass the capability to Project membership writes.
 Project membership writes therefore remain outside this owner-field capability.
-Project Status remains read-only.
+Project Status remains read-only. Grooming receives a capability with an empty
+field allowlist and writes no Project field.
 
 A repository-wide text inventory scans every tracked and nonignored untracked
 file for each complete protected operation name. Each occurrence must be in the
@@ -429,6 +430,34 @@ them as empty. It rejects a mismatch that the snapshot shows and preserves
 Status. It does not roll back a direct external write because that could erase
 external state. It reads at most 100 comment pages or 10,000 comments and fails
 closed on incomplete history.
+
+Grooming routing writes take the same mutex. `issue:groom` writes `pkg:*`,
+`risk:*`, and `kind:*` labels on one explicit issue. It refuses a queue-state
+label and every other label class, and refuses an issue the in-mutex read
+finds already owned (`agent-active` or `in-pr`) — a claim can win the mutex
+between the sweep's roster snapshot and this call, and the read is the first
+point this command can see that. It refuses a label the repository does not
+define earlier still, before it takes the mutex: `gh issue edit` fails on an
+unknown label only after the write is attempted, where this module keeps
+`LOCK`, so one bounded read of the repository's labels keeps that failure away
+from the mutex entirely. It re-reads the issue's labels inside the
+serialized section and refuses the write when the resulting set would satisfy
+the backlog-sweep label predicate: `agent-ready`, exactly one `risk:*` equal to
+`risk:low`, and exactly one `pkg:*`. The mutex serializes helpers, not people,
+so the helper re-reads the labels after the write, and treats any addition
+missing from that read as an ambiguous outcome rather than a success — a
+concurrent actor can remove this call's own addition in the same window. When a
+label landed in between and the issue is now sweep-eligible, the helper asks
+whether its own write caused that. When removing exactly the labels it added
+would clear the predicate, it removes them and exits nonzero. When the
+predicate holds without them the write was not the cause: the helper keeps the
+labels and exits with a distinct code, because undoing a correct label would
+leave the issue eligible anyway and report the opposite. A removal that fails,
+or that leaves the issue eligible, retains `LOCK`; the message names the labels
+to remove by hand only when they are still on the issue, and points at the
+current label set instead when the predicate holds through a different label.
+Every path before the write releases the mutex, so a failed read cannot strand
+a `LOCK` that only ref surgery clears.
 
 An operator recovers a stale lock only after proving that the original helper
 cannot resume. The operator terminates its session or process, or revokes its

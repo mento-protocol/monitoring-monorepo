@@ -373,6 +373,7 @@ const ROOT_TOOLING_SCRIPT_COMMANDS = [
   "node scripts/supply-chain/version-skew-check.test.mjs",
   "node scripts/supply-chain/override-prune-report.test.mjs",
   "node scripts/pr/check-adr-reminder.test.mjs",
+  "node --test scripts/pr/closeout-review.test.mjs",
   "node scripts/context/docs-index.test.mjs",
   "node scripts/docs/docs-audit.test.mjs",
   "node scripts/docs/docs-garden-issue.test.mjs",

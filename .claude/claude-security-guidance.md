@@ -6,7 +6,7 @@ plugin must be installed/enabled by the developer; this repo does not declare a
 user-scoped plugin installation. Regex-enforceable patterns live in
 `.claude/security-patterns.json`; canonical workflow detail lives in package
 instructions and PR checklists. These rules supplement, but do not replace,
-`/security-review`, autoreview, tests, or normal PR gates.
+`/security-review`, the closeout review, tests, or normal PR gates.
 
 ## Secrets and credentials
 

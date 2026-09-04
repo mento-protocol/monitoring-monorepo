@@ -521,6 +521,7 @@ export const AGENT_MODULE_ARMS = [
       "scripts/pr/issue-board-backfill.mjs",
       "scripts/pr/issue-board-cli.mjs",
       "scripts/pr/issue-board-commands.mjs",
+      "scripts/pr/issue-board-groom.mjs",
       "scripts/pr/issue-board-lock.mjs",
       "scripts/pr/issue-board-ownership.mjs",
       "scripts/pr/issue-board-projects.mjs",
@@ -533,7 +534,7 @@ export const AGENT_MODULE_ARMS = [
     ],
     effects: [
       {
-        why: "agent-issue-board.mjs is the entry point over twelve layers (cli, transport, state, projects, ownership snapshots, backfill, persistent issue lock, claim transactions, release transactions, commands, sync lock tracking, sync). The one suite covers the state machine and transaction seams through the entry's re-exports, so every layer routes to it.",
+        why: "agent-issue-board.mjs is the entry point over thirteen layers (cli, transport, state, projects, ownership snapshots, backfill, persistent issue lock, claim transactions, release transactions, grooming routing writes, commands, sync lock tracking, sync). The one suite covers the state machine and transaction seams through the entry's re-exports, so every layer routes to it.",
         command: "pnpm issue:board:test",
         reason: "agent issue board helper changed",
       },

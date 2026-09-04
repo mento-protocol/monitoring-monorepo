@@ -408,8 +408,8 @@ merges. After it succeeds, use the normal `ship` workflow. Stage only
 `docs/evals/review-skill-ledger.jsonl` and the selected detail directory. Give
 the workflow `$PR_BODY` as the PR description. The scoped `.gitignore` rule
 keeps each run's `cells/` resume cache, raw model transcripts, and tool output
-out of Git and autoreview bundles. Scored `result-*.json` evidence remains in
-the detail directory above `cells/` and stays eligible for the commit. There is
+out of Git and out of any review input. Scored `result-*.json` evidence remains
+in the detail directory above `cells/` and stays eligible for the commit. There is
 no auto-merge. A human reads the report and approves.
 
 A run that fails publishes the same way. Its `status: failed` row is already in
@@ -942,6 +942,17 @@ not evidence that the configuration still works. The ledger is. If
 `status: "complete"` in the last 120 days, treat the operating point as
 unverified: a failed run leaves a `kind: "full"` trace row, and that row
 records that the harness tried, not that the pairing still scores.
+
+Two paired screens run on 2026-09-02 asked whether adding the repo's own local
+review adapter to that pairing found anything the pairing missed. Over PRs
+1990, 1995 and 1999, the incumbent flow and the flow carrying the extra pass
+scored 14 against 14 and 13 against 13 of 22 known defects, and 5 against 5 and
+4 against 4 of the P1 subset. The adapter's own pass returned 1, 0 and 1
+findings, none of them new; on PR 1995 it reported the patch correct while five
+known defects went unfound. On this evidence issue 2239 drops that adapter from
+the operating flow: the two-model operating point above is what carries the
+recall. The adapter and its runtime are still in the tree at this commit; a
+later change in that issue's stack deletes them.
 
 ## What this evaluation cannot tell you
 
