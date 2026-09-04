@@ -218,9 +218,9 @@ scripts/indexer-handler-invariant-contract.test.mjs` in the `indexer` job and
 both steps so neither can leave CI unnoticed. Changing a registration is a
 `ci.yml` edit that the constant must follow.
 [ADR 0086](0086-autoreview-removal-thin-two-model-review.md) has since deleted the
-autoreview source the owner and schema assertions compared against, so the
-second suite checks one copy of the family data instead of two; the suite and
-its audit step stay.
+autoreview source the owner and schema assertions compared against, so
+`indexer-handler-invariant-contract.test.mjs` checks one copy of the family data
+instead of two; that suite and its audit step stay.
 The no-skip audit runs both. It excludes only the four legacy Bash,
 routing-table, and routing parity steps. The routing-table suites test the
 legacy selector. The retained generated-output and workflow safeguards execute
