@@ -47,6 +47,8 @@ calendar data, thresholds, and shared ABIs.
 Run the direct package checks from step 3 of the
 [PR operating card](../docs/notes/pr-operating-card.md). Also run
 `pnpm --filter @mento-protocol/config build` before a direct consumer check so
-the consumer loads current `dist/` output. Required CI owns coverage, Knip,
-downstream consumer, dashboard bundle-size, and conditional indexer-mirror
+the consumer loads current `dist/` output. Apply the dashboard bundle-input row
+in step 3 to every `shared-config/**` change. Run its shared-config build,
+dashboard build, and dashboard size-limit checks before review. Required CI
+owns coverage, Knip, downstream consumer, and conditional indexer-mirror
 coverage.

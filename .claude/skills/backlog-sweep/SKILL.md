@@ -549,21 +549,11 @@ Then spawn one worker subagent per issue. Give each a brief containing:
   still running has no one left to record the result. A failed required check
   blocks the ready handoff as the operating card specifies.
 
-- **The closeout:** `pnpm agent:closeout-review`, then hand its printed report
-  path to the `review` skill. Exit 1 means the report carries findings. Exit 2
-  means the closeout failed and there is no review to hand over: the target
-  moved, codex failed or timed out, the report came back empty, or the tool
-  never started. Block on a 2 and report the reason the script printed. Prepend
-  the `codex` CLI's install directory to `PATH` — a worker subagent does not
-  always inherit the interactive shell's `PATH`. Two causes fall back instead of
-  blocking: with no `codex` on PATH, run the `review` skill alone and disclose
-  the single-source coverage; inside an active Codex session the script refuses,
-  because nested `codex exec` is unavailable.
-  [`pr-operating-card.md`](../../../docs/notes/pr-operating-card.md) step 4 owns
-  the flow — this skill defers to it rather than carrying a second copy.
-  Address the real findings; an unexplained strengthening of a validation claim
-  is itself a finding, and testing those claims is the worker's own job, not
-  the reviewer's.
+- **The closeout:** Run `pnpm agent:closeout-review --base
+<base-remote>/<baseRefName>` with the preflight-bound base, then give its
+  report to the `review` skill. For a base integration, use both axes from card
+  step 4. That step owns exit handling, fallback, findings, and validation
+  claims.
 - **The ship:** full repo PR template, all four sections, **ready for review,
   never a draft**. A draft disables CodeRabbit auto-review and the PR
   description check, so it is skipping review rather than staging it. Then

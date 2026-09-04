@@ -47,17 +47,10 @@ bootstrap; setup has a separate [trust boundary](../../../docs/notes/worktree-an
   result in `## Validation`. Reapply affected rows after a material fix, base
   integration, or formatter change during commit. Pre-push runs no repository
   verification.
-  Then run `pnpm agent:closeout-review --base <base-remote>/<baseRefName>` for
-  non-trivial behavioural, workflow, security, data-flow, infrastructure, or UI
-  changes. Use the base that preflight bound, and hand the printed report path
-  to the `review` skill. Exit 1 means the report carries
-  findings. Exit 2 means the closeout failed and there is no usable review: the
-  target moved, codex failed or timed out, the report came back empty, or the
-  tool never started. Block on a 2 and report the reason the script printed.
-  With no `codex` on PATH, skip the script and run the `review` skill alone.
-  Disclose that single-source coverage in `## Validation`. Inside an active
-  Codex session, run the closeout from a Claude session or an operator shell.
-  Card step 4 owns the flow.
+  For a non-trivial change, run `pnpm agent:closeout-review --base
+<base-remote>/<baseRefName>` with the preflight-bound base. Hand its report to
+  the `review` skill. Card step 4 owns base-integration axes, exit handling, and
+  the limited single-source fallback.
 - **PRs open ready for review.** Drafts suppress the automated AI reviews this
   workflow depends on.
 - **`scripts/pr/check-pr-description.mjs` enforces `## The Problem` then

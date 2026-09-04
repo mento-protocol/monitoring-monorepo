@@ -124,11 +124,17 @@ If root `package.json` changed, first run
    Record an unavailable tool as `not run`. Required CI remains merge authority and owns routine coverage and Knip, broad dependency and supply-chain audits, full-browser suites, and legacy-gate self-tests. A table row or triggered checklist can require a focused policy or configuration check.
 
    Apply only the rows affected by a material fix before publishing the new
-   head. Apply the table again after base integration because conflict
-   resolution creates a new tree. Do not run the table on every commit or
-   push. Pre-commit keeps staged formatting only. Pre-push starts no repository
-   check, fetch, lock, or wait. A manual push can omit author checks. It cannot
-   omit required CI.
+   head. Before a base integration, pin the fetched base as `base_oid` and the
+   existing branch head as `prior_head_oid`. Merge the exact `base_oid`. After
+   the resolution is committed, pin `final_head`, require a clean tree, and
+   require both pinned inputs to be ancestors of it. Derive changed paths for
+   both `base_oid..final_head` and `prior_head_oid..final_head`. Apply the union
+   of the author-check rows selected by those ranges to `final_head`; record
+   both axes that selected a check, and run a shared check once. Conflict
+   resolution creates a new tree, so earlier results do not cover it. Do not
+   run the table on every commit or push. Pre-commit keeps staged formatting
+   only. Pre-push starts no repository check, fetch, lock, or wait. A manual
+   push can omit author checks. It cannot omit required CI.
 
    If pre-commit changes a file, stop before push. Apply its author-check rows
    and step 4 to the committed tree. Do not publish unchecked formatter changes.
@@ -148,7 +154,7 @@ If root `package.json` changed, first run
    command output behind a claim, so it cannot see the claims to test. Do it
    where the claims and their evidence are both in hand.
 
-   Then run the second model over the diff:
+   Without a base integration, run the second model over the branch diff:
 
    ```bash
    pnpm agent:closeout-review --base <base-remote>/<baseRefName>
@@ -156,6 +162,21 @@ If root `package.json` changed, first run
 
    Pass the base that preflight bound. Do not let the command infer a different
    default branch for a stacked or not-yet-open PR.
+
+   After a base integration, review both immutable reconciliation axes against
+   the same clean `final_head`:
+
+   ```bash
+   pnpm agent:closeout-review --base "$base_oid"
+   pnpm agent:closeout-review --base "$prior_head_oid"
+   ```
+
+   The current-base axis shows what the branch adds to the integrated base. The
+   prior-head axis shows what the integration changed about the branch and
+   catches a conflict resolution that drops branch behavior. Hand both complete
+   reports to the `review` skill. A finding or failed closeout on either axis
+   blocks the handoff. After a review fix, rerun the author-check union and both
+   closeout axes against the new final head.
 
    It prints `report: <path>` as its last line and exits 0 for a clean report,
    1 when the report carries findings, and 2 when the closeout failed — the
@@ -189,10 +210,10 @@ If root `package.json` changed, first run
    `codex` configuration and can read the operator's `HOME`: it is not an
    isolated runtime.
 
-   Then invoke the `review` skill on the same diff and pass it four
+   Then invoke the `review` skill on each reviewed diff and pass it four
    instructions: the second-model pass already ran, so do not run the skill's
-   own second-model tooling; read the whole report file at `<path>` rather
-   than skimming it; the report covers merge base `<sha>` and head `<sha>`
+   own second-model tooling; read each whole report file at `<path>` rather
+   than skimming it; each report covers merge base `<sha>` and head `<sha>`
    (dirty: `<flag>`, `target_fingerprint: <sha256>`), so exclude it if that is
    not the pinned target — on a dirty tree the fingerprint, not the head sha,
    is what names the reviewed bytes; verify every claim against the code,

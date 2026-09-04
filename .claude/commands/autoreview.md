@@ -6,16 +6,16 @@ argument-hint: "[additional agent:closeout-review options]"
 # Auto Review
 
 Resolve the base in repository preflight. Freeze the request, owner, changed
-files, and non-test changed-line count. Then run:
+files, and non-test changed-line count. Without a base integration, run:
 
 ```bash
 pnpm agent:closeout-review --base <base-remote>/<baseRefName> $ARGUMENTS
 ```
 
-Do not infer another base for a stacked or not-yet-open PR. Read the complete
-report and hand it to the `review` skill for the verifier pass over the same
-target. [Operating-card step 4](../../docs/notes/pr-operating-card.md) owns the
-target, exit, trust, validation-claim, fallback, and handoff rules.
+Do not infer another base for a stacked or not-yet-open PR. After a base
+integration, use both immutable axes from
+[operating-card step 4](../../docs/notes/pr-operating-card.md). Read every report
+and hand it to the `review` skill. That step owns the remaining rules.
 
 Verify each accepted finding. After a fix, rerun its direct author checks and
 the closeout. Source review does not prove tests, browser behavior, generated

@@ -2812,37 +2812,10 @@ call. Any error or drift stops the workflow and invalidates the result. Any
 refetch, including a conflict-triggered base refresh, restarts this preflight and
 refreshes both pins before another adapter call.
 
-### The two review axes
+### Retired two-axis autoreview execution
 
-Superseded: [`pr-operating-card.md`](pr-operating-card.md) step 4 owns the
-closeout review. The autoreview sections below describe machinery the removal
-PR retires; read them as history, not instruction.
-
-A conflict repair is reviewed against **two** axes, because either alone can miss a
-regression the other catches. Pin both inputs as immutable commit IDs before merging:
-`base_oid` for the fetched base and `premerge_oid` for the published PR head as it stood
-before the merge. Merge the exact `base_oid`, resolve, validate, and create the merge
-commit locally without pushing it.
-
-Pin the result as `final_head`, require a clean worktree, and require both inputs to be
-its ancestors:
-
-```bash
-git merge-base --is-ancestor "$base_oid" "$final_head" || exit 1
-git merge-base --is-ancestor "$premerge_oid" "$final_head" || exit 1
-```
-
-Then derive changed paths for both `base_oid..final_head` and
-`premerge_oid..final_head`. Apply every direct author-check row selected by
-either axis to `final_head`; do not invoke the legacy gate. Record each axis
-that selected a check. Run a shared check once because both axes bind to the
-same final tree.
-
-`base_oid..final_head` shows what the branch adds to the new base. `premerge_oid..final_head`
-shows what the merge changed about the branch — the axis that catches a resolution which
-silently drops branch behaviour, since such a resolution looks clean against the new base.
-Prepare, verify, and post-verify a separate review bundle per axis. Only after both
-post-verifications pass, run the sequential suite as separate behaviour evidence, then push.
+The binding replacement is in [`pr-operating-card.md`](pr-operating-card.md)
+steps 3-4. The runtime-specific legacy steps below remain historical.
 
 For each review axis, compare its immutable base tree with the immutable final
 tree before any autoreview entrypoint runs. Treat the axis as runtime-sensitive

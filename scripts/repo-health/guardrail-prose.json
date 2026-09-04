@@ -43,6 +43,7 @@
     "| `terraform.stacks.json` | Run `pnpm tf:test`. |",
     "| New top-level package/service root with `AGENTS.md` or `package.json`, new workspace package registration, new Terraform stack registration, or new GitHub Actions workflow file | Run `pnpm adr:check --base <resolved-pr-base> --include-untracked`. |",
     "Use the resolved PR base, not a fixed `origin/main`, for every diff-based author check, including stacked PRs.",
+    "Derive changed paths for both `base_oid..final_head` and `prior_head_oid..final_head`. Apply the union of the author-check rows selected by those ranges to `final_head`;",
     "| Root tooling, control plane, standalone service, or alert delivery/rule input | Run the focused existing contract named by the nearest scoped `AGENTS.md`. Do not add a root selector. For `alerts/rules/**`, run `pnpm alerts:rules:lint`. For `alerts/infra/onchain-event-listeners/**` or `alerts/infra/channels/**`, run the alerts-onchain-event-handler package lint, typecheck, and test. For its Safe ABI, event-hash generator, or event-hash output, run its `build:event-hashes` script and inspect the generated JSON diff. Run `node --check` on each surviving changed `governance-watchdog/infra/quicknode-filter-functions/*.js` file. |",
     "Record each applicable result in the PR's `## Validation` section as `passed`, `failed`, or `not run: <reason>`.",
     "Pre-push starts no repository check, fetch, lock, or wait.",
@@ -82,7 +83,6 @@
   ],
   "docs/notes/agent-quality-gate-mechanics.md": [
     "This mapping describes the optional retained diagnostic. Normal author work follows the matching direct checks in step 3 of the [PR operating card](pr-operating-card.md) and does not invoke the gate.",
-    "The [PR operating card](pr-operating-card.md#the-loop) owns normal direct author checks and closeout sequencing.",
-    "Apply every direct author-check row selected by either axis to `final_head`; do not invoke the legacy gate."
+    "The [PR operating card](pr-operating-card.md#the-loop) owns normal direct author checks and closeout sequencing."
   ]
 }

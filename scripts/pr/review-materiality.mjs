@@ -327,7 +327,8 @@ function classifyBySize(fileCount, lineChanges) {
  * two-model closeout is not a closeout.
  */
 const VERIFIER_HANDOFF =
-  "Hand that report to the review skill for the verifier pass; " +
+  "After a base integration, use both immutable axes from operating-card step 4. " +
+  "Hand each report to the review skill for the verifier pass; " +
   "with no codex on PATH, run the review skill alone and say so in ## Validation.";
 
 function recommendedReview(tier) {
@@ -341,14 +342,14 @@ function recommendedReview(tier) {
   if (tier === "standard") {
     return [
       "Run the applicable direct author checks from docs/notes/pr-operating-card.md step 3.",
-      "Run pnpm agent:closeout-review before pushing.",
+      "Run pnpm agent:closeout-review --base <base-remote>/<baseRefName> before pushing.",
       VERIFIER_HANDOFF,
     ];
   }
 
   return [
     "Run the applicable direct author checks from docs/notes/pr-operating-card.md step 3.",
-    "Run pnpm agent:closeout-review before pushing.",
+    "Run pnpm agent:closeout-review --base <base-remote>/<baseRefName> before pushing.",
     VERIFIER_HANDOFF,
     "Identify every applicable checklist from the changed surfaces and scoped instructions, then audit sibling surfaces before the next push.",
   ];

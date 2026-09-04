@@ -33,16 +33,21 @@ const REQUIRED_WHOLE_FILE_PATHS = new Set(
     " ",
   ),
 );
-const WHOLE_FILE_PATHS = new Set([
-  ...OPTIONAL_WHOLE_FILE_PATHS,
-  ...REQUIRED_WHOLE_FILE_PATHS,
-]);
+const REQUIRED_REPLACEMENT_WHOLE_FILE_PATHS = new Set(
+  ".agents/roles/standards-enforcer.md .agents/roles/verifier.md .agents/skills/ship/SKILL.md .claude/commands/autoreview.md .claude/skills/ship/SKILL.md .trunk/hooks/pre-commit .trunk/trunk.yaml docs/notes/pr-operating-card.md scripts/bootstrap/agent-setup-contract.test.sh scripts/docs/check-verification-redesign-evidence-source-patch.test.mjs scripts/docs/check-verification-redesign-evidence.mjs scripts/docs/check-verification-redesign-evidence.test.mjs scripts/pr/closeout-review-exec.mjs scripts/pr/closeout-review-git.mjs scripts/pr/closeout-review.mjs scripts/pr/closeout-review.test.mjs scripts/repo-health/check-guardrail-prose.mjs scripts/repo-health/check-guardrail-prose.test.mjs scripts/repo-health/guardrail-prose.json".split(
+    " ",
+  ),
+);
 const SCOPED_REFERENCE_PATTERN =
   /^(?:(?:\.agents\/skills\/backlog-sweep\/SKILL\.md|\.claude\/skills\/backlog-sweep\/SKILL\.md|docs\/adr\/0077-operator-triggered-backlog-sweep\.md|docs\/notes\/backlog-sweep\.md):.*run\.lock|docs\/adr\/(?:0064-scripts-module-directories|0073-guardrail-prose-pinned-in-ci)\.md:.*\b(?:lockfile-scope|arms-packages|pins\.test|routing-table\.test|engine\.test|arms-scripts|arms-agent-modules)\.mjs\b|scripts\/sentry\/ci-wiring\/check-sentry-suites-in-ci-gate-probe\.mjs:.*\bfacts\.mjs\b|(?:\.agents\/roles\/verifier\.md|(?:\.agents|\.claude)\/skills\/backlog-sweep\/SKILL\.md|docs\/notes\/(?:backlog-sweep|pr-ready-state)\.md|docs\/pr-checklists\/review-prompt-exclusions\.md):.*--run(?!-)|docs\/notes\/pr-operating-card\.md:.*--(?:run|base)(?!-)|scripts\/pr\/check-adr-reminder\.mjs:.*(?:\bgate.*--(?:head|changed-paths-file)(?!-)|--(?:head|changed-paths-file)(?!-).*\bgate)|scripts\/agent-autoreview\.sh:.*\bgate_stat\b|(?!(?:scripts\/sentry\/ci-wiring\/check-sentry-suites-in-ci-gate-job\.test\.mjs|scripts\/sentry\/gate\/sentry-suite-gate-integrity\.mjs):)[^:]+:.*\bGATE_[A-Z0-9_]+)/u;
 const EXCLUDED_REFERENCE_PATH =
   /^(?:ui-dashboard\/scripts\/(?:arkham-smoke-test\.mjs|intel-marathon\/tier1-bulk-enrich\.mjs)|indexer-envio\/\.cursor\/rules\/subgraph-migration\.mdc)$/u;
 const REFERENCE_PATTERN =
   /agent[:-](?:quality-gate|prewarm)|\bagent\.qualityGate(?:\.|\b)|gate:routing-table:test|scripts\/gate\/|(?:^|["'`(])(?:\.\.?\/)*gate\/|\$[^"'\s]*\\?\/gate(?:\\?\/|["':])|["']gate["']\s*,\s*["'][^"']+\.(?:c|mjs|sh)["']|\.terraform-agent-gate(?:\/|\b)|skip-if-fresh|--(?:allow-package-script-changes|full-local-tests|lock-wait|no-lock|command-timeout|command-not-started)(?!-)|\b(?:AGENT_(?:QUALITY|GATE|PREWARM)|AGENTQG|QUALITY_GATE)_[A-Z0-9_]+|\bAGENT_TURBO_SHARED_CACHE\b|\bagentqg[:-]|inheritGateMarkerStdio|mapped-command-process-identity\.mjs|\bdarwin-process-(?:identity|lineage)[a-z0-9._-]*|\b(?:portable-marker-v1|request-marker-empty-v1|darwin-coherent-lineage-v2|darwin-unique-lineage-v1|coordinator-owner-v1)\b|\btrunk-check-once(?:\.test)?\.sh/i;
+const REPLACEMENT_REFERENCE_PATTERN =
+  /agent:closeout-review|(?:direct )?(?:author|package) checks?|author[- ](?:check(?: table| rows?| contract| mapping| triggers?)|checkpoint)|PR operating card|optional legacy (?:gate|diagnostic)|Required CI (?:runs|owns|remains)|pre-(?:commit hook|push verification)|code-generation variant|non-mainnet variants first|staged formatting on pre-commit/i;
+const REPLACEMENT_ALIAS_PATTERN =
+  /^\s*"(?:agent:closeout-review(?::test)?|verification:[^"]+)"\s*:/u;
 const matchesReference = (p, line) =>
   REFERENCE_PATTERN.test(line) ||
   SCOPED_REFERENCE_PATTERN.test(`${p}:${line}`) ||
@@ -153,18 +158,26 @@ const nlines = (s) => (s ? s.split("\n").length - +s.endsWith("\n") : 0);
 function surfaceFor(path, wholeFile) {
   if (path.startsWith(".trunk/hooks/")) return "hook";
   if (/\.md$/u.test(path) || path.endsWith("AGENTS.md")) return "instruction";
+  if (/\.ya?ml$/u.test(path)) return "yaml-or-inline-shell";
+  if (path === "scripts/repo-health/guardrail-prose.json")
+    return "configuration-reference";
   if (wholeFile)
     return /\.test\.[^/]+$/u.test(path) ? "test" : "implementation";
   if (path === "package.json") return "alias";
-  if (/\.ya?ml$/u.test(path)) return "yaml-or-inline-shell";
   if (/\.sh$/u.test(path)) return "shell-reference";
   return "configuration-reference";
 }
-function countReferenceLines(path, content) {
+function countReferenceLines(path, content, replacementActive) {
   const lines = content.split("\n");
   const selected = new Set();
   lines.forEach((line, index) => {
-    if (matchesReference(path, line)) selected.add(index);
+    if (
+      matchesReference(path, line) ||
+      (replacementActive &&
+        (REPLACEMENT_REFERENCE_PATTERN.test(line) ||
+          (path === "package.json" && REPLACEMENT_ALIAS_PATTERN.test(line))))
+    )
+      selected.add(index);
   });
   if (path === ".trunk/trunk.yaml") {
     const legacyMarkerIndexes = lines.flatMap((line, index) =>
@@ -237,15 +250,24 @@ export function buildManifest({ repoRoot = DEFAULT_ROOT, source }) {
     fail(
       "The pre-push hook and Trunk quality-gate action must be retained or removed together.",
     );
+  const replacementActive = !hookPresent && !trunkActionPresent;
+  for (const path of replacementActive
+    ? REQUIRED_REPLACEMENT_WHOLE_FILE_PATHS
+    : [])
+    if (!paths.includes(path))
+      fail(`Missing replacement manifest path: ${path}`);
   const entries = [];
   for (const path of paths) {
     const wholeFile =
-      WHOLE_FILE_PATHS.has(path) || path.startsWith("scripts/gate/");
+      OPTIONAL_WHOLE_FILE_PATHS.has(path) ||
+      REQUIRED_WHOLE_FILE_PATHS.has(path) ||
+      path.startsWith("scripts/gate/") ||
+      (replacementActive && REQUIRED_REPLACEMENT_WHOLE_FILE_PATHS.has(path));
     const content = git(repoRoot, ["show", `${sourceSha}:${path}`]);
     if (content.includes("\0")) continue;
     const lines = wholeFile
       ? nlines(content)
-      : countReferenceLines(path, content);
+      : countReferenceLines(path, content, replacementActive);
     if (lines === 0) continue;
     entries.push({
       path,
@@ -273,12 +295,19 @@ export function buildManifest({ repoRoot = DEFAULT_ROOT, source }) {
   return {
     schema_version: 1,
     source_sha: sourceSha,
-    definitions: {
-      whole_file:
-        "Physical lines in the gate entry points, dedicated canonical gate documents, every scripts/gate/** file, the package-script pin checker, and the full pre-push hook. The gate-rooted set includes retained shared-consumer code.",
-      matching_lines:
-        "Unique fixed-pattern lines in other tracked files, full Turbo input filters that pin gate sources, and the full Trunk gate action block.",
-    },
+    definitions: replacementActive
+      ? {
+          whole_file:
+            "Physical lines in the gate entry points, dedicated canonical gate documents, every scripts/gate/** file, and the required author, closeout-review, guardrail, setup-contract, pre-commit, and Trunk surfaces.",
+          matching_lines:
+            "Unique fixed-pattern legacy or replacement lines in other tracked files, verification aliases, full Turbo input filters that pin gate sources, and the full legacy Trunk gate action block.",
+        }
+      : {
+          whole_file:
+            "Physical lines in the gate entry points, dedicated canonical gate documents, every scripts/gate/** file, the package-script pin checker, and the full pre-push hook. The gate-rooted set includes retained shared-consumer code.",
+          matching_lines:
+            "Unique fixed-pattern lines in other tracked files, full Turbo input filters that pin gate sources, and the full Trunk gate action block.",
+        },
     entries,
     totals,
   };
