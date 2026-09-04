@@ -153,8 +153,8 @@ in the same PR.
 - New Node root scripts need `pnpm lint:scripts` coverage; new shell scripts must
   pass `bash -n`. Add a focused command to `scripts/agent-quality-gate.sh` for
   behavior syntax and lint cannot verify.
-- No ESLint `max-lines` reaches this tree. The file-size watchlist reports every
-  scripts/ file; the exemption list is currently empty:
+- No ESLint `max-lines` reaches this tree. The file-size watchlist reports it
+  instead — tests aside, and the exemption list is now empty:
   [ADR 0065](../docs/adr/0065-scripts-file-size-watchlist-scope.md).
 - `pnpm tf plan/apply platform` owns one private saved plan. Never accept a
   caller plan path, or print, upload, or cache either plan form. Mechanism and

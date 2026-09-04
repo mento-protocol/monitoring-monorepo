@@ -564,7 +564,9 @@ Different selected values prevent shared execution and retained-result reuse.
 The mapped-command launcher removes child-only test and validator injections,
 including `ESLINT_BASELINE_INPUT`, inherited `ESLINT_BASELINE_MAIN`, alert-rule
 fixture paths, validator root overrides, focused child-test controls, and
-ambient cloud-provider credentials that the autoreview tests can forward.
+ambient cloud-provider credentials that a mapped test can forward. The
+autoreview suite was the forwarding case this named until [ADR 0086](0086-autoreview-removal-thin-two-model-review.md)
+deleted it; the launcher still removes the values.
 These values stay outside the shared key because no mapped descendant can read
 them. An assignment inside a mapped command still applies after the launcher
 removes the inherited value. CI package lint jobs do not use this launcher, so
@@ -1307,7 +1309,6 @@ They do not predict production gate duration.
   `scripts/gate/darwin-broker-launch-preflight.test.mjs`,
   `darwin-process-identity.test.mjs`, `darwin-process-lineage.test.mjs`,
   `mapped-command-process-identity.test.mjs`, `trunk-check-once.test.sh`,
-  `scripts/agent-autoreview.test.sh`,
   `scripts/sentry/broker/sentry-mcp-broker.test.mjs`, and
   `scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-extract.test.mjs`.
 - Integration entry point: `scripts/agent-quality-gate.sh`.

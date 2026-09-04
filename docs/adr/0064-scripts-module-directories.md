@@ -45,8 +45,9 @@ Routing survives a subdirectory in three of the four discovery mechanisms:
 
 - Bash `case` patterns match `/` with `*`, because they are pattern matches, not
   filesystem globs. The `scripts/*.sh` arm in `scripts/agent-quality-gate.sh`
-  keeps routing a file that moves into a subdirectory. A second such arm lived in
-  `scripts/agent-autoreview.sh` until [ADR 0086](0086-autoreview-removal-thin-two-model-review.md) deleted that wrapper.
+  keeps routing a file that moves into a subdirectory. A second such arm lived
+  in `scripts/agent-autoreview.sh` until
+  [ADR 0086](0086-autoreview-removal-thin-two-model-review.md) deleted that wrapper.
 - `pnpm lint:scripts` runs `eslint scripts/`, and `eslint.config.mjs` scopes
   root scripts with `scripts/**/*.{mjs,js}` and `scripts/**/*.cjs`. ESLint
   recurses into the directory argument, so a moved file stays linted.
@@ -66,13 +67,13 @@ is the routing.
 Both deploy arms carried that pair, added ahead of the move rather than with
 it: `scripts/deploy-*.sh|scripts/*/deploy-*.sh` routes the root-anchor check in
 `agent-quality-gate.sh`, and the same pair routed the Terraform/Cloud Run
-checklist in `select_checklists()` in `agent-autoreview.sh` until [ADR 0086](0086-autoreview-removal-thin-two-model-review.md) deleted
-that wrapper. The surviving arm stays shell-scoped. The check behind it has a
-`deploy-*.sh` subject set, and the Node deploy helpers that land in the same
-directory drive Envio and own no Cloud Run surface, so it is not the right home
-for them. Widening a routing
-glob is separable from the move it protects, and doing it first means the move
-cannot be the commit that goes quiet.
+checklist in `select_checklists()` in `agent-autoreview.sh` until
+[ADR 0086](0086-autoreview-removal-thin-two-model-review.md) deleted that wrapper. The
+surviving arm stays shell-scoped. The check behind it has a `deploy-*.sh`
+subject set, and the Node deploy helpers that land in the same directory drive
+Envio and own no Cloud Run surface, so it is not the right home for them.
+Widening a routing glob is separable from the move it protects, and doing it
+first means the move cannot be the commit that goes quiet.
 
 Because `*` matches `/`, the pair reaches a `deploy-*.sh` basename under any
 `scripts/` subdirectory rather than one fixed directory. That is deliberate on
@@ -196,10 +197,11 @@ scheduled document, for context an agent gets from the directory map in
   than the `pr-description.yml` case above, which degrades to a warning; here
   there is no fallback to degrade to. Hold the last step until no wrapper old
   enough to need the pre-move paths is still in use. D3 completed the three
-  merges on 2026-08-20; `scripts/pr/` is now the only pinned location. [ADR 0086](0086-autoreview-removal-thin-two-model-review.md)
-  has since deleted the wrapper, so nothing reads that pin any more and its
-  residual is gone. The hazard class stands for any future mechanism that reads
-  a path from `origin/main` rather than from the working tree.
+  merges on 2026-08-20; `scripts/pr/` is now the only pinned location.
+  [ADR 0086](0086-autoreview-removal-thin-two-model-review.md) has since deleted the
+  wrapper, so nothing reads that pin any more and its residual is gone. The
+  hazard class stands for any future mechanism that reads a path from
+  `origin/main` rather than from the working tree.
 - Duplicated copies diverge through the merge queue, not through the PR that
   duplicates them. While both locations are live, an unrelated PR that edits one
   side is not a conflict for the copy PR, so git merges both cleanly and the two
@@ -223,8 +225,8 @@ routing, not procedure.
 2. `check-agent-quality-gate-package-scripts.mjs` — pinned alias map.
 3. `.github/workflows/` — 22 of 32 files pin a `scripts/` path. `ci.yml`
    (`versionSkew`; `rootScripts` is the recursive `scripts/**`), `infra.yml`,
-   `alerts-rules.yml`,
-   `peg-policy-publication.yml`, and `schema-diff.yml` list individual files.
+   `alerts-rules.yml`, `peg-policy-publication.yml`, and `schema-diff.yml` list
+   individual files.
    The three Terraform filters are the exception: `ci.yml` `terraform` plus
    `infra.yml` push and `pull_request` copy the broad
    `workflowAdmissionPatterns` boundary from `terraform.stacks.json`, including

@@ -140,9 +140,10 @@ the gate's `--base` would change what it asserts — on a stacked PR the default
 branch is still `main`. It is named in a short marker list inside the predicate,
 the fallback this ADR otherwise rejects, and the reasoning holds because the
 failure is asymmetric: a listed command only ever gets the stricter binding, so
-a stale entry costs a re-run while a missing one costs a skipped check. The residual is that a rename makes a
-marker stale silently; the `markerbound` stamps-freshness fixture is what
-notices, since it asserts tip binding for a real navigation-eval plan.
+a stale entry costs a re-run while a missing one costs a skipped check. The
+residual is that a rename makes a marker stale silently; the `markerbound`
+stamps-freshness fixture is what notices, since it asserts tip binding for a
+real navigation-eval plan.
 
 A marker match binds the **default branch's own OID** as a second component,
 `+default-branch:<oid>`. Binding the base tip alone was not enough, and the

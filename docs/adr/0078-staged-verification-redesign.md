@@ -211,6 +211,9 @@ The audit excludes legacy local-gate self-tests from the replacement target.
 
 The repair extracts retained SessionEnd, setup-marker, package-policy,
 autoreview owner, and autoreview schema assertions into two focused suites.
+[ADR 0086](0086-autoreview-removal-thin-two-model-review.md) has since deleted the
+autoreview source those two assertion sets covered, so only the first three
+remain to move.
 The no-skip audit runs both. It excludes only the four legacy Bash,
 routing-table, and routing parity steps. The routing-table suites test the
 legacy selector. The retained generated-output and workflow safeguards execute

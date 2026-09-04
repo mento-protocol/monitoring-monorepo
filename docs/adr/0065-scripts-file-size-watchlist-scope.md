@@ -133,8 +133,9 @@ Rejected on measurement: of the test files a plan named unsplittable, only
 `deploy-staging-contract.test.mjs` actually cannot take a sibling. A Sentry
 suite may extract non-suite helper modules — the gate closes over its transitive
 imports, so only a new `*.test.mjs` is barred. `tf-stacks.test.mjs` and
-`agent-autoreview.test.sh` are facades that may import or source extracted
-siblings. Writing those as mechanical bars would have put false reasons in the
+`agent-autoreview.test.sh` were facades that may import or source extracted
+siblings; [ADR 0086](0086-autoreview-removal-thin-two-model-review.md) has since deleted the
+second. Writing those as mechanical bars would have put false reasons in the
 report; writing them honestly leaves 36 actionable rows nobody will work, which
 is how a watchlist gets ignored from its first run.
 

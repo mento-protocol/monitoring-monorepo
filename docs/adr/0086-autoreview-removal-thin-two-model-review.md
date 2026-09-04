@@ -146,6 +146,17 @@ superseded by this record.
   had two commands. The autoreview suite was the second, so
   `docs:navigation-eval -- --validate` is now the only marker command, in the
   gate and in that ADR.
+- [ADR 0073](0073-guardrail-prose-pinned-in-ci.md) rejected script digest pins
+  partly because the wrapper already hashed its own blob. That protection is
+  gone; the rejection stands on its reflex argument, and `.gitattributes` plus
+  `UPSTASH_MCP_LAUNCHER_SHA256` remain the one byte-pinned artifact.
+- [ADR 0076](0076-fair-quality-gate-coordinator.md) listed
+  `scripts/agent-autoreview.test.sh` among the focused containment tests, and
+  named the autoreview tests as the credential-forwarding case the mapped-command
+  launcher scrubs. The suite is gone; the launcher still scrubs.
+- [ADR 0078](0078-staged-verification-redesign.md)'s M4 move covered autoreview
+  owner and schema assertions. Their source is deleted, so only the SessionEnd,
+  setup-marker and package-policy assertions remain to move.
 
 The frozen verification-evidence manifest keeps its scoped allowance for
 `scripts/agent-autoreview.sh:.*gate_stat`, because
