@@ -5326,7 +5326,14 @@ test("a resume record whose shape cannot be published is re-judged", async () =>
     await scorePlan({ ...scoreArgs({ plan, root }), exec: first.exec });
 
     const broken = plan.cells.slice(0, 3);
-    const shapes = [{}, [], 7];
+    // The last one is the shape that survives a shallow guard: it carries the
+    // cost and the leak signals, and `foldCondition` then aborts on the `novel`
+    // counts it does not carry.
+    const shapes = [
+      {},
+      [],
+      { scoring_usd: 0, leak: { suspected: false, hard: [] } },
+    ];
     broken.forEach((cell, index) => {
       const stored = JSON.parse(readFileSync(scoreResume(plan, cell), "utf8"));
       stored.record = shapes[index % shapes.length];

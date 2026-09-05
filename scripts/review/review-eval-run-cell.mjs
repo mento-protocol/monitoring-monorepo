@@ -393,23 +393,31 @@ function calibrationResumePath(planDir) {
  * Whether a stored record can stand in for a judge call.
  *
  * A resumed record is published verbatim as
- * `result-<pr>-<condition>-<draw>.json`, so it has to carry what run evidence
- * demands of one. Rejecting anything else here keeps a matching identity over a
- * record that is `{}`, an array or a scalar from reaching `record.leak` in the
- * scoring loop and aborting the pass at the one point the design promises a
- * re-judge - the same ending an unparsable file already gets, for the same
- * reason: one cell re-spent beats a dead six-hour pass.
+ * `result-<pr>-<condition>-<draw>.json` and folded into a condition on the way,
+ * so every field either consumer dereferences has to be there and has to have
+ * the right type. A partial record is worse than no record: it is not re-judged,
+ * it aborts the pass on the missing field, and it stays under `cells/` so the
+ * next retry aborts the same way. Rejecting it takes the ending an unparsable
+ * file already gets, for the same reason - one cell re-spent beats a dead
+ * six-hour pass.
  */
 function usableScoreRecord(record) {
+  if (typeof record !== "object" || record === null || Array.isArray(record)) {
+    return false;
+  }
+  const finite = (value) => typeof value === "number" && Number.isFinite(value);
   return (
-    typeof record === "object" &&
-    record !== null &&
-    !Array.isArray(record) &&
-    typeof record.scoring_usd === "number" &&
-    Number.isFinite(record.scoring_usd) &&
+    typeof record.cell_id === "string" &&
+    finite(record.scoring_usd) &&
     record.scoring_usd >= 0 &&
+    finite(record.seconds) &&
+    finite(record.usd) &&
+    Array.isArray(record.claims) &&
+    Array.isArray(record.matched_ids) &&
     typeof record.leak?.suspected === "boolean" &&
-    Array.isArray(record.leak?.hard)
+    Array.isArray(record.leak?.hard) &&
+    finite(record.novel?.novelReal) &&
+    finite(record.novel?.novelWrong)
   );
 }
 
