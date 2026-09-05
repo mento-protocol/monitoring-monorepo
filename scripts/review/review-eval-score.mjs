@@ -217,10 +217,67 @@ function repairJson(text) {
     .replace(/,(\s*[}\]])/g, "$1");
 }
 
+// The span of `text` from the bracket at `start` to its matching close, or
+// null when nothing closes it. Quotes and their backslash escapes are tracked,
+// because a bracket inside a JSON string is text, not structure.
+function balancedSpan(text, start, open, close) {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < text.length; i += 1) {
+    const char = text[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"') inString = true;
+    else if (char === open) depth += 1;
+    else if (char === close && --depth === 0) return text.slice(start, i + 1);
+  }
+  return null;
+}
+
+// Candidate spans, best signal first: the contents of each fenced block, then
+// each top-level balanced span of the wanted shape in order. A span that fails
+// to parse is not descended into, so a nested `{}` never stands in for the
+// object that contains it.
+function* jsonCandidates(text, shape) {
+  const [open, close] = shape === "array" ? ["[", "]"] : ["{", "}"];
+  for (const fence of text.matchAll(/```[a-z]*\n([\s\S]*?)```/gi)) {
+    yield fence[1];
+  }
+  for (let i = 0; i < text.length; i += 1) {
+    if (text[i] !== open) continue;
+    const span = balancedSpan(text, i, open, close);
+    if (!span) continue;
+    yield span;
+    i += span.length - 1;
+  }
+}
+
+// The first candidate that parses to the wanted shape. This used to be one
+// greedy regex from the first opening bracket to the last closing one, which a
+// judge broke by writing prose before its fenced answer: a brace in the prose
+// — an awk snippet such as `open != "" { next }` — started the slice, and every
+// canonical run since the judge became agentic died on "no parseable JSON".
+// The limit is unchanged from the greedy form: a prose span that itself parses
+// to the wanted shape still wins, so the fenced block is tried first.
 function sliceJson(text, shape) {
-  const pattern = shape === "array" ? /\[[\s\S]*\]/ : /\{[\s\S]*\}/;
-  const match = text.match(pattern);
-  return match ? match[0] : null;
+  for (const candidate of jsonCandidates(text, shape)) {
+    const trimmed = candidate.trim();
+    if (!trimmed) continue;
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (shape === "array" ? Array.isArray(parsed) : isObject(parsed)) {
+        return trimmed;
+      }
+    } catch {
+      // Not this span. The next candidate, then the repaired text, then throw.
+    }
+  }
+  return null;
 }
 
 export function parseJudgeJson(
