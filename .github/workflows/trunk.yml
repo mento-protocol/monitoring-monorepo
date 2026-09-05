@@ -33,18 +33,11 @@ jobs:
         run: node scripts/workflows/check-github-action-pins.mjs
       - uses: ./.trunk/setup-ci
       - name: PR validation boundary suite
+        id: validation-boundary
         # This required workflow always runs, including when a PR changes only
         # .trunk/setup-ci. The suite rejects implicit PR cache saves before
         # setup-node's post action can publish one from a successful job.
         run: node scripts/workflows/check-pr-validation-boundary.test.mjs
-      - name: pnpm audit high gate self-tests
-        run: node scripts/supply-chain/pnpm-audit-high-gate.test.mjs
-      - name: pnpm audit governance-watchdog deploy lockfile (high+ only)
-        run: node scripts/supply-chain/pnpm-audit-high-gate.mjs --dir governance-watchdog --label governance-watchdog
-      - name: pnpm audit on-call announcer deploy lockfile (high+ only)
-        run: node scripts/supply-chain/pnpm-audit-high-gate.mjs --dir alerts/infra/oncall-announcer --label alerts/infra/oncall-announcer
-      - name: pnpm audit handler deploy lockfile (high+ only)
-        run: node scripts/supply-chain/pnpm-audit-high-gate.mjs --dir alerts/infra/onchain-event-handler --label alerts/infra/onchain-event-handler
       - name: Restore Trunk artifacts
         id: trunk-cache
         continue-on-error: true
@@ -61,6 +54,20 @@ jobs:
           node -e 'const { rmSync } = require("node:fs"); const { homedir } = require("node:os"); const { join } = require("node:path"); rmSync(join(homedir(), ".cache", "trunk"), { force: true, recursive: true });'
       - name: Run Trunk
         run: ./tools/trunk check --ci --all
+      # Report every audit even if lint or another audit fails. Setup and
+      # validation failures still stop candidate tooling; cancellation stops work.
+      - name: pnpm audit high gate self-tests
+        if: ${{ !cancelled() && steps.validation-boundary.outcome == 'success' }}
+        run: node scripts/supply-chain/pnpm-audit-high-gate.test.mjs
+      - name: pnpm audit governance-watchdog deploy lockfile (high+ only)
+        if: ${{ !cancelled() && steps.validation-boundary.outcome == 'success' }}
+        run: node scripts/supply-chain/pnpm-audit-high-gate.mjs --dir governance-watchdog --label governance-watchdog
+      - name: pnpm audit on-call announcer deploy lockfile (high+ only)
+        if: ${{ !cancelled() && steps.validation-boundary.outcome == 'success' }}
+        run: node scripts/supply-chain/pnpm-audit-high-gate.mjs --dir alerts/infra/oncall-announcer --label alerts/infra/oncall-announcer
+      - name: pnpm audit handler deploy lockfile (high+ only)
+        if: ${{ !cancelled() && steps.validation-boundary.outcome == 'success' }}
+        run: node scripts/supply-chain/pnpm-audit-high-gate.mjs --dir alerts/infra/onchain-event-handler --label alerts/infra/onchain-event-handler
       - name: Save Trunk artifacts
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.trunk-cache.outputs.cache-hit != 'true'
         continue-on-error: true

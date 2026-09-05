@@ -54,6 +54,44 @@ test("the repository satisfies the M2 structural boundary", () => {
   assert.deepEqual(checkStructuralRepository(ROOT), []);
 });
 
+test("Code Quality reports lint and all audits without bypassing prerequisites", () => {
+  const { jobs } = load(
+    readFileSync(join(ROOT, ".github/workflows/trunk.yml"), "utf8"),
+  );
+  const { steps } = jobs.trunk;
+  assert.equal(jobs.trunk.name, "Code Quality");
+  assert.notEqual(jobs.trunk["continue-on-error"], true);
+  const lint = steps.findIndex(
+    (step) => step.run === "./tools/trunk check --ci --all",
+  );
+  const boundary = steps.findIndex((step) => step.id === "validation-boundary");
+  const setup = steps.findIndex((step) => step.uses === "./.trunk/setup-ci");
+  const pins = steps.findIndex(
+    (step) => step.name === "Check GitHub Actions pins",
+  );
+  assert(pins >= 0 && pins < setup && setup < boundary && boundary < lint);
+  // Default success() semantics keep setup, trust checks, and cache cleanup
+  // failures fatal to lint. Only independent audits override failure short-circuiting.
+  for (const index of [pins, setup, boundary, lint]) {
+    assert.equal(steps[index].if, undefined);
+    assert.notEqual(steps[index]["continue-on-error"], true);
+  }
+  const audits = steps.filter((step) => step.name?.startsWith("pnpm audit "));
+  assert.equal(audits.length, 4);
+  for (const audit of audits) {
+    assert(steps.indexOf(audit) > lint, `${audit.name} cannot suppress lint`);
+    assert.equal(
+      audit.if,
+      "${{ !cancelled() && steps.validation-boundary.outcome == 'success' }}",
+    );
+    assert.notEqual(
+      audit["continue-on-error"],
+      true,
+      `${audit.name} must fail the job`,
+    );
+  }
+});
+
 test("a HOME override cannot put the pnpm cache inside the checkout", () => {
   const root = structuralFixture();
   const action = load(
