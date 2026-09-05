@@ -373,6 +373,17 @@ test("the root tooling bundle schedules the whole suite list", () => {
   assert.ok(commands.includes("node scripts/pr/pr-ready-state.test.mjs"));
 });
 
+test("listing metric changes schedule alert-rule lint in the legacy diagnostic", () => {
+  const plan = new Plan();
+  routeChangedPaths(
+    ROUTING_PLAN.filter((group) => group.id === "tree"),
+    ["metrics-bridge/src/peg/listing-metrics.ts"],
+    stubFacts(),
+    { plan },
+  );
+  assert.ok(commandsOf(plan).includes("pnpm alerts:rules:lint"));
+});
+
 test("every root manifest class schedules the focused package-policy contract", () => {
   const expected = "bash scripts/bootstrap/agent-setup-contract.test.sh";
   for (const manifestClass of [
