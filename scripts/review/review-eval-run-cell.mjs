@@ -401,13 +401,16 @@ function calibrationResumePath(planDir) {
  * file already gets, for the same reason - one cell re-spent beats a dead
  * six-hour pass.
  */
-function usableScoreRecord(record) {
+function usableScoreRecord(record, cell) {
   if (typeof record !== "object" || record === null || Array.isArray(record)) {
     return false;
   }
   const finite = (value) => typeof value === "number" && Number.isFinite(value);
   return (
-    typeof record.cell_id === "string" &&
+    record.cell_id === cell.cell_id &&
+    record.pr === cell.pr &&
+    record.condition === cell.condition &&
+    record.draw === cell.draw &&
     finite(record.scoring_usd) &&
     record.scoring_usd >= 0 &&
     finite(record.seconds) &&
@@ -437,7 +440,7 @@ export function readScoreResume({ planDir, plan, cell, resultDigest }) {
     scoreResumePath(planDir, cell.cell_id),
     judgeResumeIdentity({ plan, resultDigest }),
   );
-  return usableScoreRecord(record)
+  return usableScoreRecord(record, cell)
     ? { ...record, treatment: treatmentIdentity({ plan }) }
     : null;
 }
@@ -456,12 +459,44 @@ export function writeScoreResume({
   );
 }
 
+/**
+ * Whether a stored calibration replay can stand in for running the forty pairs.
+ *
+ * It is published as `calibration.json`, and `--validate` re-derives
+ * `agreement` and `total` from `outcomes` to check the row's own numbers. A
+ * record that cannot support that re-derivation would be published as a reuse,
+ * fail validation, and - because the failed-run path keeps `cells/` - be reused
+ * by every retry after it. Replaying forty pairs once is the cheaper ending.
+ */
+function usableCalibrationRecord(calibration) {
+  if (
+    typeof calibration !== "object" ||
+    calibration === null ||
+    Array.isArray(calibration)
+  ) {
+    return false;
+  }
+  return (
+    Number.isInteger(calibration.total) &&
+    calibration.total > 0 &&
+    Number.isInteger(calibration.agreement) &&
+    calibration.agreement >= 0 &&
+    calibration.agreement <= calibration.total &&
+    Array.isArray(calibration.outcomes) &&
+    calibration.outcomes.length === calibration.total &&
+    typeof calibration.scoring_usd === "number" &&
+    Number.isFinite(calibration.scoring_usd) &&
+    calibration.scoring_usd >= 0
+  );
+}
+
 /** A calibration replay this plan and judge may reuse, or null. */
 export function readCalibrationResume({ planDir, plan, judge }) {
-  return readResume(
+  const calibration = readResume(
     calibrationResumePath(planDir),
     judgeResumeIdentity({ plan, judge }),
   );
+  return usableCalibrationRecord(calibration) ? calibration : null;
 }
 
 export function writeCalibrationResume({ planDir, plan, judge, calibration }) {

@@ -5353,6 +5353,65 @@ test("a resume record whose shape cannot be published is re-judged", async () =>
   }
 });
 
+test("a cached verdict filed under the wrong cell is re-judged", async () => {
+  // The identity matches and every type is right, but the record describes a
+  // different cell. Publishing it would put one cell's verdict in another's
+  // result file, which run evidence rejects - and the bad record stays under
+  // `cells/`, so every retry would fail the same way.
+  const root = makeRoot();
+  try {
+    const plan = planWithCollectedCells(root);
+    const first = stubExec();
+    await scorePlan({ ...scoreArgs({ plan, root }), exec: first.exec });
+
+    const [target, other] = plan.cells;
+    const stored = JSON.parse(readFileSync(scoreResume(plan, target), "utf8"));
+    stored.record.pr = other.pr;
+    stored.record.cell_id = other.cell_id;
+    writeFileSync(scoreResume(plan, target), JSON.stringify(stored));
+
+    const second = stubExec();
+    const again = await scorePlan({
+      ...scoreArgs({ plan, root }),
+      exec: second.exec,
+    });
+    assert.equal(again.judged, 1);
+    assert.equal(again.reused, plan.cells.length - 1);
+    assert.deepEqual(validateLedgerRow(again.row), []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a cached calibration replay that cannot be validated is replayed", async () => {
+  // `--validate` re-derives agreement and total from `outcomes`, so a replay
+  // that cannot support that must not be published as a reuse. It survives
+  // under `cells/` too, so accepting it would wedge every retry.
+  const root = makeRoot();
+  try {
+    const plan = planWithCollectedCells(root);
+    const first = stubExec();
+    await scorePlan({ ...scoreArgs({ plan, root }), exec: first.exec });
+
+    const file = path.join(plan.plan_dir, "cells", "calibration.json");
+    const stored = JSON.parse(readFileSync(file, "utf8"));
+    stored.record = {};
+    writeFileSync(file, JSON.stringify(stored));
+
+    const second = stubExec();
+    const again = await scorePlan({
+      ...scoreArgs({ plan, root }),
+      exec: second.exec,
+    });
+    assert.equal(again.calibrationReused, false);
+    assert.equal(again.reused, plan.cells.length);
+    assert.ok(second.calls.length > 0, "the replay was not re-run");
+    assert.deepEqual(validateLedgerRow(again.row), []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("a calibration replay is reused only for the judge that produced it", async () => {
   const root = makeRoot();
   try {
