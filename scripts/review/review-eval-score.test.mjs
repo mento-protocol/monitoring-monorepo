@@ -224,6 +224,58 @@ test("parseJudgeJson throws JudgeOutputError rather than defaulting to empty", (
   );
 });
 
+// A trimmed excerpt of the novel-judge reply that failed the 2026-09-05
+// canonical run. The greedy slice started at the brace in the awk snippet and
+// ran to the last brace in the file, so `JSON.parse` reported "Expected
+// property name" and the whole scoring pass threw.
+const PROSE_BEFORE_FENCE = [
+  "Verification complete. Both claims describe mechanics that check out.",
+  "",
+  "**Claim 2 — real and distinct.** The awk in `verify_gate_family_partition`",
+  "(test.sh:497-565) enforces the marker placement, but skips every line",
+  'inside an open family (`open != "" { next }`) — it never checks for the',
+  "`arm_suite_abort_trap` call the file's own comment declares mandatory.",
+  "",
+  "```json",
+  '{"verdicts": {"1": {"class": "known", "why": "restates test.sh:628"},',
+  '"2": {"class": "real", "why": "distinct from test.sh:572"}}}',
+  "```",
+].join("\n");
+
+test("parseJudgeJson reads the fenced object past a brace in the prose", () => {
+  const parsed = parseJudgeJson(PROSE_BEFORE_FENCE, { shape: "object" });
+  assert.deepEqual(Object.keys(parsed.verdicts), ["1", "2"]);
+  assert.equal(parsed.verdicts["2"].class, "real");
+});
+
+test("parseJudgeJson reads an unfenced object past a brace in the prose", () => {
+  const parsed = parseJudgeJson(
+    'The awk skips family lines (`open != "" { next }`), so the rule is\n' +
+      'unenforced.\n{"verdicts": {"1": {"class": "real", "why": "distinct"}}}',
+    { shape: "object" },
+  );
+  assert.deepEqual(parsed.verdicts["1"], { class: "real", why: "distinct" });
+});
+
+test("parseJudgeJson reads an array past a stray bracket in the prose", () => {
+  const parsed = parseJudgeJson(
+    "I read the gate [scripts/agent-quality-gate.sh:1616-1618] first.\n" +
+      '["the focus refusal keys only on the lock env var", "the awk skips"]',
+    { shape: "array" },
+  );
+  assert.deepEqual(parsed, [
+    "the focus refusal keys only on the lock env var",
+    "the awk skips",
+  ]);
+});
+
+test("parseJudgeJson still throws when a brace in prose is all there is", () => {
+  assert.throws(
+    () => parseJudgeJson('the awk skips `open != "" { next }` and stops there'),
+    JudgeOutputError,
+  );
+});
+
 test("renderPrompt refuses a template with an unfilled placeholder", () => {
   assert.throws(
     () => renderPrompt(loadPrompt("judge-match"), { DEFECTS: "1. x" }),

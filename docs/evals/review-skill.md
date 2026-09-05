@@ -407,6 +407,13 @@ one rule: the run prints recovery commands and exits non-zero until an operator
 finishes the helper and `ship` workflow. launchd therefore records that a human
 still has to finish the job.
 
+A run that failed with `novel judge returned no parseable JSON object` before
+the scorer read balanced JSON spans hit the greedy slice, which ran from the
+first brace in the judge's reply to the last: a brace in the prose ahead of the
+fenced answer — an awk snippet, say — swallowed the JSON. The logged stderr
+tail is the only record of it, because `run-eval.sh` deletes the score stderr
+file as soon as it prints that tail.
+
 The freshness workflow also routes a new staleness issue through
 `review-eval-freshness-publication.mjs`. The wrapper keeps the hash-covered
 issue planner unchanged, replaces its legacy PR instruction at the GitHub
