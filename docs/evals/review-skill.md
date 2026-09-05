@@ -757,7 +757,10 @@ Scored evidence reaches the detail-dir root — `result-*.json` and
 row publish no scored evidence and a retry still resume: the two needs are one
 layout rather than a trade. Editing the scorer moves `scorer_digest`, so the
 next run plans a new directory name; seed it by copying the previous run's
-`cells/` across, as with any superseded run.
+`cells/` across, as with any superseded run. A retry that crosses UTC midnight
+needs the same copy for the same reason: the directory base carries the date, so
+`resolve_detail_dir` finds no earlier run to resume from and the paid cells stay
+in yesterday's directory until they are moved.
 
 `--score --against` requires the baseline to carry the plan's
 `comparability_key`. It refuses a cross-key pair before model work. `--report`

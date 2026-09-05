@@ -389,12 +389,25 @@ function calibrationResumePath(planDir) {
   return path.join(planDir, "cells", "calibration.json");
 }
 
-/** A judge verdict for this cell that this plan may reuse, or null. */
+/**
+ * A judge verdict for this cell that this plan may reuse, or null.
+ *
+ * `treatment` stays out of the resume identity: the selection that named the
+ * run is display identity, not a judge input, so the same transcript under the
+ * same contract earns the same verdict either way. The record is published as
+ * `result-<pr>-<condition>-<draw>.json` though, and run evidence rejects one
+ * whose treatment is not this plan's, so a reused verdict is rebound to this
+ * run's selection - exactly what a fresh judge call stamps onto a cached raw
+ * cell.
+ */
 export function readScoreResume({ planDir, plan, cell, resultDigest }) {
-  return readResume(
+  const record = readResume(
     scoreResumePath(planDir, cell.cell_id),
     judgeResumeIdentity({ plan, resultDigest }),
   );
+  return record === null
+    ? null
+    : { ...record, treatment: treatmentIdentity({ plan }) };
 }
 
 export function writeScoreResume({

@@ -5246,6 +5246,37 @@ test("a second judge pass reuses every verdict it already paid for", async () =>
   }
 });
 
+test("a reused verdict is rebound to this run's treatment", async () => {
+  // The selection that names a run does not change what the judge saw, so
+  // `treatment` stays out of the resume identity and a changed one still
+  // reuses. But the record is published as `result-<pr>-<condition>-<draw>.json`
+  // and run evidence rejects one whose treatment is not this plan's, so the
+  // reused verdict has to carry the current selection.
+  const root = makeRoot();
+  try {
+    const plan = planWithCollectedCells(root);
+    const first = stubExec();
+    await scorePlan({ ...scoreArgs({ plan, root }), exec: first.exec });
+
+    const moved = {
+      ...plan,
+      inputs: { ...plan.inputs, dirty: !plan.inputs.dirty },
+    };
+    const second = stubExec();
+    const again = await scorePlan({
+      ...scoreArgs({ plan: moved, root }),
+      exec: second.exec,
+    });
+    assert.deepEqual(second.calls, [], "the resumed pass called the judge");
+    assert.equal(again.reused, plan.cells.length);
+    for (const record of again.scored) {
+      assert.deepEqual(record.treatment, treatmentIdentity({ plan: moved }));
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("a resume record that does not match this plan is re-judged", async () => {
   const root = makeRoot();
   try {
