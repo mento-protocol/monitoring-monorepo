@@ -4446,7 +4446,14 @@ test("scoring resets each fixture, uses the contract judge, and totals its cost"
     }
 
     // A reset that does not land on the pinned head fails scoring rather than
-    // scoring the contestant's tree.
+    // scoring the contestant's tree. A reused judge verdict never touches the
+    // fixture, so clear the resume records the pass above wrote: the drift is
+    // only reachable on a cell this pass actually judges.
+    for (const cell of plan.cells) {
+      rmSync(path.join(plan.plan_dir, "cells", cell.cell_id, "score.json"), {
+        force: true,
+      });
+    }
     const drifting = stubGit();
     const driftGit = ({ args, cwd }) => {
       const answer = drifting.runGit({ args, cwd });
@@ -5148,6 +5155,226 @@ test("the spec worktree is not created where a cell can list it", () => {
   const cleanup = shellFunction("cleanup");
   assert.match(cleanup, /worktree remove --force "\$SPEC"/);
   assert.match(cleanup, /rm -rf "\$SPEC"/);
+});
+
+/**
+ * One canary plan whose cells all carry a stubbed contestant transcript, ready
+ * for a judge pass. The resume cases below score it more than once.
+ */
+function planWithCollectedCells(root) {
+  const plan = buildPlan({
+    contract,
+    contractDigest,
+    kind: "canary",
+    repoRoot: root,
+    outDir: path.join(root, "run"),
+    env: planEnv,
+  });
+  for (const cell of plan.cells) {
+    const dir = path.join(plan.plan_dir, "cells", cell.cell_id);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      path.join(dir, "result.json"),
+      JSON.stringify({
+        ok: true,
+        fingerprint: cellFingerprint({ plan }),
+        output: "scripts/pr/pr-ready-state-core.mjs:750 is too long.",
+        seconds: 300,
+        cost_usd: 3.5,
+        fixture_path: root,
+      }),
+    );
+  }
+  return plan;
+}
+
+/** The arguments every resume case passes to `scorePlan` but `exec`. */
+function scoreArgs({ plan, root }) {
+  return {
+    plan,
+    contract,
+    contractDigest,
+    repoRoot: root,
+    planDir: plan.plan_dir,
+    runGit: stubGit().runGit,
+    calibrationSet: JSON.parse(
+      readFileSync(
+        path.join(root, "docs/evals/review-skill-judge-calibration.json"),
+        "utf8",
+      ),
+    ),
+    now: new Date("2026-09-05T00:00:00Z"),
+  };
+}
+
+function scoreResume(plan, cell) {
+  return path.join(plan.plan_dir, "cells", cell.cell_id, "score.json");
+}
+
+test("a second judge pass reuses every verdict it already paid for", async () => {
+  // The judge costs about $4 and nine minutes a cell, so a 39-cell pass does
+  // not fit inside one usage window. Re-running the same command must resume
+  // from the verdicts on disk rather than re-spend the whole pass.
+  const root = makeRoot();
+  try {
+    const plan = planWithCollectedCells(root);
+    const first = stubExec();
+    const scored = await scorePlan({
+      ...scoreArgs({ plan, root }),
+      exec: first.exec,
+    });
+    assert.ok(first.calls.length > 0, "the first pass never called the judge");
+    assert.equal(scored.judged, plan.cells.length);
+    assert.equal(scored.reused, 0);
+    assert.equal(scored.calibrationReused, false);
+
+    const second = stubExec();
+    const again = await scorePlan({
+      ...scoreArgs({ plan, root }),
+      exec: second.exec,
+    });
+    assert.deepEqual(second.calls, [], "the resumed pass called the judge");
+    assert.equal(again.judged, 0);
+    assert.equal(again.reused, plan.cells.length);
+    assert.equal(again.calibrationReused, true);
+    // Same row, down to the scoring dollars: the reused shares are added back
+    // so `scoring_usd` still states what the evidence beside it cost.
+    assert.deepEqual(again.row, scored.row);
+    assert.deepEqual(validateLedgerRow(again.row), []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a resume record that does not match this plan is re-judged", async () => {
+  const root = makeRoot();
+  try {
+    const plan = planWithCollectedCells(root);
+    const first = stubExec();
+    await scorePlan({ ...scoreArgs({ plan, root }), exec: first.exec });
+
+    // One record produced under a different skill, and one that cannot be
+    // parsed at all. Neither may be folded into this run.
+    const [mismatched, corrupt] = plan.cells;
+    const stored = JSON.parse(
+      readFileSync(scoreResume(plan, mismatched), "utf8"),
+    );
+    stored.resume_identity.fingerprint.skill_digest = "0".repeat(64);
+    writeFileSync(scoreResume(plan, mismatched), JSON.stringify(stored));
+    writeFileSync(scoreResume(plan, corrupt), "{ this is not json");
+
+    const second = stubExec();
+    const again = await scorePlan({
+      ...scoreArgs({ plan, root }),
+      exec: second.exec,
+    });
+    assert.equal(again.judged, 2);
+    assert.equal(again.reused, plan.cells.length - 2);
+    assert.ok(second.calls.length > 0);
+    // Re-judging restores a matching record, so the next pass is free again.
+    const third = stubExec();
+    assert.equal(
+      (await scorePlan({ ...scoreArgs({ plan, root }), exec: third.exec }))
+        .judged,
+      0,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a calibration replay is reused only for the judge that produced it", async () => {
+  const root = makeRoot();
+  try {
+    const plan = planWithCollectedCells(root);
+    await scorePlan({ ...scoreArgs({ plan, root }), exec: stubExec().exec });
+    const resume = path.join(plan.plan_dir, "cells", "calibration.json");
+    const stored = JSON.parse(readFileSync(resume, "utf8"));
+    assert.equal(stored.resume_identity.judge.model, contract.judge.model);
+    assert.equal(
+      stored.resume_identity.calibration_digest,
+      plan.calibration_digest,
+    );
+
+    stored.resume_identity.judge.effort = "low";
+    writeFileSync(resume, JSON.stringify(stored));
+    const second = stubExec();
+    const again = await scorePlan({
+      ...scoreArgs({ plan, root }),
+      exec: second.exec,
+    });
+    assert.equal(again.calibrationReused, false);
+    assert.equal(again.judged, 0, "only the calibration had to re-run");
+    assert.ok(second.calls.length > 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a failed run keeps the judge verdicts its retry resumes from", async () => {
+  // `write_failed_row` clears the scored artifacts because
+  // `--revalidate-appended` would otherwise read them as the failure row's own
+  // numbers. It clears the run-directory root, and the judge pass keeps its
+  // verdicts under `cells/`, which publication excludes and `abort` keeps on
+  // disk — so the clearing a failed row needs and the resume a retry needs are
+  // the same layout, not a trade.
+  const root = makeRoot();
+  try {
+    const plan = planWithCollectedCells(root);
+    const scored = await scorePlan({
+      ...scoreArgs({ plan, root }),
+      exec: stubExec().exec,
+    });
+
+    const harness = [
+      "set -uo pipefail",
+      `RUN_DIR=${JSON.stringify(plan.plan_dir)}`,
+      shellFunction("clear_scoring_artifacts"),
+      "clear_scoring_artifacts",
+    ].join("\n");
+    const cleared = spawnSync("bash", ["-c", harness], { encoding: "utf8" });
+    assert.equal(cleared.status, 0, cleared.stderr);
+    assert.deepEqual(
+      readdirSync(plan.plan_dir)
+        .filter(
+          (name) =>
+            name === "calibration.json" ||
+            (name.startsWith("result-") && name.endsWith(".json")),
+        )
+        .sort(),
+      [],
+      "the failed row would publish scored evidence",
+    );
+
+    const retry = await scorePlan({
+      ...scoreArgs({ plan, root }),
+      exec: async () => {
+        throw new Error("a retry must not call the judge again");
+      },
+    });
+    assert.equal(retry.judged, 0);
+    assert.equal(retry.reused, plan.cells.length);
+    assert.equal(retry.calibrationReused, true);
+    assert.deepEqual(retry.row, scored.row);
+    // And the retry rebuilds exactly the evidence the failed row cleared.
+    assert.equal(
+      existsSync(path.join(plan.plan_dir, "calibration.json")),
+      true,
+    );
+    for (const cell of plan.cells) {
+      assert.equal(
+        existsSync(
+          path.join(
+            plan.plan_dir,
+            `result-${cell.pr}-${cell.condition}-${cell.draw}.json`,
+          ),
+        ),
+        true,
+      );
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("a failed run publishes no partial scoring artifacts", () => {

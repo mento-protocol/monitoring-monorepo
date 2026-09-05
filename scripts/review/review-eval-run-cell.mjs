@@ -1,6 +1,7 @@
-// Cell identity, cache reuse, and answer-key leak signals.
+// Cell identity, raw and judge cache reuse, and answer-key leak signals.
 
-import { existsSync, readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import { defaultRunGit } from "./review-eval-fixtures.mjs";
@@ -304,4 +305,124 @@ export function cellReuseDecision({ plan, resultPath, result = null }) {
       ? "the cached cell matches this run through the recorded reviewed orchestrator transition"
       : "the cached cell matches this run",
   };
+}
+
+/** Where the orchestrator wrote one cell's raw contestant transcript. */
+export function cellResultPath(planDir, cell) {
+  return path.join(planDir, "cells", cell.cell_id, "result.json");
+}
+
+/**
+ * One cell's raw result plus the digest of the exact bytes scoring reads, or
+ * null when the cell never completed. The digest is what ties a cached judge
+ * verdict to the transcript that verdict was formed on.
+ */
+export function readCellResult(planDir, cell) {
+  const file = cellResultPath(planDir, cell);
+  if (!existsSync(file)) return null;
+  const bytes = readFileSync(file);
+  let result;
+  try {
+    result = JSON.parse(bytes.toString("utf8"));
+  } catch (error) {
+    throw new Error(`could not read valid JSON from ${file}`, { cause: error });
+  }
+  if (result?.ok !== true || typeof result.output !== "string") return null;
+  return { result, digest: createHash("sha256").update(bytes).digest("hex") };
+}
+
+/**
+ * What a cached judge verdict must have been produced under.
+ *
+ * The judge pass costs about four dollars and nine minutes a cell, so a 39-cell
+ * pass outlasts one usage window: it has to resume rather than re-spend from
+ * zero. These fields are every input that can move a scored number - the
+ * comparability key the row is filed under, the contract, the scorer and
+ * calibration bytes that key is derived from, the execution fingerprint the raw
+ * cell already carries, and, per cell, the transcript itself. A record matching
+ * all of them is the same judge call, so replaying it changes nothing. Anything
+ * else is ignored and re-judged, which costs one cell and never scores one
+ * pipeline's output under another pipeline's identity.
+ */
+function judgeResumeIdentity({ plan, resultDigest = null, judge = null }) {
+  return {
+    comparability_key: plan?.comparability_key ?? null,
+    contract_digest: plan?.contract_digest ?? null,
+    matcher_digest: plan?.matcher_digest ?? null,
+    calibration_digest: plan?.calibration_digest ?? null,
+    fingerprint: cellFingerprint({ plan }),
+    ...(resultDigest === null ? {} : { result_digest: resultDigest }),
+    ...(judge === null ? {} : { judge }),
+  };
+}
+
+/** The record a resume file holds, or null when it does not match or parse. */
+function readResume(file, identity) {
+  let stored;
+  try {
+    stored = JSON.parse(readFileSync(file, "utf8"));
+  } catch {
+    return null;
+  }
+  return JSON.stringify(stored?.resume_identity) === JSON.stringify(identity)
+    ? (stored.record ?? null)
+    : null;
+}
+
+function writeResume(file, identity, record) {
+  mkdirSync(path.dirname(file), { recursive: true });
+  writeFileSync(
+    file,
+    `${JSON.stringify({ resume_identity: identity, record }, null, 2)}\n`,
+  );
+}
+
+// The resume cache lives under `cells/`: the directory publication already
+// excludes with a pathspec and a failed run already keeps on disk. Scored
+// evidence at the detail-dir root is exactly what a failed row must not carry,
+// so the scorer writes nothing there until the pass has finished.
+function scoreResumePath(planDir, cellId) {
+  return path.join(planDir, "cells", cellId, "score.json");
+}
+
+function calibrationResumePath(planDir) {
+  return path.join(planDir, "cells", "calibration.json");
+}
+
+/** A judge verdict for this cell that this plan may reuse, or null. */
+export function readScoreResume({ planDir, plan, cell, resultDigest }) {
+  return readResume(
+    scoreResumePath(planDir, cell.cell_id),
+    judgeResumeIdentity({ plan, resultDigest }),
+  );
+}
+
+export function writeScoreResume({
+  planDir,
+  plan,
+  cell,
+  resultDigest,
+  record,
+}) {
+  writeResume(
+    scoreResumePath(planDir, cell.cell_id),
+    judgeResumeIdentity({ plan, resultDigest }),
+    record,
+  );
+}
+
+/** A calibration replay this plan and judge may reuse, or null. */
+export function readCalibrationResume({ planDir, plan, judge }) {
+  return readResume(
+    calibrationResumePath(planDir),
+    judgeResumeIdentity({ plan, judge }),
+  );
+}
+
+export function writeCalibrationResume({ planDir, plan, judge, calibration }) {
+  writeResume(
+    calibrationResumePath(planDir),
+    judgeResumeIdentity({ plan, judge }),
+    calibration,
+  );
 }
