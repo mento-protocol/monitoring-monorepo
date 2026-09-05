@@ -811,9 +811,13 @@ directory. `--validate` re-derives `agreement` and `total` from them and checks
 each `expected` against the frozen pair, so the gate that caps a run at AMBER is
 evidence on disk rather than two integers the row states about itself. A detail
 directory holding cell results but no `calibration.json` fails validation. The
-replay is also cached beside the cell verdicts, at `cells/calibration.json`, and
-reused when the plan's calibration digest and the contract judge both still
-match, so a resumed pass does not replay the forty pairs again.
+replay is also cached beside the cell verdicts, at `cells/calibration.json`,
+under the same resume identity those verdicts carry — the comparability key, the
+contract digest, the matcher digest, the calibration digest and the cell
+fingerprint — with the contract judge standing in for the per-cell transcript
+digest. A resumed pass reuses it only when every one of those still matches, so
+an edit to a scoring module, which moves `matcher_digest`, replays the forty
+pairs again rather than reusing a replay the edit could have changed.
 
 **Model retirement needs a bridge run.** Pinned models get retired and history
 cannot be re-run. When that happens, run the retiring model and its replacement

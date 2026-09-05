@@ -5378,11 +5378,11 @@ test("a failed run keeps the judge verdicts its retry resumes from", async () =>
 });
 
 test("a failed run publishes no partial scoring artifacts", () => {
-  // `--score` writes calibration.json before the first cell and one result
-  // file per cell it scores. A judge that dies mid-pass, or a scored row that
-  // fails `--validate`, leaves those beside the zero placeholders `failedRow`
-  // publishes, and `--revalidate-appended` recomputes the row from exactly
-  // those files and rejects the failure PR. The paid `cells/` cache stays.
+  // `--score` writes calibration.json and one result file per cell only once
+  // the whole pass has finished, so a scored row that then fails `--validate`
+  // is what leaves those beside the zero placeholders `failedRow` publishes,
+  // and `--revalidate-appended` recomputes the row from exactly those files
+  // and rejects the failure PR. The paid `cells/` cache stays.
   const dir = mkdtempSync(path.join(tmpdir(), "review-eval-partial-"));
   try {
     const run = path.join(dir, "run");
