@@ -5314,6 +5314,38 @@ test("a resume record that does not match this plan is re-judged", async () => {
   }
 });
 
+test("a resume record whose shape cannot be published is re-judged", async () => {
+  // The identity matches, so the file is this plan's, but the record is not a
+  // verdict. It is published verbatim as result-<pr>-<condition>-<draw>.json,
+  // so folding one in would either abort the pass on `record.leak` or write
+  // evidence `--validate` rejects. Re-judging costs one cell instead.
+  const root = makeRoot();
+  try {
+    const plan = planWithCollectedCells(root);
+    const first = stubExec();
+    await scorePlan({ ...scoreArgs({ plan, root }), exec: first.exec });
+
+    const broken = plan.cells.slice(0, 3);
+    const shapes = [{}, [], 7];
+    broken.forEach((cell, index) => {
+      const stored = JSON.parse(readFileSync(scoreResume(plan, cell), "utf8"));
+      stored.record = shapes[index % shapes.length];
+      writeFileSync(scoreResume(plan, cell), JSON.stringify(stored));
+    });
+
+    const second = stubExec();
+    const again = await scorePlan({
+      ...scoreArgs({ plan, root }),
+      exec: second.exec,
+    });
+    assert.equal(again.judged, broken.length);
+    assert.equal(again.reused, plan.cells.length - broken.length);
+    assert.deepEqual(validateLedgerRow(again.row), []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("a calibration replay is reused only for the judge that produced it", async () => {
   const root = makeRoot();
   try {

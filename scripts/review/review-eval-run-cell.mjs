@@ -390,6 +390,30 @@ function calibrationResumePath(planDir) {
 }
 
 /**
+ * Whether a stored record can stand in for a judge call.
+ *
+ * A resumed record is published verbatim as
+ * `result-<pr>-<condition>-<draw>.json`, so it has to carry what run evidence
+ * demands of one. Rejecting anything else here keeps a matching identity over a
+ * record that is `{}`, an array or a scalar from reaching `record.leak` in the
+ * scoring loop and aborting the pass at the one point the design promises a
+ * re-judge - the same ending an unparsable file already gets, for the same
+ * reason: one cell re-spent beats a dead six-hour pass.
+ */
+function usableScoreRecord(record) {
+  return (
+    typeof record === "object" &&
+    record !== null &&
+    !Array.isArray(record) &&
+    typeof record.scoring_usd === "number" &&
+    Number.isFinite(record.scoring_usd) &&
+    record.scoring_usd >= 0 &&
+    typeof record.leak?.suspected === "boolean" &&
+    Array.isArray(record.leak?.hard)
+  );
+}
+
+/**
  * A judge verdict for this cell that this plan may reuse, or null.
  *
  * `treatment` stays out of the resume identity: the selection that named the
@@ -405,9 +429,9 @@ export function readScoreResume({ planDir, plan, cell, resultDigest }) {
     scoreResumePath(planDir, cell.cell_id),
     judgeResumeIdentity({ plan, resultDigest }),
   );
-  return record === null
-    ? null
-    : { ...record, treatment: treatmentIdentity({ plan }) };
+  return usableScoreRecord(record)
+    ? { ...record, treatment: treatmentIdentity({ plan }) }
+    : null;
 }
 
 export function writeScoreResume({
