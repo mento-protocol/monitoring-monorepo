@@ -268,9 +268,7 @@ If root `package.json` changed, first run
 
    `~/.claude/bin/codex-review.sh` is a different operator tool with a
    different CLI and different exit codes. In this repo the closeout is
-   `pnpm agent:closeout-review`. The global `review` skill's tooling
-   reference still names a retired repo command; that file lives outside this
-   repository and fixing it is a separate follow-up.
+   `pnpm agent:closeout-review`.
 
 5. **Ship.** Open the PR through the `ship` skill on every surface, including
    hosted sessions — do not hand-roll PR creation. The description follows the
