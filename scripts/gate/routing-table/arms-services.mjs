@@ -59,6 +59,7 @@ export const SERVICE_ARMS = [
               "metrics-bridge/src/metrics.ts",
               "metrics-bridge/src/cdp-metrics.ts",
               "metrics-bridge/src/peg/metrics.ts",
+              "metrics-bridge/src/peg/listing-metrics.ts",
             ],
             effects: [
               {
