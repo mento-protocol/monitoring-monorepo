@@ -36,9 +36,10 @@ experiment cannot replace canonical qualification.
 [ADR 0086](0086-review-eval-lane-any-grid-multi-draw.md) supersedes this
 decision on the panel: the grid is every contract fixture marked `grid: true`,
 `--draws N` repeats each fixture, and every number written below as a count —
-the fixed PR list, the three-lane panel, 12 P1 opportunities, the historical
-24-cell manifest, and the promote and reject bars — is derived from the grid and the
-draws instead. The harness digest binds every module listed in
+the fixed PR list, the three-lane panel, 12 P1 opportunities, and the promote
+and reject bars — is derived from the grid and the draws instead, while the
+historical 24-cell manifest is derived from the contract's full run matrix as
+the Context above describes. The harness digest binds every module listed in
 `EXPERIMENT_SOURCE_FILES`, which is no longer six. Everything else here stands.
 
 ADR 0085 supersedes this decision on one point: the plan records provider CLI
