@@ -108,8 +108,9 @@ After the exact checkout, protected inline admission code compares the admitted
 base and source Git trees. It rejects changes to package manifests, pnpm
 workspace files, pnpm lockfiles, package patches, the Node and pnpm selections,
 `.npmrc`, `.pnpmfile.cjs`, `pnpmfile.cjs`, and tracked `node_modules` paths.
-It also rejects changes to `ci.yml`, the no-skip dispatcher, its checker and
-runtime parser, both focused retained-contract definitions, and either
+It also rejects changes to `ci.yml`, the no-skip dispatcher, the CI contract
+source and test entry point, the no-skip checker and runtime parser, both
+focused retained-contract definitions, and either
 protected local action. The reusable audit starts only after this comparison
 succeeds. Package-execution drift can use the ordinary-force-all evidence form
 when the protected filter selects every retained job and every job succeeds.
@@ -168,7 +169,8 @@ validator before dependency installation.
 - [ ] Reject package-execution path drift during the evidence window. Ordinary
       CI remains the validation path for package, dependency, and toolchain PRs.
 - [ ] Reject evidence-instrument drift during admission. Protect `ci.yml`, the
-      dispatcher, the no-skip checker and runtime parser, all focused contract
+      dispatcher, the CI contract source and test entry point, the no-skip
+      checker and runtime parser, all focused contract
       definitions, and both protected local action trees. Do not count
       instrument-changing pull requests.
 - [ ] Keep every package-execution admission path family in the ordinary

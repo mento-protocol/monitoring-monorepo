@@ -102,8 +102,9 @@ Move each pin class with its files.
   `repo-health/dependency-cruiser-root-contract.test.mjs`, and the retained
   graph. Moves update ADR 0064 and all pins.
   The CI test imports `workflows/collect-m6-canary.test.mjs` for temporary M6
-  collection coverage. The no-skip admission excludes the collector and its
-  workflow from candidate changes (ADR 0088).
+  collection coverage. The no-skip admission excludes
+  `workflows/collect-m6-canary.mjs`, its workflow, and the CI contract entry
+  points from candidate changes (ADR 0088).
 - **Terraform stack registry.** `terraform.stacks.json` `changedPathPatterns`
   pins exact `scripts/` paths per stack. The broad workflow admission boundary
   covers the directory; `pnpm tf:test` enforces subsumption.

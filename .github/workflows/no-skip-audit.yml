@@ -104,6 +104,8 @@ jobs:
             .github/workflows/m6-canary.yml
             scripts/workflows/collect-m6-canary.mjs
             scripts/workflows/collect-m6-canary.test.mjs
+            scripts/workflows/check-ci-contract.mjs
+            scripts/workflows/check-ci-contract.test.mjs
             scripts/bootstrap/agent-setup-contract.test.sh
             scripts/indexer-handler-invariant-contract.test.mjs
             scripts/repo-health/dependency-cruiser-root-contract.test.mjs

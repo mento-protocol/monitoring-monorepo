@@ -3,7 +3,6 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import yaml from "js-yaml";
 import { collectM6Canary, readReservation } from "./collect-m6-canary.mjs";
-
 const HEAD = "a".repeat(40),
   BASE = "b".repeat(40);
 const REPO = "mento-protocol/monitoring-monorepo";
@@ -45,7 +44,6 @@ const comment = (record = {}) => ({
   user: { login: "github-actions[bot]" },
   body: `<!-- m6-canary-reservation-v1 -->\n${JSON.stringify({ pr: 2400, head: HEAD, base: BASE, ordinaryRun: 800, ...record })}`,
 });
-
 function fixture(options = {}) {
   const calls = [],
     comments = options.comments ?? [];
@@ -59,16 +57,14 @@ function fixture(options = {}) {
           ? (options.mainRuns ?? [])
           : [
               {
-                id: 800,
+                ...run(800),
                 head_sha: HEAD,
                 event: "pull_request",
                 path: ".github/workflows/ci.yml",
-                repository: { full_name: REPO },
-                head_repository: { full_name: REPO },
                 head_branch: "feature",
-                status: "completed",
-                conclusion: "success",
-                pull_requests: [{ number: 2400, base: { sha: BASE } }],
+                pull_requests: options.ordinaryPRs ?? [
+                  { number: options.pull?.number ?? 2400, base: { sha: BASE } },
+                ],
               },
             ],
     listJobsForWorkflowRunAttempt: async (args) =>
@@ -126,7 +122,6 @@ function fixture(options = {}) {
     },
   };
 }
-
 test("reserves immutable selection before exactly one dispatch and saves returned ID", async () => {
   const f = fixture();
   const result = await collectM6Canary(f);
@@ -143,7 +138,6 @@ test("reserves immutable selection before exactly one dispatch and saves returne
   assert.equal(f.calls[1][1].return_run_details, true);
   assert.match(f.calls[2][1].body, /"auditRun":901/u);
 });
-
 test("ambiguous dispatch leaves reservation and never retries", async () => {
   const f = fixture({ dispatchError: true });
   assert.match((await collectM6Canary(f)).stopped, /ambiguous/u);
@@ -152,20 +146,17 @@ test("ambiguous dispatch leaves reservation and never retries", async () => {
   assert.match((await collectM6Canary(next)).stopped, /unresolved dispatch/u);
   assert(!next.calls.some(([kind]) => kind === "dispatch"));
 });
-
 test("in-flight audits wait without failing or writing comments", async () => {
   const f = fixture({ runs: [{ ...run(), status: "in_progress" }] });
   assert.deepEqual(await collectM6Canary(f), { waiting: 900 });
   assert.deepEqual(f.calls, []);
 });
-
 test("stale collector revision cannot write or dispatch", async () => {
   const f = fixture();
   f.context.sha = HEAD;
   assert.match((await collectM6Canary(f)).stopped, /no longer main/u);
   assert.deepEqual(f.calls, []);
 });
-
 test("historic startup failures do not block new collection", async () => {
   const f = fixture({
     runs: [
@@ -175,13 +166,11 @@ test("historic startup failures do not block new collection", async () => {
   });
   assert.equal((await collectM6Canary(f)).dispatched, 901);
 });
-
 test("closed M6 issue prevents any comment or dispatch", async () => {
   const f = fixture({ issueState: "closed" });
   assert.match((await collectM6Canary(f)).stopped, /closed/u);
   assert.deepEqual(f.calls, []);
 });
-
 test("repeated stop conditions do not create duplicate issue comments", async () => {
   const options = {
     runs: [run()],
@@ -196,7 +185,6 @@ test("repeated stop conditions do not create duplicate issue comments", async ()
   await collectM6Canary(second);
   assert(!second.calls.some(([kind]) => kind === "comment"));
 });
-
 test("failure to persist dispatch ID leaves a reservation that blocks retries", async () => {
   const f = fixture({ updateError: true });
   assert.match((await collectM6Canary(f)).stopped, /ambiguous/u);
@@ -206,7 +194,6 @@ test("failure to persist dispatch ID leaves a reservation that blocks retries", 
   assert.match((await collectM6Canary(next)).stopped, /unresolved dispatch/u);
   assert(!next.calls.some(([kind]) => kind === "dispatch"));
 });
-
 test("unreserved new audit stops further dispatch", async () => {
   const f = fixture({ runs: [run()] });
   assert.match((await collectM6Canary(f)).stopped, /unreserved|reservation/iu);
@@ -345,6 +332,15 @@ test("only trusted bot reservation comments control selection", () => {
 });
 
 for (const [name, options] of [
+  ...[
+    [],
+    [{ number: 2401, base: { sha: BASE } }],
+    [{ number: 2400, base: { sha: HEAD } }],
+  ].map((ordinaryPRs, i) => [`ordinary association ${i}`, { ordinaryPRs }]),
+  ...[2291, 2299].map((n) => [
+    `excluded ${n}`,
+    { pulls: [pull(n)], pull: pull(n) },
+  ]),
   [
     "fork",
     {
@@ -364,15 +360,20 @@ for (const [name, options] of [
       files: [{ filename: "ordinary.txt", previous_filename: "nested/.npmrc" }],
     },
   ],
-  [
-    "instrument input",
-    { files: [{ filename: "scripts/workflows/collect-m6-canary.mjs" }] },
-  ],
+  ...[
+    "collect-m6-canary.mjs",
+    "check-ci-contract.mjs",
+    "check-ci-contract.test.mjs",
+  ].map((name) => [
+    name,
+    { files: [{ filename: `scripts/workflows/${name}` }] },
+  ]),
 ])
   test(`does not dispatch ${name}`, async () => {
     const f = fixture(options);
     assert.equal(Boolean((await collectM6Canary(f)).dispatched), false);
     assert(!f.calls.some(([kind]) => kind === "dispatch"));
+    if (name.startsWith("excluded")) assert.deepEqual(f.calls, []);
   });
 
 test("charges every attempt and deduplicates copied successful jobs", async () => {

@@ -37,6 +37,10 @@ automatic repository token. It can read contents and PRs, dispatch Actions,
 and write evidence comments on #2128. Candidate execution stays in the existing
 read-only `no-skip-audit.yml`. The writer does not forward its token there.
 The audit repeats its immutable head/base and execution-path admission checks.
+The ordinary CI run must match the selected head and branch, and its PR
+association must name this PR and the current base SHA. Missing or stale
+associations prevent selection. Admission also protects the CI contract source
+and test entry point that loads the collector tests.
 
 Record one immutable selection before dispatch. Treat an ambiguous dispatch
 outcome as an outstanding reservation; never retry it automatically. Each

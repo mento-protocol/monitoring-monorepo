@@ -218,8 +218,9 @@ code, normalizes pull-request-only semantics, and runs every retained
 deterministic CI job. Before the reusable audit starts, the dispatcher compares
 the admitted base and source trees for package manifests, pnpm workspace and
 lock files, package patches, the Node and pnpm selections, pnpm configuration,
-tracked `node_modules`, `ci.yml`, the dispatcher, the no-skip checker and its
-runtime parser, both focused retained-contract definitions, and both protected
+tracked `node_modules`, `ci.yml`, the dispatcher, the CI contract source and
+test entry point, the no-skip checker and its runtime parser, both focused
+retained-contract definitions, and both protected
 local action trees. A candidate that changes these paths does not enter the
 no-skip audit. Package-execution drift can use an ordinary full-job CI
 observation. Evidence-instrument drift cannot count through either evidence

@@ -9,7 +9,7 @@ const executionPath = (path) =>
     path,
   ) || path === ".node-version";
 const instrumentPath = (path) =>
-  /^(?:\.github\/(?:workflows\/(?:ci|no-skip-audit|m6-canary)\.yml$|actions\/(?:pnpm-install|resolve-eslint-baseline)(?:\/|$))|scripts\/(?:workflows\/(?:check-no-skip-audit|collect-m6-canary)(?:\.test)?\.mjs$|bootstrap\/agent-setup-contract\.test\.sh$|indexer-handler-invariant-contract\.test\.mjs$|repo-health\/dependency-cruiser-root-contract\.test\.mjs$|lib\/workflow-yaml\.mjs$))/u.test(
+  /^(?:\.github\/(?:workflows\/(?:ci|no-skip-audit|m6-canary)\.yml$|actions\/(?:pnpm-install|resolve-eslint-baseline)(?:\/|$))|scripts\/(?:workflows\/(?:check-ci-contract|check-no-skip-audit|collect-m6-canary)(?:\.test)?\.mjs$|bootstrap\/agent-setup-contract\.test\.sh$|indexer-handler-invariant-contract\.test\.mjs$|repo-health\/dependency-cruiser-root-contract\.test\.mjs$|lib\/workflow-yaml\.mjs$))/u.test(
     path,
   );
 
@@ -236,6 +236,9 @@ export async function collectM6Canary({ github, context, core }) {
       .filter(
         (run) =>
           ownsRun(run, "ci", "pull_request") &&
+          run.pull_requests?.some(
+            (pr) => pr.number === pull.number && pr.base?.sha === pull.base.sha,
+          ) &&
           run.head_sha === pull.head.sha &&
           run.head_branch === pull.head.ref,
       )
