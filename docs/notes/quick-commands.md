@@ -66,7 +66,9 @@ pnpm docs:navigation-eval -- --validate <result.json>  # Recompute authority, ev
 pnpm ci:contract:test             # Test fixed CI, protected no-skip admission and drift, cache, base, and aggregate contracts
 bash scripts/bootstrap/agent-setup-contract.test.sh  # Test retained SessionEnd, setup-marker, and package-policy behavior
 node --test scripts/indexer-handler-invariant-contract.test.mjs  # Test retained indexer handler invariant owners and schema
-# For each approved #2128 post-cutover canary proof, read the current immutable inputs:
+# M6 canary collection selects PRs after CI; see ADR 0088. No per-PR request is needed.
+# Manual recovery only: disable/drain m6-canary.yml and reconcile its reservations/spend first.
+# For an approved manual #2128 proof, read the current immutable inputs:
 gh pr view <pr> --repo mento-protocol/monitoring-monorepo --json number,state,headRefOid,baseRefName,baseRefOid,headRepositoryOwner
 # The audit refuses a stale baseRefOid. Update or rebase the PR branch, then read fresh inputs.
 # Do not dispatch no-skip for package-execution or evidence-instrument drift. Package drift can use ordinary-force-all evidence. Instrument drift cannot count.

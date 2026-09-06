@@ -27,6 +27,11 @@ operator merge-path assumption.
 
 **Scope:** ci/process
 
+[ADR 0088](0088-temporary-m6-canary-collection.md) supersedes the manual-only
+M6 collection procedure below. It adds temporary event-driven dispatch and
+pending evidence collection. It does not change the audit target, sample
+acceptance, spend limits, or separate legacy-deletion approval.
+
 ## Context
 
 The local quality gate combines path routing, validation, process cleanup,

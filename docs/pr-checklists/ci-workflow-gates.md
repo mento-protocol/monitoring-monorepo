@@ -89,13 +89,20 @@ The command checks these contracts without defining a second runtime router:
   zero skipped jobs, the retained-command boundary, cold cache policy, and
   normalized PR-only checks.
 
-### Manual no-skip audit
+### No-skip audit and temporary collection
 
 `.github/workflows/no-skip-audit.yml` is the only no-skip entry point. It runs
-only by manual dispatch from protected `main`. It accepts a pull request number,
+by dispatch from protected `main`. It accepts a pull request number,
 full current head SHA, and full current protected-main SHA. Admission fails if
 the pull request, either SHA, repository identity, base branch, or live `main`
 has moved.
+
+During M6, `.github/workflows/m6-canary.yml` selects candidates after CI
+completion and dispatches this entry point. It writes pending evidence on
+#2128. [ADR 0088](../adr/0088-temporary-m6-canary-collection.md) owns selection,
+serialization, spend stops, recovery, proof limits, and removal. Disable and
+drain collection before a manual audit. Keep its writer isolated from candidate
+execution; do not add a required status or upstream artifact handoff.
 
 After the exact checkout, protected inline admission code compares the admitted
 base and source Git trees. It rejects changes to package manifests, pnpm
