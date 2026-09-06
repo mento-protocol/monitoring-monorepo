@@ -18,7 +18,10 @@ garden_lane: adrs-architecture
 
 ## Context
 
-The canonical review-skill evaluation has 24 model cells. It supplies the
+The canonical review-skill evaluation had 24 model cells when this ADR was
+written; since [ADR 0086](0086-review-eval-lane-any-grid-multi-draw.md) the
+count is derived from the contract grid (`pnpm review:eval -- --plan --kind
+full --json` prints it). It supplies the
 ledger verdict, baseline, and freshness evidence. This matrix is too slow and
 costly for early prompt experiments.
 
@@ -58,7 +61,8 @@ Add a small staged experiment lane with these rules:
   plan binds the contract digest, fixture head and base SHAs, truth,
   finder-report and prompt digests, skill digests, model and effort settings,
   provider CLI versions, scorer, the six-module experiment harness digest,
-  complete lane set, treatment order, and a canonical 24-cell rerun manifest.
+  complete lane set, treatment order, and a canonical rerun manifest (24 cells
+  when written; the count is derived since ADR 0086).
 - The screen uses the first frozen finder report for each of the three grid
   fixtures. The holdout uses each complementary report. The optional
   `live-paired` stage generates one current finder output per fixture and gives
@@ -106,7 +110,8 @@ Add a small staged experiment lane with these rules:
   not an unattended service or an adversarial containment boundary.
 - The canonical rerun manifest is planning data only. No canonical importer
   exists, and the manifest disables experiment-artifact reuse. A selected
-  candidate must rerun all 24 canonical cells.
+  candidate must rerun every canonical cell (24 when written; the count is
+  derived since ADR 0086).
 - The current fixtures are development data. A broad generalization claim
   needs a new holdout whose truth did not guide the candidate change.
 
