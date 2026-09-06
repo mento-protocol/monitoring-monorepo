@@ -1,0 +1,40 @@
+name: M6 canary collection
+
+on:
+  workflow_run:
+    workflows: [CI, No-skip audit]
+    types: [completed]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: m6-canary-collection
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    # Upstream events are wake-ups only. No upstream code, output, artifact,
+    # or cache enters this writer. Every decision re-reads GitHub API state.
+    if: github.repository == 'mento-protocol/monitoring-monorepo' && github.ref == 'refs/heads/main'
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: write
+      issues: write
+    steps:
+      - name: Check out protected collector revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Collect evidence and select at most one audit
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          retries: 0
+          script: |
+            const { collectM6Canary } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/workflows/collect-m6-canary.mjs`);
+            const result = await collectM6Canary({ github, context, core });
+            await core.summary.addHeading('M6 canary collection').addCodeBlock(JSON.stringify(result, null, 2), 'json').write();

@@ -14,7 +14,6 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { load } from "js-yaml";
-
 import {
   auditAggregateViolations,
   noSkipAuditViolations,
@@ -26,7 +25,6 @@ const FILES = [
   ".github/actions/pnpm-install/action.yml",
   ".github/actions/resolve-eslint-baseline/action.yml",
 ];
-
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), "no-skip-audit-"));
   for (const path of FILES)
@@ -255,6 +253,8 @@ for (const path of [
   "scripts/repo-health/dependency-cruiser-root-contract.test.mjs",
   "scripts/workflows/check-no-skip-audit.mjs",
   "scripts/workflows/check-no-skip-audit.test.mjs",
+  "scripts/workflows/check-ci-contract.mjs",
+  "scripts/workflows/check-ci-contract.test.mjs",
   "scripts/lib/workflow-yaml.mjs",
   ".github/actions/pnpm-install/action.yml",
   ".github/actions/resolve-eslint-baseline/action.yml",

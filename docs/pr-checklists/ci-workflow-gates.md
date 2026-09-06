@@ -89,20 +89,28 @@ The command checks these contracts without defining a second runtime router:
   zero skipped jobs, the retained-command boundary, cold cache policy, and
   normalized PR-only checks.
 
-### Manual no-skip audit
+### No-skip audit and temporary collection
 
 `.github/workflows/no-skip-audit.yml` is the only no-skip entry point. It runs
-only by manual dispatch from protected `main`. It accepts a pull request number,
+by dispatch from protected `main`. It accepts a pull request number,
 full current head SHA, and full current protected-main SHA. Admission fails if
 the pull request, either SHA, repository identity, base branch, or live `main`
 has moved.
+
+During M6, `.github/workflows/m6-canary.yml` selects candidates after CI
+completion and dispatches this entry point. It writes pending evidence on
+#2128. [ADR 0088](../adr/0088-temporary-m6-canary-collection.md) owns selection,
+serialization, spend stops, recovery, proof limits, and removal. Disable and
+drain collection before a manual audit. Keep its writer isolated from candidate
+execution; do not add a required status or upstream artifact handoff.
 
 After the exact checkout, protected inline admission code compares the admitted
 base and source Git trees. It rejects changes to package manifests, pnpm
 workspace files, pnpm lockfiles, package patches, the Node and pnpm selections,
 `.npmrc`, `.pnpmfile.cjs`, `pnpmfile.cjs`, and tracked `node_modules` paths.
-It also rejects changes to `ci.yml`, the no-skip dispatcher, its checker and
-runtime parser, both focused retained-contract definitions, and either
+It also rejects changes to `ci.yml`, the no-skip dispatcher, the CI contract
+source and test entry point, the no-skip checker and runtime parser, both
+focused retained-contract definitions, and either
 protected local action. The reusable audit starts only after this comparison
 succeeds. Package-execution drift can use the ordinary-force-all evidence form
 when the protected filter selects every retained job and every job succeeds.
@@ -161,7 +169,8 @@ validator before dependency installation.
 - [ ] Reject package-execution path drift during the evidence window. Ordinary
       CI remains the validation path for package, dependency, and toolchain PRs.
 - [ ] Reject evidence-instrument drift during admission. Protect `ci.yml`, the
-      dispatcher, the no-skip checker and runtime parser, all focused contract
+      dispatcher, the CI contract source and test entry point, the no-skip
+      checker and runtime parser, all focused contract
       definitions, and both protected local action trees. Do not count
       instrument-changing pull requests.
 - [ ] Keep every package-execution admission path family in the ordinary
