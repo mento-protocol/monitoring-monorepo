@@ -1,7 +1,7 @@
 // Cell scoring, condition folding, row assembly, and freshness planning.
 
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import {
@@ -25,22 +25,20 @@ import {
 } from "./review-eval-score.mjs";
 import {
   cellFingerprint,
+  cellResultPath,
   cellReuseDecision,
   leakSignals,
   loginsInFixtureTree,
+  readCalibrationResume,
+  readCellResult,
+  readScoreResume,
   reviewerLogins,
   treatmentIdentity,
+  writeCalibrationResume,
+  writeScoreResume,
 } from "./review-eval-run-cell.mjs";
 import { resetFixture } from "./review-eval-run-execution.mjs";
 import { baselinePlanIdentity, planCells } from "./review-eval-run-plan.mjs";
-
-function readJson(file) {
-  try {
-    return JSON.parse(readFileSync(file, "utf8"));
-  } catch (error) {
-    throw new Error(`could not read valid JSON from ${file}`, { cause: error });
-  }
-}
 
 /** Read, verify, and parse the same truth bytes that scoring will retain. */
 function readPinnedTruth(repoRoot, fixture) {
@@ -59,18 +57,6 @@ function readPinnedTruth(repoRoot, fixture) {
   }
 }
 
-function cellResultPath(planDir, cell) {
-  return path.join(planDir, "cells", cell.cell_id, "result.json");
-}
-
-function readCellResult(planDir, cell) {
-  const file = cellResultPath(planDir, cell);
-  if (!existsSync(file)) return null;
-  const result = readJson(file);
-  return result?.ok === true && typeof result.output === "string"
-    ? result
-    : null;
-}
 async function scoreOneCell({
   cell,
   cellResult,
@@ -338,20 +324,20 @@ export async function scorePlan({
   const treatment = treatmentIdentity({ plan });
   const missing = [];
   for (const cell of plan.cells) {
-    const cellResult = readCellResult(planDir, cell);
-    if (!cellResult) {
+    const completed = readCellResult(planDir, cell);
+    if (!completed) {
       missing.push(cell.cell_id);
       continue;
     }
     const reuse = cellReuseDecision({
       plan,
       resultPath: cellResultPath(planDir, cell),
-      result: cellResult,
+      result: completed.result,
     });
     if (!reuse.reuse) {
       throw new Error(`cell ${cell.cell_id} cannot be scored: ${reuse.reason}`);
     }
-    completedCellResults.set(cell.cell_id, cellResult);
+    completedCellResults.set(cell.cell_id, completed);
   }
   if (completedCellResults.size === 0) {
     throw new Error(
@@ -369,13 +355,64 @@ export async function scorePlan({
   );
   const scoringCost = { usd: 0 };
   const metered = meterExec(exec, scoringCost);
-  const calibrationCost = { usd: 0 };
-  const calibration = await runCalibration({
-    calibrationSet,
-    exec: meterExec(metered, calibrationCost),
-    model: contract.judge.model,
-    effort: contract.judge.effort,
-  });
+  const judge = { model: contract.judge.model, effort: contract.judge.effort };
+  let calibration = readCalibrationResume({ planDir, plan, judge });
+  const calibrationReused = calibration !== null;
+  if (calibrationReused) {
+    scoringCost.usd += Number(calibration.scoring_usd ?? 0);
+  } else {
+    const calibrationCost = { usd: 0 };
+    calibration = {
+      ...(await runCalibration({
+        calibrationSet,
+        exec: meterExec(metered, calibrationCost),
+        ...judge,
+      })),
+      // The replay's share of `scoring_usd`. With the per-cell shares it makes
+      // the row's scoring cost re-derivable from the detail, and a resumed pass
+      // adds the recorded share back so the row still states what the evidence
+      // beside it cost to produce.
+      scoring_usd: calibrationCost.usd,
+    };
+    if (write) writeCalibrationResume({ planDir, plan, judge, calibration });
+  }
+  const scored = new Map();
+  const leaked = [];
+  let reusedCells = 0;
+  let judgedCells = 0;
+  for (const cell of plan.cells) {
+    const completed = completedCellResults.get(cell.cell_id);
+    if (!completed) continue;
+    const resultDigest = completed.digest;
+    let record = readScoreResume({ planDir, plan, cell, resultDigest });
+    if (record) {
+      reusedCells += 1;
+      scoringCost.usd += Number(record.scoring_usd ?? 0);
+    } else {
+      record = await scoreOneCell({
+        cell,
+        cellResult: completed.result,
+        fingerprint,
+        treatment,
+        contract,
+        repoRoot,
+        truth: truthByPr.get(cell.pr),
+        exec: metered,
+        runGit,
+      });
+      judgedCells += 1;
+      if (write) {
+        writeScoreResume({ planDir, plan, cell, resultDigest, record });
+      }
+    }
+    scored.set(cell.cell_id, record);
+    if (record.leak.suspected) leaked.push(...record.leak.hard);
+  }
+  // The scored evidence reaches the detail-dir root only here, once every cell
+  // the matrix collected has a verdict. A judge that dies mid-pass therefore
+  // leaves the root clean, which is what a `status: failed` row must publish,
+  // while the per-cell verdicts above stay under `cells/` for the retry.
+  //
   // The calibration replay is the only recorded number with no other trace on
   // disk, so `--validate` had to take `judge_calibration` on the row's own say
   // so. Writing the forty outcomes beside the cell results makes the agreement
@@ -391,35 +428,16 @@ export async function scorePlan({
           fingerprint,
           treatment,
           completed_cell_ids: [...completedCellResults.keys()],
-          // The replay's share of `scoring_usd`. With the per-cell shares it
-          // makes the row's scoring cost re-derivable from the detail.
-          scoring_usd: calibrationCost.usd,
+          scoring_usd: calibration.scoring_usd,
           outcomes: calibration.outcomes ?? [],
         },
         null,
         2,
       )}\n`,
     );
-  }
-  const scored = new Map();
-  const leaked = [];
-  for (const cell of plan.cells) {
-    const cellResult = completedCellResults.get(cell.cell_id);
-    if (!cellResult) continue;
-    const record = await scoreOneCell({
-      cell,
-      cellResult,
-      fingerprint,
-      treatment,
-      contract,
-      repoRoot,
-      truth: truthByPr.get(cell.pr),
-      exec: metered,
-      runGit,
-    });
-    scored.set(cell.cell_id, record);
-    if (record.leak.suspected) leaked.push(...record.leak.hard);
-    if (write) {
+    for (const cell of plan.cells) {
+      const record = scored.get(cell.cell_id);
+      if (!record) continue;
       writeFileSync(
         path.join(
           planDir,
@@ -504,6 +522,9 @@ export async function scorePlan({
     missing,
     baselineRow: baseline,
     scored: [...scored.values()],
+    reused: reusedCells,
+    judged: judgedCells,
+    calibrationReused,
   };
 }
 

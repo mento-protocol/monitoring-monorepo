@@ -622,6 +622,14 @@ async function modeScore(options, context) {
       status: scored.row.status,
       missing: scored.missing,
       judge_calibration: scored.row.judge_calibration,
+      // What this pass paid for and what it read back from the resume cache a
+      // stopped pass left under `cells/`. A retry that says it judged nothing
+      // and reused everything is the run log saying the judge was free.
+      judge_pass: {
+        judged: scored.judged,
+        reused: scored.reused,
+        calibration_reused: scored.calibrationReused,
+      },
       reasons: scored.reasons,
     },
     options.json,

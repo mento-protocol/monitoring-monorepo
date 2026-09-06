@@ -285,10 +285,11 @@ and CI check both records against the plan. Changing only the row and plan
 inputs cannot relabel a candidate as an installed run. The run directory
 carries the kind and the skill digest in its name, so an
 aborted run followed by a skill edit re-runs instead of scoring the old skill
-under the new digest. A run that ends before it scores keeps its cells on disk
-for that retry — publishing strips them from the commit with an exclude
-pathspec rather than deleting them — and only a run that reached a score
-removes them, having nothing left to resume. The directory belongs to one
+under the new digest. A run that never published a score keeps its cells on
+disk for that retry — publishing strips them from the commit with an exclude
+pathspec rather than deleting them — and only a run that published one removes
+them, having nothing left to resume. `cells/` carries the judge pass's per-cell
+verdicts as well as the paid transcripts, so a retry resumes the scoring too. The directory belongs to one
 execution: a run killed before it recorded anything is retried into it, but once
 a ledger row points at it the next execution takes the next name and copies
 those cells across, because a second run writing there would overwrite the plan,
@@ -405,7 +406,10 @@ changes, and nothing reaches the freshness workflow. A scored row wedges it the
 same way. The installed job uses the non-publishing mode, so both endings follow
 one rule: the run prints recovery commands and exits non-zero until an operator
 finishes the helper and `ship` workflow. launchd therefore records that a human
-still has to finish the job.
+still has to finish the job. Writing that row clears the scored artifacts at the
+run-directory root, because `--revalidate-appended` would otherwise read them as
+the failure row's own numbers; it leaves `cells/` alone, so the judge verdicts a
+stopped pass already earned survive for the retry.
 
 A run that failed with `novel judge returned no parseable JSON object` before
 the scorer read balanced JSON spans hit the greedy slice, which ran from the
@@ -710,7 +714,8 @@ against the anchor with the version drift named beside it.
 `review-eval-score.mjs` owns the `SCORING_MODULES` inventory and computes
 `scorer_digest`. The digest covers every file that can move a recorded number
 or verdict. This includes the CLI, the run facade, plan construction, scoring
-process execution, cell identity and leak checks, condition folding, row
+process execution, cell identity, judge-verdict reuse and leak checks,
+condition folding, row
 assembly, the recompute, timestamp validation, and verdict rules. It also
 covers the two fixture helpers:
 `review-eval-fixtures.mjs` picks the matrix, the truth file and the recall
@@ -734,6 +739,28 @@ first calibration call. A later checkout edit cannot change one cell's
 scoring. `--check-fixtures` covers the inputs once, before the matrix starts;
 under `--skill-ref` the spec worktree is the live checkout for the two hours in
 between, and the contract digest alone would not notice.
+
+**The judge pass resumes per cell.** Judging one cell costs about $4 and nine
+minutes, so 39 cells run about six hours and do not fit inside one usage window:
+the 2026-09-05 attempt scored nineteen cells, hit a usage limit, and re-spent
+them on the retry. `--score` writes each verdict to `cells/<cell_id>/score.json`
+as it earns it, under a resume identity carrying the plan's comparability key,
+contract digest, matcher digest and calibration digest, the cell fingerprint, and
+the digest of the `result.json` that verdict was formed on. A later pass reuses a
+record only when every one of those matches; a mismatched or unparsable record
+is ignored and re-judged, which costs one cell. The `--json` output reports
+`judge_pass.judged`, `judge_pass.reused` and `judge_pass.calibration_reused`, so
+the run log says what the pass paid for.
+
+Scored evidence reaches the detail-dir root — `result-*.json` and
+`calibration.json` — only once the pass has finished. That is what lets a failed
+row publish no scored evidence and a retry still resume: the two needs are one
+layout rather than a trade. Editing the scorer moves `scorer_digest`, so the
+next run plans a new directory name; seed it by copying the previous run's
+`cells/` across, as with any superseded run. A retry that crosses UTC midnight
+needs the same copy for the same reason: the directory base carries the date, so
+`resolve_detail_dir` finds no earlier run to resume from and the paid cells stay
+in yesterday's directory until they are moved.
 
 `--score --against` requires the baseline to carry the plan's
 `comparability_key`. It refuses a cross-key pair before model work. `--report`
@@ -786,7 +813,14 @@ The forty outcomes are written to `calibration.json` in the run's detail
 directory. `--validate` re-derives `agreement` and `total` from them and checks
 each `expected` against the frozen pair, so the gate that caps a run at AMBER is
 evidence on disk rather than two integers the row states about itself. A detail
-directory holding cell results but no `calibration.json` fails validation.
+directory holding cell results but no `calibration.json` fails validation. The
+replay is also cached beside the cell verdicts, at `cells/calibration.json`,
+under the same resume identity those verdicts carry — the comparability key, the
+contract digest, the matcher digest, the calibration digest and the cell
+fingerprint — with the contract judge standing in for the per-cell transcript
+digest. A resumed pass reuses it only when every one of those still matches, so
+an edit to a scoring module, which moves `matcher_digest`, replays the forty
+pairs again rather than reusing a replay the edit could have changed.
 
 **Model retirement needs a bridge run.** Pinned models get retired and history
 cannot be re-run. When that happens, run the retiring model and its replacement

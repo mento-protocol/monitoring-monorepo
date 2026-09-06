@@ -1,6 +1,7 @@
-// Cell identity, cache reuse, and answer-key leak signals.
+// Cell identity, raw and judge cache reuse, and answer-key leak signals.
 
-import { existsSync, readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import { defaultRunGit } from "./review-eval-fixtures.mjs";
@@ -304,4 +305,204 @@ export function cellReuseDecision({ plan, resultPath, result = null }) {
       ? "the cached cell matches this run through the recorded reviewed orchestrator transition"
       : "the cached cell matches this run",
   };
+}
+
+/** Where the orchestrator wrote one cell's raw contestant transcript. */
+export function cellResultPath(planDir, cell) {
+  return path.join(planDir, "cells", cell.cell_id, "result.json");
+}
+
+/**
+ * One cell's raw result plus the digest of the exact bytes scoring reads, or
+ * null when the cell never completed. The digest is what ties a cached judge
+ * verdict to the transcript that verdict was formed on.
+ */
+export function readCellResult(planDir, cell) {
+  const file = cellResultPath(planDir, cell);
+  if (!existsSync(file)) return null;
+  const bytes = readFileSync(file);
+  let result;
+  try {
+    result = JSON.parse(bytes.toString("utf8"));
+  } catch (error) {
+    throw new Error(`could not read valid JSON from ${file}`, { cause: error });
+  }
+  if (result?.ok !== true || typeof result.output !== "string") return null;
+  return { result, digest: createHash("sha256").update(bytes).digest("hex") };
+}
+
+/**
+ * What a cached judge verdict must have been produced under.
+ *
+ * The judge pass costs about four dollars and nine minutes a cell, so a 39-cell
+ * pass outlasts one usage window: it has to resume rather than re-spend from
+ * zero. These fields are every input that can move a scored number - the
+ * comparability key the row is filed under, the contract, the scorer and
+ * calibration bytes that key is derived from, the execution fingerprint the raw
+ * cell already carries, and, per cell, the transcript itself. A record matching
+ * all of them is the same judge call, so replaying it changes nothing. Anything
+ * else is ignored and re-judged, which costs one cell and never scores one
+ * pipeline's output under another pipeline's identity.
+ */
+function judgeResumeIdentity({ plan, resultDigest = null, judge = null }) {
+  return {
+    comparability_key: plan?.comparability_key ?? null,
+    contract_digest: plan?.contract_digest ?? null,
+    matcher_digest: plan?.matcher_digest ?? null,
+    calibration_digest: plan?.calibration_digest ?? null,
+    fingerprint: cellFingerprint({ plan }),
+    ...(resultDigest === null ? {} : { result_digest: resultDigest }),
+    ...(judge === null ? {} : { judge }),
+  };
+}
+
+/** The record a resume file holds, or null when it does not match or parse. */
+function readResume(file, identity) {
+  let stored;
+  try {
+    stored = JSON.parse(readFileSync(file, "utf8"));
+  } catch {
+    return null;
+  }
+  return JSON.stringify(stored?.resume_identity) === JSON.stringify(identity)
+    ? (stored.record ?? null)
+    : null;
+}
+
+function writeResume(file, identity, record) {
+  mkdirSync(path.dirname(file), { recursive: true });
+  writeFileSync(
+    file,
+    `${JSON.stringify({ resume_identity: identity, record }, null, 2)}\n`,
+  );
+}
+
+// The resume cache lives under `cells/`: the directory publication already
+// excludes with a pathspec and a failed run already keeps on disk. Scored
+// evidence at the detail-dir root is exactly what a failed row must not carry,
+// so the scorer writes nothing there until the pass has finished.
+function scoreResumePath(planDir, cellId) {
+  return path.join(planDir, "cells", cellId, "score.json");
+}
+
+function calibrationResumePath(planDir) {
+  return path.join(planDir, "cells", "calibration.json");
+}
+
+/**
+ * Whether a stored record can stand in for a judge call.
+ *
+ * A resumed record is published verbatim as
+ * `result-<pr>-<condition>-<draw>.json` and folded into a condition on the way,
+ * so every field either consumer dereferences has to be there and has to have
+ * the right type. A partial record is worse than no record: it is not re-judged,
+ * it aborts the pass on the missing field, and it stays under `cells/` so the
+ * next retry aborts the same way. Rejecting it takes the ending an unparsable
+ * file already gets, for the same reason - one cell re-spent beats a dead
+ * six-hour pass.
+ */
+function usableScoreRecord(record, cell) {
+  if (typeof record !== "object" || record === null || Array.isArray(record)) {
+    return false;
+  }
+  const finite = (value) => typeof value === "number" && Number.isFinite(value);
+  return (
+    record.cell_id === cell.cell_id &&
+    record.pr === cell.pr &&
+    record.condition === cell.condition &&
+    record.draw === cell.draw &&
+    finite(record.scoring_usd) &&
+    record.scoring_usd >= 0 &&
+    finite(record.seconds) &&
+    finite(record.usd) &&
+    Array.isArray(record.claims) &&
+    Array.isArray(record.matched_ids) &&
+    typeof record.leak?.suspected === "boolean" &&
+    Array.isArray(record.leak?.hard) &&
+    finite(record.novel?.novelReal) &&
+    finite(record.novel?.novelWrong)
+  );
+}
+
+/**
+ * A judge verdict for this cell that this plan may reuse, or null.
+ *
+ * `treatment` stays out of the resume identity: the selection that named the
+ * run is display identity, not a judge input, so the same transcript under the
+ * same contract earns the same verdict either way. The record is published as
+ * `result-<pr>-<condition>-<draw>.json` though, and run evidence rejects one
+ * whose treatment is not this plan's, so a reused verdict is rebound to this
+ * run's selection - exactly what a fresh judge call stamps onto a cached raw
+ * cell.
+ */
+export function readScoreResume({ planDir, plan, cell, resultDigest }) {
+  const record = readResume(
+    scoreResumePath(planDir, cell.cell_id),
+    judgeResumeIdentity({ plan, resultDigest }),
+  );
+  return usableScoreRecord(record, cell)
+    ? { ...record, treatment: treatmentIdentity({ plan }) }
+    : null;
+}
+
+export function writeScoreResume({
+  planDir,
+  plan,
+  cell,
+  resultDigest,
+  record,
+}) {
+  writeResume(
+    scoreResumePath(planDir, cell.cell_id),
+    judgeResumeIdentity({ plan, resultDigest }),
+    record,
+  );
+}
+
+/**
+ * Whether a stored calibration replay can stand in for running the forty pairs.
+ *
+ * It is published as `calibration.json`, and `--validate` re-derives
+ * `agreement` and `total` from `outcomes` to check the row's own numbers. A
+ * record that cannot support that re-derivation would be published as a reuse,
+ * fail validation, and - because the failed-run path keeps `cells/` - be reused
+ * by every retry after it. Replaying forty pairs once is the cheaper ending.
+ */
+function usableCalibrationRecord(calibration) {
+  if (
+    typeof calibration !== "object" ||
+    calibration === null ||
+    Array.isArray(calibration)
+  ) {
+    return false;
+  }
+  return (
+    Number.isInteger(calibration.total) &&
+    calibration.total > 0 &&
+    Number.isInteger(calibration.agreement) &&
+    calibration.agreement >= 0 &&
+    calibration.agreement <= calibration.total &&
+    Array.isArray(calibration.outcomes) &&
+    calibration.outcomes.length === calibration.total &&
+    typeof calibration.scoring_usd === "number" &&
+    Number.isFinite(calibration.scoring_usd) &&
+    calibration.scoring_usd >= 0
+  );
+}
+
+/** A calibration replay this plan and judge may reuse, or null. */
+export function readCalibrationResume({ planDir, plan, judge }) {
+  const calibration = readResume(
+    calibrationResumePath(planDir),
+    judgeResumeIdentity({ plan, judge }),
+  );
+  return usableCalibrationRecord(calibration) ? calibration : null;
+}
+
+export function writeCalibrationResume({ planDir, plan, judge, calibration }) {
+  writeResume(
+    calibrationResumePath(planDir),
+    judgeResumeIdentity({ plan, judge }),
+    calibration,
+  );
 }
