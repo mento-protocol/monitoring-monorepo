@@ -3,7 +3,7 @@ title: Review-skill experiments use a separate staged non-ledger lane
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-01
+last_verified: 2026-09-06
 scope: ci/process
 date: 2026-09
 doc_type: adr
@@ -18,7 +18,11 @@ garden_lane: adrs-architecture
 
 ## Context
 
-The canonical review-skill evaluation has 24 model cells. It supplies the
+The canonical review-skill evaluation had 24 model cells when this ADR was
+written; since [ADR 0086](0086-review-eval-lane-any-grid-multi-draw.md) the
+count is derived from the contract's full run matrix — pipeline and control
+cells for every fixture, replay cells per finder report for grid fixtures —
+and `pnpm review:eval -- --plan --kind full --json` prints it. It supplies the
 ledger verdict, baseline, and freshness evidence. This matrix is too slow and
 costly for early prompt experiments.
 
@@ -32,9 +36,10 @@ experiment cannot replace canonical qualification.
 [ADR 0086](0086-review-eval-lane-any-grid-multi-draw.md) supersedes this
 decision on the panel: the grid is every contract fixture marked `grid: true`,
 `--draws N` repeats each fixture, and every number written below as a count —
-the fixed PR list, the three-lane panel, 12 P1 opportunities, the 24-cell
-manifest, and the promote and reject bars — is derived from the grid and the
-draws instead. The harness digest binds every module listed in
+the fixed PR list, the three-lane panel, 12 P1 opportunities, and the promote
+and reject bars — is derived from the grid and the draws instead, while the
+historical 24-cell manifest is derived from the contract's full run matrix as
+the Context above describes. The harness digest binds every module listed in
 `EXPERIMENT_SOURCE_FILES`, which is no longer six. Everything else here stands.
 
 ADR 0085 supersedes this decision on one point: the plan records provider CLI
@@ -58,7 +63,8 @@ Add a small staged experiment lane with these rules:
   plan binds the contract digest, fixture head and base SHAs, truth,
   finder-report and prompt digests, skill digests, model and effort settings,
   provider CLI versions, scorer, the six-module experiment harness digest,
-  complete lane set, treatment order, and a canonical 24-cell rerun manifest.
+  complete lane set, treatment order, and a canonical rerun manifest (24 cells
+  when written; the count is derived since ADR 0086).
 - The screen uses the first frozen finder report for each of the three grid
   fixtures. The holdout uses each complementary report. The optional
   `live-paired` stage generates one current finder output per fixture and gives
@@ -106,7 +112,8 @@ Add a small staged experiment lane with these rules:
   not an unattended service or an adversarial containment boundary.
 - The canonical rerun manifest is planning data only. No canonical importer
   exists, and the manifest disables experiment-artifact reuse. A selected
-  candidate must rerun all 24 canonical cells.
+  candidate must rerun every canonical cell (24 when written; the count is
+  derived since ADR 0086).
 - The current fixtures are development data. A broad generalization claim
   needs a new holdout whose truth did not guide the candidate change.
 
