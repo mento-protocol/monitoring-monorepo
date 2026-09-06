@@ -3,7 +3,7 @@ title: Review-skill experiments use a separate staged non-ledger lane
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-01
+last_verified: 2026-09-06
 scope: ci/process
 date: 2026-09
 doc_type: adr
