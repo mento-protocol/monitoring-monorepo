@@ -120,7 +120,7 @@ resource "grafana_contact_point" "slack_pools_transition" {
     token                   = var.slack_bot_token
     recipient               = var.slack_channel_pools
     disable_resolve_message = true
-    title                   = "{{ if eq .Status \"firing\" }}🟡{{ else }}✅{{ end }}"
+    title                   = "{{ if eq (index .CommonAnnotations \"transition_reason\") \"recovered\" }}✅{{ else if eq .Status \"firing\" }}🟡{{ else }}✅{{ end }}"
     text                    = local.slack_body_template
   }
 }

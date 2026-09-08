@@ -1931,6 +1931,49 @@ test("flap-prone criticals keep incidents open across short recoveries", () => {
   }
 });
 
+test("pool transition Slack titles render recovery events as resolved", () => {
+  const transitionRules = readFileSync(
+    path.resolve(repoRoot, "alerts/rules/rules-fpmms-deviation-transitions.tf"),
+    "utf8",
+  );
+  for (const namePattern of [
+    /\bname\s*=\s*"Deviation Breach State Changed"/,
+    /\bname\s*=\s*"Deviation Breach Critical State Changed"/,
+  ]) {
+    assert(
+      /\btransition_reason\s*=\s*"\{\{- if \$values\.Info -\}\}\{\{ index \$values\.Info\.Labels \\"reason\\" \}\}\{\{- end -\}\}"/.test(
+        ruleBlockNamed(transitionRules, namePattern),
+      ),
+      `${namePattern} must expose the bounded transition reason to the notification template`,
+    );
+  }
+
+  const contactPoints = stripComments(
+    readFileSync(
+      path.resolve(repoRoot, "alerts/rules/contact-points.tf"),
+      "utf8",
+    ),
+  );
+  const [poolTransitionContactPoint] = blocksFor(
+    contactPoints,
+    'resource "grafana_contact_point" "slack_pools_transition"',
+  );
+  assert(
+    poolTransitionContactPoint,
+    "grafana_contact_point.slack_pools_transition should exist",
+  );
+  assert(
+    /\bdisable_resolve_message\s*=\s*true/.test(poolTransitionContactPoint),
+    "transition delivery must remain one-shot rather than sending a second resolve message",
+  );
+  assert(
+    /\btitle\s*=\s*"\{\{ if eq \(index \.CommonAnnotations \\"transition_reason\\"\) \\"recovered\\" \}\}✅\{\{ else if eq \.Status \\"firing\\" \}\}🟡\{\{ else \}\}✅\{\{ end \}\}"/.test(
+      poolTransitionContactPoint,
+    ),
+    "a recovered firing transition must render green while other firing transitions stay yellow",
+  );
+});
+
 // A token-count share is the exchange rate, not depletion: a balanced
 // JPYm/USDm pool reads 0.4% / 99.6% by count and would page forever. PR #1940
 // shipped exactly that and was corrected in #1944 before the production apply.
