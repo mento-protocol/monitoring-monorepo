@@ -1941,7 +1941,7 @@ test("pool transition Slack titles render recovery events as resolved", () => {
     /\bname\s*=\s*"Deviation Breach Critical State Changed"/,
   ]) {
     assert(
-      /\btransition_reason\s*=\s*"\{\{ index \$values\.Info\.Labels \\"reason\\" \}\}"/.test(
+      /\btransition_reason\s*=\s*"\{\{- if \$values\.Info -\}\}\{\{ index \$values\.Info\.Labels \\"reason\\" \}\}\{\{- end -\}\}"/.test(
         ruleBlockNamed(transitionRules, namePattern),
       ),
       `${namePattern} must expose the bounded transition reason to the notification template`,

@@ -13,7 +13,7 @@ resource "grafana_rule_group" "fpmms_deviation_transitions" {
 
     annotations = {
       summary           = local.deviation_transition_summary_annotation
-      transition_reason = "{{ index $values.Info.Labels \"reason\" }}"
+      transition_reason = "{{- if $values.Info -}}{{ index $values.Info.Labels \"reason\" }}{{- end -}}"
       current_reserves  = local.deviation_current_reserves_annotation
       breach_duration   = local.deviation_transition_breach_duration_annotation
       breach_started    = local.deviation_transition_breach_started_annotation
@@ -118,7 +118,7 @@ resource "grafana_rule_group" "fpmms_deviation_transitions" {
 
     annotations = {
       summary           = local.deviation_transition_summary_annotation
-      transition_reason = "{{ index $values.Info.Labels \"reason\" }}"
+      transition_reason = "{{- if $values.Info -}}{{ index $values.Info.Labels \"reason\" }}{{- end -}}"
       current_reserves  = local.deviation_current_reserves_annotation
       breach_duration   = local.deviation_transition_breach_duration_annotation
       breach_started    = local.deviation_transition_breach_started_annotation
