@@ -47,10 +47,15 @@ import {
 
 let passed = 0;
 let failed = 0;
+const tests = [];
 
 function test(name, fn) {
+  tests.push({ name, fn });
+}
+
+async function runTest(name, fn) {
   try {
-    fn();
+    await fn();
     process.stdout.write(`ok ${name}\n`);
     passed += 1;
   } catch (err) {
@@ -3105,6 +3110,10 @@ test("a passing CodeRabbit check does not clear a real required blocker", () => 
     "CodeRabbit must never appear as a required blocker by default",
   );
 });
+
+for (const { name, fn } of tests) {
+  await runTest(name, fn);
+}
 
 if (failed > 0) {
   process.stderr.write(`\n${failed} failed, ${passed} passed\n`);
