@@ -697,12 +697,24 @@ export async function fetchRequiredStatusContexts({
         ? await fetchWorkflowNames(repo, rulesResult.value ?? [])
         : { byPath: new Map(), error: null };
 
-      return requiredStatusContextsFromRulesResult(rulesResult.value ?? [], {
-        workflowNameByPath: workflowNameByPath.byPath,
-        workflowNameLookupError: workflowNameByPath.error,
-        fallbackRepoPath: repoPath(repo),
-        statusCheckRollup,
-      });
+      const rulesContexts = requiredStatusContextsFromRulesResult(
+        rulesResult.value ?? [],
+        {
+          workflowNameByPath: workflowNameByPath.byPath,
+          workflowNameLookupError: workflowNameByPath.error,
+          fallbackRepoPath: repoPath(repo),
+          statusCheckRollup,
+        },
+      );
+      if (rulesContexts.error === null && rulesContexts.contexts.length === 0) {
+        return {
+          contexts: [],
+          error:
+            "Required status contexts unavailable: classic branch protection returned HTTP 404 and branch rulesets did not define required status checks or workflows",
+        };
+      }
+
+      return rulesContexts;
     }
 
     return {

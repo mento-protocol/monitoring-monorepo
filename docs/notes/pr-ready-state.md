@@ -50,7 +50,9 @@ Required blockers:
   HTTP 404, whether `gh` renders it as `Not Found` or `Branch not protected`,
   the probe reads active branch rulesets and derives required status contexts from any
   `required_status_checks` and named `workflows` rule before using the fallback
-  split.
+  split. A ruleset result that is empty or defines no required status checks or
+  workflows stays unavailable and blocking because the 404 may mask missing
+  permission to read classic protection rather than prove its absence.
 - Required GitHub review state, including requested changes or required review
   still pending.
 - Unreplied review comments that repo policy requires agents to answer. A

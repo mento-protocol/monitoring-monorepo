@@ -368,6 +368,24 @@ test("fails closed when branch protection is absent and rulesets are unavailable
   });
 });
 
+test("fails closed when a protection 404 yields no ruleset-required contexts", async () => {
+  const result = await fetchRequiredStatusContexts({
+    repo: { owner: "mento-protocol", name: "monitoring-monorepo", host: null },
+    baseRef: "main",
+    fetchProtection: async () => ({
+      ok: false,
+      error: "gh: Not Found (HTTP 404)",
+    }),
+    fetchRules: async () => ({ ok: true, value: [{ type: "deletion" }] }),
+  });
+
+  assertDeepEqual(result, {
+    contexts: [],
+    error:
+      "Required status contexts unavailable: classic branch protection returned HTTP 404 and branch rulesets did not define required status checks or workflows",
+  });
+});
+
 test("fails closed without reading rulesets for non-404 protection errors", async () => {
   let rulesCalls = 0;
   const result = await fetchRequiredStatusContexts({
