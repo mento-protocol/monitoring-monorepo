@@ -662,19 +662,26 @@ async function attachCodexRequestReactions({ repo, issueComments }) {
   );
 }
 
-async function fetchRequiredStatusContexts({
+function isHttpNotFoundError(error) {
+  return /\bHTTP 404\b/i.test(String(error));
+}
+
+export async function fetchRequiredStatusContexts({
   repo,
   baseRef,
   statusCheckRollup = [],
+  fetchProtection = ghApiJsonResult,
+  fetchRules = ghApiJsonPagesResult,
+  fetchWorkflowNames = fetchWorkflowNamesForRules,
 }) {
   const encodedBaseRef = encodeURIComponent(baseRef);
-  const result = await ghApiJsonResult(repo, [
+  const result = await fetchProtection(repo, [
     `repos/${repoPath(repo)}/branches/${encodedBaseRef}/protection/required_status_checks`,
   ]);
 
   if (!result.ok) {
-    if (result.error.includes("Branch not protected (HTTP 404)")) {
-      const rulesResult = await ghApiJsonPagesResult(repo, [
+    if (isHttpNotFoundError(result.error)) {
+      const rulesResult = await fetchRules(repo, [
         `repos/${repoPath(repo)}/rules/branches/${encodedBaseRef}`,
       ]);
 
@@ -687,7 +694,7 @@ async function fetchRequiredStatusContexts({
 
       const workflowNameByPath = workflowPathsFromRules(rulesResult.value ?? [])
         .length
-        ? await fetchWorkflowNamesForRules(repo, rulesResult.value ?? [])
+        ? await fetchWorkflowNames(repo, rulesResult.value ?? [])
         : { byPath: new Map(), error: null };
 
       return requiredStatusContextsFromRulesResult(rulesResult.value ?? [], {

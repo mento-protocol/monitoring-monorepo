@@ -3,7 +3,7 @@ title: PR Ready State
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-03
+last_verified: 2026-09-08
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -47,8 +47,8 @@ Required blockers:
 - Branch-protection context lookup failures caused by unreadable or
   unauthorized protection data; the probe fails closed rather than guessing
   required-vs-optional status. If the classic branch-protection endpoint returns
-  GitHub's `Branch not protected (HTTP 404)` response, the probe reads active
-  branch rulesets and derives required status contexts from any
+  HTTP 404, whether `gh` renders it as `Not Found` or `Branch not protected`,
+  the probe reads active branch rulesets and derives required status contexts from any
   `required_status_checks` and named `workflows` rule before using the fallback
   split.
 - Required GitHub review state, including requested changes or required review
