@@ -498,14 +498,13 @@ export function validateLedgerRowAgainstContract({
 /**
  * Validate an external baseline before a generated plan starts paid work.
  *
- * A row this plan can pair with ran this plan's matrix: the planner is hashed
- * into `matcher_digest`, so an equal comparability key means an equal cell
- * list. Its draw counts are therefore checked exactly rather than as a floor.
- * `--against` names a row file with no plan and no result files beside it, so
- * this is the only check that reads its shape at all, and `perDefectBits()`
- * folds a condition's draws with OR: a baseline carrying two bits per defect
- * against a candidate carrying one is a higher hit rate for the baseline alone,
- * which shows up as lost defects and can red a run that regressed nothing.
+ * A row this plan can pair with ran this plan's matrix — the planner is hashed
+ * into `matcher_digest` — so its draws are checked exactly rather than as a
+ * floor. `--against` names a row file with no plan or results beside it, so
+ * this is the only check that reads its shape, and `perDefectBits()` folds a
+ * condition's draws with OR: two baseline bits per defect against a candidate's
+ * one is a higher hit rate for the baseline alone, which reads as lost defects
+ * and can red a run that regressed nothing.
  */
 export function baselinePreflightProblems({
   row,
@@ -621,19 +620,13 @@ export function contractScorableIdsByPr(contract) {
  * keeps it and shortens only that PR's vectors, which every other check reads
  * as the run's own sample rather than as a missing cell.
  *
- * Both draw checks are floors rather than equalities by default, so a row
- * recorded when the matrix planned more draws than it does now still validates.
- * That row ran a superset of today's matrix, not a subset of it, and it can
- * never be paired with a current row anyway: `plannedMatrix` and `planCells`
- * are both hashed into `matcher_digest`, so moving the matrix moves the
- * comparability key and starts a new series. `validateLedgerRow` still refuses
- * a vector longer than the draws its own condition declares, so a row cannot
- * claim bits it never planned in either direction.
- *
- * `exactDraws` restores the equality for a caller that has already established
- * the row ran this matrix — `baselinePreflightProblems` does, from the
- * comparability key — because there a longer vector is not history but an
- * unequal sample on one side of a paired comparison.
+ * Both draw checks are floors by default: a row recorded when the matrix
+ * planned more draws ran a superset of today's, and it pairs with nothing
+ * current anyway, because `plannedMatrix` and `planCells` are hashed into
+ * `matcher_digest`. `exactDraws` restores the equality for a caller that has
+ * already established the row ran this matrix — `baselinePreflightProblems`
+ * does, from the comparability key — where a longer vector is an unequal
+ * sample on one side of a paired comparison rather than history.
  */
 export function completeMatrixProblems({
   contract,
@@ -684,13 +677,12 @@ export function completeMatrixProblems({
     // `condition.draws` is one number for the whole condition, so the check
     // above only catches a matrix shortened everywhere at once. A run that
     // dropped the last replay draw for a single PR keeps `draws: 2` — the other
-    // PRs still ran it — and every other check agrees with it: the vectors of
-    // the omitted PR carry one bit each, `recall` is recomputed from those
-    // bits, and `revalidateRow` finds the same single draw in the cell records.
-    // The row then claims a whole matrix while missing a planned cell,
-    // refreshes the freshness clock and becomes a baseline. The per-PR sample
-    // is the vector length, so each planned cell is compared with the PR's own
-    // bits.
+    // PRs still ran it — and every other check agrees with it: that PR's
+    // vectors carry one bit each, `recall` is recomputed from those bits, and
+    // `revalidateRow` finds the same single draw in the cell records. The row
+    // then claims a whole matrix while missing a planned cell, refreshes the
+    // freshness clock and becomes a baseline. The per-PR sample is the vector
+    // length, so each planned cell is compared with the PR's own bits.
     for (const cell of cells) {
       const ids = scorableByPr.get(cell.pr) ?? [];
       const short = ids.filter((id) => {

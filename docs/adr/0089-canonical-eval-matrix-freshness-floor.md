@@ -83,7 +83,9 @@ today's cells, and it carries a different comparability key in any case.
   and carries the finder's spread. `verdict()` still calls six net flips RED or
   PROMOTE, and finder sampling alone can now reach that on a run where nothing
   changed. Read a `pipeline` flip beside `replay` before acting on it: `replay`
-  runs frozen reports, so it does not move with the finder. The thresholds in
+  runs frozen reports, so it does not move with the finder. `replay` covers the
+  39 grid defects only, so a flip on one of the 12 defects from PRs 1982, 1984
+  and 2001 is unchecked rather than uncorroborated. The thresholds in
   `verdict_rules` are pre-registered and are deliberately not re-tuned here.
 - That reading is not enforced. A PROMOTE re-anchors the baseline on its own
   and its verdict is recomputed from the row's numbers, so it cannot be lowered

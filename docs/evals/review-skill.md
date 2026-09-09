@@ -697,13 +697,16 @@ generalization.
 | **PROMOTE**    | `c − b ≥ 6` and the change was intentional                                                                                                                                                                                    | re-anchor the baseline in a PR that says what changed and why             |
 | **INCOMPLETE** | the run failed, or a canary did not finish                                                                                                                                                                                    | fix the harness and re-run; the row stays as a trace                      |
 
-**A flip that only `pipeline` shows is unproven.** Since 2026-09 `pipeline`
-takes one live finder draw per PR, and the finder samples, so six net flips
-there can be the finder rather than the reviewer. `replay` runs frozen reports
-over the same defects and does not move with it. A RED still opens its priority
-issue and a PROMOTE still records what changed, and both name whether `replay`
-moved with the flipped defects; an uncorroborated flip is written down as
-unproven rather than treated as a skill change.
+**A `pipeline` flip `replay` contradicts is unproven; one it never saw is
+unchecked.** Since 2026-09 `pipeline` takes one live finder draw per PR, and the
+finder samples, so six net flips there can be the finder rather than the
+reviewer. `replay` runs frozen reports and does not move with the finder, but it
+covers the 39 grid defects only. So a RED still opens its priority issue and a
+PROMOTE still records what changed, and both split the flipped defects three
+ways: those `replay` moved with, those `replay` held on — where the flip is
+unproven — and those from PRs 1982, 1984 and 2001, which `replay` never
+scores. That third group has no variance-free counterpart at all. Name it
+unchecked; it is neither corroboration nor contradiction.
 
 The harness does not enforce that yet, and it is the one place this matters
 most: a PROMOTE re-anchors the baseline on its own, because `resolveBaseline()`
