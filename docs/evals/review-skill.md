@@ -111,18 +111,20 @@ Until 2026-09 a full run took two live `pipeline` draws of every fixture and a
 `control` cell on all nine, which is 39 cells, about $145 of contestant spend
 and about $155 more for the judge pass. The second live draw was there because
 the finder samples — one codex configuration drew 19 and then 10 known defects
-on identical diffs — but two points do not measure that spread, and they do not
-remove it either: the scorer folds a condition's draws with OR, so the second
-draw only damped the noise. Ranking two skills is the experiment lane's job,
-and the lane holds the finder fixed to do it: every draw of a lane replays one
-frozen report through both arms
+on identical diffs — but two points do not measure that spread, and they do
+not remove it either: the scorer folds a condition's draws with OR, so the
+second draw only damped the noise. Ranking two skills is the experiment lane's
+job, and the lane holds the finder fixed to do it: every draw of a lane replays
+one frozen report through both arms
 ([ADR 0086](../adr/0086-review-eval-lane-any-grid-multi-draw.md)). The
 canonical row is a freshness floor and the baseline anchor, so it now buys one
 live draw per PR.
 
 `control` narrowed to the grid for the same reason: it is read as a paired
 per-defect difference against the previous run's control, and the grid's 39
-defects carry that comparison. The three non-grid fixtures (PRs 1982, 1984 and 2001) stay in `pipeline`, where they widen the wrong-claims and leak surface.
+defects carry that comparison. The three non-grid fixtures — PRs 1982, 1984
+and 2001 — stay in `pipeline`, where they widen the wrong-claims and leak
+surface.
 
 Two things follow. `pipeline` now records one bit per defect, so its number is
 a single live sample that carries the finder's spread. The verdict rules still
