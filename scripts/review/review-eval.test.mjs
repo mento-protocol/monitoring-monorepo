@@ -845,7 +845,7 @@ test("comparabilityKey moves with the contract, the prompts, and the scorer", ()
 
 test("orchestratorSourceDigest binds the shell and the cell modules", () => {
   const expected =
-    "681af78b88b9c20f13b0ef14a5b81f4cd4017d44c259808c1c5446a68955c610";
+    "0115d207878da5d9b197cd58cb721fecc20e93ce61413964cbc427dee6b6d664";
   assert.equal(orchestratorSourceDigest(), expected);
   // The cell writer and the stream parser are in the digest for the same
   // reason the shell is: the writer decides what a paid cell records and the
@@ -2120,6 +2120,7 @@ function driveMatrix({
   startedAgo = 0,
   cellSeconds = 1,
   failing = [],
+  selfKill = "",
 }) {
   const events = path.join(dir, "events");
   // The rows travel through a file, not through the harness source: the fields
@@ -2147,10 +2148,12 @@ function driveMatrix({
     "TOTAL=0",
     "EVENTS=" + JSON.stringify(events),
     "FAILING=" + JSON.stringify(failing.join(" ")),
+    "SELF_KILL=" + JSON.stringify(selfKill),
     `log() { printf '%s\\n' "$*"; }`,
     `fail() { printf 'FATAL: %s\\n' "$*" >&2; exit 1; }`,
     "cell_rows() { cat " + JSON.stringify(rowsFile) + "; }",
     "run_cell() {",
+    `  if [[ -n $SELF_KILL && $1 == "$SELF_KILL" ]]; then kill -KILL $BASHPID; fi`,
     `  printf 'start %s %s\\n' "$2" "$1" >>"$EVENTS"`,
     "  sleep " + String(cellSeconds),
     `  printf 'end %s %s\\n' "$2" "$1" >>"$EVENTS"`,
@@ -2373,8 +2376,33 @@ test("the matrix counts every concurrent cell exactly once", () => {
     // group's, so a failure still reads as one block under its own cell id.
     assert.match(
       counted.stdout,
-      /  pr-1995-pipeline-draw1 ran\n {2}pr-1995-pipeline-draw1 FAILED\n/,
+      / {2}pr-1995-pipeline-draw1 ran\n {2}pr-1995-pipeline-draw1 FAILED\n/,
     );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a killed group worker ends the matrix instead of holding it open", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "review-eval-matrix-killed-"));
+  try {
+    // The worker for 1995 kills itself, so it never writes the marker the
+    // parent waits on. Without a second signal the scheduler would poll that
+    // slot forever and no run would ever reach scoring.
+    const killed = driveMatrix({
+      cells: [
+        { pr: "1990", id: "pr-1990-control-draw1" },
+        { pr: "1995", id: "pr-1995-control-draw1" },
+      ],
+      dir,
+      concurrency: 2,
+      selfKill: "pr-1995-control-draw1",
+    });
+    assert.equal(killed.done, 1);
+    assert.equal(killed.failed, 0);
+    assert.equal(killed.total, 2);
+    assert.equal(killed.note, "1 cells recorded no outcome");
+    assert.match(killed.stdout, /the matrix is partial; 1 cells recorded/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -129,9 +129,12 @@ matrix_start_group() {
 }
 
 # Block until fewer than $2 group workers are still running; $2 of 1 waits for
-# all of them. A worker announces itself finished with a marker file rather than
-# with `kill -0`, which cannot tell a live worker from one that exited and has
-# not been reaped yet.
+# all of them. A worker announces itself finished with a marker file, because
+# `kill -0` alone cannot tell a live worker from one that exited and has not
+# been reaped yet. A worker that was killed writes no marker, so a pid Bash has
+# already reaped counts as finished too — without that second signal a SIGKILLed
+# group would hold the whole run here forever. Its cells then have no status
+# file, and the accounting below reports them as a partial matrix.
 matrix_wait_for_capacity() {
   local status_dir="$1" limit="$2" index live slot pid
   local -a live_pids live_slots
@@ -142,7 +145,7 @@ matrix_wait_for_capacity() {
     for ((index = 0; index < live; index++)); do
       slot="${MATRIX_WORKER_SLOTS[$index]}"
       pid="${MATRIX_WORKER_PIDS[$index]}"
-      if [[ -f "$status_dir/$slot.group" ]]; then
+      if [[ -f "$status_dir/$slot.group" ]] || ! kill -0 "$pid" 2>/dev/null; then
         wait "$pid" 2>/dev/null || true
         continue
       fi
