@@ -3353,6 +3353,12 @@ test("final snapshot rejects parent or membership changes after protection looku
   const { stack } = await stackBases(fixture);
   const mutations = [
     (next) => {
+      next.currentPr.number = 12;
+    },
+    (next) => {
+      next.currentPr.head.ref = "other-child";
+    },
+    (next) => {
       next.currentPr.head.sha = "c".repeat(40);
     },
     (next) => {
@@ -3387,16 +3393,18 @@ test("final snapshot rejects parent or membership changes after protection looku
     let rejected = false;
     try {
       await finalSnapshot(fixture, stack, mutate);
-    } catch {
-      rejected = true;
+    } catch (error) {
+      rejected = String(error.message).startsWith(
+        "Stack metadata unavailable:",
+      );
     }
     assert(rejected, "changed snapshot must not emit readiness");
   }
   let rejected = false;
   try {
     await finalSnapshot(fixture, null);
-  } catch {
-    rejected = true;
+  } catch (error) {
+    rejected = String(error.message).startsWith("Stack metadata unavailable:");
   }
   assert(rejected, "standalone to native transition must not emit readiness");
 });
@@ -3413,8 +3421,10 @@ test("final snapshot rejects failed or missing current PR fetch", async () => {
         stack: null,
         fetchJson: async () => result,
       });
-    } catch {
-      rejected = true;
+    } catch (error) {
+      rejected = String(error.message).startsWith(
+        "Stack metadata unavailable:",
+      );
     }
     assert(rejected, "final lookup must succeed before readiness");
   }

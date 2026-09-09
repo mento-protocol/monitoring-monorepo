@@ -97,7 +97,7 @@ Move each pin class with its files.
   `scripts/docs/check-verification-redesign-evidence*.mjs`.
 - **Sentry suite manifest.** `scripts/sentry/gate/sentry-suite-manifest.json`
   enforces two-way path equality with `findSentrySuites()`; moves fail closed.
-- **Babysit pin.** Move `pr/pr-stack-ready-state.mjs` with
+- **Babysit pin.** Move `pr/pr-stack-ready-state*.mjs` with
   `.claude/babysit-pr.sh`.
 - **PR probe pins.** `pr/pr-{ready,feedback}-state*.mjs` use
   `pr:ready-state:test` and `pr:feedback-state:test` in scripts CI.

@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { fetchReadyState } from "./pr-ready-state.mjs";
+import { fetchReadyState, withGhAbortSignal } from "./pr-ready-state.mjs";
 import { summarizeFeedbackState } from "./pr-feedback-state-core.mjs";
 
 function fingerprint(stack) {
@@ -17,7 +17,30 @@ export async function evaluateStackGate(
   repoArg,
   fetchState = fetchReadyState,
   feedback = summarizeFeedbackState,
+  timeoutMs = 5 * 60_000,
 ) {
+  const controller = new AbortController();
+  let timer;
+  const expired = new Promise((resolve) => {
+    timer = setTimeout(() => {
+      resolve("PENDING stack verification deadline exceeded");
+      controller.abort();
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([
+      expired,
+      withGhAbortSignal(controller.signal, () =>
+        evaluateLayers(initial, repoArg, fetchState, feedback),
+      ),
+    ]);
+  } finally {
+    clearTimeout(timer);
+    controller.abort();
+  }
+}
+
+async function evaluateLayers(initial, repoArg, fetchState, feedback) {
   const stack = initial?.stack;
   if (
     !stack ||

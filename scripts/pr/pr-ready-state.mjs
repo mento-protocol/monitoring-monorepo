@@ -7,6 +7,7 @@
  */
 
 import { spawn } from "node:child_process";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -30,11 +31,18 @@ import {
 export { fetchHeadUpdatedAt, headUpdatedAtFromTimeline };
 
 const GH_OUTPUT_MAX_BYTES = 20 * 1024 * 1024;
+const ghAbortScope = new AsyncLocalStorage();
+
+export function withGhAbortSignal(signal, callback) {
+  return ghAbortScope.run(signal, callback);
+}
 
 function runGh(args) {
   return new Promise((resolve, reject) => {
     const child = spawn("gh", args, {
       stdio: ["ignore", "pipe", "pipe"],
+      signal: ghAbortScope.getStore(),
+      killSignal: "SIGKILL",
     });
     let stdout = "";
     let stderr = "";

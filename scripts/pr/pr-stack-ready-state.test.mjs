@@ -109,7 +109,7 @@ try {
   );
   writeFileSync(
     join(root, "scripts/pr/pr-ready-state.mjs"),
-    `import {readFileSync} from 'node:fs'; let calls=0; export async function fetchReadyState(args) { calls++; const value=JSON.parse(readFileSync('input.json')); value.pr={...value.stack.layers.find(layer=>String(layer.number)===args.prArg)}; delete value.pr.baseRefOid; if(process.env.SCENARIO==='blocked' && args.prArg==='1') value.feedbackReady=false; if(process.env.SCENARIO==='moved' && calls===5) value.stack.layers[0].headRefOid='b'.repeat(40); return value; }`,
+    `import {readFileSync} from 'node:fs'; let calls=0; export function withGhAbortSignal(_signal,callback) { return callback(); } export async function fetchReadyState(args) { calls++; const value=JSON.parse(readFileSync('input.json')); value.pr={...value.stack.layers.find(layer=>String(layer.number)===args.prArg)}; delete value.pr.baseRefOid; if(process.env.SCENARIO==='blocked' && args.prArg==='1') value.feedbackReady=false; if(process.env.SCENARIO==='moved' && calls===5) value.stack.layers[0].headRefOid='b'.repeat(40); return value; }`,
   );
   writeFileSync(
     join(root, "scripts/pr/pr-feedback-state-core.mjs"),
@@ -194,4 +194,43 @@ try {
 } finally {
   rmSync(root, { recursive: true, force: true });
 }
-console.log("ok stack aggregate and hook regression tests");
+const deadlineRoot = mkdtempSync(join(tmpdir(), "stack-deadline-"));
+const previousPath = process.env.PATH;
+try {
+  const pidPath = join(deadlineRoot, "pid");
+  writeFileSync(
+    join(deadlineRoot, "gh"),
+    `#!${process.execPath}\nrequire('node:fs').writeFileSync(${JSON.stringify(pidPath)}, String(process.pid)); setInterval(() => {}, 1000);\n`,
+    { mode: 0o755 },
+  );
+  process.env.PATH = `${deadlineRoot}:${previousPath}`;
+  const started = Date.now();
+  const result = await evaluateStackGate(
+    state(2),
+    "owner/repo",
+    undefined,
+    undefined,
+    500,
+  );
+  assert.match(result, /^PENDING stack verification deadline exceeded/);
+  assert.ok(Date.now() - started < 5000, "deadline must bound the aggregate");
+  const pid = Number(readFileSync(pidPath, "utf8"));
+  // Allow the operating system to reap the child after SIGKILL.
+  for (let attempt = 0; attempt < 50; attempt++) {
+    try {
+      process.kill(pid, 0);
+    } catch {
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.throws(
+    () => process.kill(pid, 0),
+    { code: "ESRCH" },
+    "deadline must terminate gh",
+  );
+} finally {
+  process.env.PATH = previousPath;
+  rmSync(deadlineRoot, { recursive: true, force: true });
+}
+console.log("ok stack aggregate, deadline, and hook regression tests");

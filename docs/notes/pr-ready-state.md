@@ -508,6 +508,8 @@ matching stack snapshots, and performs a final selected-PR readiness read.
 Only complete, stable, ready results produce `PASS`; an unavailable, malformed,
 changed, or blocked result produces `PENDING`. It adds no public command and
 does not change the individual probes' layer-scoped JSON contract.
+The native aggregate has a five-minute deadline that cancels active `gh` child
+requests and returns `PENDING` when reached.
 
 ## Agent workflow
 
