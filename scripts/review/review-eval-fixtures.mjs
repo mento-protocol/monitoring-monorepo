@@ -18,6 +18,7 @@ export const FINDER_ARGV_ELEMENT = /^[A-Za-z0-9._="@/:-]+$/;
 const REQUIRED_VERDICT_RULES = [
   "noise_floor_defects",
   "regression_net_flips",
+  "promote_corroboration_net_flips",
   "p1_recall_floor",
   "wrong_claims_ratio_ceiling",
   "canary_min_matched_grid",
@@ -595,6 +596,26 @@ function checkShape({ contract, problems }) {
       problems.push(
         "verdict_rules.p1_recall_floor must be a rate at or below 1",
       );
+    }
+    // The corroboration rule counts defects, and it asks `replay` to move less
+    // than the flip rule asks of the headline. A value above
+    // `regression_net_flips` would demand more of the quieter condition than
+    // the verdict itself demands, which no PROMOTE could ever clear.
+    const corroboration = rules.promote_corroboration_net_flips;
+    if (Number.isFinite(corroboration)) {
+      if (!Number.isSafeInteger(corroboration)) {
+        problems.push(
+          "verdict_rules.promote_corroboration_net_flips must be a whole number of defects",
+        );
+      }
+      if (
+        Number.isFinite(rules.regression_net_flips) &&
+        corroboration > rules.regression_net_flips
+      ) {
+        problems.push(
+          "verdict_rules.promote_corroboration_net_flips must not exceed verdict_rules.regression_net_flips",
+        );
+      }
     }
   }
   const cadence = contract.cadence_days;

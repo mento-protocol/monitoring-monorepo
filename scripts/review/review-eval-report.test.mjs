@@ -118,6 +118,11 @@ function baseline(overrides = {}) {
   });
 }
 
+/** A `replay` condition: the grid defects only, both frozen reports replayed. */
+function replay(overrides = {}) {
+  return condition({ ids: gridIds, draws: 2, ...overrides });
+}
+
 test("the fixtures used by these assertions are themselves valid rows", () => {
   assert.deepEqual(validateLedgerRow(row()), []);
   assert.deepEqual(
@@ -345,9 +350,19 @@ test("verdict applies the pre-registered rule to every branch", () => {
       reason: /cannot be ranked against the given baseline/,
     },
     {
-      name: "PROMOTE on a net gain past the threshold",
-      row: row({ conditions: { pipeline: condition({ found: 26 }) } }),
-      baseline: baseline(),
+      name: "PROMOTE on a net gain past the threshold replay corroborates",
+      row: row({
+        conditions: {
+          pipeline: condition({ found: 26 }),
+          replay: replay({ found: 13 }),
+        },
+      }),
+      baseline: baseline({
+        conditions: {
+          pipeline: condition({ found: 20 }),
+          replay: replay({ found: 10 }),
+        },
+      }),
       expect: "PROMOTE",
       reason: /gained a net 6 defects/,
     },
@@ -507,6 +522,114 @@ test("verdict refuses to rank a pair sharing fewer than three defects", () => {
     }).verdict,
     "GREEN",
   );
+});
+
+test("a pipeline gain replay does not corroborate does not re-anchor", () => {
+  // A PROMOTE moves the baseline every later run is paired against, and since
+  // ADR 0090 `pipeline` takes one live finder draw per PR, so six net flips
+  // there can be the draw. `replay` replays frozen reports over the grid, so
+  // it is the condition that can tell the two apart.
+  const gain = { pipeline: condition({ found: 26 }) };
+  const base = { pipeline: condition({ found: 20 }) };
+  const cases = [
+    {
+      name: "replay held still",
+      row: row({ conditions: { ...gain, replay: replay({ found: 10 }) } }),
+      baseline: baseline({
+        conditions: { ...base, replay: replay({ found: 10 }) },
+      }),
+      reason:
+        /replay moved 0 defects on 39 shared defects, and corroboration needs a net gain of at least 3/,
+    },
+    {
+      name: "replay moved the other way",
+      row: row({ conditions: { ...gain, replay: replay({ found: 8 }) } }),
+      baseline: baseline({
+        conditions: { ...base, replay: replay({ found: 10 }) },
+      }),
+      reason: /replay moved -2 defects/,
+    },
+    {
+      name: "replay gained less than the corroboration threshold",
+      row: row({ conditions: { ...gain, replay: replay({ found: 12 }) } }),
+      baseline: baseline({
+        conditions: { ...base, replay: replay({ found: 10 }) },
+      }),
+      reason: /replay moved 2 defects/,
+    },
+    {
+      name: "replay absent on the row",
+      row: row({ conditions: gain }),
+      baseline: baseline({
+        conditions: { ...base, replay: replay({ found: 10 }) },
+      }),
+      reason: /replay is absent on this row/,
+    },
+    {
+      name: "replay absent on the baseline",
+      row: row({ conditions: { ...gain, replay: replay({ found: 13 }) } }),
+      baseline: baseline({ conditions: base }),
+      reason: /replay is absent on the baseline/,
+    },
+    {
+      name: "replay shares fewer defects than the noise floor",
+      row: row({
+        conditions: {
+          ...gain,
+          replay: condition({ ids: gridIds.slice(0, 2), found: 2 }),
+        },
+      }),
+      baseline: baseline({
+        conditions: {
+          ...base,
+          replay: condition({ ids: gridIds.slice(0, 2), found: 0 }),
+        },
+      }),
+      reason:
+        /replay and the baseline share only 2 scored defect\(s\); noise_floor_defects 3 refuses to corroborate/,
+    },
+  ];
+  for (const item of cases) {
+    const decision = verdict({
+      contract,
+      row: item.row,
+      baselineRow: item.baseline,
+    });
+    assert.equal(decision.verdict, "GREEN", item.name);
+    const joined = decision.reasons.join("\n");
+    // The gain is still stated: the reader sees what moved and why it is not
+    // enough to move the anchor.
+    assert.match(joined, /pipeline gained a net 6 defects/, item.name);
+    assert.match(joined, item.reason, `${item.name}: ${joined}`);
+    assert.match(joined, /does not re-anchor the baseline/, item.name);
+  }
+});
+
+test("corroboration gates PROMOTE only, and only a pipeline headline", () => {
+  // RED is unchanged: a spurious RED costs an investigation, a spurious
+  // PROMOTE silently moves the reference.
+  const red = verdict({
+    contract,
+    row: row({ conditions: { pipeline: condition({ found: 14 }) } }),
+    baselineRow: baseline({
+      conditions: { pipeline: condition({ found: 20 }) },
+    }),
+  });
+  assert.equal(red.verdict, "RED", JSON.stringify(red.reasons));
+  assert.match(red.reasons.join("\n"), /lost a net 6 defects/);
+  // A row whose headline is `replay` scored no live pipeline cell, and
+  // `replay`'s finder is frozen, so there is no finder sampling to corroborate.
+  const replayHeadline = verdict({
+    contract,
+    row: row({ conditions: { replay: replay({ found: 26 }) } }),
+    baselineRow: baseline({ conditions: { replay: replay({ found: 20 }) } }),
+  });
+  assert.equal(
+    replayHeadline.verdict,
+    "PROMOTE",
+    JSON.stringify(replayHeadline.reasons),
+  );
+  assert.match(replayHeadline.reasons.join("\n"), /replay gained a net 6/);
 });
 
 test("a condition that scored no P1 defect is not read as zero P1 recall", () => {

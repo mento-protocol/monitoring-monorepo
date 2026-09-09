@@ -544,13 +544,17 @@ export function verdict({
     return { verdict: "AMBER", reasons: [...reasons, ...amber] };
 
   if (flips && rankable && -flips.delta >= rules.regression_net_flips) {
-    return {
-      verdict: "PROMOTE",
-      reasons: [
-        ...reasons,
-        `${name} gained a net ${-flips.delta} defects against the baseline (b=${flips.b}, c=${flips.c})`,
-      ],
-    };
+    const gain = `${name} gained a net ${-flips.delta} defects against the baseline (b=${flips.b}, c=${flips.c})`;
+    const uncorroborated = promoteCorroborationGap({
+      rules,
+      row,
+      baseline,
+      name,
+    });
+    if (uncorroborated) {
+      return { verdict: "GREEN", reasons: [...reasons, gain, uncorroborated] };
+    }
+    return { verdict: "PROMOTE", reasons: [...reasons, gain] };
   }
   return {
     verdict: "GREEN",
@@ -561,6 +565,52 @@ export function verdict({
         : `${name} recall ${rateText(condition.recall.rate)}, P1 ${rateText(condition.p1.rate)}`,
     ],
   };
+}
+
+/**
+ * Why `replay` does not corroborate a `pipeline` gain large enough to PROMOTE,
+ * or null when it does.
+ *
+ * A PROMOTE re-anchors the baseline: `resolveBaseline` picks the newest PROMOTE
+ * row of the key, and every later run is paired against its bits. Since
+ * [ADR 0090](../../docs/adr/0090-canonical-eval-matrix-freshness-floor.md)
+ * `pipeline` takes one live finder draw per PR, and the finder samples — one
+ * codex configuration drew 19 and then 10 known defects on identical diffs — so
+ * six net flips there can be the draw rather than the reviewer. `replay` runs
+ * frozen finder reports over the 39 grid defects with two OR-folded draws, so
+ * it is the quieter condition, and asking it for half the PROMOTE threshold in
+ * the same direction confirms the direction beyond noise without asking the
+ * verifier alone to reproduce a PROMOTE-sized gain on 39 defects.
+ *
+ * The gate applies to a `pipeline` headline only. When `replay` is the headline
+ * no live pipeline cell scored, and `replay`'s finder is frozen, so there is no
+ * finder sampling to corroborate away.
+ *
+ * RED is unchanged. A spurious RED costs an investigation; a spurious PROMOTE
+ * moves the reference every later run reads.
+ */
+function promoteCorroborationGap({ rules, row, baseline, name }) {
+  if (name !== "pipeline") return null;
+  const tail = "the gain does not re-anchor the baseline";
+  const replay = row.conditions?.replay;
+  const baseReplay = baseline?.conditions?.replay;
+  if (!replay || !baseReplay) {
+    const where =
+      !replay && !baseReplay
+        ? "this row or the baseline"
+        : !replay
+          ? "this row"
+          : "the baseline";
+    return `replay is absent on ${where}, so nothing corroborates the pipeline gain; ${tail}`;
+  }
+  const replayFlips = compareConditions(baseReplay, replay);
+  if (replayFlips.ids.length < (rules.noise_floor_defects ?? 0)) {
+    return `replay and the baseline share only ${replayFlips.ids.length} scored defect(s); noise_floor_defects ${rules.noise_floor_defects} refuses to corroborate the pipeline gain on that, so ${tail}`;
+  }
+  if (-replayFlips.delta < rules.promote_corroboration_net_flips) {
+    return `replay moved ${-replayFlips.delta} defects on ${replayFlips.ids.length} shared defects, and corroboration needs a net gain of at least ${rules.promote_corroboration_net_flips}, so ${tail}`;
+  }
+  return null;
 }
 
 /** One condition's per-defect vectors narrowed to a set of defect ids. */
@@ -597,7 +647,7 @@ function restrictCondition(condition, ids) {
  * while control's share of it stays under the bar. That direction is a RED that
  * should have been AMBER — an investigation, not a false pass — and scaling the
  * pre-registered threshold to the scope is a verdict-rule change with its own
- * decision to record. Issue 2324 carries it.
+ * decision to record. Issue 2333 carries it.
  */
 function controlMoved({ contract, row, baseline, flips, name }) {
   if (!baseline || !flips || flips.delta === 0) return null;
