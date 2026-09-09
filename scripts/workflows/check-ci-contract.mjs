@@ -51,7 +51,7 @@ const EXPECTED_RUNNERS = Object.freeze({ changes: "blacksmith-2vcpu-ubuntu-2404-
 // prettier-ignore
 const EXPECTED_JOB_ENV = Object.freeze({ indexer: { ENVIO_STRICT_START_BLOCK: "true" }, aegis: { FOUNDRY_PROFILE: "ci" } });
 // prettier-ignore
-const REQUIRED_COMMANDS = Object.freeze({ ui: [["VERCEL_DEPLOYMENT_ID=ci pnpm exec turbo run size-limit --filter=@mento-protocol/ui-dashboard --cache=\"$TURBO_CACHE_POLICY\"", null, { TURBO_CACHE_POLICY: "${{ inputs.no_skip_audit && 'local:,remote:' || 'local:rw' }}" }]], scripts: [["node scripts/workflows/check-ci-contract.mjs", null], ["pnpm adr:check", null, { AGENT_QUALITY_BASE: "${{ inputs.no_skip_audit && inputs.audit_base_sha || 'origin/main' }}" }], ["pnpm adr:check:test", null]], "production-infra-contract": [["pnpm ci:contract:test", "${{ !cancelled() }}"]] });
+const REQUIRED_COMMANDS = Object.freeze({ ui: [["VERCEL_DEPLOYMENT_ID=ci pnpm exec turbo run size-limit --filter=@mento-protocol/ui-dashboard --cache=\"$TURBO_CACHE_POLICY\"", null, { TURBO_CACHE_POLICY: "${{ inputs.no_skip_audit && 'local:,remote:' || 'local:rw' }}" }]], scripts: [["node scripts/workflows/check-ci-contract.mjs", null], ["pnpm pr:ready-state:test", null], ["pnpm pr:feedback-state:test", null], ["pnpm adr:check", null, { AGENT_QUALITY_BASE: "${{ inputs.no_skip_audit && inputs.audit_base_sha || 'origin/main' }}" }], ["pnpm adr:check:test", null]], "production-infra-contract": [["pnpm ci:contract:test", "${{ !cancelled() }}"]] });
 
 function list(value) {
   if (value === undefined) return [];

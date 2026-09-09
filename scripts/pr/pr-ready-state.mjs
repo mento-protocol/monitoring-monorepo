@@ -22,6 +22,7 @@ import {
   validateCodeRabbitPathFilterSkip,
 } from "./pr-ready-state-review-signals.mjs";
 import { formatCompact, formatHuman } from "./pr-ready-state-format.mjs";
+import { fetchStackContext } from "./pr-ready-state-stack.mjs";
 
 export { fetchHeadUpdatedAt, headUpdatedAtFromTimeline };
 
@@ -729,6 +730,21 @@ export async function fetchRequiredStatusContexts({
   };
 }
 
+export async function fetchReadinessBases({
+  repo,
+  pr,
+  fetchJson = ghApiJsonResult,
+  fetchContexts = fetchRequiredStatusContexts,
+}) {
+  const stack = await fetchStackContext({ repo, pr, fetchJson });
+  const requiredStatusContexts = await fetchContexts({
+    repo,
+    baseRef: stack?.protectionBaseRef ?? pr.baseRefName,
+    statusCheckRollup: pr.statusCheckRollup ?? [],
+  });
+  return { stack, requiredStatusContexts };
+}
+
 export async function fetchReadyState({
   prArg,
   repoArg,
@@ -795,11 +811,7 @@ export async function fetchReadyState({
     `repos/${path}/pulls/${number}/comments`,
   ]);
   const reviewThreadsPromise = fetchReviewThreads({ repo, number });
-  const requiredStatusContextsPromise = fetchRequiredStatusContexts({
-    repo,
-    baseRef: pr.baseRefName,
-    statusCheckRollup: pr.statusCheckRollup ?? [],
-  });
+  const readinessBasesPromise = fetchReadinessBases({ repo, pr });
   const timelinePromise = ghApiJsonPagesResult(repo, [
     "-H",
     "Accept: application/vnd.github+json",
@@ -812,7 +824,7 @@ export async function fetchReadyState({
     reactions,
     reviewComments,
     reviewThreads,
-    requiredStatusContexts,
+    { stack, requiredStatusContexts },
     timelineResult,
   ] = await Promise.all([
     statusSourcePromise,
@@ -820,7 +832,7 @@ export async function fetchReadyState({
     reactionsPromise,
     reviewCommentsPromise,
     reviewThreadsPromise,
-    requiredStatusContextsPromise,
+    readinessBasesPromise,
     timelinePromise,
   ]);
   const headUpdatedAt = fetchHeadUpdatedAt({
@@ -862,7 +874,7 @@ export async function fetchReadyState({
     ),
   };
 
-  return summarizeReadyState({
+  const summary = summarizeReadyState({
     pr: annotatedPr,
     issueComments,
     reactions,
@@ -874,6 +886,14 @@ export async function fetchReadyState({
     includeFeedbackDetails,
     codeRabbitPathFilterSkip,
   });
+  return stack
+    ? {
+        ...summary,
+        readinessScope: "layer",
+        stack,
+        summary: `Layer only: ${summary.summary} Stack readiness is not evaluated.`,
+      }
+    : summary;
 }
 
 function usage() {

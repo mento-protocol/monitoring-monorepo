@@ -99,6 +99,7 @@ Authority: canonical
 - [`docs/notes/sentry-triage-pipeline.md`](notes/sentry-triage-pipeline.md)
 - [`docs/notes/slack-github-subscriptions.md`](notes/slack-github-subscriptions.md)
 - [`docs/notes/spoken-attention-nudge.md`](notes/spoken-attention-nudge.md)
+- [`docs/notes/stacked-pull-requests.md`](notes/stacked-pull-requests.md)
 - [`docs/notes/upstash-mcp-operator.md`](notes/upstash-mcp-operator.md)
 - [`docs/notes/worktree-and-web-setup.md`](notes/worktree-and-web-setup.md)
 - [`docs/terraform.md`](terraform.md)
@@ -217,6 +218,7 @@ Authority: canonical
 - [`docs/adr/0088-temporary-m6-canary-collection.md`](adr/0088-temporary-m6-canary-collection.md) — Temporary event-driven M6 canary collection
 - [`docs/adr/0089-review-eval-canonical-matrix-pr-groups.md`](adr/0089-review-eval-canonical-matrix-pr-groups.md) — The canonical review-eval matrix runs PR groups concurrently
 - [`docs/adr/0090-canonical-eval-matrix-freshness-floor.md`](adr/0090-canonical-eval-matrix-freshness-floor.md) — The canonical review-eval matrix is a freshness floor
+- [`docs/adr/0091-opt-in-native-stacked-pull-requests.md`](adr/0091-opt-in-native-stacked-pull-requests.md) — Adopt native stacked pull requests through an opt-in pilot
 
 Authority: non-canonical
 

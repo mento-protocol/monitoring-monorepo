@@ -97,6 +97,8 @@ Move each pin class with its files.
   `scripts/docs/check-verification-redesign-evidence*.mjs`.
 - **Sentry suite manifest.** `scripts/sentry/gate/sentry-suite-manifest.json`
   enforces two-way path equality with `findSentrySuites()`; moves fail closed.
+- **PR probe pins.** `pr/pr-{ready,feedback}-state*.mjs` use
+  `pr:ready-state:test` and `pr:feedback-state:test` in scripts CI.
 - **Workflow pins.** `check-ci-contract{,.test}.mjs` pins CI.
   `check-no-skip-audit{,.test}.mjs` pins admission, SHAs, caches, skips,
   `repo-health/dependency-cruiser-root-contract.test.mjs`, and the retained

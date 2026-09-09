@@ -3,7 +3,7 @@ title: PR Ready State
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-08
+last_verified: 2026-09-09
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -482,6 +482,22 @@ Field expectations:
   satisfy readiness.
 - `summary`: one concise human-readable sentence suitable for a babysitter
   status update.
+
+## Native stack output
+
+Standalone PR output is unchanged. Native stack summaries add
+`readinessScope: "layer"` and `stack` with its number, `diffBaseRef`,
+`protectionBaseRef`, one-based `position`, ordered `layers`, and
+`dependencyPrNumbers` for unmerged predecessors. Each layer records its PR
+number, state, branch, and head SHA. The probe reads required checks from the
+protection base; diff checks still use `pr.baseRefName`.
+
+`stack.ready` is `null` and `stack.readiness` is `"not_evaluated"`: a ready
+layer does not prove stack readiness. Run both projections independently for
+every open layer and follow [the stacked PR workflow](stacked-pull-requests.md)
+for membership changes and aggregate handoff. A stack lookup or metadata error
+causes a nonzero CLI result; a watch retries without emitting a ready verdict.
+Never treat failed discovery as proof that a PR is standalone.
 
 ## Agent workflow
 

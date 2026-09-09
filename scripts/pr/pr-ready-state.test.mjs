@@ -32,6 +32,7 @@ import { formatCompact, formatHuman } from "./pr-ready-state-format.mjs";
 import {
   annotateStatusCheckSources,
   fetchRequiredStatusContexts,
+  fetchReadinessBases,
   fetchHeadUpdatedAt,
   headUpdatedAtFromTimeline,
   parseArgs,
@@ -3127,6 +3128,180 @@ test("a passing CodeRabbit check does not clear a real required blocker", () => 
     !summary.required.blockers.some((blocker) => blocker.name === "CodeRabbit"),
     "CodeRabbit must never appear as a required blocker by default",
   );
+});
+
+function stackFixture() {
+  const repo = { owner: "owner", name: "repo" };
+  const repository = { url: "https://api.github.com/repos/owner/repo" };
+  const layer = (number, base, head, sha) => ({
+    number,
+    state: "open",
+    draft: false,
+    merged_at: null,
+    base: { ref: base, repo: repository },
+    head: { ref: head, sha: sha.repeat(40), repo: repository },
+  });
+  const stack = {
+    number: 7,
+    open: true,
+    base: { ref: "main" },
+    pull_requests: [
+      layer(10, "main", "parent", "a"),
+      layer(11, "parent", "child", "b"),
+    ],
+  };
+  const pr = {
+    number: 11,
+    headRefName: "child",
+    headRefOid: "b".repeat(40),
+    baseRefName: "parent",
+    isDraft: false,
+  };
+  return { repo, pr, stack };
+}
+
+async function stackBases(fixture, transformList = (stack) => [stack]) {
+  const requests = [];
+  const result = await fetchReadinessBases({
+    ...fixture,
+    fetchJson: async (_repo, args) => {
+      requests.push(args[0]);
+      return {
+        ok: true,
+        value: args[0].includes("?")
+          ? transformList(structuredClone(fixture.stack))
+          : fixture.stack,
+      };
+    },
+    fetchContexts: async (args) => {
+      requests.push(`protection:${args.baseRef}`);
+      return { contexts: [{ context: "ci" }], error: null };
+    },
+  });
+  return { ...result, requests };
+}
+
+async function rejectsStack(fixture, transformList) {
+  try {
+    await stackBases(fixture, transformList);
+  } catch (error) {
+    assert(
+      error.message.startsWith("Stack metadata unavailable:"),
+      error.message,
+    );
+    return;
+  }
+  throw new Error("expected stack metadata rejection");
+}
+
+test("native stacks fetch protection at stack base and report unmerged dependencies", async () => {
+  const result = await stackBases(stackFixture());
+  assertEqual(
+    result.requests.join("|"),
+    "repos/owner/repo/stacks?pull_request=11&per_page=100|repos/owner/repo/stacks/7|protection:main",
+  );
+  assertEqual(result.stack.diffBaseRef, "parent");
+  assertEqual(result.stack.protectionBaseRef, "main");
+  assertEqual(result.stack.dependencyPrNumbers.join(","), "10");
+  assertEqual(result.stack.ready, null);
+});
+
+test("verified standalone PRs use the immediate base without stack output", async () => {
+  const result = await stackBases(stackFixture(), () => []);
+  assertEqual(result.stack, null);
+  assertEqual(result.requests.at(-1), "protection:parent");
+});
+
+test("partial stack merge checks remaining layer against stack base", async () => {
+  const fixture = stackFixture();
+  fixture.stack.pull_requests[0].state = "closed";
+  fixture.stack.pull_requests[0].merged_at = "2026-09-09T10:00:00Z";
+  fixture.stack.pull_requests[1].base.ref = "main";
+  fixture.pr.baseRefName = "main";
+  const result = await stackBases(fixture);
+  assertEqual(result.stack.dependencyPrNumbers.length, 0);
+  assertEqual(result.stack.layers[0].state, "MERGED");
+});
+
+test("stack membership failure never fetches weaker branch protection", async () => {
+  for (const result of [
+    { ok: false, error: "HTTP 403" },
+    { ok: false, error: "HTTP 404" },
+    { ok: true, value: null },
+  ]) {
+    let fetchedProtection = false;
+    let rejected = false;
+    try {
+      await fetchReadinessBases({
+        ...stackFixture(),
+        fetchJson: async () => result,
+        fetchContexts: async () => {
+          fetchedProtection = true;
+        },
+      });
+    } catch {
+      rejected = true;
+    }
+    assert(
+      rejected && !fetchedProtection,
+      "must fail before protection lookup",
+    );
+  }
+});
+
+test("stack metadata rejects missing membership, ambiguity, changed parent and protection base", async () => {
+  for (const mutate of [
+    () => null,
+    (stack) => [stack, stack],
+    (stack) => {
+      stack.pull_requests[0].head.sha = "c".repeat(40);
+      return [stack];
+    },
+    (stack) => {
+      stack.base.ref = "other";
+      return [stack];
+    },
+    (stack) => {
+      stack.pull_requests.pop();
+      return [stack];
+    },
+  ])
+    await rejectsStack(stackFixture(), mutate);
+});
+
+test("stack metadata rejects malformed topology, fork, closed dependency and stale PR snapshot", async () => {
+  for (const mutate of [
+    (f) => {
+      f.stack.pull_requests[1].base.ref = "other";
+    },
+    (f) => {
+      f.stack.pull_requests[0].head.repo = {
+        url: "https://api.github.com/repos/outsider/repo",
+      };
+    },
+    (f) => {
+      f.stack.pull_requests[0].state = "closed";
+    },
+    (f) => {
+      f.pr.headRefOid = "c".repeat(40);
+    },
+    (f) => {
+      f.pr.baseRefName = "new-parent";
+    },
+    (f) => {
+      f.stack.pull_requests[0].number = 11;
+    },
+    (f) => {
+      f.pr.number = 99;
+    },
+    (f) => {
+      f.stack.pull_requests[0].head.sha = null;
+    },
+  ]) {
+    const fixture = stackFixture();
+    mutate(fixture);
+    await rejectsStack(fixture);
+  }
 });
 
 for (const { name, fn } of tests) {
