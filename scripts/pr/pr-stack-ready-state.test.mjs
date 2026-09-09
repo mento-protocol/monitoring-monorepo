@@ -9,6 +9,8 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
+import { mock } from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 import { evaluateStackGate } from "./pr-stack-ready-state.mjs";
 
 const layers = [1, 2].map((number) => ({
@@ -204,17 +206,35 @@ try {
     { mode: 0o755 },
   );
   process.env.PATH = `${deadlineRoot}:${previousPath}`;
-  const started = Date.now();
-  const result = await evaluateStackGate(
+  mock.timers.enable({ apis: ["setTimeout"] });
+  const pending = evaluateStackGate(
     state(2),
     "owner/repo",
     undefined,
     undefined,
     500,
   );
-  assert.match(result, /^PENDING stack verification deadline exceeded/);
-  assert.ok(Date.now() - started < 5000, "deadline must bound the aggregate");
-  const pid = Number(readFileSync(pidPath, "utf8"));
+  let pid;
+  try {
+    const startupDeadline = Date.now() + 10_000;
+    while (Date.now() < startupDeadline) {
+      try {
+        pid = Number(readFileSync(pidPath, "utf8"));
+        if (Number.isInteger(pid) && pid > 0) break;
+      } catch (error) {
+        if (error.code !== "ENOENT") throw error;
+      }
+      await delay(10);
+    }
+    assert.ok(pid > 0, "gh stub must start before the deadline advances");
+  } finally {
+    mock.timers.tick(500);
+    mock.timers.reset();
+    assert.match(
+      await pending,
+      /^PENDING stack verification deadline exceeded/,
+    );
+  }
   // Allow the operating system to reap the child after SIGKILL.
   for (let attempt = 0; attempt < 50; attempt++) {
     try {
@@ -230,6 +250,7 @@ try {
     "deadline must terminate gh",
   );
 } finally {
+  mock.timers.reset();
   process.env.PATH = previousPath;
   rmSync(deadlineRoot, { recursive: true, force: true });
 }
