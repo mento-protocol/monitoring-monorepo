@@ -458,7 +458,11 @@ function calibrationFinding(defect) {
   const [firstLine, ...rest] = detail.split("\n");
   const title = normalizeTitleLine(String(defect.title ?? ""));
   const repeatsTitle = title !== "" && normalizeTitleLine(firstLine) === title;
-  return { ...defect, body: (repeatsTitle ? rest.join("\n") : detail).trim() };
+  const stripped = repeatsTitle ? rest.join("\n").trim() : "";
+  // A record whose whole detail is the title line strips to nothing, and an
+  // empty `detail:` is the defect this maps around. Keep the title then: a
+  // repeated title tells the judge more than a blank line does.
+  return { ...defect, body: stripped || detail.trim() };
 }
 
 function selectScorable(truthFindings, scorableIds) {

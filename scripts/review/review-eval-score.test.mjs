@@ -813,6 +813,22 @@ test("runCalibration preserves record order under concurrency", async () => {
   );
 });
 
+// The rendered detail, read out of the DEFECTS fence. Scoping matters: the
+// REVIEW block carries the claim excerpt, which may quote the defect title.
+function renderedDetail(prompt) {
+  const block = prompt.split("<<<DEFECTS\n")[1].split("\nDEFECTS\n")[0];
+  return block.split("detail: ").slice(1).join("detail: ");
+}
+
+// Independent of the module's own normalizer, so a change there cannot mutate
+// both sides of the comparison and keep this green.
+function plainText(text) {
+  return text
+    .replace(/[*_`#]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 test("runCalibration shows the judge the record's defect detail", async () => {
   const record = calibration.records.find(
     (row) => row.record_id === "pr1982-3827636772-matched",
@@ -835,7 +851,59 @@ test("runCalibration shows the judge the record's defect detail", async () => {
   );
   // The title is rendered once, by the header line. The stripped detail must
   // not repeat it.
-  assert.equal(prompt.split(record.defect.title).length - 1, 1);
+  assert.equal(renderedDetail(prompt).split(record.defect.title).length - 1, 0);
+});
+
+test("runCalibration renders every committed record with a detail and no repeated title", async () => {
+  const exec = stubExec(() =>
+    JSON.stringify({ matches: [1], reasoning: { 1: "stub" } }),
+  );
+  await runCalibration({
+    calibrationSet: calibration,
+    exec,
+    concurrency: 1,
+  });
+  assert.equal(exec.calls.length, calibration.records.length);
+  // Only five of the forty details open with the title verbatim; the rest wrap
+  // it in the source bot's markdown — a badge image, a heading, italics. Every
+  // one of them must lose the repeat and keep its body.
+  for (const [index, record] of calibration.records.entries()) {
+    const detail = renderedDetail(exec.calls[index].prompt);
+    assert.ok(
+      detail.trim() !== "",
+      `${record.record_id} rendered an empty detail`,
+    );
+    assert.ok(
+      !plainText(detail).includes(plainText(record.defect.title)),
+      `${record.record_id} repeats its title inside the detail`,
+    );
+  }
+});
+
+test("runCalibration keeps a title-only detail rather than rendering nothing", async () => {
+  const defect = {
+    ...truthFindings[0],
+    detail: `[P1] ${truthFindings[0].title}`,
+  };
+  const exec = stubExec([
+    JSON.stringify({ matches: [1], reasoning: { 1: "stub" } }),
+  ]);
+  await runCalibration({
+    calibrationSet: {
+      records: [
+        {
+          record_id: "title-only",
+          defect_id: defect.id,
+          expected_verdict: "matched",
+          claim_excerpt: "a claim",
+          defect,
+        },
+      ],
+    },
+    exec,
+    concurrency: 1,
+  });
+  assert.equal(renderedDetail(exec.calls[0].prompt).trim(), defect.detail);
 });
 
 test("runCalibration refuses an empty set", async () => {
