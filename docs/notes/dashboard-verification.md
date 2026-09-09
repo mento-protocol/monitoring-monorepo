@@ -49,9 +49,12 @@ protection bypass secret. If so, record project, organization, and bypass-secret
 IDs; preserve Terraform targets. Remote deletion needs human approval; remove
 only confirmed accidental local links.
 
-Interactive `next dev` can rewrite `next-env.d.ts` to import
-`./.next/dev/types/routes.d.ts`. Restore the production
-`./.next/types/routes.d.ts` import before committing if the server changed it.
+Interactive `next dev` can rewrite every generated import in
+`next-env.d.ts` to its `./.next/dev/types/` variant, currently
+`routes.d.ts` and `root-params.d.ts`. Restore the production
+`./.next/types/` imports before committing if the server changed the file;
+`git checkout -- next-env.d.ts` from `ui-dashboard` restores all of them at
+once.
 
 ## Session-state verification
 

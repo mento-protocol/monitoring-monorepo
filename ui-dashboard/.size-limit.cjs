@@ -152,9 +152,10 @@ function manifestPathsOrFallback(extension, prefixes, fallbackGlob) {
 // the one whose source contains `marker`. This lets us guard individual chunks —
 // the Plotly bundle and the lazy markdown-editor bundle — so a regression trips a
 // tight per-chunk budget rather than hiding inside the aggregate. If a marker ever
-// stops matching (renamed/removed), we return a non-existent sentinel path so
-// size-limit reports 0 bytes and passes, leaving the aggregate budget as backstop
-// rather than crashing the whole run on an empty path list.
+// stops matching (renamed/removed), we return a non-existent sentinel path;
+// size-limit 12 then reports the check as missed ("can't find files") and exits 1,
+// so a dead marker fails CI and must be re-pinned to a string that survives
+// minification. The Next 16.3.4 upgrade hit this for "react-markdown".
 function chunkContaining(marker, label) {
   const assets = collectManifestReferencedStaticAssets({
     extension: ".js",
@@ -235,7 +236,11 @@ const config = [
     limit: "320 kB",
   },
   {
-    // Markdown-editor chunk, pinned by the "unwrapDisallowed" runtime option. Guards P4: the
+    // Markdown-editor chunk, pinned by react-markdown's deprecation-table id
+    // "remove-buggy-html-in-markdown-parser". Next 16.3.4 drops the package's
+    // changelog URL from the production bundle, and that URL was the only place
+    // the literal "react-markdown" survived minification; the deprecation id
+    // belongs to the same package and still matches exactly one chunk. Guards P4: the
     // react-markdown + remark-gfm + rehype-sanitize pipeline is lazy-loaded via
     // next/dynamic from address-link.tsx, so it lives in its own ~44 KB brotli async
     // chunk instead of shipping on every page that renders an AddressLink. If a
@@ -243,10 +248,8 @@ const config = [
     // well past this budget and fails CI.
     //
     // Baseline: 44,109 bytes  Budget: ×1.10 = 48,520 bytes → 49 KB
-    // Next 16.3 removes react-markdown development error strings.
-    // This runtime option identifies the same renderer in production output.
-    name: "Markdown editor chunk (unwrapDisallowed)",
-    path: chunkContaining("unwrapDisallowed", "markdown"),
+    name: "Markdown editor chunk (react-markdown)",
+    path: chunkContaining("remove-buggy-html-in-markdown-parser", "markdown"),
     limit: "49 kB",
   },
   {
