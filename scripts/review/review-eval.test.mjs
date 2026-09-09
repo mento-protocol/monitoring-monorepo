@@ -2631,14 +2631,25 @@ test("TERM ends a group worker interrupted before the parent recorded it", async
     assert.equal(await exited, 143);
     workerChild = readFileSync(childFile, "utf8").trim();
     assert.match(workerChild, /^\d+$/, "the worker never started its child");
-    // The worker leads its group, so its child's parent is the group id this
-    // teardown needs. Read it while the child can still name it: on the fixed
-    // scheduler the child is already gone, and there is nothing to end.
+    // Read the group id itself, not the child's parent: once the worker dies
+    // its child reparents to pid 1, and a teardown that group-killed that
+    // answer would signal every process this user owns.
     workerGroup = String(
-      spawnSync("ps", ["-o", "ppid=", "-p", workerChild], {
+      spawnSync("ps", ["-o", "pgid=", "-p", workerChild], {
         encoding: "utf8",
       }).stdout ?? "",
     ).trim();
+    // A runner that cannot inspect processes must fail this test, not pass it:
+    // every probe below reads as "gone" when `ps` is denied, which is also the
+    // answer the fixed scheduler gives. Prove `ps` works on this process first.
+    const selfState = spawnSync(
+      "ps",
+      ["-o", "state=", "-p", String(process.pid)],
+      { encoding: "utf8" },
+    );
+    assert.equal(selfState.error, undefined, "ps cannot run here");
+    assert.equal(selfState.status, 0, "ps cannot read process state here");
+    assert.notEqual(selfState.stdout.trim(), "", "ps reported no state here");
     // Gone or reaped-late, the same poll the pass above uses: the worker's group
     // outliving the run is the orphan that keeps spending quota.
     let ended = false;
@@ -2646,8 +2657,8 @@ test("TERM ends a group worker interrupted before the parent recorded it", async
       const state = spawnSync("ps", ["-o", "state=", "-p", workerChild], {
         encoding: "utf8",
       });
+      assert.equal(state.error, undefined, "ps stopped running mid-poll");
       ended =
-        spawnSync("kill", ["-0", workerChild]).status !== 0 ||
         state.status !== 0 ||
         state.stdout.trim() === "" ||
         state.stdout.trim().startsWith("Z");
@@ -2655,14 +2666,17 @@ test("TERM ends a group worker interrupted before the parent recorded it", async
     }
     assert.ok(
       ended,
-      `unrecorded worker's group ${workerChild} outlived the run`,
+      `the unrecorded worker's group member ${workerChild} outlived the run`,
     );
     assert.equal(existsSync(marker), false, "the unrecorded worker ran on");
   } finally {
     // A worker that outlived the run writes into this directory while it is
     // being removed, so end its whole group before the removal, not after.
-    if (/^\d+$/.test(workerGroup)) {
-      spawnSync("kill", ["-KILL", `-${workerGroup}`]);
+    // Never group-kill 0 or 1: neither names this worker's group, and
+    // signalling them reaches every process this user owns.
+    const group = Number(workerGroup);
+    if (Number.isInteger(group) && group > 1) {
+      spawnSync("kill", ["-KILL", `-${group}`]);
     }
     if (/^\d+$/.test(workerChild)) spawnSync("kill", ["-KILL", workerChild]);
     rmSync(dir, { recursive: true, force: true, maxRetries: 5 });
