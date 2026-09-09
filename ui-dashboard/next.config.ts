@@ -16,6 +16,10 @@ const nextConfig: NextConfig = {
   },
   // Drop the `x-powered-by: Next.js` fingerprint header.
   poweredByHeader: false,
+  // Next 16.3 makes `next dev` append a managed agent-rules block to
+  // `AGENTS.md`/`CLAUDE.md`. Those files are canonical, reviewed context here
+  // (docs/context-standards.md), so a dev server must not edit them.
+  agentRules: false,
   env: {
     // Mirror VERCEL_ENV verbatim — empty on localhost, set to
     // production/preview/development on Vercel deployments. The
