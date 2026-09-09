@@ -291,6 +291,31 @@ function comparable(row, baselineRow, { baselineIsExplicit = true } = {}) {
     };
   }
   if (row.comparability_key === baselineRow.comparability_key) {
+    // One key means one planner — `planCells` and `plannedMatrix` are hashed
+    // into `matcher_digest` — so two rows under it planned the same draws per
+    // condition. When they disagree, one of them did not come from that
+    // planner, and pairing them compares unequal samples: `perDefectBits()`
+    // folds a condition's draws with OR, so the side with the extra draw has
+    // the higher hit rate for no reason the skill accounts for, which reads as
+    // lost defects on the other. Refuse the pair rather than rank on it. The
+    // ledger's own draw check is a floor, so it accepts a larger historical
+    // matrix; that is right for reading history and wrong for pairing.
+    const uneven = HEADLINE_ORDER.filter((name) => {
+      const mine = row.conditions?.[name]?.draws;
+      const theirs = baselineRow.conditions?.[name]?.draws;
+      return (
+        Number.isSafeInteger(mine) &&
+        Number.isSafeInteger(theirs) &&
+        mine !== theirs
+      );
+    });
+    if (uneven.length > 0) {
+      const [name] = uneven;
+      return {
+        usable: false,
+        reason: `baseline ${name} carries ${baselineRow.conditions[name].draws} draw(s) against this row's ${row.conditions[name].draws} under one comparability_key; comparison refused (the draws fold with OR, so unequal samples do not pair)`,
+      };
+    }
     return { usable: true, reason: runtimeDrift(row, baselineRow) };
   }
   if (row.kind === "bridge") {
@@ -451,7 +476,7 @@ export function verdict({
   // the model moved and the loss is not attributable to the skill, which the
   // runbook scores AMBER. The absolute floors below are floors either way, so
   // they stay RED whatever the control did.
-  const worldMoved = controlMoved({ contract, row, baseline, flips });
+  const worldMoved = controlMoved({ contract, row, baseline, flips, name });
   const regression =
     flips && rankable && flips.delta >= rules.regression_net_flips
       ? `${name} lost a net ${flips.delta} defects against the baseline (b=${flips.b}, c=${flips.c}, regression_net_flips ${rules.regression_net_flips})`
@@ -538,12 +563,43 @@ export function verdict({
   };
 }
 
+/** One condition's per-defect vectors narrowed to a set of defect ids. */
+function restrictCondition(condition, ids) {
+  if (!condition || typeof condition.per_defect !== "object") return condition;
+  const perDefect = {};
+  for (const [id, vector] of Object.entries(condition.per_defect)) {
+    if (ids.has(id)) perDefect[id] = vector;
+  }
+  return { ...condition, per_defect: perDefect };
+}
+
 /**
  * The control condition isolates model drift. When control and the headline
  * move together by at least the flip threshold, the world moved and the score
  * is not attributable to the skill.
+ *
+ * The direction test reads the delta of the rule being waived: `flips`, over
+ * every defect the headline scored. It is a waiver for that RED and nothing
+ * else, so control has to have moved the way the loss did. Testing against the
+ * headline restricted to control's own defects looks tighter and is not: since
+ * [ADR 0090](../../docs/adr/0090-canonical-eval-matrix-freshness-floor.md)
+ * `control` runs the grid alone, so a grid gain sitting beside a larger
+ * non-grid loss is a net regression whose grid slice points the other way, and
+ * a waiver keyed to that slice would wave it through.
+ *
+ * The grid numbers are still worth printing, so the reason says how much of the
+ * headline's movement control was in a position to see. Nothing thresholds
+ * them.
+ *
+ * What this does not fix: the threshold asks control to move
+ * `regression_net_flips` defects on its 39, so model drift spread across the
+ * grid and the three non-grid fixtures can push the headline past the RED line
+ * while control's share of it stays under the bar. That direction is a RED that
+ * should have been AMBER — an investigation, not a false pass — and scaling the
+ * pre-registered threshold to the scope is a verdict-rule change with its own
+ * decision to record. Issue 2324 carries it.
  */
-function controlMoved({ contract, row, baseline, flips }) {
+function controlMoved({ contract, row, baseline, flips, name }) {
   if (!baseline || !flips || flips.delta === 0) return null;
   const control = row.conditions?.control;
   const baseControl = baseline.conditions?.control;
@@ -556,7 +612,12 @@ function controlMoved({ contract, row, baseline, flips }) {
     sameDirection &&
     Math.abs(controlFlips.delta) >= contract.verdict_rules.regression_net_flips
   ) {
-    return `control moved ${controlFlips.delta} defects in the same direction as the headline; the model moved, so the score is not attributable`;
+    const scope = new Set(controlFlips.ids);
+    const headlineOnScope = compareConditions(
+      restrictCondition(baseline.conditions?.[name], scope),
+      restrictCondition(row.conditions?.[name], scope),
+    );
+    return `control moved ${controlFlips.delta} defects in the same direction as the headline, which moved ${headlineOnScope.delta} on the ${scope.size} defect(s) control also scored; the model moved, so the score is not attributable`;
   }
   return null;
 }
@@ -824,6 +885,11 @@ export function scheduleIssuePayload({
     "- [ ] Append one ledger row; never edit a committed row.",
     "- [ ] Open the ledger PR with the generated report as its body.",
     "- [ ] Escalate a RED verdict as its own issue naming the flipped defects.",
+    "- [ ] For a RED or a PROMOTE, record what `replay` did on each flipped",
+    "      defect before escalating or re-anchoring: `pipeline` takes one live",
+    "      finder draw, and `replay` scores the grid fixtures only. A flip is",
+    "      corroborated where `replay` flipped with it, unproven where `replay`",
+    "      held, and unchecked where `replay` never scored that defect.",
     "",
     "### Verification commands",
     "",

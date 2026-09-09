@@ -20,9 +20,11 @@ garden_lane: adrs-architecture
 
 The canonical review-skill evaluation had 24 model cells when this ADR was
 written; since [ADR 0086](0086-review-eval-lane-any-grid-multi-draw.md) the
-count is derived from the contract's full run matrix — pipeline and control
-cells for every fixture, replay cells per finder report for grid fixtures —
-and `pnpm review:eval -- --plan --kind full --json` prints it. It supplies the
+count is derived from the contract's full run matrix, and
+`pnpm review:eval -- --plan --kind full --json` prints it. Since
+[ADR 0090](0090-canonical-eval-matrix-freshness-floor.md) that
+matrix is one pipeline cell for every fixture, replay cells per finder report
+for the grid fixtures, and one control cell for each grid fixture. It supplies the
 ledger verdict, baseline, and freshness evidence. This matrix is too slow and
 costly for early prompt experiments.
 

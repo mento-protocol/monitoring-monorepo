@@ -133,9 +133,19 @@ export function gridFixtures(contract) {
   return (contract?.fixtures || []).filter((fixture) => fixture.grid === true);
 }
 
-// Draws the pipeline condition takes per PR. The finder samples, so one draw
-// carries no variance signal; `planCells` spawns exactly this many.
-export const PIPELINE_DRAWS = 2;
+// Draws the pipeline condition takes per PR. The finder samples — the 2026-09
+// programme watched one codex configuration draw 19 and then 10 known defects
+// on identical diffs — and one draw carries that spread into the canonical
+// number. Two draws did not remove it either: they fold with OR, which damps
+// the noise without measuring it, and no ranking decision is taken on this
+// condition. Ranking is the experiment lane's job, and the lane isolates the
+// skill by freezing the finder report instead of sampling it
+// (`docs/adr/0086-review-eval-lane-any-grid-multi-draw.md`). So the canonical
+// row buys one live draw per PR, and a `pipeline` flip is read beside the
+// finder-frozen `replay` condition before it is believed
+// (`docs/adr/0090-canonical-eval-matrix-freshness-floor.md`).
+// `planCells` spawns exactly this many.
+export const PIPELINE_DRAWS = 1;
 
 /**
  * The cells a run of one kind plans, as condition -> [{ pr, draws }].
@@ -160,7 +170,13 @@ export function plannedMatrix(contract, kind) {
       fixtures.map((fixture) => ({ pr: fixture.pr, draws: PIPELINE_DRAWS })),
     ],
     ["replay", replay],
-    ["control", fixtures.map((fixture) => ({ pr: fixture.pr, draws: 1 }))],
+    // `control` runs the grid alone. Its job is to say whether the model itself
+    // moved between two runs, and `compareConditions` reads that as a paired
+    // per-defect difference against the previous run's control: the grid's
+    // defects carry it. The three non-grid fixtures are in the suite to widen
+    // what `pipeline` reviews — the wrong-claims and leak surface — not to add
+    // paired ranking evidence, and `pipeline` still covers every fixture.
+    ["control", grid.map((fixture) => ({ pr: fixture.pr, draws: 1 }))],
   ]);
 }
 

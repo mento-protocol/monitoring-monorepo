@@ -216,6 +216,7 @@ Authority: canonical
 - [`docs/adr/0087-autoreview-removal-thin-two-model-review.md`](adr/0087-autoreview-removal-thin-two-model-review.md) — Remove the autoreview machinery; keep a thin two-model closeout review
 - [`docs/adr/0088-temporary-m6-canary-collection.md`](adr/0088-temporary-m6-canary-collection.md) — Temporary event-driven M6 canary collection
 - [`docs/adr/0089-review-eval-canonical-matrix-pr-groups.md`](adr/0089-review-eval-canonical-matrix-pr-groups.md) — The canonical review-eval matrix runs PR groups concurrently
+- [`docs/adr/0090-canonical-eval-matrix-freshness-floor.md`](adr/0090-canonical-eval-matrix-freshness-floor.md) — The canonical review-eval matrix is a freshness floor
 
 Authority: non-canonical
 

@@ -476,6 +476,7 @@ export function validateLedgerRowAgainstContract({
   contract,
   contractDigest,
   label = "baseline row",
+  exactDraws = false,
 }) {
   const problems = validateLedgerRow(row, label);
   if (problems.length > 0) return problems;
@@ -488,11 +489,23 @@ export function validateLedgerRowAgainstContract({
   problems.push(...frozenDefectProblems({ contract, row, label }));
   // The other half of the frozen denominator: which conditions, which PRs and
   // how many draws a complete run must have scored at all.
-  problems.push(...completeMatrixProblems({ contract, row, label }));
+  problems.push(
+    ...completeMatrixProblems({ contract, row, label, exactDraws }),
+  );
   return problems;
 }
 
-/** Validate an external baseline before a generated plan starts paid work. */
+/**
+ * Validate an external baseline before a generated plan starts paid work.
+ *
+ * A row this plan can pair with ran this plan's matrix — the planner is hashed
+ * into `matcher_digest` — so its draws are checked exactly rather than as a
+ * floor. `--against` names a row file with no plan or results beside it, so
+ * this is the only check that reads its shape, and `perDefectBits()` folds a
+ * condition's draws with OR: two baseline bits per defect against a candidate's
+ * one is a higher hit rate for the baseline alone, which reads as lost defects
+ * and can red a run that regressed nothing.
+ */
 export function baselinePreflightProblems({
   row,
   contract,
@@ -504,6 +517,7 @@ export function baselinePreflightProblems({
     row,
     contract,
     contractDigest,
+    exactDraws: row?.comparability_key === planComparabilityKey,
   });
   if (row?.comparability_key !== planComparabilityKey) {
     problems.push(
@@ -599,14 +613,27 @@ export function contractScorableIdsByPr(contract) {
  * that floor on a sixth of the evidence it claims.
  *
  * The draw count is checked because it is the other axis of the same claim:
- * a `kind: "full"` row with `draws: 1` under pipeline has half the planned
- * sample, and it still refreshes the full-run clock and becomes a baseline. It
- * is checked per planned PR as well as per condition, because `draws` is one
- * number for the whole condition: a matrix that dropped one PR's second draw
+ * a row with fewer draws than its kind plans has less than the planned sample,
+ * and it still refreshes the full-run clock and becomes a baseline. It is
+ * checked per planned PR as well as per condition, because `draws` is one
+ * number for the whole condition: a matrix that dropped one PR's last draw
  * keeps it and shortens only that PR's vectors, which every other check reads
  * as the run's own sample rather than as a missing cell.
+ *
+ * Both draw checks are floors by default: a row recorded when the matrix
+ * planned more draws ran a superset of today's, and it pairs with nothing
+ * current anyway, because `plannedMatrix` and `planCells` are hashed into
+ * `matcher_digest`. `exactDraws` restores the equality for a caller that has
+ * already established the row ran this matrix — `baselinePreflightProblems`
+ * does, from the comparability key — where a longer vector is an unequal
+ * sample on one side of a paired comparison rather than history.
  */
-export function completeMatrixProblems({ contract, row, label = "row" }) {
+export function completeMatrixProblems({
+  contract,
+  row,
+  label = "row",
+  exactDraws = false,
+}) {
   if (row?.status !== "complete") return [];
   if (!LEDGER_KINDS.includes(row?.kind) || row.kind === "bridge") return [];
   const problems = [];
@@ -639,33 +666,63 @@ export function completeMatrixProblems({ contract, row, label = "row" }) {
     const drawsPlanned = Math.max(...cells.map((cell) => cell.draws));
     if (
       Number.isSafeInteger(condition?.draws) &&
-      condition.draws !== drawsPlanned
+      (exactDraws
+        ? condition.draws !== drawsPlanned
+        : condition.draws < drawsPlanned)
     ) {
       problems.push(
-        `${label}.conditions.${name}.draws is ${condition.draws}; a complete ${row.kind} run plans ${drawsPlanned}`,
+        `${label}.conditions.${name}.draws is ${condition.draws}; a complete ${row.kind} run plans ${exactDraws ? "" : "at least "}${drawsPlanned}`,
       );
     }
     // `condition.draws` is one number for the whole condition, so the check
     // above only catches a matrix shortened everywhere at once. A run that
-    // dropped pipeline draw 2 for a single PR keeps `draws: 2` — the other PRs
-    // still ran it — and every other check agrees with it: the vectors of the
-    // omitted PR carry one bit each, `recall` is recomputed from those bits,
-    // and `revalidateRow` finds the same single draw in the cell records. The
-    // row then claims a whole matrix while missing a planned cell, refreshes
-    // the freshness clock and becomes a baseline. The per-PR sample is the
-    // vector length, so each planned cell is compared with the PR's own bits.
+    // dropped the last replay draw for a single PR keeps `draws: 2` — the other
+    // PRs still ran it — and every other check agrees with it: that PR's
+    // vectors carry one bit each, `recall` is recomputed from those bits, and
+    // `revalidateRow` finds the same single draw in the cell records. The row
+    // then claims a whole matrix while missing a planned cell, refreshes the
+    // freshness clock and becomes a baseline. The per-PR sample is the vector
+    // length, so each planned cell is compared with the PR's own bits.
     for (const cell of cells) {
       const ids = scorableByPr.get(cell.pr) ?? [];
       const short = ids.filter((id) => {
         const vector = condition?.per_defect?.[id];
-        return Array.isArray(vector) && vector.length !== cell.draws;
+        if (!Array.isArray(vector)) return false;
+        return exactDraws
+          ? vector.length !== cell.draws
+          : vector.length < cell.draws;
       });
       if (short.length) {
         const found = condition.per_defect[short[0]].length;
         problems.push(
-          `${label}.conditions.${name} carries ${found} draw(s) for PR ${cell.pr}; a complete ${row.kind} run plans ${cell.draws}`,
+          `${label}.conditions.${name} carries ${found} draw(s) for PR ${cell.pr}; a complete ${row.kind} run plans ${exactDraws ? "" : "at least "}${cell.draws}`,
         );
       }
+    }
+    // The floor above says nothing about a row that inflates its own count:
+    // `validateLedgerRow` refuses a vector longer than the declared `draws` and
+    // a shorter one is a cell that never ran, so a row can claim `draws: 2`
+    // while every vector carries one bit. That row would report twice the
+    // sample it took, refresh the freshness clock on it and become an anchor.
+    // The claim is checkable without knowing which matrix produced the row: a
+    // declared draw is backed only if some defect the condition scored carries
+    // a bit for it. Not every defect — a PR whose last cell never ran keeps a
+    // short vector on purpose — but at least one.
+    const vectors = Object.values(condition?.per_defect ?? {}).filter(
+      (vector) => Array.isArray(vector),
+    );
+    const longest = vectors.reduce(
+      (most, vector) => Math.max(most, vector.length),
+      0,
+    );
+    if (
+      Number.isSafeInteger(condition?.draws) &&
+      vectors.length > 0 &&
+      longest < condition.draws
+    ) {
+      problems.push(
+        `${label}.conditions.${name}.draws is ${condition.draws}; no defect carries more than ${longest} bit(s), so the run never took that many draws`,
+      );
     }
   }
   return problems;

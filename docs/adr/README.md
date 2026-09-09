@@ -99,6 +99,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0087](0087-autoreview-removal-thin-two-model-review.md)    | Remove the autoreview machinery; keep a thin two-model closeout review               |
 | [0088](0088-temporary-m6-canary-collection.md)              | Collect temporary M6 canary evidence after CI without per-PR operator requests       |
 | [0089](0089-review-eval-canonical-matrix-pr-groups.md)      | The canonical review-eval matrix runs PR groups concurrently                         |
+| [0090](0090-canonical-eval-matrix-freshness-floor.md)       | Canonical full run drops to 27 cells; repeat draws live in the experiment lane       |
 
 ### shared-config
 

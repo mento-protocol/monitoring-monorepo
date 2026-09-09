@@ -96,14 +96,49 @@ report recall over the smaller denominator.
 
 Three conditions, every one of them load-bearing:
 
-| condition  | what it runs                                          | why it exists                                                          |
-| ---------- | ----------------------------------------------------- | ---------------------------------------------------------------------- |
-| `pipeline` | live `codex exec review` then `claude` with the skill | the number of record; exactly what production does                     |
-| `replay`   | the frozen finder report then `claude` with the skill | zero finder sampling variance; the only variance-free signal           |
-| `control`  | the bare pinned model, no skill, no codex             | if control and pipeline fall together the model moved, not our tooling |
+| condition  | what it runs                                          | how many cells                                  | why it exists                                                          |
+| ---------- | ----------------------------------------------------- | ----------------------------------------------- | ---------------------------------------------------------------------- |
+| `pipeline` | live `codex exec review` then `claude` with the skill | one draw of each of the nine fixtures           | the number of record; exactly what production does                     |
+| `replay`   | the frozen finder report then `claude` with the skill | both frozen reports of each of the six grid PRs | zero finder sampling variance; the verifier is still sampled fresh     |
+| `control`  | the bare pinned model, no skill, no codex             | one draw of each of the six grid PRs            | if control and pipeline fall together the model moved, not our tooling |
 
 `control` is the cheapest line item and carries the most interpretive weight.
 Cut it last.
+
+**Why 27 cells and not 39** (2026-09-09,
+[ADR 0090](../adr/0090-canonical-eval-matrix-freshness-floor.md)).
+Until 2026-09 a full run took two live `pipeline` draws of every fixture and a
+`control` cell on all nine, which is 39 cells, about $145 of contestant spend
+and about $155 more for the judge pass — the judge pass alone ran about six
+hours. The second live draw was there because
+the finder samples — one codex configuration drew 19 and then 10 known defects
+on identical diffs — but two points do not measure that spread, and they do
+not remove it either: the scorer folds a condition's draws with OR, so the
+second draw only damped the noise. Ranking two skills is the experiment lane's
+job, and the lane holds the finder fixed to do it: every draw of a lane replays
+one frozen report through both arms
+([ADR 0086](../adr/0086-review-eval-lane-any-grid-multi-draw.md)). The
+canonical row is a freshness floor and the baseline anchor, so it now buys one
+live draw per PR.
+
+`control` narrowed to the grid for the same reason: it is read as a paired
+per-defect difference against the previous run's control, and the grid's 39
+defects carry that comparison. The three non-grid fixtures — PRs 1982, 1984
+and 2001 — stay in `pipeline`, where they widen the wrong-claims and leak
+surface.
+
+Two things follow. `pipeline` now records one bit per defect, so its number is
+a single live sample that carries the finder's spread. The verdict rules still
+call six net flips RED or PROMOTE, and finder sampling alone can reach that on
+a run where nothing changed, so **read a `pipeline` flip beside `replay`**:
+`replay` runs frozen reports, so it does not move with the finder — though its
+own verifier session is sampled fresh like any other, so it is quieter than
+`pipeline`, not silent. A `pipeline` flip it does not corroborate is unproven
+rather than a regression.
+And `control` recall is now measured over the 39 grid defects while `pipeline`
+recall covers all 51, so the two rates are over different denominators: read
+`control` against the previous run's `control`, never as a within-run
+subtraction from `pipeline`.
 
 Per condition the run records recall, P1 recall, novel-real count,
 wrong-claims count, dollars, seconds, and a per-defect bit vector for every
@@ -199,20 +234,30 @@ automatic row cannot name a later row on the same branch as its baseline.
 Both the ledger check and `--validate --append` hold the frozen denominator. A
 condition that scored a PR at all carries every defect that PR froze, and a
 `status: complete` row carries the whole matrix of its own kind: a full run is
-`pipeline` over every fixture in two draws, `replay` over the grid fixtures in
-one draw per frozen finder report and `control` over every fixture in one draw;
-a canary is `replay` over every grid fixture in one draw. Both axes are checked,
-which PRs each condition scored and how many draws it recorded. A complete full
-row is the score of record — it refreshes the full-run clock and becomes the
-automatic baseline — and a complete canary is read against
+`pipeline` over every fixture in one draw, `replay` over the grid fixtures in
+one draw per frozen finder report and `control` over the grid fixtures in one
+draw; a canary is `replay` over every grid fixture in one draw. Both axes are
+checked, which PRs each condition scored and how many draws it recorded. A
+complete full row is the score of record — it refreshes the full-run clock and
+becomes the automatic baseline — and a complete canary is read against
 `canary_min_matched_grid`, so neither may claim its matrix on a subset of it.
+The draw check is a floor rather than an equality: a row recorded when the
+matrix planned more draws ran a superset of today's cells, and it carries a
+different comparability key anyway, so it is history rather than a short run.
+One caller keeps the equality: a baseline named with `--against` whose
+`comparability_key` equals the generated plan's. That row ran this plan's
+matrix — the planner is inside the key — so its draws must equal the planned
+count exactly rather than merely reach it. The per-defect bits of a condition
+fold with OR, so a baseline carrying two bits per defect against a candidate's
+one is a higher hit rate for the baseline alone, which reads as lost defects.
+Such a row is refused as a baseline rather than paired.
 
 Then plan and run. `--plan` prints the matrix and the cost estimate without
 spending anything.
 
 ```bash
 pnpm review:eval -- --plan --kind canary --json   # 6 cells, about $22, ~40 min
-pnpm review:eval -- --plan --kind full --json     # 39 cells, about $145, hours TBD
+pnpm review:eval -- --plan --kind full --json     # 27 cells, about $99, hours TBD
 pnpm review:eval:run --kind canary                # the monthly smoke test
 pnpm review:eval:run --kind full                  # the quarterly score of record
 ```
@@ -318,9 +363,13 @@ cleans and stages `.skill` into its PR's one checkout, so two cells of one PR
 would delete each other's tree, while two PRs are separate trees. The cost is
 unchanged — the same cells, in the same per-PR order, against the same fixtures
 — and the wall-clock time is not yet measured: the 2026-09-04 six-fixture full
-run took 100 minutes for 6 serial pipeline cells, which put 39 serial cells at 8
-to 9 hours against a 4.5-hour matrix deadline. Re-measure on the next full run
-and replace the `hours TBD` above with what it took. Each group is its own
+run took 100 minutes for 6 serial pipeline cells, which put the 39-cell serial
+matrix of the time at 8 to 9 hours against a 4.5-hour matrix deadline. The
+matrix is 27 cells since
+[ADR 0090](../adr/0090-canonical-eval-matrix-freshness-floor.md), 9 of them live
+pipeline draws instead of 18, so the serial worst case is well under that; what
+grouping then buys on top of it is still unmeasured. Re-measure on the next full
+run and replace the `hours TBD` above with what it took. Each group is its own
 process group, and the TERM and EXIT paths take every one of them down before
 the run returns; because `run_bounded` puts each cell's bounded child in a
 process group of its own, a signalled worker forwards to that group as well
@@ -682,6 +731,31 @@ generalization.
 | **PROMOTE**    | `c − b ≥ 6` and the change was intentional                                                                                                                                                                                    | re-anchor the baseline in a PR that says what changed and why             |
 | **INCOMPLETE** | the run failed, or a canary did not finish                                                                                                                                                                                    | fix the harness and re-run; the row stays as a trace                      |
 
+**A `pipeline` flip `replay` contradicts is unproven; a flip on a defect
+`replay` never scores is unchecked.**
+Since 2026-09 `pipeline` takes one live finder draw per PR, and the
+finder samples, so six net flips there can be the finder rather than the
+reviewer. `replay` runs frozen reports, so it does not move with the finder;
+its own `claude` verifier is still sampled fresh, with no seed and no
+deterministic decoding, so it removes one source of variance rather than all of
+them. It also covers the 39 grid defects only. So a RED still opens its priority issue and a
+PROMOTE still records what changed, and both split the flipped defects three
+ways: those `replay` moved with, those `replay` held on — where the flip is
+unproven — and those from PRs 1982, 1984 and 2001, which `replay` never
+scores. That third group has no finder-frozen counterpart at all. Name it
+unchecked; it is neither corroboration nor contradiction. And read a
+corroborating `replay` flip for what it is: two conditions moving together, each
+with its own verifier draw, which is weaker than a repeated measurement and
+stronger than one condition alone.
+
+The harness does not enforce that yet, and it is the one place this matters
+most: a PROMOTE re-anchors the baseline on its own, because `resolveBaseline()`
+picks the newest PROMOTE row of the same key and `--validate` recomputes the
+verdict from the row's own numbers, so it cannot be lowered by hand. Until
+[issue 2324](https://github.com/mento-protocol/monitoring-monorepo/issues/2324)
+gates re-anchoring on corroboration, read the next run against a PROMOTE anchor
+knowing the anchor may carry one draw of finder noise.
+
 The three AMBER gates — failed judge calibration, a leak signal, and a matrix
 that did not complete — are read before the RED lines, not after them. Each says
 the numbers under it are untrusted or partial, and a run whose numbers are
@@ -700,9 +774,10 @@ finding.
 ## The noise rule
 
 **Never rank on fewer than three defects.** Fifty-one defects across nine PRs
-with two draws is 102 raw scoring opportunities that the scorer collapses to 51
-paired per-defect outcomes, and draws on the same defect are correlated, so the
-effective sample is smaller than it looks. The
+is 51 paired per-defect outcomes, and `replay` measures its 39 grid defects
+twice, which the scorer folds into those same 51 bits rather than into a larger
+sample: draws on one defect are correlated, so the effective sample is smaller
+than it looks. The
 pre-registered red line is `b − c ≥ 6` net flips on the paired per-defect
 vectors; at `b + c = 10`, `b = 8` gives a one-sided p of about 0.055. Anything
 below six flips is the noise floor. The rule is written down here so nobody
@@ -768,9 +843,9 @@ under `--skill-ref` the spec worktree is the live checkout for the two hours in
 between, and the contract digest alone would not notice.
 
 **The judge pass resumes per cell.** Judging one cell costs about $4 and nine
-minutes, so 39 cells run about six hours and do not fit inside one usage window:
-the 2026-09-05 attempt scored nineteen cells, hit a usage limit, and re-spent
-them on the retry. `--score` writes each verdict to `cells/<cell_id>/score.json`
+minutes, so 27 cells run about four hours and need not fit inside one usage
+window: the 2026-09-05 attempt, on the 39-cell matrix, scored nineteen cells,
+hit a usage limit, and re-spent them on the retry. `--score` writes each verdict to `cells/<cell_id>/score.json`
 as it earns it, under a resume identity carrying the plan's comparability key,
 contract digest, matcher digest and calibration digest, the cell fingerprint, and
 the digest of the `result.json` that verdict was formed on. A later pass reuses a
@@ -900,7 +975,7 @@ anchor because its machine clock was slow.
    materialization falls back to `refs/pull/<n>/head` and records
    `tag_pinned: false`. CI fetches tags for exactly this reason.
 3. Run `pnpm review:eval:run --kind full` from a clean checkout. Budget
-   about $88 and two hours.
+   about $99 of contestant spend and two hours, plus the judge pass.
 4. Prepare the artifacts with `review-eval-publication.mjs`, then use the
    `ship` workflow to open the ledger PR. Its body contains the complete
    generated report and the execution-authenticity limit. State that this row
@@ -953,8 +1028,9 @@ later change in that issue's stack deletes them.
   Self-preference is plausible and only partly measured.
 - **`replay` drifts away from production.** It scores against a 2026-08 finder
   report while production uses whatever codex is that month. It stays because
-  it is the only variance-free signal, and it must never become the headline
-  number.
+  it removes the finder's sampling from the comparison, and it must never
+  become the headline number. Its `claude` verifier is sampled fresh per cell,
+  so it is not variance-free either.
 - **Local execution is not reproducible by a third party.** Shell environment,
   MCP servers and CLI patch versions all leak in. Two developers running the
   same contract may legitimately differ by several defects.

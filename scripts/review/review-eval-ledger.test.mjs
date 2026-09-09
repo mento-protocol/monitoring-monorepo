@@ -403,9 +403,9 @@ const wholeFixture = (bits = [1, 0]) =>
 
 // The other half of it: a `status: "complete"` row claims the whole matrix of
 // its own kind. `planCells` builds a full run as pipeline over every fixture in
-// two draws, replay over the grid fixtures in one draw per frozen finder
-// report, and control over every fixture in one draw; a canary is replay over
-// the grid fixtures in one draw.
+// one draw, replay over the grid fixtures in one draw per frozen finder report,
+// and control over the grid fixtures in one draw; a canary is replay over the
+// grid fixtures in one draw.
 const idsFor = (fixtures, bits) =>
   Object.fromEntries(
     fixtures.flatMap((fixture) =>
@@ -415,13 +415,15 @@ const idsFor = (fixtures, bits) =>
 const gridFixtureList = contract.fixtures.filter(
   (fixture) => fixture.grid === true,
 );
+const firstGridFixture = gridFixtureList[0];
 const everyFixture = (bits = [1, 0]) => idsFor(contract.fixtures, bits);
 const everyGridFixture = (bits = [1, 0]) => idsFor(gridFixtureList, bits);
 const fullMatrix = () => ({
-  pipeline: condition({ per_defect: everyFixture() }),
+  // One live pipeline cell per PR and one control cell per grid PR, so one bit
+  // per defect in both; replay runs both frozen finder reports, so two.
+  pipeline: condition({ per_defect: everyFixture([1]), draws: 1 }),
   replay: condition({ per_defect: everyGridFixture() }),
-  // One control cell per PR, so one bit per defect.
-  control: condition({ per_defect: everyFixture([1]), draws: 1 }),
+  control: condition({ per_defect: everyGridFixture([1]), draws: 1 }),
 });
 const canaryMatrix = () => ({
   replay: condition({ per_defect: everyGridFixture([1]), draws: 1 }),
@@ -556,12 +558,17 @@ test("checkLedger requires a complete row to carry its whole matrix", () => {
     });
   }
 
-  // A condition that is present but covers only one of the contract's PRs is
-  // the same claim made a different way.
+  // A condition that is present but covers only one of the PRs its condition
+  // plans is the same claim made a different way.
   const oneFixture = row({
     conditions: {
       ...conditions,
-      control: condition({ per_defect: wholeFixture([1]), draws: 1 }),
+      control: condition({
+        per_defect: Object.fromEntries(
+          firstGridFixture.scorable_ids.map((id) => [String(id), [1]]),
+        ),
+        draws: 1,
+      }),
     },
   });
   withTempLedger(jsonl(oneFixture), (file) => {
@@ -577,14 +584,14 @@ test("checkLedger requires a complete row to carry its whole matrix", () => {
     );
   });
 
-  // The draw count is the other axis of the same claim. A full row that ran
-  // only pipeline draw 1 has half the planned sample, and it would still
-  // refresh the full-run clock and become the baseline every later run is
-  // paired against.
+  // The draw count is the other axis of the same claim. A full row that
+  // replayed only one of the two frozen finder reports has half the planned
+  // sample, and it would still refresh the full-run clock and become the
+  // baseline every later run is paired against.
   const oneDraw = row({
     conditions: {
       ...conditions,
-      pipeline: condition({ per_defect: everyFixture([1]), draws: 1 }),
+      replay: condition({ per_defect: everyGridFixture([1]), draws: 1 }),
     },
   });
   withTempLedger(jsonl(oneDraw), (file) => {
@@ -596,23 +603,45 @@ test("checkLedger requires a complete row to carry its whole matrix", () => {
     assert.equal(checked.ok, false);
     assert.match(
       checked.problems.join(" | "),
-      /conditions\.pipeline\.draws is 1; a complete full run plans 2/,
+      /conditions\.replay\.draws is 1; a complete full run plans at least 2/,
     );
   });
 
+  // The same check is a floor, not an equality: a row recorded when the matrix
+  // planned more draws than it does now ran a superset of today's cells. It
+  // cannot pair with a current row — the planner is inside `matcher_digest`,
+  // so the comparability key moved with the matrix — and rejecting it would
+  // retire history the ledger is append-only about.
+  const extraDraws = row({
+    conditions: {
+      ...conditions,
+      pipeline: condition({ per_defect: everyFixture(), draws: 2 }),
+    },
+  });
+  withTempLedger(jsonl(extraDraws), (file) => {
+    const checked = checkLedger({
+      path: file,
+      contract,
+      contractDigest: DIGEST_A,
+    });
+    assert.deepEqual(checked.problems, []);
+    assert.equal(checked.ok, true);
+  });
+
   // `draws` is one number for the whole condition, so a matrix shortened for a
-  // single PR keeps it: the other PRs still ran draw 2. That row's vectors, its
-  // recall and the cell records `revalidateRow` reads all agree with each other
-  // on one draw for the omitted PR, and it would still claim the whole matrix,
-  // refresh the freshness clock and become a baseline. The per-PR sample is the
-  // vector length, and it is compared with the planned cell.
+  // single PR keeps it: the other PRs still ran the second report. That row's
+  // vectors, its recall and the cell records `revalidateRow` reads all agree
+  // with each other on one draw for the omitted PR, and it would still claim
+  // the whole matrix, refresh the freshness clock and become a baseline. The
+  // per-PR sample is the vector length, and it is compared with the planned
+  // cell.
   const shortForOnePr = row({
     conditions: {
       ...conditions,
-      pipeline: condition({
+      replay: condition({
         per_defect: {
-          ...everyFixture(),
-          ...idsFor([contract.fixtures[0]], [1]),
+          ...everyGridFixture(),
+          ...idsFor([firstGridFixture], [1]),
         },
       }),
     },
@@ -627,7 +656,7 @@ test("checkLedger requires a complete row to carry its whole matrix", () => {
     assert.match(
       checked.problems.join(" | "),
       new RegExp(
-        `conditions\\.pipeline carries 1 draw\\(s\\) for PR ${contract.fixtures[0].pr}; a complete full run plans 2`,
+        `conditions\\.replay carries 1 draw\\(s\\) for PR ${firstGridFixture.pr}; a complete full run plans at least 2`,
       ),
     );
   });
@@ -685,6 +714,61 @@ test("checkLedger requires a complete row to carry its whole matrix", () => {
       );
     });
   }
+});
+
+test("a row cannot claim more draws than any of its vectors carries", () => {
+  // `validateLedgerRow` refuses a vector longer than the declared `draws`, and
+  // a shorter one is a cell that never ran, so nothing else stops a row from
+  // stating `draws: 2` over one-bit vectors. That row reports twice the sample
+  // it took, and it still refreshes the freshness clock and becomes an anchor.
+  // The check needs no comparability key: a declared draw is backed only if
+  // some scored defect carries a bit for it.
+  const inflated = row({
+    conditions: {
+      ...fullMatrix(),
+      pipeline: condition({ per_defect: everyFixture([1]), draws: 2 }),
+    },
+  });
+  withTempLedger(jsonl(inflated), (file) => {
+    const checked = checkLedger({
+      path: file,
+      contract,
+      contractDigest: DIGEST_A,
+    });
+    assert.equal(checked.ok, false);
+    assert.match(
+      checked.problems.join(" | "),
+      /conditions\.pipeline\.draws is 2; no defect carries more than 1 bit\(s\)/,
+    );
+  });
+
+  // A row whose last cell never ran for one PR keeps a short vector on purpose,
+  // and the other PRs still back the declared count.
+  const oneShortPr = row({
+    conditions: {
+      ...fullMatrix(),
+      replay: condition({
+        per_defect: {
+          ...everyGridFixture(),
+          ...idsFor([firstGridFixture], [1]),
+        },
+        draws: 2,
+      }),
+    },
+  });
+  withTempLedger(jsonl(oneShortPr), (file) => {
+    const checked = checkLedger({
+      path: file,
+      contract,
+      contractDigest: DIGEST_A,
+    });
+    assert.ok(
+      !checked.problems.some((problem) =>
+        /no defect carries more than/.test(problem),
+      ),
+      checked.problems.join(" | "),
+    );
+  });
 });
 
 test("plannedMatrix is the matrix planCells actually builds", () => {

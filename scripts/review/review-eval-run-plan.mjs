@@ -276,6 +276,13 @@ export function resolveKind({ kind, rows, contract, contractDigest, now }) {
  * The run matrix. `full` is the comparable score of record; `canary` is a
  * floor test on the replay condition alone, which spends no codex quota and
  * carries no finder-sampling variance.
+ *
+ * A `full` run is `PIPELINE_DRAWS` live draw(s) of every fixture, one replay of
+ * every frozen finder report the grid carries, and one control cell per grid
+ * fixture — 27 cells against the 2026-09 contract. It is a freshness floor and
+ * a baseline anchor, so it buys breadth of PRs rather than repeat draws, and
+ * the comparison that ranks two skills lives in the experiment lane
+ * (`docs/adr/0086-review-eval-lane-any-grid-multi-draw.md`).
  */
 export function planCells({ contract, kind }) {
   const cells = [];
@@ -326,7 +333,7 @@ export function planCells({ contract, kind }) {
       });
     });
   }
-  for (const fixture of contract.fixtures) {
+  for (const fixture of gridFixtures(contract)) {
     push(fixture, "control", 1, {
       model: contract.sut.control.model,
       effort: contract.sut.control.effort,

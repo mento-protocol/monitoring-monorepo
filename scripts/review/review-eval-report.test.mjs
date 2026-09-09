@@ -721,6 +721,155 @@ test("a regression the control moved with is AMBER, not RED", () => {
   );
 });
 
+test("two rows of one key with unequal draws do not pair", () => {
+  // One comparability key means one planner, so two rows under it planned the
+  // same draws. When they disagree, one did not come from that planner, and
+  // `perDefectBits` folds a condition's draws with OR: the side with the extra
+  // draw carries the higher hit rate for no reason the skill accounts for.
+  const pairing = verdict({
+    contract,
+    row: row({
+      conditions: {
+        pipeline: condition({ found: 14, draws: 1 }),
+        control: condition({ ids: gridIds, found: 10, draws: 1 }),
+      },
+    }),
+    baselineRow: baseline({
+      conditions: {
+        pipeline: condition({ found: 20, draws: 2 }),
+        control: condition({ ids: gridIds, found: 10, draws: 1 }),
+      },
+    }),
+  });
+  assert.ok(
+    pairing.reasons.some((reason) =>
+      /baseline pipeline carries 2 draw\(s\) against this row's 1 under one comparability_key/.test(
+        reason,
+      ),
+    ),
+    pairing.reasons.join(" | "),
+  );
+  // Refused as a pairing means refused as a ranking: no flip count survives to
+  // call this RED or PROMOTE.
+  assert.ok(
+    ["AMBER", "GREEN"].includes(pairing.verdict),
+    `${pairing.verdict}: ${pairing.reasons.join(" | ")}`,
+  );
+});
+
+/** A condition whose found ids are given outright, for a split-direction row. */
+function splitCondition({ ids, foundIds, draws = 2, ...overrides }) {
+  const found = new Set(foundIds);
+  return condition({
+    ids,
+    draws,
+    per_defect: Object.fromEntries(
+      ids.map((id) => [
+        id,
+        Array.from({ length: draws }, () => (found.has(id) ? 1 : 0)),
+      ]),
+    ),
+    ...overrides,
+  });
+}
+
+test("the drift waiver points the way the regression it waives points", () => {
+  // Since ADR 0090 `control` runs the grid alone while `pipeline` covers every
+  // fixture, so the two conditions no longer score the same defects.
+  const gridScope = new Set(gridIds);
+  const nonGridIds = allIds.filter((id) => !gridScope.has(id));
+  assert.ok(nonGridIds.length > 5, "the contract needs non-grid defects");
+
+  // The headline's whole loss sits on the grid, where control lost with it.
+  // The reason names how much of that movement control was able to see.
+  const movedTogether = verdict({
+    contract,
+    row: row({
+      conditions: {
+        pipeline: condition({ found: 14 }),
+        control: condition({ ids: gridIds, found: 4, draws: 1 }),
+      },
+    }),
+    baselineRow: baseline({
+      conditions: {
+        pipeline: condition({ found: 20 }),
+        control: condition({ ids: gridIds, found: 10, draws: 1 }),
+      },
+    }),
+  });
+  assert.equal(movedTogether.verdict, "AMBER");
+  assert.ok(
+    movedTogether.reasons.some((reason) =>
+      new RegExp(
+        `control moved 6 defects in the same direction as the headline, which moved 6 on the ${gridIds.length} defect\\(s\\) control also scored`,
+      ).test(reason),
+    ),
+    movedTogether.reasons.join(" | "),
+  );
+
+  // A control that moved the other way explains nothing, and the RED stands.
+  const opposed = verdict({
+    contract,
+    row: row({
+      conditions: {
+        pipeline: condition({ found: 14 }),
+        control: condition({ ids: gridIds, found: 10, draws: 1 }),
+      },
+    }),
+    baselineRow: baseline({
+      conditions: {
+        pipeline: condition({ found: 20 }),
+        control: condition({ ids: gridIds, found: 4, draws: 1 }),
+      },
+    }),
+  });
+  assert.equal(opposed.verdict, "RED");
+
+  // The case the grid slice alone gets wrong. The headline gains six defects on
+  // the grid and loses twelve off it: a net loss of six, which is the RED line.
+  // Control, on the grid, gains six with it. Keyed to the grid the two look
+  // like one movement and the waiver fires; keyed to the regression it waives
+  // — a net loss over every defect the headline scored — control is moving the
+  // other way and explains none of it.
+  const gridGain = gridIds.slice(0, 16);
+  const baselineGrid = gridIds.slice(0, 10);
+  const split = verdict({
+    contract,
+    row: row({
+      conditions: {
+        pipeline: splitCondition({ ids: allIds, foundIds: gridGain }),
+        control: splitCondition({
+          ids: gridIds,
+          foundIds: gridGain,
+          draws: 1,
+        }),
+      },
+    }),
+    baselineRow: baseline({
+      conditions: {
+        pipeline: splitCondition({
+          ids: allIds,
+          foundIds: [...baselineGrid, ...nonGridIds],
+        }),
+        control: splitCondition({
+          ids: gridIds,
+          foundIds: baselineGrid,
+          draws: 1,
+        }),
+      },
+    }),
+  });
+  assert.equal(
+    split.verdict,
+    "RED",
+    `${split.verdict}: ${split.reasons.join(" | ")}`,
+  );
+  assert.ok(
+    !split.reasons.some((reason) => /control moved/.test(reason)),
+    split.reasons.join(" | "),
+  );
+});
+
 test("the report states the verdict, the table, and the defects that flipped", () => {
   const candidate = row({
     verdict: "RED",
