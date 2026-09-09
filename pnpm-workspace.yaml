@@ -37,7 +37,6 @@ minimumReleaseAgeExclude:
   - fast-uri
   - form-data
   - js-yaml
-  - multer@2.2.0
   # July 2026 security releases: Next 16.2.11 and Auth.js 5.0.0-beta.32.
   - next@16.2.11
   - "@next/env@16.2.11"
@@ -83,9 +82,11 @@ overrides:
   # track the dashboard's react version or react-dom's own `react: ^x` peer
   # breaks inside envio's subtree.
   "envio>react": 19.2.8
-  # GHSA-f88m-g3jw-g9cj: stable Next 16.2.x still requests sharp ^0.34.5.
-  # Remove once the supported stable Next line selects sharp >=0.35.0.
-  "sharp@<0.35.0": 0.35.3
+  # GHSA-rgj7-g3m4-5g8c (libheif) hits 0.35.3, the floor the superseded
+  # GHSA-f88m-g3jw-g9cj pin set. 0.35.4 is the patched floor. Stable Next
+  # 16.2.x still requests sharp ^0.34.5; remove once the supported stable Next
+  # line selects sharp >=0.35.4.
+  "sharp@<0.35.4": 0.35.4
   "flatted@<3.4.2": 3.4.2
   # GHSA-rgw5-rvv9-x895: the 5.0.8 resource-limit fix is incomplete.
   "brace-expansion@>=2.0.0 <3": 5.0.9
@@ -137,7 +138,10 @@ overrides:
   "minimatch@^3.0.0": ^3.1.4
   "minimatch@^9.0.0": ^9.0.7
   "minimatch@^10.0.0": ^10.2.3
-  "multer@<2.2.0": 2.2.0
+  # GHSA-wc9g-mqfw-jrwm, GHSA-qfvm-cv95-jqjf and GHSA-535w-7cp7-47q4 hit
+  # 2.2.0, the floor the superseded GHSA-72gw-mp4g-v24j pin set. 2.3.0 is
+  # the patched floor; @nestjs/platform-express 11.x still requests 2.0.2.
+  "multer@<2.3.0": 2.3.0
   "@opentelemetry/core@<2.8.0": 2.8.0
   "path-to-regexp@^8.0.0": ^8.4.0
   "picomatch@^2.0.0": ^2.3.2
