@@ -578,15 +578,20 @@ function restrictCondition(condition, ids) {
  * move together by at least the flip threshold, the world moved and the score
  * is not attributable to the skill.
  *
- * Both deltas are counted over the defects control actually observed. Since
+ * The direction test reads the delta of the rule being waived: `flips`, over
+ * every defect the headline scored. It is a waiver for that RED and nothing
+ * else, so control has to have moved the way the loss did. Testing against the
+ * headline restricted to control's own defects looks tighter and is not: since
  * [ADR 0090](../../docs/adr/0090-canonical-eval-matrix-freshness-floor.md)
- * `control` runs the grid alone while the headline covers every fixture, so the
- * unrestricted headline delta would be a count over 51 defects held against a
- * control count over 39 — two different denominators, and a direction read off
- * movement control never saw. Narrowing the headline to control's own ids is
- * what makes the comparison one comparison.
+ * `control` runs the grid alone, so a grid gain sitting beside a larger
+ * non-grid loss is a net regression whose grid slice points the other way, and
+ * a waiver keyed to that slice would wave it through.
  *
- * What this does not fix: the threshold still asks control to move
+ * The grid numbers are still worth printing, so the reason says how much of the
+ * headline's movement control was in a position to see. Nothing thresholds
+ * them.
+ *
+ * What this does not fix: the threshold asks control to move
  * `regression_net_flips` defects on its 39, so model drift spread across the
  * grid and the three non-grid fixtures can push the headline past the RED line
  * while control's share of it stays under the bar. That direction is a RED that
@@ -601,19 +606,18 @@ function controlMoved({ contract, row, baseline, flips, name }) {
   if (!control || !baseControl) return null;
   const controlFlips = compareConditions(baseControl, control);
   if (controlFlips.delta === 0) return null;
-  const scope = new Set(controlFlips.ids);
-  const headlineOnScope = compareConditions(
-    restrictCondition(baseline.conditions?.[name], scope),
-    restrictCondition(row.conditions?.[name], scope),
-  );
-  if (headlineOnScope.delta === 0) return null;
   const sameDirection =
-    Math.sign(controlFlips.delta) === Math.sign(headlineOnScope.delta);
+    Math.sign(controlFlips.delta) === Math.sign(flips.delta);
   if (
     sameDirection &&
     Math.abs(controlFlips.delta) >= contract.verdict_rules.regression_net_flips
   ) {
-    return `control moved ${controlFlips.delta} defects in the same direction as the headline on the ${scope.size} defect(s) both scored; the model moved, so the score is not attributable`;
+    const scope = new Set(controlFlips.ids);
+    const headlineOnScope = compareConditions(
+      restrictCondition(baseline.conditions?.[name], scope),
+      restrictCondition(row.conditions?.[name], scope),
+    );
+    return `control moved ${controlFlips.delta} defects in the same direction as the headline, which moved ${headlineOnScope.delta} on the ${scope.size} defect(s) control also scored; the model moved, so the score is not attributable`;
   }
   return null;
 }
