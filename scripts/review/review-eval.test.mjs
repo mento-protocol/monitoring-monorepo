@@ -845,7 +845,7 @@ test("comparabilityKey moves with the contract, the prompts, and the scorer", ()
 
 test("orchestratorSourceDigest binds the shell and the cell modules", () => {
   const expected =
-    "12a8e405d71afaa24d44249d66fb1fad61905005fca898e37f29e9055d9c0409";
+    "c7746d078354c79c4f9825bc70a8599b2bd8784a52f1904b078aca7368ddaee3";
   assert.equal(orchestratorSourceDigest(), expected);
   // The cell writer and the stream parser are in the digest for the same
   // reason the shell is: the writer decides what a paid cell records and the
@@ -2496,12 +2496,24 @@ test("TERM takes every group worker's process group down with the run", async ()
     process.kill(child.pid, "SIGTERM");
     assert.equal(await exited, 143);
     // Each of these ignored TERM, so only the KILL pass can have ended it.
+    // `kill -0` still succeeds on a zombie, and these reparent to PID 1 when
+    // their group leader dies — on a runner whose PID 1 reaps slowly one can
+    // sit in state `Z` for a moment. A zombie has terminated: it holds nothing
+    // and spends nothing. Poll for gone-or-zombie rather than for gone.
     for (const pid of started) {
-      assert.equal(
-        spawnSync("kill", ["-0", pid]).status,
-        1,
-        `TERM-ignoring grandchild ${pid} outlived the run`,
-      );
+      let ended = false;
+      for (let attempt = 0; attempt < 40 && !ended; attempt += 1) {
+        const state = spawnSync("ps", ["-o", "state=", "-p", pid], {
+          encoding: "utf8",
+        });
+        ended =
+          spawnSync("kill", ["-0", pid]).status !== 0 ||
+          state.status !== 0 ||
+          state.stdout.trim() === "" ||
+          state.stdout.trim().startsWith("Z");
+        if (!ended) await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      assert.ok(ended, `TERM-ignoring grandchild ${pid} outlived the run`);
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });

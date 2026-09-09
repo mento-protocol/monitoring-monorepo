@@ -53,8 +53,17 @@ MATRIX_WORKER_SLOTS=()
 # one member is alive, so the collected id still names it.
 # shellcheck disable=SC2329  # invoked by the worker's TERM trap
 matrix_worker_kill_children() {
-  local pid_file="$1" self="" child
+  local pid_file="$1" self="" child waited=0
   local -a groups=()
+  # The parent writes that file in the command after the one that forked this
+  # worker, and Bash runs a pending trap between two commands, so a signal
+  # delivered in that gap arrives before the file exists. Wait for it rather
+  # than forward nothing. One second is orders of magnitude more than the gap
+  # and still inside the parent's own grace before it KILLs this group.
+  while [[ ! -f $pid_file ]] && ((waited < 20)); do
+    sleep 0.05
+    waited=$((waited + 1))
+  done
   [[ -f $pid_file ]] || return 0
   read -r self <"$pid_file" || return 0
   [[ $self =~ ^[0-9]+$ ]] || return 0
