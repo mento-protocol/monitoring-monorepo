@@ -632,6 +632,71 @@ test("corroboration gates PROMOTE only, and only a pipeline headline", () => {
   assert.match(replayHeadline.reasons.join("\n"), /replay gained a net 6/);
 });
 
+test("the gate binds the contracts that pre-register it", () => {
+  // A contract from before this rule never registered it, and
+  // `--report --contract <archived>` has to reproduce the verdict that run
+  // saw, so an absent key leaves the PROMOTE standing. A key the gate cannot
+  // read is the other case: the contract claims the gate and cannot run it.
+  const gain = row({
+    conditions: {
+      pipeline: condition({ found: 26 }),
+      replay: replay({ found: 16 }),
+    },
+  });
+  const base = baseline({
+    conditions: {
+      pipeline: condition({ found: 20 }),
+      replay: replay({ found: 10 }),
+    },
+  });
+  const corroborated = verdict({ contract, row: gain, baselineRow: base });
+  assert.equal(
+    corroborated.verdict,
+    "PROMOTE",
+    JSON.stringify(corroborated.reasons),
+  );
+  // An archived contract: the rule is absent, so the old verdict stands even
+  // when replay would not corroborate.
+  const archived = structuredClone(contract);
+  delete archived.verdict_rules.promote_corroboration_net_flips;
+  const flatReplay = {
+    pipeline: condition({ found: 26 }),
+    replay: replay({ found: 10 }),
+  };
+  const legacy = verdict({
+    contract: archived,
+    row: row({ conditions: flatReplay }),
+    baselineRow: base,
+  });
+  assert.equal(legacy.verdict, "PROMOTE", JSON.stringify(legacy.reasons));
+  // A value the gate cannot read corroborates nothing.
+  for (const value of [0, -3, "3", null]) {
+    const broken = structuredClone(contract);
+    broken.verdict_rules.promote_corroboration_net_flips = value;
+    const decision = verdict({
+      contract: broken,
+      row: row({ conditions: flatReplay }),
+      baselineRow: base,
+    });
+    assert.equal(decision.verdict, "GREEN", String(value));
+    assert.match(
+      decision.reasons.join("\n"),
+      /which the gate cannot read, so nothing corroborates the pipeline gain/,
+      String(value),
+    );
+  }
+  const noFloor = structuredClone(contract);
+  delete noFloor.verdict_rules.noise_floor_defects;
+  assert.equal(
+    verdict({
+      contract: noFloor,
+      row: row({ conditions: flatReplay }),
+      baselineRow: base,
+    }).verdict,
+    "GREEN",
+  );
+});
+
 test("a condition that scored no P1 defect is not read as zero P1 recall", () => {
   const noP1 = row({
     conditions: {

@@ -599,8 +599,10 @@ function checkShape({ contract, problems }) {
     }
     // The corroboration rule counts defects, and it asks `replay` to move less
     // than the flip rule asks of the headline. A value above
-    // `regression_net_flips` would demand more of the quieter condition than
-    // the verdict itself demands, which no PROMOTE could ever clear.
+    // `regression_net_flips` would ask `replay`'s 39 grid defects for a larger
+    // move than the headline's 51 have to make. That is the asymmetry ADR 0091
+    // rejects under "Ask `replay` for the full six net flips"; such a value is
+    // still clearable, so the bound is policy, not arithmetic.
     const corroboration = rules.promote_corroboration_net_flips;
     if (Number.isFinite(corroboration)) {
       if (!Number.isSafeInteger(corroboration)) {

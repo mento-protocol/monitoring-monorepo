@@ -592,6 +592,22 @@ export function verdict({
 function promoteCorroborationGap({ rules, row, baseline, name }) {
   if (name !== "pipeline") return null;
   const tail = "the gain does not re-anchor the baseline";
+  // The gate is a pre-registered rule, so it binds the contracts that carry it
+  // and no others. A contract from before this rule never registered it, and
+  // `--report --contract <archived>` has to reproduce the verdict that run
+  // saw, so an absent key leaves the old semantics alone. Its series is its
+  // own: `comparabilityKey` hashes the contract digest, so a row scored under
+  // such a contract can only re-anchor rows scored under it too.
+  //
+  // A contract that names the rule and gives it a value the gate cannot read
+  // is the other case: it claims the gate and cannot run it, so it
+  // corroborates nothing.
+  const need = rules.promote_corroboration_net_flips;
+  const floor = rules.noise_floor_defects;
+  if (need === undefined) return null;
+  if (!Number.isFinite(need) || need <= 0 || !Number.isFinite(floor)) {
+    return `the contract names promote_corroboration_net_flips ${JSON.stringify(need)} against noise_floor_defects ${JSON.stringify(floor)}, which the gate cannot read, so nothing corroborates the pipeline gain; ${tail}`;
+  }
   const replay = row.conditions?.replay;
   const baseReplay = baseline?.conditions?.replay;
   if (!replay || !baseReplay) {
@@ -604,11 +620,11 @@ function promoteCorroborationGap({ rules, row, baseline, name }) {
     return `replay is absent on ${where}, so nothing corroborates the pipeline gain; ${tail}`;
   }
   const replayFlips = compareConditions(baseReplay, replay);
-  if (replayFlips.ids.length < (rules.noise_floor_defects ?? 0)) {
-    return `replay and the baseline share only ${replayFlips.ids.length} scored defect(s); noise_floor_defects ${rules.noise_floor_defects} refuses to corroborate the pipeline gain on that, so ${tail}`;
+  if (replayFlips.ids.length < floor) {
+    return `replay and the baseline share only ${replayFlips.ids.length} scored defect(s); noise_floor_defects ${floor} refuses to corroborate the pipeline gain on that, so ${tail}`;
   }
-  if (-replayFlips.delta < rules.promote_corroboration_net_flips) {
-    return `replay moved ${-replayFlips.delta} defects on ${replayFlips.ids.length} shared defects, and corroboration needs a net gain of at least ${rules.promote_corroboration_net_flips}, so ${tail}`;
+  if (-replayFlips.delta < need) {
+    return `replay moved ${-replayFlips.delta} defects on ${replayFlips.ids.length} shared defects, and corroboration needs a net gain of at least ${need}, so ${tail}`;
   }
   return null;
 }

@@ -545,8 +545,8 @@ test("every contract problem is collected, not just the first", () => {
 test("the corroboration rule may not ask more than the flip rule", () => {
   // `promote_corroboration_net_flips` asks `replay` to move in the same
   // direction as a `pipeline` gain. Above `regression_net_flips` it would ask
-  // the quieter condition for more than the verdict itself needs, and no
-  // PROMOTE could clear it.
+  // `replay`'s 39 grid defects for a larger move than the headline's 51 have
+  // to make. The contract refuses that as policy; such a value is clearable.
   const contract = clone(committed.contract);
   contract.verdict_rules.promote_corroboration_net_flips =
     contract.verdict_rules.regression_net_flips + 1;

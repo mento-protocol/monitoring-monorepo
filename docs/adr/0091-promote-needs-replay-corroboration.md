@@ -84,6 +84,9 @@ silently moves the reference.
   ranking belongs ([ADR 0086](0086-review-eval-lane-any-grid-multi-draw.md)).
 - An uncorroborated gain reads GREEN, so the report states it as a gain and says
   it did not re-anchor. Nothing is lost from the record.
+- The rule binds the contracts that carry the key. `--report --contract` with a
+  contract from before this change still prints the verdict that run saw, so
+  history does not move under a rule its runs never ran against.
 - Scaling the control-drift waiver threshold to control's 39-defect scope is a
   separate verdict-rule decision and stays open as
   [issue 2333](https://github.com/mento-protocol/monitoring-monorepo/issues/2333).
