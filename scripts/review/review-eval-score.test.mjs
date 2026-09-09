@@ -873,9 +873,12 @@ test("runCalibration renders every committed record with a detail and no repeate
       detail.trim() !== "",
       `${record.record_id} rendered an empty detail`,
     );
+    // The renderer only drops a leading title repeat, so only the first line
+    // is checked. A body that refers back to its own title later is valid.
+    const [firstDetailLine = ""] = detail.trim().split("\n");
     assert.ok(
-      !plainText(detail).includes(plainText(record.defect.title)),
-      `${record.record_id} repeats its title inside the detail`,
+      !plainText(firstDetailLine).includes(plainText(record.defect.title)),
+      `${record.record_id} repeats its title on the first detail line`,
     );
   }
 });
@@ -904,6 +907,33 @@ test("runCalibration keeps a title-only detail rather than rendering nothing", a
     concurrency: 1,
   });
   assert.equal(renderedDetail(exec.calls[0].prompt).trim(), defect.detail);
+});
+
+test("runCalibration falls back to body when detail is empty", async () => {
+  const defect = {
+    ...truthFindings[0],
+    detail: "   ",
+    body: "the compatibility body",
+  };
+  const exec = stubExec([
+    JSON.stringify({ matches: [1], reasoning: { 1: "stub" } }),
+  ]);
+  await runCalibration({
+    calibrationSet: {
+      records: [
+        {
+          record_id: "empty-detail",
+          defect_id: defect.id,
+          expected_verdict: "matched",
+          claim_excerpt: "a claim",
+          defect,
+        },
+      ],
+    },
+    exec,
+    concurrency: 1,
+  });
+  assert.equal(renderedDetail(exec.calls[0].prompt).trim(), defect.body);
 });
 
 test("runCalibration refuses an empty set", async () => {

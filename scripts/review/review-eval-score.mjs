@@ -454,7 +454,10 @@ function normalizeTitleLine(text) {
  * because no committed calibration record carries `body`.
  */
 function calibrationFinding(defect) {
-  const detail = String(defect.detail ?? defect.body ?? "");
+  // `??` would keep an empty `detail`, which is the blank line this maps
+  // around; fall back to the compatibility `body` whenever `detail` is blank.
+  const recorded = String(defect.detail ?? "");
+  const detail = recorded.trim() === "" ? String(defect.body ?? "") : recorded;
   const [firstLine, ...rest] = detail.split("\n");
   const title = normalizeTitleLine(String(defect.title ?? ""));
   const repeatsTitle = title !== "" && normalizeTitleLine(firstLine) === title;
