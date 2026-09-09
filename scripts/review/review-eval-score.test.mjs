@@ -813,6 +813,31 @@ test("runCalibration preserves record order under concurrency", async () => {
   );
 });
 
+test("runCalibration shows the judge the record's defect detail", async () => {
+  const record = calibration.records.find(
+    (row) => row.record_id === "pr1982-3827636772-matched",
+  );
+  const exec = stubExec([
+    JSON.stringify({ matches: [1], reasoning: { 1: "stub" } }),
+  ]);
+  await runCalibration({
+    calibrationSet: { records: [record] },
+    exec,
+    concurrency: 1,
+  });
+  const { prompt } = exec.calls[0];
+  // The body sits after the title line inside `defect.detail`. The renderer
+  // used to read `defect.body`, which no committed record carries, so every
+  // calibration replay judged on the title alone with `detail:` empty.
+  assert.match(
+    prompt,
+    /buildClaimComment \(scripts\/pr\/issue-board-commands\.mjs:74\) only emits a Branch: line/,
+  );
+  // The title is rendered once, by the header line. The stripped detail must
+  // not repeat it.
+  assert.equal(prompt.split(record.defect.title).length - 1, 1);
+});
+
 test("runCalibration refuses an empty set", async () => {
   await assert.rejects(
     runCalibration({ calibrationSet: { records: [] }, exec: stubExec([]) }),

@@ -434,6 +434,33 @@ function defectBlock(findings) {
     .join("\n");
 }
 
+// A calibration record stores the defect body under `detail`, and every
+// `detail` opens by repeating the title, sometimes wrapped in the markdown the
+// source bot used (a severity prefix, a badge image, italics, a heading).
+// Normalizing both sides lets the repeat be recognized and dropped.
+const TITLE_DECORATION_PATTERN =
+  /!\[[^\]]*\]\([^)]*\)|^#+\s+|^\[[^\]]+\]\s+|[*_`]/g;
+
+function normalizeTitleLine(text) {
+  return text
+    .replace(TITLE_DECORATION_PATTERN, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Map a calibration record's defect into the truth-shaped finding
+ * `defectBlock()` renders. Without this the judge sees an empty `detail:`,
+ * because no committed calibration record carries `body`.
+ */
+function calibrationFinding(defect) {
+  const detail = String(defect.detail ?? defect.body ?? "");
+  const [firstLine, ...rest] = detail.split("\n");
+  const title = normalizeTitleLine(String(defect.title ?? ""));
+  const repeatsTitle = title !== "" && normalizeTitleLine(firstLine) === title;
+  return { ...defect, body: (repeatsTitle ? rest.join("\n") : detail).trim() };
+}
+
 function selectScorable(truthFindings, scorableIds) {
   const wanted = new Set(scorableIds);
   const selected = truthFindings.filter((finding) => wanted.has(finding.id));
@@ -853,7 +880,7 @@ export async function runCalibration({
     Math.max(1, concurrency),
     async (record) => {
       const prompt = renderPrompt(loadPrompt("judge-match"), {
-        DEFECTS: defectBlock([record.defect]),
+        DEFECTS: defectBlock([calibrationFinding(record.defect)]),
         REVIEW: String(record.claim_excerpt).slice(0, MAX_JUDGE_REVIEW_CHARS),
       });
       const parsed = await callJudge(
