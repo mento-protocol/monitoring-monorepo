@@ -31,6 +31,7 @@ import {
 import { formatCompact, formatHuman } from "./pr-ready-state-format.mjs";
 import {
   annotateStatusCheckSources,
+  fetchRequiredStatusContexts,
   fetchHeadUpdatedAt,
   headUpdatedAtFromTimeline,
   parseArgs,
@@ -46,10 +47,15 @@ import {
 
 let passed = 0;
 let failed = 0;
+const tests = [];
 
 function test(name, fn) {
+  tests.push({ name, fn });
+}
+
+async function runTest(name, fn) {
   try {
-    fn();
+    await fn();
     process.stdout.write(`ok ${name}\n`);
     passed += 1;
   } catch (err) {
@@ -281,6 +287,125 @@ test("falls back to bare branch protection contexts when check details are absen
       { context: "Vercel", integrationId: null },
     ],
   );
+});
+
+test("uses classic branch protection required status contexts when available", async () => {
+  let rulesCalls = 0;
+  const result = await fetchRequiredStatusContexts({
+    repo: { owner: "mento-protocol", name: "monitoring-monorepo", host: null },
+    baseRef: "main",
+    fetchProtection: async () => ({
+      ok: true,
+      value: { contexts: ["ci", "Vercel"] },
+    }),
+    fetchRules: async () => {
+      rulesCalls += 1;
+      return { ok: true, value: [] };
+    },
+  });
+
+  assertDeepEqual(result, {
+    contexts: [
+      { context: "ci", integrationId: null },
+      { context: "Vercel", integrationId: null },
+    ],
+    error: null,
+  });
+  assertEqual(rulesCalls, 0, "rulesets must not be read when protection works");
+});
+
+test("falls back to rulesets for the current gh branch-protection 404", async () => {
+  const result = await fetchRequiredStatusContexts({
+    repo: { owner: "mento-protocol", name: "monitoring-monorepo", host: null },
+    baseRef: "main",
+    fetchProtection: async () => ({
+      ok: false,
+      error:
+        "gh api repos/mento-protocol/monitoring-monorepo/branches/main/protection/required_status_checks failed with exit 1:\ngh: Not Found (HTTP 404)\n",
+    }),
+    fetchRules: async () => ({
+      ok: true,
+      value: [
+        {
+          type: "required_status_checks",
+          parameters: {
+            required_status_checks: [
+              { context: "ci" },
+              { context: "Code Quality" },
+            ],
+          },
+        },
+      ],
+    }),
+  });
+
+  assertDeepEqual(result, {
+    contexts: [
+      { context: "ci", integrationId: null },
+      { context: "Code Quality", integrationId: null },
+    ],
+    error: null,
+  });
+});
+
+test("fails closed when branch protection is absent and rulesets are unavailable", async () => {
+  const result = await fetchRequiredStatusContexts({
+    repo: { owner: "mento-protocol", name: "monitoring-monorepo", host: null },
+    baseRef: "main",
+    fetchProtection: async () => ({
+      ok: false,
+      error: "gh: Not Found (HTTP 404)",
+    }),
+    fetchRules: async () => ({
+      ok: false,
+      error: "gh: Resource not accessible by integration (HTTP 403)",
+    }),
+  });
+
+  assertDeepEqual(result, {
+    contexts: [],
+    error: "gh: Resource not accessible by integration (HTTP 403)",
+  });
+});
+
+test("fails closed when a protection 404 yields no ruleset-required contexts", async () => {
+  const result = await fetchRequiredStatusContexts({
+    repo: { owner: "mento-protocol", name: "monitoring-monorepo", host: null },
+    baseRef: "main",
+    fetchProtection: async () => ({
+      ok: false,
+      error: "gh: Not Found (HTTP 404)",
+    }),
+    fetchRules: async () => ({ ok: true, value: [{ type: "deletion" }] }),
+  });
+
+  assertDeepEqual(result, {
+    contexts: [],
+    error:
+      "Required status contexts unavailable: classic branch protection returned HTTP 404 and branch rulesets did not define required status checks or workflows",
+  });
+});
+
+test("fails closed without reading rulesets for non-404 protection errors", async () => {
+  let rulesCalls = 0;
+  const result = await fetchRequiredStatusContexts({
+    repo: { owner: "mento-protocol", name: "monitoring-monorepo", host: null },
+    baseRef: "main",
+    fetchProtection: async () => ({
+      ok: false,
+      error: "gh: Resource not accessible by integration (HTTP 403)",
+    }),
+    fetchRules: async () => {
+      rulesCalls += 1;
+      return { ok: true, value: [] };
+    },
+  });
+
+  assertDeepEqual(result, {
+    contexts: [],
+    error: "gh: Resource not accessible by integration (HTTP 403)",
+  });
+  assertEqual(rulesCalls, 0, "non-404 errors must not trigger a fallback");
 });
 
 test("extracts required workflow contexts from branch rulesets", () => {
@@ -3003,6 +3128,10 @@ test("a passing CodeRabbit check does not clear a real required blocker", () => 
     "CodeRabbit must never appear as a required blocker by default",
   );
 });
+
+for (const { name, fn } of tests) {
+  await runTest(name, fn);
+}
 
 if (failed > 0) {
   process.stderr.write(`\n${failed} failed, ${passed} passed\n`);
