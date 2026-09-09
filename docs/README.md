@@ -215,6 +215,7 @@ Authority: canonical
 - [`docs/adr/0086-review-eval-lane-any-grid-multi-draw.md`](adr/0086-review-eval-lane-any-grid-multi-draw.md) — The experiment lane runs any grid at N draws and decides on paired evidence
 - [`docs/adr/0087-autoreview-removal-thin-two-model-review.md`](adr/0087-autoreview-removal-thin-two-model-review.md) — Remove the autoreview machinery; keep a thin two-model closeout review
 - [`docs/adr/0088-temporary-m6-canary-collection.md`](adr/0088-temporary-m6-canary-collection.md) — Temporary event-driven M6 canary collection
+- [`docs/adr/0089-review-eval-canonical-matrix-pr-groups.md`](adr/0089-review-eval-canonical-matrix-pr-groups.md) — The canonical review-eval matrix runs PR groups concurrently
 
 Authority: non-canonical
 

@@ -845,7 +845,7 @@ test("comparabilityKey moves with the contract, the prompts, and the scorer", ()
 
 test("orchestratorSourceDigest binds the shell and the cell modules", () => {
   const expected =
-    "0115d207878da5d9b197cd58cb721fecc20e93ce61413964cbc427dee6b6d664";
+    "053c808b2667c91d355a02adea99269617f51219071fb9b5ad808bb4cb03d1de";
   assert.equal(orchestratorSourceDigest(), expected);
   // The cell writer and the stream parser are in the digest for the same
   // reason the shell is: the writer decides what a paid cell records and the
@@ -2115,7 +2115,10 @@ const matrixSourcePath = runEvalSourcePaths.get("matrix");
 function driveMatrix({
   cells,
   dir,
-  concurrency,
+  // Always pinned, never inherited: `spawn` passes the ambient environment, so
+  // an operator's own REVIEW_EVAL_PR_CONCURRENCY would silently decide how many
+  // groups these assertions get to see.
+  concurrency = 3,
   deadline = 3600,
   startedAgo = 0,
   cellSeconds = 1,
@@ -2169,9 +2172,7 @@ function driveMatrix({
     encoding: "utf8",
     env: {
       ...process.env,
-      ...(concurrency === undefined
-        ? {}
-        : { REVIEW_EVAL_PR_CONCURRENCY: String(concurrency) }),
+      REVIEW_EVAL_PR_CONCURRENCY: String(concurrency),
     },
   });
   assert.equal(run.status, 0, run.stderr);
@@ -2431,9 +2432,11 @@ test("TERM takes every group worker's process group down with the run", async ()
         )
         .join(""),
     );
-    // The pid file records a grandchild of the run: a background process the
-    // fake cell started, the way a real cell's finder and contestant are
-    // started. A signal to the worker alone would leave these spending quota.
+    // The pid file records a grandchild of the run started the way `run_bounded`
+    // starts a finder or a contestant: under its own `set -m`, so it leads a
+    // process group of its own rather than inheriting the worker's. A signal to
+    // the worker's group alone never reaches it, which is exactly the orphan
+    // that would keep spending quota after the run reported failure.
     const pidsFile = path.join(dir, "pids");
     const harness = [
       "set -euo pipefail",
@@ -2449,12 +2452,23 @@ test("TERM takes every group worker's process group down with the run", async ()
       `fail() { printf 'FATAL: %s\\n' "$*" >&2; exit 1; }`,
       "cell_rows() { cat " + JSON.stringify(rowsFile) + "; }",
       "run_cell() {",
-      `  sleep 120 & printf '%s\\n' "$!" >>"$PIDS"; wait $!`,
+      "  set -m",
+      `  sleep 120 & printf '%s\\n' "$!" >>"$PIDS"`,
+      "  set +m",
+      "  wait $!",
       "}",
       "source " + JSON.stringify(matrixSourcePath),
       "run_matrix",
     ].join("\n");
-    const child = spawn("bash", ["-c", harness], { stdio: "ignore" });
+    // `/bin/bash` on purpose: that is what the launchd job execs, it is 3.2 on
+    // macOS, and it has no `BASHPID` — the version the signal forwarding must
+    // not depend on.
+    const child = spawn("/bin/bash", ["-c", harness], {
+      stdio: "ignore",
+      // Pinned for the same reason `driveMatrix` pins it: the ambient value
+      // would otherwise decide how many groups this assertion can see.
+      env: { ...process.env, REVIEW_EVAL_PR_CONCURRENCY: "3" },
+    });
     const exited = new Promise((resolve) => {
       child.on("exit", (code) => resolve(code));
     });

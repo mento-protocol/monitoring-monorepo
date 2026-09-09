@@ -309,9 +309,11 @@ the run returns, even when the direct child exits first.
 
 The matrix runs its cells as PR groups: the cells of one fixture PR strictly in
 sequence on the checkout they share, and up to `REVIEW_EVAL_PR_CONCURRENCY`
-groups — 3 by default, 1 for the old strictly serial matrix — at once. This is
-the shape [ADR 0086](../adr/0086-review-eval-lane-any-grid-multi-draw.md)
-already gives the experiment lane, and for the same reason: every cell resets,
+groups — 3 by default, 1 for the old strictly serial matrix — at once.
+[ADR 0089](../adr/0089-review-eval-canonical-matrix-pr-groups.md) records that
+decision for this runner; it is the shape
+[ADR 0086](../adr/0086-review-eval-lane-any-grid-multi-draw.md) already gives
+the experiment lane, and for the same reason: every cell resets,
 cleans and stages `.skill` into its PR's one checkout, so two cells of one PR
 would delete each other's tree, while two PRs are separate trees. The cost is
 unchanged — the same cells, in the same per-PR order, against the same fixtures
@@ -320,11 +322,15 @@ run took 100 minutes for 6 serial pipeline cells, which put 39 serial cells at 8
 to 9 hours against a 4.5-hour matrix deadline. Re-measure on the next full run
 and replace the `hours TBD` above with what it took. Each group is its own
 process group, and the TERM and EXIT paths take every one of them down before
-the run returns. A cell's
-log lines are buffered and emitted as one block, so two groups cannot splice
-their output into each other. Every cell's outcome is written to its own status
-file and summed by the parent, so `matrix: D done, F failed, of T` counts each
-cell exactly once and `T` is the whole planned matrix.
+the run returns; because `run_bounded` puts each cell's bounded child in a
+process group of its own, a signalled worker forwards to that group as well
+rather than leaving a finder or a contestant orphaned. A cell's log lines are
+buffered and emitted as one write, which is indivisible on the regular file the
+launchd job redirects to and guaranteed only to `PIPE_BUF` through a pipe, so
+`run-eval.sh | tee` can still interleave two failing cells. Every cell's outcome
+is written to its own status file and summed by the parent, so
+`matrix: D done, F failed, of T` counts each cell exactly once and `T` is the
+whole planned matrix.
 
 A PR whose draw-2 cell never ran is scored on draw 1 alone: the defect's bit
 vector is as long as the draws its own PR completed, so a missing cell shrinks the
