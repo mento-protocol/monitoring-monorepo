@@ -30,7 +30,6 @@ const stack = {
 };
 const state = (number) => {
   const pr = { ...layers[number - 1] };
-  delete pr.baseRefOid;
   return {
     ready: true,
     feedbackReady: true,
@@ -95,6 +94,44 @@ for (const mutation of [
   assert.match(result, /^PENDING /, mutation);
 }
 
+// The native stack API can omit base SHAs. PR reads must still agree.
+for (const scenario of [
+  "stable",
+  "feedback-to-readiness",
+  "initial-to-feedback",
+  "final-selected",
+  "missing-observed-base",
+]) {
+  const withoutNativeBase = (number) => {
+    const value = state(number);
+    for (const layer of value.stack.layers) delete layer.baseRefOid;
+    return value;
+  };
+  let count = 0;
+  const result = await evaluateStackGate(
+    withoutNativeBase(2),
+    "owner/repo",
+    async (args) => {
+      count++;
+      const value = withoutNativeBase(Number(args.prArg));
+      if (
+        (scenario === "feedback-to-readiness" && count === 2) ||
+        (scenario === "initial-to-feedback" && count === 3) ||
+        (scenario === "final-selected" && count === 5)
+      )
+        value.pr.baseRefOid = "b".repeat(40);
+      if (scenario === "missing-observed-base") delete value.pr.baseRefOid;
+      return value;
+    },
+    feedback,
+  );
+  assert.match(
+    result,
+    scenario === "stable" ? /^PASS / : /^PENDING /,
+    scenario,
+  );
+}
+
 // Exercise the real hook and helper with offline probe modules and commands.
 const root = mkdtempSync(join(tmpdir(), "stack-gate-"));
 try {
@@ -111,7 +148,7 @@ try {
   );
   writeFileSync(
     join(root, "scripts/pr/pr-ready-state.mjs"),
-    `import {readFileSync} from 'node:fs'; let calls=0; export function withGhAbortSignal(_signal,callback) { return callback(); } export async function fetchReadyState(args) { calls++; const value=JSON.parse(readFileSync('input.json')); value.pr={...value.stack.layers.find(layer=>String(layer.number)===args.prArg)}; delete value.pr.baseRefOid; if(process.env.SCENARIO==='blocked' && args.prArg==='1') value.feedbackReady=false; if(process.env.SCENARIO==='moved' && calls===5) value.stack.layers[0].headRefOid='b'.repeat(40); return value; }`,
+    `import {readFileSync} from 'node:fs'; let calls=0; export function withGhAbortSignal(_signal,callback) { return callback(); } export async function fetchReadyState(args) { calls++; const value=JSON.parse(readFileSync('input.json')); value.pr={...value.stack.layers.find(layer=>String(layer.number)===args.prArg)}; if(process.env.SCENARIO==='blocked' && args.prArg==='1') value.feedbackReady=false; if(process.env.SCENARIO==='moved' && calls===5) value.stack.layers[0].headRefOid='b'.repeat(40); return value; }`,
   );
   writeFileSync(
     join(root, "scripts/pr/pr-feedback-state-core.mjs"),

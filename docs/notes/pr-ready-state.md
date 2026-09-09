@@ -491,6 +491,9 @@ Standalone PR output is unchanged. Native stack summaries add
 `dependencyPrNumbers` for unmerged predecessors. Each layer records its PR
 number, state, branch, and head SHA. The probe reads required checks from the
 protection base; diff checks still use `pr.baseRefName`.
+Native results also include the observed `pr.baseRefOid`. The aggregate retains
+each layer's observed base commit and rejects changes between reads, including
+when the native stack API omits its optional base SHA.
 
 `stack.ready` is `null` and `stack.readiness` is `"not_evaluated"`: a ready
 layer does not prove stack readiness. Run both projections independently for

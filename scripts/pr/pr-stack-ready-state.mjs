@@ -55,14 +55,30 @@ async function evaluateLayers(initial, repoArg, fetchState, feedback) {
   );
   if (!selected || selected.state !== "OPEN")
     return "PENDING selected stack layer changed";
-  const matches = (value, layer) =>
-    value?.stack &&
-    fingerprint(value.stack) === signature &&
-    value.pr?.number === layer.number &&
-    value.pr?.state === "OPEN" &&
-    value.pr?.headRefOid === layer.headRefOid &&
-    value.pr?.headRefName === layer.headRefName &&
-    value.pr?.baseRefName === layer.baseRefName;
+  const observedBases = new Map();
+  const matches = (value, layer) => {
+    const baseOid = value?.pr?.baseRefOid;
+    if (
+      typeof baseOid !== "string" ||
+      !/^[0-9a-f]{40}$/i.test(baseOid) ||
+      (layer.baseRefOid != null && layer.baseRefOid !== baseOid) ||
+      (observedBases.has(layer.number) &&
+        observedBases.get(layer.number) !== baseOid)
+    )
+      return false;
+    observedBases.set(layer.number, baseOid);
+    return (
+      value?.stack &&
+      fingerprint(value.stack) === signature &&
+      value.pr?.number === layer.number &&
+      value.pr?.state === "OPEN" &&
+      value.pr?.headRefOid === layer.headRefOid &&
+      value.pr?.headRefName === layer.headRefName &&
+      value.pr?.baseRefName === layer.baseRefName
+    );
+  };
+  if (!matches(initial, selected))
+    return "PENDING selected stack layer base unavailable or changed";
   try {
     for (const layer of stack.layers.filter(
       (entry) => entry.state === "OPEN",
