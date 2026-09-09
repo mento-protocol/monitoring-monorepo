@@ -36,6 +36,7 @@ import {
   baselinePreflightProblems,
   readLedger,
   validateLedgerRow,
+  validateLedgerRowAgainstContract,
 } from "./review-eval-ledger.mjs";
 import {
   baseLedgerRows,
@@ -306,12 +307,12 @@ function makeRow({
   const p1 = new Set(p1IdsFor(prs));
   const matched = new Set(matchedIds.map(String));
   // The draws each condition plans, which a complete row of this kind must
-  // carry: pipeline samples the finder twice, replay replays both frozen
-  // reports, control runs once. A draw repeats the same bit here — these rows
-  // are about the counters, not about between-draw variance.
+  // carry: pipeline takes `PIPELINE_DRAWS` live draws, replay replays both
+  // frozen reports, control runs once. A draw repeats the same bit here — these
+  // rows are about the counters, not about between-draw variance.
   const bitsFor = (id, draws) =>
     Array.from({ length: draws }, () => (matched.has(id) ? 1 : 0));
-  const pipelineDraws = kind === "canary" ? 1 : 2;
+  const pipelineDraws = kind === "canary" ? 1 : PIPELINE_DRAWS;
   const perDefect = Object.fromEntries(
     ids.map((id) => [id, bitsFor(id, pipelineDraws)]),
   );
@@ -382,8 +383,10 @@ function makeRow({
     notes: "",
   };
   if (fullMatrix) {
+    // Replay and control both run the grid alone: replay once per frozen finder
+    // report, control once.
     built.conditions.replay = conditionOver(scorableIdsFor(gridPrs), 2);
-    built.conditions.control = conditionOver(ids, 1, false);
+    built.conditions.control = conditionOver(scorableIdsFor(gridPrs), 1, false);
   }
   built.verdict = statedVerdict ?? verdict({ contract, row: built }).verdict;
   return built;
@@ -697,14 +700,14 @@ test("planCells builds the documented matrices", () => {
   const full = planCells({ contract, kind: "full" });
   const byCondition = (name) =>
     full.filter((cell) => cell.condition === name).length;
-  // Two pipeline draws of every fixture, one replay of every frozen report the
-  // grid carries, and one control cell per fixture.
+  // `PIPELINE_DRAWS` live draws of every fixture, one replay of every frozen
+  // report the grid carries, and one control cell per grid fixture.
   const pipeline = PIPELINE_DRAWS * contract.fixtures.length;
   const replay = grid.reduce(
     (total, fixture) => total + fixture.finder_reports.length,
     0,
   );
-  const control = contract.fixtures.length;
+  const control = grid.length;
   assert.equal(full.length, pipeline + replay + control);
   assert.equal(byCondition("pipeline"), pipeline);
   assert.equal(byCondition("replay"), replay);
@@ -714,6 +717,39 @@ test("planCells builds the documented matrices", () => {
       .filter((cell) => cell.condition === "control")
       .every((cell) => cell.prompt === "request"),
   );
+  // The 2026-09 composition, written out so a change to any of the three
+  // conditions has to be made on purpose: 9 pipeline, 12 replay, 6 control.
+  assert.equal(full.length, 27);
+  assert.deepEqual([pipeline, replay, control], [9, 12, 6]);
+});
+
+test("control runs the grid fixtures alone", () => {
+  // Control is read paired against the previous run's control, which the grid
+  // carries; the non-grid fixtures stay in `pipeline`, where they widen the
+  // wrong-claims and leak surface. A cell for one of them is unpaired spend.
+  const gridPrs = new Set(grid.map((fixture) => fixture.pr));
+  const nonGridPrs = contract.fixtures
+    .filter((fixture) => fixture.grid !== true)
+    .map((fixture) => fixture.pr);
+  assert.ok(nonGridPrs.length > 0, "the contract needs a non-grid fixture");
+
+  const full = planCells({ contract, kind: "full" });
+  const prsIn = (name) =>
+    full.filter((cell) => cell.condition === name).map((cell) => cell.pr);
+  assert.deepEqual(
+    [...new Set(prsIn("control"))].sort((a, b) => a - b),
+    [...gridPrs].sort((a, b) => a - b),
+  );
+  for (const pr of nonGridPrs) {
+    assert.ok(
+      !prsIn("control").includes(pr),
+      `PR ${pr} is not a grid fixture and must not plan a control cell`,
+    );
+    assert.ok(
+      prsIn("pipeline").includes(pr),
+      `PR ${pr} must still run the pipeline condition`,
+    );
+  }
 });
 
 test("--plan writes plan.json and pins the comparability key", () => {
@@ -2415,18 +2451,19 @@ test("--validate --append refuses a complete full row missing a condition", () =
     }
 
     // A condition present but scoring only one PR is the same claim made a
-    // different way: pipeline and control cover every fixture in a full run.
+    // different way: pipeline covers every fixture in a full run and control
+    // covers every grid fixture.
     const narrow = makeRow({
       matchedIds: scorableIdsFor([1990]),
       fullMatrix: true,
     });
-    for (const id of scorableIdsFor([2001])) {
+    for (const id of scorableIdsFor([2121])) {
       delete narrow.conditions.control.per_defect[id];
     }
     narrow.conditions.control.recall.opportunities -= scorableIdsFor([
-      2001,
+      2121,
     ]).length;
-    narrow.conditions.control.p1.opportunities -= p1IdsFor([2001]).length;
+    narrow.conditions.control.p1.opportunities -= p1IdsFor([2121]).length;
     narrow.conditions.control.recall.rate = Number(
       (
         narrow.conditions.control.recall.matched /
@@ -2445,7 +2482,7 @@ test("--validate --append refuses a complete full row missing a condition", () =
     assert.equal(result.status, 1);
     assert.match(
       JSON.parse(result.stdout).problems.join(" | "),
-      /conditions\.control is a complete full run but scores no defect from PR 2001/,
+      /conditions\.control is a complete full run but scores no defect from PR 2121/,
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -2473,7 +2510,7 @@ test("--validate --append refuses a row that dropped a scored PR's frozen defect
       fullMatrix: true,
     });
     const control = row.conditions.control;
-    for (const id of scorableIdsFor([1982]).slice(1)) {
+    for (const id of scorableIdsFor([2121]).slice(1)) {
       delete control.per_defect[id];
     }
     // Re-derive the condition's own numbers from the bits it still carries, so
@@ -2501,7 +2538,7 @@ test("--validate --append refuses a row that dropped a scored PR's frozen defect
     assert.equal(output.appended, false);
     assert.match(
       output.problems.join(" | "),
-      /conditions\.control\.per_defect scored PR 1982 but omits .*; the contract freezes 5 defect\(s\) for that PR/,
+      /conditions\.control\.per_defect scored PR 2121 but omits .*; the contract freezes 5 defect\(s\) for that PR/,
     );
     assert.equal(readLedger(path.join(root, ledgerRelative)).length, 0);
   } finally {
@@ -2694,6 +2731,43 @@ test("baseline preflight rejects a wrong key and malformed frozen bits", () => {
       candidateExecutedAt: row.executed_at,
     }).join(" | "),
     /must precede the generated plan's candidate timestamp/,
+  );
+
+  // An explicit baseline is a row file with no plan and no results beside it,
+  // so this is the only check that reads its shape. A row that claims this
+  // plan's key ran this plan's matrix — the planner is inside `matcher_digest`
+  // — so its draws are checked exactly, not as a floor: `perDefectBits` folds
+  // a condition's draws with OR, and two baseline bits against the candidate's
+  // one is a higher hit rate for the baseline alone.
+  const oversampled = JSON.parse(JSON.stringify(row));
+  const pipeline = oversampled.conditions.pipeline;
+  pipeline.draws = 2;
+  for (const [defect, bits] of Object.entries(pipeline.per_defect)) {
+    pipeline.per_defect[defect] = [...bits, bits[0]];
+  }
+  pipeline.recall.opportunities *= 2;
+  pipeline.recall.matched *= 2;
+  pipeline.p1.opportunities *= 2;
+  pipeline.p1.matched *= 2;
+  assert.match(
+    baselinePreflightProblems({
+      row: oversampled,
+      contract,
+      contractDigest,
+      planComparabilityKey: oversampled.comparability_key,
+      candidateExecutedAt: "2026-10-08T10:00:00Z",
+    }).join(" | "),
+    /conditions\.pipeline\.draws is 2; a complete full run plans 1/,
+  );
+  // The same row is still valid history when it is read as a ledger row: it
+  // ran a superset of today's matrix under a key nothing current pairs with.
+  assert.deepEqual(
+    validateLedgerRowAgainstContract({
+      row: oversampled,
+      contract,
+      contractDigest,
+    }),
+    [],
   );
 });
 
@@ -3655,8 +3729,10 @@ test("a PR that ran fewer draws loses opportunities, not recall", async () => {
       outDir: path.join(root, "run"),
       env: planEnv,
     });
-    const both = contract.fixtures[0];
-    const single = contract.fixtures[1];
+    // `replay` is the condition that plans more than one draw: one cell per
+    // frozen finder report, on the grid fixtures.
+    const both = grid[0];
+    const single = grid[1];
     const firstScorable = (fixture) => {
       const truth = JSON.parse(
         readFileSync(path.join(root, fixture.truth_file), "utf8"),
@@ -3673,7 +3749,7 @@ test("a PR that ran fewer draws loses opportunities, not recall", async () => {
     // cell of the matrix is missing, exactly as a deadline or an abort leaves it.
     const ran = plan.cells.filter(
       (cell) =>
-        cell.condition === "pipeline" &&
+        cell.condition === "replay" &&
         (cell.pr === both.pr || (cell.pr === single.pr && cell.draw === 1)),
     );
     assert.equal(ran.length, 3);
@@ -3708,19 +3784,19 @@ test("a PR that ran fewer draws loses opportunities, not recall", async () => {
         ),
       ),
     });
-    const pipeline = scored.row.conditions.pipeline;
-    assert.equal(pipeline.draws, 2);
+    const replay = scored.row.conditions.replay;
+    assert.equal(replay.draws, 2);
     for (const id of both.scorable_ids) {
-      assert.equal(pipeline.per_defect[String(id)].length, 2, `defect ${id}`);
+      assert.equal(replay.per_defect[String(id)].length, 2, `defect ${id}`);
     }
     for (const id of single.scorable_ids) {
-      assert.equal(pipeline.per_defect[String(id)].length, 1, `defect ${id}`);
+      assert.equal(replay.per_defect[String(id)].length, 1, `defect ${id}`);
     }
     // The defect PR `single` did find is a 1 and nothing else: the draw it
     // never ran contributes no bit, so no false zero follows it.
-    assert.deepEqual(pipeline.per_defect[String(hit[single.pr].id)], [1]);
+    assert.deepEqual(replay.per_defect[String(hit[single.pr].id)], [1]);
     assert.equal(
-      pipeline.recall.opportunities,
+      replay.recall.opportunities,
       both.scorable_ids.length * 2 + single.scorable_ids.length,
     );
     assert.deepEqual(validateLedgerRow(scored.row), []);
@@ -4141,10 +4217,11 @@ test("a PR is zero-finding only when every draw it ran found nothing", async () 
       outDir: path.join(root, "run"),
       env: planEnv,
     });
-    const [quiet, mixed] = contract.fixtures.map((fixture) => fixture.pr);
+    // `replay` is the condition with two draws per PR, so it is where one empty
+    // draw can sit beside a productive one.
+    const [quiet, mixed] = grid.map((fixture) => fixture.pr);
     const cells = plan.cells.filter(
-      (cell) =>
-        cell.condition === "pipeline" && [quiet, mixed].includes(cell.pr),
+      (cell) => cell.condition === "replay" && [quiet, mixed].includes(cell.pr),
     );
     assert.equal(cells.length, 4);
     for (const cell of cells) {
@@ -4171,8 +4248,8 @@ test("a PR is zero-finding only when every draw it ran found nothing", async () 
         ),
       ),
     });
-    const pipeline = scored.row.conditions.pipeline;
-    assert.equal(pipeline.zero_finding_prs, 1);
+    const replay = scored.row.conditions.replay;
+    assert.equal(replay.zero_finding_prs, 1);
     assert.deepEqual(validateLedgerRow(scored.row), []);
     // Two zero-finding PRs are RED, so counting one empty draw per PR would
     // red a run on the strength of a PR it did review.
@@ -4193,8 +4270,8 @@ test("a PR is zero-finding only when every draw it ran found nothing", async () 
     });
     assert.deepEqual(honest.problems, []);
     const tampered = structuredClone(scored.row);
-    tampered.conditions.pipeline.wrong_claims += 5;
-    tampered.conditions.pipeline.zero_finding_prs = 0;
+    tampered.conditions.replay.wrong_claims += 5;
+    tampered.conditions.replay.zero_finding_prs = 0;
     const caught = revalidateRow({
       contract,
       row: tampered,
@@ -4223,7 +4300,7 @@ test("a PR is zero-finding only when every draw it ran found nothing", async () 
       ["seconds", 60],
     ]) {
       const edited = structuredClone(scored.row);
-      edited.conditions.pipeline[field] += delta;
+      edited.conditions.replay[field] += delta;
       const found = revalidateRow({
         contract,
         row: edited,
@@ -4232,7 +4309,7 @@ test("a PR is zero-finding only when every draw it ran found nothing", async () 
       });
       assert.ok(
         found.problems.some((problem) =>
-          problem.startsWith(`conditions.pipeline.${field} is`),
+          problem.startsWith(`conditions.replay.${field} is`),
         ),
         `${field}: ${JSON.stringify(found.problems)}`,
       );
