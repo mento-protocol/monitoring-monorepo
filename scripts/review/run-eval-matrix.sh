@@ -88,15 +88,51 @@ matrix_worker_kill_children() {
 # TERM first, then KILL for whatever ignored it. The grace between them is what
 # gives each worker's own handler time to forward the signal to the bounded
 # child it started, which leads a group of its own.
+#
+# The recorded array is the primary source, so the pass still ends the workers
+# where `pgrep` is missing. Asked to discover, it adds the orchestrator's direct
+# children to that list. `matrix_start_group` records a worker in the command
+# after the one that forked it, and Bash runs a pending trap between two
+# commands, so a signal delivered in that gap arrives here with the array not
+# yet naming a live worker — the parent-side twin of the window the worker's own
+# handler waits out. The fork already made that worker a child, so `pgrep` names
+# it even there.
+#
+# Only the TERM and INT trap asks for discovery. `matrix_cleanup` reaches this
+# on the EXIT path, after `run_matrix` returned, where a live direct child is a
+# later stage's `run_bounded` leader rather than a group worker, and ending
+# those is not this function's job.
+#
+# The list is collected once and both passes reuse it, for the same reason the
+# worker-side pass collects its groups once: a leader that dies on TERM leaves
+# `pgrep` while a member of its group is still alive. A child that leads no
+# group answers to its own leader's signal instead, and the failed `kill` is
+# discarded.
 # shellcheck disable=SC2329  # invoked by the TERM trap and by matrix_cleanup
 matrix_kill_workers() {
-  local pid
-  ((${#MATRIX_WORKER_PIDS[@]} > 0)) || return 0
+  local discover="${1:-}" pid candidate known
+  local -a targets=()
   for pid in ${MATRIX_WORKER_PIDS[@]+"${MATRIX_WORKER_PIDS[@]}"}; do
+    targets+=("$pid")
+  done
+  if [[ $discover == discover ]]; then
+    for candidate in $(pgrep -P "$$" 2>/dev/null || true); do
+      known=0
+      for pid in ${targets[@]+"${targets[@]}"}; do
+        if [[ $pid == "$candidate" ]]; then
+          known=1
+          break
+        fi
+      done
+      ((known)) || targets+=("$candidate")
+    done
+  fi
+  ((${#targets[@]} > 0)) || return 0
+  for pid in "${targets[@]}"; do
     kill -TERM "-$pid" 2>/dev/null || true
   done
   sleep 3
-  for pid in ${MATRIX_WORKER_PIDS[@]+"${MATRIX_WORKER_PIDS[@]}"}; do
+  for pid in "${targets[@]}"; do
     kill -KILL "-$pid" 2>/dev/null || true
   done
   MATRIX_WORKER_PIDS=()
@@ -274,7 +310,7 @@ run_matrix() {
     fail "could not create the matrix status directory"
   log "scheduling ${#group_prs[@]} PR groups, up to $MATRIX_PR_CONCURRENCY at once"
 
-  trap 'matrix_kill_workers; exit 143' TERM INT
+  trap 'matrix_kill_workers discover; exit 143' TERM INT
   count=${#group_prs[@]}
   for ((next = 0; next < count; next++)); do
     matrix_wait_for_capacity "$MATRIX_STATUS_DIR" "$MATRIX_PR_CONCURRENCY"

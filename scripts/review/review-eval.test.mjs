@@ -883,7 +883,7 @@ test("comparabilityKey moves with the contract, the prompts, and the scorer", ()
 
 test("orchestratorSourceDigest binds the shell and the cell modules", () => {
   const expected =
-    "e7fe24ecf42652e8b4403dce78869bdecf278997796f72e123ca691587101200";
+    "d460aa3fefe45e964e71b6490898ed69e69b1d6e2f99781d7eff2c8252bff61f";
   assert.equal(orchestratorSourceDigest(), expected);
   // The cell writer and the stream parser are in the digest for the same
   // reason the shell is: the writer decides what a paid cell records and the
@@ -2555,6 +2555,117 @@ test("TERM takes every group worker's process group down with the run", async ()
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("TERM ends a group worker interrupted before the parent recorded it", async () => {
+  const dir = mkdtempSync(
+    path.join(tmpdir(), "review-eval-matrix-unrecorded-"),
+  );
+  let workerChild = "";
+  let workerGroup = "";
+  try {
+    const rowsFile = path.join(dir, "rows.tsv");
+    writeFileSync(
+      rowsFile,
+      [
+        "pr-1990-control-draw1",
+        "1990",
+        "control",
+        "1",
+        "opus",
+        "high",
+        "",
+        "",
+        "request",
+      ].join("\t") + "\n",
+    );
+    const marker = path.join(dir, "survivor");
+    const childFile = path.join(dir, "worker-child");
+    // `matrix_start_group` forks the worker and records it in the next command,
+    // and a pending trap runs between two commands. A `printf` function shadows
+    // the builtin the parent writes the pid file with, which holds the parent
+    // inside exactly that gap while the worker signals it, so the run's TERM
+    // trap finds `MATRIX_WORKER_PIDS` empty and has to discover the worker to
+    // signal it at all.
+    const harness = [
+      "set -euo pipefail",
+      "TMPROOT=" + JSON.stringify(dir),
+      "STARTED=$(date +%s)",
+      "MATRIX_DEADLINE=3600",
+      'STATUS_NOTE=""',
+      "DONE=0",
+      "FAILED=0",
+      "TOTAL=0",
+      "MARKER=" + JSON.stringify(marker),
+      "CHILD_FILE=" + JSON.stringify(childFile),
+      // Read here, not from `$PPID` inside the worker: the worker is a subshell,
+      // where `$PPID` is still this shell's own parent rather than this shell.
+      "ORCHESTRATOR=$$",
+      `log() { builtin printf '%s\\n' "$*"; }`,
+      `fail() { builtin printf 'FATAL: %s\\n' "$*" >&2; exit 1; }`,
+      "cell_rows() { cat " + JSON.stringify(rowsFile) + "; }",
+      "source " + JSON.stringify(matrixSourcePath),
+      'printf() { sleep 2; builtin printf "$@"; }',
+      // The worker records a child of its own, interrupts the run, and waits.
+      // Nothing writes the marker unless the worker outlives the run that never
+      // recorded it.
+      "matrix_group_worker() {",
+      "  sleep 20 &",
+      `  builtin printf '%s\\n' "$!" >"$CHILD_FILE"`,
+      '  kill -TERM "$ORCHESTRATOR"',
+      "  wait",
+      `  builtin printf 'survived\\n' >"$MARKER"`,
+      "}",
+      "run_matrix",
+    ].join("\n");
+    // `/bin/bash` for the same reason the pass above uses it: that is what the
+    // launchd job execs, and on macOS it is 3.2.
+    const child = spawn("/bin/bash", ["-c", harness], {
+      stdio: "ignore",
+      env: { ...process.env, REVIEW_EVAL_PR_CONCURRENCY: "3" },
+    });
+    const exited = new Promise((resolve) => {
+      child.on("exit", (code) => resolve(code));
+    });
+    assert.equal(await exited, 143);
+    workerChild = readFileSync(childFile, "utf8").trim();
+    assert.match(workerChild, /^\d+$/, "the worker never started its child");
+    // The worker leads its group, so its child's parent is the group id this
+    // teardown needs. Read it while the child can still name it: on the fixed
+    // scheduler the child is already gone, and there is nothing to end.
+    workerGroup = String(
+      spawnSync("ps", ["-o", "ppid=", "-p", workerChild], {
+        encoding: "utf8",
+      }).stdout ?? "",
+    ).trim();
+    // Gone or reaped-late, the same poll the pass above uses: the worker's group
+    // outliving the run is the orphan that keeps spending quota.
+    let ended = false;
+    for (let attempt = 0; attempt < 40 && !ended; attempt += 1) {
+      const state = spawnSync("ps", ["-o", "state=", "-p", workerChild], {
+        encoding: "utf8",
+      });
+      ended =
+        spawnSync("kill", ["-0", workerChild]).status !== 0 ||
+        state.status !== 0 ||
+        state.stdout.trim() === "" ||
+        state.stdout.trim().startsWith("Z");
+      if (!ended) await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    assert.ok(
+      ended,
+      `unrecorded worker's group ${workerChild} outlived the run`,
+    );
+    assert.equal(existsSync(marker), false, "the unrecorded worker ran on");
+  } finally {
+    // A worker that outlived the run writes into this directory while it is
+    // being removed, so end its whole group before the removal, not after.
+    if (/^\d+$/.test(workerGroup)) {
+      spawnSync("kill", ["-KILL", `-${workerGroup}`]);
+    }
+    if (/^\d+$/.test(workerChild)) spawnSync("kill", ["-KILL", workerChild]);
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5 });
   }
 });
 

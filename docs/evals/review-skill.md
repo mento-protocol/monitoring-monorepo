@@ -373,10 +373,12 @@ run and replace the `hours TBD` above with what it took. Each group is its own
 process group, and the TERM and EXIT paths take every one of them down before
 the run returns; because `run_bounded` puts each cell's bounded child in a
 process group of its own, a signalled worker forwards to that group as well
-rather than leaving a finder or a contestant orphaned. A cell's log lines are
-buffered and emitted as one write, which is indivisible on the regular file the
-launchd job redirects to and guaranteed only to `PIPE_BUF` through a pipe, so
-`run-eval.sh | tee` can still interleave two failing cells. Every cell's outcome
+rather than leaving a finder or a contestant orphaned. On TERM or INT the run
+signals both the workers it recorded and its own direct children, so a worker
+interrupted between its fork and the command that records it is ended too. A
+cell's log lines are buffered and emitted as one write, which is indivisible on
+the regular file the launchd job redirects to and guaranteed only to `PIPE_BUF`
+through a pipe, so `run-eval.sh | tee` can still interleave two failing cells. Every cell's outcome
 is written to its own status file and summed by the parent, so
 `matrix: D done, F failed, of T` counts each cell exactly once and `T` is the
 whole planned matrix.
