@@ -43,17 +43,30 @@ MATRIX_WORKER_SLOTS=()
 # A file the parent wrote is the same on every Bash. Before that file exists —
 # a window of one write, against a matrix that runs for hours — this forwards
 # nothing and the worker still dies of the group signal it was sent.
+#
+# The group ids are collected once, before the first signal, and the same list
+# is used for both passes. A bounded child can exit on TERM while a model
+# process in its group ignores it — the case `run_bounded`'s own watchdog is
+# built around — and once that leader is gone its group is no longer any child
+# of this worker. Re-reading the children for the KILL pass would miss exactly
+# the group that still needs it. A process group outlives its leader as long as
+# one member is alive, so the collected id still names it.
 # shellcheck disable=SC2329  # invoked by the worker's TERM trap
 matrix_worker_kill_children() {
   local pid_file="$1" self="" child
+  local -a groups=()
   [[ -f $pid_file ]] || return 0
   read -r self <"$pid_file" || return 0
   [[ $self =~ ^[0-9]+$ ]] || return 0
   for child in $(pgrep -P "$self" 2>/dev/null || true); do
+    groups+=("$child")
+  done
+  ((${#groups[@]} > 0)) || return 0
+  for child in "${groups[@]}"; do
     kill -TERM "-$child" 2>/dev/null || true
   done
   sleep 1
-  for child in $(pgrep -P "$self" 2>/dev/null || true); do
+  for child in "${groups[@]}"; do
     kill -KILL "-$child" 2>/dev/null || true
   done
 }

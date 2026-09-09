@@ -845,7 +845,7 @@ test("comparabilityKey moves with the contract, the prompts, and the scorer", ()
 
 test("orchestratorSourceDigest binds the shell and the cell modules", () => {
   const expected =
-    "053c808b2667c91d355a02adea99269617f51219071fb9b5ad808bb4cb03d1de";
+    "12a8e405d71afaa24d44249d66fb1fad61905005fca898e37f29e9055d9c0409";
   assert.equal(orchestratorSourceDigest(), expected);
   // The cell writer and the stream parser are in the digest for the same
   // reason the shell is: the writer decides what a paid cell records and the
@@ -2438,6 +2438,22 @@ test("TERM takes every group worker's process group down with the run", async ()
     // the worker's group alone never reaches it, which is exactly the orphan
     // that would keep spending quota after the run reported failure.
     const pidsFile = path.join(dir, "pids");
+    // The bounded child, modelled on `run_bounded`: the leader takes the
+    // default TERM and dies, while a descendant inside its group ignores TERM.
+    // Once the leader is gone that group is no longer a child of the worker, so
+    // only a KILL aimed at the pgid collected before the TERM pass can end the
+    // descendant. Its pid is the one the assertions below follow.
+    const cellScript = path.join(dir, "bounded-cell.sh");
+    writeFileSync(
+      cellScript,
+      [
+        "#!/bin/bash",
+        '( trap "" TERM; sleep 120 ) &',
+        'printf "%s\\n" "$!" >>"$1"',
+        "wait",
+      ].join("\n") + "\n",
+      { mode: 0o755 },
+    );
     const harness = [
       "set -euo pipefail",
       "TMPROOT=" + JSON.stringify(dir),
@@ -2453,9 +2469,10 @@ test("TERM takes every group worker's process group down with the run", async ()
       "cell_rows() { cat " + JSON.stringify(rowsFile) + "; }",
       "run_cell() {",
       "  set -m",
-      `  sleep 120 & printf '%s\\n' "$!" >>"$PIDS"`,
+      "  " + JSON.stringify(cellScript) + ' "$PIDS" &',
+      "  bounded=$!",
       "  set +m",
-      "  wait $!",
+      "  wait $bounded || true",
       "}",
       "source " + JSON.stringify(matrixSourcePath),
       "run_matrix",
@@ -2478,11 +2495,12 @@ test("TERM takes every group worker's process group down with the run", async ()
     assert.equal(started.length, 3, "three groups did not start a cell");
     process.kill(child.pid, "SIGTERM");
     assert.equal(await exited, 143);
+    // Each of these ignored TERM, so only the KILL pass can have ended it.
     for (const pid of started) {
       assert.equal(
         spawnSync("kill", ["-0", pid]).status,
         1,
-        `grandchild ${pid} outlived the run`,
+        `TERM-ignoring grandchild ${pid} outlived the run`,
       );
     }
   } finally {
