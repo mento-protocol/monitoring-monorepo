@@ -235,7 +235,11 @@ const config = [
     limit: "320 kB",
   },
   {
-    // Markdown-editor chunk, pinned by the "react-markdown" marker. Guards P4: the
+    // Markdown-editor chunk, pinned by react-markdown's deprecation-table id
+    // "remove-buggy-html-in-markdown-parser". Next 16.3.4 drops the package's
+    // changelog URL from the production bundle, and that URL was the only place
+    // the literal "react-markdown" survived minification; the deprecation id
+    // belongs to the same package and still matches exactly one chunk. Guards P4: the
     // react-markdown + remark-gfm + rehype-sanitize pipeline is lazy-loaded via
     // next/dynamic from address-link.tsx, so it lives in its own ~44 KB brotli async
     // chunk instead of shipping on every page that renders an AddressLink. If a
@@ -244,7 +248,7 @@ const config = [
     //
     // Baseline: 44,109 bytes  Budget: ×1.10 = 48,520 bytes → 49 KB
     name: "Markdown editor chunk (react-markdown)",
-    path: chunkContaining("react-markdown", "markdown"),
+    path: chunkContaining("remove-buggy-html-in-markdown-parser", "markdown"),
     limit: "49 kB",
   },
   {
