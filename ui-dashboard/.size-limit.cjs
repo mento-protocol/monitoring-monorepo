@@ -152,9 +152,10 @@ function manifestPathsOrFallback(extension, prefixes, fallbackGlob) {
 // the one whose source contains `marker`. This lets us guard individual chunks —
 // the Plotly bundle and the lazy markdown-editor bundle — so a regression trips a
 // tight per-chunk budget rather than hiding inside the aggregate. If a marker ever
-// stops matching (renamed/removed), we return a non-existent sentinel path so
-// size-limit reports 0 bytes and passes, leaving the aggregate budget as backstop
-// rather than crashing the whole run on an empty path list.
+// stops matching (renamed/removed), we return a non-existent sentinel path;
+// size-limit 12 then reports the check as missed ("can't find files") and exits 1,
+// so a dead marker fails CI and must be re-pinned to a string that survives
+// minification. The Next 16.3.4 upgrade hit this for "react-markdown".
 function chunkContaining(marker, label) {
   const assets = collectManifestReferencedStaticAssets({
     extension: ".js",
