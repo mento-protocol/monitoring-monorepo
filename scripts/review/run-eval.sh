@@ -89,7 +89,7 @@ cleanup_source_snapshot_bootstrap() {
   local code=$?
   if [[ $RUN_EVAL_BOOTSTRAP_SOURCE_OWNED -eq 1 ]]; then
     chmod 0700 "$RUN_EVAL_SOURCE_SNAPSHOT" >/dev/null 2>&1 || true
-    rm -f -- "$RUN_EVAL_SOURCE_SNAPSHOT"/run-eval{,-source-snapshot,-lifecycle,-runtime}.sh
+    rm -f -- "$RUN_EVAL_SOURCE_SNAPSHOT"/run-eval{,-source-snapshot,-lifecycle,-runtime,-matrix}.sh
     rm -f -- "$RUN_EVAL_SOURCE_SNAPSHOT"/review-eval-{cell-writer,stream}.mjs
     if [[ $RUN_EVAL_SOURCE_NONCE =~ ^[[:alnum:]]{12}$ ]]; then
       rm -f -- "$RUN_EVAL_SOURCE_SNAPSHOT/.review-eval-owner.$RUN_EVAL_SOURCE_NONCE"
@@ -434,30 +434,18 @@ unset RUN_EVAL_LIFECYCLE_STAGE
 # shellcheck source=scripts/review/run-eval-runtime.sh
 source "$RUN_EVAL_SCRIPT_DIR/run-eval-runtime.sh"
 # RUN-EVAL-EXTRACT-END cell-runtime
+# shellcheck source=scripts/review/run-eval-matrix.sh
+source "$RUN_EVAL_SCRIPT_DIR/run-eval-matrix.sh"
 
 STARTED="$(date +%s)"
 FAILED=0
 DONE=0
 TOTAL=0
 
-while IFS=$'\t' read -r cell_id pr condition draw model effort finder \
-  finder_report prompt_kind extra; do
-  TOTAL=$((TOTAL + 1))
-  if [[ -n ${extra:-} ]]; then
-    fail "the plan produced a cell row with an extra field: $extra"
-  fi
-  if [[ $(($(date +%s) - STARTED)) -ge $MATRIX_DEADLINE ]]; then
-    STATUS_NOTE="matrix deadline of ${MATRIX_DEADLINE}s reached"
-    log "matrix deadline reached; the matrix is partial"
-    break
-  fi
-  if run_cell "$cell_id" "$pr" "$condition" "$draw" "$model" "$effort" \
-    "$finder" "$finder_report" "$prompt_kind"; then
-    DONE=$((DONE + 1))
-  else
-    FAILED=$((FAILED + 1))
-  fi
-done < <(cell_rows)
+# The cells of one fixture PR run in sequence on the checkout they share; whole
+# PR groups run concurrently. `run_matrix` sets DONE, FAILED, TOTAL and, for a
+# partial matrix, STATUS_NOTE.
+run_matrix
 
 log "matrix: $DONE done, $FAILED failed, of $TOTAL"
 if [[ $DONE -eq 0 ]]; then
