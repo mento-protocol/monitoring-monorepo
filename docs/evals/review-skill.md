@@ -3,7 +3,7 @@ title: Review Skill Evaluation
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-30
+last_verified: 2026-09-09
 doc_type: runbook
 scope: ci/process
 review_interval_days: 90
