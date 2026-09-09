@@ -4,6 +4,7 @@
  */
 
 import { readFileSync } from "node:fs";
+import "./pr-stack-ready-state.test.mjs";
 
 import {
   classifyCheck,
@@ -29,6 +30,7 @@ import {
   validateCodeRabbitPathFilterSkip,
 } from "./pr-ready-state-review-signals.mjs";
 import { formatCompact, formatHuman } from "./pr-ready-state-format.mjs";
+import { verifyReadinessSnapshot } from "./pr-ready-state-stack.mjs";
 import {
   annotateStatusCheckSources,
   fetchRequiredStatusContexts,
@@ -3301,6 +3303,120 @@ test("stack metadata rejects malformed topology, fork, closed dependency and sta
     const fixture = stackFixture();
     mutate(fixture);
     await rejectsStack(fixture);
+  }
+});
+
+async function finalSnapshot(
+  fixture,
+  originalStack,
+  mutate = () => {},
+  standalone = false,
+) {
+  const currentPr = {
+    number: fixture.pr.number,
+    state: "open",
+    draft: fixture.pr.isDraft,
+    head: { sha: fixture.pr.headRefOid, ref: fixture.pr.headRefName },
+    base: { ref: fixture.pr.baseRefName, sha: fixture.pr.baseRefOid },
+  };
+  const next = { currentPr, stack: structuredClone(fixture.stack), standalone };
+  mutate(next);
+  await verifyReadinessSnapshot({
+    ...fixture,
+    stack: originalStack,
+    fetchJson: async (_repo, [path]) => ({
+      ok: true,
+      value: path.includes("/pulls/")
+        ? next.currentPr
+        : path.includes("?")
+          ? next.standalone
+            ? []
+            : [next.stack]
+          : next.stack,
+    }),
+  });
+}
+
+test("final snapshot accepts stable native and standalone PRs after readiness reads", async () => {
+  const fixture = stackFixture();
+  fixture.pr.baseRefOid = "a".repeat(40);
+  const { stack } = await stackBases(fixture);
+  await finalSnapshot(fixture, stack);
+  await finalSnapshot(fixture, null, () => {}, true);
+});
+
+test("final snapshot rejects parent or membership changes after protection lookup", async () => {
+  const fixture = stackFixture();
+  fixture.pr.baseRefOid = "a".repeat(40);
+  fixture.stack.pull_requests[0].base.sha = "d".repeat(40);
+  fixture.stack.base.sha = "d".repeat(40);
+  const { stack } = await stackBases(fixture);
+  const mutations = [
+    (next) => {
+      next.currentPr.head.sha = "c".repeat(40);
+    },
+    (next) => {
+      next.currentPr.base.ref = "other-parent";
+    },
+    (next) => {
+      next.currentPr.base.sha = "c".repeat(40);
+    },
+    (next) => {
+      next.currentPr.draft = true;
+    },
+    (next) => {
+      next.currentPr.state = "closed";
+    },
+    (next) => {
+      next.stack.pull_requests[0].head.sha = "c".repeat(40);
+    },
+    (next) => {
+      next.stack.pull_requests[0].base.sha = "c".repeat(40);
+    },
+    (next) => {
+      next.stack.base.sha = "c".repeat(40);
+    },
+    (next) => {
+      next.standalone = true;
+    },
+    (next) => {
+      next.stack.number = 8;
+    },
+  ];
+  for (const mutate of mutations) {
+    let rejected = false;
+    try {
+      await finalSnapshot(fixture, stack, mutate);
+    } catch {
+      rejected = true;
+    }
+    assert(rejected, "changed snapshot must not emit readiness");
+  }
+  let rejected = false;
+  try {
+    await finalSnapshot(fixture, null);
+  } catch {
+    rejected = true;
+  }
+  assert(rejected, "standalone to native transition must not emit readiness");
+});
+
+test("final snapshot rejects failed or missing current PR fetch", async () => {
+  for (const result of [
+    { ok: false, error: "HTTP 403" },
+    { ok: true, value: null },
+  ]) {
+    let rejected = false;
+    try {
+      await verifyReadinessSnapshot({
+        ...stackFixture(),
+        stack: null,
+        fetchJson: async () => result,
+      });
+    } catch {
+      rejected = true;
+    }
+    assert(rejected, "final lookup must succeed before readiness");
   }
 });
 

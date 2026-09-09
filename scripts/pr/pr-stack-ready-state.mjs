@@ -1,0 +1,77 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { fetchReadyState } from "./pr-ready-state.mjs";
+import { summarizeFeedbackState } from "./pr-feedback-state-core.mjs";
+
+function fingerprint(stack) {
+  return JSON.stringify([
+    stack.number,
+    stack.protectionBaseRef,
+    stack.protectionBaseOid,
+    stack.layers,
+  ]);
+}
+
+export async function evaluateStackGate(
+  initial,
+  repoArg,
+  fetchState = fetchReadyState,
+  feedback = summarizeFeedbackState,
+) {
+  const stack = initial?.stack;
+  if (
+    !stack ||
+    !Array.isArray(stack.layers) ||
+    stack.layers.length === 0 ||
+    stack.layers.length > 100
+  )
+    return "PENDING stack membership unavailable or exceeds 100 layers";
+  const signature = fingerprint(stack);
+  const selected = stack.layers.find(
+    (layer) => layer.number === initial.pr?.number,
+  );
+  if (!selected || selected.state !== "OPEN")
+    return "PENDING selected stack layer changed";
+  const matches = (value, layer) =>
+    value?.stack &&
+    fingerprint(value.stack) === signature &&
+    value.pr?.number === layer.number &&
+    value.pr?.state === "OPEN" &&
+    value.pr?.headRefOid === layer.headRefOid &&
+    value.pr?.headRefName === layer.headRefName &&
+    value.pr?.baseRefName === layer.baseRefName;
+  try {
+    for (const layer of stack.layers.filter(
+      (entry) => entry.state === "OPEN",
+    )) {
+      const detail = await fetchState({
+        prArg: String(layer.number),
+        repoArg,
+        includeFeedbackDetails: true,
+      });
+      if (!matches(detail, layer) || feedback(detail).ready !== true)
+        return `PENDING stack layer #${layer.number} feedback blocked or snapshot changed`;
+      const ready = await fetchState({ prArg: String(layer.number), repoArg });
+      if (!matches(ready, layer) || ready.ready !== true)
+        return `PENDING stack layer #${layer.number} readiness blocked or snapshot changed`;
+    }
+    const final = await fetchState({ prArg: String(selected.number), repoArg });
+    if (!matches(final, selected) || final.ready !== true)
+      return "PENDING stack changed during final verification";
+    return `PASS stack #${stack.number}: every open layer passed both projections`;
+  } catch {
+    return "PENDING stack projections unavailable";
+  }
+}
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  try {
+    const result = await evaluateStackGate(
+      JSON.parse(readFileSync(0, "utf8")),
+      process.argv[2],
+    );
+    process.stdout.write(result);
+  } catch {
+    process.stdout.write("PENDING stack input unavailable");
+  }
+}

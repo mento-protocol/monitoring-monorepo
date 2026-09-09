@@ -51,6 +51,10 @@ export async function fetchStackContext({ repo, pr, fetchJson }) {
     validRef(stack.base?.ref) && stack.base.ref === entry.base?.ref,
     "stack base missing or changed",
   );
+  requireMetadata(
+    stack.base.sha === undefined || /^[0-9a-f]{40}$/i.test(stack.base.sha),
+    "invalid protection base SHA",
+  );
   const layers = stack.pull_requests;
   requireMetadata(Array.isArray(layers) && layers.length > 0, "missing layers");
   requireMetadata(
@@ -91,6 +95,10 @@ export async function fetchStackContext({ repo, pr, fetchJson }) {
       "cross-repository layer",
     );
     requireMetadata(
+      layer.base.sha === undefined || /^[0-9a-f]{40}$/i.test(layer.base.sha),
+      "invalid layer base SHA",
+    );
+    requireMetadata(
       previous?.number === layer.number &&
         previous.head?.sha === layer.head.sha &&
         previous.head?.ref === layer.head.ref &&
@@ -116,6 +124,8 @@ export async function fetchStackContext({ repo, pr, fetchJson }) {
       selected.head.sha === pr.headRefOid &&
       selected.head.ref === pr.headRefName &&
       selected.base.ref === pr.baseRefName &&
+      (selected.base.sha === undefined ||
+        selected.base.sha === pr.baseRefOid) &&
       selected.draft === pr.isDraft,
     "PR head or base changed during lookup",
   );
@@ -123,6 +133,7 @@ export async function fetchStackContext({ repo, pr, fetchJson }) {
     number: stack.number,
     diffBaseRef: pr.baseRefName,
     protectionBaseRef: stack.base.ref,
+    protectionBaseOid: stack.base.sha ?? null,
     position: position + 1,
     ready: null,
     readiness: "not_evaluated",
@@ -131,10 +142,36 @@ export async function fetchStackContext({ repo, pr, fetchJson }) {
       state: layer.merged_at ? "MERGED" : "OPEN",
       headRefName: layer.head.ref,
       headRefOid: layer.head.sha,
+      baseRefName: layer.base.ref,
+      baseRefOid: layer.base.sha ?? null,
+      isDraft: layer.draft,
     })),
     dependencyPrNumbers: layers
       .slice(0, position)
       .filter((layer) => !layer.merged_at)
       .map((layer) => layer.number),
   };
+}
+
+export async function verifyReadinessSnapshot({ repo, pr, stack, fetchJson }) {
+  const result = await fetchJson(repo, [
+    `repos/${repo.owner}/${repo.name}/pulls/${pr.number}`,
+  ]);
+  requireMetadata(result.ok, result.error ?? "final PR request failed");
+  const current = result.value;
+  requireMetadata(
+    current?.number === pr.number &&
+      current.state === "open" &&
+      current.head?.sha === pr.headRefOid &&
+      current.head?.ref === pr.headRefName &&
+      current.base?.ref === pr.baseRefName &&
+      current.base?.sha === pr.baseRefOid &&
+      current.draft === pr.isDraft,
+    "PR changed while gathering readiness data",
+  );
+  const currentStack = await fetchStackContext({ repo, pr, fetchJson });
+  requireMetadata(
+    JSON.stringify(currentStack) === JSON.stringify(stack),
+    "stack changed while gathering readiness data",
+  );
 }

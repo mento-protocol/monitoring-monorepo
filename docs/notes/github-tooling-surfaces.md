@@ -214,7 +214,10 @@ gh-capable handoff:
 Native stack publication and merge operations require verified membership and
 API access as described in [stacked-pull-requests.md](stacked-pull-requests.md).
 Do not infer native stack readiness or submit a merge through an MCP surface
-that cannot read membership and verify the merge operation.
+that cannot read membership and verify the merge operation. The local babysit
+hook also requires both projections for every open native layer and a matching
+final snapshot. An MCP surface without that evidence cannot substitute one
+layer's ready state for stack readiness.
 
 ## Known MCP gaps
 

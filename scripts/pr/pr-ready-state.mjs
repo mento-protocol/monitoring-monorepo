@@ -22,7 +22,10 @@ import {
   validateCodeRabbitPathFilterSkip,
 } from "./pr-ready-state-review-signals.mjs";
 import { formatCompact, formatHuman } from "./pr-ready-state-format.mjs";
-import { fetchStackContext } from "./pr-ready-state-stack.mjs";
+import {
+  fetchStackContext,
+  verifyReadinessSnapshot,
+} from "./pr-ready-state-stack.mjs";
 
 export { fetchHeadUpdatedAt, headUpdatedAtFromTimeline };
 
@@ -758,6 +761,7 @@ export async function fetchReadyState({
     [
       "author",
       "baseRefName",
+      "baseRefOid",
       "changedFiles",
       "headRefName",
       "headRefOid",
@@ -865,6 +869,12 @@ export async function fetchReadyState({
         currentPr?.changed_files === pr.changedFiles,
     });
   }
+  await verifyReadinessSnapshot({
+    repo,
+    pr,
+    stack,
+    fetchJson: ghApiJsonResult,
+  });
   const annotatedPr = {
     ...pr,
     headUpdatedAt,

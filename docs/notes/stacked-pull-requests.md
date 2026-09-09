@@ -86,6 +86,12 @@ change. Run `pr:feedback-state` and `pr:ready-state` for each open layer. A
 single PR's ready result describes that layer only. Report each PR's head,
 bases, and blockers. Call the stack ready only when every open layer has clean
 current feedback and required readiness on a stable membership snapshot.
+The repository babysit hook enforces this through
+`scripts/pr/pr-stack-ready-state.mjs`: it runs both projections for every open
+layer, compares their stack snapshots, and rechecks the selected PR before
+returning `PASS`. Unavailable, malformed, or changed snapshots return
+`PENDING`. This helper is internal to the hook; manual watches must establish
+the same complete and stable evidence.
 
 A parent fix, base change, stack edit, or merge revokes dependent ready
 verdicts. Re-read membership and every affected head and base. Reapply the

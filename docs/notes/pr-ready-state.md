@@ -497,7 +497,17 @@ layer does not prove stack readiness. Run both projections independently for
 every open layer and follow [the stacked PR workflow](stacked-pull-requests.md)
 for membership changes and aggregate handoff. A stack lookup or metadata error
 causes a nonzero CLI result; a watch retries without emitting a ready verdict.
-Never treat failed discovery as proof that a PR is standalone.
+Before returning a native-layer result, the probe re-reads the selected PR
+and native stack context after the other evidence reads. A changed head, base,
+or stack context rejects that result. Never treat failed discovery as proof
+that a PR is standalone.
+
+The repository babysit hook uses `scripts/pr/pr-stack-ready-state.mjs` for
+native stacks. The helper runs both projections for each open layer, requires
+matching stack snapshots, and performs a final selected-PR readiness read.
+Only complete, stable, ready results produce `PASS`; an unavailable, malformed,
+changed, or blocked result produces `PENDING`. It adds no public command and
+does not change the individual probes' layer-scoped JSON contract.
 
 ## Agent workflow
 
