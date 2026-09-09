@@ -82,7 +82,12 @@ unverified. Do not install or upgrade CLI tooling implicitly to enable it.
 ## Watch with babysit-pr
 
 Discover the full native stack at entry and after each parent or membership
-change. Run `pr:feedback-state` and `pr:ready-state` for each open layer. A
+change. Start a generic watcher with every open native member, not only the
+parent. Its merged-PR path can finish before the repository hook runs, and its
+branch-based dependent lookup can miss a child GitHub has already retargeted.
+After `MERGED`, rediscover native membership and resume watches for every
+remaining open member, even if the parent watcher has exited.
+Run `pr:feedback-state` and `pr:ready-state` for each open layer. A
 single PR's ready result describes that layer only. Report each PR's head,
 bases, and blockers. Call the stack ready only when every open layer has clean
 current feedback and required readiness on a stable membership snapshot.
@@ -91,7 +96,11 @@ The repository babysit hook enforces this through
 layer, compares their stack snapshots, and rechecks the selected PR before
 returning `PASS`. Unavailable, malformed, or changed snapshots return
 `PENDING`. This helper is internal to the hook; manual watches must establish
-the same complete and stable evidence.
+the same complete and stable evidence. A verdict is a bounded observation:
+GitHub does not provide an atomic snapshot of reviews and checks across PRs.
+Topology revalidation detects changed membership and heads; it cannot rule out
+a same-head review or check update after a layer was read. Recheck the selected
+bottom layer immediately before an approved merge as described below.
 
 A parent fix, base change, stack edit, or merge revokes dependent ready
 verdicts. Re-read membership and every affected head and base. Reapply the
