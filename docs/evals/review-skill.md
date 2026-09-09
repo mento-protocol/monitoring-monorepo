@@ -212,7 +212,7 @@ spending anything.
 
 ```bash
 pnpm review:eval -- --plan --kind canary --json   # 6 cells, about $22, ~40 min
-pnpm review:eval -- --plan --kind full --json     # 39 cells, about $145, ~3 h
+pnpm review:eval -- --plan --kind full --json     # 39 cells, about $145, hours TBD
 pnpm review:eval:run --kind canary                # the monthly smoke test
 pnpm review:eval:run --kind full                  # the quarterly score of record
 ```
@@ -235,7 +235,7 @@ complete owner record atomically. A process also claims a stale lock before it
 removes the lock, so two starters cannot both reclaim one killed run. The runner
 creates one private directory under the checkout's physical git directory. It
 copies and sources `run-eval-source-snapshot.sh` from that directory first. The
-helper copies the wrapper, the other two sourced helpers, and the two node
+helper copies the wrapper, the other three sourced helpers, and the two node
 modules the cell path loads — `review-eval-cell-writer.mjs` and the
 dependency-free `review-eval-stream.mjs` it imports — creates a PID-bound
 random owner marker, seals the directory, and restarts the wrapper. Those two
@@ -245,13 +245,13 @@ orchestrator digest hashes them and the snapshot copies them, so a move
 updates both lists in the same PR. The
 restarted process accepts only that sealed, non-symlink direct child. The
 read-only directory and files prevent in-place writes and entry replacement
-before a later helper source. Cleanup unlinks only the six fixed source files
+before a later helper source. Cleanup unlinks only the seven fixed source files
 and the authenticated marker, then removes the empty directory. Every later
 helper stage uses the same snapshot, and the cell writer runs from it: reading
 the stream parser out of the spec worktree instead let it change between two
 cells of one run while every cell fingerprint stayed identical. Before a paid
 cell starts, the snapshot helper recomputes the framed source digest over all
-six and requires the persistent plan to record the same digest. An edit during
+seven and requires the persistent plan to record the same digest. An edit during
 planning makes the run stop instead of
 executing bytes outside its recorded provenance. The skill
 under test is snapshotted once, before the first cell, and every cell stages
@@ -305,9 +305,35 @@ the judge pass, and a run that reaches either bound reports a partial matrix
 rather than a table with quietly missing cells. A stalled process is killed
 rather than waited on, because a deadline checked only between cells is no
 deadline at all. After TERM, the watchdog completes its group-wide KILL before
-the run returns, even when the direct child exits first. A PR whose
-draw-2 cell never ran is scored on draw 1 alone: the defect's bit vector is as
-long as the draws its own PR completed, so a missing cell shrinks the
+the run returns, even when the direct child exits first.
+
+The matrix runs its cells as PR groups: the cells of one fixture PR strictly in
+sequence on the checkout they share, and up to `REVIEW_EVAL_PR_CONCURRENCY`
+groups — 3 by default, 1 for the old strictly serial matrix — at once.
+[ADR 0089](../adr/0089-review-eval-canonical-matrix-pr-groups.md) records that
+decision for this runner; it is the shape
+[ADR 0086](../adr/0086-review-eval-lane-any-grid-multi-draw.md) already gives
+the experiment lane, and for the same reason: every cell resets,
+cleans and stages `.skill` into its PR's one checkout, so two cells of one PR
+would delete each other's tree, while two PRs are separate trees. The cost is
+unchanged — the same cells, in the same per-PR order, against the same fixtures
+— and the wall-clock time is not yet measured: the 2026-09-04 six-fixture full
+run took 100 minutes for 6 serial pipeline cells, which put 39 serial cells at 8
+to 9 hours against a 4.5-hour matrix deadline. Re-measure on the next full run
+and replace the `hours TBD` above with what it took. Each group is its own
+process group, and the TERM and EXIT paths take every one of them down before
+the run returns; because `run_bounded` puts each cell's bounded child in a
+process group of its own, a signalled worker forwards to that group as well
+rather than leaving a finder or a contestant orphaned. A cell's log lines are
+buffered and emitted as one write, which is indivisible on the regular file the
+launchd job redirects to and guaranteed only to `PIPE_BUF` through a pipe, so
+`run-eval.sh | tee` can still interleave two failing cells. Every cell's outcome
+is written to its own status file and summed by the parent, so
+`matrix: D done, F failed, of T` counts each cell exactly once and `T` is the
+whole planned matrix.
+
+A PR whose draw-2 cell never ran is scored on draw 1 alone: the defect's bit
+vector is as long as the draws its own PR completed, so a missing cell shrinks the
 denominator instead of recording misses that were never possible.
 
 To evaluate a candidate skill, run it against the installed one in one sitting.
@@ -723,10 +749,11 @@ denominator, and `build-fixture.sh` materializes the checkout the contestant
 reviews and carries the checks that verify it, so an edit to either moves what
 was reviewed or what it was scored against. `orchestrator_digest` is a
 length-framed digest over `run-eval.sh`,
-`run-eval-source-snapshot.sh`, `run-eval-lifecycle.sh`, and
-`run-eval-runtime.sh`. Together they fix source authentication, sealing,
-restart and cleanup, plus the contestant's allowed tools, turn limit, skill
-staging, finder-report truncation, and cell environment. They shape the
+`run-eval-source-snapshot.sh`, `run-eval-lifecycle.sh`,
+`run-eval-runtime.sh`, and `run-eval-matrix.sh`. Together they fix source
+authentication, sealing, restart and cleanup, plus the contestant's allowed
+tools, turn limit, skill staging, finder-report truncation, cell environment,
+and what the matrix may run at the same time. They shape the
 transcript every number is derived from as directly as a prompt does. An edit
 to any of them re-anchors the series, which is the conservative direction: a
 refused comparison is visible, a silently paired one is not.
@@ -977,6 +1004,7 @@ path must exist on `main` before the first run after the moving commit.
 | `scripts/review/run-eval-source-snapshot.sh`                | source authentication, sealing, restart, and cleanup     |
 | `scripts/review/run-eval-lifecycle.sh`                      | locks, deadlines, failure traces, and publication        |
 | `scripts/review/run-eval-runtime.sh`                        | skill staging, fixtures, cache, and cell runtime         |
+| `scripts/review/run-eval-matrix.sh`                         | the PR-group matrix scheduler                            |
 | `scripts/review/build-fixture.sh`                           | leak-proof fixture materialization                       |
 | `scripts/review/launchd/`                                   | the monthly scheduler                                    |
 | `.github/workflows/review-eval-freshness.yml`               | the LLM-free contract and freshness guard                |
