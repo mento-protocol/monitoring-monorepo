@@ -513,6 +513,7 @@ changed, or blocked result produces `PENDING`. It adds no public command and
 does not change the individual probes' layer-scoped JSON contract.
 The native aggregate has a five-minute deadline that cancels active `gh` child
 requests and returns `PENDING` when reached.
+`scripts/pr/pr-ready-state-gh.mjs` owns GitHub CLI transport and scoped cancellation.
 
 ## Agent workflow
 

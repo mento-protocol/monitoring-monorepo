@@ -101,7 +101,6 @@ Move each pin class with its files.
   `.claude/babysit-pr.sh`.
 - **PR probe pins.** `pr/pr-{ready,feedback}-state*.mjs` use
   `pr:ready-state:test` and `pr:feedback-state:test` in scripts CI.
-  `pr-ready-state-gh.mjs` owns their GitHub CLI transport and scoped cancellation.
 - **Workflow pins.** `check-ci-contract{,.test}.mjs` pins CI.
   `check-no-skip-audit{,.test}.mjs` pins admission, SHAs, caches, skips,
   `repo-health/dependency-cruiser-root-contract.test.mjs`, and the retained
