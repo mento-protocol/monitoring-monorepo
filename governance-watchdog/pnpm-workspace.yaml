@@ -42,7 +42,9 @@ overrides:
   "qs@<6.15.2": 6.15.2
   "uuid@<11.1.1": 11.1.1
   "protobufjs@>=7.0.0 <7.6.5": 7.6.5
-  "js-yaml@>=4.0.0 <4.3.1": 4.3.1
+  # GHSA-2883-xcg3-v3hh hits 4.3.1, the floor the superseded
+  # GHSA-5p4m-2wfm-xmqj pin set. 4.3.2 is the patched floor for the 4.x line.
+  "js-yaml@>=4.0.0 <4.3.2": 4.3.2
   # GHSA-2v37-7h3g-55p8: 3.3.18 is the patched floor for the 3.x line.
   "nanoid@<3.3.18": 3.3.18
   # isows resolves ws@8.20.1 through viem; 8.21.0 contains the GHSA-96hv-2xvq-fx4p
