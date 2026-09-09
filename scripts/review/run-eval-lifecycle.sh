@@ -23,6 +23,12 @@ TMPROOT="${TMPDIR:-/tmp}"
 # shellcheck disable=SC2329  # invoked by the EXIT trap below
 cleanup() {
   local code=$?
+  # The matrix scheduler is sourced last, so it may not exist yet. When it does,
+  # this is what takes its group workers down — before the spec worktree and the
+  # skill snapshot they are reading are removed.
+  if declare -F matrix_cleanup >/dev/null 2>&1; then
+    matrix_cleanup
+  fi
   if [[ $SPEC_TEMP -eq 1 && -n $SPEC ]]; then
     git -C "$REPO" worktree remove --force "$SPEC" >/dev/null 2>&1 || true
     # The spec lives under the git directory rather than under `$TMPDIR`, so no
@@ -192,6 +198,7 @@ acquire_run_lock
       run-eval-source-snapshot.sh
       run-eval-lifecycle.sh
       run-eval-runtime.sh
+      run-eval-matrix.sh
     )
     for RUN_EVAL_SOURCE_NAME in "${RUN_EVAL_SOURCE_NAMES[@]}"; do
       RUN_EVAL_RUNNING_SOURCE="$RUN_EVAL_SCRIPT_DIR/$RUN_EVAL_SOURCE_NAME"

@@ -11,7 +11,7 @@ review_interval_days: 90
 garden_lane: adrs-architecture
 ---
 
-# ADR 0089 — The canonical review-eval matrix is a freshness floor
+# ADR 0090 — The canonical review-eval matrix is a freshness floor
 
 **Status:** Accepted (Sep 2026), in force.
 **Scope:** ci/process
@@ -74,7 +74,11 @@ today's cells, and it carries a different comparability key in any case.
 ## Consequences
 
 - A run costs about $99 of contestant spend and about $108 of judging, roughly
-  30% less than before, and finishes in about six hours end to end.
+  30% less than before, and the judge pass drops from about six hours to about
+  four. Matrix wall-clock time is not claimed here: since
+  [ADR 0089](0089-review-eval-canonical-matrix-pr-groups.md) the runner works PR
+  groups concurrently, so twelve fewer cells shortens the serial worst case but
+  the measured figure comes from the next full run.
 - The comparability key moves, because `planCells` and `plannedMatrix` are both
   hashed into `matcher_digest`. Rows scored under the 39-cell matrix become a
   separate series: they still validate and still report, but the first 27-cell

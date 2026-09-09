@@ -124,6 +124,7 @@ const runEvalSourcePaths = new Map([
   ],
   ["lifecycle", path.join(repoRoot, "scripts/review/run-eval-lifecycle.sh")],
   ["runtime", path.join(repoRoot, "scripts/review/run-eval-runtime.sh")],
+  ["matrix", path.join(repoRoot, "scripts/review/run-eval-matrix.sh")],
 ]);
 
 function runEvalSource(owner) {
@@ -220,7 +221,7 @@ test("the shell split no longer reconstructs the pre-split cell runtime", () => 
   // so this pin still catches an unintended shell edit.
   assert.equal(
     reconstructed,
-    "521f25b1882d76fa34bc607a5f225209ce86005daa861ae6fb9549717bdffffb",
+    "28844cb2da2ae2559843802a00e1725962c5255021b65381c214a96dc7f23130",
   );
   // It is no longer the pre-split monolith. Capturing the whole session instead
   // of the CLI's last-message envelope changed what a cell records, so the 24
@@ -720,7 +721,7 @@ test("planCells builds the documented matrices", () => {
   // The 2026-09 composition, written out so a change to any of the three
   // conditions has to be made on purpose: 9 pipeline, 12 replay, 6 control.
   // A contract that gains a fixture moves these numbers, and it moves the same
-  // numbers in `docs/evals/review-skill.md` and ADR 0089 with them.
+  // numbers in `docs/evals/review-skill.md` and ADR 0090 with them.
   assert.equal(full.length, 27);
   assert.deepEqual([pipeline, replay, control], [9, 12, 6]);
 });
@@ -882,7 +883,7 @@ test("comparabilityKey moves with the contract, the prompts, and the scorer", ()
 
 test("orchestratorSourceDigest binds the shell and the cell modules", () => {
   const expected =
-    "dda25054b96c037e82b0a616e98b97ad028c6f2351f14bf8948f76a1fc1beb60";
+    "c7746d078354c79c4f9825bc70a8599b2bd8784a52f1904b078aca7368ddaee3";
   assert.equal(orchestratorSourceDigest(), expected);
   // The cell writer and the stream parser are in the digest for the same
   // reason the shell is: the writer decides what a paid cell records and the
@@ -896,6 +897,7 @@ test("orchestratorSourceDigest binds the shell and the cell modules", () => {
       "run-eval-source-snapshot.sh",
       "run-eval-lifecycle.sh",
       "run-eval-runtime.sh",
+      "run-eval-matrix.sh",
       "review-eval-cell-writer.mjs",
       "review-eval-stream.mjs",
     ],
@@ -2133,6 +2135,424 @@ test("run-eval.sh inserts finder output into the handoff prompt verbatim", () =>
     });
     assert.equal(result.status, 0, result.stderr);
     assert.equal(result.stdout, `before\n${other}\nafter\n`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- the PR-group matrix scheduler -------------------------------------------
+
+const matrixSourcePath = runEvalSourcePaths.get("matrix");
+
+/**
+ * Drive `run_matrix` with a fake `run_cell`. The scheduler is the only thing
+ * under test, so the fake records a start and an end event per cell and the
+ * assertions read overlap out of that log; nothing here touches a model, a
+ * fixture or the plan.
+ */
+function driveMatrix({
+  cells,
+  dir,
+  // Always pinned, never inherited: `spawn` passes the ambient environment, so
+  // an operator's own REVIEW_EVAL_PR_CONCURRENCY would silently decide how many
+  // groups these assertions get to see.
+  concurrency = 3,
+  deadline = 3600,
+  startedAgo = 0,
+  cellSeconds = 1,
+  failing = [],
+  selfKill = "",
+}) {
+  const events = path.join(dir, "events");
+  // The rows travel through a file, not through the harness source: the fields
+  // are tab-separated and the reader is the thing under test.
+  const rowsFile = path.join(dir, "rows.tsv");
+  writeFileSync(
+    rowsFile,
+    cells
+      .map(
+        ({ pr, id }) =>
+          [id, pr, "control", "1", "opus", "high", "", "", "request"].join(
+            "\t",
+          ) + "\n",
+      )
+      .join(""),
+  );
+  const harness = [
+    "set -euo pipefail",
+    "TMPROOT=" + JSON.stringify(dir),
+    "STARTED=$(( $(date +%s) - " + String(startedAgo) + " ))",
+    "MATRIX_DEADLINE=" + String(deadline),
+    'STATUS_NOTE=""',
+    "DONE=0",
+    "FAILED=0",
+    "TOTAL=0",
+    "EVENTS=" + JSON.stringify(events),
+    "FAILING=" + JSON.stringify(failing.join(" ")),
+    "SELF_KILL=" + JSON.stringify(selfKill),
+    `log() { printf '%s\\n' "$*"; }`,
+    `fail() { printf 'FATAL: %s\\n' "$*" >&2; exit 1; }`,
+    "cell_rows() { cat " + JSON.stringify(rowsFile) + "; }",
+    "run_cell() {",
+    `  if [[ -n $SELF_KILL && $1 == "$SELF_KILL" ]]; then kill -KILL $BASHPID; fi`,
+    `  printf 'start %s %s\\n' "$2" "$1" >>"$EVENTS"`,
+    "  sleep " + String(cellSeconds),
+    `  printf 'end %s %s\\n' "$2" "$1" >>"$EVENTS"`,
+    `  printf '  %s ran\\n' "$1"`,
+    `  case " $FAILING " in *" $1 "*) printf '  %s FAILED\\n' "$1"; return 1 ;; esac`,
+    "  return 0",
+    "}",
+    "source " + JSON.stringify(matrixSourcePath),
+    "run_matrix",
+    `printf 'DONE=%s FAILED=%s TOTAL=%s NOTE=%s\\n' "$DONE" "$FAILED" "$TOTAL" "$STATUS_NOTE"`,
+  ].join("\n");
+  const run = spawnSync("bash", ["-c", harness], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      REVIEW_EVAL_PR_CONCURRENCY: String(concurrency),
+    },
+  });
+  assert.equal(run.status, 0, run.stderr);
+  const summary = run.stdout.match(
+    /DONE=(\d+) FAILED=(\d+) TOTAL=(\d+) NOTE=(.*)$/m,
+  );
+  assert.ok(summary, run.stdout);
+  return {
+    stdout: run.stdout,
+    done: Number(summary[1]),
+    failed: Number(summary[2]),
+    total: Number(summary[3]),
+    note: summary[4],
+    events: existsSync(events)
+      ? readFileSync(events, "utf8")
+          .split("\n")
+          .filter(Boolean)
+          .map((line) => {
+            const [kind, pr, id] = line.split(" ");
+            return { kind, pr, id };
+          })
+      : [],
+  };
+}
+
+/** Every pair of cells that was open at the same time, split by PR. */
+function matrixOverlaps(events) {
+  const open = new Set();
+  const samePr = [];
+  const crossPr = [];
+  const prOf = new Map();
+  for (const event of events) {
+    prOf.set(event.id, event.pr);
+    if (event.kind === "end") {
+      open.delete(event.id);
+      continue;
+    }
+    for (const id of open) {
+      if (prOf.get(id) === event.pr) samePr.push([id, event.id]);
+      else crossPr.push([id, event.id]);
+    }
+    open.add(event.id);
+  }
+  return { samePr, crossPr };
+}
+
+test("the matrix runs one PR's cells in sequence and PR groups at once", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "review-eval-matrix-"));
+  try {
+    const parallel = driveMatrix({
+      cells: [
+        { pr: "1990", id: "pr-1990-control-draw1" },
+        { pr: "1995", id: "pr-1995-control-draw1" },
+        { pr: "1990", id: "pr-1990-pipeline-draw1" },
+        { pr: "1995", id: "pr-1995-pipeline-draw1" },
+      ],
+      dir,
+      concurrency: 2,
+    });
+    assert.equal(parallel.done, 4);
+    assert.equal(parallel.failed, 0);
+    assert.equal(parallel.total, 4);
+    assert.equal(parallel.note, "");
+    const seen = matrixOverlaps(parallel.events);
+    // Two cells of one PR share one fixture checkout — each resets it, cleans
+    // it and stages `.skill` into it — so they may never be open at the same
+    // time. Two PRs are separate checkouts, and their overlap is the change.
+    assert.deepEqual(seen.samePr, []);
+    assert.ok(seen.crossPr.length > 0, parallel.stdout);
+    // Plan order is kept inside each group, so the cell ids of a run and their
+    // per-PR order are what a serial run produced.
+    assert.deepEqual(
+      parallel.events
+        .filter((event) => event.kind === "start" && event.pr === "1990")
+        .map((event) => event.id),
+      ["pr-1990-control-draw1", "pr-1990-pipeline-draw1"],
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("REVIEW_EVAL_PR_CONCURRENCY of 1 is the old strictly serial matrix", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "review-eval-matrix-serial-"));
+  try {
+    const serial = driveMatrix({
+      cells: [
+        { pr: "1990", id: "pr-1990-control-draw1" },
+        { pr: "1995", id: "pr-1995-control-draw1" },
+        { pr: "1999", id: "pr-1999-control-draw1" },
+      ],
+      dir,
+      concurrency: 1,
+    });
+    assert.equal(serial.done, 3);
+    assert.equal(serial.total, 3);
+    const seen = matrixOverlaps(serial.events);
+    assert.deepEqual(seen.samePr, []);
+    assert.deepEqual(seen.crossPr, []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+
+  // A word or a zero would schedule nothing and leave the matrix silently
+  // empty, so it is refused where the message can name the cause.
+  const rejected = spawnSync(
+    "bash",
+    [
+      "-c",
+      [
+        "set -euo pipefail",
+        `fail() { printf 'FATAL: %s\\n' "$*" >&2; exit 1; }`,
+        "source " + JSON.stringify(matrixSourcePath),
+      ].join("\n"),
+    ],
+    {
+      encoding: "utf8",
+      env: { ...process.env, REVIEW_EVAL_PR_CONCURRENCY: "0" },
+    },
+  );
+  assert.equal(rejected.status, 1);
+  assert.match(rejected.stderr, /positive whole number of PR groups/);
+});
+
+test("no cell starts after the matrix deadline, under concurrency", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "review-eval-matrix-deadline-"));
+  try {
+    // Both groups start their first cell inside the budget and both find it
+    // spent before their second. A partial matrix reports what ran and says so.
+    const partial = driveMatrix({
+      cells: [
+        { pr: "1990", id: "pr-1990-control-draw1" },
+        { pr: "1995", id: "pr-1995-control-draw1" },
+        { pr: "1990", id: "pr-1990-pipeline-draw1" },
+        { pr: "1995", id: "pr-1995-pipeline-draw1" },
+      ],
+      dir,
+      concurrency: 2,
+      deadline: 2,
+      cellSeconds: 4,
+    });
+    assert.equal(partial.done, 2);
+    assert.equal(partial.failed, 0);
+    assert.equal(partial.total, 4);
+    assert.equal(partial.note, "matrix deadline of 2s reached");
+    assert.match(
+      partial.stdout,
+      /matrix deadline reached; the matrix is partial/,
+    );
+    assert.equal(
+      partial.events.filter((event) => event.kind === "start").length,
+      2,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+
+  const spent = mkdtempSync(path.join(tmpdir(), "review-eval-matrix-spent-"));
+  try {
+    // A budget already gone starts nothing at all, and every planned cell is
+    // still counted, so the run aborts instead of scoring an empty matrix.
+    const none = driveMatrix({
+      cells: [
+        { pr: "1990", id: "pr-1990-control-draw1" },
+        { pr: "1995", id: "pr-1995-control-draw1" },
+      ],
+      dir: spent,
+      concurrency: 2,
+      deadline: 10,
+      startedAgo: 100,
+    });
+    assert.equal(none.done, 0);
+    assert.equal(none.failed, 0);
+    assert.equal(none.total, 2);
+    assert.equal(none.note, "matrix deadline of 10s reached");
+    assert.deepEqual(none.events, []);
+  } finally {
+    rmSync(spent, { recursive: true, force: true });
+  }
+});
+
+test("the matrix counts every concurrent cell exactly once", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "review-eval-matrix-count-"));
+  try {
+    const counted = driveMatrix({
+      cells: [
+        { pr: "1990", id: "pr-1990-control-draw1" },
+        { pr: "1995", id: "pr-1995-control-draw1" },
+        { pr: "1999", id: "pr-1999-control-draw1" },
+        { pr: "1990", id: "pr-1990-pipeline-draw1" },
+        { pr: "1995", id: "pr-1995-pipeline-draw1" },
+      ],
+      dir,
+      concurrency: 3,
+      failing: ["pr-1995-pipeline-draw1"],
+    });
+    assert.equal(counted.done, 4);
+    assert.equal(counted.failed, 1);
+    assert.equal(counted.total, 5);
+    assert.equal(counted.note, "");
+    // A cell's own log lines arrive together rather than spliced into another
+    // group's, so a failure still reads as one block under its own cell id.
+    assert.match(
+      counted.stdout,
+      / {2}pr-1995-pipeline-draw1 ran\n {2}pr-1995-pipeline-draw1 FAILED\n/,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a killed group worker ends the matrix instead of holding it open", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "review-eval-matrix-killed-"));
+  try {
+    // The worker for 1995 kills itself, so it never writes the marker the
+    // parent waits on. Without a second signal the scheduler would poll that
+    // slot forever and no run would ever reach scoring.
+    const killed = driveMatrix({
+      cells: [
+        { pr: "1990", id: "pr-1990-control-draw1" },
+        { pr: "1995", id: "pr-1995-control-draw1" },
+      ],
+      dir,
+      concurrency: 2,
+      selfKill: "pr-1995-control-draw1",
+    });
+    assert.equal(killed.done, 1);
+    assert.equal(killed.failed, 0);
+    assert.equal(killed.total, 2);
+    assert.equal(killed.note, "1 cells recorded no outcome");
+    assert.match(killed.stdout, /the matrix is partial; 1 cells recorded/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("TERM takes every group worker's process group down with the run", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "review-eval-matrix-term-"));
+  try {
+    const rowsFile = path.join(dir, "rows.tsv");
+    writeFileSync(
+      rowsFile,
+      ["1990", "1995", "1999"]
+        .map(
+          (pr) =>
+            [
+              `pr-${pr}-control-draw1`,
+              pr,
+              "control",
+              "1",
+              "opus",
+              "high",
+              "",
+              "",
+              "request",
+            ].join("\t") + "\n",
+        )
+        .join(""),
+    );
+    // The pid file records a grandchild of the run started the way `run_bounded`
+    // starts a finder or a contestant: under its own `set -m`, so it leads a
+    // process group of its own rather than inheriting the worker's. A signal to
+    // the worker's group alone never reaches it, which is exactly the orphan
+    // that would keep spending quota after the run reported failure.
+    const pidsFile = path.join(dir, "pids");
+    // The bounded child, modelled on `run_bounded`: the leader takes the
+    // default TERM and dies, while a descendant inside its group ignores TERM.
+    // Once the leader is gone that group is no longer a child of the worker, so
+    // only a KILL aimed at the pgid collected before the TERM pass can end the
+    // descendant. Its pid is the one the assertions below follow.
+    const cellScript = path.join(dir, "bounded-cell.sh");
+    writeFileSync(
+      cellScript,
+      [
+        "#!/bin/bash",
+        '( trap "" TERM; sleep 120 ) &',
+        'printf "%s\\n" "$!" >>"$1"',
+        "wait",
+      ].join("\n") + "\n",
+      { mode: 0o755 },
+    );
+    const harness = [
+      "set -euo pipefail",
+      "TMPROOT=" + JSON.stringify(dir),
+      "STARTED=$(date +%s)",
+      "MATRIX_DEADLINE=3600",
+      'STATUS_NOTE=""',
+      "DONE=0",
+      "FAILED=0",
+      "TOTAL=0",
+      "PIDS=" + JSON.stringify(pidsFile),
+      `log() { printf '%s\\n' "$*"; }`,
+      `fail() { printf 'FATAL: %s\\n' "$*" >&2; exit 1; }`,
+      "cell_rows() { cat " + JSON.stringify(rowsFile) + "; }",
+      "run_cell() {",
+      "  set -m",
+      "  " + JSON.stringify(cellScript) + ' "$PIDS" &',
+      "  bounded=$!",
+      "  set +m",
+      "  wait $bounded || true",
+      "}",
+      "source " + JSON.stringify(matrixSourcePath),
+      "run_matrix",
+    ].join("\n");
+    // `/bin/bash` on purpose: that is what the launchd job execs, it is 3.2 on
+    // macOS, and it has no `BASHPID` — the version the signal forwarding must
+    // not depend on.
+    const child = spawn("/bin/bash", ["-c", harness], {
+      stdio: "ignore",
+      // Pinned for the same reason `driveMatrix` pins it: the ambient value
+      // would otherwise decide how many groups this assertion can see.
+      env: { ...process.env, REVIEW_EVAL_PR_CONCURRENCY: "3" },
+    });
+    const exited = new Promise((resolve) => {
+      child.on("exit", (code) => resolve(code));
+    });
+    // Long enough for all three groups to have started their first cell.
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+    const started = readFileSync(pidsFile, "utf8").split("\n").filter(Boolean);
+    assert.equal(started.length, 3, "three groups did not start a cell");
+    process.kill(child.pid, "SIGTERM");
+    assert.equal(await exited, 143);
+    // Each of these ignored TERM, so only the KILL pass can have ended it.
+    // `kill -0` still succeeds on a zombie, and these reparent to PID 1 when
+    // their group leader dies — on a runner whose PID 1 reaps slowly one can
+    // sit in state `Z` for a moment. A zombie has terminated: it holds nothing
+    // and spends nothing. Poll for gone-or-zombie rather than for gone.
+    for (const pid of started) {
+      let ended = false;
+      for (let attempt = 0; attempt < 40 && !ended; attempt += 1) {
+        const state = spawnSync("ps", ["-o", "state=", "-p", pid], {
+          encoding: "utf8",
+        });
+        ended =
+          spawnSync("kill", ["-0", pid]).status !== 0 ||
+          state.status !== 0 ||
+          state.stdout.trim() === "" ||
+          state.stdout.trim().startsWith("Z");
+        if (!ended) await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      assert.ok(ended, `TERM-ignoring grandchild ${pid} outlived the run`);
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -6283,7 +6703,11 @@ test("the orchestrator refuses to run bytes the row would not record", () => {
   );
   assert.match(wrapper, /RUN_EVAL_SCRIPT_DIR="\$RUN_EVAL_SOURCE_SNAPSHOT"/);
   assert.match(wrapper, /source "\$RUN_EVAL_SOURCE_HELPER"/);
-  for (const helper of ["run-eval-lifecycle.sh", "run-eval-runtime.sh"]) {
+  for (const helper of [
+    "run-eval-lifecycle.sh",
+    "run-eval-runtime.sh",
+    "run-eval-matrix.sh",
+  ]) {
     assert.match(
       wrapper,
       new RegExp(
@@ -6301,6 +6725,7 @@ test("the orchestrator refuses to run bytes the row would not record", () => {
     "run-eval-source-snapshot.sh",
     "run-eval-lifecycle.sh",
     "run-eval-runtime.sh",
+    "run-eval-matrix.sh",
   ]) {
     assert.match(
       verify,
@@ -6423,7 +6848,7 @@ test("the orchestrator keeps every helper stage on one private source snapshot",
         JSON.stringify(changedStream) +
         ' "$TEST_LIVE/review-eval-stream.mjs"',
       "RUN_EVAL_LIFECYCLE_STAGE=support",
-      'node -e \'const fs = require("node:fs"); const p = process.argv[1]; const mode = (name) => (fs.statSync(name).mode & 0o777).toString(8); process.stdout.write(`modes=${mode(p)}:${mode(`${p}/run-eval.sh`)}:${mode(`${p}/run-eval-source-snapshot.sh`)}:${mode(`${p}/run-eval-lifecycle.sh`)}:${mode(`${p}/run-eval-runtime.sh`)}:${mode(`${p}/review-eval-cell-writer.mjs`)}:${mode(`${p}/review-eval-stream.mjs`)}\\n`);\' "$RUN_EVAL_SOURCE_SNAPSHOT"',
+      'node -e \'const fs = require("node:fs"); const p = process.argv[1]; const mode = (name) => (fs.statSync(name).mode & 0o777).toString(8); process.stdout.write(`modes=${mode(p)}:${mode(`${p}/run-eval.sh`)}:${mode(`${p}/run-eval-source-snapshot.sh`)}:${mode(`${p}/run-eval-lifecycle.sh`)}:${mode(`${p}/run-eval-runtime.sh`)}:${mode(`${p}/run-eval-matrix.sh`)}:${mode(`${p}/review-eval-cell-writer.mjs`)}:${mode(`${p}/review-eval-stream.mjs`)}\\n`);\' "$RUN_EVAL_SOURCE_SNAPSHOT"',
       "node -e 'for (const key of Object.keys(process.env)) { if (key.startsWith(\"RUN_EVAL_\")) process.exit(1); }'",
       'if [[ $(id -u) -ne 0 ]] && mv "$RUN_EVAL_SOURCE_SNAPSHOT/run-eval-runtime.sh" "$RUN_EVAL_SOURCE_SNAPSHOT/run-eval-runtime.moved" 2>/dev/null; then fail "the sealed source snapshot allowed an entry replacement"; fi',
       'source "$RUN_EVAL_SCRIPT_DIR/run-eval-lifecycle.sh"',
@@ -6443,6 +6868,10 @@ test("the orchestrator keeps every helper stage on one private source snapshot",
       writeFileSync(
         path.join(live, "run-eval-runtime.sh"),
         "SNAPSHOT_RUNTIME=old\n",
+      );
+      writeFileSync(
+        path.join(live, "run-eval-matrix.sh"),
+        "SNAPSHOT_MATRIX=old\n",
       );
       // The cell writer and the stream parser it imports are snapshotted with
       // the shell: the wrapper loads them from the sealed directory, so the
@@ -6481,7 +6910,7 @@ test("the orchestrator keeps every helper stage on one private source snapshot",
     });
     assert.equal(run.status, 0, run.stderr);
     assert.match(run.stdout, /lifecycle=old runtime=old/);
-    assert.match(run.stdout, /modes=500:500:400:400:400:400:400/);
+    assert.match(run.stdout, /modes=500:500:400:400:400:400:400:400/);
     const snapshot = run.stdout.match(/snapshot=(.+)$/m)?.[1];
     assert.ok(snapshot);
     assert.equal(
@@ -6680,6 +7109,7 @@ test("the persistent plan must bind the private source snapshot", () => {
       "run-eval-source-snapshot.sh",
       "run-eval-lifecycle.sh",
       "run-eval-runtime.sh",
+      "run-eval-matrix.sh",
       "review-eval-cell-writer.mjs",
       "review-eval-stream.mjs",
     ];
