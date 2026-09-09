@@ -241,12 +241,13 @@ becomes the automatic baseline — and a complete canary is read against
 The draw check is a floor rather than an equality: a row recorded when the
 matrix planned more draws ran a superset of today's cells, and it carries a
 different comparability key anyway, so it is history rather than a short run.
-One caller keeps the equality. A baseline named with `--against` whose
-comparability key equals the plan's ran this plan's matrix, so its draws must
-match it exactly: the per-defect bits of a condition fold with OR, and a
-baseline carrying two bits per defect against a candidate's one is a higher hit
-rate for the baseline alone, which reads as lost defects. An over-sampled row
-of the current key is refused as a baseline rather than paired.
+One caller keeps the equality: a baseline named with `--against` whose
+`comparability_key` equals the generated plan's. That row ran this plan's
+matrix — the planner is inside the key — so its draws must equal the planned
+count exactly rather than merely reach it. The per-defect bits of a condition
+fold with OR, so a baseline carrying two bits per defect against a candidate's
+one is a higher hit rate for the baseline alone, which reads as lost defects.
+Such a row is refused as a baseline rather than paired.
 
 Then plan and run. `--plan` prints the matrix and the cost estimate without
 spending anything.
@@ -697,8 +698,9 @@ generalization.
 | **PROMOTE**    | `c − b ≥ 6` and the change was intentional                                                                                                                                                                                    | re-anchor the baseline in a PR that says what changed and why             |
 | **INCOMPLETE** | the run failed, or a canary did not finish                                                                                                                                                                                    | fix the harness and re-run; the row stays as a trace                      |
 
-**A `pipeline` flip `replay` contradicts is unproven; one it never saw is
-unchecked.** Since 2026-09 `pipeline` takes one live finder draw per PR, and the
+**A `pipeline` flip `replay` contradicts is unproven; a flip on a defect
+`replay` never scores is unchecked.**
+Since 2026-09 `pipeline` takes one live finder draw per PR, and the
 finder samples, so six net flips there can be the finder rather than the
 reviewer. `replay` runs frozen reports and does not move with the finder, but it
 covers the 39 grid defects only. So a RED still opens its priority issue and a
