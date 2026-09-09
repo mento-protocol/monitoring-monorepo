@@ -99,7 +99,7 @@ Three conditions, every one of them load-bearing:
 | condition  | what it runs                                          | how many cells                                  | why it exists                                                          |
 | ---------- | ----------------------------------------------------- | ----------------------------------------------- | ---------------------------------------------------------------------- |
 | `pipeline` | live `codex exec review` then `claude` with the skill | one draw of each of the nine fixtures           | the number of record; exactly what production does                     |
-| `replay`   | the frozen finder report then `claude` with the skill | both frozen reports of each of the six grid PRs | zero finder sampling variance; the only variance-free signal           |
+| `replay`   | the frozen finder report then `claude` with the skill | both frozen reports of each of the six grid PRs | zero finder sampling variance; the verifier is still sampled fresh     |
 | `control`  | the bare pinned model, no skill, no codex             | one draw of each of the six grid PRs            | if control and pipeline fall together the model moved, not our tooling |
 
 `control` is the cheapest line item and carries the most interpretive weight.
@@ -131,8 +131,10 @@ Two things follow. `pipeline` now records one bit per defect, so its number is
 a single live sample that carries the finder's spread. The verdict rules still
 call six net flips RED or PROMOTE, and finder sampling alone can reach that on
 a run where nothing changed, so **read a `pipeline` flip beside `replay`**:
-`replay` runs frozen reports and does not move with the finder, so a
-`pipeline` flip it does not corroborate is unproven rather than a regression.
+`replay` runs frozen reports, so it does not move with the finder — though its
+own verifier session is sampled fresh like any other, so it is quieter than
+`pipeline`, not silent. A `pipeline` flip it does not corroborate is unproven
+rather than a regression.
 And `control` recall is now measured over the 39 grid defects while `pipeline`
 recall covers all 51, so the two rates are over different denominators: read
 `control` against the previous run's `control`, never as a within-run
@@ -733,13 +735,18 @@ generalization.
 `replay` never scores is unchecked.**
 Since 2026-09 `pipeline` takes one live finder draw per PR, and the
 finder samples, so six net flips there can be the finder rather than the
-reviewer. `replay` runs frozen reports and does not move with the finder, but it
-covers the 39 grid defects only. So a RED still opens its priority issue and a
+reviewer. `replay` runs frozen reports, so it does not move with the finder;
+its own `claude` verifier is still sampled fresh, with no seed and no
+deterministic decoding, so it removes one source of variance rather than all of
+them. It also covers the 39 grid defects only. So a RED still opens its priority issue and a
 PROMOTE still records what changed, and both split the flipped defects three
 ways: those `replay` moved with, those `replay` held on — where the flip is
 unproven — and those from PRs 1982, 1984 and 2001, which `replay` never
-scores. That third group has no variance-free counterpart at all. Name it
-unchecked; it is neither corroboration nor contradiction.
+scores. That third group has no finder-frozen counterpart at all. Name it
+unchecked; it is neither corroboration nor contradiction. And read a
+corroborating `replay` flip for what it is: two conditions moving together, each
+with its own verifier draw, which is weaker than a repeated measurement and
+stronger than one condition alone.
 
 The harness does not enforce that yet, and it is the one place this matters
 most: a PROMOTE re-anchors the baseline on its own, because `resolveBaseline()`
@@ -1021,8 +1028,9 @@ later change in that issue's stack deletes them.
   Self-preference is plausible and only partly measured.
 - **`replay` drifts away from production.** It scores against a 2026-08 finder
   report while production uses whatever codex is that month. It stays because
-  it is the only variance-free signal, and it must never become the headline
-  number.
+  it removes the finder's sampling from the comparison, and it must never
+  become the headline number. Its `claude` verifier is sampled fresh per cell,
+  so it is not variance-free either.
 - **Local execution is not reproducible by a third party.** Shell environment,
   MCP servers and CLI patch versions all leak in. Two developers running the
   same contract may legitimately differ by several defects.

@@ -699,6 +699,31 @@ export function completeMatrixProblems({
         );
       }
     }
+    // The floor above says nothing about a row that inflates its own count:
+    // `validateLedgerRow` refuses a vector longer than the declared `draws` and
+    // a shorter one is a cell that never ran, so a row can claim `draws: 2`
+    // while every vector carries one bit. That row would report twice the
+    // sample it took, refresh the freshness clock on it and become an anchor.
+    // The claim is checkable without knowing which matrix produced the row: a
+    // declared draw is backed only if some defect the condition scored carries
+    // a bit for it. Not every defect — a PR whose last cell never ran keeps a
+    // short vector on purpose — but at least one.
+    const vectors = Object.values(condition?.per_defect ?? {}).filter(
+      (vector) => Array.isArray(vector),
+    );
+    const longest = vectors.reduce(
+      (most, vector) => Math.max(most, vector.length),
+      0,
+    );
+    if (
+      Number.isSafeInteger(condition?.draws) &&
+      vectors.length > 0 &&
+      longest < condition.draws
+    ) {
+      problems.push(
+        `${label}.conditions.${name}.draws is ${condition.draws}; no defect carries more than ${longest} bit(s), so the run never took that many draws`,
+      );
+    }
   }
   return problems;
 }

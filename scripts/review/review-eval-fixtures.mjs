@@ -142,7 +142,7 @@ export function gridFixtures(contract) {
 // skill by freezing the finder report instead of sampling it
 // (`docs/adr/0086-review-eval-lane-any-grid-multi-draw.md`). So the canonical
 // row buys one live draw per PR, and a `pipeline` flip is read beside the
-// variance-free `replay` condition before it is believed
+// finder-frozen `replay` condition before it is believed
 // (`docs/adr/0090-canonical-eval-matrix-freshness-floor.md`).
 // `planCells` spawns exactly this many.
 export const PIPELINE_DRAWS = 1;

@@ -716,6 +716,61 @@ test("checkLedger requires a complete row to carry its whole matrix", () => {
   }
 });
 
+test("a row cannot claim more draws than any of its vectors carries", () => {
+  // `validateLedgerRow` refuses a vector longer than the declared `draws`, and
+  // a shorter one is a cell that never ran, so nothing else stops a row from
+  // stating `draws: 2` over one-bit vectors. That row reports twice the sample
+  // it took, and it still refreshes the freshness clock and becomes an anchor.
+  // The check needs no comparability key: a declared draw is backed only if
+  // some scored defect carries a bit for it.
+  const inflated = row({
+    conditions: {
+      ...fullMatrix(),
+      pipeline: condition({ per_defect: everyFixture([1]), draws: 2 }),
+    },
+  });
+  withTempLedger(jsonl(inflated), (file) => {
+    const checked = checkLedger({
+      path: file,
+      contract,
+      contractDigest: DIGEST_A,
+    });
+    assert.equal(checked.ok, false);
+    assert.match(
+      checked.problems.join(" | "),
+      /conditions\.pipeline\.draws is 2; no defect carries more than 1 bit\(s\)/,
+    );
+  });
+
+  // A row whose last cell never ran for one PR keeps a short vector on purpose,
+  // and the other PRs still back the declared count.
+  const oneShortPr = row({
+    conditions: {
+      ...fullMatrix(),
+      replay: condition({
+        per_defect: {
+          ...everyGridFixture(),
+          ...idsFor([firstGridFixture], [1]),
+        },
+        draws: 2,
+      }),
+    },
+  });
+  withTempLedger(jsonl(oneShortPr), (file) => {
+    const checked = checkLedger({
+      path: file,
+      contract,
+      contractDigest: DIGEST_A,
+    });
+    assert.ok(
+      !checked.problems.some((problem) =>
+        /no defect carries more than/.test(problem),
+      ),
+      checked.problems.join(" | "),
+    );
+  });
+});
+
 test("plannedMatrix is the matrix planCells actually builds", () => {
   // The matrix check above asks what a complete run owed without importing the
   // planner. The two would drift the moment a condition or a draw moved, and

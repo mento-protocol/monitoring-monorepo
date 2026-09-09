@@ -52,9 +52,12 @@ The canonical row's job is to say the operating point still works and to anchor
 the next comparison, so it buys breadth of PRs rather than repeat draws.
 
 The damping the second draw provided goes with it, and `replay` replaces it as
-the corroborating signal: it is variance-free by construction, it is unchanged
-at 12 cells, and a `pipeline` flip verdict that `replay` does not corroborate
-is read as unproven rather than acted on.
+the corroborating signal: it replays a frozen finder report, it is unchanged at
+12 cells, and a `pipeline` flip verdict that `replay` does not corroborate is
+read as unproven rather than acted on. `replay` removes the finder's sampling,
+not all sampling — every replay cell still starts a fresh `claude` verifier with
+no seed and no deterministic decoding — so two conditions moving together is
+weaker evidence than a repeated measurement of one.
 
 The ledger's complete-matrix draw checks become floors rather than equalities,
 so a row recorded under a larger matrix still validates: it ran a superset of
@@ -63,7 +66,7 @@ today's cells, and it carries a different comparability key in any case.
 ## Alternatives considered
 
 - **Keep two draws and cut `replay`.** Rejected: `replay` is the only
-  variance-free signal in the suite and the cheapest condition per cell.
+  condition that holds the finder fixed, and the cheapest cell in the suite.
 - **Keep two draws and cut fixtures.** Rejected: the grid was widened to six
   fixtures in 2026-09 precisely because three PRs gave too few paired P1
   opportunities.
@@ -87,9 +90,10 @@ today's cells, and it carries a different comparability key in any case.
   and carries the finder's spread. `verdict()` still calls six net flips RED or
   PROMOTE, and finder sampling alone can now reach that on a run where nothing
   changed. Read a `pipeline` flip beside `replay` before acting on it: `replay`
-  runs frozen reports, so it does not move with the finder. `replay` covers the
-  39 grid defects only, so a flip on one of the 12 defects from PRs 1982, 1984
-  and 2001 is unchecked rather than uncorroborated. The thresholds in
+  runs frozen reports, so it does not move with the finder, though its own
+  verifier is sampled fresh. `replay` covers the 39 grid defects only, so a flip
+  on one of the 12 defects from PRs 1982, 1984 and 2001 is unchecked rather than
+  uncorroborated. The thresholds in
   `verdict_rules` are pre-registered and are deliberately not re-tuned here.
 - That reading is not enforced. A PROMOTE re-anchors the baseline on its own
   and its verdict is recomputed from the row's numbers, so it cannot be lowered

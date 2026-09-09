@@ -8,8 +8,11 @@
 # two cells of one PR can never overlap. Two cells of different PRs touch
 # different checkouts, which is the shape ADR 0086 already gives the experiment
 # lane: draws of one PR in sequence, PR groups concurrent. Serial cells put the
-# 39-cell full matrix at 8 to 9 hours against a 4.5-hour matrix deadline; three
-# groups at once is the same cap the experiment lane uses.
+# 39-cell full matrix of 2026-09-08 at 8 to 9 hours against a 4.5-hour matrix
+# deadline; three groups at once is the same cap the experiment lane uses. The
+# matrix is 27 cells since ADR 0090 — nine PR groups, four cells for a grid PR
+# and one for a non-grid PR — which shortens the serial worst case without
+# changing anything here: the grouping reads `cell.pr` and never a cell count.
 #
 # The cost is unchanged: the same cells run, in the same plan order inside their
 # group, against the same fixtures.

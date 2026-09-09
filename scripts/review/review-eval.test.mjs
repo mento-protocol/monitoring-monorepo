@@ -883,7 +883,7 @@ test("comparabilityKey moves with the contract, the prompts, and the scorer", ()
 
 test("orchestratorSourceDigest binds the shell and the cell modules", () => {
   const expected =
-    "c7746d078354c79c4f9825bc70a8599b2bd8784a52f1904b078aca7368ddaee3";
+    "e7fe24ecf42652e8b4403dce78869bdecf278997796f72e123ca691587101200";
   assert.equal(orchestratorSourceDigest(), expected);
   // The cell writer and the stream parser are in the digest for the same
   // reason the shell is: the writer decides what a paid cell records and the

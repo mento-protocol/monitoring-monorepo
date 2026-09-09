@@ -721,6 +721,101 @@ test("a regression the control moved with is AMBER, not RED", () => {
   );
 });
 
+test("two rows of one key with unequal draws do not pair", () => {
+  // One comparability key means one planner, so two rows under it planned the
+  // same draws. When they disagree, one did not come from that planner, and
+  // `perDefectBits` folds a condition's draws with OR: the side with the extra
+  // draw carries the higher hit rate for no reason the skill accounts for.
+  const pairing = verdict({
+    contract,
+    row: row({
+      conditions: {
+        pipeline: condition({ found: 14, draws: 1 }),
+        control: condition({ ids: gridIds, found: 10, draws: 1 }),
+      },
+    }),
+    baselineRow: baseline({
+      conditions: {
+        pipeline: condition({ found: 20, draws: 2 }),
+        control: condition({ ids: gridIds, found: 10, draws: 1 }),
+      },
+    }),
+  });
+  assert.ok(
+    pairing.reasons.some((reason) =>
+      /baseline pipeline carries 2 draw\(s\) against this row's 1 under one comparability_key/.test(
+        reason,
+      ),
+    ),
+    pairing.reasons.join(" | "),
+  );
+  // Refused as a pairing means refused as a ranking: no flip count survives to
+  // call this RED or PROMOTE.
+  assert.ok(
+    ["AMBER", "GREEN"].includes(pairing.verdict),
+    `${pairing.verdict}: ${pairing.reasons.join(" | ")}`,
+  );
+});
+
+test("the drift gate counts control and the headline on the same defects", () => {
+  // Since ADR 0090 `control` runs the grid alone while `pipeline` covers every
+  // fixture. The gate has to answer "did control move the way the headline
+  // did", and it can only ask that about defects control scored: an
+  // unrestricted headline delta counts 51 defects against control's 39, and
+  // reads a direction off movement control never observed.
+  const gridScope = new Set(gridIds);
+  const nonGridIds = allIds.filter((id) => !gridScope.has(id));
+  assert.ok(nonGridIds.length > 0, "the contract needs non-grid defects");
+
+  // The headline's whole loss sits on the grid, where control lost with it.
+  // Control's 39 ids are the shared scope, and the reason says so.
+  const movedTogether = verdict({
+    contract,
+    row: row({
+      conditions: {
+        pipeline: condition({ found: 14 }),
+        control: condition({ ids: gridIds, found: 4, draws: 1 }),
+      },
+    }),
+    baselineRow: baseline({
+      conditions: {
+        pipeline: condition({ found: 20 }),
+        control: condition({ ids: gridIds, found: 10, draws: 1 }),
+      },
+    }),
+  });
+  assert.equal(movedTogether.verdict, "AMBER");
+  assert.ok(
+    movedTogether.reasons.some((reason) =>
+      new RegExp(
+        `control moved 6 defects in the same direction as the headline on the ${gridIds.length} defect\\(s\\) both scored`,
+      ).test(reason),
+    ),
+    movedTogether.reasons.join(" | "),
+  );
+
+  // A control that moved the other way on the shared defects explains nothing,
+  // and the headline stays RED. Before the scope was aligned this compared
+  // control's grid movement against a headline delta counted over defects
+  // control never scored.
+  const opposed = verdict({
+    contract,
+    row: row({
+      conditions: {
+        pipeline: condition({ found: 14 }),
+        control: condition({ ids: gridIds, found: 10, draws: 1 }),
+      },
+    }),
+    baselineRow: baseline({
+      conditions: {
+        pipeline: condition({ found: 20 }),
+        control: condition({ ids: gridIds, found: 4, draws: 1 }),
+      },
+    }),
+  });
+  assert.equal(opposed.verdict, "RED");
+});
+
 test("the report states the verdict, the table, and the defects that flipped", () => {
   const candidate = row({
     verdict: "RED",
