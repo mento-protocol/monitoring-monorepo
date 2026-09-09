@@ -719,6 +719,8 @@ test("planCells builds the documented matrices", () => {
   );
   // The 2026-09 composition, written out so a change to any of the three
   // conditions has to be made on purpose: 9 pipeline, 12 replay, 6 control.
+  // A contract that gains a fixture moves these numbers, and it moves the same
+  // numbers in `docs/evals/review-skill.md` and ADR 0089 with them.
   assert.equal(full.length, 27);
   assert.deepEqual([pipeline, replay, control], [9, 12, 6]);
 });
@@ -5289,9 +5291,10 @@ function scoreResume(plan, cell) {
 }
 
 test("a second judge pass reuses every verdict it already paid for", async () => {
-  // The judge costs about $4 and nine minutes a cell, so a 39-cell pass does
-  // not fit inside one usage window. Re-running the same command must resume
-  // from the verdicts on disk rather than re-spend the whole pass.
+  // The judge costs about $4 and nine minutes a cell, so a 27-cell pass runs
+  // about four hours and can still meet a usage limit. Re-running the same
+  // command must resume from the verdicts on disk rather than re-spend the
+  // whole pass.
   const root = makeRoot();
   try {
     const plan = planWithCollectedCells(root);

@@ -109,15 +109,17 @@ Cut it last.
 [ADR 0089](../adr/0089-canonical-eval-matrix-freshness-floor.md)).
 Until 2026-09 a full run took two live `pipeline` draws of every fixture and a
 `control` cell on all nine, which is 39 cells, about $145 of contestant spend
-and about $155 more for the judge pass. The second live draw was there because the finder
-samples — one codex configuration drew 19 and then 10 known defects on
-identical diffs — but two draws measures that spread rather than removing it,
-and the scorer folds a condition's draws with OR, so the second draw only
-damped the noise. Ranking two skills is the experiment lane's job, and the lane
-holds the finder fixed to do it: every draw of a lane replays one frozen report
-through both arms ([ADR 0086](../adr/0086-review-eval-lane-any-grid-multi-draw.md)).
-The canonical row is a freshness floor and the baseline anchor, so it now buys
-one live draw per PR.
+and about $155 more for the judge pass. The second live draw was there because
+the finder samples — one codex configuration drew 19 and then 10 known defects
+on identical diffs — but two points do not measure that spread, and they do not
+remove it either: the scorer folds a condition's draws with OR, so the second
+draw only damped the noise. Ranking two skills is the experiment lane's job,
+and the lane holds the finder fixed to do it: every draw of a lane replays one
+frozen report through both arms
+([ADR 0086](../adr/0086-review-eval-lane-any-grid-multi-draw.md)). The
+canonical row is a freshness floor and the baseline anchor, so it now buys one
+live draw per PR.
+
 `control` narrowed to the grid for the same reason: it is read as a paired
 per-defect difference against the previous run's control, and the grid's 39
 defects carry that comparison. The three non-grid fixtures (PRs 1982, 1984 and 2001) stay in `pipeline`, where they widen the wrong-claims and leak surface.
@@ -237,6 +239,12 @@ becomes the automatic baseline — and a complete canary is read against
 The draw check is a floor rather than an equality: a row recorded when the
 matrix planned more draws ran a superset of today's cells, and it carries a
 different comparability key anyway, so it is history rather than a short run.
+One caller keeps the equality. A baseline named with `--against` whose
+comparability key equals the plan's ran this plan's matrix, so its draws must
+match it exactly: the per-defect bits of a condition fold with OR, and a
+baseline carrying two bits per defect against a candidate's one is a higher hit
+rate for the baseline alone, which reads as lost defects. An over-sampled row
+of the current key is refused as a baseline rather than paired.
 
 Then plan and run. `--plan` prints the matrix and the cost estimate without
 spending anything.
@@ -921,7 +929,7 @@ anchor because its machine clock was slow.
    materialization falls back to `refs/pull/<n>/head` and records
    `tag_pinned: false`. CI fetches tags for exactly this reason.
 3. Run `pnpm review:eval:run --kind full` from a clean checkout. Budget
-   about $88 and two hours.
+   about $99 of contestant spend and two hours, plus the judge pass.
 4. Prepare the artifacts with `review-eval-publication.mjs`, then use the
    `ship` workflow to open the ledger PR. Its body contains the complete
    generated report and the execution-authenticity limit. State that this row
