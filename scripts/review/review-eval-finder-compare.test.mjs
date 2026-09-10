@@ -94,7 +94,11 @@ function writeArm({
         draw: 1,
         matched_ids: record.matched,
         novel: record.novel ?? { novelWrong: record.wrong ?? 0 },
-        leak: { suspected: record.leaked === true, hard: [], advisory: [] },
+        leak: record.leak ?? {
+          suspected: record.leaked === true,
+          hard: [],
+          advisory: [],
+        },
       }),
     );
   }
@@ -329,6 +333,46 @@ test("a numeric string id matches the contract's number; a non-integer id is ref
         contract,
       }),
     /not a scorable id/,
+  );
+});
+
+test("an inconsistent leak shape and a comparison with no shared cell are refused", () => {
+  const anchor = readArm({
+    dir: writeArm({
+      finder: "sol@high",
+      cells: [11],
+      results: { 11: { matched: [1] } },
+    }),
+    contract,
+  });
+  assert.throws(
+    () =>
+      readArm({
+        dir: writeArm({
+          finder: "astra@low",
+          cells: [11],
+          results: {
+            11: {
+              matched: [1],
+              leak: { suspected: false, hard: ["x"], advisory: [] },
+            },
+          },
+        }),
+        contract,
+      }),
+    /leak must carry/,
+  );
+  const disjoint = readArm({
+    dir: writeArm({
+      finder: "astra@low",
+      cells: [22],
+      results: { 22: { matched: [4] } },
+    }),
+    contract,
+  });
+  assert.throws(
+    () => compareArms({ anchor, candidate: disjoint }),
+    /nothing to compare/,
   );
 });
 

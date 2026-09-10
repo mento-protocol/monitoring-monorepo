@@ -96,6 +96,7 @@ const validationModuleLineLimits = new Map([
   ["review-eval-run-plan.mjs", 600],
   ["review-eval-run-detail.mjs", 200],
   ["review-eval-finder-compare.mjs", 600],
+  ["review-eval-finder-render.mjs", 200],
   ["review-eval-finder-override.mjs", 200],
   ["review-eval-freshness-guard.mjs", 200],
   ["review-eval-run-execution.mjs", 600],
