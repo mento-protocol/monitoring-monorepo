@@ -1,0 +1,105 @@
+{
+  "cell_id": "pr-2035-pipeline-draw1",
+  "fingerprint": {
+    "skill_digest": "89f5bdf20356c5515974ec1a6112fc4f9dfbf31cf1d60b667084f91dfbe6ec60",
+    "kind": "full",
+    "contract_digest": "59b82ee3e6d7ccf2cfbe75cb11aa40e6ec93b92a754a992adee4a1a69166a259",
+    "claude_cli": "2.1.267 (Claude Code)",
+    "codex_cli": "codex-cli 0.154.0",
+    "finder_argv_digest": "40099c93f78800efefbc46f57772ae2cbadc86b378bdd22f474945abfd7b450c",
+    "orchestrator_digest": "d460aa3fefe45e964e71b6490898ed69e69b1d6e2f99781d7eff2c8252bff61f"
+  },
+  "treatment": {
+    "skill_ref": "installed",
+    "dirty": false
+  },
+  "pr": 2035,
+  "condition": "pipeline",
+  "draw": 1,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": "gpt-5.6-sol@high",
+  "claims": [
+    "The tier2 tag-ordering fix doesn't hold for addresses tier1 already labeled — `tier2-light-forensic.mjs:672-681`: the merge step still puts the existing entry's tags first, then `derived.tags`, then keeps only the first 20, so Arkham ids fill the slots before any forensic tag (20-tag entry ends with zero ctp:/type:/entity:/slug: tags; 15-tag entry loses type:contract)",
+    "tier1's refresh merge also puts fresh Arkham tags first (`tier1-bulk-enrich.mjs:726`, copying the library's `mergeRefreshEntry`), so a pass-2 refresh of an entry tier2 wrote in pass 1 can push its `ctp:` tags out",
+    "The quota floor can overshoot by hundreds of lookups — `tier1-bulk-enrich.mjs:103, 1000, 1058`: with no `Remaining` header, `remaining` only updates when polled every 500 addresses, so the stop can fire up to about 500 lookups late, and the only remaining brake is the unverified 402/403 halt",
+    "The circuit breaker's \"resumes the queue\" message is inaccurate — `tier1-bulk-enrich.mjs:966` with lines 1036-1047 and 806-816: failed addresses get an `{address, error}` progress line and on resume any line counts as processed, so the addresses that tripped the breaker (and every earlier error) are never retried",
+    "Stale comments in `run.sh` — `run.sh:44` (\"A dry run touches neither Arkham nor Upstash\") and `:53` (\"the credential is unused\") contradict the corrected header: a dry run does read Upstash",
+    "In a dry run where tfvars exists but the Upstash management API call fails, the `python3` parse at `run.sh:92-93` aborts under `set -e`, which isn't \"best-effort\"",
+    "No tests for tier1's new logic: about 600 lines untested (the merge, the adapted Lua compare-and-set, quota tracking and the discovery abort); new `arkham.test.ts` cases cover only `src/lib/arkham.ts`",
+    "`--chain 42220` loads pass 1's `tier1-progress-42220.jsonl` and skips every pass-1 address, which is the entire refresh tier",
+    "`quota.fromHeaders` (lines 518, 548) is written but never read",
+    "Progress lines are written before the batched write is flushed (line 1010 vs 1012): an Upstash error or Ctrl-C loses up to 99 labels, and resume won't retry them even though their quota was spent"
+  ],
+  "matched_ids": [
+    3845594538,
+    3845607361,
+    3845618202
+  ],
+  "judge_reasoning": {
+    "3845594538": "The review's 'older bug' note says an Upstash error during the batched flush loses up to 99 labels, and resume won't retry them. That is the same lost-batch-on-transient-failure defect.",
+    "3845596185": "The review mentions the 250-page cap only warns, but lists it under 'checked and cleared' as unreachable. It does not treat cap truncation as a defect that should abort discovery like failedSources does.",
+    "3845603922": "The review never mentions the tfvars key prefix match in run.sh. Its run.sh notes cover stale comments and python3 under set -e.",
+    "3845603940": "The review does not mention the tag slice happening before dedup in the sanitizers. It says the sanitizer copies match the library.",
+    "3845607361": "Review item 1 finds the same bug: the tier2 merge puts existingEntry.tags first, then slices to 20. Already-labeled entries with 20 tags lose all ctp:/type: forensic tags.",
+    "3845618202": "The review's 'Related' note says tier1's refresh merge puts fresh Arkham tags first. A pass-2 refresh of a tier2 entry can then push out its ctp: tags."
+  },
+  "novel": {
+    "claims": 10,
+    "novelReal": 5,
+    "novelWrong": 0,
+    "novelVague": 2,
+    "restatedKnown": 3,
+    "alreadyMatched": 3,
+    "verdicts": {
+      "1": {
+        "class": "known",
+        "why": "tier2-light-forensic.mjs:672-682 does merge existing tags first and then slice(0,20), but this is the known 'Preserve Tier 2 tags when merging capped labels' (tier2:395)"
+      },
+      "2": {
+        "class": "known",
+        "why": "buildWriteEntry at tier1-bulk-enrich.mjs:726-727 does put fresh.tags before current.tags and then caps at 20 in sanitizeEntry, but this is the known 'Refresh wipes forensic tags'"
+      },
+      "3": {
+        "class": "real",
+        "why": "Without a Remaining header, quota.remaining is only set by logIntelUsage, which runs at start and every INTEL_USAGE_EVERY=500 (lines 103, 1058). The floor check at line 1000 reads that stale value, so a floor of 50 can be passed by up to about 500 lookups before the next poll"
+      },
+      "4": {
+        "class": "real",
+        "why": "Error branches at 1036-1047 append {address,error} before noteFailure trips the breaker. The resume loader at 806-816 adds any line with an address to processed, so errored addresses are never retried, which contradicts 'resumes the queue' at line 966"
+      },
+      "5": {
+        "class": "real",
+        "why": "run.sh:44 says a dry run 'touches neither Arkham nor Upstash' and :53 says the credential is 'unused', but the header (lines 15-18) and lines 81-95 plus tier1:772 (hasUpstash → getLabels) show a dry run mints a token and reads Upstash"
+      },
+      "6": {
+        "class": "real",
+        "why": "run.sh:28 sets -euo pipefail. If the mgmt API fails, the python3 KeyError in the assignment at :92 exits non-zero and aborts the script. I reproduced this in bash (exit=1), so the dry run isn't best-effort"
+      },
+      "7": {
+        "class": "vague",
+        "why": "True that nothing tests tier1-bulk-enrich.mjs and the arkham.test.ts additions only cover src/lib/arkham.ts, but a missing-tests note names no concrete defect"
+      },
+      "8": {
+        "class": "real",
+        "why": "scope = --chain value (line 135), and the progress file is tier1-progress-${scope}.jsonl (801). Every address in it is skipped (806-816, 854). Pass 1 ran with --chain 42220, and lines 78-80 invite passing --chain to 'resume a prior per-chain progress file', so doing that in pass 2 skips pass 1's addresses, which are most of the refresh tier"
+      },
+      "9": {
+        "class": "vague",
+        "why": "Grep confirms quota.fromHeaders is only written (518, 548) and never read, but it's harmless leftover state: dead code, not a behavioral defect"
+      },
+      "10": {
+        "class": "known",
+        "why": "Progress is appended at 1010, before the batched flush at 1012/1052, so a failed or interrupted flush loses labels that are already marked processed. This is the known 'A failed flush discards the pending batch and marks the addresses as processed'"
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 1018,
+  "usd": 2.6553375000000004,
+  "scoring_usd": 0.8934655
+}

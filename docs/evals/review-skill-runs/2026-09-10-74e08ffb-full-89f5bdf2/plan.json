@@ -1,0 +1,415 @@
+{
+  "schema_version": 1,
+  "suite_id": "review-skill-v1",
+  "kind": "full",
+  "planned_at": "2026-09-10T15:45:51Z",
+  "contract_digest": "59b82ee3e6d7ccf2cfbe75cb11aa40e6ec93b92a754a992adee4a1a69166a259",
+  "matcher_digest": "62502057b569fb0ecd039adb1471d34c3719ce18e538e84cabd29fc0016fe5d9",
+  "calibration_digest": "e9f3539bd89c06caa5b4178ead8d2cff45477daa2e14cf37adfb30668d5fa241",
+  "comparability_key": "74e08ffb1dc8454c34c5be2db436f6243392c0bb61a6952e9f37d6b3c8bf4254",
+  "judge": {
+    "model": "claude-opus-5",
+    "effort": "high"
+  },
+  "detail_dir": "docs/evals/review-skill-runs/2026-09-10-74e08ffb-full-89f5bdf2",
+  "baseline_selection": "automatic",
+  "baseline": null,
+  "resume_from": null,
+  "plan_dir": "/private/tmp/claude/review-eval-a3c8bffc/docs/evals/review-skill-runs/2026-09-10-74e08ffb-full-89f5bdf2",
+  "inputs": {
+    "skill_digest": "89f5bdf20356c5515974ec1a6112fc4f9dfbf31cf1d60b667084f91dfbe6ec60",
+    "skill_ref": "installed",
+    "finder_argv_digest": "40099c93f78800efefbc46f57772ae2cbadc86b378bdd22f474945abfd7b450c",
+    "orchestrator_digest": "d460aa3fefe45e964e71b6490898ed69e69b1d6e2f99781d7eff2c8252bff61f",
+    "claude_cli": "2.1.267 (Claude Code)",
+    "codex_cli": "codex-cli 0.154.0",
+    "host": "Mac"
+  },
+  "totals": {
+    "prs": 9,
+    "scorable": 51,
+    "p1": 16
+  },
+  "estimate": {
+    "cells": 27,
+    "claude_usd": 99.36
+  },
+  "warnings": [],
+  "cells": [
+    {
+      "cell_id": "pr-1982-pipeline-draw1",
+      "pr": 1982,
+      "condition": "pipeline",
+      "draw": 1,
+      "model": "claude-opus-5",
+      "effort": "high",
+      "finder": "gpt-5.6-sol@high",
+      "finder_argv": [
+        "codex",
+        "exec",
+        "review",
+        "--base",
+        "base",
+        "-m",
+        "gpt-5.6-sol",
+        "-c",
+        "model_reasoning_effort=\"high\""
+      ],
+      "prompt": "handoff"
+    },
+    {
+      "cell_id": "pr-1984-pipeline-draw1",
+      "pr": 1984,
+      "condition": "pipeline",
+      "draw": 1,
+      "model": "claude-opus-5",
+      "effort": "high",
+      "finder": "gpt-5.6-sol@high",
+      "finder_argv": [
+        "codex",
+        "exec",
+        "review",
+        "--base",
+        "base",
+        "-m",
+        "gpt-5.6-sol",
+        "-c",
+        "model_reasoning_effort=\"high\""
+      ],
+      "prompt": "handoff"
+    },
+    {
+      "cell_id": "pr-1990-pipeline-draw1",
+      "pr": 1990,
+      "condition": "pipeline",
+      "draw": 1,
+      "model": "claude-opus-5",
+      "effort": "high",
+      "finder": "gpt-5.6-sol@high",
+      "finder_argv": [
+        "codex",
+        "exec",
+        "review",
+        "--base",
+        "base",
+        "-m",
+        "gpt-5.6-sol",
+        "-c",
+        "model_reasoning_effort=\"high\""
+      ],
+      "prompt": "handoff"
+    },
+    {
+      "cell_id": "pr-1995-pipeline-draw1",
+      "pr": 1995,
+      "condition": "pipeline",
+      "draw": 1,
+      "model": "claude-opus-5",
+      "effort": "high",
+      "finder": "gpt-5.6-sol@high",
+      "finder_argv": [
+        "codex",
+        "exec",
+        "review",
+        "--base",
+        "base",
+        "-m",
+        "gpt-5.6-sol",
+        "-c",
+        "model_reasoning_effort=\"high\""
+      ],
+      "prompt": "handoff"
+    },
+    {
+      "cell_id": "pr-1999-pipeline-draw1",
+      "pr": 1999,
+      "condition": "pipeline",
+      "draw": 1,
+      "model": "claude-opus-5",
+      "effort": "high",
+      "finder": "gpt-5.6-sol@high",
+      "finder_argv": [
+        "codex",
+        "exec",
+        "review",
+        "--base",
+        "base",
+        "-m",
+        "gpt-5.6-sol",
+        "-c",
+        "model_reasoning_effort=\"high\""
+      ],
+      "prompt": "handoff"
+    },
+    {
+      "cell_id": "pr-2001-pipeline-draw1",
+      "pr": 2001,
+      "condition": "pipeline",
+      "draw": 1,
+      "model": "claude-opus-5",
+      "effort": "high",
+      "finder": "gpt-5.6-sol@high",
+      "finder_argv": [
+        "codex",
+        "exec",
+        "review",
+        "--base",
+        "base",
+        "-m",
+        "gpt-5.6-sol",
+        "-c",
+        "model_reasoning_effort=\"high\""
+      ],
+      "prompt": "handoff"
+    },
+    {
+      "cell_id": "pr-2035-pipeline-draw1",
+      "pr": 2035,
+      "condition": "pipeline",
+      "draw": 1,
+      "model": "claude-opus-5",
+      "effort": "high",
+      "finder": "gpt-5.6-sol@high",
+      "finder_argv": [
+        "codex",
+        "exec",
+        "review",
+        "--base",
+        "base",
+        "-m",
+        "gpt-5.6-sol",
+        "-c",
+        "model_reasoning_effort=\"high\""
+      ],
+      "prompt": "handoff"
+    },
+    {
+      "cell_id": "pr-2039-pipeline-draw1",
+      "pr": 2039,
+      "condition": "pipeline",
+      "draw": 1,
+      "model": "claude-opus-5",
+      "effort": "high",
+      "finder": "gpt-5.6-sol@high",
+      "finder_argv": [
+        "codex",
+        "exec",
+        "review",
+        "--base",
+        "base",
+        "-m",
+        "gpt-5.6-sol",
+        "-c",
+        "model_reasoning_effort=\"high\""
+      ],
+      "prompt": "handoff"
+    },
+    {
+      "cell_id": "pr-2121-pipeline-draw1",
+      "pr": 2121,
+      "condition": "pipeline",
+      "draw": 1,
+      "model": "claude-opus-5",
+      "effort": "high",
+      "finder": "gpt-5.6-sol@high",
+      "finder_argv": [
+        "codex",
+        "exec",
+        "review",
+        "--base",
+        "base",
+        "-m",
+        "gpt-5.6-sol",
+        "-c",
+        "model_reasoning_effort=\"high\""
+      ],
+      "prompt": "handoff"
+    },
+    {
+      "cell_id": "pr-1990-replay-draw1",
+      "pr": 1990,
+      "condition": "replay",
+      "draw": 1,
+      "model": "claude-opus-5",
+      "effort": "high",
+      "finder": "gpt-5.6-sol@high",
+      "finder_report": "docs/evals/review-skill-finder-reports/pr-1990-draw1.md",
+      "prompt": "handoff"
+    },
+    {
+      "cell_id": "pr-1990-replay-draw2",
+      "pr": 1990,
+      "condition": "replay",
+      "draw": 2,
+      "model": "claude-opus-5",
+      "effort": "high",
+      "finder": "gpt-5.6-sol@high",
+      "finder_report": "docs/evals/review-skill-finder-reports/pr-1990-draw2.md",
+      "prompt": "handoff"
+    },
+    {
+      "cell_id": "pr-1995-replay-draw1",
+      "pr": 1995,
+      "condition": "replay",
+      "draw": 1,
+      "model": "claude-opus-5",
+      "effort": "high",
+      "finder": "gpt-5.6-sol@high",
+      "finder_report": "docs/evals/review-skill-finder-reports/pr-1995-draw1.md",
+      "prompt": "handoff"
+    },
+    {
+      "cell_id": "pr-1995-replay-draw2",
+      "pr": 1995,
+      "condition": "replay",
+      "draw": 2,
+      "model": "claude-opus-5",
+      "effort": "high",
+      "finder": "gpt-5.6-sol@high",
+      "finder_report": "docs/evals/review-skill-finder-reports/pr-1995-draw2.md",
+      "prompt": "handoff"
+    },
+    {
+      "cell_id": "pr-1999-replay-draw1",
+      "pr": 1999,
+      "condition": "replay",
+      "draw": 1,
+      "model": "claude-opus-5",
+      "effort": "high",
+      "finder": "gpt-5.6-sol@high",
+      "finder_report": "docs/evals/review-skill-finder-reports/pr-1999-draw1.md",
+      "prompt": "handoff"
+    },
+    {
+      "cell_id": "pr-1999-replay-draw2",
+      "pr": 1999,
+      "condition": "replay",
+      "draw": 2,
+      "model": "claude-opus-5",
+      "effort": "high",
+      "finder": "gpt-5.6-sol@high",
+      "finder_report": "docs/evals/review-skill-finder-reports/pr-1999-draw2.md",
+      "prompt": "handoff"
+    },
+    {
+      "cell_id": "pr-2035-replay-draw1",
+      "pr": 2035,
+      "condition": "replay",
+      "draw": 1,
+      "model": "claude-opus-5",
+      "effort": "high",
+      "finder": "gpt-5.6-sol@high",
+      "finder_report": "docs/evals/review-skill-finder-reports/pr-2035-draw1.md",
+      "prompt": "handoff"
+    },
+    {
+      "cell_id": "pr-2035-replay-draw2",
+      "pr": 2035,
+      "condition": "replay",
+      "draw": 2,
+      "model": "claude-opus-5",
+      "effort": "high",
+      "finder": "gpt-5.6-sol@high",
+      "finder_report": "docs/evals/review-skill-finder-reports/pr-2035-draw2.md",
+      "prompt": "handoff"
+    },
+    {
+      "cell_id": "pr-2039-replay-draw1",
+      "pr": 2039,
+      "condition": "replay",
+      "draw": 1,
+      "model": "claude-opus-5",
+      "effort": "high",
+      "finder": "gpt-5.6-sol@high",
+      "finder_report": "docs/evals/review-skill-finder-reports/pr-2039-draw1.md",
+      "prompt": "handoff"
+    },
+    {
+      "cell_id": "pr-2039-replay-draw2",
+      "pr": 2039,
+      "condition": "replay",
+      "draw": 2,
+      "model": "claude-opus-5",
+      "effort": "high",
+      "finder": "gpt-5.6-sol@high",
+      "finder_report": "docs/evals/review-skill-finder-reports/pr-2039-draw2.md",
+      "prompt": "handoff"
+    },
+    {
+      "cell_id": "pr-2121-replay-draw1",
+      "pr": 2121,
+      "condition": "replay",
+      "draw": 1,
+      "model": "claude-opus-5",
+      "effort": "high",
+      "finder": "gpt-5.6-sol@high",
+      "finder_report": "docs/evals/review-skill-finder-reports/pr-2121-draw1.md",
+      "prompt": "handoff"
+    },
+    {
+      "cell_id": "pr-2121-replay-draw2",
+      "pr": 2121,
+      "condition": "replay",
+      "draw": 2,
+      "model": "claude-opus-5",
+      "effort": "high",
+      "finder": "gpt-5.6-sol@high",
+      "finder_report": "docs/evals/review-skill-finder-reports/pr-2121-draw2.md",
+      "prompt": "handoff"
+    },
+    {
+      "cell_id": "pr-1990-control-draw1",
+      "pr": 1990,
+      "condition": "control",
+      "draw": 1,
+      "model": "claude-opus-5",
+      "effort": "high",
+      "prompt": "request"
+    },
+    {
+      "cell_id": "pr-1995-control-draw1",
+      "pr": 1995,
+      "condition": "control",
+      "draw": 1,
+      "model": "claude-opus-5",
+      "effort": "high",
+      "prompt": "request"
+    },
+    {
+      "cell_id": "pr-1999-control-draw1",
+      "pr": 1999,
+      "condition": "control",
+      "draw": 1,
+      "model": "claude-opus-5",
+      "effort": "high",
+      "prompt": "request"
+    },
+    {
+      "cell_id": "pr-2035-control-draw1",
+      "pr": 2035,
+      "condition": "control",
+      "draw": 1,
+      "model": "claude-opus-5",
+      "effort": "high",
+      "prompt": "request"
+    },
+    {
+      "cell_id": "pr-2039-control-draw1",
+      "pr": 2039,
+      "condition": "control",
+      "draw": 1,
+      "model": "claude-opus-5",
+      "effort": "high",
+      "prompt": "request"
+    },
+    {
+      "cell_id": "pr-2121-control-draw1",
+      "pr": 2121,
+      "condition": "control",
+      "draw": 1,
+      "model": "claude-opus-5",
+      "effort": "high",
+      "prompt": "request"
+    }
+  ]
+}

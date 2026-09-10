@@ -1,0 +1,119 @@
+{
+  "cell_id": "pr-1999-pipeline-draw1",
+  "fingerprint": {
+    "skill_digest": "89f5bdf20356c5515974ec1a6112fc4f9dfbf31cf1d60b667084f91dfbe6ec60",
+    "kind": "full",
+    "contract_digest": "59b82ee3e6d7ccf2cfbe75cb11aa40e6ec93b92a754a992adee4a1a69166a259",
+    "claude_cli": "2.1.267 (Claude Code)",
+    "codex_cli": "codex-cli 0.154.0",
+    "finder_argv_digest": "40099c93f78800efefbc46f57772ae2cbadc86b378bdd22f474945abfd7b450c",
+    "orchestrator_digest": "d460aa3fefe45e964e71b6490898ed69e69b1d6e2f99781d7eff2c8252bff61f"
+  },
+  "treatment": {
+    "skill_ref": "installed",
+    "dirty": false
+  },
+  "pr": 1999,
+  "condition": "pipeline",
+  "draw": 1,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": "gpt-5.6-sol@high",
+  "claims": [
+    "alerts/rules/peg-rule-definitions.tftest.hcl:68-69 — Terraform test still expects the old Slack title: it asserts peg_slack_title contains $alert.Annotations.summary and $alert.Annotations.resolved_summary, which this change removed, so terraform test will fail in required PR CI and on main; the file wasn't updated",
+    "peg-alert-events.ts:109-110 with :320-321 — an Error→Alerting transition never opens an alert cycle, so the final clear is treated as a raise from before the window (:346), loses the 'lasted N' duration, takes wording from the Normal row's values (:262), and a repeated cycle on the same fingerprint makes unpairedCleared.set at :346 overwrite the earlier clear so that event disappears; no test covers this sequence",
+    "route.test.ts:819, 832, 846 — the fail-closed tests now pass no matter what: .mockResolvedValue(json(...)) hands one shared Response to fetch calls 2–4, the second read throws 'ReadableStream is locked' and maps to 502, so the malformed-frame, oversized-body and truncation tests would stay green even if the guards were deleted",
+    "route.ts:43-56 / peg-alert-events.ts:341 — errors that end in any state other than Normal or Alerting (e.g. Error→Pending for rules with a pending period) are never fetched, so the error cycle stays open, a later Error on the same fingerprint is dropped, and recovery reports 'lasted' from the first error",
+    "docs/notes/peg-monitoring.md lines 118-119 are stale: they still say 'Slack titles use the severity icon plus that summary'",
+    "docs/notes/peg-monitoring.md lines 132-133 are stale: they still say the backend 'reads only fired and resolved transitions'",
+    "peg-alert-events.ts:230-242 — the wording names the price source, not the rule: rules with source = \"\" (Structural, Heartbeat, Indexed Pool, Policy Rollover) render as 'Grafana could not evaluate the Price source Peg rule'",
+    "peg-alert-events.ts:230-242 — for Bitvavo, the wording can't tell apart the six Bitvavo rules",
+    "Existing bug: Alerting→Error→Normal still leaves the alert cycle open, so the raise never gets a matching clear; this change fetches the Error→Normal row that would close it but doesn't use it",
+    "route.ts:63-64 — the change goes back to four upstream queries (which #1875 cut to 2 to restore alert history availability), hidden inside fetchJson, which guesses the extra query from the URL parameters",
+    "One Prometheus error floods the panel: all peg rules share one datasource (rules-peg.tf:71), so each rule gets its own 'failed' and 'recovered' event and with PEG_ALERTS_MAX_EVENTS = 4 the panel shows only monitoring noise, pushing out real alerts",
+    "Repeated error blips count toward the 1,001-row cap, which makes the whole panel return 502"
+  ],
+  "matched_ids": [
+    3830366247,
+    3830366547,
+    3830366556,
+    3830371315,
+    3830371325,
+    3830416461
+  ],
+  "judge_reasoning": {
+    "3830366247": "Review item 4 says Error→Pending recoveries (rules with for > 0) are never queried, because only current=Normal/Alerting are fetched. It proposes querying previous=Error with no current filter.",
+    "3830366547": "Review's 'Existing bug' note says Alerting→Error→Normal leaves the alert cycle open, so the raise never gets a matching clear, even though the Error→Normal row is now fetched.",
+    "3830366556": "Review item 4 says the error cycle stays open (orphaned) when recovery goes through Pending, because Pending transitions aren't queried.",
+    "3830371307": "Review item 1 covers the Terraform tftest asserting the old Slack title. It never raises the JS lint test's unvalidated marker indexes or its whole-source link searches.",
+    "3830371315": "Review item 3 flags that mockResolvedValue shares one Response across fetch calls 2–4, causing a locked-stream 502 so the fail-closed tests pass regardless.",
+    "3830371325": "Review item 2 flags error-recovered-alerting only closing the error cycle and not opening the alert cycle, so the pairing breaks. This matches the defect's focus on handling error-recovered-alerting at line 352.",
+    "3830416461": "Review item 6 says source-less rules (Structural, Heartbeat, Indexed Pool, Policy Rollover) render as 'Price source' in the evaluation-failure wording."
+  },
+  "novel": {
+    "claims": 12,
+    "novelReal": 5,
+    "novelWrong": 0,
+    "novelVague": 1,
+    "restatedKnown": 6,
+    "alreadyMatched": 6,
+    "verdicts": {
+      "1": {
+        "class": "known",
+        "why": "Verified: peg-rule-definitions.tftest.hcl:68-69 still asserts the title template contains $alert.Annotations.summary/resolved_summary, which the diff removed. Same as the known 'Update the stale Terraform title assertion'."
+      },
+      "2": {
+        "class": "real",
+        "why": "transitionKind maps Error→Alerting to error-recovered-alerting (error cycle key), so the alert key is never opened. The later Alerting→Normal clear goes into unpairedCleared (:346), with no 'lasted' and evidence taken from transition.line (:262). A second cycle overwrites the Map entry before any alert-key opening flushes it. The only new test ends at Alerting."
+      },
+      "3": {
+        "class": "known",
+        "why": "route.test.ts:819/832/846 now use mockResolvedValue with one shared Response.json instance across fetch calls 2-4, so reading the body again fails and the tests pass regardless. Same as the known route.test.ts:819 item."
+      },
+      "4": {
+        "class": "known",
+        "why": "errorStateHistoryUrl only adds previous=Error for the current=Normal query, so Error→Pending is never fetched and the error cycle stays open. Same as the known :114/:116 Pending-recovery items."
+      },
+      "5": {
+        "class": "known",
+        "why": "docs/notes/peg-monitoring.md:118-119 still say 'Slack titles use the severity icon plus that summary'. Same as the known 'Keep the Peg runbook aligned with the new title'."
+      },
+      "6": {
+        "class": "real",
+        "why": "docs/notes/peg-monitoring.md:132-133 still say the backend 'reads only fired and resolved transitions', but route.ts now also fetches current=Error and previous=Error rows (the test expects 4 calls). The diff doesn't touch the docs."
+      },
+      "7": {
+        "class": "known",
+        "why": "pegAlertSourceName('') returns 'Price source', so source-less rules read 'Grafana could not evaluate the Price source Peg rule'. Same as the known :230 'Label source-less evaluation failures by rule'."
+      },
+      "8": {
+        "class": "real",
+        "why": "The lead at :230-242 uses only the source name and the detail only the asset. Bitvavo has several deep-venue rules (downside, premium, critical, spread, blind, unhealthy, …), and the explanation text just says 'this Peg rule', so identical rows can't be told apart."
+      },
+      "9": {
+        "class": "known",
+        "why": "Error→Normal is classified error-recovered under the error cycleKey, so an Alerting raise stays open in the alert cycle and is emitted as still active. Same as the known :352 'Error recovery leaves breach active'."
+      },
+      "10": {
+        "class": "vague",
+        "why": "Accurate: fetchJson now fans out to 4 queries by reading the URL params, and #1875 had cut the history route from 4 to 2 (it also removed the lead-in window). But the claim shows no concrete availability failure, only a design concern."
+      },
+      "11": {
+        "class": "real",
+        "why": "rules-peg.tf:71 gives every Peg rule the same prometheus datasource_uid with exec_err_state=Error. duplicateKey includes rule kind, asset and source, so per-rule failed/recovered events don't coalesce, and PEG_ALERTS_MAX_EVENTS=4 lets them push out breach events."
+      },
+      "12": {
+        "class": "real",
+        "why": "The new Error queries use the same limit=1001 and parseStateFrameTransitions throws when rows exceed PEG_ALERTS_MAX_STATE_ROWS. GET maps that to 502 for the whole panel, so flapping errors across many rules can now fail the endpoint."
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 1198,
+  "usd": 2.980194,
+  "scoring_usd": 1.0414185000000002
+}

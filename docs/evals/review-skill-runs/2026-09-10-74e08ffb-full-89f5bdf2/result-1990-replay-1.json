@@ -1,0 +1,117 @@
+{
+  "cell_id": "pr-1990-replay-draw1",
+  "fingerprint": {
+    "skill_digest": "89f5bdf20356c5515974ec1a6112fc4f9dfbf31cf1d60b667084f91dfbe6ec60",
+    "kind": "full",
+    "contract_digest": "59b82ee3e6d7ccf2cfbe75cb11aa40e6ec93b92a754a992adee4a1a69166a259",
+    "claude_cli": "2.1.267 (Claude Code)",
+    "codex_cli": "codex-cli 0.154.0",
+    "finder_argv_digest": "40099c93f78800efefbc46f57772ae2cbadc86b378bdd22f474945abfd7b450c",
+    "orchestrator_digest": "d460aa3fefe45e964e71b6490898ed69e69b1d6e2f99781d7eff2c8252bff61f"
+  },
+  "treatment": {
+    "skill_ref": "installed",
+    "dirty": false
+  },
+  "pr": 1990,
+  "condition": "replay",
+  "draw": 1,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": "gpt-5.6-sol@high",
+  "claims": [
+    "Anyone can post the \"review requested\" marker, and it gets accepted (`scripts/pr/pr-ready-state-core.mjs:772-783`): the loop over issue comments never checks who wrote the comment, unlike sibling readiness overrides that use `isTrustedHumanAuthor`/`HUMAN_OVERRIDE_ASSOCIATIONS`",
+    "The ordered runbook puts the request after the final pair (`docs/notes/pr-ready-state.md:399-408`): it runs the pair in step 5 and makes the request in step 8, step 10 never says to rerun feedback-state, and this contradicts `SKILL.md:295` and `pr-operating-card.md:157`",
+    "A clean CodeRabbit run probably never counts as `reviewed` (`pr-ready-state-core.mjs:760-770`): the classifier only reads review records, but a clean result appears in the top-level summary comment, so the agent posts one unnecessary request and the head stays `requested` forever, contradicting `pr-ready-state.md:355`",
+    "The docs call the marker \"idempotent\" and duplicate-proof, which overstates it (`babysit-pr/SKILL.md:311`, `ship/SKILL.md:214`, `cloud-watch-loop.md:55`, ADR 0066:216-219): two babysitters can both see no marker and both post",
+    "The canonical JSON example is missing the new field (`docs/notes/pr-ready-state.md:276-305`): neither `gates.codeRabbitReviewSignal` nor the top-level `codeRabbitReviewSignal` appears in it",
+    "The skill doesn't say where to read the CodeRabbit check status (`babysit-pr/SKILL.md:296-300`): feedback-state's output has no optional-check section, and the check state is only in `pr:ready-state`'s `optional.items`",
+    "Deleting the `isCurrentSignal` check at `pr-ready-state-core.mjs:778` fails no test",
+    "No test uses the REST shape for reviews (`coderabbitai[bot]` / `commit_id`)",
+    "No test covers who wrote the comment",
+    "File size (`pr-ready-state-core.mjs`): goes from 998 to 1,077 raw lines, flagged as \"near hard cap\" (+84) by the watchlist script",
+    "No fallback check when the head SHA is missing (`pr-ready-state-core.mjs:442, 658`): failing closed would be good hardening",
+    "Unconfirmed that real review bodies contain `**Run ID**` in the format the regex expects (the new fixture has no source); if the format is wrong, the signal can never reach `reviewed`"
+  ],
+  "matched_ids": [
+    3829654081,
+    3829659544,
+    3829659546,
+    3829659550,
+    3830259678
+  ],
+  "judge_reasoning": {
+    "3829654081": "Finding 8 flags pr-ready-state-core.mjs growing from 998 to 1,077 raw / 961 rough lines into the 'near hard cap' tier and suggests moving the helpers out, the same file-size defect, just downgraded.",
+    "3829659544": "Finding 5 says the canonical JSON example in pr-ready-state.md omits gates.codeRabbitReviewSignal.",
+    "3829659546": "Finding 2 says the ordered runbook in pr-ready-state.md:399-408 runs the final pair before the CodeRabbit request, inconsistent with the skill mirrors.",
+    "3829659550": "Finding 9 says that with no head SHA the code falls back to timestamps instead of requiring an exact head match, and recommends failing closed. It is downgraded, but it is the same defect.",
+    "3830259678": "Finding 1 says the issue-comment loop at pr-ready-state-core.mjs:772-783 accepts the marker from any commenter without checking the author or trust association.",
+    "3830394205": "Not matched. The review's authentication finding covers only the local classifier; it mentions the cloud path only to ask which account posts the marker. It never says the condition in cloud-watch-loop.md accepts markers from any commenter, and it cites that file only for the 'idempotent' wording."
+  },
+  "novel": {
+    "claims": 12,
+    "novelReal": 3,
+    "novelWrong": 0,
+    "novelVague": 5,
+    "restatedKnown": 4,
+    "alreadyMatched": 5,
+    "verdicts": {
+      "1": {
+        "class": "known",
+        "why": "The issue-comment loop at pr-ready-state-core.mjs:772-783 has no author or association check. This is the same defect as the known 'Trust only authorized closeout requests' at :772."
+      },
+      "2": {
+        "class": "known",
+        "why": "In pr-ready-state.md, the pair runs in step 5, the request is in step 8, and step 10 has no rerun. This matches the known pr-ready-state.md:408 Functional Correctness finding."
+      },
+      "3": {
+        "class": "real",
+        "why": "classifyCodeRabbitReviewSignal only returns 'reviewed' for review records with a **Run ID** marker. The repo's own fixture from PR #1918 (pr-feedback-state.test.mjs:3369) shows the clean result 'No actionable comments were generated' in the top-level walkthrough comment, which the classifier never reads. So a clean run stays missing, or stays requested once a request is posted, contrary to doc line 355."
+      },
+      "4": {
+        "class": "vague",
+        "why": "The marker check does dedupe sequential runs. A double post needs two watchers on one PR at once, which the skill's one-watcher-per-PR ownership rule already rules out. This is a wording nit, not a concrete defect."
+      },
+      "5": {
+        "class": "real",
+        "why": "The gates example at pr-ready-state.md:276-305 used to list every gate. It now lacks gates.codeRabbitReviewSignal and the top-level codeRabbitReviewSignal, so the documented contract is stale."
+      },
+      "6": {
+        "class": "vague",
+        "why": "It's true that summarizeFeedbackState outputs no optional checks. But the same skill (SKILL.md:139-141) already tells agents to read optional.items from pr:ready-state --json, so this is a clarity nit."
+      },
+      "7": {
+        "class": "real",
+        "why": "I removed the isCurrentSignal clause in a git-archive copy and pr-ready-state.test.mjs still reported 82 passed. No test has a current-head request dated before headUpdatedAt."
+      },
+      "8": {
+        "class": "vague",
+        "why": "It's true that no CodeRabbit test uses user.login or commit_id. But production fetches reviews only through gh pr view --json reviews (GraphQL shape, pr-ready-state.mjs:770), so this is a test gap on an unused path with no defect shown."
+      },
+      "9": {
+        "class": "known",
+        "why": "The missing author test follows from the missing author check, which is already covered by the known :772 authorization finding."
+      },
+      "10": {
+        "class": "known",
+        "why": "wc -l confirms 998 lines at base and 1077 at HEAD. This is covered by the known 'Split the growing ready-state core' at :750."
+      },
+      "11": {
+        "class": "vague",
+        "why": "Line 442 returns true when there is no head SHA, but the isCurrentSignal time bound still applies, and gh pr view always returns headRefOid. This is a hardening suggestion with no concrete failure."
+      },
+      "12": {
+        "class": "vague",
+        "why": "This is a hedged 'unconfirmed format' speculation. It shows no evidence that real bodies differ from the regex at line 4."
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 330,
+  "usd": 2.165332,
+  "scoring_usd": 1.2954184999999998
+}
