@@ -16,7 +16,7 @@ garden_lane: adrs-architecture
 **Status:** Accepted (Apr 2026), in force. Scope extended by
 [ADR 0042](0042-metrics-bridge-external-price-poller.md) (Jul 2026): the
 bridge additionally hosts an isolated external market-price peg-polling
-lifecycle. [ADR 0094](0094-isolated-bridge-transfer-observations.md) adds an
+lifecycle. [ADR 0095](0095-isolated-bridge-transfer-observations.md) adds an
 isolated bridge-transfer observation lifecycle.
 **Scope:** metrics-bridge
 

@@ -11,7 +11,7 @@ review_interval_days: 90
 garden_lane: adrs-architecture
 ---
 
-# ADR 0094 — Bridge transfers use isolated complete observations
+# ADR 0095 — Bridge transfers use isolated complete observations
 
 **Status:** Accepted. Extends [ADR 0027](0027-metrics-bridge-hasura-to-prometheus.md).
 
