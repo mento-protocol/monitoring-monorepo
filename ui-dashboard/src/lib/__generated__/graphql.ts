@@ -6120,6 +6120,11 @@ export type CdpSchemaFieldsQuery = {
       readonly name: string;
     }> | null;
   } | null;
+  readonly TroveOperationEventType: {
+    readonly fields: ReadonlyArray<{
+      readonly name: string;
+    }> | null;
+  } | null;
   readonly TroveLedgerEventType: {
     readonly fields: ReadonlyArray<{
       readonly name: string;
@@ -7094,6 +7099,28 @@ export type CdpTroveOperationsQuery = {
     readonly debtIncreaseFromUpfrontFee: string;
     readonly timestamp: string;
     readonly blockNumber: string;
+    readonly txHash: string;
+  }>;
+};
+
+// queries/liquity.CDP_TROVE_OPERATIONS_NUMERIC
+export type CdpTroveOperationsNumericQueryVariables = {
+  readonly instanceId: string;
+  readonly troveId: string;
+  readonly limit: number;
+};
+export type CdpTroveOperationsNumericQuery = {
+  readonly TroveOperationEvent: ReadonlyArray<{
+    readonly id: string;
+    readonly troveId: string;
+    readonly operation: number;
+    readonly collChange: string;
+    readonly debtChange: string;
+    readonly annualInterestRate: string;
+    readonly debtIncreaseFromUpfrontFee: string;
+    readonly timestamp: string;
+    readonly blockNumber: string;
+    readonly logIndex: number;
     readonly txHash: string;
   }>;
 };

@@ -11,6 +11,7 @@ Terraform-managed alert infrastructure for monitoring Mento's infrastructure acr
 ├── main.tf                 # Root configuration and module orchestration
 ├── variables.tf            # Shared variable definitions
 ├── outputs.tf              # Aggregated outputs
+├── bridge-warning-channel.tf # #alerts-bridges lifecycle and initial @eng roster
 ├── monitoring.tf           # GCP operational alerts → Slack #alerts-infra
 │
 ├── channels/
@@ -498,3 +499,12 @@ pnpm alerts:oncall:typecheck
 pnpm alerts:oncall:test
 # Apply and approved removals run only through production-infra-gated CI.
 ```
+
+## Bridge warning channel
+
+`bridge-warning-channel.tf` provisions the approved public `#alerts-bridges`
+channel through the existing Slack module and seeds the existing `@eng` roster.
+Grafana contact points remain in `alerts/rules`. Verify the Grafana Alerts bot
+can post before enabling bridge rules; it can differ from this stack's channel
+management bot. Follow the [bridge alert runbook](../../docs/notes/bridge-transfer-alerting.md)
+for the separate channel, exporter, rule and delivery approval steps.
