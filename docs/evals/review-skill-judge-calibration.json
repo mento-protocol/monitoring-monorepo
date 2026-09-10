@@ -10,7 +10,7 @@
   "prompt": "scripts/review/prompts/judge-match.md"
  },
  "limits": {
-  "agreement_amber_below": 35
+  "agreement_amber_below": 37
  },
  "counts": {
   "total": 40,
@@ -836,14 +836,12 @@
  "measured_blind_baseline": {
   "model": "claude-fable-5",
   "effort": "max",
-  "measured_at": "2026-08-28",
-  "agreement": 37,
+  "measured_at": "2026-09-09",
+  "agreement": 39,
   "total": 40,
   "misses": [
-   "pr1982-3827655676-unmatched",
-   "pr1982-3827655684-unmatched",
-   "pr1995-3830695396-unmatched"
+   "pr1982-3827647420-matched"
   ],
-  "note": "Blind excerpt-only replay of the contract judge against the audited labels; the three misses are the same-file trap pairs recorded in provenance as a systematic blind over-matching bias. The verdict floor is anchored at this baseline minus 2."
+  "note": "Blind replay of the contract judge against the audited labels through the renderer fixed for issue 2332, which shows the judge each record's title plus its body detail. Two independent replays on 2026-09-09 both scored 39/40 with the same single miss. The 2026-08-28 baseline of 37/40 was measured on a title-only rendering, the defect that issue fixed: its three misses were the same-file trap pairs pr1982-3827655676-unmatched, pr1982-3827655684-unmatched and pr1995-3830695396-unmatched, and all three now judge correctly. The one miss left is new. pr1982-3827647420-matched is an under-match: the judge holds that the review names a different flaw in the same verification code, a false verification failure when a competing claim lands after a successful write, while the defect is stale claim data written when the competing claim lands before or during the write batch. Both replays gave that reasoning. The label is a matched pair from the audited set and is a candidate for the next re-audit, not a change made here. The verdict floor is anchored at this baseline minus 2."
  }
 }

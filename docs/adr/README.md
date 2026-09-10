@@ -100,6 +100,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0088](0088-temporary-m6-canary-collection.md)              | Collect temporary M6 canary evidence after CI without per-PR operator requests       |
 | [0089](0089-review-eval-canonical-matrix-pr-groups.md)      | The canonical review-eval matrix runs PR groups concurrently                         |
 | [0090](0090-canonical-eval-matrix-freshness-floor.md)       | Canonical full run drops to 27 cells; repeat draws live in the experiment lane       |
+| [0091](0091-promote-needs-replay-corroboration.md)          | A PROMOTE re-anchors only when `replay` corroborates the `pipeline` gain             |
 | [0092](0092-dependabot-npm-version-updates.md)              | Dependabot batches npm version updates into Monday groups; npm stays operator-merged |
 
 ### shared-config
