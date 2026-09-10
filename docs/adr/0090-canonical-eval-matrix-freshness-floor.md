@@ -95,11 +95,10 @@ today's cells, and it carries a different comparability key in any case.
   on one of the 12 defects from PRs 1982, 1984 and 2001 is unchecked rather than
   uncorroborated. The thresholds in
   `verdict_rules` are pre-registered and are deliberately not re-tuned here.
-- That reading is not enforced. A PROMOTE re-anchors the baseline on its own
-  and its verdict is recomputed from the row's numbers, so it cannot be lowered
-  by hand.
-  [Issue 2324](https://github.com/mento-protocol/monitoring-monorepo/issues/2324)
-  carries the rule change, which is its own pre-registered decision.
+- That reading is now enforced on the PROMOTE side.
+  [ADR 0091](0091-promote-needs-replay-corroboration.md) gates the PROMOTE
+  branch on a corroborating `replay` gain, so an uncorroborated `pipeline` gain
+  reads GREEN and does not re-anchor the baseline. RED is unchanged.
 - `control` recall is measured over the 39 grid defects while `pipeline` covers
   all 51. The two rates are over different denominators and must not be
   subtracted from each other within a run.
