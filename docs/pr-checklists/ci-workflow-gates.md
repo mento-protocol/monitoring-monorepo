@@ -255,7 +255,16 @@ Audit workflows that "tolerate transient errors" become attack surface — an at
 
 ## 7. Dependabot policy
 
-Dependabot is scoped to the `github-actions` ecosystem (`.github/dependabot.yml`). npm is handled by pnpm with `minimumReleaseAge: 4320` in `pnpm-workspace.yaml`; GitHub-issued security advisories on `pnpm-lock.yaml` still come through as Dependabot PRs without an `npm` entry.
+Dependabot covers two ecosystems in `.github/dependabot.yml`: `github-actions`
+and `npm`. Both run weekly on Monday. The npm entry batches routine workspace
+updates into themed groups (`next-runtime`, `envio-runtime`, `nest-runtime`,
+`playwright-runtime`, `chain-stack`, `test-toolchain`, `lint-toolchain`, plus
+`production-misc` and `tooling` catch-alls) and mirrors those boundaries for
+security updates. `minimumReleaseAge: 4320` in `pnpm-workspace.yaml` is a
+separate three-day install-time guard for versions not listed in
+`minimumReleaseAgeExclude`. GitHub-issued security advisories on `pnpm-lock.yaml` open
+as soon as the advisory publishes; the schedule does not apply to them. See
+[ADR 0092](../adr/0092-dependabot-npm-version-updates.md).
 
 Dependabot groups routine updates. One exact group can auto-merge through
 `.github/workflows/dependabot-auto-merge.yml`.
@@ -279,7 +288,9 @@ Dependabot groups routine updates. One exact group can auto-merge through
 - **`dependabot/*`:** require an operator-authorized merge. `dependabot/fetch-metadata`
   classifies this auto-merge lane, so it cannot update itself through the lane.
   Dependabot-owned actions remain separate from other third-party groups.
-- **Every non-GitHub-Actions ecosystem:** require an operator-authorized merge.
+- **Every npm group, version or security:** require an operator-authorized merge.
+  The auto-merge classifier requires the `github_actions` ecosystem, so no
+  npm PR can enter the lane.
 
 All version-update tiers use `default-days: 7`; the `github-actions` ecosystem
 has no per-tier cooldown. GitHub skips cooldown for security updates. Requiring

@@ -11,7 +11,7 @@ review_interval_days: 90
 garden_lane: adrs-architecture
 ---
 
-# ADR 0092 — Adopt native stacked pull requests through an opt-in pilot
+# ADR 0093 — Adopt native stacked pull requests through an opt-in pilot
 
 **Status:** Accepted (Sep 2026), rollout tooling in force; live pilot outstanding.
 **Scope:** ci/process
