@@ -2,7 +2,7 @@ import thresholds from "../bridge-thresholds.json" with { type: "json" };
 
 /** Canonical seconds shared with Grafana rule generation. Queued NTT cannot bypass its 24h inbound window. */
 export const BRIDGE_STUCK_THRESHOLD_SECONDS = thresholds;
-export type BridgeInFlightStatus = keyof typeof thresholds;
+export type BridgeInFlightStatus = keyof typeof BRIDGE_STUCK_THRESHOLD_SECONDS;
 export type BridgeStatus =
   | BridgeInFlightStatus
   | "DELIVERED"
