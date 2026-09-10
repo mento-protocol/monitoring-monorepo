@@ -65,7 +65,7 @@ resource "grafana_rule_group" "bridge_observation" {
   interval_seconds = 60
   dynamic "rule" {
     for_each = {
-      unavailable = { name = "Bridge observation unavailable", expr = local.bridge_unavailable_promql, description = "Bridge observations failed, never succeeded, became stale, or stopped exporting. Transfer alerts retain their previous state until a complete fresh observation succeeds." }
+      unavailable = { name = "Bridge observation unavailable", expr = local.bridge_unavailable_promql, description = "Bridge observations failed, never succeeded, became stale, stopped exporting, or report thresholds that do not match the rules. Check exporter and rule rollout versions. Transfer alerts retain their previous state until a complete fresh observation with matching thresholds succeeds." }
       invalid     = { name = "Bridge observation contains unknown data", expr = local.bridge_invalid_promql, description = "Bridge rows have unknown route, token, status or time. Inspect the broader bridge dashboard; unknown values cannot establish a healthy transfer queue." }
     }
     content {

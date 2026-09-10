@@ -2451,8 +2451,8 @@ test("bridge rules expose all metric registrations and use existing URL paramete
     "utf8",
   );
   assert(
-    registeredMetricNames(metrics).length === 7,
-    "all seven bridge metric families must be visible to the rule linter",
+    registeredMetricNames(metrics).length === 8,
+    "all eight bridge metric families must be visible to the rule linter",
   );
   const rules = readFileSync(
     join(repoRoot, "alerts/rules/bridge-promql.tf"),

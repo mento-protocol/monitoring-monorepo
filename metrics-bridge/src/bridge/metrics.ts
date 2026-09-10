@@ -1,6 +1,7 @@
 import { Gauge, type Registry } from "prom-client";
 import { tokenSymbol } from "@mento-protocol/config/tokens";
 import {
+  BRIDGE_STUCK_THRESHOLD_SECONDS,
   bridgeStateAgeSeconds,
   deriveBridgeStatus,
   isBridgeInFlight,
@@ -169,6 +170,16 @@ export function createBridgeMetrics(register: Registry) {
   lastSuccess.set(0);
   error.set(1);
   freshness.set(BRIDGE_FRESHNESS_SECONDS);
+  const thresholds = new Gauge({
+    name: "mento_ntt_bridge_warning_threshold_seconds",
+    help: "Configured status threshold used to count stuck transfers",
+    labelNames: ["status"],
+    registers: [register],
+  });
+  for (const [status, seconds] of Object.entries(
+    BRIDGE_STUCK_THRESHOLD_SECONDS,
+  ))
+    thresholds.set({ status }, seconds);
   // No route samples before success: startup cannot masquerade as known empty.
   return {
     fail() {

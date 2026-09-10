@@ -23,6 +23,14 @@ Use the canonical seconds in `shared-config/bridge-thresholds.json`. Changes to
 this shared file trigger both exporter and rules workflows. The rules stack owns
 this exact dependency for change detection and protected plan/apply. Other
 shared-config files can enter coarse validation without triggering rules apply.
+The exporter reports its four status thresholds in
+`mento_ntt_bridge_warning_threshold_seconds`. Every observed job/instance must
+report all four exact values expected by the rules. Missing values, unequal
+values, extra statuses or mixed exporter versions hold all transfer alerts and
+raise the observation-unavailable alert. Either deployment order is safe: alerts
+resume after both sides agree and a complete fresh observation is available.
+During rollout, the guard holds existing state; it does not evaluate the new
+policy until the exporter and rules match.
 
 Thresholds:
 
@@ -89,7 +97,7 @@ owns traversal budgets, bounded cardinality and concurrent-pagination limits.
 1. Obtain approval for the specific bottommost stack PR merge. Recheck the
    remaining native members after GitHub changes their heads or bases.
 2. Obtain approval for the exporter deployment. Verify the deployed image,
-   seven metric families, at most 544 series, positive advancing last-success,
+   eight metric families, at most 548 series, positive advancing last-success,
    error zero and known-data snapshots across multiple polls.
 3. Review the `alerts-delivery` plan and obtain apply approval. Create
    `#alerts-bridges` through `bridge_warning_channel`. The existing channel
@@ -128,8 +136,8 @@ Run `PROMTOOL=/path/to/promtool node --test alerts/rules/tests/bridge-behavior.t
 with Terraform, Go 1.26.0 and Prometheus `promtool` 3.5.0 installed. The required
 credential-free Terraform CI job pins Go and downloads the pinned Linux ARM64
 Prometheus archive with SHA-256 verification before running this command. Missing tools fail the test. The harness evaluates the
-actual rule locals in a provider-free temporary module, then checks 41 scenarios
-with 164 expression assertions. It also renders the exact notification templates
+actual rule locals in a provider-free temporary module, then checks 112 scenarios
+with 448 expression assertions across the current and lowered threshold policies. It also renders the exact notification templates
 with Go for firing, resolved and mixed groups.
 These checks do not exercise Grafana's live alert-state engine or Slack/Splunk
 recipient delivery.

@@ -4,6 +4,7 @@ import {
   mkdirSync,
   writeFileSync,
   copyFileSync,
+  readFileSync,
   rmSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -23,7 +24,7 @@ function command(binary, args, options = {}) {
   });
 }
 
-function evaluateContract(directory) {
+function evaluateContract(directory, thresholdOverrides = {}) {
   const module = join(directory, "alerts/rules");
   mkdirSync(module, { recursive: true });
   mkdirSync(join(directory, "shared-config"));
@@ -34,6 +35,12 @@ function evaluateContract(directory) {
   copyFileSync(
     join(repo, "shared-config/bridge-thresholds.json"),
     join(directory, "shared-config/bridge-thresholds.json"),
+  );
+  const thresholdPath = join(directory, "shared-config/bridge-thresholds.json");
+  const thresholds = JSON.parse(readFileSync(thresholdPath, "utf8"));
+  writeFileSync(
+    thresholdPath,
+    JSON.stringify({ ...thresholds, ...thresholdOverrides }),
   );
   // This module has only the exact rule locals and shared JSON. It has no
   // providers, backend, resources or production inputs. Never plan the live root.
@@ -63,6 +70,7 @@ function scenarios(contract) {
     "transfers",
     "stuck_transfers",
     "oldest_state_age_seconds",
+    "warning_threshold_seconds",
   ];
   const routeMetrics = new Set([
     "transfers",
@@ -76,12 +84,15 @@ function scenarios(contract) {
       invalid = 0,
       missing = [],
       unavailable = 0,
+      thresholdValues = {},
+      missingThresholds = [],
+      replicas = [],
     } = options;
     const values = [error, last, 45, invalid, 3, stuck, age];
     const route = `source_chain="137",destination_chain="143",token="USDm",status="${status}",job="metrics-bridge",instance="local"`;
     const labels = `{destination_chain="143", source_chain="137", status="${status}", token="USDm"}`;
-    const input_series = names.flatMap((metric, index) =>
-      missing.includes(metric)
+    const regular = names.flatMap((metric, index) =>
+      missing.includes(metric) || metric === "warning_threshold_seconds"
         ? []
         : [
             {
@@ -90,6 +101,50 @@ function scenarios(contract) {
             },
           ],
     );
+    const policy = Object.fromEntries(
+      Object.values(contract.rules)
+        .filter((rule) => rule.severity === "page")
+        .map((rule) => [rule.status, rule.threshold]),
+    );
+    const policySeries = (instance, job, overrides, omitted) =>
+      missing.includes("warning_threshold_seconds")
+        ? []
+        : Object.entries({ ...policy, ...overrides }).flatMap(
+            ([status, seconds]) =>
+              omitted.includes(status)
+                ? []
+                : [
+                    {
+                      series: `mento_ntt_bridge_warning_threshold_seconds{status="${status}",job="${job}",instance="${instance}"}`,
+                      values: `${seconds}+0x1000`,
+                    },
+                  ],
+          );
+    const input_series = [
+      ...regular,
+      ...policySeries(
+        "local",
+        "metrics-bridge",
+        thresholdValues,
+        missingThresholds,
+      ),
+      ...replicas.flatMap(
+        ({
+          instance,
+          job = "metrics-bridge",
+          thresholds = {},
+          missing = [],
+        }) => [
+          ...regular.map((sample) => ({
+            ...sample,
+            series: sample.series
+              .replace('instance="local"', `instance="${instance}"`)
+              .replace('job="metrics-bridge"', `job="${job}"`),
+          })),
+          ...policySeries(instance, job, thresholds, missing),
+        ],
+      ),
+    ];
     const promql_expr_test = [
       ["warning", warning],
       ["page", page],
@@ -128,12 +183,13 @@ function scenarios(contract) {
     ])
       scenario(`${status}-${name}`, status, age, stuck, warning, page);
   }
-  scenario("fresh-exact75", "SENT", 3601, 1, 1, 0, { last: 925 });
-  scenario("stale76", "SENT", 3601, 1, null, null, {
+  const sentThreshold = contract.rules["SENT-page"].threshold;
+  scenario("fresh-exact75", "SENT", sentThreshold + 1, 1, 1, 0, { last: 925 });
+  scenario("stale76", "SENT", sentThreshold + 1, 1, null, null, {
     last: 924,
     unavailable: 1,
   });
-  scenario("query-failure", "SENT", 3601, 1, null, null, {
+  scenario("query-failure", "SENT", sentThreshold + 1, 1, null, null, {
     error: 1,
     unavailable: 1,
   });
@@ -153,10 +209,100 @@ function scenarios(contract) {
     unavailable: 1,
   });
   for (const metric of names)
-    scenario(`missing-${metric}`, "SENT", 3601, 1, null, null, {
+    scenario(`missing-${metric}`, "SENT", sentThreshold + 1, 1, null, null, {
       missing: [metric],
       unavailable: 1,
     });
+  for (const factor of [0.5, 2])
+    scenario(`threshold-rollout-${factor}`, "SENT", 4000, 2, null, null, {
+      thresholdValues: { SENT: sentThreshold * factor },
+      unavailable: 1,
+    });
+  for (const status of ["PENDING", "SENT", "ATTESTED", "QUEUED_INBOUND"])
+    scenario(
+      `missing-threshold-${status}`,
+      "SENT",
+      sentThreshold + 1,
+      1,
+      null,
+      null,
+      {
+        missingThresholds: [status],
+        unavailable: 1,
+      },
+    );
+  scenario("extra-threshold-status", "SENT", sentThreshold + 1, 1, null, null, {
+    thresholdValues: { UNKNOWN: 1 },
+    unavailable: 1,
+  });
+  for (const replica of [
+    { instance: "other" },
+    { instance: "local", job: "other" },
+  ])
+    scenario(
+      `mixed-replica-${replica.instance}-${replica.job}`,
+      "SENT",
+      sentThreshold + 1,
+      1,
+      null,
+      null,
+      {
+        replicas: [{ ...replica, thresholds: { SENT: sentThreshold / 2 } }],
+        unavailable: 1,
+      },
+    );
+  scenario(
+    "thresholds-split-across-replicas",
+    "SENT",
+    sentThreshold + 1,
+    1,
+    null,
+    null,
+    {
+      missingThresholds: ["PENDING", "SENT"],
+      replicas: [
+        { instance: "other", missing: ["ATTESTED", "QUEUED_INBOUND"] },
+      ],
+      unavailable: 1,
+    },
+  );
+  scenario(
+    "legacy-replica-missing-handshake",
+    "SENT",
+    sentThreshold + 1,
+    1,
+    null,
+    null,
+    {
+      replicas: [
+        {
+          instance: "other",
+          missing: ["PENDING", "SENT", "ATTESTED", "QUEUED_INBOUND"],
+        },
+      ],
+      unavailable: 1,
+    },
+  );
+  scenario(
+    "matching-replicas-resume-page",
+    "SENT",
+    sentThreshold * 2,
+    2,
+    0,
+    1,
+    {
+      replicas: [{ instance: "other" }],
+    },
+  );
+  scenario(
+    "matching-policy-resume-warning",
+    "SENT",
+    sentThreshold + 1,
+    2,
+    1,
+    0,
+  );
+  scenario("matching-policy-empty-recovery", "SENT", 0, 0, 0, 0);
   return tests;
 }
 
@@ -168,7 +314,10 @@ test(
     const directory = mkdtempSync(join(tmpdir(), "bridge-rule-behavior-"));
     try {
       const contract = evaluateContract(directory);
-      const tests = scenarios(contract);
+      const updatedDirectory = join(directory, "updated-policy");
+      mkdirSync(updatedDirectory);
+      const updated = evaluateContract(updatedDirectory, { SENT: 1800 });
+      const tests = [...scenarios(contract), ...scenarios(updated)];
       const fixture = join(directory, "rules.test.json");
       writeFileSync(
         fixture,

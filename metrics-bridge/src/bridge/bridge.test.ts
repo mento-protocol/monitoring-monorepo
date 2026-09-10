@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Registry } from "prom-client";
+import { BRIDGE_STUCK_THRESHOLD_SECONDS } from "@mento-protocol/config/bridge-status";
 import { aggregateBridgeTransfers, createBridgeMetrics } from "./metrics.js";
 import {
   observeBridgeTransfers,
@@ -245,6 +246,35 @@ describe("bounded bridge aggregation", () => {
 });
 
 describe("snapshot lifecycle", () => {
+  it("exports exactly the four thresholds used by the stuck counters", async () => {
+    const registry = new Registry();
+    const metrics = createBridgeMetrics(registry);
+    for (const [status, seconds] of Object.entries(
+      BRIDGE_STUCK_THRESHOLD_SECONDS,
+    )) {
+      expect(
+        await value(registry, "warning_threshold_seconds", { status }),
+      ).toBe(seconds);
+      const transfer = row({ status, lastAttestedTimestamp: "100" });
+      metrics.publish([transfer], 100 + seconds);
+      expect(
+        await value(registry, "stuck_transfers", { ...labels, status }),
+      ).toBe(0);
+      metrics.publish([transfer], 101 + seconds);
+      expect(
+        await value(registry, "stuck_transfers", { ...labels, status }),
+      ).toBe(1);
+    }
+    const family = (await registry.getMetricsAsJSON()).find(
+      (metric) => metric.name === "mento_ntt_bridge_warning_threshold_seconds",
+    );
+    expect(family?.values).toHaveLength(4);
+    metrics.fail();
+    expect(
+      await value(registry, "warning_threshold_seconds", { status: "SENT" }),
+    ).toBe(BRIDGE_STUCK_THRESHOLD_SECONDS.SENT);
+  });
+
   it("distinguishes startup, success, failure, empty success and resumed work", async () => {
     const registry = new Registry();
     const metrics = createBridgeMetrics(registry);
