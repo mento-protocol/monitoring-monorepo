@@ -663,18 +663,19 @@ function controlWaiverThreshold(rules) {
  * move together by at least the waiver threshold, the world moved and the score
  * is not attributable to the skill.
  *
- * The direction test reads the delta of the rule being waived: `flips`, over
- * every defect the headline scored. It is a waiver for that RED and nothing
- * else, so control has to have moved the way the loss did. Testing against the
- * headline restricted to control's own defects looks tighter and is not: since
+ * The direction test has two halves, and the waiver needs both. The first reads
+ * the delta of the rule being waived: `flips`, over every defect the headline
+ * scored. It is a waiver for that RED and nothing else, so control has to have
+ * moved the way the loss did. The second reads the headline restricted to the
+ * defects control scored. Since
  * [ADR 0090](../../docs/adr/0090-canonical-eval-matrix-freshness-floor.md)
- * `control` runs the grid alone, so a grid gain sitting beside a larger
- * non-grid loss is a net regression whose grid slice points the other way, and
- * a waiver keyed to that slice would wave it through.
- *
- * The grid numbers are still worth printing, so the reason says how much of the
- * headline's movement control was in a position to see. Nothing thresholds
- * them.
+ * `control` runs the grid alone, so the two conditions can both fall overall
+ * and still fall on disjoint defects; when the headline gained where control
+ * lost, control's drift explains none of the loss it would waive. Replacing the
+ * first half with the second would be wrong the other way round: a grid gain
+ * sitting beside a larger non-grid loss is a net regression whose grid slice
+ * points away from it, and a waiver keyed to the slice alone would wave it
+ * through.
  *
  * The magnitude test reads `control_waiver_net_flips`, which is scaled to
  * control's 39 grid defects rather than the headline's 51
@@ -692,17 +693,15 @@ function controlMoved({ contract, row, baseline, flips, name }) {
   if (controlFlips.delta === 0) return null;
   const need = controlWaiverThreshold(contract.verdict_rules);
   if (!Number.isFinite(need)) return null;
-  const sameDirection =
-    Math.sign(controlFlips.delta) === Math.sign(flips.delta);
-  if (sameDirection && Math.abs(controlFlips.delta) >= need) {
-    const scope = new Set(controlFlips.ids);
-    const headlineOnScope = compareConditions(
-      restrictCondition(baseline.conditions?.[name], scope),
-      restrictCondition(row.conditions?.[name], scope),
-    );
-    return `control moved ${controlFlips.delta} defects in the same direction as the headline, which moved ${headlineOnScope.delta} on the ${scope.size} defect(s) control also scored (control_waiver_net_flips ${need}); the model moved, so the score is not attributable`;
-  }
-  return null;
+  if (Math.sign(controlFlips.delta) !== Math.sign(flips.delta)) return null;
+  if (Math.abs(controlFlips.delta) < need) return null;
+  const scope = new Set(controlFlips.ids);
+  const headlineOnScope = compareConditions(
+    restrictCondition(baseline.conditions?.[name], scope),
+    restrictCondition(row.conditions?.[name], scope),
+  );
+  if (Math.sign(headlineOnScope.delta) !== Math.sign(flips.delta)) return null;
+  return `control moved ${controlFlips.delta} defects in the same direction as the headline, which moved ${headlineOnScope.delta} on the ${scope.size} defect(s) control also scored (control_waiver_net_flips ${need}); the model moved, so the score is not attributable`;
 }
 
 /** Defect id to {path, line, title, severity}, read from the frozen truth. */

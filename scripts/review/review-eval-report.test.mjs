@@ -1123,6 +1123,100 @@ test("the drift waiver is scaled to the 39 grid defects control scores", () => {
   }
 });
 
+test("the drift waiver refuses when the headline gained on control's scope", () => {
+  // Control and the headline can both fall overall and still fall on disjoint
+  // defects. Here the headline loses eleven non-grid defects and gains five on
+  // the grid: a net loss of six, the RED line. Control loses five on the grid,
+  // which clears the scaled threshold and points the same way as the headline's
+  // net loss. On the 39 defects control actually scored the headline moved the
+  // other way, so control's drift explains none of the loss it would waive.
+  const gridScope = new Set(gridIds);
+  const nonGridIds = allIds.filter((id) => !gridScope.has(id));
+  const offGrid = verdict({
+    contract,
+    row: row({
+      conditions: {
+        pipeline: splitCondition({
+          ids: allIds,
+          foundIds: [nonGridIds[0], ...gridIds.slice(0, 15)],
+        }),
+        control: splitCondition({
+          ids: gridIds,
+          foundIds: gridIds.slice(0, 5),
+          draws: 1,
+        }),
+      },
+    }),
+    baselineRow: baseline({
+      conditions: {
+        pipeline: splitCondition({
+          ids: allIds,
+          foundIds: [
+            ...nonGridIds,
+            ...gridIds.slice(0, 5),
+            ...gridIds.slice(10, 15),
+          ],
+        }),
+        control: splitCondition({
+          ids: gridIds,
+          foundIds: gridIds.slice(0, 10),
+          draws: 1,
+        }),
+      },
+    }),
+  });
+  assert.equal(
+    offGrid.verdict,
+    "RED",
+    `${offGrid.verdict}: ${offGrid.reasons.join(" | ")}`,
+  );
+  assert.ok(
+    !offGrid.reasons.some((reason) => /control moved/.test(reason)),
+    offGrid.reasons.join(" | "),
+  );
+});
+
+test("control drift at the scaled threshold takes a gain row off the ranking", () => {
+  // The waiver is not only a RED softener. `worldMoved` pushes AMBER whichever
+  // way the run moved, so scaling the threshold down to control's own scope
+  // also widens the set of gain rows that lose their rankability. Here the
+  // headline gains one defect, well inside the noise floor, and control gains
+  // five on the grid. ADR 0094 records the widening.
+  const gainRow = {
+    row: row({
+      conditions: {
+        pipeline: condition({ found: 21 }),
+        control: condition({ ids: gridIds, found: 10, draws: 1 }),
+      },
+    }),
+    baselineRow: baseline({
+      conditions: {
+        pipeline: condition({ found: 20 }),
+        control: condition({ ids: gridIds, found: 5, draws: 1 }),
+      },
+    }),
+  };
+  const drifted = verdict({ contract, ...gainRow });
+  assert.equal(drifted.verdict, "AMBER", drifted.reasons.join(" | "));
+  assert.ok(
+    drifted.reasons.some((reason) =>
+      /control moved -5 defects in the same direction .*control_waiver_net_flips 5/.test(
+        reason,
+      ),
+    ),
+    drifted.reasons.join(" | "),
+  );
+
+  // Under the pre-ADR 0094 threshold the same drift left the row rankable.
+  const archived = structuredClone(contract);
+  delete archived.verdict_rules.control_waiver_net_flips;
+  assert.equal(
+    verdict({ contract: archived, ...gainRow }).verdict,
+    "GREEN",
+    "the old threshold left a five-flip control drift alone",
+  );
+});
+
 test("the report states the verdict, the table, and the defects that flipped", () => {
   const candidate = row({
     verdict: "RED",
