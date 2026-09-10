@@ -878,9 +878,10 @@ between, and the contract digest alone would not notice.
 minutes at the fable-max judge this replaces. If the 3.4x cost ratio measured
 on the calibration pass carries to the longer per-cell prompt, opus high judges
 a cell for roughly $1.20. Neither that cost nor the wall is measured per cell
-yet, so 27 cells still run about four hours and need not fit inside one usage
-window: the 2026-09-05 attempt, on the 39-cell matrix, scored nineteen cells,
-hit a usage limit, and re-spent them on the retry. `--score` writes each verdict to `cells/<cell_id>/score.json`
+yet, so the four-hour budget for 27 cells stands as the fable-max number. The
+pass need not fit inside one usage window: the 2026-09-05 attempt, on the
+39-cell matrix, scored nineteen cells, hit a usage limit, and re-spent them on
+the retry. `--score` writes each verdict to `cells/<cell_id>/score.json`
 as it earns it, under a resume identity carrying the plan's comparability key,
 contract digest, matcher digest and calibration digest, the cell fingerprint, and
 the digest of the `result.json` that verdict was formed on. A later pass reuses a
