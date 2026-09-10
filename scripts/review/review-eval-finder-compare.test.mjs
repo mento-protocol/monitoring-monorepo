@@ -15,13 +15,21 @@ const contract = {
 };
 
 /** A detail directory holding only what the comparison reads. */
-function writeArm({ finder, cells, results, skillDigest = "skill", judge }) {
+function writeArm({
+  finder,
+  cells,
+  results,
+  skillDigest = "skill",
+  judge,
+  contractDigest = null,
+}) {
   const dir = mkdtempSync(path.join(tmpdir(), "finder-compare-"));
   writeFileSync(
     path.join(dir, "plan.json"),
     JSON.stringify({
       kind: "finder",
       comparability_key: "key",
+      contract_digest: contractDigest,
       judge: judge ?? { model: "claude-opus-5", effort: "high" },
       inputs: {
         skill_digest: skillDigest,
@@ -136,4 +144,59 @@ test("a different skill or judge warns; a different orchestrator only notes", ()
   assert.deepEqual(second.warnings, []);
   assert.equal(second.notes.length, 1);
   assert.match(second.notes[0], /orchestrator sources differ/);
+});
+
+test("a different contract on either side warns", () => {
+  // Every count here is recomputed from the contract this process loaded, so a
+  // run planned against other fixture bits is read through a scoring key it
+  // never ran under. That difference is a contract difference, not a finder one.
+  const results = { 11: { matched: [1] } };
+  const anchor = readArm({
+    dir: writeArm({
+      finder: "sol@high",
+      cells: [11],
+      results,
+      contractDigest: "aaaa1111",
+    }),
+    contract,
+  });
+  const candidate = readArm({
+    dir: writeArm({
+      finder: "astra@low",
+      cells: [11],
+      results,
+      contractDigest: "bbbb2222",
+    }),
+    contract,
+  });
+  const split = compareArms({
+    anchor,
+    candidate,
+    contractDigest: "aaaa1111",
+  });
+  assert.equal(split.warnings.length, 2);
+  assert.match(split.warnings[0], /planned against different contracts/);
+  assert.match(split.warnings[1], /the candidate was planned against contract/);
+
+  // Both arms agreeing with each other but not with the loaded contract is two
+  // warnings as well: the counts still come from bits neither run saw.
+  candidate.identity.contract_digest = "aaaa1111";
+  anchor.identity.contract_digest = "aaaa1111";
+  const drifted = compareArms({
+    anchor,
+    candidate,
+    contractDigest: "cccc3333",
+  });
+  assert.equal(drifted.warnings.length, 2);
+  assert.ok(
+    drifted.warnings.every((warning) =>
+      /recomputed from cccc3333/.test(warning),
+    ),
+  );
+
+  // Agreement all round warns about nothing.
+  assert.deepEqual(
+    compareArms({ anchor, candidate, contractDigest: "aaaa1111" }).warnings,
+    [],
+  );
 });

@@ -67,6 +67,7 @@ export function readArm({ dir, contract }) {
       skill_digest: plan.inputs?.skill_digest ?? null,
       orchestrator_digest: plan.inputs?.orchestrator_digest ?? null,
       comparability_key: plan.comparability_key ?? null,
+      contract_digest: plan.contract_digest ?? null,
       judge: plan.judge ?? null,
     },
   };
@@ -104,7 +105,7 @@ export function signFlip(differences) {
 }
 
 /** Pair the two arms by PR and total the differences. */
-export function compareArms({ anchor, candidate }) {
+export function compareArms({ anchor, candidate, contractDigest = null }) {
   const paired = [...anchor.byPr.keys()]
     .filter((pr) => candidate.byPr.has(pr))
     .sort((left, right) => left - right);
@@ -144,14 +145,43 @@ export function compareArms({ anchor, candidate }) {
     totals,
     skipped,
     sign_flip: signFlip(rows.map((row) => row.net)),
-    warnings: identityWarnings(anchor.identity, candidate.identity),
+    warnings: identityWarnings(
+      anchor.identity,
+      candidate.identity,
+      contractDigest,
+    ),
     notes: identityNotes(anchor.identity, candidate.identity),
   };
 }
 
-/** Differences that invalidate the comparison rather than being its subject. */
-export function identityWarnings(anchor, candidate) {
+/**
+ * Differences that invalidate the comparison rather than being its subject.
+ *
+ * `contractDigest` is the contract this process loaded. Every count here is
+ * recomputed from that contract's `scorable_ids` and `p1_ids`, so a run planned
+ * against different fixture bits is being read through a scoring key it never
+ * ran under, and the difference is a contract difference, not a finder one.
+ */
+export function identityWarnings(anchor, candidate, contractDigest = null) {
   const warnings = [];
+  const short = (value) => String(value).slice(0, 8);
+  if (anchor.contract_digest !== candidate.contract_digest) {
+    warnings.push(
+      `the two runs were planned against different contracts (${short(anchor.contract_digest)} vs ${short(candidate.contract_digest)}); a matched-id difference is not a finder difference`,
+    );
+  }
+  if (contractDigest) {
+    for (const [side, arm] of [
+      ["anchor", anchor],
+      ["candidate", candidate],
+    ]) {
+      if (arm.contract_digest && arm.contract_digest !== contractDigest) {
+        warnings.push(
+          `the ${side} was planned against contract ${short(arm.contract_digest)}, but these counts are recomputed from ${short(contractDigest)}`,
+        );
+      }
+    }
+  }
   if (anchor.skill_digest !== candidate.skill_digest) {
     warnings.push(
       "the two runs used different review skills; a matched-id difference is not a finder difference",
@@ -189,9 +219,10 @@ function render(report) {
   for (const side of ["anchor", "candidate"]) {
     const arm = report[side];
     lines.push(
-      `${side.padEnd(9)} finder ${arm.finder} argv ${short(arm.finder_argv_digest)} skill ${short(arm.skill_digest)} key ${short(arm.comparability_key)} orchestrator ${short(arm.orchestrator_digest)} judge ${arm.judge?.model}@${arm.judge?.effort}`,
+      `${side.padEnd(9)} finder ${arm.finder} argv ${short(arm.finder_argv_digest)} skill ${short(arm.skill_digest)} contract ${short(arm.contract_digest)} key ${short(arm.comparability_key)} orchestrator ${short(arm.orchestrator_digest)} judge ${arm.judge?.model}@${arm.judge?.effort}`,
     );
   }
+  lines.push(`loaded    contract ${short(report.contract_digest)}`);
   lines.push("");
   for (const warning of report.warnings) lines.push(`WARNING: ${warning}`);
   for (const note of report.notes) lines.push(`note: ${note}`);
@@ -242,13 +273,14 @@ function render(report) {
 }
 
 export function buildReport({ anchorDir, candidateDir, repoRoot }) {
-  const { contract } = loadContract(
+  const { contract, digest: contractDigest } = loadContract(
     path.resolve(repoRoot, DEFAULT_CONTRACT_PATH),
   );
   const anchor = readArm({ dir: path.resolve(anchorDir), contract });
   const candidate = readArm({ dir: path.resolve(candidateDir), contract });
-  const compared = compareArms({ anchor, candidate });
+  const compared = compareArms({ anchor, candidate, contractDigest });
   return {
+    contract_digest: contractDigest,
     anchor: { dir: anchor.dir, ...anchor.identity },
     candidate: { dir: candidate.dir, ...candidate.identity },
     ...compared,

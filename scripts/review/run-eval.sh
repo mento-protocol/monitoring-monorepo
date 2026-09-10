@@ -48,7 +48,7 @@
 # scores and stops — nothing appended, no row validated, no PR — and prints the
 # detail directory review-eval-finder-compare.mjs reads against a full run. One
 # draw per fixture rejects a finder; it never promotes one. Each flag needs the
-# other. Editing this file moves the comparability key of every run.
+# other; --against is refused. Editing this file moves the comparability key.
 #
 # --against names the baseline row this run is planned, scored, validated and
 # reported against: a row file path or an executed_at prefix. The candidate
@@ -237,6 +237,12 @@ if [[ -n $FINDER && $KIND != finder ]]; then
 fi
 if [[ $KIND == finder && -z $FINDER ]]; then
   fail "--kind finder requires --finder MODEL@EFFORT"
+fi
+# A probe resolves no baseline, appends no row and writes no report, so every
+# --against stage is skipped for it. Accepting the flag and ignoring it would
+# let an operator believe a probe was compared against a named anchor.
+if [[ $KIND == finder && -n $AGAINST ]]; then
+  fail "--against is not valid with --kind finder; compare the detail directories with review-eval-finder-compare.mjs instead"
 fi
 
 if [[ -z $REPO ]]; then

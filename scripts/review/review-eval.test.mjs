@@ -227,7 +227,7 @@ test("the shell split no longer reconstructs the pre-split cell runtime", () => 
   // so this pin still catches an unintended shell edit.
   assert.equal(
     reconstructed,
-    "872472fa94dd0bb4c19b038459a90aa5cd35c64fe8fdad7c050d64934ec96d9e",
+    "cc9ef3a581b17a6ae2aef9aeacb09e19749cae7a99c1b86e38e763c5436d369f",
   );
   // It is no longer the pre-split monolith. Capturing the whole session instead
   // of the CLI's last-message envelope changed what a cell records, so the 24
@@ -889,7 +889,7 @@ test("comparabilityKey moves with the contract, the prompts, and the scorer", ()
 
 test("orchestratorSourceDigest binds the shell and the cell modules", () => {
   const expected =
-    "63db76e74b220e34641eafeb6b7fc3c6b5e5e43b9572144c1c03841463b0e528";
+    "299654e339118209243f0fd0ac3c07aa8afc473adb7d4ce9fc5b92d59382c3a4";
   assert.equal(orchestratorSourceDigest(), expected);
   // The cell writer and the stream parser are in the digest for the same
   // reason the shell is: the writer decides what a paid cell records and the
@@ -9832,7 +9832,15 @@ test("the two finder flags require each other, and the effort is a closed set", 
     () => buildPlan({ ...args, kind: "finder" }),
     /--kind finder requires --finder/,
   );
-  for (const bad of ["gpt-6-astra@ultra", "gpt-6-astra", "@low", "a b@low"]) {
+  for (const bad of [
+    "gpt-6-astra@ultra",
+    "gpt-6-astra",
+    "@low",
+    "a b@low",
+    // The runtime refuses any argv element outside its character set, so a
+    // model with a comma in it plans fine and then kills nine paid cells.
+    "gpt-6,astra@low",
+  ]) {
     assert.throws(() => parseFinderSpec(bad), /--finder/, bad);
   }
   assert.deepEqual(parseFinderSpec("gpt-6-astra@medium"), {
@@ -9888,4 +9896,97 @@ test("the CLI pairs --kind finder with --finder", () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("two probes of one day take different detail directories", () => {
+  // A probe appends no ledger row, so `resolveDetailDir` sees nothing taken and
+  // hands the second probe the first one's name. Without the finder segment the
+  // second run overwrites the first one's plan and results in place, and the
+  // compare CLI then reads one run against itself.
+  const args = {
+    contract,
+    contractDigest,
+    kind: "finder",
+    repoRoot,
+    write: false,
+    env: planEnv,
+    now: new Date("2026-09-10T12:00:00Z"),
+  };
+  const first = buildPlan({ ...args, finder: "gpt-6-astra@low" });
+  const second = buildPlan({ ...args, finder: "gpt-6-astra@high" });
+  assert.notEqual(first.detail_dir, second.detail_dir);
+  for (const plan of [first, second]) {
+    assert.ok(
+      plan.detail_dir.endsWith(
+        `-${plan.inputs.finder_argv_digest.slice(0, 8)}`,
+      ),
+      plan.detail_dir,
+    );
+  }
+  // A canonical run's name is unchanged: it has a ledger row to disambiguate it.
+  const full = buildPlan({ ...args, kind: "full", finder: null });
+  assert.ok(full.detail_dir.endsWith(full.inputs.skill_digest.slice(0, 8)));
+});
+
+test("a probe refuses --against", () => {
+  // `--against` reaches `buildPlan` as a resolved baseline row. A probe scores
+  // and stops, so every stage that reads a baseline is skipped for it and the
+  // flag would be accepted and silently ignored.
+  assert.throws(
+    () =>
+      buildPlan({
+        contract,
+        contractDigest,
+        kind: "finder",
+        finder: "gpt-6-astra@low",
+        repoRoot,
+        write: false,
+        env: planEnv,
+        baselineRow: makeRow({ kind: "full" }),
+      }),
+    /--against is not valid with --kind finder/,
+  );
+  // The orchestrator refuses the pair up front, before it plans anything.
+  assert.match(
+    runEvalSource("wrapper"),
+    /if \[\[ \$KIND == finder && -n \$AGAINST \]\]; then/,
+  );
+});
+
+test("only a probe plan may substitute a finder", async () => {
+  // plan.json is a file on the branch. Honouring `finder_override` for every
+  // kind would let an edited full plan with matching cells publish a canonical
+  // row for a finder the contract never named, under a key that still names
+  // the contract's finder.
+  const override = { model: "gpt-6-astra", effort: "low", argv: ["x"] };
+  await assert.rejects(
+    scorePlan({
+      plan: {
+        cells: [],
+        kind: "full",
+        contract_digest: contractDigest,
+        inputs: { finder_override: override },
+      },
+      contract,
+      contractDigest,
+      repoRoot,
+    }),
+    /only a finder probe may substitute a finder/,
+  );
+  // A probe whose recorded digest does not cover its recorded override is
+  // refused too: the digest is what the runtime checked the spawned argv on.
+  const probe = buildPlan({
+    contract,
+    contractDigest,
+    kind: "finder",
+    finder: "gpt-6-astra@low",
+    repoRoot,
+    write: false,
+    env: planEnv,
+  });
+  probe.inputs.finder_argv_digest = "0".repeat(64);
+  await assert.rejects(
+    scorePlan({ plan: probe, contract, contractDigest, repoRoot }),
+    /finder_argv_digest does not match/,
+  );
 });

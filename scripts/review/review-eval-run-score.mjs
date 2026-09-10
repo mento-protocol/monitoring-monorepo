@@ -40,6 +40,7 @@ import {
 import { resetFixture } from "./review-eval-run-execution.mjs";
 import {
   applyFinderOverride,
+  finderArgvDigest,
   finderProbeDecision,
 } from "./review-eval-finder-override.mjs";
 import { baselinePlanIdentity, planCells } from "./review-eval-run-plan.mjs";
@@ -292,11 +293,34 @@ export async function scorePlan({
   // A finder probe's matrix is rebuilt through the substitution the plan
   // recorded, or the cell check below would read the contract's finder.
   const isFinderProbe = plan.kind === "finder";
+  const recordedOverride = plan.inputs?.finder_override ?? null;
+  // Only a probe may substitute a finder. A full or canary plan.json is a file
+  // on the branch: were the override honoured for every kind, an edited plan
+  // with matching cells would score and publish a canonical row for a finder
+  // the contract never named, under a comparability key that still names the
+  // contract's finder. Refuse it here, before any judge call spends quota.
+  if (recordedOverride && !isFinderProbe) {
+    throw new Error(
+      `plan kind ${plan.kind} carries inputs.finder_override; only a finder probe may substitute a finder`,
+    );
+  }
+  const probeContract = applyFinderOverride({
+    contract,
+    override: recordedOverride,
+  }).contract;
+  // The plan's recorded digest is what the runtime checked its spawned argv
+  // against, so an override edited apart from the digest is not the vector the
+  // cells ran and the row would misname its own provenance.
+  if (
+    isFinderProbe &&
+    finderArgvDigest(probeContract) !== plan.inputs?.finder_argv_digest
+  ) {
+    throw new Error(
+      "plan inputs.finder_argv_digest does not match the recorded finder_override",
+    );
+  }
   const expectedCells = planCells({
-    contract: applyFinderOverride({
-      contract,
-      override: plan.inputs?.finder_override ?? null,
-    }).contract,
+    contract: probeContract,
     kind: plan.kind,
   });
   if (JSON.stringify(plan.cells) !== JSON.stringify(expectedCells)) {

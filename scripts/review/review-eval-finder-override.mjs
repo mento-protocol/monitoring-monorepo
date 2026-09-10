@@ -14,6 +14,12 @@ import { createHash } from "node:crypto";
 
 export const FINDER_EFFORTS = ["low", "medium", "high", "xhigh"];
 
+// The rule every finder argv element must satisfy: `run-eval-runtime.sh` reads
+// the vector one element per line and refuses anything outside this set, and
+// the contract test pins the same set. A model token that fails it plans fine
+// and then kills the run at its first cell, so refuse it at plan time.
+export const FINDER_ARGV_ELEMENT = /^[A-Za-z0-9._="@/:-]+$/;
+
 /**
  * Digest over the finder command a pipeline cell actually executes. The
  * contract pins that argument vector, and `run-eval.sh` spawns it element for
@@ -43,6 +49,11 @@ export function parseFinderSpec(spec) {
   if (!model || /[\s@]/.test(model)) {
     throw new Error(
       `--finder must be MODEL@EFFORT with a whitespace-free model; got ${JSON.stringify(spec)}`,
+    );
+  }
+  if (!FINDER_ARGV_ELEMENT.test(model)) {
+    throw new Error(
+      `--finder model must match ${FINDER_ARGV_ELEMENT} — the argv element rule the runtime enforces; got ${JSON.stringify(model)}`,
     );
   }
   if (!FINDER_EFFORTS.includes(effort)) {
@@ -88,14 +99,44 @@ export function applyFinderOverride({ contract, override }) {
 }
 
 /** The contract one plan of this kind runs against, with the two flags paired. */
-export function resolveFinderPlan({ contract, kind, finder }) {
+export function resolveFinderPlan({ contract, kind, finder, baselineRow }) {
   if (finder && kind !== "finder") {
     throw new Error("--finder is only valid with --kind finder");
   }
   if (kind === "finder" && !finder) {
     throw new Error("--kind finder requires --finder MODEL@EFFORT");
   }
+  // A probe scores and stops: it resolves no baseline, appends no row and
+  // reports nothing, so `--against` would be accepted and then ignored.
+  if (kind === "finder" && baselineRow) {
+    throw new Error(
+      "--against is not valid with --kind finder; a probe resolves no baseline and appends no row",
+    );
+  }
   return applyFinderOverride({ contract, override: finder });
+}
+
+/**
+ * The detail-directory segment that separates two probes planned on one day.
+ * The rest of the base name — date, comparability key, kind, skill digest — is
+ * identical for every probe of a contract, and a finder run appends no ledger
+ * row, so without this the second probe would overwrite the first one's
+ * evidence in place. The overridden argv digest is exactly what differs.
+ */
+export function finderDetailSegment({ kind, inputs }) {
+  if (kind !== "finder") return "";
+  return `-${String(inputs?.finder_argv_digest ?? "").slice(0, 8)}`;
+}
+
+/**
+ * The detail-directory name a plan takes before `resolveDetailDir` disambiguates
+ * it against the ledger. The skill under test and the kind are in it because the
+ * directory is also the resume cache: two runs of the same contract with
+ * different skills must never land on each other's cells.
+ */
+export function detailDirBase({ date, key, kind, inputs }) {
+  const skill = String(inputs?.skill_digest ?? "").slice(0, 8);
+  return `${date}-${String(key).slice(0, 8)}-${kind}-${skill}${finderDetailSegment({ kind, inputs })}`;
 }
 
 /** The row verdict of a finder probe: outside the ledger set, so it never appends. */

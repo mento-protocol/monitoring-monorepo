@@ -20,7 +20,9 @@ import {
   scorableTotals,
 } from "./review-eval-fixtures.mjs";
 import {
+  detailDirBase,
   finderArgvDigest,
+  finderDetailSegment,
   resolveFinderPlan,
 } from "./review-eval-finder-override.mjs";
 import { freshness } from "./review-eval-ledger.mjs";
@@ -399,7 +401,7 @@ function resolveLegacySplitCache({
   const prefix = LEGACY_SPLIT_CACHE_PLAN.comparabilityKey.slice(0, 8);
   const skill = String(inputs.skill_digest).slice(0, 8);
   const namePattern = new RegExp(
-    `^\\d{4}-\\d{2}-\\d{2}-${prefix}-${kind}-${skill}(?:-(?:[2-9]|[1-4]\\d|50))?$`,
+    `^\\d{4}-\\d{2}-\\d{2}-${prefix}-${kind}-${skill}${finderDetailSegment({ kind, inputs })}(?:-(?:[2-9]|[1-4]\\d|50))?$`,
   );
   let best = null;
   for (const entry of entries) {
@@ -510,6 +512,7 @@ export function buildPlan({
     contract,
     kind,
     finder,
+    baselineRow,
   });
   // The key binds the committed calibration set by content. Recording that
   // digest in the plan is what lets `--score --calibration PATH` be refused
@@ -527,12 +530,9 @@ export function buildPlan({
   const date = now.toISOString().slice(0, 10);
   const inputs = collectInputs({ contract: planContract, skillRef, env });
   if (override) inputs.finder_override = override;
-  // The skill under test and the kind are part of the directory name because
-  // the directory is also the resume cache: two runs of the same contract with
-  // different skills must never land on each other's cells.
   const resolvedDetail = resolveDetailDir({
     runsDir,
-    base: `${date}-${key.slice(0, 8)}-${kind}-${String(inputs.skill_digest).slice(0, 8)}`,
+    base: detailDirBase({ date, key, kind, inputs }),
     ledgerRows,
   });
   const { detailDir } = resolvedDetail;

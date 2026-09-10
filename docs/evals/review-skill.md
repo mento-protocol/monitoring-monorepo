@@ -276,8 +276,12 @@ contract. `EFFORT` is `low`, `medium`, `high` or `xhigh`, and each of the two
 flags is refused without the other.
 
 A probe scores and stops. It appends no ledger row, refreshes no clock, cannot
-become a baseline, and `--validate --append` refuses its row outright. Compare
-it against a canonical full run by detail directory:
+become a baseline, and `--validate --append` refuses its row outright. It
+resolves no baseline either, so `--against` is refused rather than ignored. Its
+detail directory carries the overridden argv digest as a final segment, because
+no ledger row records the name: two probes of one day would otherwise land on
+one directory and the second would overwrite the first. Compare a probe against
+a canonical full run by detail directory:
 
 ```bash
 pnpm review:eval:run --kind finder --finder gpt-6-astra@low
@@ -288,8 +292,10 @@ pnpm review:eval:finder-compare -- \
 
 The comparison pairs the pipeline draw-1 cells by PR and prints matched ids,
 P1 recall, wrong claims, the per-PR net and a sign-flip test over the nets. It
-warns when the two runs used different review skills or different judges, which
-makes the numbers unreadable as a finder difference, and notes a difference in
+warns when the two runs used different review skills, different judges or
+different contracts — including a contract that differs from the one the
+comparison itself loaded, since every count is recomputed from it — all of which
+make the numbers unreadable as a finder difference. It notes a difference in
 orchestrator bytes, which does not.
 
 One draw per fixture is enough to reject a finder and never enough to promote
@@ -1045,8 +1051,10 @@ retire it. Run the bridge whenever the outgoing key does carry a complete row,
 and run it before the retiring model goes away, because history cannot be
 re-run.
 
-No CLI mode plans a bridge run: `--kind` accepts `full` and `canary`, and
-`buildPlan` refuses anything else. What the harness contributes is the row's
+No CLI mode plans a bridge run: `--kind` accepts `full`, `canary` and `finder`,
+and `buildPlan` refuses anything else. `finder` is no help here — it is the
+probe lane, appends no row, and is not a ledger kind, so it can neither be a
+bridge nor plan one. What the harness contributes is the row's
 standing — `bridge` is a valid ledger kind, `--validate --against` re-derives
 its cross-key pairing, and `--report` renders it. Ordinary scoring refuses a
 cross-key baseline.
@@ -1164,8 +1172,9 @@ path must exist on `main` before the first run after the moving commit.
 | `scripts/review/review-eval-run-plan.mjs`                   | plan, input, matrix, and comparability-key construction  |
 | `scripts/review/review-eval-run-execution.mjs`              | judge execution, environment scrub, and fixture reset    |
 | `scripts/review/review-eval-run-cell.mjs`                   | cell identity, cache reuse, and leak signals             |
-| `scripts/review/review-eval-run-score.mjs`                  | cell scoring, condition folds, rows, and freshness plans |
-| `scripts/review/review-eval-finder-override.mjs`            | finder argv digest and the --finder substitution         |
+| `scripts/review/review-eval-run-score.mjs`                  | cell scoring, condition folds, and row construction      |
+| `scripts/review/review-eval-freshness-guard.mjs`            | staleness plans and the authorized freshness workflow    |
+| `scripts/review/review-eval-finder-override.mjs`            | finder argv digest, `--finder` substitution, run naming  |
 | `scripts/review/review-eval-finder-compare.mjs`             | offline pipeline draw-1 comparison of two runs           |
 | `scripts/review/review-eval-score.mjs`                      | scorer logic and scoring-module digest ownership         |
 | `scripts/review/review-eval-stream.mjs`                     | dependency-free stream parser, session budget, envelope  |
