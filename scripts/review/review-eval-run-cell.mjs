@@ -334,9 +334,11 @@ export function readCellResult(planDir, cell) {
 /**
  * What a cached judge verdict must have been produced under.
  *
- * The judge pass costs about four dollars and nine minutes a cell, so a
- * 27-cell pass runs about four hours: long enough to meet a usage limit, so it
- * has to resume rather than re-spend from zero. These fields are every input that can move a scored number - the
+ * The judge pass cost about four dollars and nine minutes a cell at the
+ * fable-max judge, so a 27-cell pass ran about four hours: long enough to meet
+ * a usage limit, so it has to resume rather than re-spend from zero. The
+ * opus-high judge that replaced it is not measured per cell yet. These fields
+ * are every input that can move a scored number - the
  * comparability key the row is filed under, the contract, the scorer and
  * calibration bytes that key is derived from, the execution fingerprint the raw
  * cell already carries, and, per cell, the transcript itself. A record matching

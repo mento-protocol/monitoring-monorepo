@@ -68,6 +68,12 @@ variable "slack_channel_infra" {
   default     = "#alerts-infra"
 }
 
+variable "slack_channel_bridges" {
+  type        = string
+  description = "Bridge-transfer warning destination. Channel lifecycle belongs to alerts-delivery."
+  default     = "#alerts-bridges"
+}
+
 variable "slack_channel_cdps" {
   type        = string
   description = "Slack channel for CDP (Liquity v2) warning alerts (stability-pool thinning, liquidation/redemption activity)."

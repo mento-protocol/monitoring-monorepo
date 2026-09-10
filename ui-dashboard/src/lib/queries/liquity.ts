@@ -43,6 +43,11 @@ export const CDP_TROVE_SCHEMA_FIELDS = `
         name
       }
     }
+    TroveOperationEventType: __type(name: "TroveOperationEvent") {
+      fields {
+        name
+      }
+    }
     TroveLedgerEventType: __type(name: "TroveLedgerEvent") {
       fields {
         name
@@ -526,6 +531,20 @@ export const CDP_TROVE_OPERATIONS = `
       id troveId operation collChange debtChange
       annualInterestRate debtIncreaseFromUpfrontFee
       timestamp blockNumber txHash
+    }
+  }
+`;
+
+export const CDP_TROVE_OPERATIONS_NUMERIC = `
+  query CdpTroveOperationsNumeric($instanceId: String!, $troveId: String!, $limit: Int!) {
+    TroveOperationEvent(
+      where: { instanceId: { _eq: $instanceId }, troveId: { _eq: $troveId } }
+      order_by: [{ timestamp: desc }, { blockNumber: desc }, { logIndex: desc }, { id: desc }]
+      limit: $limit
+    ) {
+      id troveId operation collChange debtChange
+      annualInterestRate debtIncreaseFromUpfrontFee
+      timestamp blockNumber logIndex txHash
     }
   }
 `;

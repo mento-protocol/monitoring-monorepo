@@ -84,6 +84,7 @@ const EXPECTED_EXPORT_NAMES = [
   "CDP_TROVE_OG_BY_ID",
   "CDP_TROVE_OG_COLLATERALS",
   "CDP_TROVE_OPERATIONS",
+  "CDP_TROVE_OPERATIONS_NUMERIC",
   "CDP_TROVE_QUEUE",
   "CDP_TROVE_SCHEMA_FIELDS",
   "CDP_TROVES_BY_OWNER",
@@ -744,6 +745,9 @@ describe("@/lib/queries — content snapshots (refactor characterization)", () =
             fields {
               name
             }
+          }
+          TroveOperationEventType: __type(name: "TroveOperationEvent") {
+            fields { name }
           }
           TroveLedgerEventType: __type(name: "TroveLedgerEvent") {
             fields {

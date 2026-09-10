@@ -35,7 +35,7 @@ export function runOffline(script, scenario = {}, args = []) {
       );
     }
     const executable =
-      script === "before"
+      script !== "after"
         ? join(cwd, "before.mjs")
         : join(here, "tier1-bulk-enrich.mjs");
     if (script === "before")
@@ -43,6 +43,22 @@ export function runOffline(script, scenario = {}, args = []) {
         executable,
         readFileSync(join(here, "fixtures/tier1-before.mjs.txt")),
       );
+    if (script === "parent") {
+      writeFileSync(
+        executable,
+        readFileSync(join(here, "fixtures/tier1-parent.mjs.txt")),
+      );
+      writeFileSync(
+        join(cwd, "tier1-progress.mjs"),
+        readFileSync(join(here, "fixtures/tier1-parent-progress.mjs.txt")),
+      );
+      // These three modules are unchanged in the retry child.
+      for (const name of ["discovery", "quota", "writes"])
+        writeFileSync(
+          join(cwd, `tier1-${name}.mjs`),
+          readFileSync(join(here, `tier1-${name}.mjs`)),
+        );
+    }
     const result = spawnSync(
       process.execPath,
       ["--import", offlinePreload, executable, ...args],
@@ -204,13 +220,28 @@ const cases = [
   ["missing numeric value", {}, ["--limit"]],
   ["invalid numeric value", {}, ["--quota-floor", "5O"]],
 ];
-describe("tier1 offline before/after CLI parity", () => {
-  it.each(cases)("%s", (_name, scenario, args) => {
-    const before = runOffline("before", scenario, args);
-    const after = runOffline("after", scenario, args);
-    expect(after).toEqual(before);
-    expect(after.stderr).not.toContain("Unexpected offline request");
-  });
+describe.each(["before", "parent"])(
+  "tier1 offline %s/child CLI parity",
+  (baseline) => {
+    it.each(cases)("%s", (_name, scenario, args) => {
+      const before = runOffline(baseline, scenario, args);
+      const after = runOffline("after", scenario, args);
+      const updateGuidance = (text) =>
+        text.replace(
+          /resumes (the queue|it)\./g,
+          "resumes unattempted work. Default resume skips recorded errors; add --retry-errors to retry them (additional Intel Label quota may be spent).",
+        );
+      expect(after).toEqual({
+        ...before,
+        stdout: updateGuidance(before.stdout),
+        stderr: updateGuidance(before.stderr),
+      });
+      expect(after.stderr).not.toContain("Unexpected offline request");
+    });
+  },
+);
+
+describe("offline durable outcomes", () => {
   it("halts failed writes without completing unwritten addresses", () => {
     const result = runOffline("after", {
       sources,
@@ -228,5 +259,126 @@ describe("tier1 offline before/after CLI parity", () => {
     expect(
       result.files["tier1-progress-all.jsonl"].trim().split("\n"),
     ).toHaveLength(10);
+  });
+});
+
+describe("offline retry CLI", () => {
+  const errors = JSON.stringify({ address: address(1), error: "" }) + "\n";
+  const lookups = (result) =>
+    result.requests
+      .split("\n")
+      .filter((line) => line.includes("address_enriched"));
+  it("retries eligible error-only histories, then skips their terminal success", () => {
+    const first = runOffline("after", { sources, progress: errors }, [
+      "--retry-errors",
+    ]);
+    expect(first.status).toBe(0);
+    expect(lookups(first)).toHaveLength(2);
+    expect(first.files["tier1-progress-all.jsonl"]).toContain(
+      '"write":"written"',
+    );
+    const second = runOffline(
+      "after",
+      { sources, progress: first.files["tier1-progress-all.jsonl"] },
+      ["--retry-errors"],
+    );
+    expect(second.status).toBe(0);
+    expect(lookups(second)).toHaveLength(0);
+    expect(second.files["tier1-progress-all.jsonl"]).toBe(
+      first.files["tier1-progress-all.jsonl"],
+    );
+  });
+  it("preserves default error skipping", () => {
+    const result = runOffline("after", { sources, progress: errors });
+    expect(lookups(result)).toHaveLength(1);
+    expect(lookups(result)[0]).toContain(address(2));
+  });
+  it("keeps terminal records terminal in either order", () => {
+    for (const progress of [
+      errors + JSON.stringify({ address: address(1), write: "written" }) + "\n",
+      JSON.stringify({ address: address(1), status: 404 }) + "\n" + errors,
+    ]) {
+      const result = runOffline("after", { sources, progress }, [
+        "--retry-errors",
+      ]);
+      expect(lookups(result)).toHaveLength(1);
+      expect(lookups(result)[0]).toContain(address(2));
+    }
+  });
+  it("honors limits and quota floor", () => {
+    const limited = runOffline("after", { sources, progress: errors }, [
+      "--retry-errors",
+      "--limit",
+      "1",
+    ]);
+    expect(lookups(limited)).toHaveLength(1);
+    expect(lookups(limited)[0]).toContain(address(1));
+    const stopped = runOffline(
+      "after",
+      {
+        sources,
+        progress: errors,
+        usage: { totalCount: 950, totalLimit: 1000 },
+      },
+      ["--retry-errors"],
+    );
+    expect(lookups(stopped)).toHaveLength(0);
+    expect(stopped.files["tier1-progress-all.jsonl"]).toBe(errors);
+  });
+  it("does not expand discovery or override manual and no-refresh filters", () => {
+    const progress =
+      errors + JSON.stringify({ address: address(99), error: "failed" }) + "\n";
+    const result = runOffline(
+      "after",
+      {
+        sources,
+        labels: {
+          [address(1)]: { name: "Manual" },
+          [address(2)]: { name: "Arkham", source: "arkham" },
+        },
+        progress,
+      },
+      ["--retry-errors", "--no-refresh"],
+    );
+    expect(lookups(result)).toHaveLength(0);
+    expect(result.files["tier1-progress-all.jsonl"]).toBe(progress);
+  });
+  it("keeps scope files isolated", () => {
+    const result = runOffline(
+      "after",
+      {
+        sources,
+        scope: "other",
+        progress:
+          JSON.stringify({ address: address(1), write: "written" }) + "\n",
+      },
+      ["--retry-errors", "--chain", "selected"],
+    );
+    expect(lookups(result)).toHaveLength(2);
+    expect(result.files["tier1-progress-other.jsonl"]).toContain(
+      '"write":"written"',
+    );
+    expect(result.files["tier1-progress-selected.jsonl"]).toBeDefined();
+  });
+  it("does not complete retried entries whose writes fail", () => {
+    const result = runOffline(
+      "after",
+      { sources, progress: errors, pipelines: [{ status: 500 }] },
+      ["--retry-errors"],
+    );
+    expect(result.status).toBe(1);
+    expect(result.files["tier1-progress-all.jsonl"]).toBe(errors);
+  });
+  it("retains the ten-error circuit breaker and explains explicit retries", () => {
+    const scenario = cases.find(([name]) => name === "circuit breaker")[1];
+    const result = runOffline("after", { ...scenario, progress: errors }, [
+      "--retry-errors",
+    ]);
+    expect(result.status).toBe(3);
+    expect(lookups(result)).toHaveLength(10);
+    expect(result.stderr).toContain(
+      "Default resume skips recorded errors; add --retry-errors",
+    );
+    expect(result.stderr).toContain("additional Intel Label quota");
   });
 });

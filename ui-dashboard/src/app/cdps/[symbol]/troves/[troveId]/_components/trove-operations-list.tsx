@@ -139,6 +139,7 @@ export function TroveOperationsList({
   probeState,
   hasLoadedOnce = rows.length > 0,
   hasLifetimeTotals = false,
+  orderingNotice,
   chainId,
   debtSymbol,
 }: {
@@ -166,6 +167,7 @@ export function TroveOperationsList({
    *  defaults to `false` (omit the reference) so callers indifferent to it
    *  — most tests — don't need to pass it. */
   hasLifetimeTotals?: boolean;
+  orderingNotice?: string | null;
   chainId: number;
   debtSymbol: string;
 }) {
@@ -181,6 +183,11 @@ export function TroveOperationsList({
       <p role="status" className="mb-3 text-xs text-amber-400">
         {partialNotice}
       </p>
+      {orderingNotice != null && (
+        <p role="status" className="mb-3 text-xs text-amber-400">
+          {orderingNotice}
+        </p>
+      )}
       {/* Mirrors the parent view's other three notices (markets/trove/batch
           rate): once the fetch has resolved at least once, a later poll
           failure keeps the cached rows (which may legitimately be empty —

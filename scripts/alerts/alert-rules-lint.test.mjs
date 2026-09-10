@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
+import { load as loadYaml } from "js-yaml";
+import picomatch from "picomatch";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path, { join } from "node:path";
@@ -2397,7 +2399,7 @@ test("CLI reports parse failures and unknown bridge metrics", () => {
       join(dir, "broken.tf"),
       [
         'expr = "sum(rate(broken["',
-        'labels = { metric = "mento_pool_does_not_exist" }',
+        'labels = { metric = "mento_pool_does_not_exist", bridge_metric = "mento_ntt_bridge_does_not_exist" }',
         "",
       ].join("\n"),
     );
@@ -2414,9 +2416,183 @@ test("CLI reports parse failures and unknown bridge metrics", () => {
       `expected parse failure to name file, got: ${result.stderr}`,
     );
     assert(
-      /mento_pool_does_not_exist/.test(result.stderr),
+      /mento_pool_does_not_exist/.test(result.stderr) &&
+        /mento_ntt_bridge_does_not_exist/.test(result.stderr),
       `expected unknown metric failure, got: ${result.stderr}`,
     );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("bridge freshness allowance follows the live Alloy scrape cadence", () => {
+  const alloy = readFileSync(
+    join(repoRoot, "aegis/grafana-agent/config.alloy"),
+    "utf8",
+  );
+  const scrape = extractBlockAt(
+    alloy,
+    alloy.indexOf('prometheus.scrape "metrics_bridge"'),
+  );
+  const allowance = readFileSync(
+    join(repoRoot, "alerts/rules/bridge-promql.tf"),
+    "utf8",
+  ).match(/bridge_scrape_allowance_seconds\s*=\s*(\d+)/)?.[1];
+  const seconds = scrape.match(/scrape_interval\s*=\s*"(\d+)s"/)?.[1];
+  assert(
+    seconds !== undefined && seconds === allowance,
+    "Prometheus sample allowance must match Metrics Bridge scrape interval",
+  );
+});
+
+test("bridge rules expose all metric registrations and use existing URL parameters", () => {
+  const metrics = readFileSync(
+    join(repoRoot, "metrics-bridge/src/bridge/metrics.ts"),
+    "utf8",
+  );
+  assert(
+    registeredMetricNames(metrics).length === 8,
+    "all eight bridge metric families must be visible to the rule linter",
+  );
+  const rules = readFileSync(
+    join(repoRoot, "alerts/rules/bridge-promql.tf"),
+    "utf8",
+  );
+  const urlState = readFileSync(
+    join(
+      repoRoot,
+      "ui-dashboard/src/app/bridge-flows/_components/use-bridge-flow-url-state.ts",
+    ),
+    "utf8",
+  );
+  for (const parameter of ["status", "source", "destination"]) {
+    assert(
+      rules.includes(`${parameter}=`),
+      `bridge rule link must include ${parameter}`,
+    );
+    assert(
+      urlState.includes(`params.get("${parameter}")`),
+      `dashboard must consume ${parameter}`,
+    );
+  }
+  assert(
+    rules.includes("mento_ntt_bridge_invalid_rows == 0"),
+    "unknown data must not resolve a known transfer incident",
+  );
+});
+
+test("bridge dependencies route exact checks and protected apply eligibility", () => {
+  const workflow = (name) =>
+    loadYaml(
+      readFileSync(join(repoRoot, `.github/workflows/${name}.yml`), "utf8"),
+    );
+  const ci = workflow("ci");
+  const filters = loadYaml(
+    ci.jobs.changes.steps.find((step) => step.id === "filter").with.filters,
+  );
+  const rules = workflow("alerts-rules");
+  const infra = workflow("infra");
+  const dir = mkdtempSync(join(tmpdir(), "bridge-routing-"));
+  try {
+    for (const [file, rulesExpected, lintExpected] of [
+      ["shared-config/bridge-thresholds.json", true, false],
+      ["metrics-bridge/src/bridge/metrics.ts", false, true],
+      ["shared-config/chains.json", false, false],
+    ]) {
+      for (const event of ["pull_request", "push"]) {
+        assert(
+          picomatch(rules.on[event].paths)(file) === rulesExpected,
+          `${file}: exact rules ${event} admission`,
+        );
+        assert(
+          picomatch(infra.on[event].paths)(file),
+          `${file}: coarse infra admission`,
+        );
+      }
+      assert(
+        picomatch(filters.terraform.flat(Infinity))(file),
+        `${file}: coarse Terraform CI admission`,
+      );
+      assert(
+        picomatch(filters.rootScripts.flat(Infinity))(file) === lintExpected,
+        `${file}: metric linter admission`,
+      );
+      const paths = join(dir, "paths.txt");
+      writeFileSync(paths, `${file}\n`);
+      const result = spawnSync(
+        process.execPath,
+        [
+          join(repoRoot, "scripts/tf-stacks.mjs"),
+          "changed",
+          "--paths-file",
+          paths,
+          "--json",
+        ],
+        { encoding: "utf8" },
+      );
+      assert(result.status === 0, result.stderr);
+      assert(
+        JSON.parse(result.stdout).include.some(
+          (stack) => stack.id === "alerts-rules",
+        ) === rulesExpected,
+        `${file}: exact stack ownership`,
+      );
+    }
+    const init = spawnSync("git", ["init", "-q", dir]);
+    assert(init.status === 0, "initialize route fixture");
+    const git = (...args) => {
+      const result = spawnSync(
+        "git",
+        [
+          "-C",
+          dir,
+          "-c",
+          "user.name=Test",
+          "-c",
+          "user.email=test@example.invalid",
+          ...args,
+        ],
+        { encoding: "utf8" },
+      );
+      assert(result.status === 0, result.stderr);
+      return result.stdout.trim();
+    };
+    git("add", ".");
+    git("commit", "-qm", "baseline");
+    const detector = rules.jobs.plan.steps.find(
+      (step) => step.id === "stack_changes",
+    );
+    for (const [file, expected] of [
+      ["shared-config/bridge-thresholds.json", true],
+      ["shared-config/chains.json", false],
+    ]) {
+      const base = git("rev-parse", "HEAD");
+      const target = join(dir, file);
+      const parent = spawnSync("mkdir", ["-p", path.dirname(target)]);
+      assert(parent.status === 0, "create fixture directory");
+      writeFileSync(target, "{}\n");
+      git("add", file);
+      git("commit", "-qm", "change");
+      const output = join(dir, "output");
+      writeFileSync(output, "");
+      const result = spawnSync("bash", ["-c", detector.run], {
+        cwd: dir,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          GITHUB_EVENT_NAME: "push",
+          BASE_SHA: base,
+          HEAD_SHA: git("rev-parse", "HEAD"),
+          STACK_PATH: "alerts/rules",
+          GITHUB_OUTPUT: output,
+        },
+      });
+      assert(result.status === 0, result.stderr);
+      assert(
+        readFileSync(output, "utf8").trim() === `stack-changed=${expected}`,
+        `${file}: protected apply change detector`,
+      );
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
