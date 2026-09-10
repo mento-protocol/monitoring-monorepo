@@ -29,12 +29,12 @@ export const REVIEW_EVAL_ISSUE_LABELS = [
 ];
 
 export const REPORT_MAX_LINES = 40;
-// Anchored empirically 2026-09-09: the contract judge (claude-fable-5 max)
-// measures 39/40 blind against the audited labels — its one miss is an
-// under-match on a matched pair, and the three same-file trap pairs it used to
-// over-match now judge correctly. The floor sits two below that measured
-// baseline so it fires on drift, not on the known ceiling. Re-measure and
-// re-anchor whenever the calibration set, the contract judge, or the
+// Anchored empirically 2026-09-10: the contract judge (claude-opus-5 high)
+// measures 39/40 blind against the audited labels on both of two draws — its
+// one miss is an under-match on a matched pair, and every judge config
+// measured that day misses that same record. The floor sits two below that
+// measured baseline so it fires on drift, not on the known ceiling. Re-measure
+// and re-anchor whenever the calibration set, the contract judge, or the
 // calibration prompt renderer changes: the earlier 37/40 anchor (2026-08-28)
 // was measured through a renderer that showed the judge the defect title
 // alone. The measured baseline lives in the calibration file's

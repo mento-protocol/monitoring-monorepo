@@ -109,8 +109,8 @@ Cut it last.
 [ADR 0090](../adr/0090-canonical-eval-matrix-freshness-floor.md)).
 Until 2026-09 a full run took two live `pipeline` draws of every fixture and a
 `control` cell on all nine, which is 39 cells, about $145 of contestant spend
-and about $155 more for the judge pass — the judge pass alone ran about six
-hours. The second live draw was there because
+and about $155 more for the judge pass at the fable-max judge of the time —
+the judge pass alone ran about six hours. The second live draw was there because
 the finder samples — one codex configuration drew 19 and then 10 known defects
 on identical diffs — but two points do not measure that spread, and they do
 not remove it either: the scorer folds a condition's draws with OR, so the
@@ -874,10 +874,12 @@ scoring. `--check-fixtures` covers the inputs once, before the matrix starts;
 under `--skill-ref` the spec worktree is the live checkout for the two hours in
 between, and the contract digest alone would not notice.
 
-**The judge pass resumes per cell.** Judging one cell costs about $4 and nine
-minutes, so 27 cells run about four hours and need not fit inside one usage
-window: the 2026-09-05 attempt, on the 39-cell matrix, scored nineteen cells,
-hit a usage limit, and re-spent them on the retry. `--score` writes each verdict to `cells/<cell_id>/score.json`
+**The judge pass resumes per cell.** Judging one cell cost about $4 and nine
+minutes at the retired fable-max judge. The 2026-09-10 switch to opus high cuts
+that to about $1.20 a cell and leaves the wall unmeasured, so 27 cells still
+run about four hours and need not fit inside one usage window: the 2026-09-05
+attempt, on the 39-cell matrix, scored nineteen cells, hit a usage limit, and
+re-spent them on the retry. `--score` writes each verdict to `cells/<cell_id>/score.json`
 as it earns it, under a resume identity carrying the plan's comparability key,
 contract digest, matcher digest and calibration digest, the cell fingerprint, and
 the digest of the `result.json` that verdict was formed on. A later pass reuses a
@@ -929,10 +931,10 @@ older one is refused; pass `--contract` with the archived contract to read it.
 under 37/40 marks the run AMBER (floor = the contract judge's measured 39/40
 blind baseline on the audited set minus a two-pair drift margin; re-anchor on
 any judge, set, or calibration-renderer change), excludes the row from baseline
-comparison, and keeps it off the full-run freshness clock. It costs about $2 and
-it is the only mechanism that separates "the review skill regressed" from "the
-judge alias now points at different weights and the scorer got stricter". It
-fired on the very first baseline run (2026-08-28): the original labels — the
+comparison, and keeps it off the full-run freshness clock. It costs about $0.80
+and it is the only mechanism that separates "the review skill regressed" from
+"the judge alias now points at different weights and the scorer got stricter".
+It fired on the very first baseline run (2026-08-28): the original labels — the
 frozen 2026-08 judge's own decisions — scored 29/40 against two independent
 modern judges, which agreed with each other on 36/40. The set was re-audited
 against the modern consensus, which held for all six matched -> unmatched flips.
@@ -941,13 +943,18 @@ each cited the same file while describing a different problem, so both blind
 modern judges share an over-matching bias on file overlap and that direction has
 to be adjudicated, not trusted. Six records were then replaced with fresh
 matched pairs so the set still clears the balance guard at 18 matched / 22
-unmatched (provenance in the calibration file). The contract judge is now
-`claude-fable-5` at max effort, the judge whose full-context adjudication
-settled the contested labels. Until the issue 2332 fix the replay rendered an
-empty `detail:` line for every record, so the judge saw each defect's title and
-nothing else. The 2026-08-28 baseline of 37/40 was measured that way. A blind
-replay through the fixed renderer measures 39/40 on 2026-09-09, and the three
-same-file trap pairs that baseline missed now judge correctly.
+unmatched (provenance in the calibration file). The contract judge is
+`claude-opus-5` at high effort. Until the issue 2332 fix (PR 2337) the replay
+rendered an empty `detail:` line for every record, so the judge saw each
+defect's title and nothing else, and the 2026-08-28 baseline of 37/40 was
+measured that way. The 2026-09-09 check kept `claude-fable-5` at max effort, the
+judge whose full-context adjudication settled the contested labels, because the
+cheaper configs sat at 35/40 on that title-only renderer. The 2026-09-10
+re-measure on the fixed renderer put opus high at 39/40 on both of two draws for
+about $0.80 a pass, against 39/40 twice for about $2.75 at fable max, so the
+judge moved to about a third of the cost. Every config measured that day misses
+the same record, an under-match on the audited set and a candidate for the next
+re-audit.
 
 The forty outcomes are written to `calibration.json` in the run's detail
 directory. `--validate` re-derives `agreement` and `total` from them and checks
