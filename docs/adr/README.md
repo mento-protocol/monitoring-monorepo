@@ -103,7 +103,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0091](0091-promote-needs-replay-corroboration.md)          | A PROMOTE re-anchors only when `replay` corroborates the `pipeline` gain             |
 | [0092](0092-dependabot-npm-version-updates.md)              | Dependabot batches npm version updates into Monday groups; npm stays operator-merged |
 | [0093](0093-opt-in-native-stacked-pull-requests.md)         | Native stacks use separate diff and protection bases through an opt-in pilot         |
-| [0094](0094-control-waiver-scaled-to-grid-scope.md)         | The control-drift waiver asks control for its share of the flips, not the headline's |
+| [0094](0094-grid-waiver.md)                                 | The control-drift waiver asks control for its share of the flips, not the headline's |
 
 ### shared-config
 

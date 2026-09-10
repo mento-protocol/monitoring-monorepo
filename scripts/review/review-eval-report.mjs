@@ -682,7 +682,7 @@ function controlWaiverThreshold(rules) {
  *
  * The magnitude test reads `control_waiver_net_flips`, which is scaled to
  * control's 39 grid defects rather than the headline's 51
- * ([ADR 0094](../../docs/adr/0094-control-waiver-scaled-to-grid-scope.md)).
+ * ([ADR 0094](../../docs/adr/0094-grid-waiver.md)).
  * Asking control for the headline's own `regression_net_flips` let drift spread
  * evenly across the suite push the headline past the RED line while control's
  * share of it stayed under the bar, which is a RED that should have been AMBER.

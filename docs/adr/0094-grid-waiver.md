@@ -1,5 +1,5 @@
 ---
-title: The control-drift waiver is scaled to control's grid scope
+title: Scale the control waiver to grid scope
 status: active
 owner: eng
 canonical: true
@@ -11,7 +11,7 @@ review_interval_days: 90
 garden_lane: adrs-architecture
 ---
 
-# ADR 0094 — The control-drift waiver is scaled to control's grid scope
+# ADR 0094 — Scale the control waiver to grid scope
 
 **Status:** Accepted (Sep 2026), in force.
 **Scope:** ci/process

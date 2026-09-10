@@ -815,7 +815,7 @@ which a grid gain beside a larger non-grid loss does not, and the headline must
 have moved that way on the grid too, which a loss sitting entirely off the grid
 does not. The waiver reads gains as well as losses, so a run inside the noise
 floor beside a drifting control reads AMBER and is not ranked on.
-[ADR 0094](../adr/0094-control-waiver-scaled-to-grid-scope.md) records the
+[ADR 0094](../adr/0094-grid-waiver.md) records the
 decision, and `--check-fixtures` refuses a value outside the bounds the fixture
 set derives, so widening the grid re-registers the number.
 
