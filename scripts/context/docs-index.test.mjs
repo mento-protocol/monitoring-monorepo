@@ -643,7 +643,7 @@ test("render groups documents in deterministic lane order", () => {
   });
 });
 
-test("render keeps ADR titles while using source paths for other documents", () => {
+test("render keeps ADR titles and links with catalog-relative labels", () => {
   withRepo((repo) => {
     write(
       repo,
@@ -664,7 +664,7 @@ test("render keeps ADR titles while using source paths for other documents", () 
     });
     assert.match(
       rendered,
-      /\[`docs\/adr\/0001-example\.md`\]\(adr\/0001-example\.md\) — Example decision/,
+      /\[`adr\/0001-example\.md`\]\(adr\/0001-example\.md\) — Example decision/,
     );
     assert.match(
       rendered,
