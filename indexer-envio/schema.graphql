@@ -1918,6 +1918,7 @@ type TroveOperationEvent
   debtIncreaseFromUpfrontFee: BigInt!
   timestamp: BigInt! @index
   blockNumber: BigInt!
+  logIndex: Int!
   txHash: String!
 }
 

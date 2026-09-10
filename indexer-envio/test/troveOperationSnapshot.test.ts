@@ -186,6 +186,7 @@ describe("TroveOperationEvent before/after snapshot (issue #2080)", () => {
       0n,
       "regression: open row's collBefore is 0, not the post-open coll",
     );
+    assert.equal(row?.logIndex, 2);
     assert.equal(row?.debtAfter, 1_000n * 10n ** 18n);
     assert.equal(row?.collAfter, 500n * 10n ** 18n);
   });
@@ -403,6 +404,7 @@ describe("TroveOperationEvent before/after snapshot (issue #2080)", () => {
       row,
       "TroveOperationEvent row is written for OPEN_TROVE_AND_JOIN_BATCH",
     );
+    assert.equal(row.logIndex, 2);
     assert.equal(
       row?.debtBefore,
       undefined,
@@ -484,6 +486,31 @@ describe("troveOperationSnapshot unit edges", () => {
     assert.equal(rows[0]!.collBefore, 0n, "950 - 1000 floors at zero");
     assert.equal(rows[0]!.debtAfter, 700n);
     assert.equal(rows[0]!.collAfter, 950n);
+  });
+
+  it("preserves numeric log indexes and distinct IDs within one block", () => {
+    const rows: TroveOperationEvent[] = [];
+    for (const logIndex of [0, 9, 10, 101]) {
+      maybeRecordTroveOperation({
+        context: { TroveOperationEvent: { set: (row) => rows.push(row) } },
+        op: OP.ADJUST_TROVE,
+        event: { ...makeEvent(), logIndex },
+        instanceId: "instance-1",
+        troveId: "0x1",
+        snapshotState: { owner: "0xaa", debtAfter: 1n, collAfter: 1n },
+        pendingBatchedTroveUpdate: undefined,
+        blockNumber: 42n,
+        blockTimestamp: 1_000n,
+      });
+    }
+    assert.deepEqual(
+      rows.map((row) => row.logIndex),
+      [0, 9, 10, 101],
+    );
+    assert.deepEqual(
+      rows.map((row) => row.id),
+      [0, 9, 10, 101].map((ordinal) => `${market.chainId}_42_${ordinal}`),
+    );
   });
 
   it("writes no row for ops that own dedicated event entities or are protocol-forced", () => {
