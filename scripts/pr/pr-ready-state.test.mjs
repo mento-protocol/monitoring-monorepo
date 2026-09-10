@@ -3162,12 +3162,27 @@ function stackFixture() {
   return { repo, pr, stack };
 }
 
-async function stackBases(fixture, transformList = (stack) => [stack]) {
+function ancestryResult(path) {
+  const parentSha = path.split("/compare/")[1].split("...")[0];
+  return {
+    status: "ahead",
+    behind_by: 0,
+    base_commit: { sha: parentSha },
+    merge_base_commit: { sha: parentSha },
+  };
+}
+
+async function stackBases(
+  fixture,
+  transformList = (stack) => [stack],
+  compare = (path) => ({ ok: true, value: ancestryResult(path) }),
+) {
   const requests = [];
   const result = await fetchReadinessBases({
     ...fixture,
     fetchJson: async (_repo, args) => {
       requests.push(args[0]);
+      if (args[0].includes("/compare/")) return compare(args[0]);
       return {
         ok: true,
         value: args[0].includes("?")
@@ -3200,7 +3215,7 @@ test("native stacks fetch protection at stack base and report unmerged dependenc
   const result = await stackBases(stackFixture());
   assertEqual(
     result.requests.join("|"),
-    "repos/owner/repo/stacks?pull_request=11&per_page=100|repos/owner/repo/stacks/7|protection:main",
+    `repos/owner/repo/stacks?pull_request=11&per_page=100|repos/owner/repo/stacks/7|repos/owner/repo/compare/${"a".repeat(40)}...${"b".repeat(40)}?per_page=1|protection:main`,
   );
   assertEqual(result.stack.diffBaseRef, "parent");
   assertEqual(result.stack.protectionBaseRef, "main");
@@ -3208,10 +3223,78 @@ test("native stacks fetch protection at stack base and report unmerged dependenc
   assertEqual(result.stack.ready, null);
 });
 
+test("native stack ancestry fails closed on stale children and unavailable comparisons", async () => {
+  for (const mutate of [
+    (value) => ({ ...value, status: "behind", behind_by: 1 }),
+    (value) => ({ ...value, status: "diverged", behind_by: 1 }),
+    (value) => ({ ...value, status: "unknown" }),
+    (value) => ({ ...value, behind_by: undefined }),
+    (value) => ({ ...value, base_commit: { sha: "c".repeat(40) } }),
+    (value) => ({ ...value, merge_base_commit: { sha: "c".repeat(40) } }),
+    () => null,
+  ]) {
+    let rejected = false;
+    try {
+      await stackBases(stackFixture(), undefined, (path) => ({
+        ok: true,
+        value: mutate(ancestryResult(path)),
+      }));
+    } catch (error) {
+      rejected = error.message.includes("does not verifiably include parent");
+    }
+    assert(rejected, "ancestry uncertainty must block readiness");
+  }
+  let rejected = false;
+  try {
+    await stackBases(stackFixture(), undefined, () => ({
+      ok: false,
+      error: "HTTP 403",
+    }));
+  } catch (error) {
+    rejected = error.message.includes("HTTP 403");
+  }
+  assert(rejected, "comparison API failure must block readiness");
+});
+
+test("identical native heads satisfy ancestry without requiring a new child commit", async () => {
+  const fixture = stackFixture();
+  fixture.stack.pull_requests[1].head.sha = fixture.pr.headRefOid = "a".repeat(
+    40,
+  );
+  const result = await stackBases(fixture, undefined, (path) => ({
+    ok: true,
+    value: { ...ancestryResult(path), status: "identical" },
+  }));
+  assertEqual(result.stack.layers.length, 2);
+});
+
+test("native ancestry verifies each adjacent open layer including descendants of the selected PR", async () => {
+  const fixture = stackFixture();
+  const third = structuredClone(fixture.stack.pull_requests[1]);
+  third.number = 12;
+  third.base.ref = "child";
+  third.head.ref = "grandchild";
+  third.head.sha = "c".repeat(40);
+  fixture.stack.pull_requests.push(third);
+  const result = await stackBases(fixture);
+  const comparisons = result.requests.filter((path) =>
+    path.includes("/compare/"),
+  );
+  assertEqual(comparisons.length, 2);
+  assert(
+    comparisons[1].includes(`${"b".repeat(40)}...${"c".repeat(40)}`),
+    "second pair must compare child to grandchild",
+  );
+});
+
 test("verified standalone PRs use the immediate base without stack output", async () => {
   const result = await stackBases(stackFixture(), () => []);
   assertEqual(result.stack, null);
   assertEqual(result.requests.at(-1), "protection:parent");
+  assert(
+    !result.requests.some((path) => path.includes("/compare/")),
+    "standalone PRs need no ancestry request",
+  );
 });
 
 test("partial stack merge checks remaining layer against stack base", async () => {
@@ -3223,6 +3306,10 @@ test("partial stack merge checks remaining layer against stack base", async () =
   const result = await stackBases(fixture);
   assertEqual(result.stack.dependencyPrNumbers.length, 0);
   assertEqual(result.stack.layers[0].state, "MERGED");
+  assert(
+    !result.requests.some((path) => path.includes("/compare/")),
+    "merged parents must not be compared after squash and retarget",
+  );
 });
 
 test("stack membership failure never fetches weaker branch protection", async () => {
@@ -3326,13 +3413,15 @@ async function finalSnapshot(
     stack: originalStack,
     fetchJson: async (_repo, [path]) => ({
       ok: true,
-      value: path.includes("/pulls/")
-        ? next.currentPr
-        : path.includes("?")
-          ? next.standalone
-            ? []
-            : [next.stack]
-          : next.stack,
+      value: path.includes("/compare/")
+        ? ancestryResult(path)
+        : path.includes("/pulls/")
+          ? next.currentPr
+          : path.includes("?")
+            ? next.standalone
+              ? []
+              : [next.stack]
+            : next.stack,
     }),
   });
 }

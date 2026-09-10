@@ -55,12 +55,42 @@ assert.deepEqual(
   calls.map((call) => [call.prArg, !!call.includeFeedbackDetails]),
   [
     ["1", true],
-    ["1", false],
+    ["1", true],
     ["2", true],
-    ["2", false],
-    ["2", false],
+    ["2", true],
+    ["2", true],
   ],
 );
+// A later readiness read can contain a new top-level finding while its ready
+// flag stays true. Exercise the real feedback projection on every later read.
+for (const findingRead of [null, 2, 4, 5]) {
+  let count = 0;
+  const result = await evaluateStackGate(
+    state(2),
+    "owner/repo",
+    async (args) => {
+      count++;
+      const value = state(Number(args.prArg));
+      if (count === findingRead && args.includeFeedbackDetails) {
+        value.topLevelBotComments = [
+          {
+            id: 100,
+            author: "chatgpt-codex-connector[bot]",
+            commitOid: value.pr.headRefOid,
+            body: "[P2] Fix the newly found feedback defect.",
+          },
+        ];
+      }
+      return value;
+    },
+  );
+  assert.match(
+    result,
+    findingRead === null ? /^PASS / : /^PENDING /,
+    `new finding at read ${findingRead}`,
+  );
+  assert.equal(count, findingRead ?? 5);
+}
 for (const mutation of [
   "feedback",
   "readiness",

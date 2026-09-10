@@ -129,6 +129,27 @@ export async function fetchStackContext({ repo, pr, fetchJson }) {
       selected.draft === pr.isDraft,
     "PR head or base changed during lookup",
   );
+  // Pin both sides to immutable commits: matching branch names do not prove
+  // that a child includes a parent's latest changes.
+  const openLayers = layers.filter((layer) => layer.state === "open");
+  for (let index = 1; index < openLayers.length; index += 1) {
+    const parent = openLayers[index - 1];
+    const child = openLayers[index];
+    const comparison = await fetchJson(repo, [
+      `repos/${repo.owner}/${repo.name}/compare/${parent.head.sha}...${child.head.sha}?per_page=1`,
+    ]);
+    requireMetadata(
+      comparison.ok,
+      comparison.error ?? "parent ancestry request failed",
+    );
+    requireMetadata(
+      ["ahead", "identical"].includes(comparison.value?.status) &&
+        comparison.value?.behind_by === 0 &&
+        comparison.value?.base_commit?.sha === parent.head.sha &&
+        comparison.value?.merge_base_commit?.sha === parent.head.sha,
+      `layer #${child.number} does not verifiably include parent #${parent.number} head`,
+    );
+  }
   return {
     number: stack.number,
     diffBaseRef: pr.baseRefName,

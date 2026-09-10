@@ -494,6 +494,8 @@ protection base; diff checks still use `pr.baseRefName`.
 Native results also include the observed `pr.baseRefOid`. The aggregate retains
 each layer's observed base commit and rejects changes between reads, including
 when the native stack API omits its optional base SHA.
+The probe also verifies that each open child head contains the preceding open
+parent head. A stale or unverifiable ancestry result blocks native readiness.
 
 `stack.ready` is `null` and `stack.readiness` is `"not_evaluated"`: a ready
 layer does not prove stack readiness. Run both projections independently for
@@ -508,6 +510,8 @@ that a PR is standalone.
 The repository babysit hook uses `scripts/pr/pr-stack-ready-state.mjs` for
 native stacks. The helper runs both projections for each open layer, requires
 matching stack snapshots, and performs a final selected-PR readiness read.
+Every later snapshot is checked for feedback as well as readiness, so a newly
+observed finding cannot be ignored while accepting that snapshot.
 Only complete, stable, ready results produce `PASS`; an unavailable, malformed,
 changed, or blocked result produces `PENDING`. It adds no public command and
 does not change the individual probes' layer-scoped JSON contract.

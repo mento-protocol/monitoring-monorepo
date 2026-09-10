@@ -90,12 +90,28 @@ async function evaluateLayers(initial, repoArg, fetchState, feedback) {
       });
       if (!matches(detail, layer) || feedback(detail).ready !== true)
         return `PENDING stack layer #${layer.number} feedback blocked or snapshot changed`;
-      const ready = await fetchState({ prArg: String(layer.number), repoArg });
-      if (!matches(ready, layer) || ready.ready !== true)
+      const ready = await fetchState({
+        prArg: String(layer.number),
+        repoArg,
+        includeFeedbackDetails: true,
+      });
+      if (
+        !matches(ready, layer) ||
+        ready.ready !== true ||
+        feedback(ready).ready !== true
+      )
         return `PENDING stack layer #${layer.number} readiness blocked or snapshot changed`;
     }
-    const final = await fetchState({ prArg: String(selected.number), repoArg });
-    if (!matches(final, selected) || final.ready !== true)
+    const final = await fetchState({
+      prArg: String(selected.number),
+      repoArg,
+      includeFeedbackDetails: true,
+    });
+    if (
+      !matches(final, selected) ||
+      final.ready !== true ||
+      feedback(final).ready !== true
+    )
       return "PENDING stack changed during final verification";
     return `PASS stack #${stack.number}: every open layer passed both projections`;
   } catch {
