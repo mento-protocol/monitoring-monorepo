@@ -273,6 +273,38 @@ test("a root result outside the completed-cell manifest is stale and reads as mi
   );
 });
 
+test("a numeric string id matches the contract's number; a non-integer id is refused", () => {
+  const anchor = readArm({
+    dir: writeArm({
+      finder: "sol@high",
+      cells: [11],
+      results: { 11: { matched: [1] } },
+    }),
+    contract,
+  });
+  const strings = readArm({
+    dir: writeArm({
+      finder: "astra@low",
+      cells: [11],
+      results: { 11: { matched: ["1"] } },
+    }),
+    contract,
+  });
+  assert.equal(compareArms({ anchor, candidate: strings }).totals.net, 0);
+  assert.throws(
+    () =>
+      readArm({
+        dir: writeArm({
+          finder: "astra@low",
+          cells: [11],
+          results: { 11: { matched: ["x"] } },
+        }),
+        contract,
+      }),
+    /not an integer id/,
+  );
+});
+
 test("--allow-scorer-drift turns the scorer refusal into a warning, nothing else", () => {
   // A probe is planned on a branch that edits scoring modules, so its scorer
   // digest never equals the anchor's. The operator who has read that diff can

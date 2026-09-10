@@ -66,19 +66,27 @@ function readCheckedRow(dir) {
 /** A per-cell count `foldCondition` reads. Absent, it would read as zero. */
 const DIGEST = /^[0-9a-f]{64}$/;
 
-/** `matched_ids` as the run wrote it: an array of scalar ids, never a shape. */
+/**
+ * `matched_ids` as the run wrote it: an array of ids, never a shape. The
+ * contract's ids are numbers and `aggregateDraws` matches by strict set
+ * membership, so a numeric string is read as its number, the way the canonical
+ * evidence validator compares string forms; anything else is refused.
+ */
 function requireIdArray(value, file) {
-  if (
-    !Array.isArray(value) ||
-    value.some(
-      (id) => !(typeof id === "number" || typeof id === "string") || id === "",
-    )
-  ) {
+  if (!Array.isArray(value)) {
     throw new Error(
-      `${file} matched_ids must be an array of scalar ids; the result cannot be compared`,
+      `${file} matched_ids must be an array of ids; the result cannot be compared`,
     );
   }
-  return value;
+  return value.map((id) => {
+    const number = typeof id === "string" && id !== "" ? Number(id) : id;
+    if (!Number.isSafeInteger(number)) {
+      throw new Error(
+        `${file} matched_ids carries ${JSON.stringify(id)}, which is not an integer id; the result cannot be compared`,
+      );
+    }
+    return number;
+  });
 }
 
 function requireCount(value, label, file) {

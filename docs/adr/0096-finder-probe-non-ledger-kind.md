@@ -93,9 +93,13 @@ already require.
 
 ## Consequences
 
-- A finder can be screened for about 9 cells, about 40 minutes and about $23,
-  against the anchor's pipeline cells, with the skill, verifier and judge
-  identical.
+- A finder can be screened for nine cells and about 30 minutes against the
+  anchor's pipeline cells, with the skill, verifier and judge identical. The
+  five probes of 2026-09-10 metered $20 to $24 each: $14 to $17 for the nine
+  Claude verifier cells and $5 to $7 for the judge pass. The codex finder call
+  is not metered by the harness; it runs on the operator's Codex plan. The
+  planner's warning of $3.68 per Claude cell ($33 for nine) is a budget
+  ceiling, not the recorded spend.
 - `run-eval.sh` and the scoring modules changed, so the comparability key
   moved; the next canonical run is a first row on its key. The runbook names
   the files that move it.
