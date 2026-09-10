@@ -303,6 +303,21 @@ test("a numeric string id matches the contract's number; a non-integer id is ref
       }),
     /not an integer id/,
   );
+  for (const odd of ["01", "1e0", "0x1"]) {
+    assert.throws(
+      () =>
+        readArm({
+          dir: writeArm({
+            finder: "astra@low",
+            cells: [11],
+            results: { 11: { matched: [odd] } },
+          }),
+          contract,
+        }),
+      /not an integer id/,
+      odd,
+    );
+  }
   assert.throws(
     () =>
       readArm({

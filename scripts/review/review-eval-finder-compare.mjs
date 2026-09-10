@@ -79,7 +79,13 @@ function requireIdArray(value, file, scorableIds) {
     );
   }
   return value.map((id) => {
-    const number = typeof id === "string" && id !== "" ? Number(id) : id;
+    // A string counts only in its exact decimal form, the string the canonical
+    // validator compares: "01", "1e0" and "0x1" are not the id 1.
+    const number =
+      typeof id === "string"
+        ? (scorableIds.find((scorable) => String(scorable) === id) ??
+          Number.NaN)
+        : id;
     if (!Number.isSafeInteger(number)) {
       throw new Error(
         `${file} matched_ids carries ${JSON.stringify(id)}, which is not an integer id; the result cannot be compared`,
