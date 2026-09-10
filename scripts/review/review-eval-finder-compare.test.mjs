@@ -15,15 +15,19 @@ const contract = {
 };
 
 /** A detail directory holding only what the comparison reads. */
+// A 64-hex digest that still reads as its label in a failure message.
+const HEX = (label) =>
+  (label.replace(/[^0-9a-f]/g, "0") + "0".repeat(64)).slice(0, 64);
+
 function writeArm({
   finder,
   cells,
   results,
   skillDigest = "skill",
   judge,
-  contractDigest = null,
-  matcherDigest = "matcher",
-  calibrationDigest = "calibset",
+  contractDigest = HEX("aaaa1111"),
+  matcherDigest = HEX("matcher"),
+  calibrationDigest = HEX("calibset"),
   comparabilityKey = "key",
   // The shape the committed anchor row records.
   calibration = { agreement: 39, total: 40 },
@@ -190,22 +194,22 @@ test("a scoring-input mismatch is refused, not warned about", () => {
   const results = { 11: { matched: [1] } };
   const base = { finder: "sol@high", cells: [11], results };
   for (const [changed, pattern] of [
-    [{ contractDigest: "bbbb2222" }, /different contracts/],
-    [{ matcherDigest: "other-matcher" }, /different scorers/],
+    [{ contractDigest: HEX("bbbb2222") }, /different contracts/],
+    [{ matcherDigest: HEX("other-matcher") }, /different scorers/],
     [
-      { calibrationDigest: "other-calibset" },
+      { calibrationDigest: HEX("other-calibset") },
       /different judge calibration sets/,
     ],
   ]) {
     const anchor = readArm({
-      dir: writeArm({ ...base, contractDigest: "aaaa1111" }),
+      dir: writeArm({ ...base, contractDigest: HEX("aaaa1111") }),
       contract,
     });
     const candidate = readArm({
       dir: writeArm({
         ...base,
         finder: "astra@low",
-        contractDigest: "aaaa1111",
+        contractDigest: HEX("aaaa1111"),
         ...changed,
       }),
       contract,
@@ -224,7 +228,7 @@ test("a straddled CLI upgrade warns and names the runtime that moved", () => {
     finder: "sol@high",
     cells: [11],
     results,
-    contractDigest: "aaaa1111",
+    contractDigest: HEX("aaaa1111"),
   };
   const anchor = readArm({ dir: writeArm(base), contract });
   const candidate = readArm({
@@ -246,7 +250,7 @@ test("a root result outside the completed-cell manifest is stale and reads as mi
     finder: "sol@high",
     cells: [11, 22],
     results,
-    contractDigest: "aaaa1111",
+    contractDigest: HEX("aaaa1111"),
   };
   const anchor = readArm({ dir: writeArm(base), contract });
   // PR 22 succeeded on an earlier run of this directory and failed on retry:
@@ -279,11 +283,15 @@ test("--allow-scorer-drift turns the scorer refusal into a warning, nothing else
     finder: "sol@high",
     cells: [11],
     results,
-    contractDigest: "aaaa1111",
+    contractDigest: HEX("aaaa1111"),
   };
   const anchor = readArm({ dir: writeArm(base), contract });
   const drifted = readArm({
-    dir: writeArm({ ...base, finder: "astra@low", matcherDigest: "other" }),
+    dir: writeArm({
+      ...base,
+      finder: "astra@low",
+      matcherDigest: HEX("other"),
+    }),
     contract,
   });
   assert.throws(() => compareArms({ anchor, candidate: drifted }), /scorers/);
@@ -295,7 +303,7 @@ test("--allow-scorer-drift turns the scorer refusal into a warning, nothing else
   assert.equal(report.totals.prs, 1);
   assert.ok(report.warnings.some((w) => /allow-scorer-drift/.test(w)));
   const other = readArm({
-    dir: writeArm({ ...base, calibrationDigest: "other-calibset" }),
+    dir: writeArm({ ...base, calibrationDigest: HEX("other-calibset") }),
     contract,
   });
   assert.throws(
@@ -313,8 +321,8 @@ test("an arm that disagrees with the loaded contract is refused; the scorer warn
     finder: "sol@high",
     cells: [11],
     results,
-    contractDigest: "aaaa1111",
-    matcherDigest: "mmmm1111",
+    contractDigest: HEX("aaaa1111"),
+    matcherDigest: HEX("mmmm1111"),
   };
   const anchor = readArm({ dir: writeArm(base), contract });
   const candidate = readArm({
@@ -322,18 +330,22 @@ test("an arm that disagrees with the loaded contract is refused; the scorer warn
     contract,
   });
   assert.throws(
-    () => compareArms({ anchor, candidate, contractDigest: "cccc3333" }),
+    () => compareArms({ anchor, candidate, contractDigest: HEX("cccc3333") }),
     /planned against contract aaaa1111, but these counts are recomputed from cccc3333/,
   );
   // The loaded scorer only warns. It did not produce either arm's matched ids,
   // and it moves whenever any scoring module is edited — the normal state of
   // the branch a probe is planned on — so refusing on it would refuse every
   // probe against every earlier anchor, including this repo's own.
-  const drifted = compareArms({ anchor, candidate, matcherDigest: "nnnn2222" });
+  const drifted = compareArms({
+    anchor,
+    candidate,
+    matcherDigest: HEX("nnnn2222"),
+  });
   assert.equal(drifted.warnings.length, 1);
   assert.match(
     drifted.warnings[0],
-    /both runs were scored under mmmm1111, but this checkout's scorer is nnnn2222/,
+    /both runs were scored under 00001111, but this checkout's scorer is 00002222/,
   );
   assert.equal(drifted.totals.prs, 1);
   // Agreement all round refuses nothing and warns about nothing.
@@ -341,8 +353,8 @@ test("an arm that disagrees with the loaded contract is refused; the scorer warn
     compareArms({
       anchor,
       candidate,
-      contractDigest: "aaaa1111",
-      matcherDigest: "mmmm1111",
+      contractDigest: HEX("aaaa1111"),
+      matcherDigest: HEX("mmmm1111"),
     }).warnings,
     [],
   );

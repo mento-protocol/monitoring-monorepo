@@ -64,6 +64,23 @@ function readCheckedRow(dir) {
 }
 
 /** A per-cell count `foldCondition` reads. Absent, it would read as zero. */
+const DIGEST = /^[0-9a-f]{64}$/;
+
+/** `matched_ids` as the run wrote it: an array of scalar ids, never a shape. */
+function requireIdArray(value, file) {
+  if (
+    !Array.isArray(value) ||
+    value.some(
+      (id) => !(typeof id === "number" || typeof id === "string") || id === "",
+    )
+  ) {
+    throw new Error(
+      `${file} matched_ids must be an array of scalar ids; the result cannot be compared`,
+    );
+  }
+  return value;
+}
+
 function requireCount(value, label, file) {
   if (!Number.isSafeInteger(value) || value < 0) {
     throw new Error(
@@ -106,7 +123,7 @@ export function readArm({ dir, contract }) {
       p1Ids: fixture.p1_ids ?? [],
       draws: [
         {
-          matchedIds: result.matched_ids ?? [],
+          matchedIds: requireIdArray(result.matched_ids, file),
           scorableIds: fixture.scorable_ids,
         },
       ],
@@ -304,6 +321,16 @@ export function assertComparable(
   { contractDigest = null, allowScorerDrift = false } = {},
 ) {
   for (const [field, label] of SCORING_IDENTITY) {
+    for (const [side, arm] of [
+      ["anchor", anchor],
+      ["candidate", candidate],
+    ]) {
+      if (!DIGEST.test(String(arm[field] ?? ""))) {
+        throw new Error(
+          `the ${side} plan records no ${label.replace(/s$/, "")} digest; a run without scoring provenance cannot be compared`,
+        );
+      }
+    }
     if (anchor[field] === candidate[field]) continue;
     // `--allow-scorer-drift`: the operator has read which scoring modules
     // changed between the two plans and vouches that matching did not. The
@@ -318,7 +345,7 @@ export function assertComparable(
     ["anchor", anchor],
     ["candidate", candidate],
   ]) {
-    if (arm.contract_digest && arm.contract_digest !== contractDigest) {
+    if (arm.contract_digest !== contractDigest) {
       throw new Error(
         `the ${side} was planned against contract ${short(arm.contract_digest)}, but these counts are recomputed from ${short(contractDigest)}`,
       );
