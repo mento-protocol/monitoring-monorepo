@@ -46,7 +46,15 @@ concurrency:
 jobs:
   contract:
     name: Check the evaluation contract and ledger
-    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    # Mento's self-hosted pool (`cibase`; runbook in mento-protocol/ci-infrastructure).
+    # This workflow DOES run on `pull_request`, so two things carry it. First,
+    # the repository requires approval for all external contributors, so no
+    # fork-authored code reaches the pool unattended. Second, this check is
+    # advisory -- it is not in the branch ruleset's required set (`ci`,
+    # `Code Quality`, `Sentry suites`, Vercel), so if the single-host pool is
+    # ever down this goes pending rather than blocking every merge in the org.
+    # Required checks stay on Blacksmith for exactly that reason.
+    runs-on: [self-hosted, sol-ci]
     timeout-minutes: 10
     permissions:
       contents: read
@@ -106,7 +114,15 @@ jobs:
     # Schedule only. A pull request checks the contract; it must not open or
     # touch an issue.
     if: github.event_name == 'schedule'
-    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    # Mento's self-hosted pool (`cibase`; runbook in mento-protocol/ci-infrastructure).
+    # This workflow DOES run on `pull_request`, so two things carry it. First,
+    # the repository requires approval for all external contributors, so no
+    # fork-authored code reaches the pool unattended. Second, this check is
+    # advisory -- it is not in the branch ruleset's required set (`ci`,
+    # `Code Quality`, `Sentry suites`, Vercel), so if the single-host pool is
+    # ever down this goes pending rather than blocking every merge in the org.
+    # Required checks stay on Blacksmith for exactly that reason.
+    runs-on: [self-hosted, sol-ci]
     timeout-minutes: 10
     permissions:
       contents: read
