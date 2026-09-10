@@ -5890,10 +5890,10 @@ function scoreResume(plan, cell) {
 }
 
 test("a second judge pass reuses every verdict it already paid for", async () => {
-  // The judge costs about $4 and nine minutes a cell, so a 27-cell pass runs
-  // about four hours and can still meet a usage limit. Re-running the same
-  // command must resume from the verdicts on disk rather than re-spend the
-  // whole pass.
+  // The judge cost about $4 and nine minutes a cell at the fable-max judge, so
+  // a 27-cell pass ran about four hours and could still meet a usage limit.
+  // Re-running the same command must resume from the verdicts on disk rather
+  // than re-spend the whole pass.
   const root = makeRoot();
   try {
     const plan = planWithCollectedCells(root);
