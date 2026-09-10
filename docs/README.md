@@ -247,6 +247,7 @@ Authority: canonical
 - [`integration-probes/README.md`](../integration-probes/README.md)
 - [`README.md`](../README.md)
 - [`SPEC.md`](../SPEC.md)
+- [`ui-dashboard/scripts/intel-marathon/README.md`](../ui-dashboard/scripts/intel-marathon/README.md)
 
 ## notes-plans-archive
 
