@@ -17,9 +17,10 @@ version: 2
 updates:
   # npm / pnpm workspace dependencies. The root directory covers every
   # workspace member through pnpm-lock.yaml. governance-watchdog and the two
-  # alert function roots keep their own lockfiles for standalone deploys, so
-  # they need their own directories; one entry keeps a shared dependency such
-  # as viem in one grouped PR across all four roots, which is what
+  # alert function roots keep their own lockfiles for standalone deploys, and
+  # sentry-ingest-watcher is a lockfile-less Cloud Function manifest outside
+  # the workspace; they need their own directories. One entry keeps a shared
+  # dependency such as viem in one grouped PR across all roots, which is what
   # scripts/supply-chain/version-skew-check.mjs requires of the catalog.
   - package-ecosystem: npm
     directories:
@@ -27,6 +28,7 @@ updates:
       - /governance-watchdog
       - /alerts/infra/onchain-event-handler
       - /alerts/infra/oncall-announcer
+      - /alerts/infra/sentry-ingest-watcher
     schedule:
       interval: weekly
       day: monday
@@ -41,7 +43,10 @@ updates:
       semver-minor-days: 7
       semver-patch-days: 7
 
-    # Worst case per Monday: nine version groups plus a few ungrouped majors.
+    # Worst case per Monday: nine version groups plus one PR per ungrouped
+    # major (chain-stack majors and any production major outside the named
+    # runtime groups). Dependabot defers further PRs until the count drops,
+    # so a busy week queues rather than fails.
     open-pull-requests-limit: 12
 
     labels:
@@ -160,8 +165,10 @@ updates:
           - minor
           - patch
 
-      # Catch-all so ungrouped production stragglers arrive as one weekly PR.
-      # Exclusions mirror the named groups above so group order never matters.
+      # Catch-all so ungrouped production minor and patch stragglers arrive as
+      # one weekly PR. Production majors stay individual so each gets its own
+      # review. Exclusions mirror the named groups above so group order never
+      # matters.
       production-misc:
         applies-to: version-updates
         dependency-type: production
@@ -286,7 +293,6 @@ updates:
 
       test-toolchain-security:
         applies-to: security-updates
-        dependency-type: development
         patterns:
           - vitest
           - "@vitest/*"
@@ -302,7 +308,6 @@ updates:
 
       lint-toolchain-security:
         applies-to: security-updates
-        dependency-type: development
         patterns:
           - eslint
           - "@eslint/*"
@@ -317,9 +322,9 @@ updates:
           - jscpd
           - react-doctor
 
-      security-runtime:
+      security-tooling:
         applies-to: security-updates
-        dependency-type: production
+        dependency-type: development
         patterns:
           - "*"
         exclude-patterns:
@@ -367,9 +372,10 @@ updates:
           - jscpd
           - react-doctor
 
-      security-tooling:
+      # Final catch-all with no dependency-type filter so production and
+      # indirect (transitive) advisories both land here instead of nowhere.
+      security-runtime:
         applies-to: security-updates
-        dependency-type: development
         patterns:
           - "*"
         exclude-patterns:
