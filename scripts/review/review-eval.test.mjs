@@ -883,7 +883,7 @@ test("comparabilityKey moves with the contract, the prompts, and the scorer", ()
 
 test("orchestratorSourceDigest binds the shell and the cell modules", () => {
   const expected =
-    "e7fe24ecf42652e8b4403dce78869bdecf278997796f72e123ca691587101200";
+    "d460aa3fefe45e964e71b6490898ed69e69b1d6e2f99781d7eff2c8252bff61f";
   assert.equal(orchestratorSourceDigest(), expected);
   // The cell writer and the stream parser are in the digest for the same
   // reason the shell is: the writer decides what a paid cell records and the
@@ -2558,6 +2558,131 @@ test("TERM takes every group worker's process group down with the run", async ()
   }
 });
 
+test("TERM ends a group worker interrupted before the parent recorded it", async () => {
+  const dir = mkdtempSync(
+    path.join(tmpdir(), "review-eval-matrix-unrecorded-"),
+  );
+  let workerChild = "";
+  let workerGroup = "";
+  try {
+    const rowsFile = path.join(dir, "rows.tsv");
+    writeFileSync(
+      rowsFile,
+      [
+        "pr-1990-control-draw1",
+        "1990",
+        "control",
+        "1",
+        "opus",
+        "high",
+        "",
+        "",
+        "request",
+      ].join("\t") + "\n",
+    );
+    const marker = path.join(dir, "survivor");
+    const childFile = path.join(dir, "worker-child");
+    // `matrix_start_group` forks the worker and records it in the next command,
+    // and a pending trap runs between two commands. A `printf` function shadows
+    // the builtin the parent writes the pid file with, which holds the parent
+    // inside exactly that gap while the worker signals it, so the run's TERM
+    // trap finds `MATRIX_WORKER_PIDS` empty and has to discover the worker to
+    // signal it at all.
+    const harness = [
+      "set -euo pipefail",
+      "TMPROOT=" + JSON.stringify(dir),
+      "STARTED=$(date +%s)",
+      "MATRIX_DEADLINE=3600",
+      'STATUS_NOTE=""',
+      "DONE=0",
+      "FAILED=0",
+      "TOTAL=0",
+      "MARKER=" + JSON.stringify(marker),
+      "CHILD_FILE=" + JSON.stringify(childFile),
+      // Read here, not from `$PPID` inside the worker: the worker is a subshell,
+      // where `$PPID` is still this shell's own parent rather than this shell.
+      "ORCHESTRATOR=$$",
+      `log() { builtin printf '%s\\n' "$*"; }`,
+      `fail() { builtin printf 'FATAL: %s\\n' "$*" >&2; exit 1; }`,
+      "cell_rows() { cat " + JSON.stringify(rowsFile) + "; }",
+      "source " + JSON.stringify(matrixSourcePath),
+      'printf() { sleep 2; builtin printf "$@"; }',
+      // The worker records a child of its own, interrupts the run, and waits.
+      // Nothing writes the marker unless the worker outlives the run that never
+      // recorded it.
+      "matrix_group_worker() {",
+      "  sleep 20 &",
+      `  builtin printf '%s\\n' "$!" >"$CHILD_FILE"`,
+      '  kill -TERM "$ORCHESTRATOR"',
+      "  wait",
+      `  builtin printf 'survived\\n' >"$MARKER"`,
+      "}",
+      "run_matrix",
+    ].join("\n");
+    // `/bin/bash` for the same reason the pass above uses it: that is what the
+    // launchd job execs, and on macOS it is 3.2.
+    const child = spawn("/bin/bash", ["-c", harness], {
+      stdio: "ignore",
+      env: { ...process.env, REVIEW_EVAL_PR_CONCURRENCY: "3" },
+    });
+    const exited = new Promise((resolve) => {
+      child.on("exit", (code) => resolve(code));
+    });
+    assert.equal(await exited, 143);
+    workerChild = readFileSync(childFile, "utf8").trim();
+    assert.match(workerChild, /^\d+$/, "the worker never started its child");
+    // Read the group id itself, not the child's parent: once the worker dies
+    // its child reparents to pid 1, and a teardown that group-killed that
+    // answer would signal every process this user owns.
+    workerGroup = String(
+      spawnSync("ps", ["-o", "pgid=", "-p", workerChild], {
+        encoding: "utf8",
+      }).stdout ?? "",
+    ).trim();
+    // A runner that cannot inspect processes must fail this test, not pass it:
+    // every probe below reads as "gone" when `ps` is denied, which is also the
+    // answer the fixed scheduler gives. Prove `ps` works on this process first.
+    const selfState = spawnSync(
+      "ps",
+      ["-o", "state=", "-p", String(process.pid)],
+      { encoding: "utf8" },
+    );
+    assert.equal(selfState.error, undefined, "ps cannot run here");
+    assert.equal(selfState.status, 0, "ps cannot read process state here");
+    assert.notEqual(selfState.stdout.trim(), "", "ps reported no state here");
+    // Gone or reaped-late, the same poll the pass above uses: the worker's group
+    // outliving the run is the orphan that keeps spending quota.
+    let ended = false;
+    for (let attempt = 0; attempt < 40 && !ended; attempt += 1) {
+      const state = spawnSync("ps", ["-o", "state=", "-p", workerChild], {
+        encoding: "utf8",
+      });
+      assert.equal(state.error, undefined, "ps stopped running mid-poll");
+      ended =
+        state.status !== 0 ||
+        state.stdout.trim() === "" ||
+        state.stdout.trim().startsWith("Z");
+      if (!ended) await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    assert.ok(
+      ended,
+      `the unrecorded worker's group member ${workerChild} outlived the run`,
+    );
+    assert.equal(existsSync(marker), false, "the unrecorded worker ran on");
+  } finally {
+    // A worker that outlived the run writes into this directory while it is
+    // being removed, so end its whole group before the removal, not after.
+    // Never group-kill 0 or 1: neither names this worker's group, and
+    // signalling them reaches every process this user owns.
+    const group = Number(workerGroup);
+    if (Number.isInteger(group) && group > 1) {
+      spawnSync("kill", ["-KILL", `-${group}`]);
+    }
+    if (/^\d+$/.test(workerChild)) spawnSync("kill", ["-KILL", workerChild]);
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5 });
+  }
+});
+
 test("--validate refuses bad or evidence-free rows and appends a good one", () => {
   const root = makeRoot();
   try {
@@ -3211,6 +3336,60 @@ test("resolveBaseline uses the same eligibility rule as an explicit baseline", (
   assert.equal(
     resolveBaseline({ rows: [empty, clean, emptyPromotion], row }).executed_at,
     clean.executed_at,
+  );
+});
+
+test("an uncorroborated PROMOTE never becomes the anchor", () => {
+  // The gate lives in `verdict()`, and both baseline paths read it there:
+  // `revalidateRow` recomputes the verdict from the row's own numbers, so a
+  // hand-written PROMOTE is refused, and `resolveBaseline` re-anchors on the
+  // verdict a row actually carries.
+  const prs = contract.fixtures.map((fixture) => fixture.pr);
+  const allIds = scorableIdsFor(prs);
+  const nonGridIds = scorableIdsFor(
+    contract.fixtures
+      .filter((fixture) => fixture.grid !== true)
+      .map((fixture) => fixture.pr),
+  );
+  // Every gained defect sits on a PR `replay` never scores, so `pipeline`
+  // clears the flip threshold with nothing corroborating it.
+  const gained = new Set(
+    nonGridIds.slice(0, contract.verdict_rules.regression_net_flips),
+  );
+  const anchor = makeRow({
+    executedAt: "2026-09-08T10:41:07Z",
+    matchedIds: allIds.filter((id) => !gained.has(id)),
+    fullMatrix: true,
+  });
+  const claimed = makeRow({
+    executedAt: "2026-12-08T10:41:07Z",
+    matchedIds: allIds,
+    fullMatrix: true,
+    verdict: "PROMOTE",
+  });
+  const checked = revalidateRow({
+    contract,
+    row: claimed,
+    repoRoot,
+    ledgerRows: [anchor, claimed],
+  });
+  assert.equal(checked.verdict, "GREEN", JSON.stringify(checked.problems));
+  assert.equal(checked.ok, false);
+  assert.ok(
+    checked.problems.some((problem) =>
+      problem.startsWith(
+        "row.verdict is PROMOTE; the row's own numbers give GREEN",
+      ),
+    ),
+    JSON.stringify(checked.problems),
+  );
+  // The ledger therefore only ever holds the recomputed verdict, and that row
+  // leaves the anchor where it was.
+  const recorded = { ...claimed, verdict: checked.verdict };
+  const later = makeRow({ executedAt: "2027-01-08T10:41:07Z" });
+  assert.equal(
+    resolveBaseline({ rows: [anchor, recorded], row: later }).executed_at,
+    anchor.executed_at,
   );
 });
 

@@ -3,7 +3,7 @@ title: Review Skill Evaluation
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-30
+last_verified: 2026-09-09
 doc_type: runbook
 scope: ci/process
 review_interval_days: 90
@@ -134,7 +134,9 @@ a run where nothing changed, so **read a `pipeline` flip beside `replay`**:
 `replay` runs frozen reports, so it does not move with the finder — though its
 own verifier session is sampled fresh like any other, so it is quieter than
 `pipeline`, not silent. A `pipeline` flip it does not corroborate is unproven
-rather than a regression.
+rather than a regression. On the PROMOTE side the harness holds you to that:
+an uncorroborated `pipeline` gain is GREEN, so it never re-anchors the
+baseline.
 And `control` recall is now measured over the 39 grid defects while `pipeline`
 recall covers all 51, so the two rates are over different denominators: read
 `control` against the previous run's `control`, never as a within-run
@@ -373,12 +375,14 @@ run and replace the `hours TBD` above with what it took. Each group is its own
 process group, and the TERM and EXIT paths take every one of them down before
 the run returns; because `run_bounded` puts each cell's bounded child in a
 process group of its own, a signalled worker forwards to that group as well
-rather than leaving a finder or a contestant orphaned. A cell's log lines are
-buffered and emitted as one write, which is indivisible on the regular file the
-launchd job redirects to and guaranteed only to `PIPE_BUF` through a pipe, so
-`run-eval.sh | tee` can still interleave two failing cells. Every cell's outcome
-is written to its own status file and summed by the parent, so
-`matrix: D done, F failed, of T` counts each cell exactly once and `T` is the
+rather than leaving a finder or a contestant orphaned. On TERM or INT the run
+signals both the workers it recorded and its own direct children, so a worker
+interrupted between its fork and the command that records it is ended too. A
+cell's log lines are buffered and emitted as one write, which is indivisible on
+the regular file the launchd job redirects to and guaranteed only to `PIPE_BUF`
+through a pipe, so `run-eval.sh | tee` can still interleave two failing cells.
+Every cell's outcome is written to its own status file and summed by the parent,
+so `matrix: D done, F failed, of T` counts each cell exactly once and `T` is the
 whole planned matrix.
 
 A PR whose draw-2 cell never ran is scored on draw 1 alone: the defect's bit
@@ -726,9 +730,9 @@ generalization.
 | verdict        | it means                                                                                                                                                                                                                      | do this                                                                   |
 | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
 | **GREEN**      | nothing below fired                                                                                                                                                                                                           | merge the ledger PR                                                       |
-| **AMBER**      | recall below baseline but McNemar not significant; or fewer than three paired defects, which never ranks; or the run did not complete; or judge calibration under 35/40; or a leak signal; or `control` moved with `pipeline` | merge the row, do not rank on it, read the reason                         |
+| **AMBER**      | recall below baseline but McNemar not significant; or fewer than three paired defects, which never ranks; or the run did not complete; or judge calibration under 37/40; or a leak signal; or `control` moved with `pipeline` | merge the row, do not rank on it, read the reason                         |
 | **RED**        | `b − c ≥ 6` net flips; or pooled P1 recall under 0.60 where P1 was measured; or wrong claims at twice the baseline rate, the baseline floored at one; or a condition found nothing on two or more PRs                         | open a priority issue naming the flipped defects before changing anything |
-| **PROMOTE**    | `c − b ≥ 6` and the change was intentional                                                                                                                                                                                    | re-anchor the baseline in a PR that says what changed and why             |
+| **PROMOTE**    | `c − b ≥ 6` on the headline, the change was intentional, and where the headline is `pipeline` a net gain of at least 3 on `replay` corroborates it                                                                            | re-anchor the baseline in a PR that says what changed and why             |
 | **INCOMPLETE** | the run failed, or a canary did not finish                                                                                                                                                                                    | fix the harness and re-run; the row stays as a trace                      |
 
 **A `pipeline` flip `replay` contradicts is unproven; a flip on a defect
@@ -748,13 +752,25 @@ corroborating `replay` flip for what it is: two conditions moving together, each
 with its own verifier draw, which is weaker than a repeated measurement and
 stronger than one condition alone.
 
-The harness does not enforce that yet, and it is the one place this matters
-most: a PROMOTE re-anchors the baseline on its own, because `resolveBaseline()`
-picks the newest PROMOTE row of the same key and `--validate` recomputes the
-verdict from the row's own numbers, so it cannot be lowered by hand. Until
-[issue 2324](https://github.com/mento-protocol/monitoring-monorepo/issues/2324)
-gates re-anchoring on corroboration, read the next run against a PROMOTE anchor
-knowing the anchor may carry one draw of finder noise.
+The harness enforces that reading where it matters most. A PROMOTE re-anchors
+the baseline on its own — `resolveBaseline()` picks the newest PROMOTE row of
+the same key, and `--validate` recomputes the verdict from the row's own
+numbers, so it cannot be lowered by hand — so a `pipeline` gain past the flip
+threshold is PROMOTE only when `replay` gained at least
+`verdict_rules.promote_corroboration_net_flips` (3) net defects on at least
+`noise_floor_defects` defects both runs scored. Uncorroborated, the row is
+GREEN and the reason states the gain, why `replay` did not corroborate it, and
+that it does not re-anchor the baseline. Half the PROMOTE threshold is the bar
+because `replay` folds two frozen-report draws over the 39 grid defects: it
+confirms the direction beyond noise without asking one verifier to reproduce a
+PROMOTE-sized gain on the grid alone.
+
+The gate reads a `pipeline` headline only. A row whose headline is `replay`
+scored no live pipeline cell, and `replay`'s finder is frozen, so it has no
+finder sampling to corroborate away. RED is unchanged: a spurious RED costs an
+investigation, a spurious PROMOTE moves the reference every later run reads.
+[ADR 0091](../adr/0091-promote-needs-replay-corroboration.md) records the
+decision.
 
 The three AMBER gates — failed judge calibration, a leak signal, and a matrix
 that did not complete — are read before the RED lines, not after them. Each says
@@ -785,7 +801,10 @@ re-derives it after seeing a result they dislike.
 
 `verdict()` enforces the floor: when a candidate and its baseline share fewer
 than `noise_floor_defects` scored defects, the row is AMBER and the reason says
-the comparison was refused. It never reads as green, and it never promotes.
+the comparison was refused. It never reads as green, and it never promotes. The
+same floor bounds the PROMOTE corroboration check: `replay` corroborates only
+over defects both runs scored, and fewer than `noise_floor_defects` of them
+corroborate nothing.
 
 Do not use a two-proportion z-test on these numbers. The comparison is paired
 at the defect level, which is the whole point of freezing the fixtures.
@@ -894,22 +913,28 @@ older one is refused; pass `--contract` with the archived contract to read it.
 
 **Judge calibration runs before every scoring pass.** Forty frozen
 `(claim, defect, verdict)` pairs replay through the current judge. Agreement
-under 35/40 marks the run AMBER (floor = the contract judge's measured 37/40 blind baseline on the audited set minus a two-pair drift margin; re-anchor on any judge or set change), excludes the row from baseline comparison, and
-keeps it off the full-run freshness clock. It costs about $2 and it is the only
-mechanism that separates "the review skill regressed" from "the judge alias now
-points at different weights and the scorer got stricter". It fired on the very
-first baseline run (2026-08-28): the original labels — the frozen 2026-08
-judge's own decisions — scored 29/40 against two independent modern judges,
-which agreed with each other on 36/40. The set was re-audited against the modern
-consensus, which held for all six matched -> unmatched flips. All three
-unmatched -> matched flips it proposed were declined on full context: each cited
-the same file while describing a different problem, so both blind modern judges
-share an over-matching bias on file overlap and that direction has to be
-adjudicated, not trusted. Six records were then replaced with fresh matched
-pairs so the set still clears the balance guard at 18 matched / 22 unmatched
-(provenance in the calibration file). The contract judge is now
+under 37/40 marks the run AMBER (floor = the contract judge's measured 39/40
+blind baseline on the audited set minus a two-pair drift margin; re-anchor on
+any judge, set, or calibration-renderer change), excludes the row from baseline
+comparison, and keeps it off the full-run freshness clock. It costs about $2 and
+it is the only mechanism that separates "the review skill regressed" from "the
+judge alias now points at different weights and the scorer got stricter". It
+fired on the very first baseline run (2026-08-28): the original labels — the
+frozen 2026-08 judge's own decisions — scored 29/40 against two independent
+modern judges, which agreed with each other on 36/40. The set was re-audited
+against the modern consensus, which held for all six matched -> unmatched flips.
+All three unmatched -> matched flips it proposed were declined on full context:
+each cited the same file while describing a different problem, so both blind
+modern judges share an over-matching bias on file overlap and that direction has
+to be adjudicated, not trusted. Six records were then replaced with fresh
+matched pairs so the set still clears the balance guard at 18 matched / 22
+unmatched (provenance in the calibration file). The contract judge is now
 `claude-fable-5` at max effort, the judge whose full-context adjudication
-settled the contested labels.
+settled the contested labels. Until the issue 2332 fix the replay rendered an
+empty `detail:` line for every record, so the judge saw each defect's title and
+nothing else. The 2026-08-28 baseline of 37/40 was measured that way. A blind
+replay through the fixed renderer measures 39/40 on 2026-09-09, and the three
+same-file trap pairs that baseline missed now judge correctly.
 
 The forty outcomes are written to `calibration.json` in the run's detail
 directory. `--validate` re-derives `agreement` and `total` from them and checks
@@ -960,7 +985,8 @@ paired comparison and only the absolute floors apply.
 Every later run pairs against that anchor, never against the run before it: a
 five-point slide repeated four times never trips the per-run flip threshold,
 but it does show against the anchor. The anchor moves only for a `PROMOTE`
-row, which is where the runbook already requires a reviewed PR; from then on
+row, which is where the runbook already requires a reviewed PR, and a
+`pipeline` PROMOTE needs `replay` to corroborate it; from then on
 that promoted row is the baseline of record. Baseline selection uses immutable
 ledger append order. A backdated row cannot move ahead of the established
 anchor because its machine clock was slow.

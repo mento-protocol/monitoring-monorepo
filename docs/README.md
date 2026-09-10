@@ -218,7 +218,8 @@ Authority: canonical
 - [`docs/adr/0088-temporary-m6-canary-collection.md`](adr/0088-temporary-m6-canary-collection.md) — Temporary event-driven M6 canary collection
 - [`docs/adr/0089-review-eval-canonical-matrix-pr-groups.md`](adr/0089-review-eval-canonical-matrix-pr-groups.md) — The canonical review-eval matrix runs PR groups concurrently
 - [`docs/adr/0090-canonical-eval-matrix-freshness-floor.md`](adr/0090-canonical-eval-matrix-freshness-floor.md) — The canonical review-eval matrix is a freshness floor
-- [`docs/adr/0091-opt-in-native-stacked-pull-requests.md`](adr/0091-opt-in-native-stacked-pull-requests.md) — Adopt native stacked pull requests through an opt-in pilot
+- [`docs/adr/0091-promote-needs-replay-corroboration.md`](adr/0091-promote-needs-replay-corroboration.md) — A PROMOTE needs replay corroboration before it re-anchors
+- [`docs/adr/0092-opt-in-native-stacked-pull-requests.md`](adr/0092-opt-in-native-stacked-pull-requests.md) — Adopt native stacked pull requests through an opt-in pilot
 
 Authority: non-canonical
 
