@@ -89,7 +89,7 @@ silently moves the reference.
   history does not move under a rule its runs never ran against.
 - Scaling the control-drift waiver threshold to control's 39-defect scope was a
   separate verdict-rule decision, taken in
-  [ADR 0093](0093-control-waiver-scaled-to-grid-scope.md).
+  [ADR 0094](0094-control-waiver-scaled-to-grid-scope.md).
 
 ## Evidence
 

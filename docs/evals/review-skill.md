@@ -812,7 +812,7 @@ grid defects `control` scores, of the 51 the headline scores: 6 × 39 / 51,
 rounded up so the waiver stays at least as strict per defect as the RED it
 waives. Control must also have moved the way the headline's whole loss moved,
 which a grid gain beside a larger non-grid loss does not.
-[ADR 0093](../adr/0093-control-waiver-scaled-to-grid-scope.md) records the
+[ADR 0094](../adr/0094-control-waiver-scaled-to-grid-scope.md) records the
 decision, and `--check-fixtures` refuses a value outside the bounds the fixture
 set derives, so widening the grid re-registers the number.
 

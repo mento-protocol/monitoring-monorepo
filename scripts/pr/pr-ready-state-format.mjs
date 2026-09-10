@@ -22,6 +22,14 @@ export function formatHuman(summary) {
   if (pr.state) lines.push(`State: ${pr.state}`);
   lines.push(`Head: ${pr.headRefName} @ ${pr.headRefOid}`);
   lines.push(`Base: ${pr.baseRefName}`);
+  if (summary.stack) {
+    lines.push(
+      `Stack #${summary.stack.number}: layer ${summary.stack.position}; protection base: ${summary.stack.protectionBaseRef}; stack readiness: not evaluated`,
+    );
+    lines.push(
+      `Unmerged dependencies: ${summary.stack.dependencyPrNumbers.map((number) => `#${number}`).join(", ") || "none"}`,
+    );
+  }
   lines.push(
     `Mergeability: ${pr.mergeable ?? "UNKNOWN"}; review decision: ${
       pr.reviewDecision ?? "UNKNOWN"
@@ -136,7 +144,7 @@ export function formatCompact(summary) {
   );
 
   return [
-    `PR #${summary.pr.number} ${summary.ready ? "READY" : "BLOCKED"}`,
+    `PR #${summary.pr.number} ${summary.stack ? "LAYER " : ""}${summary.ready ? "READY" : "BLOCKED"}`,
     `head=${summary.pr.headRefOid}`,
     `state=${summary.pr.state ?? "UNKNOWN"}`,
     `mergeable=${summary.pr.mergeable ?? "UNKNOWN"}`,

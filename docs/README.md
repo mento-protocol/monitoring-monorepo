@@ -99,6 +99,7 @@ Authority: canonical
 - [`docs/notes/sentry-triage-pipeline.md`](notes/sentry-triage-pipeline.md)
 - [`docs/notes/slack-github-subscriptions.md`](notes/slack-github-subscriptions.md)
 - [`docs/notes/spoken-attention-nudge.md`](notes/spoken-attention-nudge.md)
+- [`docs/notes/stacked-pull-requests.md`](notes/stacked-pull-requests.md)
 - [`docs/notes/upstash-mcp-operator.md`](notes/upstash-mcp-operator.md)
 - [`docs/notes/worktree-and-web-setup.md`](notes/worktree-and-web-setup.md)
 - [`docs/terraform.md`](terraform.md)
@@ -219,7 +220,8 @@ Authority: canonical
 - [`docs/adr/0090-canonical-eval-matrix-freshness-floor.md`](adr/0090-canonical-eval-matrix-freshness-floor.md) — The canonical review-eval matrix is a freshness floor
 - [`docs/adr/0091-promote-needs-replay-corroboration.md`](adr/0091-promote-needs-replay-corroboration.md) — A PROMOTE needs replay corroboration before it re-anchors
 - [`docs/adr/0092-dependabot-npm-version-updates.md`](adr/0092-dependabot-npm-version-updates.md) — Dependabot batches npm version updates into Monday groups
-- [`docs/adr/0093-control-waiver-scaled-to-grid-scope.md`](adr/0093-control-waiver-scaled-to-grid-scope.md) — The control-drift waiver is scaled to control's grid scope
+- [`docs/adr/0093-opt-in-native-stacked-pull-requests.md`](adr/0093-opt-in-native-stacked-pull-requests.md) — Adopt native stacked pull requests through an opt-in pilot
+- [`docs/adr/0094-control-waiver-scaled-to-grid-scope.md`](adr/0094-control-waiver-scaled-to-grid-scope.md) — The control-drift waiver is scaled to control's grid scope
 
 Authority: non-canonical
 

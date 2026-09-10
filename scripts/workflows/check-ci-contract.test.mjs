@@ -259,6 +259,10 @@ const STATIC_MUTATIONS = [
     },
   ],
   // prettier-ignore
+  ["removed readiness suite", /scripts no longer enforces pnpm pr:ready-state:test/u, ({ workflow }) => { workflow.jobs.scripts.steps = workflow.jobs.scripts.steps.filter((step) => step.run !== "pnpm pr:ready-state:test"); }],
+  // prettier-ignore
+  ["nonfatal feedback suite", /scripts no longer enforces pnpm pr:feedback-state:test/u, ({ workflow }) => { workflow.jobs.scripts.steps.find((step) => step.run === "pnpm pr:feedback-state:test")["continue-on-error"] = true; }],
+  // prettier-ignore
   ["changed timeout", /ui timeout-minutes must be 25/u, ({ workflow }) => { workflow.jobs.ui["timeout-minutes"] = 1; }],
   // prettier-ignore
   ["nonblocking required command", /ui no longer enforces VERCEL_DEPLOYMENT_ID/u, ({ workflow }) => { workflow.jobs.ui.steps.find((step) => step.name?.startsWith("Production build"))["continue-on-error"] = true; }],

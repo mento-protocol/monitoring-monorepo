@@ -569,7 +569,7 @@ test("the control waiver stays between the flip rule and its grid share", () => 
   // it; below the flip rule's share of the grid it would demand a larger
   // per-defect move from control than the headline had to make. Both bounds are
   // derived from the contract's own id lists, so widening the grid fails
-  // validation until the number is registered again. ADR 0093.
+  // validation until the number is registered again. ADR 0094.
   const gridScorable = committed.contract.fixtures
     .filter((fixture) => fixture.grid === true)
     .reduce((sum, fixture) => sum + fixture.scorable_ids.length, 0);

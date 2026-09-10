@@ -1063,7 +1063,7 @@ test("the drift waiver is scaled to the 39 grid defects control scores", () => {
   // spread evenly over the suite reaches six flips on the headline and five on
   // control. Under the headline's own `regression_net_flips` that was a RED the
   // control could not waive; `control_waiver_net_flips` asks control for its
-  // share of the same movement. ADR 0093.
+  // share of the same movement. ADR 0094.
   const scaled = {
     row: row({
       conditions: {

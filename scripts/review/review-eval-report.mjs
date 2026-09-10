@@ -645,7 +645,7 @@ function restrictCondition(condition, ids) {
  * The net flips control must move before it waives the headline's regression,
  * or null when no readable threshold is registered.
  *
- * The rule binds the contracts that carry it. A contract from before ADR 0093
+ * The rule binds the contracts that carry it. A contract from before ADR 0094
  * never registered the key, and `--report --contract <archived>` has to
  * reproduce the verdict that run saw, so an absent key leaves the old
  * `regression_net_flips` threshold in place. A key that is present and
@@ -678,7 +678,7 @@ function controlWaiverThreshold(rules) {
  *
  * The magnitude test reads `control_waiver_net_flips`, which is scaled to
  * control's 39 grid defects rather than the headline's 51
- * ([ADR 0093](../../docs/adr/0093-control-waiver-scaled-to-grid-scope.md)).
+ * ([ADR 0094](../../docs/adr/0094-control-waiver-scaled-to-grid-scope.md)).
  * Asking control for the headline's own `regression_net_flips` let drift spread
  * evenly across the suite push the headline past the RED line while control's
  * share of it stayed under the bar, which is a RED that should have been AMBER.

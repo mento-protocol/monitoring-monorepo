@@ -186,7 +186,7 @@ export function plannedMatrix(contract, kind) {
  * Scorable defects on the grid fixtures and on every fixture.
  *
  * `control` scores the grid alone while the headline scores all of them, so the
- * two counts are the scopes ADR 0093 scales the control-drift waiver between.
+ * two counts are the scopes ADR 0094 scales the control-drift waiver between.
  * Both are read from the contract's own id lists, so a fixture added or dropped
  * moves them without a second place to edit.
  */
@@ -646,7 +646,7 @@ function checkShape({ contract, problems }) {
       }
     }
     // The control-drift waiver counts defects on `control`'s scope, which is
-    // the grid alone. ADR 0093 scales it to that scope: at most
+    // the grid alone. ADR 0094 scales it to that scope: at most
     // `regression_net_flips`, because a waiver looser per defect than the rule
     // it waives excuses a smaller proportional move than the one that fired,
     // and at least the flip rule's share of the grid, because a waiver tighter

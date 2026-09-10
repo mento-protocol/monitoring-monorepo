@@ -547,6 +547,9 @@ export function summarizeFeedbackState(readyState) {
   return {
     ready,
     pr: readyState.pr,
+    ...(readyState.stack
+      ? { readinessScope: "layer", stack: readyState.stack }
+      : {}),
     summary: ready
       ? "Feedback gates are clear."
       : "Feedback surfaces need attention.",
