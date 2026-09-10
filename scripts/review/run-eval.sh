@@ -244,6 +244,9 @@ fi
 if [[ $KIND == finder && -n $AGAINST ]]; then
   fail "--against is not valid with --kind finder; compare the detail directories with review-eval-finder-compare.mjs instead"
 fi
+if [[ $KIND == finder && $OPEN_PR -eq 1 ]]; then
+  fail "--pr is not valid with --kind finder; a probe appends no row and publishes nothing"
+fi
 
 if [[ -z $REPO ]]; then
   REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

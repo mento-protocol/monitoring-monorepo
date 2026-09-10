@@ -16,10 +16,38 @@ import {
   DEFAULT_CONTRACT_PATH,
   loadContract,
 } from "./review-eval-fixtures.mjs";
+import { judgeCalibrationPasses } from "./review-eval-report.mjs";
 import { aggregateDraws } from "./review-eval-score.mjs";
 
 function readJson(file) {
   return JSON.parse(readFileSync(file, "utf8"));
+}
+
+/**
+ * The run's own row, refused when its judge failed calibration. Every matched
+ * id on both sides of this comparison was read by that judge, so a run whose
+ * agreement fell below the floor cannot support a finder claim in either
+ * direction — and printing its nets beside a passing run's invites exactly
+ * that. The rule lives in `review-eval-report.mjs`; do not restate it here.
+ */
+function readCheckedRow(dir) {
+  const file = path.join(dir, "row.json");
+  if (!existsSync(file)) {
+    throw new Error(
+      `${dir} carries no row.json; the run's judge calibration cannot be checked`,
+    );
+  }
+  const row = readJson(file);
+  if (!judgeCalibrationPasses(row)) {
+    const calibration = row?.judge_calibration;
+    const recorded = calibration
+      ? `${calibration.agreement}/${calibration.total}`
+      : "nothing";
+    throw new Error(
+      `${dir} recorded judge calibration ${recorded}, which does not pass; its matched ids are not usable evidence`,
+    );
+  }
+  return row;
 }
 
 /**
@@ -29,6 +57,7 @@ function readJson(file) {
  */
 export function readArm({ dir, contract }) {
   const plan = readJson(path.join(dir, "plan.json"));
+  const row = readCheckedRow(dir);
   const byPr = new Map();
   for (const cell of plan.cells ?? []) {
     if (cell.condition !== "pipeline" || cell.draw !== 1) continue;
@@ -60,6 +89,7 @@ export function readArm({ dir, contract }) {
   return {
     dir,
     plan,
+    row,
     byPr,
     identity: {
       finder: plan.cells?.find((cell) => cell.finder)?.finder ?? null,
@@ -68,7 +98,10 @@ export function readArm({ dir, contract }) {
       orchestrator_digest: plan.inputs?.orchestrator_digest ?? null,
       comparability_key: plan.comparability_key ?? null,
       contract_digest: plan.contract_digest ?? null,
+      matcher_digest: plan.matcher_digest ?? null,
+      calibration_digest: plan.calibration_digest ?? null,
       judge: plan.judge ?? null,
+      judge_calibration: row?.judge_calibration ?? null,
     },
   };
 }
@@ -155,6 +188,20 @@ export function compareArms({ anchor, candidate, contractDigest = null }) {
 }
 
 /**
+ * Plan fields that must agree for a matched-id difference to be about the
+ * finder. Each one decides what a matched id counts as: the contract freezes
+ * the ids, the scorer decides what matches one, the calibration set is what
+ * qualified the judge, and the comparability key binds all of it plus the
+ * orchestrator into the identity a ledger row is ranked under.
+ */
+const PAIRED_IDENTITY = [
+  ["contract_digest", "contracts"],
+  ["matcher_digest", "scorers"],
+  ["calibration_digest", "judge calibration sets"],
+  ["comparability_key", "comparability keys"],
+];
+
+/**
  * Differences that invalidate the comparison rather than being its subject.
  *
  * `contractDigest` is the contract this process loaded. Every count here is
@@ -165,9 +212,10 @@ export function compareArms({ anchor, candidate, contractDigest = null }) {
 export function identityWarnings(anchor, candidate, contractDigest = null) {
   const warnings = [];
   const short = (value) => String(value).slice(0, 8);
-  if (anchor.contract_digest !== candidate.contract_digest) {
+  for (const [field, label] of PAIRED_IDENTITY) {
+    if (anchor[field] === candidate[field]) continue;
     warnings.push(
-      `the two runs were planned against different contracts (${short(anchor.contract_digest)} vs ${short(candidate.contract_digest)}); a matched-id difference is not a finder difference`,
+      `the two runs were planned against different ${label} (${short(anchor[field])} vs ${short(candidate[field])}); a matched-id difference is not a finder difference`,
     );
   }
   if (contractDigest) {
@@ -219,7 +267,10 @@ function render(report) {
   for (const side of ["anchor", "candidate"]) {
     const arm = report[side];
     lines.push(
-      `${side.padEnd(9)} finder ${arm.finder} argv ${short(arm.finder_argv_digest)} skill ${short(arm.skill_digest)} contract ${short(arm.contract_digest)} key ${short(arm.comparability_key)} orchestrator ${short(arm.orchestrator_digest)} judge ${arm.judge?.model}@${arm.judge?.effort}`,
+      `${side.padEnd(9)} finder ${arm.finder} argv ${short(arm.finder_argv_digest)} skill ${short(arm.skill_digest)} orchestrator ${short(arm.orchestrator_digest)} judge ${arm.judge?.model}@${arm.judge?.effort} calibration ${arm.judge_calibration?.agreement}/${arm.judge_calibration?.total}`,
+    );
+    lines.push(
+      `${" ".repeat(9)} contract ${short(arm.contract_digest)} scorer ${short(arm.matcher_digest)} calibration set ${short(arm.calibration_digest)} key ${short(arm.comparability_key)}`,
     );
   }
   lines.push(`loaded    contract ${short(report.contract_digest)}`);

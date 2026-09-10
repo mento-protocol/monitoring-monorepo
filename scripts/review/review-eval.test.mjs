@@ -227,7 +227,7 @@ test("the shell split no longer reconstructs the pre-split cell runtime", () => 
   // so this pin still catches an unintended shell edit.
   assert.equal(
     reconstructed,
-    "cc9ef3a581b17a6ae2aef9aeacb09e19749cae7a99c1b86e38e763c5436d369f",
+    "39947c0b45e0c2f3746377f1994cefcbc399439cb6d1ee1b5514e20ae7d6a29d",
   );
   // It is no longer the pre-split monolith. Capturing the whole session instead
   // of the CLI's last-message envelope changed what a cell records, so the 24
@@ -889,7 +889,7 @@ test("comparabilityKey moves with the contract, the prompts, and the scorer", ()
 
 test("orchestratorSourceDigest binds the shell and the cell modules", () => {
   const expected =
-    "299654e339118209243f0fd0ac3c07aa8afc473adb7d4ce9fc5b92d59382c3a4";
+    "c482e103033a27501287e78919ee8e7160f39443b77f90044f1711b74a54be50";
   assert.equal(orchestratorSourceDigest(), expected);
   // The cell writer and the stream parser are in the digest for the same
   // reason the shell is: the writer decides what a paid cell records and the
@@ -9946,10 +9946,16 @@ test("a probe refuses --against", () => {
       }),
     /--against is not valid with --kind finder/,
   );
-  // The orchestrator refuses the pair up front, before it plans anything.
+  // The orchestrator refuses the pair up front, before it plans anything, and
+  // refuses --pr the same way: a probe appends no row, so the publication path
+  // never runs and the flag would be accepted and silently dropped.
   assert.match(
     runEvalSource("wrapper"),
     /if \[\[ \$KIND == finder && -n \$AGAINST \]\]; then/,
+  );
+  assert.match(
+    runEvalSource("wrapper"),
+    /if \[\[ \$KIND == finder && \$OPEN_PR -eq 1 \]\]; then/,
   );
 });
 

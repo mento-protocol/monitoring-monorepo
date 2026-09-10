@@ -277,7 +277,8 @@ flags is refused without the other.
 
 A probe scores and stops. It appends no ledger row, refreshes no clock, cannot
 become a baseline, and `--validate --append` refuses its row outright. It
-resolves no baseline either, so `--against` is refused rather than ignored. Its
+resolves no baseline and publishes nothing either, so `--against` and `--pr` are
+refused rather than ignored. Its
 detail directory carries the overridden argv digest as a final segment, because
 no ledger row records the name: two probes of one day would otherwise land on
 one directory and the second would overwrite the first. Compare a probe against
@@ -292,11 +293,17 @@ pnpm review:eval:finder-compare -- \
 
 The comparison pairs the pipeline draw-1 cells by PR and prints matched ids,
 P1 recall, wrong claims, the per-PR net and a sign-flip test over the nets. It
-warns when the two runs used different review skills, different judges or
-different contracts — including a contract that differs from the one the
-comparison itself loaded, since every count is recomputed from it — all of which
-make the numbers unreadable as a finder difference. It notes a difference in
+warns when the two runs used different review skills or different judges, and
+when their plans name different contracts, scorers, judge calibration sets or
+comparability keys — including a contract that differs from the one the
+comparison itself loaded, since every count is recomputed from it. Each of those
+makes the numbers unreadable as a finder difference. It notes a difference in
 orchestrator bytes, which does not.
+
+It refuses a run outright when that run's `row.json` records a judge that failed
+calibration, or when the row is missing. Every matched id on both sides was read
+by that judge, so a run under the floor cannot support a finder claim in either
+direction, and printing its nets beside a passing run's invites exactly that.
 
 One draw per fixture is enough to reject a finder and never enough to promote
 one: a single draw cannot separate the finder from sampling variance. A winner

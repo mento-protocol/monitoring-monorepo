@@ -22,14 +22,28 @@ function writeArm({
   skillDigest = "skill",
   judge,
   contractDigest = null,
+  matcherDigest = "matcher",
+  calibrationDigest = "calibset",
+  comparabilityKey = "key",
+  // The shape the committed anchor row records.
+  calibration = { agreement: 39, total: 40 },
+  writeRow = true,
 }) {
   const dir = mkdtempSync(path.join(tmpdir(), "finder-compare-"));
+  if (writeRow) {
+    writeFileSync(
+      path.join(dir, "row.json"),
+      JSON.stringify({ kind: "finder", judge_calibration: calibration }),
+    );
+  }
   writeFileSync(
     path.join(dir, "plan.json"),
     JSON.stringify({
       kind: "finder",
-      comparability_key: "key",
+      comparability_key: comparabilityKey,
       contract_digest: contractDigest,
+      matcher_digest: matcherDigest,
+      calibration_digest: calibrationDigest,
       judge: judge ?? { model: "claude-opus-5", effort: "high" },
       inputs: {
         skill_digest: skillDigest,
@@ -198,5 +212,67 @@ test("a different contract on either side warns", () => {
   assert.deepEqual(
     compareArms({ anchor, candidate, contractDigest: "aaaa1111" }).warnings,
     [],
+  );
+});
+
+test("a different scorer, calibration set or key warns", () => {
+  // Each of these decides what a matched id counts as, so a difference in any
+  // of them is not a finder difference. The key was printed but never flagged.
+  const results = { 11: { matched: [1] } };
+  const base = { finder: "sol@high", cells: [11], results };
+  for (const [changed, pattern] of [
+    [{ matcherDigest: "other-matcher" }, /different scorers/],
+    [
+      { calibrationDigest: "other-calibset" },
+      /different judge calibration sets/,
+    ],
+    [{ comparabilityKey: "other-key" }, /different comparability keys/],
+  ]) {
+    const anchor = readArm({ dir: writeArm(base), contract });
+    const candidate = readArm({
+      dir: writeArm({ ...base, finder: "astra@low", ...changed }),
+      contract,
+    });
+    const report = compareArms({ anchor, candidate });
+    assert.equal(report.warnings.length, 1, JSON.stringify(changed));
+    assert.match(report.warnings[0], pattern);
+  }
+});
+
+test("a run whose judge failed calibration is refused, not compared", () => {
+  // Every matched id on both sides was read by that judge. A run under the
+  // floor cannot support a finder claim in either direction, and printing its
+  // nets beside a passing run's invites exactly that.
+  const base = {
+    finder: "sol@high",
+    cells: [11],
+    results: { 11: { matched: [1] } },
+  };
+  const failed = writeArm({
+    ...base,
+    calibration: { agreement: 34, total: 40 },
+  });
+  assert.throws(
+    () => readArm({ dir: failed, contract }),
+    /recorded judge calibration 34\/40, which does not pass/,
+  );
+  const missing = writeArm({ ...base, calibration: null });
+  assert.throws(
+    () => readArm({ dir: missing, contract }),
+    /recorded judge calibration nothing/,
+  );
+  const noRow = writeArm({ ...base, writeRow: false });
+  assert.throws(() => readArm({ dir: noRow, contract }), /carries no row.json/);
+  // 37/40 is the floor itself, and it passes.
+  const floor = writeArm({
+    ...base,
+    calibration: { agreement: 37, total: 40 },
+  });
+  assert.deepEqual(
+    readArm({ dir: floor, contract }).identity.judge_calibration,
+    {
+      agreement: 37,
+      total: 40,
+    },
   );
 });
