@@ -341,6 +341,7 @@ const IAM_BLOCK_SHAPE_SPECIFICATIONS = [
 ];
 
 const MODULE_BLOCK_SHAPE_SPECIFICATIONS = [
+  "alerts/infra/bridge-warning-channel.tf:module.bridge_warning_channel|37c9fce40c64ed7c6662eb042dbf9bfe2d2ee8d51285877a3524a5bff9e23d63",
   "aegis/terraform/main.tf:module.grafana_dashboard|e91ec8aba7c7347f74f6896a4eb52e2e8ebb588ea5a582cbb39929333870bcbe",
   "alerts/infra/main.tf:module.oncall_announcer|301aef0a9ea1033e937bd28b68ff7c9f23fc5ba8671e2e4201c5d8d2172bcb07",
   "alerts/infra/main.tf:module.onchain_event_handler|4a9d935f8be2b979b2da133c4c01762813106f1d4ac60b53721f2492918843a1",

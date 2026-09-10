@@ -90,6 +90,7 @@ const IDENTITY_BEARING_RESOURCE_BLOCK_SHAPE_SPECIFICATIONS = [
 ];
 
 const OUTPUT_BLOCK_SHAPE_SPECIFICATIONS = [
+  "alerts/infra/bridge-warning-channel.tf:output.bridge_warning_channel_id|ab413a37acad916a39d785dd21da41a6a1d9fec094c00855e875404875f48b9a",
   "alerts/peg-policy-publication/outputs.tf:output.peg_policy_bucket|d823461777e322e9f59bcc751cc5fddc71cea813249369a5e64a444f4142e72f",
   "alerts/peg-policy-publication/outputs.tf:output.peg_policy_object_name|1493e69b923e302f9d59a0e6c60f48e78e8caa5a6bf62d2946d54748fc1524f1",
   "alerts/peg-policy-publication/outputs.tf:output.peg_policy_generation|715aa1193f115084ebb737a032ef860d70b11dbccc9d42514dddbf183701265f",
@@ -240,6 +241,9 @@ const SECRET_PAYLOAD_SINK_BLOCK_SHAPE_SPECIFICATIONS = [
 ];
 
 const RESOURCE_DATA_BLOCK_KEY_GROUPS = [
+  "alerts/infra/bridge-warning-channel.tf|restapi_object.bridge_warning_invite_eng",
+  "alerts/rules/bridge-contact-points.tf|grafana_contact_point.bridge_infra,grafana_contact_point.bridge_page,grafana_contact_point.bridge_warning",
+  "alerts/rules/rules-bridges.tf|grafana_folder.bridges,grafana_rule_group.bridge_observation,grafana_rule_group.bridge_transfers",
   "alerts/peg-policy-publication/policy.tf|google_storage_bucket_object.peg_policy",
   "aegis/terraform/grafana-dashboard/dashboard.tf|grafana_dashboard.aegis",
   "aegis/terraform/grafana-folders.tf|grafana_folder.aegis",
