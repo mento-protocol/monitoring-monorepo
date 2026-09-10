@@ -121,11 +121,29 @@ export function resolveFinderPlan({ contract, kind, finder, baselineRow }) {
  * The rest of the base name — date, comparability key, kind, skill digest — is
  * identical for every probe of a contract, and a finder run appends no ledger
  * row, so without this the second probe would overwrite the first one's
- * evidence in place. The overridden argv digest is exactly what differs.
+ * evidence in place.
+ *
+ * Two things differ and both are in the segment. The overridden argv is the
+ * probe's subject. The two CLI versions are not: they are outside the
+ * comparability key, so a `claude` or `codex` upgrade between two probes of one
+ * finder leaves the name identical while `cellFingerprint` rejects every cell
+ * the earlier runtime paid for — a second, partial matrix writing beside the
+ * first one's stale root `result-*.json`. An identical rerun still resumes,
+ * because identical inputs give the same digest.
  */
 export function finderDetailSegment({ kind, inputs }) {
   if (kind !== "finder") return "";
-  return `-${String(inputs?.finder_argv_digest ?? "").slice(0, 8)}`;
+  const argv = String(inputs?.finder_argv_digest ?? "").slice(0, 8);
+  const cli = createHash("sha256")
+    .update(
+      JSON.stringify([
+        String(inputs?.claude_cli ?? ""),
+        String(inputs?.codex_cli ?? ""),
+      ]),
+    )
+    .digest("hex")
+    .slice(0, 8);
+  return `-${argv}-${cli}`;
 }
 
 /**

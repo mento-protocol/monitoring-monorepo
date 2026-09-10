@@ -94,6 +94,7 @@ const validationModuleLineLimits = new Map([
   ["review-eval.mjs", 900],
   ["review-eval-run.mjs", 100],
   ["review-eval-run-plan.mjs", 600],
+  ["review-eval-run-detail.mjs", 200],
   ["review-eval-finder-override.mjs", 200],
   ["review-eval-freshness-guard.mjs", 200],
   ["review-eval-run-execution.mjs", 600],
@@ -9916,13 +9917,30 @@ test("two probes of one day take different detail directories", () => {
   const second = buildPlan({ ...args, finder: "gpt-6-astra@high" });
   assert.notEqual(first.detail_dir, second.detail_dir);
   for (const plan of [first, second]) {
-    assert.ok(
-      plan.detail_dir.endsWith(
-        `-${plan.inputs.finder_argv_digest.slice(0, 8)}`,
-      ),
+    assert.match(
+      plan.detail_dir,
+      new RegExp(`-${plan.inputs.finder_argv_digest.slice(0, 8)}-[0-9a-f]{8}$`),
       plan.detail_dir,
     );
   }
+  // The same probe planned twice resumes: identical inputs, identical name.
+  assert.equal(
+    buildPlan({ ...args, finder: "gpt-6-astra@low" }).detail_dir,
+    first.detail_dir,
+  );
+  // A CLI upgrade between two probes of one finder does not: the versions are
+  // outside the comparability key, so the name would be identical while
+  // `cellFingerprint` rejected every cell the earlier runtime paid for.
+  const upgraded = buildPlan({
+    ...args,
+    finder: "gpt-6-astra@low",
+    env: { ...planEnv, REVIEW_EVAL_CODEX_CLI: "0.49.0" },
+  });
+  assert.notEqual(upgraded.detail_dir, first.detail_dir);
+  assert.equal(
+    upgraded.inputs.finder_argv_digest,
+    first.inputs.finder_argv_digest,
+  );
   // A canonical run's name is unchanged: it has a ledger row to disambiguate it.
   const full = buildPlan({ ...args, kind: "full", finder: null });
   assert.ok(full.detail_dir.endsWith(full.inputs.skill_digest.slice(0, 8)));

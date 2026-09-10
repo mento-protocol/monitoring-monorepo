@@ -16,8 +16,11 @@ import {
   DEFAULT_CONTRACT_PATH,
   loadContract,
 } from "./review-eval-fixtures.mjs";
-import { judgeCalibrationPasses } from "./review-eval-report.mjs";
-import { aggregateDraws } from "./review-eval-score.mjs";
+import {
+  judgeCalibrationPasses,
+  leakSuspected,
+} from "./review-eval-report.mjs";
+import { aggregateDraws, scorerDigest } from "./review-eval-score.mjs";
 
 function readJson(file) {
   return JSON.parse(readFileSync(file, "utf8"));
@@ -47,7 +50,27 @@ function readCheckedRow(dir) {
       `${dir} recorded judge calibration ${recorded}, which does not pass; its matched ids are not usable evidence`,
     );
   }
+  // The canonical baseline path refuses a leaked row for the same reason
+  // (`baselineEligibility` in `review-eval-report.mjs`): the answer key may
+  // have reached the contestant, so a matched id no longer measures the
+  // finder. `scorePlan` keeps such a cell's ids so the leak stays visible in
+  // the detail; nothing may rank on them.
+  if (leakSuspected(row)) {
+    throw new Error(
+      `${dir} records a suspected leak in its row notes; its matched ids are not trusted evidence`,
+    );
+  }
   return row;
+}
+
+/** A per-cell count `foldCondition` reads. Absent, it would read as zero. */
+function requireCount(value, label, file) {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new Error(
+      `${file} carries ${label} ${JSON.stringify(value)}; a nonnegative integer is required`,
+    );
+  }
+  return value;
 }
 
 /**
@@ -59,6 +82,7 @@ export function readArm({ dir, contract }) {
   const plan = readJson(path.join(dir, "plan.json"));
   const row = readCheckedRow(dir);
   const byPr = new Map();
+  const leaked = [];
   for (const cell of plan.cells ?? []) {
     if (cell.condition !== "pipeline" || cell.draw !== 1) continue;
     const file = path.join(dir, `result-${cell.pr}-pipeline-1.json`);
@@ -68,6 +92,9 @@ export function readArm({ dir, contract }) {
       (candidate) => candidate.pr === cell.pr,
     );
     if (!fixture) continue;
+    // A leaked cell keeps its matched ids so the leak stays visible in the
+    // detail, and reading them here would score contaminated bits as recall.
+    if (result.leak?.suspected === true) leaked.push(cell.pr);
     const aggregate = aggregateDraws({
       scorableIds: fixture.scorable_ids,
       p1Ids: fixture.p1_ids ?? [],
@@ -83,8 +110,17 @@ export function readArm({ dir, contract }) {
       matched: aggregate.recall.matched,
       p1_matched: aggregate.p1.matched,
       p1_opportunities: aggregate.p1.opportunities,
-      wrong_claims: result.novel?.novelWrong ?? 0,
+      wrong_claims: requireCount(
+        result.novel?.novelWrong,
+        "novel.novelWrong",
+        file,
+      ),
     });
+  }
+  if (leaked.length > 0) {
+    throw new Error(
+      `${dir} records a suspected leak on PR ${leaked.join(", ")}; its matched ids are not trusted evidence`,
+    );
   }
   return {
     dir,
@@ -138,7 +174,13 @@ export function signFlip(differences) {
 }
 
 /** Pair the two arms by PR and total the differences. */
-export function compareArms({ anchor, candidate, contractDigest = null }) {
+export function compareArms({
+  anchor,
+  candidate,
+  contractDigest = null,
+  matcherDigest = null,
+}) {
+  assertComparable(anchor.identity, candidate.identity, { contractDigest });
   const paired = [...anchor.byPr.keys()]
     .filter((pr) => candidate.byPr.has(pr))
     .sort((left, right) => left - right);
@@ -181,54 +223,94 @@ export function compareArms({ anchor, candidate, contractDigest = null }) {
     warnings: identityWarnings(
       anchor.identity,
       candidate.identity,
-      contractDigest,
+      matcherDigest,
     ),
     notes: identityNotes(anchor.identity, candidate.identity),
   };
 }
 
+const short = (value) => String(value).slice(0, 8);
+
 /**
- * Plan fields that must agree for a matched-id difference to be about the
- * finder. Each one decides what a matched id counts as: the contract freezes
- * the ids, the scorer decides what matches one, the calibration set is what
- * qualified the judge, and the comparability key binds all of it plus the
- * orchestrator into the identity a ledger row is ranked under.
+ * The scoring inputs that decide what a matched id counts as: the contract
+ * freezes the ids and the recall denominator, the scorer decides what matches
+ * one, and the calibration set is what qualified the judge. A difference in any
+ * of them makes the two matched counts answers to different questions, so it is
+ * refused rather than warned about — a net computed across it means nothing.
+ *
+ * `comparability_key` and `orchestrator_digest` are deliberately not here. The
+ * key binds the orchestrator digest, and a probe of a new finder is normally
+ * planned on an edited harness, so its key always differs from the anchor's.
+ * Refusing on the key would make every probe incomparable with every anchor —
+ * which is the whole point of the lane. The scoring inputs above are what must
+ * match; the key and the harness bytes are named and left to the reader.
  */
-const PAIRED_IDENTITY = [
+const SCORING_IDENTITY = [
   ["contract_digest", "contracts"],
   ["matcher_digest", "scorers"],
   ["calibration_digest", "judge calibration sets"],
-  ["comparability_key", "comparability keys"],
 ];
 
 /**
- * Differences that invalidate the comparison rather than being its subject.
+ * Refuse a comparison whose two arms were not scored the same way.
  *
- * `contractDigest` is the contract this process loaded. Every count here is
- * recomputed from that contract's `scorable_ids` and `p1_ids`, so a run planned
- * against different fixture bits is being read through a scoring key it never
- * ran under, and the difference is a contract difference, not a finder one.
+ * The loaded contract is checked against both arms as well, because this
+ * process recomputes every count from its `scorable_ids` and `p1_ids`: an arm
+ * planned on other fixture bits is being rescored against a denominator it
+ * never ran under, and that is a contract difference wearing a finder's name.
+ *
+ * The loaded scorer is deliberately not checked that way. It did not produce
+ * either arm's `matched_ids` — those are committed evidence, and the only thing
+ * recomputed here is recall arithmetic, applied identically to both sides. The
+ * scorer digest moves whenever any scoring module is edited, which is the
+ * normal state of the branch a probe is planned on, so refusing on it would
+ * refuse every probe against every earlier anchor. It is warned about instead.
  */
-export function identityWarnings(anchor, candidate, contractDigest = null) {
-  const warnings = [];
-  const short = (value) => String(value).slice(0, 8);
-  for (const [field, label] of PAIRED_IDENTITY) {
+export function assertComparable(
+  anchor,
+  candidate,
+  { contractDigest = null } = {},
+) {
+  for (const [field, label] of SCORING_IDENTITY) {
     if (anchor[field] === candidate[field]) continue;
-    warnings.push(
-      `the two runs were planned against different ${label} (${short(anchor[field])} vs ${short(candidate[field])}); a matched-id difference is not a finder difference`,
+    throw new Error(
+      `the two runs were planned against different ${label} (${short(anchor[field])} vs ${short(candidate[field])}); a matched-id difference between them would not be a finder difference`,
     );
   }
-  if (contractDigest) {
-    for (const [side, arm] of [
-      ["anchor", anchor],
-      ["candidate", candidate],
-    ]) {
-      if (arm.contract_digest && arm.contract_digest !== contractDigest) {
-        warnings.push(
-          `the ${side} was planned against contract ${short(arm.contract_digest)}, but these counts are recomputed from ${short(contractDigest)}`,
-        );
-      }
+  if (!contractDigest) return;
+  for (const [side, arm] of [
+    ["anchor", anchor],
+    ["candidate", candidate],
+  ]) {
+    if (arm.contract_digest && arm.contract_digest !== contractDigest) {
+      throw new Error(
+        `the ${side} was planned against contract ${short(arm.contract_digest)}, but these counts are recomputed from ${short(contractDigest)}`,
+      );
     }
+  }
+}
+
+/** Differences that leave the comparison readable but shape how it reads. */
+export function identityWarnings(anchor, candidate, matcherDigest = null) {
+  const warnings = [];
+  // Both arms agree with each other or `assertComparable` already refused, so
+  // this names a scorer edit between the runs and this checkout — the ordinary
+  // case on the branch a probe is planned on. See `assertComparable`.
+  if (
+    matcherDigest &&
+    anchor.matcher_digest &&
+    anchor.matcher_digest !== matcherDigest
+  ) {
+    warnings.push(
+      `both runs were scored under ${short(anchor.matcher_digest)}, but this checkout's scorer is ${short(matcherDigest)}; the recomputed counts are recall arithmetic over committed matched ids, not a rescore`,
+    );
+  }
+  // Named, never refused: see SCORING_IDENTITY for why the key cannot gate a
+  // probe. A different key still means the two rows are not ledger-comparable.
+  if (anchor.comparability_key !== candidate.comparability_key) {
+    warnings.push(
+      `the two runs carry different comparability keys (${short(anchor.comparability_key)} vs ${short(candidate.comparability_key)}); their rows are not comparable in the ledger, only here`,
+    );
   }
   if (anchor.skill_digest !== candidate.skill_digest) {
     warnings.push(
@@ -263,7 +345,6 @@ function rate(matched, opportunities) {
 
 function render(report) {
   const lines = [];
-  const short = (value) => String(value).slice(0, 8);
   for (const side of ["anchor", "candidate"]) {
     const arm = report[side];
     lines.push(
@@ -273,7 +354,9 @@ function render(report) {
       `${" ".repeat(9)} contract ${short(arm.contract_digest)} scorer ${short(arm.matcher_digest)} calibration set ${short(arm.calibration_digest)} key ${short(arm.comparability_key)}`,
     );
   }
-  lines.push(`loaded    contract ${short(report.contract_digest)}`);
+  lines.push(
+    `loaded    contract ${short(report.contract_digest)} scorer ${short(report.matcher_digest)}`,
+  );
   lines.push("");
   for (const warning of report.warnings) lines.push(`WARNING: ${warning}`);
   for (const note of report.notes) lines.push(`note: ${note}`);
@@ -329,9 +412,16 @@ export function buildReport({ anchorDir, candidateDir, repoRoot }) {
   );
   const anchor = readArm({ dir: path.resolve(anchorDir), contract });
   const candidate = readArm({ dir: path.resolve(candidateDir), contract });
-  const compared = compareArms({ anchor, candidate, contractDigest });
+  const matcherDigest = scorerDigest();
+  const compared = compareArms({
+    anchor,
+    candidate,
+    contractDigest,
+    matcherDigest,
+  });
   return {
     contract_digest: contractDigest,
+    matcher_digest: matcherDigest,
     anchor: { dir: anchor.dir, ...anchor.identity },
     candidate: { dir: candidate.dir, ...candidate.identity },
     ...compared,

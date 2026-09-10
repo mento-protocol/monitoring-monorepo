@@ -278,11 +278,14 @@ flags is refused without the other.
 A probe scores and stops. It appends no ledger row, refreshes no clock, cannot
 become a baseline, and `--validate --append` refuses its row outright. It
 resolves no baseline and publishes nothing either, so `--against` and `--pr` are
-refused rather than ignored. Its
-detail directory carries the overridden argv digest as a final segment, because
-no ledger row records the name: two probes of one day would otherwise land on
-one directory and the second would overwrite the first. Compare a probe against
-a canonical full run by detail directory:
+refused rather than ignored. Its detail directory ends in two short digests, the
+overridden finder argv and the two recorded CLI versions, because no ledger row
+records the name: two probes of one day would otherwise land on one directory
+and the second would overwrite the first. The CLI digest is there because the
+versions are outside the comparability key — after a `claude` or `codex` upgrade
+the name would be unchanged while `cellFingerprint` rejected every cell the
+earlier runtime paid for. An identical rerun still resumes. Compare a probe
+against a canonical full run by detail directory:
 
 ```bash
 pnpm review:eval:run --kind finder --finder gpt-6-astra@low
@@ -292,27 +295,36 @@ pnpm review:eval:finder-compare -- \
 ```
 
 The comparison pairs the pipeline draw-1 cells by PR and prints matched ids,
-P1 recall, wrong claims, the per-PR net and a sign-flip test over the nets. It
-warns when the two runs used different review skills or different judges, and
-when their plans name different contracts, scorers, judge calibration sets or
-comparability keys — including a contract that differs from the one the
-comparison itself loaded, since every count is recomputed from it. Each of those
-makes the numbers unreadable as a finder difference. It notes a difference in
-orchestrator bytes, which does not.
+P1 recall, wrong claims, the per-PR net and a sign-flip test over the nets.
 
-It refuses a run outright when that run's `row.json` records a judge that failed
-calibration, or when the row is missing. Every matched id on both sides was read
-by that judge, so a run under the floor cannot support a finder claim in either
-direction, and printing its nets beside a passing run's invites exactly that.
+It refuses, rather than warns, when the two plans name different contracts,
+scorers or judge calibration sets, and when either arm's contract differs from
+the one this process loaded. Those decide what a matched id counts as — the
+frozen ids and the recall denominator, what matches one, and what qualified the
+judge — so a net computed across a difference in them answers no question. It
+also refuses a run whose `row.json` is missing, records a judge that failed
+calibration, or records a suspected leak, and one whose cells carry
+`leak.suspected` or no `novel.novelWrong` count. The canonical baseline path
+refuses a leaked or uncalibrated row for the same reason.
+
+Two differences only warn, because refusing on either would refuse every probe
+against every earlier anchor. The comparability key binds the orchestrator
+digest, and a probe of a new finder is normally planned on an edited harness, so
+its key almost always differs from the anchor's. The checkout's own scorer moves
+whenever any scoring module is edited, and it did not produce either arm's
+`matched_ids`: those are committed evidence, and the only thing recomputed here
+is recall arithmetic, applied identically to both sides. Different review skills
+and different judges warn too, and a difference in orchestrator bytes is noted.
 
 One draw per fixture is enough to reject a finder and never enough to promote
 one: a single draw cannot separate the finder from sampling variance. A winner
 needs a canonical full run on a contract updated to name it.
 
 `run-eval.sh` is in `ORCHESTRATOR_FILES`, and `review-eval.mjs`,
-`review-eval-run-plan.mjs` and `review-eval-finder-override.mjs` are in
-`SCORING_MODULES`. Editing any of them moves the comparability key of every
-later run, so a probe and its anchor must be planned from the same sources.
+`review-eval-run-plan.mjs`, `review-eval-run-detail.mjs` and
+`review-eval-finder-override.mjs` are in `SCORING_MODULES`. Editing any of them
+moves the comparability key of every later run, so a probe and its anchor must
+be planned from the same sources.
 
 `run-eval.sh` adds a detached worktree of `origin/main` and reads the contract,
 truth, prompts and scorer from there, so a dirty working tree cannot change
@@ -1177,6 +1189,7 @@ path must exist on `main` before the first run after the moving commit.
 | `scripts/review/review-eval.mjs`                            | the CLI                                                  |
 | `scripts/review/review-eval-run.mjs`                        | the stable run-helper import facade                      |
 | `scripts/review/review-eval-run-plan.mjs`                   | plan, input, matrix, and comparability-key construction  |
+| `scripts/review/review-eval-run-detail.mjs`                 | detail-directory naming and the pre-split cell cache     |
 | `scripts/review/review-eval-run-execution.mjs`              | judge execution, environment scrub, and fixture reset    |
 | `scripts/review/review-eval-run-cell.mjs`                   | cell identity, cache reuse, and leak signals             |
 | `scripts/review/review-eval-run-score.mjs`                  | cell scoring, condition folds, and row construction      |

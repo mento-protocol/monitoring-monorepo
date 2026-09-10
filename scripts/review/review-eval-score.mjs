@@ -114,6 +114,7 @@ export const SCORING_MODULES = [
   "review-eval.mjs",
   "review-eval-run.mjs",
   "review-eval-run-plan.mjs",
+  "review-eval-run-detail.mjs",
   "review-eval-finder-override.mjs",
   "review-eval-freshness-guard.mjs",
   "review-eval-run-execution.mjs",

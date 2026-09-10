@@ -28,12 +28,17 @@ function writeArm({
   // The shape the committed anchor row records.
   calibration = { agreement: 39, total: 40 },
   writeRow = true,
+  notes = "",
 }) {
   const dir = mkdtempSync(path.join(tmpdir(), "finder-compare-"));
   if (writeRow) {
     writeFileSync(
       path.join(dir, "row.json"),
-      JSON.stringify({ kind: "finder", judge_calibration: calibration }),
+      JSON.stringify({
+        kind: "finder",
+        judge_calibration: calibration,
+        notes,
+      }),
     );
   }
   writeFileSync(
@@ -67,7 +72,8 @@ function writeArm({
         condition: "pipeline",
         draw: 1,
         matched_ids: record.matched,
-        novel: { novelWrong: record.wrong ?? 0 },
+        novel: record.novel ?? { novelWrong: record.wrong ?? 0 },
+        leak: { suspected: record.leaked === true, hard: [], advisory: [] },
       }),
     );
   }
@@ -160,83 +166,101 @@ test("a different skill or judge warns; a different orchestrator only notes", ()
   assert.match(second.notes[0], /orchestrator sources differ/);
 });
 
-test("a different contract on either side warns", () => {
-  // Every count here is recomputed from the contract this process loaded, so a
-  // run planned against other fixture bits is read through a scoring key it
-  // never ran under. That difference is a contract difference, not a finder one.
-  const results = { 11: { matched: [1] } };
-  const anchor = readArm({
-    dir: writeArm({
-      finder: "sol@high",
-      cells: [11],
-      results,
-      contractDigest: "aaaa1111",
-    }),
-    contract,
-  });
-  const candidate = readArm({
-    dir: writeArm({
-      finder: "astra@low",
-      cells: [11],
-      results,
-      contractDigest: "bbbb2222",
-    }),
-    contract,
-  });
-  const split = compareArms({
-    anchor,
-    candidate,
-    contractDigest: "aaaa1111",
-  });
-  assert.equal(split.warnings.length, 2);
-  assert.match(split.warnings[0], /planned against different contracts/);
-  assert.match(split.warnings[1], /the candidate was planned against contract/);
-
-  // Both arms agreeing with each other but not with the loaded contract is two
-  // warnings as well: the counts still come from bits neither run saw.
-  candidate.identity.contract_digest = "aaaa1111";
-  anchor.identity.contract_digest = "aaaa1111";
-  const drifted = compareArms({
-    anchor,
-    candidate,
-    contractDigest: "cccc3333",
-  });
-  assert.equal(drifted.warnings.length, 2);
-  assert.ok(
-    drifted.warnings.every((warning) =>
-      /recomputed from cccc3333/.test(warning),
-    ),
-  );
-
-  // Agreement all round warns about nothing.
-  assert.deepEqual(
-    compareArms({ anchor, candidate, contractDigest: "aaaa1111" }).warnings,
-    [],
-  );
-});
-
-test("a different scorer, calibration set or key warns", () => {
-  // Each of these decides what a matched id counts as, so a difference in any
-  // of them is not a finder difference. The key was printed but never flagged.
+test("a scoring-input mismatch is refused, not warned about", () => {
+  // The contract freezes the ids and the recall denominator, the scorer decides
+  // what matches one, and the calibration set is what qualified the judge. A net
+  // computed across a difference in any of them answers no question at all.
   const results = { 11: { matched: [1] } };
   const base = { finder: "sol@high", cells: [11], results };
   for (const [changed, pattern] of [
+    [{ contractDigest: "bbbb2222" }, /different contracts/],
     [{ matcherDigest: "other-matcher" }, /different scorers/],
     [
       { calibrationDigest: "other-calibset" },
       /different judge calibration sets/,
     ],
-    [{ comparabilityKey: "other-key" }, /different comparability keys/],
   ]) {
-    const anchor = readArm({ dir: writeArm(base), contract });
-    const candidate = readArm({
-      dir: writeArm({ ...base, finder: "astra@low", ...changed }),
+    const anchor = readArm({
+      dir: writeArm({ ...base, contractDigest: "aaaa1111" }),
       contract,
     });
-    const report = compareArms({ anchor, candidate });
-    assert.equal(report.warnings.length, 1, JSON.stringify(changed));
-    assert.match(report.warnings[0], pattern);
+    const candidate = readArm({
+      dir: writeArm({
+        ...base,
+        finder: "astra@low",
+        contractDigest: "aaaa1111",
+        ...changed,
+      }),
+      contract,
+    });
+    assert.throws(
+      () => compareArms({ anchor, candidate }),
+      pattern,
+      JSON.stringify(changed),
+    );
   }
+});
+
+test("an arm that disagrees with the loaded contract is refused; the scorer warns", () => {
+  // Both arms can agree with each other and still be read through bits neither
+  // of them ran under: every count here is recomputed from what this process
+  // loaded, not from what the runs recorded.
+  const results = { 11: { matched: [1] } };
+  const base = {
+    finder: "sol@high",
+    cells: [11],
+    results,
+    contractDigest: "aaaa1111",
+    matcherDigest: "mmmm1111",
+  };
+  const anchor = readArm({ dir: writeArm(base), contract });
+  const candidate = readArm({
+    dir: writeArm({ ...base, finder: "astra@low" }),
+    contract,
+  });
+  assert.throws(
+    () => compareArms({ anchor, candidate, contractDigest: "cccc3333" }),
+    /planned against contract aaaa1111, but these counts are recomputed from cccc3333/,
+  );
+  // The loaded scorer only warns. It did not produce either arm's matched ids,
+  // and it moves whenever any scoring module is edited — the normal state of
+  // the branch a probe is planned on — so refusing on it would refuse every
+  // probe against every earlier anchor, including this repo's own.
+  const drifted = compareArms({ anchor, candidate, matcherDigest: "nnnn2222" });
+  assert.equal(drifted.warnings.length, 1);
+  assert.match(
+    drifted.warnings[0],
+    /both runs were scored under mmmm1111, but this checkout's scorer is nnnn2222/,
+  );
+  assert.equal(drifted.totals.prs, 1);
+  // Agreement all round refuses nothing and warns about nothing.
+  assert.deepEqual(
+    compareArms({
+      anchor,
+      candidate,
+      contractDigest: "aaaa1111",
+      matcherDigest: "mmmm1111",
+    }).warnings,
+    [],
+  );
+});
+
+test("a different comparability key warns but never refuses", () => {
+  // The key binds the orchestrator digest, and a probe of a new finder is
+  // normally planned on an edited harness, so its key always differs from the
+  // anchor's. Refusing on it would make every probe incomparable with every
+  // anchor, which is the whole point of the lane.
+  const results = { 11: { matched: [1] } };
+  const base = { finder: "sol@high", cells: [11], results };
+  const anchor = readArm({ dir: writeArm(base), contract });
+  const candidate = readArm({
+    dir: writeArm({ ...base, finder: "astra@low", comparabilityKey: "other" }),
+    contract,
+  });
+  const report = compareArms({ anchor, candidate });
+  assert.equal(report.warnings.length, 1);
+  assert.match(report.warnings[0], /different comparability keys/);
+  assert.equal(report.totals.prs, 1);
 });
 
 test("a run whose judge failed calibration is refused, not compared", () => {
@@ -275,4 +299,47 @@ test("a run whose judge failed calibration is refused, not compared", () => {
       total: 40,
     },
   );
+});
+
+test("a leaked run is refused, from the row or from any cell", () => {
+  // `scorePlan` keeps a leaked cell's matched ids so the leak stays visible in
+  // the detail, and the canonical baseline path refuses such a row for the same
+  // reason this does: the answer key may have reached the contestant, so a
+  // matched id no longer measures the finder.
+  const leakedCell = writeArm({
+    finder: "sol@high",
+    cells: [11, 22],
+    results: { 11: { matched: [1] }, 22: { matched: [4], leaked: true } },
+  });
+  assert.throws(
+    () => readArm({ dir: leakedCell, contract }),
+    /records a suspected leak on PR 22/,
+  );
+  const leakedRow = writeArm({
+    finder: "sol@high",
+    cells: [11],
+    results: { 11: { matched: [1] } },
+    notes: "leak suspected: the transcript names a withheld commit",
+  });
+  assert.throws(
+    () => readArm({ dir: leakedRow, contract }),
+    /records a suspected leak in its row notes/,
+  );
+});
+
+test("a result missing its wrong-claim count is refused, not read as zero", () => {
+  // Every committed result carries `novel.novelWrong`. Defaulting an absent one
+  // to 0 would silently hand the arm a perfect wrong-claims score.
+  for (const novel of [{}, { novelWrong: -1 }, { novelWrong: 1.5 }]) {
+    const dir = writeArm({
+      finder: "sol@high",
+      cells: [11],
+      results: { 11: { matched: [1], novel } },
+    });
+    assert.throws(
+      () => readArm({ dir, contract }),
+      /carries novel\.novelWrong .*; a nonnegative integer is required/,
+      JSON.stringify(novel),
+    );
+  }
 });
