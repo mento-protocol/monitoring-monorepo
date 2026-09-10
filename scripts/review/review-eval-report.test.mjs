@@ -1140,7 +1140,7 @@ test("the drift waiver is scaled to the 39 grid defects control scores", () => {
 
   // A contract that claims the scaled waiver and gives it a value the gate
   // cannot read waives nothing.
-  for (const value of [0, -5, "5", null]) {
+  for (const value of [0, -5, 5.5, "5", null]) {
     const broken = structuredClone(contract);
     broken.verdict_rules.control_waiver_net_flips = value;
     assert.equal(

@@ -655,7 +655,7 @@ function restrictCondition(condition, ids) {
 function controlWaiverThreshold(rules) {
   const scaled = rules?.control_waiver_net_flips;
   if (scaled === undefined) return rules?.regression_net_flips;
-  return Number.isFinite(scaled) && scaled > 0 ? scaled : null;
+  return Number.isSafeInteger(scaled) && scaled > 0 ? scaled : null;
 }
 
 /**
