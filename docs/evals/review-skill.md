@@ -875,11 +875,12 @@ under `--skill-ref` the spec worktree is the live checkout for the two hours in
 between, and the contract digest alone would not notice.
 
 **The judge pass resumes per cell.** Judging one cell cost about $4 and nine
-minutes at the retired fable-max judge. The 2026-09-10 switch to opus high cuts
-that to about $1.20 a cell and leaves the wall unmeasured, so 27 cells still
-run about four hours and need not fit inside one usage window: the 2026-09-05
-attempt, on the 39-cell matrix, scored nineteen cells, hit a usage limit, and
-re-spent them on the retry. `--score` writes each verdict to `cells/<cell_id>/score.json`
+minutes at the fable-max judge this replaces. If the 3.4x cost ratio measured
+on the calibration pass carries to the longer per-cell prompt, opus high judges
+a cell for roughly $1.20. Neither that cost nor the wall is measured per cell
+yet, so 27 cells still run about four hours and need not fit inside one usage
+window: the 2026-09-05 attempt, on the 39-cell matrix, scored nineteen cells,
+hit a usage limit, and re-spent them on the retry. `--score` writes each verdict to `cells/<cell_id>/score.json`
 as it earns it, under a resume identity carrying the plan's comparability key,
 contract digest, matcher digest and calibration digest, the cell fingerprint, and
 the digest of the `result.json` that verdict was formed on. A later pass reuses a
@@ -954,7 +955,13 @@ re-measure on the fixed renderer put opus high at 39/40 on both of two draws for
 about $0.80 a pass, against 39/40 twice for about $2.75 at fable max, so the
 judge moved to about a third of the cost. Every config measured that day misses
 the same record, an under-match on the audited set and a candidate for the next
-re-audit.
+re-audit. The switch needed no bridge run: the one ledger row at
+`status: "complete"` sits on an older comparability key, so the key this change
+moves has nothing complete to bridge to. The audited labels stand unchanged
+under the new judge, because the 2026-08-28 re-audit already declined every
+unmatched -> matched flip the modern consensus proposed, which is the
+over-matching direction `claude-opus-5` shares, and the single 2026-09-10 miss
+runs the other way.
 
 The forty outcomes are written to `calibration.json` in the run's detail
 directory. `--validate` re-derives `agreement` and `total` from them and checks
@@ -1070,8 +1077,10 @@ later change in that issue's stack deletes them.
   to state in a comment, and it contains zero defects everyone missed. A
   reviewer that catches the one bug that would have caused an outage scores
   nothing for it.
-- **The judge shares a model family with the verifier under test.**
-  Self-preference is plausible and only partly measured.
+- **The judge is the same model and effort as the verifier and control under
+  test** (`claude-opus-5` at high effort). Self-preference is plausible, only
+  partly measured, and stronger than under the different-model judge this
+  replaces.
 - **`replay` drifts away from production.** It scores against a 2026-08 finder
   report while production uses whatever codex is that month. It stays because
   it removes the finder's sampling from the comparison, and it must never
