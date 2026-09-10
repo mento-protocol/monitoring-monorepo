@@ -3,7 +3,7 @@ title: The canonical review-eval matrix is a freshness floor
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-09
+last_verified: 2026-09-10
 scope: ci/process
 date: 2026-09
 doc_type: adr
