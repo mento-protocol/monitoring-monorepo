@@ -218,6 +218,7 @@ Authority: canonical
 - [`docs/adr/0089-review-eval-canonical-matrix-pr-groups.md`](adr/0089-review-eval-canonical-matrix-pr-groups.md) — The canonical review-eval matrix runs PR groups concurrently
 - [`docs/adr/0090-canonical-eval-matrix-freshness-floor.md`](adr/0090-canonical-eval-matrix-freshness-floor.md) — The canonical review-eval matrix is a freshness floor
 - [`docs/adr/0091-promote-needs-replay-corroboration.md`](adr/0091-promote-needs-replay-corroboration.md) — A PROMOTE needs replay corroboration before it re-anchors
+- [`docs/adr/0092-dependabot-npm-version-updates.md`](adr/0092-dependabot-npm-version-updates.md) — Dependabot batches npm version updates into Monday groups
 
 Authority: non-canonical
 
