@@ -14,6 +14,9 @@ import { spawnSync } from "node:child_process";
 
 export const address = (n) => `0x${n.toString(16).padStart(40, "0")}`;
 const here = fileURLToPath(new URL(".", import.meta.url));
+const offlinePreload = fileURLToPath(
+  new URL("./fixtures/tier1-offline.mjs", import.meta.url),
+);
 export function runOffline(script, scenario = {}, args = []) {
   const cwd = mkdtempSync(join(tmpdir(), "tier1-parity-"));
   try {
@@ -42,12 +45,7 @@ export function runOffline(script, scenario = {}, args = []) {
       );
     const result = spawnSync(
       process.execPath,
-      [
-        "--import",
-        join(here, "fixtures/tier1-offline.mjs"),
-        executable,
-        ...args,
-      ],
+      ["--import", offlinePreload, executable, ...args],
       {
         cwd,
         encoding: "utf8",
