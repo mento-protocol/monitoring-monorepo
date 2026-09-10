@@ -1,9 +1,3 @@
-variable "slack_channel_bridges" {
-  type        = string
-  description = "Bridge-transfer warning destination. Channel lifecycle belongs to alerts-delivery."
-  default     = "#alerts-bridges"
-}
-
 resource "grafana_contact_point" "bridge_warning" {
   name = "slack-alerts-bridges"
   slack {
