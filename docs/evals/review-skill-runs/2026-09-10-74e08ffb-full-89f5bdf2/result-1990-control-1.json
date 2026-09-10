@@ -1,0 +1,77 @@
+{
+  "cell_id": "pr-1990-control-draw1",
+  "fingerprint": {
+    "skill_digest": "89f5bdf20356c5515974ec1a6112fc4f9dfbf31cf1d60b667084f91dfbe6ec60",
+    "kind": "full",
+    "contract_digest": "59b82ee3e6d7ccf2cfbe75cb11aa40e6ec93b92a754a992adee4a1a69166a259",
+    "claude_cli": "2.1.267 (Claude Code)",
+    "codex_cli": "codex-cli 0.154.0",
+    "finder_argv_digest": "40099c93f78800efefbc46f57772ae2cbadc86b378bdd22f474945abfd7b450c",
+    "orchestrator_digest": "d460aa3fefe45e964e71b6490898ed69e69b1d6e2f99781d7eff2c8252bff61f"
+  },
+  "treatment": {
+    "skill_ref": "installed",
+    "dirty": false
+  },
+  "pr": 1990,
+  "condition": "control",
+  "draw": 1,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": null,
+  "claims": [
+    "A clean CodeRabbit run probably never counts as `reviewed`, so every clean PR gets a wasted manual review — `scripts/pr/pr-ready-state-core.mjs:762`: `classifyCodeRabbitReviewSignal` only returns `reviewed` for a PR review whose body contains `**Run ID**`; closeout posts `@coderabbitai review` for a head CodeRabbit already reviewed, spending a Pro+ review, and state stays `requested` for good",
+    "The tests only cover a body with actionable comments (`pr-ready-state.test.mjs:2226`)",
+    "The closeout can report all-clear while the review it just requested is still running — `.agents/skills/babysit-pr/SKILL.md:295-316` (same text in `.claude/skills/...` and `docs/notes/pr-ready-state.md:123-127, 399-402`): CodeRabbit's inline comments become unresolved threads and unreplied root comments that hit required gates, so a PR can be reported clear and then turn not-ready",
+    "Minor: request comments aren't filtered by author — `scripts/pr/pr-ready-state-core.mjs:772-784`: any commenter, including a fork contributor, posting `@coderabbitai review` with the head marker flips the state to `requested` and suppresses the closeout for that head",
+    "The Codex request detection has the same gap (request comments not filtered by author)"
+  ],
+  "matched_ids": [
+    3830259678
+  ],
+  "judge_reasoning": {
+    "3829654081": "The review never raises the file growing past the line cap or the need to split pr-ready-state-core.mjs.",
+    "3829659544": "The review does not mention that the sample JSON in docs/notes/pr-ready-state.md lacks codeRabbitReviewSignal.",
+    "3829659546": "Finding 2 says the procedure posts the request before the pair and then fails to wait for the requested review. That is a different problem from sites running the projection pair before the closeout rule.",
+    "3829659550": "The review does not flag the fallbacks when currentHeadOid is null (timestamp matching, or accepting any marked request).",
+    "3830259678": "Finding 3 says request comments aren't filtered by author, so any commenter, including a fork contributor, can flip the state to requested and suppress closeout. That is the same defect."
+  },
+  "novel": {
+    "claims": 5,
+    "novelReal": 1,
+    "novelWrong": 1,
+    "novelVague": 1,
+    "restatedKnown": 2,
+    "alreadyMatched": 1,
+    "verdicts": {
+      "1": {
+        "class": "real",
+        "why": "classifyCodeRabbitReviewSignal (core.mjs:760-770) only returns `reviewed` when a CodeRabbit PR review body matches `**Run ID**`. It never reads CodeRabbit's issue comments. The repo's own PR #1918 fixture (pr-feedback-state.test.mjs:3360-3373) shows a clean run's 'No actionable comments were generated' result landing in the walkthrough issue comment. So a clean head reads as missing or stale, which triggers the manual request, and the gate then stays `requested`."
+      },
+      "2": {
+        "class": "wrong",
+        "why": "Only the first test (pr-ready-state.test.mjs:2226-2230) uses an 'Actionable comments posted: 1' body. The summarizeReadyState test at :2274 uses a body that contains only the Run ID line, so the tests don't only cover bodies with actionable comments."
+      },
+      "3": {
+        "class": "known",
+        "why": "This is the all-clear-while-the-requested-review-is-still-running gap in docs/notes/pr-ready-state.md steps 8-10 (lines 399-408). The known defect at docs/notes/pr-ready-state.md:408 (Functional Correctness, Major) already covers it, and the SKILL.md text mirrors it."
+      },
+      "4": {
+        "class": "known",
+        "why": "It's true that the issue-comment loop at core.mjs:772-784 never checks the author. This is the known defect 'scripts/pr/pr-ready-state-core.mjs:772 Trust only authorized closeout requests'."
+      },
+      "5": {
+        "class": "vague",
+        "why": "classifyCodexReviewSignal (core.mjs:707-730) is existing code that this diff doesn't touch; the diff only adds the CodeRabbit functions. The claim gives no location or impact, so it isn't a defect in this change."
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 232,
+  "usd": 1.5288364999999997,
+  "scoring_usd": 0.4871175
+}

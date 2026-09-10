@@ -1,0 +1,73 @@
+{
+  "cell_id": "pr-2121-replay-draw2",
+  "fingerprint": {
+    "skill_digest": "89f5bdf20356c5515974ec1a6112fc4f9dfbf31cf1d60b667084f91dfbe6ec60",
+    "kind": "full",
+    "contract_digest": "59b82ee3e6d7ccf2cfbe75cb11aa40e6ec93b92a754a992adee4a1a69166a259",
+    "claude_cli": "2.1.267 (Claude Code)",
+    "codex_cli": "codex-cli 0.154.0",
+    "finder_argv_digest": "40099c93f78800efefbc46f57772ae2cbadc86b378bdd22f474945abfd7b450c",
+    "orchestrator_digest": "d460aa3fefe45e964e71b6490898ed69e69b1d6e2f99781d7eff2c8252bff61f"
+  },
+  "treatment": {
+    "skill_ref": "installed",
+    "dirty": false
+  },
+  "pr": 2121,
+  "condition": "replay",
+  "draw": 2,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": "gpt-5.6-sol@high",
+  "claims": [
+    "Any trove link not requested for 5 minutes gets an \"unavailable\" preview on its next unfurl, even when Hasura is healthy — `trove-og-data.ts:273-274`: after an idle gap unstable_cache hands back the old entry and line 274 sees it is older than 5 minutes and returns `null` instead of fetching fresh data",
+    "Missing test: the test mocks `unstable_cache` as a plain pass-through (`__tests__/trove-og-data.test.ts:12-25`), so the stale-entry path never runs; the test at lines 227-239 only checks the age helper `troveOgDataIsFresh`, not what the metadata path does with an old entry",
+    "Cached \"not found\" results have no timestamp, so the fix won't age-check them — `trove-og-data.ts:212-214, 274`: a trove not indexed yet or a mismatched symbol is cached as bare `null`, and the first request after an idle gap still gets an old `null`",
+    "The card says \"temporarily\" for troves that will never exist — `_og/trove-og-card.tsx:397`: that text shows for any `null`, including a wrong symbol or trove ID",
+    "`shortTroveId` is copied into `page.tsx:48`, identical to `_og/trove-og-card.tsx:115`; importing it keeps the page title and the card in sync"
+  ],
+  "matched_ids": [],
+  "judge_reasoning": {
+    "3882086206": "The review's only duplication note is about shortTroveId being copied between page.tsx and trove-og-card.tsx. It never mentions icrTone duplicating icrTextClass's threshold math.",
+    "3882119274": "The review never raises the problem of event-time icrBps being shown on the OG card as a live health signal.",
+    "3882119284": "The review's cache finding is the opposite problem: entries older than 5 minutes return null and show 'unavailable'. It does not flag the image response's max-age and stale-while-revalidate stacking on top of a nearly 5-minute-old data snapshot, which lets card data reach about 11 minutes old."
+  },
+  "novel": {
+    "claims": 5,
+    "novelReal": 4,
+    "novelWrong": 1,
+    "novelVague": 0,
+    "restatedKnown": 0,
+    "alreadyMatched": 0,
+    "verdicts": {
+      "1": {
+        "class": "real",
+        "why": "trove-og-data.ts:254-274: unstable_cache has revalidate 60, which serves the stale entry while it revalidates in the background. After more than 5 idle minutes, troveOgDataIsFresh fails on line 274 and the function returns null, so that unfurl shows the unavailable card even when Hasura is healthy. This is a different issue from the known combined-age item at opengraph-image.tsx:54."
+      },
+      "2": {
+        "class": "real",
+        "why": "The test mock at trove-og-data.test.ts:12-25 returns fn unchanged, so the cache never replays an old entry. The test at 227-239 calls only troveOgDataIsFresh with synthetic data and never runs fetchTroveOgDataForMetadata against an old entry."
+      },
+      "3": {
+        "class": "wrong",
+        "why": "It is true that nulls from lines 212-214 carry no fetchedAtMs. But line 274 turns any entry that fails the age check into null anyway, so age-checking a cached null would give the same null. The missing timestamp changes nothing; the real cause is the stale-while-revalidate behavior in claim 1."
+      },
+      "4": {
+        "class": "real",
+        "why": "_og/trove-og-card.tsx:387-397 shows 'The indexed snapshot is temporarily unavailable.' whenever data === null. fetchTroveOgDataForMetadata also returns null for a symbol with no matching collateral and for a missing trove row (lines 203, 212), so troves that will never exist are called temporarily unavailable."
+      },
+      "5": {
+        "class": "real",
+        "why": "This diff adds shortTroveId at page.tsx:48-50. It is character-for-character the same as the exported shortTroveId at _og/trove-og-card.tsx:115-117, which opengraph-image.tsx already imports. The social title and the card's short ID can therefore drift apart."
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 191,
+  "usd": 1.3769870000000002,
+  "scoring_usd": 0.35670250000000003
+}

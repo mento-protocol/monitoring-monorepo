@@ -1,0 +1,119 @@
+{
+  "cell_id": "pr-2039-replay-draw1",
+  "fingerprint": {
+    "skill_digest": "89f5bdf20356c5515974ec1a6112fc4f9dfbf31cf1d60b667084f91dfbe6ec60",
+    "kind": "full",
+    "contract_digest": "59b82ee3e6d7ccf2cfbe75cb11aa40e6ec93b92a754a992adee4a1a69166a259",
+    "claude_cli": "2.1.267 (Claude Code)",
+    "codex_cli": "codex-cli 0.154.0",
+    "finder_argv_digest": "40099c93f78800efefbc46f57772ae2cbadc86b378bdd22f474945abfd7b450c",
+    "orchestrator_digest": "d460aa3fefe45e964e71b6490898ed69e69b1d6e2f99781d7eff2c8252bff61f"
+  },
+  "treatment": {
+    "skill_ref": "installed",
+    "dirty": false
+  },
+  "pr": 2039,
+  "condition": "replay",
+  "draw": 1,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": "gpt-5.6-sol@high",
+  "claims": [
+    "Setup now fails completely when `origin` isn't on GitHub — `scripts/bootstrap/codex-cloud-setup.sh:556-557`: the two new probes run with no GitHub-origin check, `gh repo view` (`:179`) fails, and `set -e` stops setup with a generic gh error",
+    "Even if that call passed, the write probe would push a branch to the non-GitHub remote and then print a GitHub-specific error",
+    "The pre-push hook runs during the write probe — `:206`: `.trunk/trunk.yaml:130-141` runs `agent-quality-gate.sh --run` on every pre-push, which bites when setup is re-run on a checkout that already has `core.hooksPath`",
+    "The delete push at `:217` also runs the hook; if the gate fails there, `created=false` has already been set, so the cleanup trap never retries, the probe branch is left behind on origin, and the error message wrongly blames the token",
+    "Chromium isn't refreshed during cached maintenance — `scripts/bootstrap/codex-cloud-maintenance.sh:101`: if a task branch bumps Playwright in the lockfile, maintenance installs the new package but never downloads the matching browser, leaving setup and maintenance inconsistent",
+    "The pull-request API checks prove almost nothing — `:177-186`: a token with pull-request read but not write passes, then fails later at `gh pr create`",
+    "The commit subject overclaims what the pull-request API checks verify",
+    "If the repo is public, both GET requests succeed for any valid token, which `gh auth status` already checked, so the step adds nothing beyond confirming the repo name resolves (unconfirmed)",
+    "The probe branch may trigger a Vercel preview build — `:206` (suspected): `ui-dashboard/vercel.json` evaluates every pushed branch and `vercel-ignore-build.sh:~272` builds when the branch differs from main in dashboard paths",
+    "The error message at `:134` still asks for \"repo/read PR permissions\" while the runbook now requires Contents and pull-request read/write",
+    "No tests cover `verify_github_api_capabilities`, a failed delete, or a non-GitHub origin",
+    "The write-probe tests mock `git`, so they check the command order but not how the real push behaves",
+    "A branch ruleset restricting branch creation would also trigger the \"read-only token\" error"
+  ],
+  "matched_ids": [
+    3846756487,
+    3846756810,
+    3846756918
+  ],
+  "judge_reasoning": {
+    "3846756487": "Review item 4 says the PR API checks only prove read access: a token with PR read but not write passes and then fails later at gh pr create.",
+    "3846756810": "Review item 1 says the new probes lack the non-GitHub-origin guard that verify_origin_git_auth has (:158-161), so gh repo view and the push break with CODEX_CLOUD_ORIGIN_URL.",
+    "3846756918": "Review item 2 says that when the delete push fails, created=false has already been set, so the cleanup trap never retries and the probe branch is left on origin.",
+    "3846756922": "The review never raises collisions in the probe branch name from the timestamp/$$ scheme.",
+    "3846757143": "Review item 5 flags a Vercel preview build triggered by the pushed branch, but treats the branch creation itself as acceptable and never proposes avoiding the mutation (e.g. --dry-run)."
+  },
+  "novel": {
+    "claims": 13,
+    "novelReal": 4,
+    "novelWrong": 0,
+    "novelVague": 3,
+    "restatedKnown": 6,
+    "alreadyMatched": 3,
+    "verdicts": {
+      "1": {
+        "class": "known",
+        "why": "Setup runs verify_github_api_capabilities at :556, which calls gh repo view at :179 with no host check, while verify_origin_git_auth (:158-161) skips non-GitHub origins. This is the known :179 defect."
+      },
+      "2": {
+        "class": "known",
+        "why": "verify_origin_write_access also has no GitHub-origin guard and prints a GitHub/Contents-specific message. Same root cause as the known :179 missing-origin-check defect."
+      },
+      "3": {
+        "class": "real",
+        "why": "The probe runs `git push origin HEAD:refs/heads/...` without --no-verify. .trunk/hooks/pre-push hands off to trunk, and trunk.yaml:130-141 then runs agent-quality-gate.sh --run on pre-push. If core.hooksPath is already set (setup only sets it later, at :563), the gate runs and can fail the probe."
+      },
+      "4": {
+        "class": "known",
+        "why": "The code sets created=false before `return 1` after the delete push fails, so the EXIT trap never retries. This restates the known :242/:243 defect about keeping the cleanup fallback."
+      },
+      "5": {
+        "class": "real",
+        "why": "codex-cloud-maintenance.sh:101 only runs pnpm install. The new install_playwright_host_dependencies exists only in setup, so a branch that bumps @playwright/test (^1.60.0 in ui-dashboard) gets no matching Chromium in cached containers."
+      },
+      "6": {
+        "class": "known",
+        "why": "The probe only sends GET repos/X and GET repos/X/pulls, which proves PR read access, not write. This is the known :195 defect."
+      },
+      "7": {
+        "class": "vague",
+        "why": "An opinion about the commit subject wording ('verify Codex Cloud shipping capabilities'). No code defect beyond the known PR-write gap."
+      },
+      "8": {
+        "class": "known",
+        "why": "Says the GET-only API checks add little. This elaborates the known :195 defect that only read access is probed."
+      },
+      "9": {
+        "class": "known",
+        "why": "vercel.json's ignoreCommand builds non-main branches that differ from main in dashboard paths, so the probe push could trigger a preview. This is a consequence of the known :231 defect that the probe mutates origin on every run."
+      },
+      "10": {
+        "class": "real",
+        "why": "Line 133 still says 'repo/read PR permissions', but the updated runbook now requires Contents read/write and pull-request read/write. The error message and the docs now disagree."
+      },
+      "11": {
+        "class": "real",
+        "why": "The test file adds only playwright, write-access success, and push-refused cases. Nothing exercises verify_github_api_capabilities, a failing delete push (which would expose the created=false bug), or a non-GitHub origin."
+      },
+      "12": {
+        "class": "vague",
+        "why": "Stubbing git in a unit test is standard practice. The claim names no concrete defect in the tests."
+      },
+      "13": {
+        "class": "vague",
+        "why": "Depends on hypothetical repo rulesets that can't be verified. The push's stderr isn't redirected (only stdout goes to /dev/null), so GitHub's real rejection reason is still shown."
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 285,
+  "usd": 1.3729360000000002,
+  "scoring_usd": 0.6429575000000001
+}
