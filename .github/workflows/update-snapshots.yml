@@ -15,7 +15,12 @@ permissions: read-all
 jobs:
   update-snapshots:
     name: Regenerate visual snapshot baselines (Linux)
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    # Mento's self-hosted pool (`cibase`; runbook in mento-protocol/ci-infrastructure).
+    # This MUST track ci.yml's `ui` job. Playwright baselines are coupled to the
+    # image that renders them, so generating them here while comparing them
+    # there (or vice versa) would diff on font rendering rather than on real UI
+    # change. The two move together or not at all.
+    runs-on: [self-hosted, sol-ci]
     timeout-minutes: 20
     permissions:
       contents: write

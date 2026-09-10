@@ -29,7 +29,12 @@ jobs:
     # sets `break: 86`, so when the mutation step runs a score below 86% fails
     # the job.
     name: Dashboard logic baseline
-    runs-on: blacksmith-4vcpu-ubuntu-2404-arm
+    # Mento's self-hosted pool (`cibase`; runbook in mento-protocol/ci-infrastructure).
+    # Best fit in the repo for the box: Stryker is CPU-bound and the pool is a
+    # 24-core/32-thread machine, against 4 vCPU here. Safe to move because the
+    # triggers are cron + dispatch only (see the note above), the job holds no
+    # secret, and it is advisory -- not in the branch ruleset's required checks.
+    runs-on: [self-hosted, sol-ci]
     timeout-minutes: 10
     # `pull-requests: read` is required by `dorny/paths-filter` in PR mode.
     permissions:
@@ -112,7 +117,12 @@ jobs:
     # sets `break: 94`, so when the mutation step runs a score below 94% fails
     # the job.
     name: Indexer logic baseline
-    runs-on: blacksmith-4vcpu-ubuntu-2404-arm
+    # Mento's self-hosted pool (`cibase`; runbook in mento-protocol/ci-infrastructure).
+    # Best fit in the repo for the box: Stryker is CPU-bound and the pool is a
+    # 24-core/32-thread machine, against 4 vCPU here. Safe to move because the
+    # triggers are cron + dispatch only (see the note above), the job holds no
+    # secret, and it is advisory -- not in the branch ruleset's required checks.
+    runs-on: [self-hosted, sol-ci]
     timeout-minutes: 10
     # `pull-requests: read` is required by `dorny/paths-filter` in PR mode.
     permissions:
@@ -197,7 +207,12 @@ jobs:
     # sets `break: 86`, so when the mutation step runs a score below 86% fails
     # the job.
     name: Bridge rebalance probe baseline
-    runs-on: blacksmith-4vcpu-ubuntu-2404-arm
+    # Mento's self-hosted pool (`cibase`; runbook in mento-protocol/ci-infrastructure).
+    # Best fit in the repo for the box: Stryker is CPU-bound and the pool is a
+    # 24-core/32-thread machine, against 4 vCPU here. Safe to move because the
+    # triggers are cron + dispatch only (see the note above), the job holds no
+    # secret, and it is advisory -- not in the branch ruleset's required checks.
+    runs-on: [self-hosted, sol-ci]
     timeout-minutes: 10
     # `pull-requests: read` is required by `dorny/paths-filter` in PR mode.
     permissions:

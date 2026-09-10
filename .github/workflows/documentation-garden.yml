@@ -51,7 +51,14 @@ jobs:
       github.event_name == 'schedule' ||
       (github.event_name == 'workflow_dispatch' &&
         github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
-    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    # Mento's self-hosted pool (`cibase`; runbook in mento-protocol/ci-infrastructure).
+    # Safe to move: schedule + main-only dispatch, so no fork-authored code ever
+    # reaches the box. The job block below replaces the workflow's `read-all`,
+    # so its effective scopes are exactly `contents: read` + `id-token: write` +
+    # `issues: write` -- Issues are the only mutable resource and no cloud
+    # credential is in scope. Nothing here is architecture-dependent -- ARM was
+    # a cost choice, not a requirement.
+    runs-on: [self-hosted, sol-ci]
     timeout-minutes: 10
     permissions:
       contents: read
@@ -65,6 +72,10 @@ jobs:
           # The planner's last_content_change evidence uses git log. A shallow
           # checkout would report null for documents unchanged at HEAD.
           fetch-depth: 0
+          # The pool is shared; nothing here talks to git over the network
+          # (no git-protocol lockfile deps, no fetch/push), so the checkout
+          # credential has no reason to stay in .git/config after the step.
+          persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version

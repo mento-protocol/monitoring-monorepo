@@ -47,7 +47,7 @@ const EXPECTED_CONDITIONS = Object.freeze({
 // prettier-ignore
 const EXPECTED_TIMEOUTS = Object.freeze({ changes: 2, shared: 10, ui: 25, indexer: 20, bridge: 10, "integration-probes": 10, alerts: 10, "gov-watchdog": 10, terraform: 10, aegis: 15, scripts: 55, "guardrail-prose": 5, "docs-checks": 10, "production-infra-contract": 5, "sentry-suites": 5, "version-skew": 5, deps: 5, ci: 2 });
 // prettier-ignore
-const EXPECTED_RUNNERS = Object.freeze({ changes: "blacksmith-2vcpu-ubuntu-2404-arm", shared: "blacksmith-2vcpu-ubuntu-2404", ui: "blacksmith-4vcpu-ubuntu-2404", indexer: "blacksmith-4vcpu-ubuntu-2404", bridge: "blacksmith-2vcpu-ubuntu-2404", "integration-probes": "blacksmith-2vcpu-ubuntu-2404", aegis: "blacksmith-2vcpu-ubuntu-2404", alerts: "blacksmith-2vcpu-ubuntu-2404", "gov-watchdog": "blacksmith-4vcpu-ubuntu-2404", terraform: "blacksmith-2vcpu-ubuntu-2404-arm", deps: "blacksmith-2vcpu-ubuntu-2404", scripts: "blacksmith-2vcpu-ubuntu-2404", "docs-checks": "blacksmith-2vcpu-ubuntu-2404", "version-skew": "blacksmith-2vcpu-ubuntu-2404", "guardrail-prose": "ubuntu-latest", "production-infra-contract": "blacksmith-2vcpu-ubuntu-2404", "sentry-suites": "ubuntu-latest", ci: "ubuntu-latest" });
+const EXPECTED_RUNNERS = Object.freeze({ changes: ["self-hosted", "sol-ci"], shared: ["self-hosted", "sol-ci"], ui: ["self-hosted", "sol-ci"], indexer: ["self-hosted", "sol-ci"], bridge: ["self-hosted", "sol-ci"], "integration-probes": ["self-hosted", "sol-ci"], aegis: ["self-hosted", "sol-ci"], alerts: ["self-hosted", "sol-ci"], "gov-watchdog": ["self-hosted", "sol-ci"], terraform: ["self-hosted", "sol-ci"], deps: ["self-hosted", "sol-ci"], scripts: ["self-hosted", "sol-ci"], "docs-checks": ["self-hosted", "sol-ci"], "version-skew": ["self-hosted", "sol-ci"], "guardrail-prose": "ubuntu-latest", "production-infra-contract": ["self-hosted", "sol-ci"], "sentry-suites": "ubuntu-latest", ci: "ubuntu-latest" });
 // prettier-ignore
 const EXPECTED_JOB_ENV = Object.freeze({ indexer: { ENVIO_STRICT_START_BLOCK: "true" }, aegis: { FOUNDRY_PROFILE: "ci" } });
 // prettier-ignore
@@ -154,7 +154,7 @@ export function workflowViolations(workflow, filters) {
       errors.push(`${name} must not use job-level continue-on-error`);
     }
     // prettier-ignore
-    if (job["runs-on"] !== EXPECTED_RUNNERS[name] || JSON.stringify(job.env ?? null) !== JSON.stringify(EXPECTED_JOB_ENV[name] ?? null) || ["defaults", "strategy", "container", "services", "uses", "environment", "secrets", "with"].some((key) => job[key] !== undefined) || (CONDITIONAL_JOBS.includes(name) && job.needs !== "changes")) errors.push(`${name} job runtime changed`);
+    if (JSON.stringify(job["runs-on"]) !== JSON.stringify(EXPECTED_RUNNERS[name]) || JSON.stringify(job.env ?? null) !== JSON.stringify(EXPECTED_JOB_ENV[name] ?? null) || ["defaults", "strategy", "container", "services", "uses", "environment", "secrets", "with"].some((key) => job[key] !== undefined) || (CONDITIONAL_JOBS.includes(name) && job.needs !== "changes")) errors.push(`${name} job runtime changed`);
     errors.push(...envMutationBlockers(job.steps, name));
   }
   errors.push(
@@ -172,7 +172,7 @@ export function workflowViolations(workflow, filters) {
   for (const [name, timeout] of Object.entries(EXPECTED_TIMEOUTS)) if (jobs[name]?.["timeout-minutes"] !== timeout) errors.push(`${name} timeout-minutes must be ${timeout}`);
   const changes = jobs.changes ?? {};
   // prettier-ignore
-  if (Object.keys(changes).sort().join() !== "name,outputs,permissions,runs-on,steps,timeout-minutes" || changes["runs-on"] !== "blacksmith-2vcpu-ubuntu-2404-arm" || JSON.stringify(changes.permissions) !== '{"contents":"read","actions":"read","pull-requests":"read"}') errors.push("changes job runtime changed");
+  if (Object.keys(changes).sort().join() !== "name,outputs,permissions,runs-on,steps,timeout-minutes" || JSON.stringify(changes["runs-on"]) !== JSON.stringify(["self-hosted", "sol-ci"]) || JSON.stringify(changes.permissions) !== '{"contents":"read","actions":"read","pull-requests":"read"}') errors.push("changes job runtime changed");
   errors.push(
     ...setErrors("changes outputs", Object.keys(changes.outputs ?? {}), [
       ...FILTER_NAMES,

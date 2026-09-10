@@ -114,7 +114,15 @@ permissions: read-all
 jobs:
   audit:
     name: npm advisory audit
-    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    # Mento's self-hosted pool (`cibase`; runbook in mento-protocol/ci-infrastructure).
+    # This workflow DOES run on `pull_request`, so two things carry it. First,
+    # the repository requires approval for all external contributors, so no
+    # fork-authored code reaches the pool unattended. Second, this check is
+    # advisory -- it is not in the branch ruleset's required set (`ci`,
+    # `Code Quality`, `Sentry suites`, Vercel), so if the single-host pool is
+    # ever down this goes pending rather than blocking every merge in the org.
+    # Required checks stay on Blacksmith for exactly that reason.
+    runs-on: [self-hosted, sol-ci]
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -152,7 +160,15 @@ jobs:
 
   lockfile-lint:
     name: lockfile integrity + registry check
-    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    # Mento's self-hosted pool (`cibase`; runbook in mento-protocol/ci-infrastructure).
+    # This workflow DOES run on `pull_request`, so two things carry it. First,
+    # the repository requires approval for all external contributors, so no
+    # fork-authored code reaches the pool unattended. Second, this check is
+    # advisory -- it is not in the branch ruleset's required set (`ci`,
+    # `Code Quality`, `Sentry suites`, Vercel), so if the single-host pool is
+    # ever down this goes pending rather than blocking every merge in the org.
+    # Required checks stay on Blacksmith for exactly that reason.
+    runs-on: [self-hosted, sol-ci]
     timeout-minutes: 2
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -210,7 +226,15 @@ jobs:
       github.event.schedule == '17 7 * * 1' ||
       (github.event_name == 'workflow_dispatch' &&
         github.ref_name == github.event.repository.default_branch)
-    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    # Mento's self-hosted pool (`cibase`; runbook in mento-protocol/ci-infrastructure).
+    # This workflow DOES run on `pull_request`, so two things carry it. First,
+    # the repository requires approval for all external contributors, so no
+    # fork-authored code reaches the pool unattended. Second, this check is
+    # advisory -- it is not in the branch ruleset's required set (`ci`,
+    # `Code Quality`, `Sentry suites`, Vercel), so if the single-host pool is
+    # ever down this goes pending rather than blocking every merge in the org.
+    # Required checks stay on Blacksmith for exactly that reason.
+    runs-on: [self-hosted, sol-ci]
     timeout-minutes: 2
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -239,7 +263,15 @@ jobs:
       github.event.schedule == '17 7 * * 1' ||
       (github.event_name == 'workflow_dispatch' &&
         github.ref_name == github.event.repository.default_branch)
-    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    # Mento's self-hosted pool (`cibase`; runbook in mento-protocol/ci-infrastructure).
+    # This workflow DOES run on `pull_request`, so two things carry it. First,
+    # the repository requires approval for all external contributors, so no
+    # fork-authored code reaches the pool unattended. Second, this check is
+    # advisory -- it is not in the branch ruleset's required set (`ci`,
+    # `Code Quality`, `Sentry suites`, Vercel), so if the single-host pool is
+    # ever down this goes pending rather than blocking every merge in the org.
+    # Required checks stay on Blacksmith for exactly that reason.
+    runs-on: [self-hosted, sol-ci]
     timeout-minutes: 5
     permissions:
       contents: read
@@ -431,7 +463,15 @@ jobs:
       github.event.schedule == '17 7 * * 1' ||
       (github.event_name == 'workflow_dispatch' &&
         github.ref_name == github.event.repository.default_branch)
-    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    # Mento's self-hosted pool (`cibase`; runbook in mento-protocol/ci-infrastructure).
+    # This workflow DOES run on `pull_request`, so two things carry it. First,
+    # the repository requires approval for all external contributors, so no
+    # fork-authored code reaches the pool unattended. Second, this check is
+    # advisory -- it is not in the branch ruleset's required set (`ci`,
+    # `Code Quality`, `Sentry suites`, Vercel), so if the single-host pool is
+    # ever down this goes pending rather than blocking every merge in the org.
+    # Required checks stay on Blacksmith for exactly that reason.
+    runs-on: [self-hosted, sol-ci]
     timeout-minutes: 5
     permissions:
       contents: read

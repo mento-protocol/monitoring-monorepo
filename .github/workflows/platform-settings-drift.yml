@@ -45,7 +45,13 @@ concurrency:
 jobs:
   check:
     name: Assert read-only default workflow-token permission
-    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    # Mento's self-hosted pool (`cibase`; runbook in mento-protocol/ci-infrastructure).
+    # Safe to move: schedule + dispatch only and already main-gated twice (the
+    # `if:` below and the sentry-pipeline Environment's branch policy), so no
+    # fork-authored code runs here. PLATFORM_SETTINGS_AUDIT_TOKEN is
+    # Administration:READ on this repo only -- it cannot change a setting, so
+    # widening where it is held does not widen what it can do.
+    runs-on: [self-hosted, sol-ci]
     timeout-minutes: 5
     # workflow_dispatch can target any ref; without this a manual dispatch from a
     # feature branch would check out that branch and run its code with the
@@ -69,6 +75,11 @@ jobs:
       actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The pool is shared; nothing here talks to git over the network
+          # (no git-protocol lockfile deps, no fetch/push), so the checkout
+          # credential has no reason to stay in .git/config after the step.
+          persist-credentials: false
 
       - name: Read live setting and evaluate drift
         id: check
