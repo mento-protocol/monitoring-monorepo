@@ -31,6 +31,9 @@ function writeArm({
   notes = "",
   codexCli = "codex-cli 0.154.0",
   claudeCli = "2.1.267 (Claude Code)",
+  // The manifest scorePlan writes; defaults to every cell that has a result.
+  completedCellIds = null,
+  writeManifest = true,
 }) {
   const dir = mkdtempSync(path.join(tmpdir(), "finder-compare-"));
   if (writeRow) {
@@ -68,6 +71,16 @@ function writeArm({
       })),
     }),
   );
+  if (writeManifest) {
+    writeFileSync(
+      path.join(dir, "calibration.json"),
+      JSON.stringify({
+        completed_cell_ids:
+          completedCellIds ??
+          Object.keys(results).map((pr) => `pr-${pr}-pipeline-draw1`),
+      }),
+    );
+  }
   for (const [pr, record] of Object.entries(results)) {
     writeFileSync(
       path.join(dir, `result-${pr}-pipeline-1.json`),
@@ -225,6 +238,35 @@ test("a straddled CLI upgrade warns and names the runtime that moved", () => {
   const report = compareArms({ anchor, candidate });
   assert.ok(report.warnings.some((w) => /codex CLI/.test(w)));
   assert.ok(!report.warnings.some((w) => /claude CLI/.test(w)));
+});
+
+test("a root result outside the completed-cell manifest is stale and reads as missing", () => {
+  const results = { 11: { matched: [1] }, 22: { matched: [2, 3] } };
+  const base = {
+    finder: "sol@high",
+    cells: [11, 22],
+    results,
+    contractDigest: "aaaa1111",
+  };
+  const anchor = readArm({ dir: writeArm(base), contract });
+  // PR 22 succeeded on an earlier run of this directory and failed on retry:
+  // its result file is still on disk, the manifest no longer lists it.
+  const candidate = readArm({
+    dir: writeArm({
+      ...base,
+      finder: "astra@low",
+      completedCellIds: ["pr-11-pipeline-draw1"],
+    }),
+    contract,
+  });
+  const report = compareArms({ anchor, candidate });
+  assert.equal(report.totals.prs, 1);
+  assert.deepEqual(report.skipped.anchor_only, [22]);
+  assert.throws(
+    () =>
+      readArm({ dir: writeArm({ ...base, writeManifest: false }), contract }),
+    /calibration\.json/,
+  );
 });
 
 test("--allow-scorer-drift turns the scorer refusal into a warning, nothing else", () => {

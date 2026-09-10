@@ -83,8 +83,14 @@ export function readArm({ dir, contract }) {
   const row = readCheckedRow(dir);
   const byPr = new Map();
   const leaked = [];
+  const completed = readCompletedCells(dir);
   for (const cell of plan.cells ?? []) {
     if (cell.condition !== "pipeline" || cell.draw !== 1) continue;
+    // An identical retry reuses the directory, and a cell that succeeded once
+    // and failed on retry leaves its old root result behind. The run's own
+    // manifest says which results belong to the current run; a file outside
+    // it is stale evidence and reads as a missing cell.
+    if (!completed.has(cell.cell_id)) continue;
     const file = path.join(dir, `result-${cell.pr}-pipeline-1.json`);
     if (!existsSync(file)) continue;
     const result = readJson(file);
@@ -173,6 +179,26 @@ export function signFlip(differences) {
     p_greater: greater / assignments,
     p_less: less / assignments,
   };
+}
+
+/** The current run's completed cells, from the manifest `scorePlan` writes. */
+function readCompletedCells(dir) {
+  const file = path.join(dir, "calibration.json");
+  if (!existsSync(file)) {
+    throw new Error(
+      `${dir} carries no calibration.json; the run's completed-cell manifest cannot be read`,
+    );
+  }
+  const ids = readJson(file)?.completed_cell_ids;
+  if (
+    !Array.isArray(ids) ||
+    ids.some((id) => typeof id !== "string" || id.length === 0)
+  ) {
+    throw new Error(
+      `${dir}/calibration.json completed_cell_ids must be an array of non-empty strings`,
+    );
+  }
+  return new Set(ids);
 }
 
 /** Pair the two arms by PR and total the differences. */
