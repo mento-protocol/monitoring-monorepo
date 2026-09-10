@@ -19,7 +19,12 @@ readiness does not prove that any rule is deployed or any recipient received it.
 
 ## Transfer rules
 
-Use the canonical seconds in `shared-config/bridge-thresholds.json`:
+Use the canonical seconds in `shared-config/bridge-thresholds.json`. Changes to
+this shared file trigger both exporter and rules workflows. The rules stack owns
+this exact dependency for change detection and protected plan/apply. Other
+shared-config files can enter coarse validation without triggering rules apply.
+
+Thresholds:
 
 | Status         | Warning age     | Page age         |
 | -------------- | --------------- | ---------------- |
@@ -43,8 +48,10 @@ token and status. Group updates use five minutes; repeats use four hours. Resolv
 notifications remain enabled. The pager and critical Slack destination share one
 contact point; these rules bypass the global notification policy.
 
-Notifications show route, token, status, age, stuck count, threshold and a bridge
-dashboard URL. URLs use the existing `status`, `source` and `destination` query
+Firing notifications show route, token, status, age, stuck count, threshold and a
+bridge dashboard URL. Resolved notifications identify the cleared alert and its
+route and link without repeating the firing description. Mixed groups render
+each alert by its own status. URLs use the existing `status`, `source` and `destination` query
 parameters. Omit an unknown endpoint rather than invent a chain ID. The dashboard
 has no token query parameter; the token remains in notification text.
 
@@ -118,11 +125,12 @@ check scrape and dashboard-link drift. `bridge-rules.tftest.hcl` uses a mocked
 Grafana provider to check rule settings and routing. Offline Prometheus evaluation
 checks exact Terraform-derived expressions at boundaries and failure states.
 Run `PROMTOOL=/path/to/promtool node --test alerts/rules/tests/bridge-behavior.test.mjs`
-with Terraform and Prometheus `promtool` 3.5.0 installed. The required Alerts Rules
-CI step downloads the pinned Linux ARM64 archive and verifies its SHA-256 before
-running this command. Missing tools fail the test. The harness evaluates the
+with Terraform, Go 1.26.0 and Prometheus `promtool` 3.5.0 installed. The required
+credential-free Terraform CI job pins Go and downloads the pinned Linux ARM64
+Prometheus archive with SHA-256 verification before running this command. Missing tools fail the test. The harness evaluates the
 actual rule locals in a provider-free temporary module, then checks 41 scenarios
-with 164 expression assertions.
+with 164 expression assertions. It also renders the exact notification templates
+with Go for firing, resolved and mixed groups.
 These checks do not exercise Grafana's live alert-state engine or Slack/Splunk
 recipient delivery.
 

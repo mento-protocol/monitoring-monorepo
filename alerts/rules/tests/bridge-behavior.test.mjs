@@ -48,7 +48,7 @@ function evaluateContract(directory) {
   const encoded = command("terraform", [`-chdir=${module}`, "console"], {
     env,
     input:
-      "jsonencode({rules=local.bridge_rule_definitions,unavailable=local.bridge_unavailable_promql,invalid=local.bridge_invalid_promql})\n",
+      "jsonencode({rules=local.bridge_rule_definitions,unavailable=local.bridge_unavailable_promql,invalid=local.bridge_invalid_promql,title=local.bridge_notification_title,body=local.bridge_notification_body})\n",
   });
   return JSON.parse(JSON.parse(encoded));
 }
@@ -161,7 +161,7 @@ function scenarios(contract) {
 }
 
 test(
-  "exact Terraform bridge expressions preserve threshold and failure behavior",
+  "exact Terraform bridge expressions and notifications preserve alert behavior",
   { timeout: 180_000 },
   () => {
     command(promtool, ["--version"]); // Required: absence is a failure, never a silent skip.
@@ -175,6 +175,19 @@ test(
         JSON.stringify({ evaluation_interval: "1s", tests }),
       );
       command(promtool, ["test", "rules", fixture]);
+      const templates = join(directory, "templates.json");
+      writeFileSync(templates, JSON.stringify(contract));
+      command(
+        "go",
+        ["test", join(repo, "alerts/rules/tests/bridge-notification_test.go")],
+        {
+          env: {
+            ...process.env,
+            GOTOOLCHAIN: "local",
+            BRIDGE_TEMPLATE_FIXTURE: templates,
+          },
+        },
+      );
       process.stdout.write(
         `${tests.length} scenarios / ${tests.reduce((count, entry) => count + entry.promql_expr_test.length, 0)} exact-expression assertions passed\n`,
       );

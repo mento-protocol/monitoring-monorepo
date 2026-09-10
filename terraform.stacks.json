@@ -9,7 +9,8 @@
     "metrics-bridge/**",
     "scripts/**",
     ".github/workflows/**",
-    "terraform.stacks.json"
+    "terraform.stacks.json",
+    "shared-config/**"
   ],
   "stacks": [
     {
@@ -107,6 +108,7 @@
       "applyPolicy": "ci-production-infra-environment-approved",
       "changedPathPatterns": [
         "alerts/rules/**",
+        "shared-config/bridge-thresholds.json",
         "terraform.stacks.json",
         "scripts/terraform/terraform-fmt-check.mjs",
         "scripts/tf-stacks.mjs",

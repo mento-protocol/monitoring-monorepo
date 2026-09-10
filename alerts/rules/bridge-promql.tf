@@ -29,8 +29,13 @@ locals {
   bridge_notification_title = "{{ .Status | toUpper }}: bridge transfer monitoring"
   bridge_notification_body  = <<-EOT
     {{ range .Alerts }}
+    {{ if eq .Status "resolved" }}
+    Bridge alert resolved: {{ .Labels.alertname }}
+    {{ if .Labels.source_chain }}Route: {{ .Labels.source_chain }} → {{ .Labels.destination_chain }} / {{ .Labels.token }} / {{ .Labels.status }}{{ end }}
+    {{ else }}
     {{ .Annotations.summary }}
     {{ .Annotations.description }}
+    {{ end }}
     {{ if .Annotations.dashboard_url }}{{ .Annotations.dashboard_url }}{{ end }}
     {{ end }}
   EOT
