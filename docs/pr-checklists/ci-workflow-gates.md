@@ -260,8 +260,9 @@ and `npm`. Both run weekly on Monday. The npm entry batches routine workspace
 updates into themed groups (`next-runtime`, `envio-runtime`, `nest-runtime`,
 `playwright-runtime`, `chain-stack`, `test-toolchain`, `lint-toolchain`, plus
 `production-misc` and `tooling` catch-alls) and mirrors those boundaries for
-security updates. `minimumReleaseAge: 4320` in `pnpm-workspace.yaml` still
-gates every install. GitHub-issued security advisories on `pnpm-lock.yaml` open
+security updates. `minimumReleaseAge: 4320` in `pnpm-workspace.yaml` is a
+separate three-day install-time guard for versions not listed in
+`minimumReleaseAgeExclude`. GitHub-issued security advisories on `pnpm-lock.yaml` open
 as soon as the advisory publishes; the schedule does not apply to them. See
 [ADR 0092](../adr/0092-dependabot-npm-version-updates.md).
 

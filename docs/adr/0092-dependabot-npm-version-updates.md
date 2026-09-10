@@ -50,16 +50,19 @@ Add an `npm` update entry to `.github/dependabot.yml`:
   development tooling; `production-misc` and `tooling` catch the rest.
 - Security-update groups mirror the same boundaries (`next-runtime-security`,
   `envio-runtime-security`, `nest-runtime-security`,
-  `playwright-runtime-security`, `chain-stack-security`, `security-runtime`,
+  `playwright-runtime-security`, `chain-stack-security`,
+  `test-toolchain-security`, `lint-toolchain-security`, `security-runtime`,
   `security-tooling`).
 - Every npm PR stays on the operator-authorized merge path. The
   [ADR 0081](0081-narrow-dependabot-auto-merge-exception.md) lane requires the
   `github_actions` ecosystem and the exact `actions-minor-patch` group, so no
   npm PR can enter it.
 
-`minimumReleaseAge` remains in force; Dependabot's cooldown is a second,
-earlier floor for version updates, and the install-time gate still applies to
-the resulting lockfile.
+The two floors are separate. Dependabot's cooldown decides when a version
+update may become a PR: seven days for minor and patch, 21 for major, none
+for security updates. pnpm's `minimumReleaseAge` is a three-day install-time
+guard on every lockfile entry not listed in `minimumReleaseAgeExclude`; it
+still applies to the lockfile a Dependabot PR produces.
 
 ## Alternatives considered
 

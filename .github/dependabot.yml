@@ -6,12 +6,14 @@ version: 2
 #
 # The npm entry batches routine workspace updates into Monday group PRs so
 # they arrive as a handful of themed PRs instead of one PR per package.
-# `minimumReleaseAge: 4320` in pnpm-workspace.yaml still applies at install
-# time and is the harder of the two floors for young releases. GitHub-issued
-# security advisories on pnpm-lock.yaml arrive whenever the advisory publishes;
-# no schedule here can move them. Both npm lanes use the normal CI and
-# operator-approved merge gates because the auto-merge lane accepts only
-# GitHub-owned `actions/*` minor and patch updates in the named group below.
+# `minimumReleaseAge: 4320` in pnpm-workspace.yaml is a separate three-day
+# install-time guard for versions not listed in `minimumReleaseAgeExclude`;
+# the Dependabot cooldown below is the longer floor for version-update PRs.
+# GitHub-issued security advisories on pnpm-lock.yaml arrive whenever the
+# advisory publishes; no schedule here can move them. Both npm lanes use the
+# normal CI and operator-approved merge gates because the auto-merge lane
+# accepts only GitHub-owned `actions/*` minor and patch updates in the named
+# group below.
 updates:
   # npm / pnpm workspace dependencies. The root directory covers every
   # workspace member through pnpm-lock.yaml. governance-watchdog and the two
@@ -249,6 +251,9 @@ updates:
           - "@next/*"
           - react
           - react-dom
+          - "@types/react"
+          - "@types/react-dom"
+          - babel-plugin-react-compiler
 
       envio-runtime-security:
         applies-to: security-updates
@@ -279,6 +284,39 @@ updates:
           - "@noble/*"
           - "@scure/*"
 
+      test-toolchain-security:
+        applies-to: security-updates
+        dependency-type: development
+        patterns:
+          - vitest
+          - "@vitest/*"
+          - vite
+          - jest
+          - ts-jest
+          - "@types/jest"
+          - "@stryker-mutator/*"
+          - fast-check
+          - jsdom
+          - axe-core
+          - vitest-axe
+
+      lint-toolchain-security:
+        applies-to: security-updates
+        dependency-type: development
+        patterns:
+          - eslint
+          - "@eslint/*"
+          - "@eslint-react/*"
+          - eslint-plugin-*
+          - eslint-config-*
+          - typescript-eslint
+          - "@typescript-eslint/*"
+          - prettier
+          - knip
+          - dependency-cruiser
+          - jscpd
+          - react-doctor
+
       security-runtime:
         applies-to: security-updates
         dependency-type: production
@@ -289,6 +327,9 @@ updates:
           - "@next/*"
           - react
           - react-dom
+          - "@types/react"
+          - "@types/react-dom"
+          - babel-plugin-react-compiler
           - envio
           - envio-cloud
           - "@envio-dev/*"
@@ -302,6 +343,29 @@ updates:
           - "@mento-protocol/*"
           - "@noble/*"
           - "@scure/*"
+          - vitest
+          - "@vitest/*"
+          - vite
+          - jest
+          - ts-jest
+          - "@types/jest"
+          - "@stryker-mutator/*"
+          - fast-check
+          - jsdom
+          - axe-core
+          - vitest-axe
+          - eslint
+          - "@eslint/*"
+          - "@eslint-react/*"
+          - eslint-plugin-*
+          - eslint-config-*
+          - typescript-eslint
+          - "@typescript-eslint/*"
+          - prettier
+          - knip
+          - dependency-cruiser
+          - jscpd
+          - react-doctor
 
       security-tooling:
         applies-to: security-updates
@@ -313,6 +377,9 @@ updates:
           - "@next/*"
           - react
           - react-dom
+          - "@types/react"
+          - "@types/react-dom"
+          - babel-plugin-react-compiler
           - envio
           - envio-cloud
           - "@envio-dev/*"
@@ -326,6 +393,29 @@ updates:
           - "@mento-protocol/*"
           - "@noble/*"
           - "@scure/*"
+          - vitest
+          - "@vitest/*"
+          - vite
+          - jest
+          - ts-jest
+          - "@types/jest"
+          - "@stryker-mutator/*"
+          - fast-check
+          - jsdom
+          - axe-core
+          - vitest-axe
+          - eslint
+          - "@eslint/*"
+          - "@eslint-react/*"
+          - eslint-plugin-*
+          - eslint-config-*
+          - typescript-eslint
+          - "@typescript-eslint/*"
+          - prettier
+          - knip
+          - dependency-cruiser
+          - jscpd
+          - react-doctor
 
   - package-ecosystem: github-actions
     directory: /
