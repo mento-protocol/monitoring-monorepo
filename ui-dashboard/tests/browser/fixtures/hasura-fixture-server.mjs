@@ -1793,6 +1793,7 @@ export function handleGraphQL(
       };
     // Interim user-ops assembly — fires on a cold trove-page load while the
     // schema probe is still resolving, then hands over to CdpTroveLedger.
+    case "CdpTroveOperationsNumeric":
     case "CdpTroveOperations":
       return {
         TroveOperationEvent:

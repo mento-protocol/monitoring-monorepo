@@ -1,0 +1,25 @@
+# Isolated, disposable server-ordering fixture. No host database or named volume.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: fixture-only
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+  hasura:
+    image: hasura/graphql-engine:v2.46.0
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      HASURA_GRAPHQL_METADATA_DATABASE_URL: postgres://postgres:fixture-only@postgres:5432/postgres
+      PG_DATABASE_URL: postgres://postgres:fixture-only@postgres:5432/postgres
+      HASURA_GRAPHQL_ENABLE_TELEMETRY: "false"
+      HASURA_GRAPHQL_ENABLE_CONSOLE: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
