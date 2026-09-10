@@ -62,6 +62,7 @@ on:
     branches: [main]
     paths:
       - alerts/rules/**
+      - shared-config/bridge-thresholds.json
       - scripts/sanitize-terraform-output.sh
       - scripts/terraform/notify-terraform-apply.mjs
       - scripts/verify-github-environment-protection.mjs
@@ -71,6 +72,7 @@ on:
     branches: [main]
     paths:
       - alerts/rules/**
+      - shared-config/bridge-thresholds.json
       - scripts/sanitize-terraform-output.sh
       - scripts/terraform/notify-terraform-apply.mjs
       - scripts/verify-github-environment-protection.mjs
@@ -162,7 +164,7 @@ jobs:
             exit 0
           fi
 
-          if git diff --quiet "$BASE_SHA" "$HEAD_SHA" -- "$STACK_PATH"; then
+          if git diff --quiet "$BASE_SHA" "$HEAD_SHA" -- "$STACK_PATH" shared-config/bridge-thresholds.json; then
             echo "stack-changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "stack-changed=true" >> "$GITHUB_OUTPUT"

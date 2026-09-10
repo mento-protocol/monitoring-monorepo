@@ -5,6 +5,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { validFixtureFiles } from "./fixtures.mjs";
+import { validateIamGrantSinkInventory } from "./iam.mjs";
 import { terraformTopLevelBlocks } from "../lib/hcl.mjs";
 import {
   assertProductionInfraIdentityContract,
@@ -1217,5 +1218,129 @@ expectFailure(
   ),
   "Terraform JSON configuration is forbidden",
 );
+
+// Issue 2371: exercise the actual bridge definitions through the inventory
+// validators. A nearby unknown address must not inherit this registration.
+function testBridgeRegistration() {
+  const channel = "alerts/infra/bridge-warning-channel.tf";
+  const contacts = "alerts/rules/bridge-contact-points.tf";
+  const rules = "alerts/rules/rules-bridges.tf";
+  const files = Object.fromEntries(
+    [channel, contacts, rules].map((file) => [
+      file,
+      readFileSync(path.join(repositoryRoot, file), "utf8"),
+    ]),
+  );
+  function violations(candidate, complete = false) {
+    const errors = [];
+    const blocks = terraformTopLevelBlocks(candidate, errors);
+    validateIamGrantSinkInventory(candidate, blocks, errors, complete);
+    return errors;
+  }
+  assert.deepEqual(violations(files), [], "audited bridge surfaces pass");
+  const mutations = [
+    [
+      channel,
+      '"bridge_warning_invite_eng"',
+      '"bridge_warning_invite_other"',
+      "unregistered Terraform resource/data blocks",
+    ],
+    [
+      contacts,
+      '"bridge_warning"',
+      '"bridge_unknown"',
+      "unregistered Terraform resource/data blocks",
+    ],
+    [
+      rules,
+      '"bridge_transfers"',
+      '"bridge_unknown"',
+      "unregistered Terraform resource/data blocks",
+    ],
+    [
+      channel,
+      'create_path = "/conversations.invite"',
+      'create_path = "/conversations.kick"',
+      "arbitrary HTTP mutation blocks must match its exact audited shape",
+    ],
+    [
+      channel,
+      'destroy_path   = "/api.test"',
+      'destroy_path   = "/conversations.archive"',
+      "arbitrary HTTP mutation blocks must match its exact audited shape",
+    ],
+    [
+      channel,
+      "users   = local.eng_user_ids_csv",
+      'users   = "U_UNREVIEWED"',
+      "arbitrary HTTP mutation blocks must match its exact audited shape",
+    ],
+    [
+      channel,
+      '"./channels/slack-channels"',
+      '"./channels/unreviewed"',
+      "Terraform module calls must match its exact audited shape",
+    ],
+    [
+      channel,
+      "restapi.slack = restapi.slack",
+      "restapi.slack = restapi.quicknode",
+      "Terraform module calls must match its exact audited shape",
+    ],
+    [
+      channel,
+      'name = "alerts-bridges"',
+      'name = "eng"',
+      "Terraform module calls must match its exact audited shape",
+    ],
+    [
+      channel,
+      "value       = module.bridge_warning_channel.channel_ids.bridges",
+      "value       = var.slack_bot_token",
+      "Terraform output blocks must match its exact audited shape",
+    ],
+    [
+      channel,
+      '"bridge_warning_channel"',
+      '"bridge_unknown_channel"',
+      "unregistered Terraform module calls",
+    ],
+    [
+      channel,
+      '"bridge_warning_channel_id"',
+      '"bridge_unknown_channel_id"',
+      "unregistered Terraform output blocks",
+    ],
+  ];
+  for (const [file, before, after, message] of mutations) {
+    assert(files[file].includes(before), `bridge mutation anchor: ${before}`);
+    const errors = violations({
+      ...files,
+      [file]: files[file].replace(before, after),
+    });
+    assert(
+      errors.some((error) => error.includes(message)),
+      `${before}: ${errors.join("\n")}`,
+    );
+  }
+  const missing = violations({}, true).join("\n");
+  for (const key of [
+    `${channel}:restapi_object.bridge_warning_invite_eng`,
+    `${channel}:module.bridge_warning_channel`,
+    `${channel}:output.bridge_warning_channel_id`,
+    `${contacts}:grafana_contact_point.bridge_warning`,
+    `${contacts}:grafana_contact_point.bridge_page`,
+    `${contacts}:grafana_contact_point.bridge_infra`,
+    `${rules}:grafana_folder.bridges`,
+    `${rules}:grafana_rule_group.bridge_transfers`,
+    `${rules}:grafana_rule_group.bridge_observation`,
+  ])
+    assert(missing.includes(key), `complete inventory requires ${key}`);
+  console.log(
+    "bridge registration: positive inventory, 12 mutations, and 9 missing-surface checks passed",
+  );
+}
+
+testBridgeRegistration();
 
 console.log("production infrastructure identity security tests passed");

@@ -27,7 +27,7 @@ Separate from `terraform/` (platform) and `aegis/terraform`: `gs://mento-terrafo
 
 ## Prerequisites
 
-1. **Slack app with bot token.** The "Grafana Alerts" app needs `chat:write` + `chat:write.public` scopes and must be invited (`/invite @Grafana Alerts`) to every channel it posts to. Current set: `#alerts-critical`, `#alerts-oracles`, `#alerts-pools`, `#alerts-cdps`, `#alerts-reserve`, `#alerts-infra`, `#alerts-testnet`, and the deprecated compatibility channel `#alerts-warning`. CDP warnings route to `#alerts-cdps`; CDP criticals route to `#alerts-critical`.
+1. **Slack app with bot token.** The "Grafana Alerts" app needs `chat:write` + `chat:write.public` scopes and must be invited (`/invite @Grafana Alerts`) to every channel it posts to. Current set: `#alerts-bridges`, `#alerts-critical`, `#alerts-oracles`, `#alerts-pools`, `#alerts-cdps`, `#alerts-reserve`, `#alerts-infra`, `#alerts-testnet`, and the deprecated compatibility channel `#alerts-warning`. CDP warnings route to `#alerts-cdps`; CDP criticals route to `#alerts-critical`.
 2. **Grafana Cloud service account token** with `Admin` role in the `clabsmento` stack (Grafana Cloud → Administration → Service accounts).
 3. **Splunk On-Call webhook URL** for page-severity protocol/Aegis routes.
 
@@ -158,3 +158,11 @@ use the global notification policy and route by `service`, `severity`, `chain`,
 and `rateFeed` labels. Aegis testnet-health rules route to `#alerts-testnet` via
 `service=aegis-testnet` and do not depend on a testnet metrics bridge or hosted
 testnet pool indexer.
+
+## Bridge transfers
+
+The [bridge alert runbook](../../docs/notes/bridge-transfer-alerting.md) owns
+thresholds, freshness, routing, apply order and recovery limits. Warnings use
+`#alerts-bridges`; pages bundle Splunk On-Call with `#alerts-critical`; observation
+failures use `#alerts-infra`. The channel belongs to `alerts-delivery`. Apply and
+verify that channel before enabling these rules.

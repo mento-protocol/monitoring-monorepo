@@ -69,9 +69,16 @@ The two-minute alert pending period limits transient notifications; it cannot
 make an incomplete observation authoritative.
 
 There are 180 route/token/status buckets and three gauges per bucket, plus four
-domain gauges: at most 544 series. No route samples exist before first success.
+domain gauges and four status-threshold samples: at most 548 series.
+No route samples exist before first success.
 Unknown-route alerts must use broader dashboard filters instead of fabricated
 chain IDs. Exporter rollout and alert activation remain separate approved steps.
+
+Threshold rollouts use a per-status handshake. Rules require all four exported
+thresholds to match their configured values for every observed job/instance.
+Missing or mixed versions make the observation unavailable and retain transfer
+alert state until matching complete observations resume. This permits exporter
+and protected rules deployments in either order without mixing policy values.
 
 ## Evidence
 

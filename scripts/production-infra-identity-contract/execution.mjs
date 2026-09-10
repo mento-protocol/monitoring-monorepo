@@ -31,6 +31,7 @@ const EXECUTION_FILES_BY_BLOCK = new Map([
 ]);
 
 const ARBITRARY_HTTP_BLOCK_SHAPE_SPECIFICATIONS = [
+  "alerts/infra/bridge-warning-channel.tf:restapi_object.bridge_warning_invite_eng|be634d087115f201d3eea822b3fff86719a4f3da138956f989516719bcafcf57",
   "alerts/infra/channels/sentry-bridge/slack_channels.tf:restapi_object.sentry_slack_channel|d51816fa0d47a37525db23b4cf2b7dc1d513e51eeaab5f5e6e005db2aff58ad8",
   "alerts/infra/channels/sentry-bridge/slack_channels.tf:restapi_object.sentry_slack_channel_member|7be9fe324b35c84fac70d53e6e391139a00dc59f295d4f0bc831ef7db2108fde",
   "alerts/infra/channels/slack-channels/main.tf:restapi_object.channel|ab6c749084edee07cc0a6a76a8c8f464a9bf7ec63710f7b81fc9ebe898294b00",
