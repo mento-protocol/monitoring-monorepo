@@ -99,8 +99,9 @@ Move each pin class with its files.
   enforces two-way path equality with `findSentrySuites()`; moves fail closed.
 - **Babysit pin.** Move `pr/pr-stack-ready-state*.mjs` with
   `.claude/babysit-pr.sh`.
-- **PR probe pins.** `pr/pr-{ready,feedback}-state*.mjs` use
-  `pr:ready-state:test` and `pr:feedback-state:test` in scripts CI.
+- `pr:ready-state:test`: `pr/pr-ready-state*.mjs` and
+  `pr/pr-stack-{ready-state,recover}*.mjs`; `pr:feedback-state:test`:
+  `pr/pr-feedback-state*.mjs`.
 - **Workflow pins.** `check-ci-contract{,.test}.mjs` pins CI.
   `check-no-skip-audit{,.test}.mjs` pins admission, SHAs, caches, skips,
   `repo-health/dependency-cruiser-root-contract.test.mjs`, and the retained

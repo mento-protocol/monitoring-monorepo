@@ -646,6 +646,7 @@ export async function fetchReadyState({
     "--json",
     [
       "author",
+      "autoMergeRequest",
       "baseRefName",
       "baseRefOid",
       "changedFiles",
@@ -653,6 +654,7 @@ export async function fetchReadyState({
       "headRefOid",
       "isDraft",
       "mergeable",
+      "mergeStateStatus",
       "mergedAt",
       "number",
       "reviewDecision",

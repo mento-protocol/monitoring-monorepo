@@ -38,6 +38,10 @@ them required for the current PR.
 
 Required blockers:
 
+- GitHub `mergeStateStatus: BEHIND`, even when `mergeable` is `MERGEABLE`.
+  Integrate the current protection base and require fresh checks; a pending
+  merge setting does not waive this blocker.
+
 - Closed-unmerged PRs. Merged PRs are terminal-ready and short-circuit the
   expensive readiness sweep because there is nothing left to fix or wait on.
   Closed-unmerged PRs report only the terminal `state` blocker; review gates are
@@ -435,6 +439,11 @@ Field expectations:
   this before fetching comments, reactions, check sources, and branch
   protection so post-merge babysitting exits quickly and does not mistake
   GitHub's post-merge `mergeable: UNKNOWN` for a blocker.
+- `pr.mergeStateStatus`: GitHub's aggregate merge status. `BEHIND` is an
+  explicit base-update blocker; other aggregate states do not replace the
+  required-check and feedback projections.
+- `pr.autoMergeEnabledAt`: the observed pending auto-merge enable timestamp,
+  or null. It records intent and never proves merge completion.
 - `pr.mergedAt` / `pr.closedAt`: terminal timestamps when GitHub provides them.
 - Terminal closed PR summaries may use gate state `not_applicable` for gates
   that are normally required on open PRs. Agents should act on the terminal
@@ -513,8 +522,12 @@ matching stack snapshots, and performs a final selected-PR readiness read.
 Every later snapshot is checked for feedback as well as readiness, so a newly
 observed finding cannot be ignored while accepting that snapshot.
 Only complete, stable, ready results produce `PASS`; an unavailable, malformed,
-changed, or blocked result produces `PENDING`. It adds no public command and
-does not change the individual probes' layer-scoped JSON contract.
+changed, or blocked result produces `PENDING`. The message identifies observed
+base updates, head/base transitions, required-check failures or pending checks,
+and feedback blockers. Only a fully observed `AWAITING_USER_MERGE` or `MERGE_REQUESTED` result can
+complete the aggregate PASS path; unknown merge observations remain PENDING.
+These diagnostics never turn a pending merge request into a terminal result. The helper adds no public
+command; individual probe JSON remains layer-scoped.
 The native aggregate has a five-minute deadline that cancels active `gh` child
 requests and returns `PENDING` when reached.
 `scripts/pr/pr-ready-state-gh.mjs` owns GitHub CLI transport and scoped cancellation.

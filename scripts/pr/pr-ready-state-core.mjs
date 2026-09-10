@@ -544,6 +544,8 @@ function summaryPr(pr, headUpdatedAt = currentHeadUpdatedAt(pr)) {
     headRefOid: pr.headRefOid,
     baseRefName: pr.baseRefName,
     mergeable: pr.mergeable ?? null,
+    mergeStateStatus: pr.mergeStateStatus ?? null,
+    autoMergeEnabledAt: pr.autoMergeRequest?.enabledAt ?? null,
     reviewDecision: pr.reviewDecision ?? null,
     headUpdatedAt:
       headUpdatedAt === null ? null : new Date(headUpdatedAt).toISOString(),
@@ -733,6 +735,16 @@ export function summarizeReadyState({
       kind: "mergeability",
       name: "Pull request is not mergeable",
       state: pr.mergeable ?? "UNKNOWN",
+      required: true,
+      url: pr.url,
+    });
+  }
+
+  if (normalizeStatusValue(pr.mergeStateStatus) === "BEHIND") {
+    requiredBlockers.push({
+      kind: "base-update",
+      name: "Pull request must include the current base before merge",
+      state: "BEHIND",
       required: true,
       url: pr.url,
     });

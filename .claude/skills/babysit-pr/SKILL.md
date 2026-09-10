@@ -5,7 +5,7 @@ title: Babysit PR Skill
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-09
+last_verified: 2026-09-10
 doc_type: skill
 scope: repo-wide
 review_interval_days: 90
@@ -49,8 +49,8 @@ baseline, and the two-projection readiness contract.
 - **Codex sign-off is required here** — a 👍 reaction on the PR description at
   or after the current head. A "no major issues" comment is context, not the
   sign-off.
-- **Watch dependent PRs as a set.** Native membership, per-layer readiness, and
-  post-merge handling live in [stacked-pull-requests.md](../../../docs/notes/stacked-pull-requests.md).
+- **Watch dependent PRs as a set.** Native membership, stale-base diagnostics,
+  serial merge coordination and post-merge recovery live in [stacked-pull-requests.md](../../../docs/notes/stacked-pull-requests.md).
 - **Never force-push or amend while babysitting.** `git fetch` before every
   push; reviewers push mid-session.
 

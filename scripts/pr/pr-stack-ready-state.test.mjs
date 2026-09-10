@@ -11,7 +11,10 @@ import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { mock } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
-import { evaluateStackGate } from "./pr-stack-ready-state.mjs";
+import {
+  classifyStackObservation,
+  evaluateStackGate,
+} from "./pr-stack-ready-state.mjs";
 
 const layers = [1, 2].map((number) => ({
   number,
@@ -29,7 +32,7 @@ const stack = {
   layers,
 };
 const state = (number) => {
-  const pr = { ...layers[number - 1] };
+  const pr = { ...layers[number - 1], mergeStateStatus: "CLEAN" };
   return {
     ready: true,
     feedbackReady: true,
@@ -38,6 +41,203 @@ const state = (number) => {
   };
 };
 const feedback = (value) => ({ ready: value.feedbackReady });
+// Report real API state, never a requested merge or a UI loading indicator.
+const observed = {
+  ...state(2),
+  pr: { ...state(2).pr, mergeStateStatus: "CLEAN" },
+  required: { blockers: [] },
+};
+assert.equal(classifyStackObservation(observed).state, "AWAITING_USER_MERGE");
+for (const terminal of ["MERGED", "CLOSED"])
+  assert.equal(
+    classifyStackObservation({
+      ...observed,
+      pr: { ...observed.pr, state: terminal },
+    }).state,
+    terminal,
+  );
+assert.equal(
+  classifyStackObservation({
+    ...observed,
+    pr: { ...observed.pr, autoMergeEnabledAt: "2026-09-10T12:00:00Z" },
+  }).state,
+  "MERGE_REQUESTED",
+);
+assert.equal(
+  classifyStackObservation({
+    ...observed,
+    pr: { ...observed.pr, state: null },
+    uiSpinner: false,
+  }).state,
+  "UNKNOWN",
+);
+assert.equal(
+  classifyStackObservation({
+    ...observed,
+    pr: { ...observed.pr, mergeStateStatus: null },
+  }).state,
+  "UNKNOWN",
+);
+assert.equal(
+  classifyStackObservation({
+    ...observed,
+    pr: { ...observed.pr, mergeStateStatus: "UNKNOWN" },
+  }).state,
+  "UNKNOWN",
+);
+assert.equal(
+  classifyStackObservation({
+    ...observed,
+    pr: { ...observed.pr, mergeStateStatus: "BEHIND" },
+  }).state,
+  "BASE_UPDATE_REQUIRED",
+);
+for (const key of ["headRefOid", "baseRefOid", "headRefName", "baseRefName"])
+  assert.equal(
+    classifyStackObservation(
+      { ...observed, pr: { ...observed.pr, [key]: "changed" } },
+      observed,
+    ).state,
+    "HEAD_OR_BASE_CHANGED",
+  );
+for (const [checkState, expected] of [
+  ["pending", "CHECKS_PENDING"],
+  ["fail", "CHECKS_FAILED"],
+]) {
+  const blocked = {
+    ...observed,
+    ready: false,
+    required: { blockers: [{ kind: "check", name: "ci", state: checkState }] },
+  };
+  assert.equal(classifyStackObservation(blocked).state, expected);
+}
+const canceledWithReplacement = {
+  ...observed,
+  ready: false,
+  required: {
+    blockers: [
+      { kind: "check", name: "ci", state: "fail" },
+      { kind: "check", name: "ci", state: "pending" },
+    ],
+  },
+};
+assert.equal(
+  classifyStackObservation(canceledWithReplacement).state,
+  "CHECKS_FAILED",
+);
+assert.match(
+  await evaluateStackGate(
+    observed,
+    "owner/repo",
+    async () => ({
+      ...canceledWithReplacement,
+      pr: { ...canceledWithReplacement.pr, ...layers[0] },
+    }),
+    feedback,
+  ),
+  /^PENDING /,
+);
+
+assert.equal(
+  classifyStackObservation({ ...observed, feedbackReady: false }).state,
+  "FEEDBACK_BLOCKED",
+);
+const changedMembership = structuredClone(observed);
+changedMembership.stack.layers[0].headRefOid = "c".repeat(40);
+assert.equal(
+  classifyStackObservation(changedMembership, observed).state,
+  "SNAPSHOT_CHANGED",
+);
+const mergeRequested = (number) => ({
+  ...state(number),
+  pr: {
+    ...state(number).pr,
+    mergeStateStatus: "CLEAN",
+    autoMergeEnabledAt: "2026-09-10T12:00:00Z",
+  },
+});
+assert.match(
+  await evaluateStackGate(
+    mergeRequested(2),
+    "owner/repo",
+    async (args) => mergeRequested(Number(args.prArg)),
+    feedback,
+  ),
+  /^PASS .*MERGE_REQUESTED:/,
+);
+assert.match(
+  await evaluateStackGate(
+    observed,
+    "owner/repo",
+    async (args) => ({ ...state(Number(args.prArg)), feedbackReady: false }),
+    feedback,
+  ),
+  /^PENDING .*FEEDBACK_BLOCKED:/,
+);
+for (const missing of ["headRefOid", "baseRefOid"])
+  assert.equal(
+    classifyStackObservation({
+      ...observed,
+      pr: { ...observed.pr, [missing]: null },
+    }).state,
+    "UNKNOWN",
+  );
+assert.equal(
+  classifyStackObservation({
+    ...observed,
+    ready: false,
+    uiSpinner: false,
+    pr: { ...observed.pr, autoMergeEnabledAt: "2026-09-10T12:00:00Z" },
+  }).state,
+  "UNKNOWN",
+);
+// Every other layer needs a complete observation, even when selected is clean.
+for (const mergeStateStatus of [null, "UNKNOWN", undefined]) {
+  let reads = 0;
+  const result = await evaluateStackGate(
+    state(1),
+    "owner/repo",
+    async (args) => {
+      reads++;
+      const value = state(Number(args.prArg));
+      if (args.prArg === "2") value.pr.mergeStateStatus = mergeStateStatus;
+      return value;
+    },
+    feedback,
+  );
+  assert.match(
+    result,
+    /^PENDING stack layer #2 merge observation incomplete; UNKNOWN:/,
+  );
+  assert.equal(reads, 4);
+}
+// Incomplete final observations must not pass otherwise green, stable layers.
+for (const patch of [
+  { mergeStateStatus: null },
+  { mergeStateStatus: "UNKNOWN" },
+  { mergeStateStatus: undefined },
+  { state: null },
+  { state: "UNKNOWN" },
+  { state: undefined },
+  { headRefOid: undefined },
+  { baseRefOid: undefined },
+]) {
+  let reads = 0;
+  const result = await evaluateStackGate(
+    state(2),
+    "owner/repo",
+    async (args) => {
+      const value = state(Number(args.prArg));
+      if (++reads === 5) Object.assign(value.pr, patch);
+      return value;
+    },
+    feedback,
+  );
+  assert.match(result, /^PENDING /, JSON.stringify(patch));
+  assert.equal(reads, 5);
+  if (Object.hasOwn(patch, "mergeStateStatus"))
+    assert.match(result, /final merge observation incomplete; UNKNOWN:/);
+}
 const calls = [];
 assert.match(
   await evaluateStackGate(
@@ -178,7 +378,7 @@ try {
   );
   writeFileSync(
     join(root, "scripts/pr/pr-ready-state.mjs"),
-    `import {readFileSync} from 'node:fs'; let calls=0; export function withGhAbortSignal(_signal,callback) { return callback(); } export async function fetchReadyState(args) { calls++; const value=JSON.parse(readFileSync('input.json')); value.pr={...value.stack.layers.find(layer=>String(layer.number)===args.prArg)}; if(process.env.SCENARIO==='blocked' && args.prArg==='1') value.feedbackReady=false; if(process.env.SCENARIO==='moved' && calls===5) value.stack.layers[0].headRefOid='b'.repeat(40); return value; }`,
+    `import {readFileSync} from 'node:fs'; let calls=0; export function withGhAbortSignal(_signal,callback) { return callback(); } export async function fetchReadyState(args) { calls++; const value=JSON.parse(readFileSync('input.json')); value.pr={...value.stack.layers.find(layer=>String(layer.number)===args.prArg),mergeStateStatus:'CLEAN'}; if(process.env.SCENARIO==='blocked' && args.prArg==='1') value.feedbackReady=false; if(process.env.SCENARIO==='moved' && calls===5) value.stack.layers[0].headRefOid='b'.repeat(40); return value; }`,
   );
   writeFileSync(
     join(root, "scripts/pr/pr-feedback-state-core.mjs"),

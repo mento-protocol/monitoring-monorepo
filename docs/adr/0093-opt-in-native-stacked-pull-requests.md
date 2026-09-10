@@ -3,7 +3,7 @@ title: Adopt native stacked pull requests through an opt-in pilot
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-09
+last_verified: 2026-09-10
 scope: ci/process
 date: 2026-09
 doc_type: adr
@@ -13,7 +13,7 @@ garden_lane: adrs-architecture
 
 # ADR 0093 — Adopt native stacked pull requests through an opt-in pilot
 
-**Status:** Accepted (Sep 2026), rollout tooling in force; live pilot outstanding.
+**Status:** Accepted (Sep 2026), first feature pilot complete; broader adoption remains opt-in.
 **Scope:** ci/process
 
 ## Context
@@ -51,10 +51,19 @@ the terminal operation and PR merge record before reporting completion. The
 endpoint's selected-head SHA does not establish a binding for every layer of a
 group merge. No new unattended merge lane is introduced.
 
-Pilot the next authorized low-risk helper-and-consumer feature. Do not create
-synthetic pilot PRs. Keep the rollout issue open for actual CI, review,
-worktree, and parent-merge evidence. Broader adoption depends on reviewing
-that evidence; publishing the tooling alone does not complete the pilot.
+Retain opt-in adoption after the first feature pilot. Prepare descendants in
+parallel but wait for the bottom PR checks and feedback before publishing
+the initial descendant set and registering it. Coordinate
+merges and recovery through one owner. Recovery uses a local-only helper that
+pins inputs and creates a separate candidate; publication remains a reviewed,
+exact-leased coordinator action outside babysitting. Prefer this separation over
+an automatic sync-and-push tool because live membership and human edits can
+change while local replay runs. A confirmed GitHub `BEHIND` state blocks
+readiness even when Git reports no content conflict.
+
+Use a smaller helper-and-consumer feature for the next comparison. Do not create
+synthetic pilot PRs. Broader adoption still needs evidence of cost and reliability;
+completion of this feature batch alone does not establish a time saving.
 
 ## Alternatives considered
 
@@ -79,8 +88,21 @@ The pilot must record review turnaround, repeated checks, manual interventions,
 and agent mistakes. A comparison with a similar ordinary dependency has limits;
 no time saving is assumed before observation.
 
+## Pilot result — 2026-09-10
+
+Seven feature PRs merged across three stacks. Three initial parent transitions
+retargeted children without completing the rebase. A later #2366 to #2369
+transition succeeded with an identical child tree. Separate shared-catalog edits
+caused real conflicts across independent stacks. The final #2369 merge request
+waited behind main, then completed after base repair and required CI, without a
+replacement merge request. The cause of the failed automatic transitions remains
+unconfirmed. These incidents support explicit transition verification and isolated
+recovery, while preserving the existing merge and control-audit boundaries.
+
 ## Evidence
 
+- [Pilot follow-up #2376](https://github.com/mento-protocol/monitoring-monorepo/issues/2376).
+- [Bridge stack final PR #2369](https://github.com/mento-protocol/monitoring-monorepo/pull/2369).
 - [Rollout issue #2286](https://github.com/mento-protocol/monitoring-monorepo/issues/2286).
 - [PR #2292](https://github.com/mento-protocol/monitoring-monorepo/pull/2292)
   and [PR #1967](https://github.com/mento-protocol/monitoring-monorepo/pull/1967).

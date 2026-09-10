@@ -3,7 +3,7 @@ title: PR Operating Card
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-09
+last_verified: 2026-09-10
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -132,9 +132,13 @@ If root `package.json` changed, first run
 
    Apply only the rows affected by a material fix before publishing the new
    head. Before a base integration, pin the fetched base as `base_oid` and the
-   existing branch head as `prior_head_oid`. Merge the exact `base_oid`. After
-   the resolution is committed, pin `final_head`, require a clean tree, and
-   require both pinned inputs to be ancestors of it. Derive changed paths for
+   existing branch head as `prior_head_oid`. For native linear-stack recovery,
+   use the isolated replay and both-axis evidence in
+   [stacked-pull-requests.md](stacked-pull-requests.md#recover-a-failed-child-transition);
+   a replay does not retain the old child as an ancestor. For ordinary merge
+   integration, merge the exact `base_oid` and require both pinned inputs to be
+   ancestors of the result. For either procedure, pin the committed `final_head`
+   and require a clean tree. Derive changed paths for
    both `base_oid..final_head` and `prior_head_oid..final_head`. Apply the union
    of the author-check rows selected by those ranges to `final_head`; record
    both axes that selected a check, and run a shared check once. Conflict
