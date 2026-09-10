@@ -138,6 +138,8 @@ export function readArm({ dir, contract }) {
       calibration_digest: plan.calibration_digest ?? null,
       judge: plan.judge ?? null,
       judge_calibration: row?.judge_calibration ?? null,
+      claude_cli: plan.inputs?.claude_cli ?? null,
+      codex_cli: plan.inputs?.codex_cli ?? null,
     },
   };
 }
@@ -331,6 +333,19 @@ export function identityWarnings(anchor, candidate, matcherDigest = null) {
       "the two runs used different review skills; a matched-id difference is not a finder difference",
     );
   }
+  // The CLI versions are deliberately outside the comparability key (ADR
+  // 0085), so a straddled upgrade is named here: a codex change can move the
+  // finder's output, a claude change the verifier's and the judge's.
+  for (const [field, label] of [
+    ["codex_cli", "codex CLI (the finder's runtime)"],
+    ["claude_cli", "claude CLI (the verifier's and judge's runtime)"],
+  ]) {
+    if (anchor[field] !== candidate[field]) {
+      warnings.push(
+        `the two runs straddle a ${label} change (${anchor[field]} vs ${candidate[field]}); a matched-id difference may be runtime drift, not a finder difference`,
+      );
+    }
+  }
   if (
     anchor.judge?.model !== candidate.judge?.model ||
     anchor.judge?.effort !== candidate.judge?.effort
@@ -362,7 +377,7 @@ function render(report) {
   for (const side of ["anchor", "candidate"]) {
     const arm = report[side];
     lines.push(
-      `${side.padEnd(9)} finder ${arm.finder} argv ${short(arm.finder_argv_digest)} skill ${short(arm.skill_digest)} orchestrator ${short(arm.orchestrator_digest)} judge ${arm.judge?.model}@${arm.judge?.effort} calibration ${arm.judge_calibration?.agreement}/${arm.judge_calibration?.total}`,
+      `${side.padEnd(9)} finder ${arm.finder} argv ${short(arm.finder_argv_digest)} skill ${short(arm.skill_digest)} orchestrator ${short(arm.orchestrator_digest)} judge ${arm.judge?.model}@${arm.judge?.effort} calibration ${arm.judge_calibration?.agreement}/${arm.judge_calibration?.total} cli ${arm.codex_cli} / ${arm.claude_cli}`,
     );
     lines.push(
       `${" ".repeat(9)} contract ${short(arm.contract_digest)} scorer ${short(arm.matcher_digest)} calibration set ${short(arm.calibration_digest)} key ${short(arm.comparability_key)}`,

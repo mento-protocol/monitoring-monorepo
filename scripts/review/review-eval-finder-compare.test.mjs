@@ -29,6 +29,8 @@ function writeArm({
   calibration = { agreement: 39, total: 40 },
   writeRow = true,
   notes = "",
+  codexCli = "codex-cli 0.154.0",
+  claudeCli = "2.1.267 (Claude Code)",
 }) {
   const dir = mkdtempSync(path.join(tmpdir(), "finder-compare-"));
   if (writeRow) {
@@ -54,6 +56,8 @@ function writeArm({
         skill_digest: skillDigest,
         finder_argv_digest: "argv",
         orchestrator_digest: "orch",
+        codex_cli: codexCli,
+        claude_cli: claudeCli,
       },
       cells: cells.map((pr) => ({
         cell_id: `pr-${pr}-pipeline-draw1`,
@@ -199,6 +203,28 @@ test("a scoring-input mismatch is refused, not warned about", () => {
       JSON.stringify(changed),
     );
   }
+});
+
+test("a straddled CLI upgrade warns and names the runtime that moved", () => {
+  const results = { 11: { matched: [1] } };
+  const base = {
+    finder: "sol@high",
+    cells: [11],
+    results,
+    contractDigest: "aaaa1111",
+  };
+  const anchor = readArm({ dir: writeArm(base), contract });
+  const candidate = readArm({
+    dir: writeArm({
+      ...base,
+      finder: "astra@low",
+      codexCli: "codex-cli 9.9.9",
+    }),
+    contract,
+  });
+  const report = compareArms({ anchor, candidate });
+  assert.ok(report.warnings.some((w) => /codex CLI/.test(w)));
+  assert.ok(!report.warnings.some((w) => /claude CLI/.test(w)));
 });
 
 test("--allow-scorer-drift turns the scorer refusal into a warning, nothing else", () => {
