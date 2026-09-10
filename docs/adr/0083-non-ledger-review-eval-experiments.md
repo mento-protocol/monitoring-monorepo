@@ -51,6 +51,12 @@ plan binds is superseded by that ADR; everything else here stands, so this ADR
 keeps `status: active` — the checklist's archive-and-`superseded_by` rule
 applies to a whole superseded decision, not to one clause.
 
+[ADR 0096](0096-finder-probe-non-ledger-kind.md) narrows this decision on one
+point: a finder probe (`--kind finder`) runs in the canonical runner as a
+non-ledger kind, with its artifacts in the checkout's runs directory, under
+the guards that ADR names. The lane below stays the route for comparing two
+skills; everything else here stands.
+
 Add a small staged experiment lane with these rules:
 
 - The lane writes `plan.json` and content-addressed artifacts under `cache/raw/`,

@@ -55,7 +55,6 @@ pnpm agent:closeout-review:test    # Suite for the closeout review tool
 pnpm review:eval:experiment -- --help  # Non-ledger paired screen; qualification reruns every canonical cell
 pnpm review:eval:experiment -- --validate-plan <campaign-dir> --json  # Validate one candidate campaign without a model call
 pnpm review:eval:experiment -- --run <campaign-dir> --stage screen --dry-run --json  # List paid lanes without a model call
-pnpm review:eval:run --kind finder --finder MODEL@EFFORT  # Finder probe; then review:eval:finder-compare
 pnpm docs:index --write            # Regenerate docs/README.md from tracked + non-ignored untracked Markdown
 pnpm docs:index --check            # Fail on catalog drift, invalid classification, or broken internal Markdown links
 pnpm docs:audit --dry-run          # Print this week's bounded semantic-review packet without mutating documentation
