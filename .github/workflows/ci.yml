@@ -1203,6 +1203,10 @@ jobs:
         # contract command from the unconditional job below. Workflow changes
         # always admit the scripts job.
         run: node scripts/workflows/check-ci-contract.mjs
+      - name: PR readiness regression suite
+        run: pnpm pr:ready-state:test
+      - name: PR feedback regression suite
+        run: pnpm pr:feedback-state:test
       - name: Agent setup and package-policy contracts
         # Retained SessionEnd, setup-marker, and pre-install policy checks were
         # extracted from the legacy Bash gate suite.

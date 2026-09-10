@@ -5,7 +5,7 @@ title: Ship Skill
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-02
+last_verified: 2026-09-09
 doc_type: skill
 scope: repo-wide
 review_interval_days: 90
@@ -51,6 +51,8 @@ bootstrap; setup has a separate [trust boundary](../../../docs/notes/worktree-an
 "$BASE_REMOTE/$baseRefName"` with the preflight-bound base. Hand its report to
   the `review` skill. Card step 4 owns base-integration axes, exit handling, and
   the limited single-source fallback.
+- **Native stacks are opt-in.** Selection, two-base binding, and verified linking
+  after per-PR publication live in [stacked-pull-requests.md](../../../docs/notes/stacked-pull-requests.md).
 - **PRs open ready for review.** Drafts suppress the automated AI reviews this
   workflow depends on.
 - **`scripts/pr/check-pr-description.mjs` enforces `## The Problem` then

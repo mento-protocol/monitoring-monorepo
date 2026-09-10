@@ -3,7 +3,7 @@ title: PR Operating Card
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-04
+last_verified: 2026-09-09
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -63,7 +63,9 @@ If root `package.json` changed, first run
 
 2. **Implement.** Work in a dedicated per-PR worktree and unique branch, never
    directly on `main`. Keep the diff surgical: touch only what the task needs,
-   match existing style, do not smuggle in adjacent cleanup. Read the scoped
+   match existing style, do not smuggle in adjacent cleanup. Select and bind
+   dependent layers through [the stacked PR workflow](stacked-pull-requests.md)
+   when a native stack is useful. Read the scoped
    `AGENTS.md` for the package you are editing (see the root Package Routing
    Index) before touching it. A change to stateful data flow across indexer,
    GraphQL, or UI first applies
@@ -348,8 +350,10 @@ If root `package.json` changed, first run
    - **An existing PR** is the push target. Before creating the ship commit,
      require local `HEAD` to equal its `headRefOid`; if intended commits
      already exist locally, require that OID to be their ancestor and inspect
-     the intervening range. If the branch is missing current base commits,
-     merge the base in — rebase is only acceptable before first publication.
+     the intervening range. If an ordinary PR branch is missing current base
+     commits, merge the base in — rebase is only acceptable before first
+     publication. For native stacks, use the history-change procedure in
+     [the stacked PR workflow](stacked-pull-requests.md).
    - **No PR yet**: a fork checkout stops here rather than first-publishing —
      step 6 refuses every fork head, so pushing to the fork's `origin` and
      opening a cross-repository PR creates one this same workflow can never
@@ -361,6 +365,9 @@ If root `package.json` changed, first run
    the ship commit before any push, or the remote receives the old commit while
    every validated change stays local. If unrelated dirty changes are mixed
    with the intended scope, stop and ask before staging.
+
+   For native stacks, publish each PR normally, then link and verify the
+   explicit PR set through [the stacked PR workflow](stacked-pull-requests.md).
 
    **Then push**, always with an explicit refspec: an existing PR takes
    `git push <head-remote> HEAD:<headRefName>`, never an implicit target or the
@@ -452,7 +459,9 @@ If root `package.json` changed, first run
    serialize only overlapping or dependent fixes. The lead keeps user-facing
    status and approval boundaries.
 
-   **Stacked PRs are the normal case here**, typically after a `/ship` batch.
+   **Dependent PRs need a batch-wide watch.** Native stack selection, separate
+   diff and protection bases, and history-change handling live in
+   [the stacked PR workflow](stacked-pull-requests.md).
    When a watched PR merges or a base moves, re-evaluate every open PR that
    depended on it — including ones the user never named — before calling a batch
    healthy. A squash merge rewrites the commits a dependent branch still carries,
@@ -500,7 +509,9 @@ review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
    the current head, required checks, and feedback state, and uses GitHub's
    merge button. If the user gives explicit, direct approval for an agent to
    merge that specific PR, the agent re-runs the current-state probes and uses
-   GitHub's merge API. The merge request must use
+   GitHub's merge API. Native stacks use the bottom-layer asynchronous path in
+   [the stacked PR workflow](stacked-pull-requests.md); an upper-layer merge
+   can include other PRs and is outside that path. The merge request must use
    `--squash --match-head-commit <head-sha>` or the REST fields
    `merge_method: "squash"` and `sha: "<head-sha>"`. It must abort on a head
    mismatch. GitHub's PR and merge record is the merge evidence.

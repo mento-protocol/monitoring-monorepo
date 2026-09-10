@@ -123,6 +123,14 @@ babysit_repo_gate() {
     }
   }
 
+  # Native stacks need both projections for every open layer before PASS.
+  if printf '%s' "$output" | jq -e '.stack != null' >/dev/null 2>&1; then
+    local stack_result
+    stack_result=$(printf '%s' "$output" | (cd "$repo_root" && node scripts/pr/pr-stack-ready-state.mjs "${owner}/${repo}") 2>/dev/null) || stack_result="PENDING stack gate unavailable"
+    printf '%s' "${stack_result:-PENDING stack gate unavailable}"
+    return 0
+  fi
+
   # Explicit boolean test — do NOT use `.ready // …` fallbacks: jq's `//`
   # treats an explicit `false` as empty, so a genuine `ready:false` would fall
   # through to the next term. `pr:ready-state` always emits a top-level

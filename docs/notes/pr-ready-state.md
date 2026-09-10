@@ -3,7 +3,7 @@ title: PR Ready State
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-08
+last_verified: 2026-09-09
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -482,6 +482,42 @@ Field expectations:
   satisfy readiness.
 - `summary`: one concise human-readable sentence suitable for a babysitter
   status update.
+
+## Native stack output
+
+Standalone PR output is unchanged. Native stack summaries add
+`readinessScope: "layer"` and `stack` with its number, `diffBaseRef`,
+`protectionBaseRef`, one-based `position`, ordered `layers`, and
+`dependencyPrNumbers` for unmerged predecessors. Each layer records its PR
+number, state, branch, and head SHA. The probe reads required checks from the
+protection base; diff checks still use `pr.baseRefName`.
+Native results also include the observed `pr.baseRefOid`. The aggregate retains
+each layer's observed base commit and rejects changes between reads, including
+when the native stack API omits its optional base SHA.
+The probe also verifies that each open child head contains the preceding open
+parent head. A stale or unverifiable ancestry result blocks native readiness.
+
+`stack.ready` is `null` and `stack.readiness` is `"not_evaluated"`: a ready
+layer does not prove stack readiness. Run both projections independently for
+every open layer and follow [the stacked PR workflow](stacked-pull-requests.md)
+for membership changes and aggregate handoff. A stack lookup or metadata error
+causes a nonzero CLI result; a watch retries without emitting a ready verdict.
+Before returning a native-layer result, the probe re-reads the selected PR
+and native stack context after the other evidence reads. A changed head, base,
+or stack context rejects that result. Never treat failed discovery as proof
+that a PR is standalone.
+
+The repository babysit hook uses `scripts/pr/pr-stack-ready-state.mjs` for
+native stacks. The helper runs both projections for each open layer, requires
+matching stack snapshots, and performs a final selected-PR readiness read.
+Every later snapshot is checked for feedback as well as readiness, so a newly
+observed finding cannot be ignored while accepting that snapshot.
+Only complete, stable, ready results produce `PASS`; an unavailable, malformed,
+changed, or blocked result produces `PENDING`. It adds no public command and
+does not change the individual probes' layer-scoped JSON contract.
+The native aggregate has a five-minute deadline that cancels active `gh` child
+requests and returns `PENDING` when reached.
+`scripts/pr/pr-ready-state-gh.mjs` owns GitHub CLI transport and scoped cancellation.
 
 ## Agent workflow
 

@@ -3656,6 +3656,35 @@ test("ignores a retired cursor[bot] comment carrying BUGBOT_BUG_ID", () => {
   assertEqual(summary.findings.filter((finding) => finding.blocking).length, 0);
 });
 
+test("feedback preserves layer scope without claiming stack readiness or clearing feedback", () => {
+  const state = coderabbitReadyState([
+    {
+      id: 900,
+      author: "coderabbitai",
+      updatedAt: "2026-06-05T16:31:00Z",
+      body: "High Severity\nRestore bounds validation.",
+    },
+  ]);
+  const stack = {
+    number: 7,
+    ready: null,
+    readiness: "not_evaluated",
+    dependencyPrNumbers: [10],
+  };
+  const summary = summarizeFeedbackState({
+    ...state,
+    readinessScope: "layer",
+    stack,
+  });
+  assertEqual(summary.ready, false);
+  assertEqual(summary.readinessScope, "layer");
+  assertDeepEqual(summary.stack, stack);
+  assertEqual(
+    summarizeFeedbackState(coderabbitReadyState([])).stack,
+    undefined,
+  );
+});
+
 if (failed > 0) {
   process.stderr.write(`${failed} pr-feedback-state test(s) failed\n`);
   process.exit(1);

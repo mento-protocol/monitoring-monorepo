@@ -6,7 +6,6 @@
  * can stay offline and fixture-driven.
  */
 
-import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -22,130 +21,21 @@ import {
   validateCodeRabbitPathFilterSkip,
 } from "./pr-ready-state-review-signals.mjs";
 import { formatCompact, formatHuman } from "./pr-ready-state-format.mjs";
+import {
+  fetchStackContext,
+  verifyReadinessSnapshot,
+} from "./pr-ready-state-stack.mjs";
+
+import {
+  ghJson,
+  ghApiArgs,
+  ghApiJsonPages,
+  ghApiJsonResult,
+  ghApiJsonPagesResult,
+} from "./pr-ready-state-gh.mjs";
 
 export { fetchHeadUpdatedAt, headUpdatedAtFromTimeline };
-
-const GH_OUTPUT_MAX_BYTES = 20 * 1024 * 1024;
-
-function runGh(args) {
-  return new Promise((resolve, reject) => {
-    const child = spawn("gh", args, {
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    let stdout = "";
-    let stderr = "";
-    let stdoutBytes = 0;
-    let stderrBytes = 0;
-    let failed = false;
-
-    function fail(message) {
-      if (failed) return;
-      failed = true;
-      child.kill();
-      reject(new Error(message));
-    }
-
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk) => {
-      stdoutBytes += Buffer.byteLength(chunk);
-      if (stdoutBytes > GH_OUTPUT_MAX_BYTES) {
-        fail(
-          `gh ${args.join(" ")} stdout exceeded ${GH_OUTPUT_MAX_BYTES} byte limit`,
-        );
-        return;
-      }
-      stdout += chunk;
-    });
-    child.stderr.on("data", (chunk) => {
-      stderrBytes += Buffer.byteLength(chunk);
-      if (stderrBytes > GH_OUTPUT_MAX_BYTES) {
-        fail(
-          `gh ${args.join(" ")} stderr exceeded ${GH_OUTPUT_MAX_BYTES} byte limit`,
-        );
-        return;
-      }
-      stderr += chunk;
-    });
-    child.on("error", (err) => {
-      fail(`gh ${args.join(" ")} failed: ${err.message}`);
-    });
-    child.on("close", (status) => {
-      if (failed) return;
-      if (status !== 0) {
-        reject(
-          new Error(
-            `gh ${args.join(" ")} failed with exit ${status}:\n${stderr}`,
-          ),
-        );
-        return;
-      }
-
-      resolve(stdout);
-    });
-  });
-}
-
-async function ghJson(args) {
-  const stdout = await runGh(args);
-  return stdout.trim() ? JSON.parse(stdout) : null;
-}
-
-function ghApiArgs(repo, args) {
-  const ghArgs = ["api"];
-  if (repo.host) {
-    ghArgs.push("--hostname", repo.host);
-  }
-  ghArgs.push(...args);
-  return ghArgs;
-}
-
-async function ghApiJsonPages(repo, args) {
-  const parsed = await ghJson([
-    ...ghApiArgs(repo, args),
-    "--paginate",
-    "--slurp",
-  ]);
-  if (!Array.isArray(parsed)) return [];
-  return parsed.flatMap((page) => (Array.isArray(page) ? page : [page]));
-}
-
-async function ghApiJsonResult(repo, args) {
-  try {
-    const stdout = await runGh(ghApiArgs(repo, args));
-    return {
-      ok: true,
-      value: stdout.trim() ? JSON.parse(stdout) : null,
-    };
-  } catch (err) {
-    return {
-      ok: false,
-      error: err instanceof Error ? err.message : String(err),
-    };
-  }
-}
-
-async function ghApiJsonPagesResult(repo, args) {
-  try {
-    const stdout = await runGh([
-      ...ghApiArgs(repo, args),
-      "--paginate",
-      "--slurp",
-    ]);
-    const parsed = stdout.trim() ? JSON.parse(stdout) : [];
-    return {
-      ok: true,
-      value: Array.isArray(parsed)
-        ? parsed.flatMap((page) => (Array.isArray(page) ? page : [page]))
-        : [],
-    };
-  } catch (err) {
-    return {
-      ok: false,
-      error: err instanceof Error ? err.message : String(err),
-    };
-  }
-}
+export { withGhAbortSignal } from "./pr-ready-state-gh.mjs";
 
 function addRequiredContext(byKey, context, integrationId = null) {
   if (!context) return;
@@ -729,6 +619,21 @@ export async function fetchRequiredStatusContexts({
   };
 }
 
+export async function fetchReadinessBases({
+  repo,
+  pr,
+  fetchJson = ghApiJsonResult,
+  fetchContexts = fetchRequiredStatusContexts,
+}) {
+  const stack = await fetchStackContext({ repo, pr, fetchJson });
+  const requiredStatusContexts = await fetchContexts({
+    repo,
+    baseRef: stack?.protectionBaseRef ?? pr.baseRefName,
+    statusCheckRollup: pr.statusCheckRollup ?? [],
+  });
+  return { stack, requiredStatusContexts };
+}
+
 export async function fetchReadyState({
   prArg,
   repoArg,
@@ -742,6 +647,7 @@ export async function fetchReadyState({
     [
       "author",
       "baseRefName",
+      "baseRefOid",
       "changedFiles",
       "headRefName",
       "headRefOid",
@@ -795,11 +701,7 @@ export async function fetchReadyState({
     `repos/${path}/pulls/${number}/comments`,
   ]);
   const reviewThreadsPromise = fetchReviewThreads({ repo, number });
-  const requiredStatusContextsPromise = fetchRequiredStatusContexts({
-    repo,
-    baseRef: pr.baseRefName,
-    statusCheckRollup: pr.statusCheckRollup ?? [],
-  });
+  const readinessBasesPromise = fetchReadinessBases({ repo, pr });
   const timelinePromise = ghApiJsonPagesResult(repo, [
     "-H",
     "Accept: application/vnd.github+json",
@@ -812,7 +714,7 @@ export async function fetchReadyState({
     reactions,
     reviewComments,
     reviewThreads,
-    requiredStatusContexts,
+    { stack, requiredStatusContexts },
     timelineResult,
   ] = await Promise.all([
     statusSourcePromise,
@@ -820,7 +722,7 @@ export async function fetchReadyState({
     reactionsPromise,
     reviewCommentsPromise,
     reviewThreadsPromise,
-    requiredStatusContextsPromise,
+    readinessBasesPromise,
     timelinePromise,
   ]);
   const headUpdatedAt = fetchHeadUpdatedAt({
@@ -853,6 +755,12 @@ export async function fetchReadyState({
         currentPr?.changed_files === pr.changedFiles,
     });
   }
+  await verifyReadinessSnapshot({
+    repo,
+    pr,
+    stack,
+    fetchJson: ghApiJsonResult,
+  });
   const annotatedPr = {
     ...pr,
     headUpdatedAt,
@@ -862,7 +770,7 @@ export async function fetchReadyState({
     ),
   };
 
-  return summarizeReadyState({
+  const summary = summarizeReadyState({
     pr: annotatedPr,
     issueComments,
     reactions,
@@ -874,6 +782,15 @@ export async function fetchReadyState({
     includeFeedbackDetails,
     codeRabbitPathFilterSkip,
   });
+  return stack
+    ? {
+        ...summary,
+        pr: { ...summary.pr, baseRefOid: pr.baseRefOid },
+        readinessScope: "layer",
+        stack,
+        summary: `Layer only: ${summary.summary} Stack readiness is not evaluated.`,
+      }
+    : summary;
 }
 
 function usage() {
