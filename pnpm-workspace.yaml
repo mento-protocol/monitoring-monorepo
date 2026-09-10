@@ -15,7 +15,7 @@ catalog:
   # handler are also built as standalone source roots outside this workspace,
   # so they keep literal pins; scripts/supply-chain/version-skew-check.mjs
   # enforces they stay equal to this entry.
-  viem: 2.50.4
+  viem: 2.56.3
 
 # pnpm-workspace.yaml overrides carry bounded undici security pins for root
 # workspace consumers such as @vercel/blob/jsdom. Keep them bounded: unbounded
