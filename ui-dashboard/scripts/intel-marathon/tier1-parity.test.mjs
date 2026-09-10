@@ -220,22 +220,28 @@ const cases = [
   ["missing numeric value", {}, ["--limit"]],
   ["invalid numeric value", {}, ["--quota-floor", "5O"]],
 ];
-describe("tier1 offline parent/child CLI parity", () => {
-  it.each(cases)("%s", (_name, scenario, args) => {
-    const before = runOffline("parent", scenario, args);
-    const after = runOffline("after", scenario, args);
-    const updateGuidance = (text) =>
-      text.replace(
-        /resumes (the queue|it)\./g,
-        "resumes unattempted work. Default resume skips recorded errors; add --retry-errors to retry them (additional Intel Label quota may be spent).",
-      );
-    expect(after).toEqual({
-      ...before,
-      stdout: updateGuidance(before.stdout),
-      stderr: updateGuidance(before.stderr),
+describe.each(["before", "parent"])(
+  "tier1 offline %s/child CLI parity",
+  (baseline) => {
+    it.each(cases)("%s", (_name, scenario, args) => {
+      const before = runOffline(baseline, scenario, args);
+      const after = runOffline("after", scenario, args);
+      const updateGuidance = (text) =>
+        text.replace(
+          /resumes (the queue|it)\./g,
+          "resumes unattempted work. Default resume skips recorded errors; add --retry-errors to retry them (additional Intel Label quota may be spent).",
+        );
+      expect(after).toEqual({
+        ...before,
+        stdout: updateGuidance(before.stdout),
+        stderr: updateGuidance(before.stderr),
+      });
+      expect(after.stderr).not.toContain("Unexpected offline request");
     });
-    expect(after.stderr).not.toContain("Unexpected offline request");
-  });
+  },
+);
+
+describe("offline durable outcomes", () => {
   it("halts failed writes without completing unwritten addresses", () => {
     const result = runOffline("after", {
       sources,

@@ -554,13 +554,9 @@ function canonicalSources(record) {
 function catalogEntry(record) {
   const lifecycle = record.status === "active" ? "" : ` (${record.status})`;
   const link = relativeCatalogLink(record.path);
-  const label =
-    record.doc_type === "adr" && record.path.startsWith("docs/adr/")
-      ? record.path.slice("docs/".length)
-      : record.path;
   const title =
     record.doc_type === "adr" ? ` — ${escapeCell(record.title)}` : "";
-  return `- [\`${escapeCell(label)}\`](${link})${title}${lifecycle}${canonicalSources(record)}`;
+  return `- [\`${escapeCell(record.path)}\`](${link})${title}${lifecycle}${canonicalSources(record)}`;
 }
 
 export function renderDocumentationIndex(
@@ -583,7 +579,7 @@ export function renderDocumentationIndex(
     "# Documentation Catalog",
     "",
     "Write: `pnpm docs:index --write`. Check: `pnpm docs:index --check`.",
-    "Docs by lane/authority: source paths and ADR numbers/titles (ADR paths are relative to docs/).",
+    "Docs by lane/authority: source paths and ADR numbers/titles.",
     "Metadata and [policy](context-standards.md) govern; runtime projections link canonical sources.",
     "",
   ];

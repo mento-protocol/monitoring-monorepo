@@ -13,7 +13,7 @@ garden_lane: package-readmes-reference
 # Documentation Catalog
 
 Write: `pnpm docs:index --write`. Check: `pnpm docs:index --check`.
-Docs by lane/authority: source paths and ADR numbers/titles (ADR paths are relative to docs/).
+Docs by lane/authority: source paths and ADR numbers/titles.
 Metadata and [policy](context-standards.md) govern; runtime projections link canonical sources.
 
 ## agent-entry-points
@@ -131,103 +131,103 @@ Authority: unmanaged
 
 Authority: canonical
 
-- [`adr/0001-monorepo-independent-deploys.md`](adr/0001-monorepo-independent-deploys.md) — One pnpm+Turbo monorepo with independently deployed services
-- [`adr/0002-envio-hosted-indexer.md`](adr/0002-envio-hosted-indexer.md) — Envio HyperIndex Hosted is the indexer; deploy via a dedicated envio branch
-- [`adr/0003-hasura-graphql-read-api.md`](adr/0003-hasura-graphql-read-api.md) — Hasura auto-generated GraphQL over Postgres is the read API
-- [`adr/0004-two-alert-planes.md`](adr/0004-two-alert-planes.md) — Two alert planes — Grafana metric thresholds and event-driven delivery
-- [`adr/0005-context-as-product.md`](adr/0005-context-as-product.md) — Context is product — canonical authority model with a metadata contract
-- [`adr/0006-github-issues-backlog.md`](adr/0006-github-issues-backlog.md) — GitHub Issues are the canonical agent work queue, not BACKLOG.md
-- [`adr/0007-agent-quality-gate-and-merge-oracle.md`](adr/0007-agent-quality-gate-and-merge-oracle.md) — Local agent quality gate plus two-projection PR all-clear and Codex gate
-- [`adr/0008-mandatory-hazard-checklists.md`](adr/0008-mandatory-hazard-checklists.md) — Cross-layer and stateful changes must run dedicated PR checklists
-- [`adr/0009-supply-chain-hardening.md`](adr/0009-supply-chain-hardening.md) — Supply-chain hardening — release-age gate, lockfile-lint, SHA-pinned Actions
-- [`adr/0010-required-checks-no-paths-filters.md`](adr/0010-required-checks-no-paths-filters.md) — Required CI checks carry no paths filters; only advisory jobs may
-- [`adr/0011-shared-config-single-source-of-truth.md`](adr/0011-shared-config-single-source-of-truth.md) — shared-config is the single source of truth for chain and token metadata
-- [`adr/0012-one-multichain-indexer.md`](adr/0012-one-multichain-indexer.md) — One multichain indexer project; Ethereum reserve-yield shares the hosted deployment
-- [`adr/0013-vendored-shared-config-mirror.md`](adr/0013-vendored-shared-config-mirror.md) — The indexer vendors a mirror of shared-config because Envio builds outside the workspace
-- [`adr/0014-snapshot-entities-no-aggregate.md`](adr/0014-snapshot-entities-no-aggregate.md) — Precompute snapshot and rollup entities; never rely on Hasura _aggregate
-- [`adr/0015-abi-vendoring-and-address-drift-gate.md`](adr/0015-abi-vendoring-and-address-drift-gate.md) — Vendor ABIs from the contracts package and gate indexed config addresses on a drift check
-- [`adr/0016-effect-rpc-split-and-heal-stages.md`](adr/0016-effect-rpc-split-and-heal-stages.md) — Split effects and RPC from handlers; decompose upsertPool into named effect-injected stages
-- [`adr/0017-broker-denormalization-volume-dedup.md`](adr/0017-broker-denormalization-volume-dedup.md) — Denormalize the v2 Broker swap path to de-duplicate VirtualPool-routed volume
-- [`adr/0018-indexer-observability-loki.md`](adr/0018-indexer-observability-loki.md) — Indexer observability contract requires structured logs and a verified error-log path (archived)
-- [`adr/0019-vercel-path-aware-deploys.md`](adr/0019-vercel-path-aware-deploys.md) — Dashboard deploys on Vercel Git integration with a path-aware skip script
-- [`adr/0021-dashboard-state-upstash-blob.md`](adr/0021-dashboard-state-upstash-blob.md) — Dashboard mutable state lives in Upstash Redis with Vercel Blob backups
-- [`adr/0022-authjs-google-shared-preview-secrets.md`](adr/0022-authjs-google-shared-preview-secrets.md) — Auth.js with Google; previews share prod auth secrets behind SSO and Git fork protection
-- [`adr/0023-es2017-no-polyfill.md`](adr/0023-es2017-no-polyfill.md) — Transpile to ES2017; pin the browser floor and block named API hazards
-- [`adr/0024-plotly-basic-dist-bundle-budgets.md`](adr/0024-plotly-basic-dist-bundle-budgets.md) — Plotly.js basic-dist-min plus enforced bundle-size budgets
-- [`adr/0025-fixture-browser-tests-react-doctor.md`](adr/0025-fixture-browser-tests-react-doctor.md) — Fixture-driven browser tests, visual snapshots, and a react-doctor score gate
-- [`adr/0026-aegis-nestjs-app-engine.md`](adr/0026-aegis-nestjs-app-engine.md) — Aegis is a NestJS App Engine service polling view calls into Prometheus
-- [`adr/0027-metrics-bridge-hasura-to-prometheus.md`](adr/0027-metrics-bridge-hasura-to-prometheus.md) — A Hasura to Prometheus bridge exists so v3 DB data can drive Grafana alerts
-- [`adr/0028-terraform-stack-registry.md`](adr/0028-terraform-stack-registry.md) — Terraform ownership is a registry with roots split by cadence and blast radius
-- [`adr/0029-ci-apply-production-infra-gate.md`](adr/0029-ci-apply-production-infra-gate.md) — Infra applies on merge to main behind the production-infra environment gate
-- [`adr/0030-iac-before-cli-secrets.md`](adr/0030-iac-before-cli-secrets.md) — All secrets are managed by IaC; agents never touch them with CLI commands
-- [`adr/0031-governance-watchdog-standalone-root.md`](adr/0031-governance-watchdog-standalone-root.md) — governance-watchdog deploys as a standalone source root in its own GCP project
-- [`adr/0032-integration-probes-quote-only.md`](adr/0032-integration-probes-quote-only.md) — Integration probes are quote-only, evidence-gated, and TTL-degraded
-- [`adr/0033-adr-process-and-gate.md`](adr/0033-adr-process-and-gate.md) — Architectural decisions are recorded as ADRs, enforced by a reminder gate
-- [`adr/0034-steth-wallet-daily-sampler.md`](adr/0034-steth-wallet-daily-sampler.md) — stETH actuals use a launch-aligned sub-daily wallet balance sampler
-- [`adr/0035-config-public-npm-package.md`](adr/0035-config-public-npm-package.md) — shared-config publishes as the public @mento-protocol/config package
-- [`adr/0036-sentry-triage-pipeline.md`](adr/0036-sentry-triage-pipeline.md) — Sentry triage/autofix runs as a staged GitHub Actions agent pipeline with a GitHub-Issue queue
-- [`adr/0037-dashboard-graphql-zod-mini.md`](adr/0037-dashboard-graphql-zod-mini.md) — Native GraphQL transport and client-side Zod Mini for the dashboard
-- [`adr/0038-sentry-central-plane-verdict-projection.md`](adr/0038-sentry-central-plane-verdict-projection.md) — Central Sentry triage plane with owning-repo verdict projection
-- [`adr/0039-multistrategy-pools-historical-fx-volume.md`](adr/0039-multistrategy-pools-historical-fx-volume.md) — Model pool strategies many-to-many and price same-currency swaps from historical FX crosses
-- [`adr/0040-bounded-documentation-garden-queue.md`](adr/0040-bounded-documentation-garden-queue.md) — Documentation gardening runs through one bounded issue queue
-- [`adr/0041-offline-documentation-navigation-evaluation.md`](adr/0041-offline-documentation-navigation-evaluation.md) — Documentation navigation is evaluated offline with deterministic scoring
-- [`adr/0042-metrics-bridge-external-price-poller.md`](adr/0042-metrics-bridge-external-price-poller.md) — metrics-bridge hosts the external market-price peg poller
-- [`adr/0043-peg-registry-service-local.md`](adr/0043-peg-registry-service-local.md) — The peg-monitor registry is service-local config, not published shared-config
-- [`adr/0044-peg-thresholds-gated-rules-plane.md`](adr/0044-peg-thresholds-gated-rules-plane.md) — Peg alert thresholds stay in the gated alerts-rules plane, read from one JSON
-- [`adr/0045-peg-paging-semantics.md`](adr/0045-peg-paging-semantics.md) — Peg paging measures executable sell price; the deep venue pages alone
-- [`adr/0046-event-sourced-oracle-freshness.md`](adr/0046-event-sourced-oracle-freshness.md) — Oracle freshness is reconstructed from persisted report events
-- [`adr/0047-separated-terraform-ci-identities.md`](adr/0047-separated-terraform-ci-identities.md) — Terraform CI separates routine deploy, PR plan, trusted-main refresh, Peg publication plan, and production apply identities
-- [`adr/0048-private-gcs-peg-policy-artifact.md`](adr/0048-private-gcs-peg-policy-artifact.md) — Peg policy is a generation-pinned private GCS artifact (archived)
-- [`adr/0049-peg-decision-package-read-model.md`](adr/0049-peg-decision-package-read-model.md) — Peg decisions use a bounded Metrics Bridge read model
-- [`adr/0050-environment-scoped-pipeline-secrets.md`](adr/0050-environment-scoped-pipeline-secrets.md) — Pipeline secrets are gated by a Terraform-managed GitHub Environment
-- [`adr/0051-dashboard-volume-scale-bounds.md`](adr/0051-dashboard-volume-scale-bounds.md) — Dashboard volume composition has per-chain and total re-review bounds
-- [`adr/0052-envio-logs-prometheus-grafana-alerting.md`](adr/0052-envio-logs-prometheus-grafana-alerting.md) — Envio logs diagnose; Prometheus and Grafana alert
-- [`adr/0053-explicit-deployment-source-staging.md`](adr/0053-explicit-deployment-source-staging.md) — Routine GCP deploys use explicit source-staging buckets
-- [`adr/0054-same-project-peg-policy-artifact.md`](adr/0054-same-project-peg-policy-artifact.md) — Peg policy stays private in the monitoring project
-- [`adr/0055-peg-policy-bucket-controller-recovery.md`](adr/0055-peg-policy-bucket-controller-recovery.md) — Peg policy bucket controller recovers authoritative IAM reconciliation
-- [`adr/0056-agent-mcp-credential-broker.md`](adr/0056-agent-mcp-credential-broker.md) — An untrusted agent's MCP credentials sit behind a loopback broker, not in its env
-- [`adr/0057-peg-observation-advancement.md`](adr/0057-peg-observation-advancement.md) — Repeated Peg provider observations retain bounded health, never sample authority
-- [`adr/0058-metrics-bridge-dedicated-cloud-build-executor.md`](adr/0058-metrics-bridge-dedicated-cloud-build-executor.md) — Metrics Bridge uses a dedicated Cloud Build executor
-- [`adr/0059-repo-owned-file-size-watchlist-scheduler.md`](adr/0059-repo-owned-file-size-watchlist-scheduler.md) — File-size watchlist scheduling is repository-owned and issue-only
-- [`adr/0060-upstash-management-key-bootstrap.md`](adr/0060-upstash-management-key-bootstrap.md) — Upstash management API keys use a human-owned bootstrap integration
-- [`adr/0061-exact-plan-guard-for-manual-platform-applies.md`](adr/0061-exact-plan-guard-for-manual-platform-applies.md) — Manual platform applies use an exact private plan guard
-- [`adr/0062-sentry-suites-self-run-gate.md`](adr/0062-sentry-suites-self-run-gate.md) — An unconditional gate job runs the Sentry suites and proves from their output that they asserted
-- [`adr/0063-dashboard-grafana-history-read-access.md`](adr/0063-dashboard-grafana-history-read-access.md) — Peg history reads Grafana Cloud through a dedicated read-only token
-- [`adr/0064-scripts-module-directories.md`](adr/0064-scripts-module-directories.md) — scripts/ may use module subdirectories; basenames and pinned paths are the constraint
-- [`adr/0065-scripts-file-size-watchlist-scope.md`](adr/0065-scripts-file-size-watchlist-scope.md) — scripts/ is inside the file-size watchlist, with named-mechanism exemptions
-- [`adr/0066-coderabbit-replaces-bugbot-third-reviewer.md`](adr/0066-coderabbit-replaces-bugbot-third-reviewer.md) — CodeRabbit replaces Cursor BugBot as the third PR review bot
-- [`adr/0067-pool-criticality-is-depletion-risk.md`](adr/0067-pool-criticality-is-depletion-risk.md) — Pool criticality is depletion risk, not deviation magnitude
-- [`adr/0069-gate-routing-table-as-data.md`](adr/0069-gate-routing-table-as-data.md) — The quality gate's routing table is data, compiled by the repo's own bash-case translator
-- [`adr/0070-sentry-requeue-settlement-sentinel.md`](adr/0070-sentry-requeue-settlement-sentinel.md) — A withheld terminal label serializes the Sentry archive settlement against the triage re-queue
-- [`adr/0071-susds-launch-aligned-daily-sampler.md`](adr/0071-susds-launch-aligned-daily-sampler.md) — sUSDS actuals use a launch-aligned bounded daily sampler
-- [`adr/0072-md-only-docs-checks-job.md`](adr/0072-md-only-docs-checks-job.md) — The Markdown globs route to a small docs-checks CI job instead of the scripts job
-- [`adr/0073-guardrail-prose-pinned-in-ci.md`](adr/0073-guardrail-prose-pinned-in-ci.md) — Normative guardrail sentences are pinned in CI, and scripts are not
-- [`adr/0074-trove-ledger-parallel-append-only-entity.md`](adr/0074-trove-ledger-parallel-append-only-entity.md) — TroveLedgerEvent is a parallel append-only entity, not a widened TroveOperationEvent
-- [`adr/0076-fair-quality-gate-coordinator.md`](adr/0076-fair-quality-gate-coordinator.md) — Fair local quality-gate coordination across worktrees
-- [`adr/0077-operator-triggered-backlog-sweep.md`](adr/0077-operator-triggered-backlog-sweep.md) — Operator-triggered backlog sweep with isolated workers
-- [`adr/0078-staged-verification-redesign.md`](adr/0078-staged-verification-redesign.md) — Staged replacement of the mandatory local gate with existing CI
-- [`adr/0080-merge-base-freshness-stamp.md`](adr/0080-merge-base-freshness-stamp.md) — The gate's freshness stamp binds the merge-base
-- [`adr/0081-narrow-dependabot-auto-merge-exception.md`](adr/0081-narrow-dependabot-auto-merge-exception.md) — Narrow Dependabot auto-merge exception
-- [`adr/0082-persistent-issue-board-mutation-mutex.md`](adr/0082-persistent-issue-board-mutation-mutex.md) — Persistent Issue-Board Mutation Mutex
-- [`adr/0083-non-ledger-review-eval-experiments.md`](adr/0083-non-ledger-review-eval-experiments.md) — Review-skill experiments use a separate staged non-ledger lane
-- [`adr/0084-github-ui-operator-merge.md`](adr/0084-github-ui-operator-merge.md) — Use GitHub for ordinary pull request merges
-- [`adr/0085-review-eval-cli-versions-bind-the-cell.md`](adr/0085-review-eval-cli-versions-bind-the-cell.md) — Provider CLI versions bind the review-eval cell, not the plan
-- [`adr/0086-review-eval-lane-any-grid-multi-draw.md`](adr/0086-review-eval-lane-any-grid-multi-draw.md) — The experiment lane runs any grid at N draws and decides on paired evidence
-- [`adr/0087-autoreview-removal-thin-two-model-review.md`](adr/0087-autoreview-removal-thin-two-model-review.md) — Remove the autoreview machinery; keep a thin two-model closeout review
-- [`adr/0088-temporary-m6-canary-collection.md`](adr/0088-temporary-m6-canary-collection.md) — Temporary event-driven M6 canary collection
-- [`adr/0089-review-eval-canonical-matrix-pr-groups.md`](adr/0089-review-eval-canonical-matrix-pr-groups.md) — The canonical review-eval matrix runs PR groups concurrently
-- [`adr/0090-canonical-eval-matrix-freshness-floor.md`](adr/0090-canonical-eval-matrix-freshness-floor.md) — The canonical review-eval matrix is a freshness floor
-- [`adr/0091-promote-needs-replay-corroboration.md`](adr/0091-promote-needs-replay-corroboration.md) — A PROMOTE needs replay corroboration before it re-anchors
-- [`adr/0092-dependabot-npm-version-updates.md`](adr/0092-dependabot-npm-version-updates.md) — Dependabot batches npm version updates into Monday groups
-- [`adr/0093-opt-in-native-stacked-pull-requests.md`](adr/0093-opt-in-native-stacked-pull-requests.md) — Adopt native stacked pull requests through an opt-in pilot
-- [`adr/0094-grid-waiver.md`](adr/0094-grid-waiver.md) — Scale the control waiver to grid scope
+- [`docs/adr/0001-monorepo-independent-deploys.md`](adr/0001-monorepo-independent-deploys.md) — One pnpm+Turbo monorepo with independently deployed services
+- [`docs/adr/0002-envio-hosted-indexer.md`](adr/0002-envio-hosted-indexer.md) — Envio HyperIndex Hosted is the indexer; deploy via a dedicated envio branch
+- [`docs/adr/0003-hasura-graphql-read-api.md`](adr/0003-hasura-graphql-read-api.md) — Hasura auto-generated GraphQL over Postgres is the read API
+- [`docs/adr/0004-two-alert-planes.md`](adr/0004-two-alert-planes.md) — Two alert planes — Grafana metric thresholds and event-driven delivery
+- [`docs/adr/0005-context-as-product.md`](adr/0005-context-as-product.md) — Context is product — canonical authority model with a metadata contract
+- [`docs/adr/0006-github-issues-backlog.md`](adr/0006-github-issues-backlog.md) — GitHub Issues are the canonical agent work queue, not BACKLOG.md
+- [`docs/adr/0007-agent-quality-gate-and-merge-oracle.md`](adr/0007-agent-quality-gate-and-merge-oracle.md) — Local agent quality gate plus two-projection PR all-clear and Codex gate
+- [`docs/adr/0008-mandatory-hazard-checklists.md`](adr/0008-mandatory-hazard-checklists.md) — Cross-layer and stateful changes must run dedicated PR checklists
+- [`docs/adr/0009-supply-chain-hardening.md`](adr/0009-supply-chain-hardening.md) — Supply-chain hardening — release-age gate, lockfile-lint, SHA-pinned Actions
+- [`docs/adr/0010-required-checks-no-paths-filters.md`](adr/0010-required-checks-no-paths-filters.md) — Required CI checks carry no paths filters; only advisory jobs may
+- [`docs/adr/0011-shared-config-single-source-of-truth.md`](adr/0011-shared-config-single-source-of-truth.md) — shared-config is the single source of truth for chain and token metadata
+- [`docs/adr/0012-one-multichain-indexer.md`](adr/0012-one-multichain-indexer.md) — One multichain indexer project; Ethereum reserve-yield shares the hosted deployment
+- [`docs/adr/0013-vendored-shared-config-mirror.md`](adr/0013-vendored-shared-config-mirror.md) — The indexer vendors a mirror of shared-config because Envio builds outside the workspace
+- [`docs/adr/0014-snapshot-entities-no-aggregate.md`](adr/0014-snapshot-entities-no-aggregate.md) — Precompute snapshot and rollup entities; never rely on Hasura _aggregate
+- [`docs/adr/0015-abi-vendoring-and-address-drift-gate.md`](adr/0015-abi-vendoring-and-address-drift-gate.md) — Vendor ABIs from the contracts package and gate indexed config addresses on a drift check
+- [`docs/adr/0016-effect-rpc-split-and-heal-stages.md`](adr/0016-effect-rpc-split-and-heal-stages.md) — Split effects and RPC from handlers; decompose upsertPool into named effect-injected stages
+- [`docs/adr/0017-broker-denormalization-volume-dedup.md`](adr/0017-broker-denormalization-volume-dedup.md) — Denormalize the v2 Broker swap path to de-duplicate VirtualPool-routed volume
+- [`docs/adr/0018-indexer-observability-loki.md`](adr/0018-indexer-observability-loki.md) — Indexer observability contract requires structured logs and a verified error-log path (archived)
+- [`docs/adr/0019-vercel-path-aware-deploys.md`](adr/0019-vercel-path-aware-deploys.md) — Dashboard deploys on Vercel Git integration with a path-aware skip script
+- [`docs/adr/0021-dashboard-state-upstash-blob.md`](adr/0021-dashboard-state-upstash-blob.md) — Dashboard mutable state lives in Upstash Redis with Vercel Blob backups
+- [`docs/adr/0022-authjs-google-shared-preview-secrets.md`](adr/0022-authjs-google-shared-preview-secrets.md) — Auth.js with Google; previews share prod auth secrets behind SSO and Git fork protection
+- [`docs/adr/0023-es2017-no-polyfill.md`](adr/0023-es2017-no-polyfill.md) — Transpile to ES2017; pin the browser floor and block named API hazards
+- [`docs/adr/0024-plotly-basic-dist-bundle-budgets.md`](adr/0024-plotly-basic-dist-bundle-budgets.md) — Plotly.js basic-dist-min plus enforced bundle-size budgets
+- [`docs/adr/0025-fixture-browser-tests-react-doctor.md`](adr/0025-fixture-browser-tests-react-doctor.md) — Fixture-driven browser tests, visual snapshots, and a react-doctor score gate
+- [`docs/adr/0026-aegis-nestjs-app-engine.md`](adr/0026-aegis-nestjs-app-engine.md) — Aegis is a NestJS App Engine service polling view calls into Prometheus
+- [`docs/adr/0027-metrics-bridge-hasura-to-prometheus.md`](adr/0027-metrics-bridge-hasura-to-prometheus.md) — A Hasura to Prometheus bridge exists so v3 DB data can drive Grafana alerts
+- [`docs/adr/0028-terraform-stack-registry.md`](adr/0028-terraform-stack-registry.md) — Terraform ownership is a registry with roots split by cadence and blast radius
+- [`docs/adr/0029-ci-apply-production-infra-gate.md`](adr/0029-ci-apply-production-infra-gate.md) — Infra applies on merge to main behind the production-infra environment gate
+- [`docs/adr/0030-iac-before-cli-secrets.md`](adr/0030-iac-before-cli-secrets.md) — All secrets are managed by IaC; agents never touch them with CLI commands
+- [`docs/adr/0031-governance-watchdog-standalone-root.md`](adr/0031-governance-watchdog-standalone-root.md) — governance-watchdog deploys as a standalone source root in its own GCP project
+- [`docs/adr/0032-integration-probes-quote-only.md`](adr/0032-integration-probes-quote-only.md) — Integration probes are quote-only, evidence-gated, and TTL-degraded
+- [`docs/adr/0033-adr-process-and-gate.md`](adr/0033-adr-process-and-gate.md) — Architectural decisions are recorded as ADRs, enforced by a reminder gate
+- [`docs/adr/0034-steth-wallet-daily-sampler.md`](adr/0034-steth-wallet-daily-sampler.md) — stETH actuals use a launch-aligned sub-daily wallet balance sampler
+- [`docs/adr/0035-config-public-npm-package.md`](adr/0035-config-public-npm-package.md) — shared-config publishes as the public @mento-protocol/config package
+- [`docs/adr/0036-sentry-triage-pipeline.md`](adr/0036-sentry-triage-pipeline.md) — Sentry triage/autofix runs as a staged GitHub Actions agent pipeline with a GitHub-Issue queue
+- [`docs/adr/0037-dashboard-graphql-zod-mini.md`](adr/0037-dashboard-graphql-zod-mini.md) — Native GraphQL transport and client-side Zod Mini for the dashboard
+- [`docs/adr/0038-sentry-central-plane-verdict-projection.md`](adr/0038-sentry-central-plane-verdict-projection.md) — Central Sentry triage plane with owning-repo verdict projection
+- [`docs/adr/0039-multistrategy-pools-historical-fx-volume.md`](adr/0039-multistrategy-pools-historical-fx-volume.md) — Model pool strategies many-to-many and price same-currency swaps from historical FX crosses
+- [`docs/adr/0040-bounded-documentation-garden-queue.md`](adr/0040-bounded-documentation-garden-queue.md) — Documentation gardening runs through one bounded issue queue
+- [`docs/adr/0041-offline-documentation-navigation-evaluation.md`](adr/0041-offline-documentation-navigation-evaluation.md) — Documentation navigation is evaluated offline with deterministic scoring
+- [`docs/adr/0042-metrics-bridge-external-price-poller.md`](adr/0042-metrics-bridge-external-price-poller.md) — metrics-bridge hosts the external market-price peg poller
+- [`docs/adr/0043-peg-registry-service-local.md`](adr/0043-peg-registry-service-local.md) — The peg-monitor registry is service-local config, not published shared-config
+- [`docs/adr/0044-peg-thresholds-gated-rules-plane.md`](adr/0044-peg-thresholds-gated-rules-plane.md) — Peg alert thresholds stay in the gated alerts-rules plane, read from one JSON
+- [`docs/adr/0045-peg-paging-semantics.md`](adr/0045-peg-paging-semantics.md) — Peg paging measures executable sell price; the deep venue pages alone
+- [`docs/adr/0046-event-sourced-oracle-freshness.md`](adr/0046-event-sourced-oracle-freshness.md) — Oracle freshness is reconstructed from persisted report events
+- [`docs/adr/0047-separated-terraform-ci-identities.md`](adr/0047-separated-terraform-ci-identities.md) — Terraform CI separates routine deploy, PR plan, trusted-main refresh, Peg publication plan, and production apply identities
+- [`docs/adr/0048-private-gcs-peg-policy-artifact.md`](adr/0048-private-gcs-peg-policy-artifact.md) — Peg policy is a generation-pinned private GCS artifact (archived)
+- [`docs/adr/0049-peg-decision-package-read-model.md`](adr/0049-peg-decision-package-read-model.md) — Peg decisions use a bounded Metrics Bridge read model
+- [`docs/adr/0050-environment-scoped-pipeline-secrets.md`](adr/0050-environment-scoped-pipeline-secrets.md) — Pipeline secrets are gated by a Terraform-managed GitHub Environment
+- [`docs/adr/0051-dashboard-volume-scale-bounds.md`](adr/0051-dashboard-volume-scale-bounds.md) — Dashboard volume composition has per-chain and total re-review bounds
+- [`docs/adr/0052-envio-logs-prometheus-grafana-alerting.md`](adr/0052-envio-logs-prometheus-grafana-alerting.md) — Envio logs diagnose; Prometheus and Grafana alert
+- [`docs/adr/0053-explicit-deployment-source-staging.md`](adr/0053-explicit-deployment-source-staging.md) — Routine GCP deploys use explicit source-staging buckets
+- [`docs/adr/0054-same-project-peg-policy-artifact.md`](adr/0054-same-project-peg-policy-artifact.md) — Peg policy stays private in the monitoring project
+- [`docs/adr/0055-peg-policy-bucket-controller-recovery.md`](adr/0055-peg-policy-bucket-controller-recovery.md) — Peg policy bucket controller recovers authoritative IAM reconciliation
+- [`docs/adr/0056-agent-mcp-credential-broker.md`](adr/0056-agent-mcp-credential-broker.md) — An untrusted agent's MCP credentials sit behind a loopback broker, not in its env
+- [`docs/adr/0057-peg-observation-advancement.md`](adr/0057-peg-observation-advancement.md) — Repeated Peg provider observations retain bounded health, never sample authority
+- [`docs/adr/0058-metrics-bridge-dedicated-cloud-build-executor.md`](adr/0058-metrics-bridge-dedicated-cloud-build-executor.md) — Metrics Bridge uses a dedicated Cloud Build executor
+- [`docs/adr/0059-repo-owned-file-size-watchlist-scheduler.md`](adr/0059-repo-owned-file-size-watchlist-scheduler.md) — File-size watchlist scheduling is repository-owned and issue-only
+- [`docs/adr/0060-upstash-management-key-bootstrap.md`](adr/0060-upstash-management-key-bootstrap.md) — Upstash management API keys use a human-owned bootstrap integration
+- [`docs/adr/0061-exact-plan-guard-for-manual-platform-applies.md`](adr/0061-exact-plan-guard-for-manual-platform-applies.md) — Manual platform applies use an exact private plan guard
+- [`docs/adr/0062-sentry-suites-self-run-gate.md`](adr/0062-sentry-suites-self-run-gate.md) — An unconditional gate job runs the Sentry suites and proves from their output that they asserted
+- [`docs/adr/0063-dashboard-grafana-history-read-access.md`](adr/0063-dashboard-grafana-history-read-access.md) — Peg history reads Grafana Cloud through a dedicated read-only token
+- [`docs/adr/0064-scripts-module-directories.md`](adr/0064-scripts-module-directories.md) — scripts/ may use module subdirectories; basenames and pinned paths are the constraint
+- [`docs/adr/0065-scripts-file-size-watchlist-scope.md`](adr/0065-scripts-file-size-watchlist-scope.md) — scripts/ is inside the file-size watchlist, with named-mechanism exemptions
+- [`docs/adr/0066-coderabbit-replaces-bugbot-third-reviewer.md`](adr/0066-coderabbit-replaces-bugbot-third-reviewer.md) — CodeRabbit replaces Cursor BugBot as the third PR review bot
+- [`docs/adr/0067-pool-criticality-is-depletion-risk.md`](adr/0067-pool-criticality-is-depletion-risk.md) — Pool criticality is depletion risk, not deviation magnitude
+- [`docs/adr/0069-gate-routing-table-as-data.md`](adr/0069-gate-routing-table-as-data.md) — The quality gate's routing table is data, compiled by the repo's own bash-case translator
+- [`docs/adr/0070-sentry-requeue-settlement-sentinel.md`](adr/0070-sentry-requeue-settlement-sentinel.md) — A withheld terminal label serializes the Sentry archive settlement against the triage re-queue
+- [`docs/adr/0071-susds-launch-aligned-daily-sampler.md`](adr/0071-susds-launch-aligned-daily-sampler.md) — sUSDS actuals use a launch-aligned bounded daily sampler
+- [`docs/adr/0072-md-only-docs-checks-job.md`](adr/0072-md-only-docs-checks-job.md) — The Markdown globs route to a small docs-checks CI job instead of the scripts job
+- [`docs/adr/0073-guardrail-prose-pinned-in-ci.md`](adr/0073-guardrail-prose-pinned-in-ci.md) — Normative guardrail sentences are pinned in CI, and scripts are not
+- [`docs/adr/0074-trove-ledger-parallel-append-only-entity.md`](adr/0074-trove-ledger-parallel-append-only-entity.md) — TroveLedgerEvent is a parallel append-only entity, not a widened TroveOperationEvent
+- [`docs/adr/0076-fair-quality-gate-coordinator.md`](adr/0076-fair-quality-gate-coordinator.md) — Fair local quality-gate coordination across worktrees
+- [`docs/adr/0077-operator-triggered-backlog-sweep.md`](adr/0077-operator-triggered-backlog-sweep.md) — Operator-triggered backlog sweep with isolated workers
+- [`docs/adr/0078-staged-verification-redesign.md`](adr/0078-staged-verification-redesign.md) — Staged replacement of the mandatory local gate with existing CI
+- [`docs/adr/0080-merge-base-freshness-stamp.md`](adr/0080-merge-base-freshness-stamp.md) — The gate's freshness stamp binds the merge-base
+- [`docs/adr/0081-narrow-dependabot-auto-merge-exception.md`](adr/0081-narrow-dependabot-auto-merge-exception.md) — Narrow Dependabot auto-merge exception
+- [`docs/adr/0082-persistent-issue-board-mutation-mutex.md`](adr/0082-persistent-issue-board-mutation-mutex.md) — Persistent Issue-Board Mutation Mutex
+- [`docs/adr/0083-non-ledger-review-eval-experiments.md`](adr/0083-non-ledger-review-eval-experiments.md) — Review-skill experiments use a separate staged non-ledger lane
+- [`docs/adr/0084-github-ui-operator-merge.md`](adr/0084-github-ui-operator-merge.md) — Use GitHub for ordinary pull request merges
+- [`docs/adr/0085-review-eval-cli-versions-bind-the-cell.md`](adr/0085-review-eval-cli-versions-bind-the-cell.md) — Provider CLI versions bind the review-eval cell, not the plan
+- [`docs/adr/0086-review-eval-lane-any-grid-multi-draw.md`](adr/0086-review-eval-lane-any-grid-multi-draw.md) — The experiment lane runs any grid at N draws and decides on paired evidence
+- [`docs/adr/0087-autoreview-removal-thin-two-model-review.md`](adr/0087-autoreview-removal-thin-two-model-review.md) — Remove the autoreview machinery; keep a thin two-model closeout review
+- [`docs/adr/0088-temporary-m6-canary-collection.md`](adr/0088-temporary-m6-canary-collection.md) — Temporary event-driven M6 canary collection
+- [`docs/adr/0089-review-eval-canonical-matrix-pr-groups.md`](adr/0089-review-eval-canonical-matrix-pr-groups.md) — The canonical review-eval matrix runs PR groups concurrently
+- [`docs/adr/0090-canonical-eval-matrix-freshness-floor.md`](adr/0090-canonical-eval-matrix-freshness-floor.md) — The canonical review-eval matrix is a freshness floor
+- [`docs/adr/0091-promote-needs-replay-corroboration.md`](adr/0091-promote-needs-replay-corroboration.md) — A PROMOTE needs replay corroboration before it re-anchors
+- [`docs/adr/0092-dependabot-npm-version-updates.md`](adr/0092-dependabot-npm-version-updates.md) — Dependabot batches npm version updates into Monday groups
+- [`docs/adr/0093-opt-in-native-stacked-pull-requests.md`](adr/0093-opt-in-native-stacked-pull-requests.md) — Adopt native stacked pull requests through an opt-in pilot
+- [`docs/adr/0094-grid-waiver.md`](adr/0094-grid-waiver.md) — Scale the control waiver to grid scope
 
 Authority: non-canonical
 
-- [`adr/0020-swr-polling-read-model.md`](adr/0020-swr-polling-read-model.md) — Read model is SWR polling plus bounded snapshot composition at current scale (archived)
-- [`adr/0068-sentry-fixture-authoring-policy.md`](adr/0068-sentry-fixture-authoring-policy.md) — Adversarial fixtures are authored to scan clean; no value or line registry (archived)
-- [`adr/0075-pr-merge.md`](adr/0075-pr-merge.md) — One sanctioned operator merge path (archived)
-- [`adr/0079-sealed-exact-file-patch-secret-suppression.md`](adr/0079-sealed-exact-file-patch-secret-suppression.md) — Autoreview permits only sealed exact-file-patch secret suppression (archived)
+- [`docs/adr/0020-swr-polling-read-model.md`](adr/0020-swr-polling-read-model.md) — Read model is SWR polling plus bounded snapshot composition at current scale (archived)
+- [`docs/adr/0068-sentry-fixture-authoring-policy.md`](adr/0068-sentry-fixture-authoring-policy.md) — Adversarial fixtures are authored to scan clean; no value or line registry (archived)
+- [`docs/adr/0075-pr-merge.md`](adr/0075-pr-merge.md) — One sanctioned operator merge path (archived)
+- [`docs/adr/0079-sealed-exact-file-patch-secret-suppression.md`](adr/0079-sealed-exact-file-patch-secret-suppression.md) — Autoreview permits only sealed exact-file-patch secret suppression (archived)
 - [`docs/adr/README.md`](adr/README.md)
 
 ## package-readmes-reference
