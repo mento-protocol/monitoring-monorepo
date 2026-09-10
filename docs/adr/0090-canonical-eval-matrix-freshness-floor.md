@@ -3,7 +3,7 @@ title: The canonical review-eval matrix is a freshness floor
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-09
+last_verified: 2026-09-10
 scope: ci/process
 date: 2026-09
 doc_type: adr
@@ -78,7 +78,11 @@ today's cells, and it carries a different comparability key in any case.
 
 - A run costs about $99 of contestant spend and about $108 of judging, roughly
   30% less than before, and the judge pass drops from about six hours to about
-  four. Matrix wall-clock time is not claimed here: since
+  four. Both judging figures are the fable-max judge's. The 2026-09-10 switch
+  to `claude-opus-5` at high effort (issue 2372) cut the calibration replay to
+  about a third of that cost and left the per-cell wall unmeasured, so
+  [`docs/evals/review-skill.md`](../evals/review-skill.md) carries the current
+  judge numbers. Matrix wall-clock time is not claimed here: since
   [ADR 0089](0089-review-eval-canonical-matrix-pr-groups.md) the runner works PR
   groups concurrently, so twelve fewer cells shortens the serial worst case but
   the measured figure comes from the next full run.
