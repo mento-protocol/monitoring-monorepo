@@ -1,0 +1,83 @@
+{
+  "cell_id": "pr-1995-replay-draw2",
+  "fingerprint": {
+    "skill_digest": "89f5bdf20356c5515974ec1a6112fc4f9dfbf31cf1d60b667084f91dfbe6ec60",
+    "kind": "full",
+    "contract_digest": "59b82ee3e6d7ccf2cfbe75cb11aa40e6ec93b92a754a992adee4a1a69166a259",
+    "claude_cli": "2.1.267 (Claude Code)",
+    "codex_cli": "codex-cli 0.154.0",
+    "finder_argv_digest": "40099c93f78800efefbc46f57772ae2cbadc86b378bdd22f474945abfd7b450c",
+    "orchestrator_digest": "d460aa3fefe45e964e71b6490898ed69e69b1d6e2f99781d7eff2c8252bff61f"
+  },
+  "treatment": {
+    "skill_ref": "installed",
+    "dirty": false
+  },
+  "pr": 1995,
+  "condition": "replay",
+  "draw": 2,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": "gpt-5.6-sol@high",
+  "claims": [
+    "A focused self-test can pass inside a real gate run: `scripts/agent-quality-gate.test.sh:601` — the guard only refuses `GATE_TEST_FOCUS` when `AGENT_QUALITY_GATE_LOCK_HELD` or `GITHUB_ACTIONS` is set, but with `--no-lock` the lock step returns early (`:1616`) and never sets `LOCK_HELD`, so a focus exported in the developer's shell reaches the mapped `pnpm agent:quality-gate:test`",
+    "A green focused no-lock run with no reuse writes `last-success.stamp` (`agent-quality-gate.sh:5868-5878`), which doesn't cover environment variables, so the pre-push hook's `--skip-if-fresh` then skips every mapped command (`:4843-4848`) until the stamp expires",
+    "Stale text: the comment at `test.sh:595-597` and the doc at `agent-quality-gate-mechanics.md:1143-1145` both say `LOCK_HELD` is on \"any command a real gate run spawns\", which isn't true for no-lock runs",
+    "Nothing tests the new guards: `test.sh:600-605` — no test would fail if the focus refusal were deleted; no test covers the gate's different run modes",
+    "The verifier's failure branches aren't tested either (`test.sh:473-575`)",
+    "The abort message reports the wrong line on macOS's built-in bash 3.2: `test.sh:21-24` — `$LINENO` inside a function's error trap gives the function's opening line, so every abort would say `line <run_X_family() {>` instead of the line that failed"
+  ],
+  "matched_ids": [
+    3830042123
+  ],
+  "judge_reasoning": {
+    "3829986398": "Review's trap finding is about $LINENO reporting the wrong line on bash 3.2, not about an unset output_file under set -u.",
+    "3829986403": "Review never flags that multiple dispatch_gate_test_families calls pass validation; it only says the verifier rejects stray lines.",
+    "3830003055": "Review does not mention that a missing dispatch call passes the partition check and silently exits 0.",
+    "3830042123": "Review finding 1 identifies that the focus guard is bypassed in --no-lock / AGENT_QUALITY_GATE_LOCK=0 runs because LOCK_HELD is never exported.",
+    "3830042128": "Review does not mention the hard-coded self-test path pin missing from the path-pin inventory.",
+    "3830695396": "Review flags the doc text as stale about LOCK_HELD coverage in no-lock runs, not the 'is set' vs 'non-empty' / 'reds' wording issue."
+  },
+  "novel": {
+    "claims": 6,
+    "novelReal": 3,
+    "novelWrong": 0,
+    "novelVague": 0,
+    "restatedKnown": 3,
+    "alreadyMatched": 1,
+    "verdicts": {
+      "1": {
+        "class": "known",
+        "why": "Checked it: acquire_gate_run_lock returns early at agent-quality-gate.sh:1616 when --no-lock is set, before LOCK_HELD is exported at :1143, so the guard at test.sh:601 lets a focus through. This is the known 'Reject focus during lock-free gate runs' defect."
+      },
+      "2": {
+        "class": "known",
+        "why": "Checked it: stamp_line (:4764) hashes only base, paths, plan, implementation, content and package-risk, with no env, and :5868-5878 writes the stamp on a green no-reuse run. But this is just the downstream effect of the known lock-free focus leak, not a separate defect."
+      },
+      "3": {
+        "class": "known",
+        "why": "The comment at test.sh:595-597 and the doc at mechanics.md:1143-1145 do say LOCK_HELD is on 'every/any command a real gate run spawns', which is false for --no-lock. It is the same lock-free gap, and it overlaps the known doc item."
+      },
+      "4": {
+        "class": "real",
+        "why": "git grep finds GATE_TEST_FOCUS only in the dispatch itself and the doc. No test runs the dispatch with a focus plus LOCK_HELD, GITHUB_ACTIONS or --no-lock, so deleting the refusal at :600-605 would not fail any test."
+      },
+      "5": {
+        "class": "real",
+        "why": "verify_gate_family_partition (:485-574) only ever runs against the real, well-formed file. No fixture exercises fail_partition, the awk error branches or the registry-order diff, so a broken verifier would go unnoticed."
+      },
+      "6": {
+        "class": "real",
+        "why": "Reproduced it: under /bin/bash 3.2.57, an ERR trap re-armed inside a function reports the function's opening line (line 7), while bash 5.3 reports the failing line (line 11). The repo's Bash floor is 3.2 (mechanics.md:196), and before this change the tests ran at top level, so this is a regression."
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 339,
+  "usd": 1.845764,
+  "scoring_usd": 0.7344925000000001
+}

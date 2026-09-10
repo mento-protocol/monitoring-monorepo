@@ -1,0 +1,90 @@
+{
+  "cell_id": "pr-2035-control-draw1",
+  "fingerprint": {
+    "skill_digest": "89f5bdf20356c5515974ec1a6112fc4f9dfbf31cf1d60b667084f91dfbe6ec60",
+    "kind": "full",
+    "contract_digest": "59b82ee3e6d7ccf2cfbe75cb11aa40e6ec93b92a754a992adee4a1a69166a259",
+    "claude_cli": "2.1.267 (Claude Code)",
+    "codex_cli": "codex-cli 0.154.0",
+    "finder_argv_digest": "40099c93f78800efefbc46f57772ae2cbadc86b378bdd22f474945abfd7b450c",
+    "orchestrator_digest": "d460aa3fefe45e964e71b6490898ed69e69b1d6e2f99781d7eff2c8252bff61f"
+  },
+  "treatment": {
+    "skill_ref": "installed",
+    "dirty": false
+  },
+  "pr": 2035,
+  "condition": "control",
+  "draw": 1,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": null,
+  "claims": [
+    "The tier2 tag reordering is undone by the merge that runs after it. `tier2-light-forensic.mjs:671-681` — the write step builds `new Set([...existingEntry.tags, ...derived.tags]).slice(0, 20)`, which puts the existing tags first, so tier1-attested entries holding up to 20 Arkham `populatedTags` ids cut off the forensic `entity:`/`slug:`/`ctp:`/`type:` tags",
+    "Reading `populatedTags` makes refreshes drop existing tags. `src/lib/arkham.ts:242` (`addChainTags`), with `mergeRefreshEntry` at `arkham.ts:374-378` and its copy at `tier1-bulk-enrich.mjs:726-731` — refresh merge `[...fresh.tags, ...existing.tags]` capped at 20 fills the cap with Arkham ids and silently drops user-added tags and tier2 forensic tags (tier1 pass 2 and the production refresh cron wipe `ctp:`/`type:contract` tags)",
+    "The quota floor can be overshot by up to about 450 lookups. `tier1-bulk-enrich.mjs:1000` and `:1058` — if `X-Intel-Datapoints-*` headers never arrive, `quota.remaining` only updates on the `/subscription/intel-usage` poll every 500 addresses, so the next 500 addresses run unchecked through the floor",
+    "Resuming skips every address that errored, including the ones that tripped the circuit breaker. `tier1-bulk-enrich.mjs:805-813` — `{address, error}` lines are added to `processed`, so circuit-breaker, timeout, and 5xx addresses are never retried despite halt messages at lines 941 and 966 saying the progress file \"resumes the queue\"",
+    "Buffered writes are lost on a crash or Ctrl-C, but progress already marks them done. `tier1-bulk-enrich.mjs:1010-1012` — the progress line is appended before the write goes to Redis, with up to 99 entries in `pendingWrites`, so on kill or Upstash pipeline throw the labels are never written and resume skips them",
+    "`--limit` with no value means no limit at all. `tier1-bulk-enrich.mjs:112-117` — `flagValue` returns `undefined` when the value is missing or is the next `--flag`, so `numericFlag` falls back to `Infinity` and `run.sh tier1 --limit --no-refresh` runs the full sweep",
+    "`run.sh` still demands `ARKHAM_API_KEY` for stages that never use it. `run.sh:73-77` — `resolve ARKHAM_API_KEY` is required for every non-dry-run stage, so `verify`, `verify-libs`, `inspect`, `measure` and `mirror-to-blob` fail with only Upstash exported"
+  ],
+  "matched_ids": [
+    3845594538,
+    3845607361,
+    3845618202
+  ],
+  "judge_reasoning": {
+    "3845594538": "Review #5 matches: when the Upstash pipeline throws, the buffered `pendingWrites` batch is never written. Progress already marks those addresses done, so resume skips them and the attested writes are lost.",
+    "3845596185": "No match: the review never says that HARD_PAGE_CAP truncation, or `capped: true`, should count as incomplete discovery.",
+    "3845603922": "No match: the review's only `run.sh` point is about requiring `ARKHAM_API_KEY` for stages that don't need it, not the tfvars key prefix match.",
+    "3845603940": "No match: the review never raises slicing tags before deduplication in the sanitizers.",
+    "3845607361": "Review #1 matches: the tier2 merge puts `existingEntry.tags` first and slices to 20. A tier1 entry that already holds 20 `populatedTags` therefore pushes out the `ctp:`/`type:` forensic tags.",
+    "3845618202": "Review #2 matches: the refresh merge puts `fresh.tags` first and caps at 20. The `populatedTags` ids fill the cap, so pass-2 refreshes drop the tier2 `ctp:`/`type:contract` forensic tags."
+  },
+  "novel": {
+    "claims": 7,
+    "novelReal": 4,
+    "novelWrong": 0,
+    "novelVague": 0,
+    "restatedKnown": 3,
+    "alreadyMatched": 3,
+    "verdicts": {
+      "1": {
+        "class": "known",
+        "why": "tier2-light-forensic.mjs:672-682 does merge existing tags first and then slice(0,20), which drops the forensic tags. This is the known tier2:395 'Preserve Tier 2 tags when merging capped labels' defect."
+      },
+      "2": {
+        "class": "known",
+        "why": "buildWriteEntry (tier1:726-731) and mergeRefreshEntry (arkham.ts:374-378) both put fresh.tags before existing tags and cap the result, so refreshes drop forensic tags. This is the known tier1:774 'Refresh wipes forensic tags' defect."
+      },
+      "3": {
+        "class": "real",
+        "why": "Without X-Intel-Datapoints-Remaining headers, quota.remaining changes only in logIntelUsage, which runs at start and when done%500===0 (line 1058). The floor check at line 1000 reads that stale value, so up to about 500 labeled lookups can pass through a floor of 50."
+      },
+      "4": {
+        "class": "real",
+        "why": "The loop appends {address,error} to the progress file before noteFailure (lines 1029-1048), and resume adds any line with an address to processed (805-813). The 10 addresses that trip the new circuit breaker are therefore never retried, even though line 966 says the progress file 'resumes the queue'."
+      },
+      "5": {
+        "class": "known",
+        "why": "The progress line is appended at line 1010, before the Redis write that pendingWrites buffers. That is the same root cause as the known tier1:997 defect where a failed flush drops the batch that is already marked processed; crash or Ctrl-C is just another trigger for it."
+      },
+      "6": {
+        "class": "real",
+        "why": "flagValue (112-117) returns undefined when the next arg starts with '--', and numericFlag then returns the Infinity fallback. So `--limit --no-refresh` runs the full sweep, despite the comment saying numericFlag is meant to fail hard on bad input."
+      },
+      "7": {
+        "class": "real",
+        "why": "run.sh has `set -euo pipefail`, and for any non-dry-run stage `resolve ARKHAM_API_KEY arkham_api_key` returns 1 when the key is unresolvable, which exits the script. verify.mjs, verify-libs.mjs, inspect-hashes.mjs, measure-hash-bytes.mjs and mirror-to-blob.mjs never reference ARKHAM_API_KEY."
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 310,
+  "usd": 2.1802685,
+  "scoring_usd": 0.678993
+}

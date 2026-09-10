@@ -1,0 +1,88 @@
+{
+  "cell_id": "pr-2121-control-draw1",
+  "fingerprint": {
+    "skill_digest": "89f5bdf20356c5515974ec1a6112fc4f9dfbf31cf1d60b667084f91dfbe6ec60",
+    "kind": "full",
+    "contract_digest": "59b82ee3e6d7ccf2cfbe75cb11aa40e6ec93b92a754a992adee4a1a69166a259",
+    "claude_cli": "2.1.267 (Claude Code)",
+    "codex_cli": "codex-cli 0.154.0",
+    "finder_argv_digest": "40099c93f78800efefbc46f57772ae2cbadc86b378bdd22f474945abfd7b450c",
+    "orchestrator_digest": "d460aa3fefe45e964e71b6490898ed69e69b1d6e2f99781d7eff2c8252bff61f"
+  },
+  "treatment": {
+    "skill_ref": "installed",
+    "dirty": false
+  },
+  "pr": 2121,
+  "condition": "control",
+  "draw": 1,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": null,
+  "claims": [
+    "Trove previews that haven't been viewed for 5+ minutes unfurl as \"Data unavailable\": `src/app/cdps/[symbol]/troves/[troveId]/_lib/trove-og-data.ts:274` (with `:23` and `:254-263`). `unstable_cache` with `revalidate: 60` returns the stale entry in a dynamic render, `troveOgDataIsFresh` rejects it, and the function returns `null` even when Hasura is healthy",
+    "The tests don't catch this because `trove-og-data.test.ts` mocks `unstable_cache` as a plain passthrough",
+    "The image route renders any text from the URL under Mento branding: `opengraph-image.tsx:29-37`, `_og/trove-og-card.tsx:173`. The image route doesn't check invalid trove ids, and the symbol comes straight from the decoded URL, isn't length-limited, and is upper-cased into the identity pill and alt text",
+    "A long symbol also overflows the 360px column",
+    "`resolveMetadataBase` trusts `x-forwarded-host` over `host` (`src/lib/site-metadata.ts:23`). Under plain `next start` or any proxy that passes it through, a client can point `og:image` / `twitter:image` at a domain they choose",
+    "Number formatting rounds up to \"1000K\" (`trove-og-data.ts:121`). `compactNumber` picks the unit before rounding, so values from 999,995 to 999,999 print \"1000K\" instead of \"1M\"; the M→B boundary has the same problem",
+    "The cache comment understates how old a card can be: `opengraph-image.tsx:49` says \"at most five minutes of stale replay\", but the actual worst case is roughly 11 minutes"
+  ],
+  "matched_ids": [
+    3882085361,
+    3882119284
+  ],
+  "judge_reasoning": {
+    "3882085361": "Review item 3 says resolveMetadataBase trusts x-forwarded-host, so under a pass-through proxy a client can point og:image at a domain they choose. That is the same missing-allowlist host-trust issue.",
+    "3882086206": "The review never flags icrTone as duplicating icrTextClass. It only says the ICR tone thresholds match the header card.",
+    "3882090788": "The review does not mention IPv6 loopback ([::1]) being treated as non-local, which leads to https being selected.",
+    "3882119274": "The review does not raise the problem of event-time ICR being shown as a fresh or live health signal.",
+    "3882119284": "Review item 5 identifies the same cache-age problem: data up to 5 minutes old plus 60s max-age plus 300s stale-while-revalidate gives roughly 11 minutes, which the comment understates."
+  },
+  "novel": {
+    "claims": 7,
+    "novelReal": 5,
+    "novelWrong": 0,
+    "novelVague": 0,
+    "restatedKnown": 2,
+    "alreadyMatched": 2,
+    "verdicts": {
+      "1": {
+        "class": "real",
+        "why": "trove-og-data.ts:254-274 wraps the fetch in unstable_cache with revalidate 60. Next serves a stale entry and revalidates in the background, so after 5+ idle minutes fetchedAtMs fails troveOgDataIsFresh (5-minute limit, :23/:229-235), the function returns null, and the card shows 'Data unavailable' (trove-og-card.tsx:418). I read Next's behaviour from memory; Next isn't installed here to check."
+      },
+      "2": {
+        "class": "real",
+        "why": "trove-og-data.test.ts:13-23 mocks unstable_cache so it records args and returns fn unchanged, so no test can reach the stale-entry-then-freshness-reject path."
+      },
+      "3": {
+        "class": "real",
+        "why": "opengraph-image.tsx:29-37 passes the decoded URL symbol through unchanged and keeps invalid trove ids as-is. When data is null, TroveOgCard shows that identity (card.tsx:434,480) with symbol.toUpperCase() at :173 and in the alt text at opengraph-image.tsx:44, with no length limit or allowlist, under the Mento brand."
+      },
+      "4": {
+        "class": "real",
+        "why": "The left column is fixed at width 360 with flexShrink 0 (card.tsx:457-458), and the pill span has no truncation or maxWidth, so a long crafted symbol with no spaces can't wrap and runs past the column into the snapshot panel."
+      },
+      "5": {
+        "class": "known",
+        "why": "site-metadata.ts:22-23 prefers x-forwarded-host over host with no allowlist. This repeats the known site-metadata.ts:33 defect."
+      },
+      "6": {
+        "class": "real",
+        "why": "compactNumber (trove-og-data.ts:121-127) picks the unit before rounding. Running it in node gave 999995→'1000K', 999999→'1000K', 999996000→'1000M'."
+      },
+      "7": {
+        "class": "known",
+        "why": "The comment at opengraph-image.tsx:49 ignores data up to 5 minutes old plus max-age 60 and SWR 300 (about 11 minutes total). This is the known 'Bound the combined data and image cache age' defect at opengraph-image.tsx:54."
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 358,
+  "usd": 2.2771909999999993,
+  "scoring_usd": 0.535193
+}

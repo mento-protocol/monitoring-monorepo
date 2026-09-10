@@ -1,0 +1,114 @@
+{
+  "cell_id": "pr-2035-replay-draw2",
+  "fingerprint": {
+    "skill_digest": "89f5bdf20356c5515974ec1a6112fc4f9dfbf31cf1d60b667084f91dfbe6ec60",
+    "kind": "full",
+    "contract_digest": "59b82ee3e6d7ccf2cfbe75cb11aa40e6ec93b92a754a992adee4a1a69166a259",
+    "claude_cli": "2.1.267 (Claude Code)",
+    "codex_cli": "codex-cli 0.154.0",
+    "finder_argv_digest": "40099c93f78800efefbc46f57772ae2cbadc86b378bdd22f474945abfd7b450c",
+    "orchestrator_digest": "d460aa3fefe45e964e71b6490898ed69e69b1d6e2f99781d7eff2c8252bff61f"
+  },
+  "treatment": {
+    "skill_ref": "installed",
+    "dirty": false
+  },
+  "pr": 2035,
+  "condition": "replay",
+  "draw": 2,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": "gpt-5.6-sol@high",
+  "claims": [
+    "--quota-floor can overshoot when Arkham doesn't send a Remaining header — tier1-bulk-enrich.mjs:543-546, :1058, check at :1000; quota.remaining only updates from the X-Intel-Datapoints-Remaining header or the intel-usage poll every 500 addresses, so the run can use up the reserve the floor protects",
+    "When Arkham sends Usage and Limit but not Remaining, the headers are recorded but remaining is never derived from limit − usage, so the commit's claimed fix only works at 500-address intervals",
+    "If the start poll fails (:583, :601) and no headers arrive, remaining stays null and the floor never fires; the only sign is a warning",
+    "The intel-usage fallback overwrites the usage/limit values taken from the headers (:596-597)",
+    "A bad flag can turn into an unlimited run — tier1-bulk-enrich.mjs:116, :125-126, :107-110; `--limit --no-refresh` or `--limit` with no value falls back to Infinity, so the whole ~68k queue runs",
+    "`--limit=100` is silently ignored, because only an exact `--limit` match is recognised",
+    "Unknown flags are accepted without complaint; with --chain now optional, a typo like `--dryrun` starts a paid live run",
+    "tier2 still drops its own tags when merging into an existing label — tier2-light-forensic.mjs:672-679; it builds [...existingEntry.tags, ...derived.tags] and keeps only the first 20, so tier2's forensic tags are not written for 20-tag tier1 labels",
+    "A source that hits the page cap only prints a warning — tier1-bulk-enrich.mjs:284-287; it should be added to failedSources and the cap should be recorded in the inventory JSON",
+    "Addresses that errored are never retried on resume — tier1-bulk-enrich.mjs:809-815; {address, error} progress lines count as done, so the 10-errors-in-a-row stop (:954-968) message that the progress file 'resumes the queue' is wrong and those addresses are skipped for good",
+    "Outdated comment — run.sh:44 still says 'A dry run touches neither Arkham nor Upstash', contradicting the rewritten header",
+    "Existing issue: progress lines are written before the batched Upstash writes, so a crash mid-batch marks up to 99 paid results as done that were never written"
+  ],
+  "matched_ids": [
+    3845596185,
+    3845607361
+  ],
+  "judge_reasoning": {
+    "3845594538": "The review only notes that a crash mid-batch leaves progress lines marking unwritten results as done, and calls this pre-existing. It never identifies splice-before-pipeline dropping the batch on a transient Upstash error, or that the circuit breaker misses it.",
+    "3845596185": "Finding 4 says a source hitting the page cap only warns, and should be added to failedSources as incomplete discovery.",
+    "3845603922": "Not mentioned. The review's run.sh notes cover printf -v, exports and a stale comment, not the tfvars key prefix match.",
+    "3845603940": "Not mentioned. The review says the sanitizeEntry copies match the shared helper and raises no concern about slicing before dedup.",
+    "3845607361": "Finding 3 identifies the tier2 merge building [...existingEntry.tags, ...derived.tags] and slicing to 20, which drops forensic tags when tier1 labels already hold 20 populatedTags.",
+    "3845618202": "Not identified. The review holds up mergeRefreshEntry's ordering as correct and never flags that a tier1 refresh puts fresh Arkham tags first and truncates away tier2 ctp:/type: tags."
+  },
+  "novel": {
+    "claims": 12,
+    "novelReal": 8,
+    "novelWrong": 0,
+    "novelVague": 1,
+    "restatedKnown": 3,
+    "alreadyMatched": 2,
+    "verdicts": {
+      "1": {
+        "class": "real",
+        "why": "noteQuotaHeaders (:533-550) only sets quota.remaining from the Remaining header. The body fallback runs only at start and every INTEL_USAGE_EVERY=500 addresses (:1058), so between polls the :1000 check sees a stale value and can run up to ~500 lookups past the default floor of 50."
+      },
+      "2": {
+        "class": "real",
+        "why": "When only Usage and Limit arrive, :541-542 store them and never compute limit−usage, and remainingFromHeaders stays false. So remaining only changes when the 500-address body poll runs, even though the commit message says partial headers are fixed."
+      },
+      "3": {
+        "class": "real",
+        "why": "logIntelUsage catches the error and only warns (:583/:601). The start call at :859 doesn't abort, so with no headers remaining stays null and the :1000 floor check does nothing until a later poll succeeds. The run fails open."
+      },
+      "4": {
+        "class": "vague",
+        "why": "True that :596-597 overwrite usage and limit while remaining isn't from headers. But those fields are only read by quotaLine() for logging, so nothing functional breaks."
+      },
+      "5": {
+        "class": "real",
+        "why": "flagValue returns undefined for a missing value or one starting with '--' (:116), and numericFlag then returns the Infinity fallback (:125-126). So `--limit --no-refresh` bypasses the 'hard parse failure' fix, and :855 applies no cap."
+      },
+      "6": {
+        "class": "real",
+        "why": "flagValue uses args.indexOf(name), an exact match, so `--limit=100` is never found. It silently falls back to Infinity with no error, which means an uncapped paid run."
+      },
+      "7": {
+        "class": "real",
+        "why": "No argv validation exists anywhere. --chain now defaults to 'all' (:134), and both the script's dryRun check (:108) and run.sh:47-48 match `--dry-run` exactly, so `--dryrun` starts a live Arkham run."
+      },
+      "8": {
+        "class": "known",
+        "why": "tier2:672-679 puts existingEntry.tags before derived.tags and slices to 20. This is the known 'Preserve Tier 2 tags when merging capped labels' item."
+      },
+      "9": {
+        "class": "known",
+        "why": "At :284-287 a HARD_PAGE_CAP hit only adds a log suffix and isn't added to failedSources. Already covered by the known page-cap items (:311/:328)."
+      },
+      "10": {
+        "class": "real",
+        "why": "Error lines {address,error} are written before noteFailure (:1025-1040), and resume adds any line with an address to processed (:809-812). So addresses that tripped the new circuit breaker are skipped for good, even though its message (:966) says the progress file resumes the queue."
+      },
+      "11": {
+        "class": "real",
+        "why": "run.sh:44 (added in this diff) says a dry run touches neither Arkham nor Upstash. The rewritten header at :15-18 says the dry run does read Upstash and mint a token."
+      },
+      "12": {
+        "class": "known",
+        "why": "Progress is appended at :1007 before the batched flush (:1009), which is the same root cause as the known 'failed flush discards the batch and marks the addresses as processed' defect."
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 290,
+  "usd": 1.8254004999999998,
+  "scoring_usd": 0.7918925
+}

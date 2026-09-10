@@ -1,0 +1,101 @@
+{
+  "cell_id": "pr-2035-replay-draw1",
+  "fingerprint": {
+    "skill_digest": "89f5bdf20356c5515974ec1a6112fc4f9dfbf31cf1d60b667084f91dfbe6ec60",
+    "kind": "full",
+    "contract_digest": "59b82ee3e6d7ccf2cfbe75cb11aa40e6ec93b92a754a992adee4a1a69166a259",
+    "claude_cli": "2.1.267 (Claude Code)",
+    "codex_cli": "codex-cli 0.154.0",
+    "finder_argv_digest": "40099c93f78800efefbc46f57772ae2cbadc86b378bdd22f474945abfd7b450c",
+    "orchestrator_digest": "d460aa3fefe45e964e71b6490898ed69e69b1d6e2f99781d7eff2c8252bff61f"
+  },
+  "treatment": {
+    "skill_ref": "installed",
+    "dirty": false
+  },
+  "pr": 2035,
+  "condition": "replay",
+  "draw": 1,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": "gpt-5.6-sol@high",
+  "claims": [
+    "The quota reserve isn't enforced when Arkham doesn't send a Remaining header — `tier1-bulk-enrich.mjs:541-546`, `:1000`, `:1058`: `noteQuotaHeaders` stores the Usage and Limit headers but never recalculates `quota.remaining`; only the `/intel-usage` call every 500 addresses updates it, so the stop check at `:1000` compares against an old number (same when no quota headers arrive at all)",
+    "A numeric flag given without a value silently falls back to its default — `tier1-bulk-enrich.mjs:112-117`, `:124-126`: `--limit` on its own, or `--limit --quota-floor 50`, gives a limit of `Infinity`",
+    "`--quota-floor \"\"` or `\" \"` becomes `Number(\"\") = 0`, which removes the reserve (e.g. `--quota-floor \"$FLOOR\"` when `FLOOR` is unset)",
+    "The tier-2 tag-ordering fix gets undone when the entry is written — `tier2-light-forensic.mjs:672-682`: `mergedTags` puts `existingEntry.tags` first, then `derived.tags`, then cuts to 20, so new `ctp:` and `type:` tags are still cut off and `extract-entities.mjs:109-112` misses those slugs",
+    "Hitting the discovery page cap only logs a warning — `tier1-bulk-enrich.mjs:284-287`: a source that hits the 250k-row cap isn't added to `failedSources`, so the run doesn't abort, inconsistent with the abort-on-incomplete-discovery rule",
+    "The tier-1 refresh can also delete forensic tags — `tier1-bulk-enrich.mjs:726-729` (mirrors `src/lib/arkham.ts:374-376`): `buildWriteEntry` puts fresh Arkham tags first and cuts to 20, so the refresh will drop pass-1 `slug:`/`ctp:`/`entity:` tags on heavily tagged addresses",
+    "After the circuit breaker trips, those addresses won't be retried — `tier1-bulk-enrich.mjs:1043-1047` with `:966`: each of the 10 failures is written to the progress file before exit, so on resume they are skipped for good even though the message says the file \"resumes the queue\"",
+    "Stale comment — `run.sh:44` still says a dry run \"touches neither Arkham nor Upstash\", contradicting the new header and commit message",
+    "Addresses are written to the progress file (`:1010`) before their label writes are flushed; if Upstash fails, up to about 99 lookups that already cost quota are marked done and never written"
+  ],
+  "matched_ids": [
+    3845594538,
+    3845596185,
+    3845607361,
+    3845618202
+  ],
+  "judge_reasoning": {
+    "3845594538": "The review's 'Older problem' note matches. It says addresses are marked done before their label writes flush, so an Upstash failure permanently loses up to ~99 quota-paid lookups. That is the same permanent loss of attested writes on a transient Upstash failure.",
+    "3845596185": "Review #4 matches. It says hitting the 250k discovery page cap only logs a warning and is not added to failedSources, which is inconsistent with the abort-on-incomplete-discovery rule.",
+    "3845603922": "Not matched. The review only mentions a stale comment at run.sh:44 and never raises tfvars key prefix matching.",
+    "3845603940": "Not matched. The review says sanitizeEntry matches the shared helper but never raises slice-before-dedup in the tag cap.",
+    "3845607361": "Review #3 matches. It says mergedTags puts existingEntry.tags first and slices to 20, so the new ctp:/type: tier-2 tags are dropped for addresses that already have 20 Arkham tags.",
+    "3845618202": "Review #5 matches. It says the tier-1 refresh buildWriteEntry puts fresh Arkham tags first and cuts to 20, dropping prior ctp:/slug:/entity: forensic tags on heavily tagged addresses."
+  },
+  "novel": {
+    "claims": 9,
+    "novelReal": 5,
+    "novelWrong": 0,
+    "novelVague": 0,
+    "restatedKnown": 4,
+    "alreadyMatched": 4,
+    "verdicts": {
+      "1": {
+        "class": "real",
+        "why": "noteQuotaHeaders (tier1:532-549) only sets quota.remaining from a Remaining header and never computes limit-usage. With no Remaining header, remaining is only set by logIntelUsage at start and then every 500 addresses (:1062), so the :1000 floor check (default 50) runs on a stale number and can overspend by up to about 500."
+      },
+      "2": {
+        "class": "real",
+        "why": "flagValue (tier1:113-118) returns undefined when the next arg is missing or starts with '--', and numericFlag (:125-126) then returns the fallback, so a bare `--limit` or `--limit --quota-floor 50` gives limitArg=Infinity with no error."
+      },
+      "3": {
+        "class": "real",
+        "why": "numericFlag gets raw='' or ' ', Number() gives 0, which is finite and >=0, so it's accepted and quotaFloor=0, removing the reserve with no error. flagValue doesn't reject empty strings."
+      },
+      "4": {
+        "class": "known",
+        "why": "tier2:672-682 mergedTags does put existingEntry.tags before derived.tags and then slices to 20, but this is the known 'Preserve Tier 2 tags when merging capped labels' (tier2:395)."
+      },
+      "5": {
+        "class": "known",
+        "why": "The HARD_PAGE_CAP hit only logs '⚠ truncated' and never pushes to failedSources, but this is already listed as known (tier1:311 / :328)."
+      },
+      "6": {
+        "class": "known",
+        "why": "buildWriteEntry (tier1:~722-735) builds the tag set as [...fresh.tags, ...current.tags] and sanitizeEntry slices to 20, but this is the known 'Refresh wipes forensic tags' (tier1:774)."
+      },
+      "7": {
+        "class": "real",
+        "why": "Each error is written to the progress file as {address,error} (:1037/:1044) before noteFailure trips at 10 and exits. The resume loader (:805-813) adds every line that has an address to `processed`, so those addresses are skipped for good, even though the halt message (:966) says the file 'resumes the queue'."
+      },
+      "8": {
+        "class": "real",
+        "why": "run.sh:44, added in this diff, says a dry run 'touches neither Arkham nor Upstash', but the new header (run.sh:15-19) and main() in tier1 say the dry run does read Upstash labels and mint a REST token."
+      },
+      "9": {
+        "class": "known",
+        "why": "The progress line is appended at :1010 before flushWrites, so a failed flush leaves the addresses marked processed but never written. This restates the known 'failed flush discards the pending batch and marks the addresses as processed' (tier1:997)."
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 252,
+  "usd": 1.5453849999999998,
+  "scoring_usd": 0.5708245000000001
+}
