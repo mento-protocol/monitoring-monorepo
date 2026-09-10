@@ -1110,6 +1110,34 @@ test("the drift waiver is scaled to the 39 grid defects control scores", () => {
   delete archived.verdict_rules.control_waiver_net_flips;
   assert.equal(verdict({ contract: archived, ...scaled }).verdict, "RED");
 
+  // When the archived threshold does waive, the reason names the rule that
+  // waived it. Calling the old number `control_waiver_net_flips` would claim
+  // the archived contract registered a key it never carried.
+  assert.equal(rules.regression_net_flips, 6);
+  const archivedWaiver = verdict({
+    contract: archived,
+    row: row({
+      conditions: {
+        pipeline: condition({ found: 14 }),
+        control: condition({ ids: gridIds, found: 4, draws: 1 }),
+      },
+    }),
+    baselineRow: scaled.baselineRow,
+  });
+  assert.equal(
+    archivedWaiver.verdict,
+    "AMBER",
+    archivedWaiver.reasons.join(" | "),
+  );
+  assert.ok(
+    archivedWaiver.reasons.some((reason) =>
+      /control moved 6 defects in the same direction .*\(regression_net_flips 6\)/.test(
+        reason,
+      ),
+    ),
+    archivedWaiver.reasons.join(" | "),
+  );
+
   // A contract that claims the scaled waiver and gives it a value the gate
   // cannot read waives nothing.
   for (const value of [0, -5, "5", null]) {

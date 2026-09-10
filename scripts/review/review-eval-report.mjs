@@ -711,7 +711,11 @@ function controlMoved({ contract, row, baseline, flips, name }) {
   const scaled = rules?.control_waiver_net_flips !== undefined;
   if (scaled && Math.sign(headlineOnScope.delta) !== Math.sign(flips.delta))
     return null;
-  return `control moved ${controlFlips.delta} defects in the same direction as the headline, which moved ${headlineOnScope.delta} on the ${scope.size} defect(s) control also scored (control_waiver_net_flips ${need}); the model moved, so the score is not attributable`;
+  // Name the rule the threshold came from. An archived contract is waived on
+  // its own `regression_net_flips`, and printing that number as
+  // `control_waiver_net_flips` would claim a key the contract does not carry.
+  const ruleName = scaled ? "control_waiver_net_flips" : "regression_net_flips";
+  return `control moved ${controlFlips.delta} defects in the same direction as the headline, which moved ${headlineOnScope.delta} on the ${scope.size} defect(s) control also scored (${ruleName} ${need}); the model moved, so the score is not attributable`;
 }
 
 /** Defect id to {path, line, title, severity}, read from the frozen truth. */
