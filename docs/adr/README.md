@@ -170,6 +170,8 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0057](0057-peg-observation-advancement.md)                   | Repeated provider observations retain bounded health, never sample authority  |
 | [0058](0058-metrics-bridge-dedicated-cloud-build-executor.md) | Metrics Bridge uses a dedicated Cloud Build executor                          |
 
+| [0094](0094-isolated-bridge-transfer-observations.md) | Bridge transfers publish only complete bounded observations in an isolated loop |
+
 ### terraform / infra
 
 | ADR                                                           | Decision                                                                                                          |

@@ -12,7 +12,7 @@ Real-time monitoring infrastructure for Mento v3 on-chain pools — a multichain
 | ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | [`indexer-envio`](./indexer-envio/)                                     | Envio HyperIndex indexer — Celo, Monad, Polygon, and Ethereum reserve-yield data                            |
 | [`ui-dashboard`](./ui-dashboard/)                                       | Next.js 16 + Plotly.js multi-chain dashboard — all chains shown together, network derived from the pool URL |
-| [`metrics-bridge`](./metrics-bridge/)                                   | Hasura state + isolated CEX/RPC peg observations → Prometheus metrics and current peg decisions             |
+| [`metrics-bridge`](./metrics-bridge/)                                   | Hasura state, isolated NTT transfer observations and CEX/RPC peg observations → Prometheus metrics          |
 | [`shared-config`](./shared-config/)                                     | Public `@mento-protocol/config` package for protocol metadata, thresholds, and shared ABIs                  |
 | [`aegis`](./aegis/)                                                     | App Engine v2 alerting service + Aegis Grafana dashboards                                                   |
 | [`integration-probes`](./integration-probes/)                           | Read-only DEX aggregator and cross-chain router probes → Upstash and dashboard                              |

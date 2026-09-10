@@ -221,6 +221,7 @@ Authority: canonical
 - [`adr/0092-dependabot-npm-version-updates.md`](adr/0092-dependabot-npm-version-updates.md) — Dependabot batches npm version updates into Monday groups
 - [`adr/0093-opt-in-native-stacked-pull-requests.md`](adr/0093-opt-in-native-stacked-pull-requests.md) — Adopt native stacked pull requests through an opt-in pilot
 - [`adr/0094-grid-waiver.md`](adr/0094-grid-waiver.md) — Scale the control waiver to grid scope
+- [`adr/0094-isolated-bridge-transfer-observations.md`](adr/0094-isolated-bridge-transfer-observations.md) — Bridge transfers use isolated complete observations
 
 Authority: non-canonical
 

@@ -16,7 +16,8 @@ garden_lane: adrs-architecture
 **Status:** Accepted (Apr 2026), in force. Scope extended by
 [ADR 0042](0042-metrics-bridge-external-price-poller.md) (Jul 2026): the
 bridge additionally hosts an isolated external market-price peg-polling
-lifecycle.
+lifecycle. [ADR 0094](0094-isolated-bridge-transfer-observations.md) adds an
+isolated bridge-transfer observation lifecycle.
 **Scope:** metrics-bridge
 
 ## Context
@@ -28,9 +29,10 @@ threshold data it can't scrape.
 
 ## Decision
 
-Run a small **`metrics-bridge`** service with two isolated polling lifecycles:
+Run a small **`metrics-bridge`** service with isolated polling lifecycles:
 the primary loop reads Hasura/Envio data plus bounded RPC rebalance probes; the
-peg loop reads protected policy plus external market sources. Both expose
+peg loop reads protected policy plus external market sources; the bridge-transfer
+loop reads complete bounded transfer observations. All expose
 **Prometheus gauges** for Grafana alert rules. Prometheus labels must have
 **bounded cardinality** — never tx hashes, user addresses, or pool-specific
 free text.
