@@ -53,9 +53,11 @@ jobs:
         github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
     # Mento's self-hosted pool (`cibase`; runbook in mento-protocol/ci-infrastructure).
     # Safe to move: schedule + main-only dispatch, so no fork-authored code ever
-    # reaches the box, and the job is issue-only (`permissions: read-all` plus
-    # `issues: write`) with no cloud credential in scope. Nothing here is
-    # architecture-dependent -- ARM was a cost choice, not a requirement.
+    # reaches the box. The job block below replaces the workflow's `read-all`,
+    # so its effective scopes are exactly `contents: read` + `id-token: write` +
+    # `issues: write` -- Issues are the only mutable resource and no cloud
+    # credential is in scope. Nothing here is architecture-dependent -- ARM was
+    # a cost choice, not a requirement.
     runs-on: [self-hosted, sol-ci]
     timeout-minutes: 10
     permissions:
