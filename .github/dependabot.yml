@@ -1,15 +1,309 @@
 version: 2
 
-# Keep GitHub Actions pinned to commit SHAs (not floating tags). This file is
-# scoped to github-actions only so Dependabot opens a PR whenever an action
-# we use tags a new release, letting us refresh the pinned SHA under review.
-# npm updates for this monorepo are handled out-of-band (pnpm workspace,
-# `minimumReleaseAge: 4320` in pnpm-workspace.yaml). GitHub-issued security
-# advisories on pnpm-lock.yaml still come through as Dependabot PRs even
-# without an `npm` entry here. Those PRs use the normal CI and operator-approved
-# gates because the auto-merge lane accepts only GitHub-owned `actions/*`
-# minor and patch updates in the named group below.
+# Keep GitHub Actions pinned to commit SHAs (not floating tags). The
+# github-actions entry opens a PR whenever an action we use tags a new release,
+# letting us refresh the pinned SHA under review.
+#
+# The npm entry batches routine workspace updates into Monday group PRs so
+# they arrive as a handful of themed PRs instead of one PR per package.
+# `minimumReleaseAge: 4320` in pnpm-workspace.yaml still applies at install
+# time and is the harder of the two floors for young releases. GitHub-issued
+# security advisories on pnpm-lock.yaml arrive whenever the advisory publishes;
+# no schedule here can move them. Both npm lanes use the normal CI and
+# operator-approved merge gates because the auto-merge lane accepts only
+# GitHub-owned `actions/*` minor and patch updates in the named group below.
 updates:
+  # npm / pnpm workspace dependencies. The root directory covers every
+  # workspace member through pnpm-lock.yaml. governance-watchdog and the two
+  # alert function roots keep their own lockfiles for standalone deploys, so
+  # they need their own directories; one entry keeps a shared dependency such
+  # as viem in one grouped PR across all four roots, which is what
+  # scripts/supply-chain/version-skew-check.mjs requires of the catalog.
+  - package-ecosystem: npm
+    directories:
+      - /
+      - /governance-watchdog
+      - /alerts/infra/onchain-event-handler
+      - /alerts/infra/oncall-announcer
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00" # trunk-ignore(yamllint/quoted-strings)
+      timezone: UTC
+
+    # Security updates bypass cooldown. Version updates wait so a malicious
+    # release that gets yanked days after publication never reaches a PR.
+    cooldown:
+      default-days: 7
+      semver-major-days: 21
+      semver-minor-days: 7
+      semver-patch-days: 7
+
+    # Worst case per Monday: nine version groups plus a few ungrouped majors.
+    open-pull-requests-limit: 12
+
+    labels:
+      - dependencies
+
+    commit-message:
+      prefix: chore(deps)
+      prefix-development: chore(deps-dev)
+
+    groups:
+      # Next.js and React are coupled to the Vercel deployment contract and the
+      # React Compiler pin. Isolate every level for focused verification.
+      next-runtime:
+        applies-to: version-updates
+        patterns:
+          - next
+          - "@next/*"
+          - react
+          - react-dom
+          - "@types/react"
+          - "@types/react-dom"
+          - babel-plugin-react-compiler
+        update-types:
+          - major
+          - minor
+          - patch
+
+      # Envio CLI and hosted-service tooling gate the indexer build and deploy.
+      envio-runtime:
+        applies-to: version-updates
+        patterns:
+          - envio
+          - envio-cloud
+          - "@envio-dev/*"
+        update-types:
+          - major
+          - minor
+          - patch
+
+      # Aegis runtime framework. NestJS packages move together.
+      nest-runtime:
+        applies-to: version-updates
+        patterns:
+          - "@nestjs/*"
+          - "@willsoto/nestjs-prometheus"
+          - reflect-metadata
+          - rxjs
+        update-types:
+          - major
+          - minor
+          - patch
+
+      # Playwright updates can require a matching browser cache key in ci.yml.
+      playwright-runtime:
+        applies-to: version-updates
+        patterns:
+          - "@playwright/test"
+        update-types:
+          - major
+          - minor
+          - patch
+
+      # Chain, signing, and protocol packages: the highest-value supply-chain
+      # target in this repo. Routine minor/patch stay in one reviewed PR;
+      # majors arrive individually.
+      chain-stack:
+        applies-to: version-updates
+        patterns:
+          - viem
+          - abitype
+          - "@mento-protocol/*"
+          - "@noble/*"
+          - "@scure/*"
+        update-types:
+          - minor
+          - patch
+
+      test-toolchain:
+        applies-to: version-updates
+        dependency-type: development
+        patterns:
+          - vitest
+          - "@vitest/*"
+          - vite
+          - jest
+          - ts-jest
+          - "@types/jest"
+          - "@stryker-mutator/*"
+          - fast-check
+          - jsdom
+          - axe-core
+          - vitest-axe
+        update-types:
+          - major
+          - minor
+          - patch
+
+      lint-toolchain:
+        applies-to: version-updates
+        dependency-type: development
+        patterns:
+          - eslint
+          - "@eslint/*"
+          - "@eslint-react/*"
+          - eslint-plugin-*
+          - eslint-config-*
+          - typescript-eslint
+          - "@typescript-eslint/*"
+          - prettier
+          - knip
+          - dependency-cruiser
+          - jscpd
+          - react-doctor
+        update-types:
+          - major
+          - minor
+          - patch
+
+      # Catch-all so ungrouped production stragglers arrive as one weekly PR.
+      # Exclusions mirror the named groups above so group order never matters.
+      production-misc:
+        applies-to: version-updates
+        dependency-type: production
+        patterns:
+          - "*"
+        exclude-patterns:
+          - next
+          - "@next/*"
+          - react
+          - react-dom
+          - "@types/react"
+          - "@types/react-dom"
+          - babel-plugin-react-compiler
+          - envio
+          - envio-cloud
+          - "@envio-dev/*"
+          - "@nestjs/*"
+          - "@willsoto/nestjs-prometheus"
+          - reflect-metadata
+          - rxjs
+          - "@playwright/test"
+          - viem
+          - abitype
+          - "@mento-protocol/*"
+          - "@noble/*"
+          - "@scure/*"
+        update-types:
+          - minor
+          - patch
+
+      tooling:
+        applies-to: version-updates
+        dependency-type: development
+        patterns:
+          - "*"
+        exclude-patterns:
+          - next
+          - "@next/*"
+          - react
+          - react-dom
+          - "@types/react"
+          - "@types/react-dom"
+          - babel-plugin-react-compiler
+          - envio
+          - envio-cloud
+          - "@envio-dev/*"
+          - "@nestjs/*"
+          - "@willsoto/nestjs-prometheus"
+          - reflect-metadata
+          - rxjs
+          - "@playwright/test"
+          - viem
+          - abitype
+          - "@mento-protocol/*"
+          - "@noble/*"
+          - "@scure/*"
+          - vitest
+          - "@vitest/*"
+          - vite
+          - jest
+          - ts-jest
+          - "@types/jest"
+          - "@stryker-mutator/*"
+          - fast-check
+          - jsdom
+          - axe-core
+          - vitest-axe
+          - eslint
+          - "@eslint/*"
+          - "@eslint-react/*"
+          - eslint-plugin-*
+          - eslint-config-*
+          - typescript-eslint
+          - "@typescript-eslint/*"
+          - prettier
+          - knip
+          - dependency-cruiser
+          - jscpd
+          - react-doctor
+
+      # Security updates keep the same boundaries so a chain-stack advisory
+      # never shares a PR with an unrelated tooling fix.
+      next-runtime-security:
+        applies-to: security-updates
+        patterns:
+          - next
+          - "@next/*"
+          - react
+          - react-dom
+
+      envio-runtime-security:
+        applies-to: security-updates
+        patterns:
+          - envio
+          - envio-cloud
+          - "@envio-dev/*"
+
+      chain-stack-security:
+        applies-to: security-updates
+        patterns:
+          - viem
+          - abitype
+          - "@mento-protocol/*"
+          - "@noble/*"
+          - "@scure/*"
+
+      security-runtime:
+        applies-to: security-updates
+        dependency-type: production
+        patterns:
+          - "*"
+        exclude-patterns:
+          - next
+          - "@next/*"
+          - react
+          - react-dom
+          - envio
+          - envio-cloud
+          - "@envio-dev/*"
+          - viem
+          - abitype
+          - "@mento-protocol/*"
+          - "@noble/*"
+          - "@scure/*"
+
+      security-tooling:
+        applies-to: security-updates
+        dependency-type: development
+        patterns:
+          - "*"
+        exclude-patterns:
+          - next
+          - "@next/*"
+          - react
+          - react-dom
+          - envio
+          - envio-cloud
+          - "@envio-dev/*"
+          - viem
+          - abitype
+          - "@mento-protocol/*"
+          - "@noble/*"
+          - "@scure/*"
+
   - package-ecosystem: github-actions
     directory: /
     schedule:
