@@ -179,8 +179,12 @@ export function compareArms({
   candidate,
   contractDigest = null,
   matcherDigest = null,
+  allowScorerDrift = false,
 }) {
-  assertComparable(anchor.identity, candidate.identity, { contractDigest });
+  assertComparable(anchor.identity, candidate.identity, {
+    contractDigest,
+    allowScorerDrift,
+  });
   const paired = [...anchor.byPr.keys()]
     .filter((pr) => candidate.byPr.has(pr))
     .sort((left, right) => left - right);
@@ -269,10 +273,14 @@ const SCORING_IDENTITY = [
 export function assertComparable(
   anchor,
   candidate,
-  { contractDigest = null } = {},
+  { contractDigest = null, allowScorerDrift = false } = {},
 ) {
   for (const [field, label] of SCORING_IDENTITY) {
     if (anchor[field] === candidate[field]) continue;
+    // `--allow-scorer-drift`: the operator has read which scoring modules
+    // changed between the two plans and vouches that matching did not. The
+    // difference is still printed as a warning; it never disappears.
+    if (field === "matcher_digest" && allowScorerDrift) continue;
     throw new Error(
       `the two runs were planned against different ${label} (${short(anchor[field])} vs ${short(candidate[field])}); a matched-id difference between them would not be a finder difference`,
     );
@@ -293,6 +301,12 @@ export function assertComparable(
 /** Differences that leave the comparison readable but shape how it reads. */
 export function identityWarnings(anchor, candidate, matcherDigest = null) {
   const warnings = [];
+  // Only reachable under --allow-scorer-drift; without it this is a refusal.
+  if (anchor.matcher_digest !== candidate.matcher_digest) {
+    warnings.push(
+      `the two runs were planned against different scorers (${short(anchor.matcher_digest)} vs ${short(candidate.matcher_digest)}); accepted by --allow-scorer-drift, so read a matched-id difference as finder-or-scorer until the scoring diff is checked`,
+    );
+  }
   // Both arms agree with each other or `assertComparable` already refused, so
   // this names a scorer edit between the runs and this checkout — the ordinary
   // case on the branch a probe is planned on. See `assertComparable`.
@@ -406,7 +420,12 @@ function render(report) {
   return `${lines.join("\n")}\n`;
 }
 
-export function buildReport({ anchorDir, candidateDir, repoRoot }) {
+export function buildReport({
+  anchorDir,
+  candidateDir,
+  repoRoot,
+  allowScorerDrift = false,
+}) {
   const { contract, digest: contractDigest } = loadContract(
     path.resolve(repoRoot, DEFAULT_CONTRACT_PATH),
   );
@@ -418,6 +437,7 @@ export function buildReport({ anchorDir, candidateDir, repoRoot }) {
     candidate,
     contractDigest,
     matcherDigest,
+    allowScorerDrift,
   });
   return {
     contract_digest: contractDigest,
@@ -436,6 +456,7 @@ export function main(argv = process.argv.slice(2), env = process.env) {
       candidate: { type: "string" },
       root: { type: "string" },
       json: { type: "boolean" },
+      "allow-scorer-drift": { type: "boolean" },
       help: { type: "boolean", short: "h" },
     },
     strict: true,
@@ -452,6 +473,10 @@ Reads committed evidence only: no model call, no network, no mutation.
   --candidate DIR  Detail directory of the run under test
   --root PATH      Repository root the contract is read from (default: cwd)
   --json           Print one machine-readable object
+  --allow-scorer-drift
+                   Compare across a scorer-digest change between the two plans
+                   (printed as a warning instead of refused); use only after
+                   reading the scoring diff between the two harness revisions
 `,
     );
     return values.help ? 0 : 1;
@@ -460,6 +485,7 @@ Reads committed evidence only: no model call, no network, no mutation.
     anchorDir: values.anchor,
     candidateDir: values.candidate,
     repoRoot: values.root ?? env.PWD ?? process.cwd(),
+    allowScorerDrift: values["allow-scorer-drift"] === true,
   });
   process.stdout.write(
     values.json ? `${JSON.stringify(report, null, 2)}\n` : render(report),

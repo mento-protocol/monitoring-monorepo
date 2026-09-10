@@ -201,6 +201,41 @@ test("a scoring-input mismatch is refused, not warned about", () => {
   }
 });
 
+test("--allow-scorer-drift turns the scorer refusal into a warning, nothing else", () => {
+  // A probe is planned on a branch that edits scoring modules, so its scorer
+  // digest never equals the anchor's. The operator who has read that diff can
+  // accept it; the difference is still printed, and the contract and the
+  // calibration set are still refused.
+  const results = { 11: { matched: [1] } };
+  const base = {
+    finder: "sol@high",
+    cells: [11],
+    results,
+    contractDigest: "aaaa1111",
+  };
+  const anchor = readArm({ dir: writeArm(base), contract });
+  const drifted = readArm({
+    dir: writeArm({ ...base, finder: "astra@low", matcherDigest: "other" }),
+    contract,
+  });
+  assert.throws(() => compareArms({ anchor, candidate: drifted }), /scorers/);
+  const report = compareArms({
+    anchor,
+    candidate: drifted,
+    allowScorerDrift: true,
+  });
+  assert.equal(report.totals.prs, 1);
+  assert.ok(report.warnings.some((w) => /allow-scorer-drift/.test(w)));
+  const other = readArm({
+    dir: writeArm({ ...base, calibrationDigest: "other-calibset" }),
+    contract,
+  });
+  assert.throws(
+    () => compareArms({ anchor, candidate: other, allowScorerDrift: true }),
+    /calibration sets/,
+  );
+});
+
 test("an arm that disagrees with the loaded contract is refused; the scorer warns", () => {
   // Both arms can agree with each other and still be read through bits neither
   // of them ran under: every count here is recomputed from what this process

@@ -301,7 +301,11 @@ It refuses, rather than warns, when the two plans name different contracts,
 scorers or judge calibration sets, and when either arm's contract differs from
 the one this process loaded. Those decide what a matched id counts as — the
 frozen ids and the recall denominator, what matches one, and what qualified the
-judge — so a net computed across a difference in them answers no question. It
+judge — so a net computed across a difference in them answers no question.
+`--allow-scorer-drift` turns the scorer refusal alone into a warning: the
+scorer digest covers every scoring module, so a harness edit that never
+touches matching still moves it, and the operator who has read that diff can
+accept the comparison with the difference printed. It
 also refuses a run whose `row.json` is missing, records a judge that failed
 calibration, or records a suspected leak, and one whose cells carry
 `leak.suspected` or no `novel.novelWrong` count. The canonical baseline path
