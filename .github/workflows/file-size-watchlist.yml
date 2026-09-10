@@ -28,7 +28,11 @@ concurrency:
 jobs:
   sync-issue:
     name: Synchronize actionable file-size drift
-    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    # Mento's self-hosted pool (`cibase`; runbook in mento-protocol/ci-infrastructure).
+    # Safe to move: schedule + dispatch only, issue-only writes, no cloud
+    # credential. `gh label create` below needs the GitHub CLI, which the
+    # self-hosted runner image ships for exactly this drop-in reason.
+    runs-on: [self-hosted, sol-ci]
     timeout-minutes: 10
     permissions:
       contents: read

@@ -74,7 +74,12 @@ jobs:
     # workflow_dispatch on a non-main ref is refused before this job runs, even if
     # the `if:` main guard above is stripped on that branch.
     environment: sentry-pipeline
-    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    # Mento's self-hosted pool (`cibase`; runbook in mento-protocol/ci-infrastructure).
+    # Safe to move: schedule + dispatch only, main-gated by both the `if:` above
+    # and the sentry-pipeline Environment, and read-only against Sentry. The
+    # pnpm store restore below resolves to the pool's local cache server, so
+    # this workflow is also the migration's first exercise of that path.
+    runs-on: [self-hosted, sol-ci]
     timeout-minutes: 15
     steps:
       - name: Check kill switch

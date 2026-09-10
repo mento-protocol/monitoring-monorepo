@@ -17,7 +17,12 @@ jobs:
     # Upstream events are wake-ups only. No upstream code, output, artifact,
     # or cache enters this writer. Every decision re-reads GitHub API state.
     if: github.repository == 'mento-protocol/monitoring-monorepo' && github.ref == 'refs/heads/main'
-    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    # Mento's self-hosted pool (`cibase`; runbook in mento-protocol/ci-infrastructure).
+    # Safe to move: `workflow_run` + dispatch, main-only, and per the note above
+    # no upstream code, output, artifact or cache enters this writer -- the job
+    # is a github-script call against re-read API state. Nothing is built here,
+    # so the runner's architecture is irrelevant.
+    runs-on: [self-hosted, sol-ci]
     timeout-minutes: 5
     permissions:
       contents: read
