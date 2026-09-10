@@ -542,6 +542,26 @@ test("every contract problem is collected, not just the first", () => {
   assert.match(joined, /regression_net_flips must be a positive number/);
 });
 
+test("the corroboration rule may not ask more than the flip rule", () => {
+  // `promote_corroboration_net_flips` asks `replay` to move in the same
+  // direction as a `pipeline` gain. Above `regression_net_flips` it would ask
+  // `replay`'s 39 grid defects for a larger move than the headline's 51 have
+  // to make. The contract refuses that as policy; such a value is clearable.
+  const contract = clone(committed.contract);
+  contract.verdict_rules.promote_corroboration_net_flips =
+    contract.verdict_rules.regression_net_flips + 1;
+  assert.match(
+    checkFixtures({ contract, repoRoot }).problems.join("\n"),
+    /promote_corroboration_net_flips must not exceed verdict_rules\.regression_net_flips/,
+  );
+  const fractional = clone(committed.contract);
+  fractional.verdict_rules.promote_corroboration_net_flips = 1.5;
+  assert.match(
+    checkFixtures({ contract: fractional, repoRoot }).problems.join("\n"),
+    /promote_corroboration_net_flips must be a whole number of defects/,
+  );
+});
+
 test("a contract that is not an object fails closed", () => {
   for (const bad of [null, [], "contract"]) {
     const result = checkFixtures({ contract: bad, repoRoot });

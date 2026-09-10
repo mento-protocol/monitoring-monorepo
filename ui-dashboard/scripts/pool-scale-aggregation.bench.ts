@@ -1,4 +1,4 @@
-import { bench, describe } from "vitest";
+import { describe, test } from "vitest";
 
 import type { Network } from "@/lib/networks";
 import type { Pool, PoolSnapshotWindow } from "@/lib/types";
@@ -172,7 +172,11 @@ const timing = {
 console.info(`timing ${JSON.stringify(timing)}`);
 
 describe("PoolDailySnapshot client aggregation at the 2026-07-26 production shape", () => {
-  bench("slice and reduce 3,197 rows into 24h/7d/30d pool maps", () => {
-    aggregateProductionShape();
+  test("slice and reduce 3,197 rows into 24h/7d/30d pool maps", async ({
+    bench,
+  }) => {
+    await bench("aggregate production shape", () => {
+      aggregateProductionShape();
+    }).run();
   });
 });

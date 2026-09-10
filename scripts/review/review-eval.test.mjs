@@ -3339,6 +3339,60 @@ test("resolveBaseline uses the same eligibility rule as an explicit baseline", (
   );
 });
 
+test("an uncorroborated PROMOTE never becomes the anchor", () => {
+  // The gate lives in `verdict()`, and both baseline paths read it there:
+  // `revalidateRow` recomputes the verdict from the row's own numbers, so a
+  // hand-written PROMOTE is refused, and `resolveBaseline` re-anchors on the
+  // verdict a row actually carries.
+  const prs = contract.fixtures.map((fixture) => fixture.pr);
+  const allIds = scorableIdsFor(prs);
+  const nonGridIds = scorableIdsFor(
+    contract.fixtures
+      .filter((fixture) => fixture.grid !== true)
+      .map((fixture) => fixture.pr),
+  );
+  // Every gained defect sits on a PR `replay` never scores, so `pipeline`
+  // clears the flip threshold with nothing corroborating it.
+  const gained = new Set(
+    nonGridIds.slice(0, contract.verdict_rules.regression_net_flips),
+  );
+  const anchor = makeRow({
+    executedAt: "2026-09-08T10:41:07Z",
+    matchedIds: allIds.filter((id) => !gained.has(id)),
+    fullMatrix: true,
+  });
+  const claimed = makeRow({
+    executedAt: "2026-12-08T10:41:07Z",
+    matchedIds: allIds,
+    fullMatrix: true,
+    verdict: "PROMOTE",
+  });
+  const checked = revalidateRow({
+    contract,
+    row: claimed,
+    repoRoot,
+    ledgerRows: [anchor, claimed],
+  });
+  assert.equal(checked.verdict, "GREEN", JSON.stringify(checked.problems));
+  assert.equal(checked.ok, false);
+  assert.ok(
+    checked.problems.some((problem) =>
+      problem.startsWith(
+        "row.verdict is PROMOTE; the row's own numbers give GREEN",
+      ),
+    ),
+    JSON.stringify(checked.problems),
+  );
+  // The ledger therefore only ever holds the recomputed verdict, and that row
+  // leaves the anchor where it was.
+  const recorded = { ...claimed, verdict: checked.verdict };
+  const later = makeRow({ executedAt: "2027-01-08T10:41:07Z" });
+  assert.equal(
+    resolveBaseline({ rows: [anchor, recorded], row: later }).executed_at,
+    anchor.executed_at,
+  );
+});
+
 test("resolveBaseline anchors on the first full row until a PROMOTE re-anchors", () => {
   const anchor = makeRow({ executedAt: "2026-09-08T10:00:00Z" });
   const later = makeRow({ executedAt: "2026-10-08T10:00:00Z" });
