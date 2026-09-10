@@ -12,7 +12,6 @@ import {
   CDP_MARKETS,
   CDP_TROVE_BY_ID,
   CDP_TROVE_BY_ID_WITHOUT_TX,
-  CDP_TROVE_OPERATIONS,
   CDP_TROVE_SCHEMA_FIELDS,
 } from "@/lib/queries";
 import {
@@ -24,9 +23,9 @@ import {
   type CdpTroveListRow,
   type CdpTroveOperationEventRow,
 } from "../../../../_lib/types";
+import { useTroveOperations } from "../_lib/use-trove-operations";
 import { cdpSymbolSlug } from "../../../../_lib/format";
 import {
-  CDP_TROVE_OPERATIONS_REQUEST_LIMIT,
   makeTroveEntityId,
   paginateTroveOperations,
   reorderTroveOperationsChronologically,
@@ -64,6 +63,7 @@ type CdpTroveByIdResponse = {
 };
 
 type CdpTroveSchemaFieldsResponse = {
+  TroveOperationEventType?: { fields: Array<{ name: string }> } | null;
   TroveType: {
     fields: Array<{ name: string }>;
   } | null;
@@ -71,10 +71,6 @@ type CdpTroveSchemaFieldsResponse = {
 
 type CdpInterestBatchByIdResponse = {
   InterestBatch: CdpInterestBatch[];
-};
-
-type CdpTroveOperationsResponse = {
-  TroveOperationEvent: CdpTroveOperationEventRow[];
 };
 
 function isOpenTroveStatus(status: string): boolean {
@@ -319,16 +315,11 @@ export function TroveDetailClient({
   // The redemption-queue panel's own ladder fetch (#2084) — never the market
   // page's cache, so a direct deep-link renders the ladder cold.
   const queue = useTroveQueue(collateral, troveEntityId);
-  const operations = useGQL<CdpTroveOperationsResponse>(
-    collateral == null || ledger.supported ? null : CDP_TROVE_OPERATIONS,
-    collateral == null || ledger.supported
-      ? undefined
-      : {
-          instanceId: collateral.id,
-          troveId,
-          limit: CDP_TROVE_OPERATIONS_REQUEST_LIMIT,
-        },
-    { timeoutMs: HASURA_TIMEOUT_MS },
+  const operations = useTroveOperations(
+    collateral?.id ?? null,
+    troveId,
+    !ledger.supported,
+    troveSchema,
   );
   const { rows: operationRows, truncated } = useMemo(
     () =>
@@ -394,7 +385,7 @@ function TroveDetailView({
   batch: BatchRateProps;
   ledger: TroveLedgerState;
   queue: TroveQueueState;
-  operations: ReturnType<typeof useGQL<CdpTroveOperationsResponse>>;
+  operations: ReturnType<typeof useTroveOperations>;
   operationRows: CdpTroveOperationEventRow[];
   truncated: boolean;
 }) {
@@ -527,7 +518,7 @@ function TroveEventHistory({
   ledger: TroveLedgerState;
   collateral: CdpCollateral;
   trove: CdpTrove;
-  operations: ReturnType<typeof useGQL<CdpTroveOperationsResponse>>;
+  operations: ReturnType<typeof useTroveOperations>;
   operationRows: CdpTroveOperationEventRow[];
   truncated: boolean;
 }) {
@@ -576,6 +567,7 @@ function TroveEventHistory({
       isLoading={operations.isLoading}
       error={operations.error}
       probeState={ledger.probeState}
+      orderingNotice={operations.orderingNotice}
       // `operations.data != null`, not `operationRows.length > 0`: the
       // latter can't tell "never loaded" from "loaded, confirmed empty"
       // (see the prop's doc comment on TroveOperationsList).

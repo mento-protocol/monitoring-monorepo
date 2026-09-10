@@ -246,9 +246,11 @@ export const registeredMetricNames = (tsSource) =>
   );
 
 export const referencedMetricNames = (tfSource) =>
-  [...tfSource.matchAll(/\bmento_(?:pool|cdp|peg)_[a-z0-9_]*[a-z0-9]\b/g)].map(
-    (match) => match[0],
-  );
+  [
+    ...tfSource.matchAll(
+      /\bmento_(?:pool|cdp|peg|ntt_bridge)_[a-z0-9_]*[a-z0-9]\b/g,
+    ),
+  ].map((match) => match[0]);
 
 const intEnv = (name, fallback) => {
   const raw = process.env[name];

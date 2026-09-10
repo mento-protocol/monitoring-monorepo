@@ -96,19 +96,11 @@ function compareEventIdOrdinal(a: string, b: string): number {
   return 0;
 }
 
-/** Numeric-aware chronological comparator, DESCENDING (newest first) —
- *  matches `CDP_TROVE_OPERATIONS`'s intended `order_by`. Hasura's own
- *  `order_by: [{ timestamp: desc }, { id: desc }]` ties break on the id
- *  STRING: an unpadded id like `..._100_9` sorts AFTER `..._100_10` as text
- *  even though log 10 happened after log 9 in the same block — the wrong
- *  chronology whenever two operations share a timestamp. Re-sorting
- *  client-side with this comparator (see
- *  {@link reorderTroveOperationsChronologically}) fixes display order for
- *  whatever page Hasura returns. It can't recover a row Hasura already
- *  dropped at the row-limit boundary using the wrong tiebreak — the
- *  `TroveOperationEvent` entity has no queryable `logIndex` field to order
- *  by server-side; that needs an indexer-side schema change (tracked
- *  separately, see the PR's Deferrals section). */
+/** Descending numeric chronology for both query variants. Legacy Hasura
+ *  sorts unpadded IDs lexically, so this repairs the returned page's display
+ *  order. It cannot recover rows omitted at the legacy query's limit. The
+ *  numeric query orders by timestamp, blockNumber and logIndex before the
+ *  limit; the same comparator preserves that order on the client. */
 export function compareTroveOperationRowsDesc(
   a: { id: string; timestamp: string },
   b: { id: string; timestamp: string },

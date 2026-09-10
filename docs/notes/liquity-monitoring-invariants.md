@@ -140,3 +140,22 @@ promotion, record this evidence in the rollout tracker:
 A caught-up status, successful deployment job, or new-event sample alone does
 not satisfy the historical replay requirement. Keep rollout issue #2103 open
 until producer promotion and consumer deployment evidence are complete.
+
+Run the isolated server ordering regression with
+`node ui-dashboard/scripts/test-trove-ordering-hasura.mjs`. It requires Docker
+and a free local port 8080. It uses the production query strings against
+Hasura v2.46.0 and disposable Postgres data. The harness generates a temporary
+database password and passes it through `TROVE_ORDERING_FIXTURE_PASSWORD` to
+its Docker processes. No credential setup is needed. Each of two 1,001-row histories
+puts log 9/10 or block 9/10 at the 1,000-row boundary. The numeric query must
+include 10 and omit 9; the legacy query does the reverse. The script removes
+only its uniquely named containers after the check. It cannot target a hosted
+endpoint. This fixture proves server selection under the cap, not historical
+completeness of a deployed indexer.
+
+The interim reader selects numeric ordering only after the shared schema probe
+confirms `logIndex`. A missing field, pending probe, or probe failure selects
+the legacy query. A failed probe has its own warning. During query changes,
+the last successful response for the same trove remains visible, with its
+original ordering limitation until a numeric response arrives. The separate
+complete-ledger reader still disables interim polling when supported.

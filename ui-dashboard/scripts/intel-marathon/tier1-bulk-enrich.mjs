@@ -70,6 +70,8 @@
  *                      ARKHAM_API_KEY required
  *   --limit N          cap the number of addresses enriched this run
  *   --quota-floor N    stop when Intel Label Remaining <= N (default 50)
+ *   --retry-errors     retry error-only progress histories in the normal queue;
+ *                      may spend additional Intel Label quota
  *   --no-refresh       skip step 1; only enrich addresses with no label
  *   --allow-partial-discovery
  *                      proceed even when a discovery source errored (the run
@@ -108,6 +110,7 @@ const MAX_CONSECUTIVE_ERRORS = 10; // circuit breaker on a wedged/exhausted API
 const args = process.argv.slice(2);
 const dryRun = args.includes("--dry-run");
 const refresh = !args.includes("--no-refresh");
+const retryErrors = args.includes("--retry-errors");
 const allowPartialDiscovery = args.includes("--allow-partial-discovery");
 
 function flagValue(name) {
@@ -245,7 +248,7 @@ async function main() {
   const progressFile = `${OUT_DIR}/tier1-progress-${scope}.jsonl`;
 
   // Resume: load already-processed addresses from prior runs.
-  const { processed, exists } = loadProcessed(progressFile);
+  const { processed, exists } = loadProcessed(progressFile, { retryErrors });
   if (exists)
     console.log(`→ Resuming: ${processed.size} addresses already processed`);
 
@@ -324,7 +327,7 @@ async function main() {
       );
       console.error(`  quota: ${quotaLine()}`);
       console.error(
-        `  Re-run once the quota resets; ${progressFile} resumes the queue.`,
+        `  Re-run once the quota resets; ${progressFile} resumes unattempted work. Default resume skips recorded errors; add --retry-errors to retry them (additional Intel Label quota may be spent).`,
       );
       await flushWrites();
       process.exit(2);
@@ -349,7 +352,7 @@ async function main() {
     console.error(`  last error: ${message}`);
     console.error(`  quota: ${quotaLine()}`);
     console.error(
-      `  Check GET /subscription/intel-usage; ${progressFile} resumes the queue.`,
+      `  Check GET /subscription/intel-usage; ${progressFile} resumes unattempted work. Default resume skips recorded errors; add --retry-errors to retry them (additional Intel Label quota may be spent).`,
     );
     process.exit(3);
   }
@@ -488,7 +491,9 @@ async function main() {
     console.log(
       `⚠ Stopped early: Intel Label remaining hit the --quota-floor of ${quotaFloor}.`,
     );
-    console.log(`  Re-run after the quota resets; ${progressFile} resumes it.`);
+    console.log(
+      `  Re-run after the quota resets; ${progressFile} resumes unattempted work. Default resume skips recorded errors; add --retry-errors to retry them (additional Intel Label quota may be spent).`,
+    );
   }
   console.log(`✓ Tier 1 scope=${scope} done in ${elapsed}s.`);
   console.log(`  queued:        ${candidates.length}`);

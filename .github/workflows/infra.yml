@@ -16,6 +16,7 @@ on:
       - scripts/**
       - .github/workflows/**
       - terraform.stacks.json
+      - shared-config/**
   pull_request:
     branches: [main]
     paths:
@@ -29,6 +30,7 @@ on:
       - scripts/**
       - .github/workflows/**
       - terraform.stacks.json
+      - shared-config/**
 
 # See ci.yml for the concurrency rationale: PR runs cancel on new pushes
 # to the same PR ref; push/dispatch events use a SHA-unique group so they
