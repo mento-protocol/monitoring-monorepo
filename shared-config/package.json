@@ -16,7 +16,8 @@
     "fx-calendar.json",
     "chain-metadata.json",
     "aggregators.json",
-    "oracle-reporters.json"
+    "oracle-reporters.json",
+    "bridge-thresholds.json"
   ],
   "publishConfig": {
     "access": "public"
@@ -75,6 +76,11 @@
     "./protocol-fee": {
       "types": "./dist/protocol-fee.d.ts",
       "default": "./dist/protocol-fee.js"
+    },
+    "./bridge-thresholds.json": "./bridge-thresholds.json",
+    "./bridge-status": {
+      "types": "./dist/bridge-status.d.ts",
+      "default": "./dist/bridge-status.js"
     }
   },
   "scripts": {

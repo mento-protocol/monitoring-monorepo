@@ -20,6 +20,12 @@ Real-time monitoring infrastructure for Mento v3 on-chain pools — a multichain
 | [`alerts-oncall-announcer`](./alerts/infra/oncall-announcer/)           | Splunk On-Call rotations → Slack and the support-engineer usergroup                                         |
 | [`governance-watchdog`](./governance-watchdog/)                         | Cloud Function watching Mento Governance events → Discord/Telegram (own GCP project)                        |
 
+Bridge progression thresholds and timestamp precedence live in
+`@mento-protocol/config/bridge-status`. The dashboard keeps presentation local.
+`shared-config/bridge-thresholds.json` exposes the same seconds for rule tooling.
+Zero, missing and non-finite timestamps are unknown. Negative epochs remain
+usable; future timestamps produce negative ages and never imply a stuck transfer.
+
 ## Architecture
 
 ```text

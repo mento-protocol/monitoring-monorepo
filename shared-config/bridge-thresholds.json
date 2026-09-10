@@ -1,0 +1,6 @@
+{
+  "PENDING": 3600,
+  "SENT": 3600,
+  "ATTESTED": 900,
+  "QUEUED_INBOUND": 86400
+}

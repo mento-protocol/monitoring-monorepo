@@ -4,15 +4,6 @@ import type {
   BridgeTransfer,
 } from "./types";
 
-const STUCK_THRESHOLD_SECONDS_BY_STATUS = {
-  PENDING: 60 * 60,
-  SENT: 60 * 60,
-  ATTESTED: 15 * 60,
-  // NTT inbound rate-limit windows default to 24h. Keep queued transfers on
-  // that longer clock because manually resubmitting the VAA cannot bypass it.
-  QUEUED_INBOUND: 24 * 60 * 60,
-} as const;
-
 /**
  * Canonical order for status-filter UI rendering. Ordered lifecycle-
  * ascending so the pills read as a pipeline (pre-flight → in-flight →
@@ -54,36 +45,7 @@ export const ALL_BRIDGE_STATUSES = [
  * destination-first race have no `sentTimestamp`, so `firstSeenAt` remains the
  * final fallback clock for rows that never progressed.
  */
-export function deriveBridgeStatus(
-  transfer: Pick<BridgeTransfer, "status" | "sentTimestamp" | "firstSeenAt"> &
-    Partial<Pick<BridgeTransfer, "lastUpdatedAt" | "lastAttestedTimestamp">>,
-  nowSeconds = Math.floor(Date.now() / 1000),
-): BridgeStatusOverlay {
-  const { status } = transfer;
-  const inFlight =
-    status === "PENDING" ||
-    status === "SENT" ||
-    status === "ATTESTED" ||
-    status === "QUEUED_INBOUND";
-  if (!inFlight) return status;
-  const lastAttested =
-    status === "ATTESTED"
-      ? parseBridgeTimestamp(transfer.lastAttestedTimestamp)
-      : null;
-  const lastUpdated = parseBridgeTimestamp(transfer.lastUpdatedAt);
-  const sent = parseBridgeTimestamp(transfer.sentTimestamp);
-  const firstSeen = parseBridgeTimestamp(transfer.firstSeenAt);
-  const ts = lastAttested ?? lastUpdated ?? sent ?? firstSeen;
-  if (ts === null || !Number.isFinite(ts)) return status;
-  const threshold = STUCK_THRESHOLD_SECONDS_BY_STATUS[status];
-  return nowSeconds - ts > threshold ? "STUCK" : status;
-}
-
-function parseBridgeTimestamp(raw: string | null | undefined): number | null {
-  if (raw == null) return null;
-  const timestamp = Number(raw);
-  return Number.isFinite(timestamp) && timestamp !== 0 ? timestamp : null;
-}
+export { deriveBridgeStatus } from "@mento-protocol/config/bridge-status";
 
 const STATUS_CLASSES: Record<BridgeStatusOverlay, string> = {
   PENDING: "bg-slate-800 text-slate-400",
