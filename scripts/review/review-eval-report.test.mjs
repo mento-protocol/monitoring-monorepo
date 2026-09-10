@@ -289,7 +289,7 @@ test("verdict applies the pre-registered rule to every branch", () => {
       row: row({ judge_calibration: { agreement: 33, total: 40 } }),
       baseline: baseline(),
       expect: "AMBER",
-      reason: /below 35\/40/,
+      reason: /below 37\/40/,
     },
     {
       // The scorer writes this note verbatim; see scorePlan in
@@ -422,7 +422,7 @@ test("a suspected leak is AMBER before any RED condition is read", () => {
 
 test("an uncalibrated baseline is refused before it ranks anything", () => {
   // The baseline supplies baseHeadline, every flip, and the wrong-claim
-  // denominator. Below 35/40 those numbers are unusable, so they may not turn a
+  // denominator. Below 37/40 those numbers are unusable, so they may not turn a
   // calibrated candidate RED or PROMOTE.
   const unusable = baseline({
     judge_calibration: { agreement: 33, total: 40 },
@@ -435,7 +435,7 @@ test("an uncalibrated baseline is refused before it ranks anything", () => {
   assert.equal(regressed.verdict, "AMBER", JSON.stringify(regressed.reasons));
   assert.match(
     regressed.reasons.join("\n"),
-    /baseline judge calibration 33\/40 is below 35\/40/,
+    /baseline judge calibration 33\/40 is below 37\/40/,
   );
   const promoted = verdict({
     contract,
@@ -606,7 +606,7 @@ test("a judge below its calibration floor gates every score verdict", () => {
   });
   assert.equal(belowP1.verdict, "AMBER");
   assert.ok(
-    belowP1.reasons.some((reason) => /below 35\/40/.test(reason)),
+    belowP1.reasons.some((reason) => /below 37\/40/.test(reason)),
     belowP1.reasons.join(" | "),
   );
   assert.ok(!belowP1.reasons.some((reason) => /p1_recall_floor/.test(reason)));
@@ -642,7 +642,7 @@ test("a judge below its calibration floor gates every score verdict", () => {
     }),
   });
   assert.equal(canary.verdict, "AMBER");
-  assert.match(canary.reasons[0], /below 35\/40/);
+  assert.match(canary.reasons[0], /below 37\/40/);
 
   // A failed run is still INCOMPLETE: it has no matrix for a judge to read.
   assert.equal(
