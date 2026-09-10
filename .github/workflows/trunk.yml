@@ -19,7 +19,11 @@ permissions: read-all
 jobs:
   trunk:
     name: Code Quality
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    # Mento's self-hosted pool (`cibase`; runbook in mento-protocol/ci-infrastructure).
+    # `Code Quality` is a REQUIRED check; see the note in ci.yml for why that is
+    # accepted. Trunk downloads and caches its own linter toolchain, so this job
+    # is one of the bigger beneficiaries of a warm, long-lived cache.
+    runs-on: [self-hosted, sol-ci]
     timeout-minutes: 10
     permissions:
       actions: read

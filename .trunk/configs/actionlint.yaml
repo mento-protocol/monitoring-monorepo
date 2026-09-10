@@ -4,3 +4,9 @@ self-hosted-runner:
     - blacksmith-2vcpu-ubuntu-2404
     - blacksmith-4vcpu-ubuntu-2404-arm
     - blacksmith-2vcpu-ubuntu-2404-arm
+    # Mento's own runner pool (`cibase`, Hetzner HEL1). Selected with the label
+    # pair `[self-hosted, sol-ci]`; `self-hosted` is a built-in label actionlint
+    # already knows, so only the discriminator is registered here. This file is
+    # the one `Code Quality` reads -- .github/actionlint.yaml carries the same
+    # list for a bare `actionlint` run and the two must not drift apart.
+    - sol-ci

@@ -258,8 +258,8 @@ test("structural mutations fail closed at each M2 boundary", () => {
   mutateOnce(
     root,
     ".github/workflows/ci.yml",
-    "  shared:\n    name: Quality Checks (shared-config)\n    needs: changes\n    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.shared == 'true'\n    runs-on: blacksmith-2vcpu-ubuntu-2404\n    timeout-minutes: 10\n    permissions:\n      contents: read",
-    "  shared:\n    name: Quality Checks (shared-config)\n    needs: changes\n    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.shared == 'true'\n    runs-on: blacksmith-2vcpu-ubuntu-2404\n    timeout-minutes: 10\n    permissions:\n      checks: write\n      contents: read",
+    "  shared:\n    name: Quality Checks (shared-config)\n    needs: changes\n    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.shared == 'true'\n    runs-on: [self-hosted, sol-ci]\n    timeout-minutes: 10\n    permissions:\n      contents: read",
+    "  shared:\n    name: Quality Checks (shared-config)\n    needs: changes\n    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.shared == 'true'\n    runs-on: [self-hosted, sol-ci]\n    timeout-minutes: 10\n    permissions:\n      checks: write\n      contents: read",
     /approved PR authority/u,
   );
   mutateOnce(
@@ -307,8 +307,8 @@ test("structural mutations fail closed at each M2 boundary", () => {
   mutateOnce(
     root,
     ".github/workflows/ci.yml",
-    "  shared:\n    name: Quality Checks (shared-config)\n    needs: changes\n    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.shared == 'true'\n    runs-on: blacksmith-2vcpu-ubuntu-2404\n    timeout-minutes: 10\n    permissions:\n      contents: read",
-    "  shared:\n    name: Quality Checks (shared-config)\n    needs: changes\n    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.shared == 'true'\n    runs-on: blacksmith-2vcpu-ubuntu-2404\n    timeout-minutes: 10\n    permissions:\n      issues: write\n      contents: read",
+    "  shared:\n    name: Quality Checks (shared-config)\n    needs: changes\n    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.shared == 'true'\n    runs-on: [self-hosted, sol-ci]\n    timeout-minutes: 10\n    permissions:\n      contents: read",
+    "  shared:\n    name: Quality Checks (shared-config)\n    needs: changes\n    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.shared == 'true'\n    runs-on: [self-hosted, sol-ci]\n    timeout-minutes: 10\n    permissions:\n      issues: write\n      contents: read",
     /approved PR authority/u,
   );
   mutateOnce(
@@ -363,8 +363,8 @@ test("structural mutations fail closed at each M2 boundary", () => {
   mutateOnce(
     root,
     ".github/workflows/ci.yml",
-    "    runs-on: blacksmith-2vcpu-ubuntu-2404\n    timeout-minutes: 5\n    permissions:\n      contents: read\n      actions: read",
-    "    runs-on: blacksmith-2vcpu-ubuntu-2404-arm\n    timeout-minutes: 5\n    permissions:\n      contents: read\n      actions: read",
+    "    runs-on: [self-hosted, sol-ci]\n    timeout-minutes: 5\n    permissions:\n      contents: read\n      actions: read",
+    "    runs-on: ubuntu-latest\n    timeout-minutes: 5\n    permissions:\n      contents: read\n      actions: read",
     /dependency-free x64 pnpm cache writer/u,
   );
   mutateOnce(
