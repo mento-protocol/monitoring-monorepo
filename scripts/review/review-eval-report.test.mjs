@@ -1058,6 +1058,246 @@ test("the drift waiver points the way the regression it waives points", () => {
   );
 });
 
+test("the drift waiver is scaled to the 39 grid defects control scores", () => {
+  // Control scores the 39 grid defects of the 51 the headline scores, so drift
+  // spread evenly over the suite reaches six flips on the headline and five on
+  // control. Under the headline's own `regression_net_flips` that was a RED the
+  // control could not waive; `control_waiver_net_flips` asks control for its
+  // share of the same movement. ADR 0094.
+  const scaled = {
+    row: row({
+      conditions: {
+        pipeline: condition({ found: 14 }),
+        control: condition({ ids: gridIds, found: 5, draws: 1 }),
+      },
+    }),
+    baselineRow: baseline({
+      conditions: {
+        pipeline: condition({ found: 20 }),
+        control: condition({ ids: gridIds, found: 10, draws: 1 }),
+      },
+    }),
+  };
+  assert.equal(rules.control_waiver_net_flips, 5);
+  const waived = verdict({ contract, ...scaled });
+  assert.equal(waived.verdict, "AMBER", waived.reasons.join(" | "));
+  assert.ok(
+    waived.reasons.some((reason) =>
+      /control moved 5 defects in the same direction .*control_waiver_net_flips 5/.test(
+        reason,
+      ),
+    ),
+    waived.reasons.join(" | "),
+  );
+
+  // One flip below the scaled threshold still explains nothing.
+  const short = verdict({
+    contract,
+    row: row({
+      conditions: {
+        pipeline: condition({ found: 14 }),
+        control: condition({ ids: gridIds, found: 6, draws: 1 }),
+      },
+    }),
+    baselineRow: scaled.baselineRow,
+  });
+  assert.equal(short.verdict, "RED", short.reasons.join(" | "));
+
+  // An archived contract never registered the key, and `--report --contract`
+  // has to reproduce the verdict that run saw: the old threshold stands, so
+  // five flips do not waive.
+  const archived = structuredClone(contract);
+  delete archived.verdict_rules.control_waiver_net_flips;
+  assert.equal(verdict({ contract: archived, ...scaled }).verdict, "RED");
+
+  // When the archived threshold does waive, the reason names the rule that
+  // waived it. Calling the old number `control_waiver_net_flips` would claim
+  // the archived contract registered a key it never carried.
+  assert.equal(rules.regression_net_flips, 6);
+  const archivedWaiver = verdict({
+    contract: archived,
+    row: row({
+      conditions: {
+        pipeline: condition({ found: 14 }),
+        control: condition({ ids: gridIds, found: 4, draws: 1 }),
+      },
+    }),
+    baselineRow: scaled.baselineRow,
+  });
+  assert.equal(
+    archivedWaiver.verdict,
+    "AMBER",
+    archivedWaiver.reasons.join(" | "),
+  );
+  assert.ok(
+    archivedWaiver.reasons.some((reason) =>
+      /control moved 6 defects in the same direction .*\(regression_net_flips 6\)/.test(
+        reason,
+      ),
+    ),
+    archivedWaiver.reasons.join(" | "),
+  );
+
+  // A contract that claims the scaled waiver and gives it a value the gate
+  // cannot read waives nothing.
+  for (const value of [0, -5, 5.5, "5", null]) {
+    const broken = structuredClone(contract);
+    broken.verdict_rules.control_waiver_net_flips = value;
+    assert.equal(
+      verdict({ contract: broken, ...scaled }).verdict,
+      "RED",
+      String(value),
+    );
+  }
+});
+
+test("the drift waiver refuses when the headline gained on control's scope", () => {
+  // Control and the headline can both fall overall and still fall on disjoint
+  // defects. Here the headline loses eleven non-grid defects and gains five on
+  // the grid: a net loss of six, the RED line. Control loses five on the grid,
+  // which clears the scaled threshold and points the same way as the headline's
+  // net loss. On the 39 defects control actually scored the headline moved the
+  // other way, so control's drift explains none of the loss it would waive.
+  const gridScope = new Set(gridIds);
+  const nonGridIds = allIds.filter((id) => !gridScope.has(id));
+  const offGrid = verdict({
+    contract,
+    row: row({
+      conditions: {
+        pipeline: splitCondition({
+          ids: allIds,
+          foundIds: [nonGridIds[0], ...gridIds.slice(0, 15)],
+        }),
+        control: splitCondition({
+          ids: gridIds,
+          foundIds: gridIds.slice(0, 5),
+          draws: 1,
+        }),
+      },
+    }),
+    baselineRow: baseline({
+      conditions: {
+        pipeline: splitCondition({
+          ids: allIds,
+          foundIds: [
+            ...nonGridIds,
+            ...gridIds.slice(0, 5),
+            ...gridIds.slice(10, 15),
+          ],
+        }),
+        control: splitCondition({
+          ids: gridIds,
+          foundIds: gridIds.slice(0, 10),
+          draws: 1,
+        }),
+      },
+    }),
+  });
+  assert.equal(
+    offGrid.verdict,
+    "RED",
+    `${offGrid.verdict}: ${offGrid.reasons.join(" | ")}`,
+  );
+  assert.ok(
+    !offGrid.reasons.some((reason) => /control moved/.test(reason)),
+    offGrid.reasons.join(" | "),
+  );
+});
+
+test("an archived contract keeps the aggregate direction test alone", () => {
+  // The slice half of the direction test arrived with the scaled threshold and
+  // binds the same contracts. Here the headline loses six non-grid defects and
+  // control loses six on the grid, where the headline did not move at all. A
+  // contract carrying the key refuses the waiver on the slice; an archived one
+  // has to replay the AMBER its run saw.
+  const gridScope = new Set(gridIds);
+  const nonGridIds = allIds.filter((id) => !gridScope.has(id));
+  const offGrid = {
+    row: row({
+      conditions: {
+        pipeline: splitCondition({
+          ids: allIds,
+          foundIds: gridIds.slice(0, 10),
+        }),
+        control: splitCondition({
+          ids: gridIds,
+          foundIds: gridIds.slice(0, 4),
+          draws: 1,
+        }),
+      },
+    }),
+    baselineRow: baseline({
+      conditions: {
+        pipeline: splitCondition({
+          ids: allIds,
+          foundIds: [...nonGridIds.slice(0, 6), ...gridIds.slice(0, 10)],
+        }),
+        control: splitCondition({
+          ids: gridIds,
+          foundIds: gridIds.slice(0, 10),
+          draws: 1,
+        }),
+      },
+    }),
+  };
+  const current = verdict({ contract, ...offGrid });
+  assert.equal(current.verdict, "RED", current.reasons.join(" | "));
+
+  const archived = structuredClone(contract);
+  delete archived.verdict_rules.control_waiver_net_flips;
+  const replayed = verdict({ contract: archived, ...offGrid });
+  assert.equal(replayed.verdict, "AMBER", replayed.reasons.join(" | "));
+  assert.ok(
+    replayed.reasons.some((reason) =>
+      /control moved 6 defects in the same direction as the headline, which moved 0 on the/.test(
+        reason,
+      ),
+    ),
+    replayed.reasons.join(" | "),
+  );
+});
+
+test("control drift at the scaled threshold takes a gain row off the ranking", () => {
+  // The waiver is not only a RED softener. `worldMoved` pushes AMBER whichever
+  // way the run moved, so scaling the threshold down to control's own scope
+  // also widens the set of gain rows that lose their rankability. Here the
+  // headline gains one defect, well inside the noise floor, and control gains
+  // five on the grid. ADR 0094 records the widening.
+  const gainRow = {
+    row: row({
+      conditions: {
+        pipeline: condition({ found: 21 }),
+        control: condition({ ids: gridIds, found: 10, draws: 1 }),
+      },
+    }),
+    baselineRow: baseline({
+      conditions: {
+        pipeline: condition({ found: 20 }),
+        control: condition({ ids: gridIds, found: 5, draws: 1 }),
+      },
+    }),
+  };
+  const drifted = verdict({ contract, ...gainRow });
+  assert.equal(drifted.verdict, "AMBER", drifted.reasons.join(" | "));
+  assert.ok(
+    drifted.reasons.some((reason) =>
+      /control moved -5 defects in the same direction .*control_waiver_net_flips 5/.test(
+        reason,
+      ),
+    ),
+    drifted.reasons.join(" | "),
+  );
+
+  // Under the pre-ADR 0094 threshold the same drift left the row rankable.
+  const archived = structuredClone(contract);
+  delete archived.verdict_rules.control_waiver_net_flips;
+  assert.equal(
+    verdict({ contract: archived, ...gainRow }).verdict,
+    "GREEN",
+    "the old threshold left a five-flip control drift alone",
+  );
+});
+
 test("the report states the verdict, the table, and the defects that flipped", () => {
   const candidate = row({
     verdict: "RED",

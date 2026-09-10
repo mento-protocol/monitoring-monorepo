@@ -347,6 +347,7 @@
     "noise_floor_defects": 3,
     "regression_net_flips": 6,
     "promote_corroboration_net_flips": 3,
+    "control_waiver_net_flips": 5,
     "p1_recall_floor": 0.6,
     "wrong_claims_ratio_ceiling": 2,
     "canary_min_matched_grid": 16

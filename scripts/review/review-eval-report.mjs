@@ -642,30 +642,50 @@ function restrictCondition(condition, ids) {
 }
 
 /**
+ * The net flips control must move before it waives the headline's regression,
+ * or null when no readable threshold is registered.
+ *
+ * The rule binds the contracts that carry it. A contract from before ADR 0094
+ * never registered the key, and `--report --contract <archived>` has to
+ * reproduce the verdict that run saw, so an absent key leaves the old
+ * `regression_net_flips` threshold in place. A key that is present and
+ * unreadable is the other case: the contract claims the scaled waiver and the
+ * gate cannot apply it, so nothing waives the RED.
+ */
+function controlWaiverThreshold(rules) {
+  const scaled = rules?.control_waiver_net_flips;
+  if (scaled === undefined) return rules?.regression_net_flips;
+  return Number.isSafeInteger(scaled) && scaled > 0 ? scaled : null;
+}
+
+/**
  * The control condition isolates model drift. When control and the headline
- * move together by at least the flip threshold, the world moved and the score
+ * move together by at least the waiver threshold, the world moved and the score
  * is not attributable to the skill.
  *
- * The direction test reads the delta of the rule being waived: `flips`, over
- * every defect the headline scored. It is a waiver for that RED and nothing
- * else, so control has to have moved the way the loss did. Testing against the
- * headline restricted to control's own defects looks tighter and is not: since
+ * The direction test has two halves, and a contract carrying
+ * `control_waiver_net_flips` needs both. The first reads
+ * the delta of the rule being waived: `flips`, over every defect the headline
+ * scored. It is a waiver for that RED and nothing else, so control has to have
+ * moved the way the loss did. The second reads the headline restricted to the
+ * defects control scored. Since
  * [ADR 0090](../../docs/adr/0090-canonical-eval-matrix-freshness-floor.md)
- * `control` runs the grid alone, so a grid gain sitting beside a larger
- * non-grid loss is a net regression whose grid slice points the other way, and
- * a waiver keyed to that slice would wave it through.
+ * `control` runs the grid alone, so the two conditions can both fall overall
+ * while the headline's loss sits off the grid; when the headline gained over
+ * the defects control scored, control's drift explains none of the loss it
+ * would waive. Neither half asks the two to flip the same defect ids, because
+ * control runs a different condition and the drift is aggregate. Replacing the
+ * first half with the second would be wrong the other way round: a grid gain
+ * sitting beside a larger non-grid loss is a net regression whose grid slice
+ * points away from it, and a waiver keyed to the slice alone would wave it
+ * through.
  *
- * The grid numbers are still worth printing, so the reason says how much of the
- * headline's movement control was in a position to see. Nothing thresholds
- * them.
- *
- * What this does not fix: the threshold asks control to move
- * `regression_net_flips` defects on its 39, so model drift spread across the
- * grid and the three non-grid fixtures can push the headline past the RED line
- * while control's share of it stays under the bar. That direction is a RED that
- * should have been AMBER — an investigation, not a false pass — and scaling the
- * pre-registered threshold to the scope is a verdict-rule change with its own
- * decision to record. Issue 2333 carries it.
+ * The magnitude test reads `control_waiver_net_flips`, which is scaled to
+ * control's 39 grid defects rather than the headline's 51
+ * ([ADR 0094](../../docs/adr/0094-grid-waiver.md)).
+ * Asking control for the headline's own `regression_net_flips` let drift spread
+ * evenly across the suite push the headline past the RED line while control's
+ * share of it stayed under the bar, which is a RED that should have been AMBER.
  */
 function controlMoved({ contract, row, baseline, flips, name }) {
   if (!baseline || !flips || flips.delta === 0) return null;
@@ -674,20 +694,28 @@ function controlMoved({ contract, row, baseline, flips, name }) {
   if (!control || !baseControl) return null;
   const controlFlips = compareConditions(baseControl, control);
   if (controlFlips.delta === 0) return null;
-  const sameDirection =
-    Math.sign(controlFlips.delta) === Math.sign(flips.delta);
-  if (
-    sameDirection &&
-    Math.abs(controlFlips.delta) >= contract.verdict_rules.regression_net_flips
-  ) {
-    const scope = new Set(controlFlips.ids);
-    const headlineOnScope = compareConditions(
-      restrictCondition(baseline.conditions?.[name], scope),
-      restrictCondition(row.conditions?.[name], scope),
-    );
-    return `control moved ${controlFlips.delta} defects in the same direction as the headline, which moved ${headlineOnScope.delta} on the ${scope.size} defect(s) control also scored; the model moved, so the score is not attributable`;
-  }
-  return null;
+  const rules = contract.verdict_rules;
+  const need = controlWaiverThreshold(rules);
+  if (!Number.isFinite(need)) return null;
+  if (Math.sign(controlFlips.delta) !== Math.sign(flips.delta)) return null;
+  if (Math.abs(controlFlips.delta) < need) return null;
+  const scope = new Set(controlFlips.ids);
+  const headlineOnScope = compareConditions(
+    restrictCondition(baseline.conditions?.[name], scope),
+    restrictCondition(row.conditions?.[name], scope),
+  );
+  // The slice half arrived with the scaled threshold and binds the same
+  // contracts, for the same reason: `--report --contract <archived>` has to
+  // reproduce the verdict that run saw, and a run under the old rule was
+  // waived on the aggregate test alone.
+  const scaled = rules?.control_waiver_net_flips !== undefined;
+  if (scaled && Math.sign(headlineOnScope.delta) !== Math.sign(flips.delta))
+    return null;
+  // Name the rule the threshold came from. An archived contract is waived on
+  // its own `regression_net_flips`, and printing that number as
+  // `control_waiver_net_flips` would claim a key the contract does not carry.
+  const ruleName = scaled ? "control_waiver_net_flips" : "regression_net_flips";
+  return `control moved ${controlFlips.delta} defects in the same direction as the headline, which moved ${headlineOnScope.delta} on the ${scope.size} defect(s) control also scored (${ruleName} ${need}); the model moved, so the score is not attributable`;
 }
 
 /** Defect id to {path, line, title, severity}, read from the frozen truth. */

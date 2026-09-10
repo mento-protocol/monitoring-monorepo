@@ -19,6 +19,7 @@ const REQUIRED_VERDICT_RULES = [
   "noise_floor_defects",
   "regression_net_flips",
   "promote_corroboration_net_flips",
+  "control_waiver_net_flips",
   "p1_recall_floor",
   "wrong_claims_ratio_ceiling",
   "canary_min_matched_grid",
@@ -179,6 +180,31 @@ export function plannedMatrix(contract, kind) {
     // paired ranking evidence, and `pipeline` still covers every fixture.
     ["control", grid.map((fixture) => ({ pr: fixture.pr, draws: 1 }))],
   ]);
+}
+
+/**
+ * Scorable defects on the grid fixtures and on every fixture.
+ *
+ * `control` scores the grid alone while the headline scores all of them, so the
+ * two counts are the scopes ADR 0094 scales the control-drift waiver between.
+ * Both are read from the contract's own id lists, so a fixture added or dropped
+ * moves them without a second place to edit.
+ */
+function scorableScopes(contract) {
+  const fixtures = Array.isArray(contract?.fixtures) ? contract.fixtures : [];
+  const count = (list) =>
+    list.reduce(
+      (sum, fixture) =>
+        sum +
+        (Array.isArray(fixture?.scorable_ids)
+          ? fixture.scorable_ids.length
+          : 0),
+      0,
+    );
+  return {
+    grid: count(fixtures.filter((fixture) => fixture?.grid === true)),
+    total: count(fixtures),
+  };
 }
 
 export function scorableTotals(contract) {
@@ -617,6 +643,38 @@ function checkShape({ contract, problems }) {
         problems.push(
           "verdict_rules.promote_corroboration_net_flips must not exceed verdict_rules.regression_net_flips",
         );
+      }
+    }
+    // The control-drift waiver counts defects on `control`'s scope, which is
+    // the grid alone. ADR 0094 scales it to that scope: at most
+    // `regression_net_flips`, because a waiver looser per defect than the rule
+    // it waives excuses a smaller proportional move than the one that fired,
+    // and at least the flip rule's share of the grid, because a waiver tighter
+    // than that asks control for a larger per-defect move than the headline
+    // made. Both bounds move with the fixture set, so widening the grid fails
+    // validation until the number is pre-registered again.
+    const waiver = rules.control_waiver_net_flips;
+    if (Number.isFinite(waiver)) {
+      if (!Number.isSafeInteger(waiver)) {
+        problems.push(
+          "verdict_rules.control_waiver_net_flips must be a whole number of defects",
+        );
+      }
+      if (Number.isFinite(rules.regression_net_flips)) {
+        if (waiver > rules.regression_net_flips) {
+          problems.push(
+            "verdict_rules.control_waiver_net_flips must not exceed verdict_rules.regression_net_flips",
+          );
+        }
+        const scopes = scorableScopes(contract);
+        const floor = Math.ceil(
+          (rules.regression_net_flips * scopes.grid) / scopes.total,
+        );
+        if (scopes.grid > 0 && scopes.total > 0 && waiver < floor) {
+          problems.push(
+            `verdict_rules.control_waiver_net_flips must be at least ${floor}, the flip rule's share of the ${scopes.grid} grid defect(s) of ${scopes.total}`,
+          );
+        }
       }
     }
   }

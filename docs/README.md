@@ -221,6 +221,7 @@ Authority: canonical
 - [`docs/adr/0091-promote-needs-replay-corroboration.md`](adr/0091-promote-needs-replay-corroboration.md) — A PROMOTE needs replay corroboration before it re-anchors
 - [`docs/adr/0092-dependabot-npm-version-updates.md`](adr/0092-dependabot-npm-version-updates.md) — Dependabot batches npm version updates into Monday groups
 - [`docs/adr/0093-opt-in-native-stacked-pull-requests.md`](adr/0093-opt-in-native-stacked-pull-requests.md) — Adopt native stacked pull requests through an opt-in pilot
+- [`docs/adr/0094-grid-waiver.md`](adr/0094-grid-waiver.md) — Scale the control waiver to grid scope
 
 Authority: non-canonical
 

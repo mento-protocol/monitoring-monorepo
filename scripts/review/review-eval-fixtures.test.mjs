@@ -562,6 +562,63 @@ test("the corroboration rule may not ask more than the flip rule", () => {
   );
 });
 
+test("the control waiver stays between the flip rule and its grid share", () => {
+  // `control_waiver_net_flips` waives a regression measured on every scorable
+  // defect using a move measured on the grid alone. Above `regression_net_flips`
+  // it would excuse a RED on a smaller per-defect move than the one that fired
+  // it; below the flip rule's share of the grid it would demand a larger
+  // per-defect move from control than the headline had to make. Both bounds are
+  // derived from the contract's own id lists, so widening the grid fails
+  // validation until the number is registered again. ADR 0094.
+  const gridScorable = committed.contract.fixtures
+    .filter((fixture) => fixture.grid === true)
+    .reduce((sum, fixture) => sum + fixture.scorable_ids.length, 0);
+  const totalScorable = committed.contract.fixtures.reduce(
+    (sum, fixture) => sum + fixture.scorable_ids.length,
+    0,
+  );
+  const floor = Math.ceil(
+    (committed.contract.verdict_rules.regression_net_flips * gridScorable) /
+      totalScorable,
+  );
+  assert.equal(
+    committed.contract.verdict_rules.control_waiver_net_flips,
+    floor,
+    "the registered waiver is the flip rule's share of the grid",
+  );
+
+  const tooLoose = clone(committed.contract);
+  tooLoose.verdict_rules.control_waiver_net_flips =
+    tooLoose.verdict_rules.regression_net_flips + 1;
+  assert.match(
+    checkFixtures({ contract: tooLoose, repoRoot }).problems.join("\n"),
+    /control_waiver_net_flips must not exceed verdict_rules\.regression_net_flips/,
+  );
+
+  const tooTight = clone(committed.contract);
+  tooTight.verdict_rules.control_waiver_net_flips = floor - 1;
+  assert.match(
+    checkFixtures({ contract: tooTight, repoRoot }).problems.join("\n"),
+    new RegExp(
+      `control_waiver_net_flips must be at least ${floor}, the flip rule's share of the ${gridScorable} grid defect\\(s\\) of ${totalScorable}`,
+    ),
+  );
+
+  const fractional = clone(committed.contract);
+  fractional.verdict_rules.control_waiver_net_flips = 5.5;
+  assert.match(
+    checkFixtures({ contract: fractional, repoRoot }).problems.join("\n"),
+    /control_waiver_net_flips must be a whole number of defects/,
+  );
+
+  const missing = clone(committed.contract);
+  delete missing.verdict_rules.control_waiver_net_flips;
+  assert.match(
+    checkFixtures({ contract: missing, repoRoot }).problems.join("\n"),
+    /control_waiver_net_flips must be a positive number/,
+  );
+});
+
 test("a contract that is not an object fails closed", () => {
   for (const bad of [null, [], "contract"]) {
     const result = checkFixtures({ contract: bad, repoRoot });

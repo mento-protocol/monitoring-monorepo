@@ -727,13 +727,13 @@ generalization.
 
 ## Read the verdict
 
-| verdict        | it means                                                                                                                                                                                                                      | do this                                                                   |
-| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| **GREEN**      | nothing below fired                                                                                                                                                                                                           | merge the ledger PR                                                       |
-| **AMBER**      | recall below baseline but McNemar not significant; or fewer than three paired defects, which never ranks; or the run did not complete; or judge calibration under 37/40; or a leak signal; or `control` moved with `pipeline` | merge the row, do not rank on it, read the reason                         |
-| **RED**        | `b − c ≥ 6` net flips; or pooled P1 recall under 0.60 where P1 was measured; or wrong claims at twice the baseline rate, the baseline floored at one; or a condition found nothing on two or more PRs                         | open a priority issue naming the flipped defects before changing anything |
-| **PROMOTE**    | `c − b ≥ 6` on the headline, the change was intentional, and where the headline is `pipeline` a net gain of at least 3 on `replay` corroborates it                                                                            | re-anchor the baseline in a PR that says what changed and why             |
-| **INCOMPLETE** | the run failed, or a canary did not finish                                                                                                                                                                                    | fix the harness and re-run; the row stays as a trace                      |
+| verdict        | it means                                                                                                                                                                                                                                                                 | do this                                                                   |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------- |
+| **GREEN**      | nothing below fired                                                                                                                                                                                                                                                      | merge the ledger PR                                                       |
+| **AMBER**      | recall below baseline but McNemar not significant; or fewer than three paired defects, which never ranks; or the run did not complete; or judge calibration under 37/40; or a leak signal; or `control` moved with `pipeline` by at least `control_waiver_net_flips` (5) | merge the row, do not rank on it, read the reason                         |
+| **RED**        | `b − c ≥ 6` net flips; or pooled P1 recall under 0.60 where P1 was measured; or wrong claims at twice the baseline rate, the baseline floored at one; or a condition found nothing on two or more PRs                                                                    | open a priority issue naming the flipped defects before changing anything |
+| **PROMOTE**    | `c − b ≥ 6` on the headline, the change was intentional, and where the headline is `pipeline` a net gain of at least 3 on `replay` corroborates it                                                                                                                       | re-anchor the baseline in a PR that says what changed and why             |
+| **INCOMPLETE** | the run failed, or a canary did not finish                                                                                                                                                                                                                               | fix the harness and re-run; the row stays as a trace                      |
 
 **A `pipeline` flip `replay` contradicts is unproven; a flip on a defect
 `replay` never scores is unchecked.**
@@ -805,6 +805,19 @@ the comparison was refused. It never reads as green, and it never promotes. The
 same floor bounds the PROMOTE corroboration check: `replay` corroborates only
 over defects both runs scored, and fewer than `noise_floor_defects` of them
 corroborate nothing.
+
+The control-drift waiver counts against a scope of its own.
+`verdict_rules.control_waiver_net_flips` (5) is the flip rule's share of the 39
+grid defects `control` scores, of the 51 the headline scores: 6 × 39 / 51,
+rounded up so the waiver stays at least as strict per defect as the RED it
+waives. Control must also have moved the way the headline's whole loss moved,
+which a grid gain beside a larger non-grid loss does not, and the headline must
+have moved that way on the grid too, which a loss sitting entirely off the grid
+does not. The waiver reads gains as well as losses, so a run inside the noise
+floor beside a drifting control reads AMBER and is not ranked on.
+[ADR 0094](../adr/0094-grid-waiver.md) records the
+decision, and `--check-fixtures` refuses a value outside the bounds the fixture
+set derives, so widening the grid re-registers the number.
 
 Do not use a two-proportion z-test on these numbers. The comparison is paired
 at the defect level, which is the whole point of freezing the fixtures.
