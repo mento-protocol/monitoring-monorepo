@@ -48,8 +48,9 @@ Add an `npm` update entry to `.github/dependabot.yml`:
   `@scure/*`, and `@mento-protocol/*` minor and patch in one reviewed PR with
   majors arriving alone; `test-toolchain` and `lint-toolchain` batch
   development tooling; `production-misc` and `tooling` catch the rest.
-- Security-update groups mirror the same boundaries (`chain-stack-security`,
-  `next-runtime-security`, `envio-runtime-security`, `security-runtime`,
+- Security-update groups mirror the same boundaries (`next-runtime-security`,
+  `envio-runtime-security`, `nest-runtime-security`,
+  `playwright-runtime-security`, `chain-stack-security`, `security-runtime`,
   `security-tooling`).
 - Every npm PR stays on the operator-authorized merge path. The
   [ADR 0081](0081-narrow-dependabot-auto-merge-exception.md) lane requires the

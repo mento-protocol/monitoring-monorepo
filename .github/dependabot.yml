@@ -257,6 +257,19 @@ updates:
           - envio-cloud
           - "@envio-dev/*"
 
+      nest-runtime-security:
+        applies-to: security-updates
+        patterns:
+          - "@nestjs/*"
+          - "@willsoto/nestjs-prometheus"
+          - reflect-metadata
+          - rxjs
+
+      playwright-runtime-security:
+        applies-to: security-updates
+        patterns:
+          - "@playwright/test"
+
       chain-stack-security:
         applies-to: security-updates
         patterns:
@@ -279,6 +292,11 @@ updates:
           - envio
           - envio-cloud
           - "@envio-dev/*"
+          - "@nestjs/*"
+          - "@willsoto/nestjs-prometheus"
+          - reflect-metadata
+          - rxjs
+          - "@playwright/test"
           - viem
           - abitype
           - "@mento-protocol/*"
@@ -298,6 +316,11 @@ updates:
           - envio
           - envio-cloud
           - "@envio-dev/*"
+          - "@nestjs/*"
+          - "@willsoto/nestjs-prometheus"
+          - reflect-metadata
+          - rxjs
+          - "@playwright/test"
           - viem
           - abitype
           - "@mento-protocol/*"
