@@ -35,9 +35,12 @@ the previous snapshot and last-success time. Startup has no route samples and
 last-success zero. The separate observation-error signal starts at one.
 
 Wait 30 seconds after each attempt. Export a 45-second freshness limit from the
-30-second cadence plus 15-second timeout. Consumers must require error zero,
-last-success greater than zero, and observation age at most this limit. Pool
-health and peg freshness cannot establish bridge-transfer freshness.
+30-second cadence plus 15-second timeout. Direct consumers must require error zero, last-success greater than zero,
+and observation age at most this runtime limit. Prometheus consumers must also
+allow for the configured scrape interval: the current 30-second Alloy scrape
+adds 30 seconds, for a 75-second sampled-data limit. Alert tooling must check
+that allowance against the scrape configuration. Pool health and peg freshness
+cannot establish bridge-transfer freshness.
 
 Share status thresholds and timestamp precedence through
 `@mento-protocol/config/bridge-status`. Labels use only chain IDs 137, 143 and
