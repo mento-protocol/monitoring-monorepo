@@ -60,7 +60,7 @@
     "@eslint/js": "^10.0.1",
     "@lhci/cli": "^0.15.1",
     "@next/eslint-plugin-next": "^16.3.4",
-    "@playwright/test": "^1.60.0",
+    "@playwright/test": "^1.62.1",
     "@size-limit/file": "^12.1.0",
     "@stryker-mutator/core": "9.6.1",
     "@stryker-mutator/vitest-runner": "9.6.1",
