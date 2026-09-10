@@ -5,6 +5,7 @@
 
 import { readFileSync } from "node:fs";
 import "./pr-stack-ready-state.test.mjs";
+import "./pr-stack-recover.test.mjs";
 
 import {
   classifyCheck,
@@ -2262,6 +2263,41 @@ test("summarizes ready state when all blocking surfaces are clean", () => {
   assertEqual(summary.optional.ready, false);
   assertEqual(summary.optional.items[0].name, "jscpd");
   assertEqual(summary.statusChecks.skipped.length, 1);
+});
+
+test("blocks confirmed BEHIND even with mergeable head and green required checks", () => {
+  for (const mergeStateStatus of [
+    "BEHIND",
+    "CLEAN",
+    "BLOCKED",
+    "UNKNOWN",
+    undefined,
+  ]) {
+    const summary = summarizeReadyState({
+      pr: {
+        ...basePr,
+        mergeStateStatus,
+        autoMergeRequest: { enabledAt: "2026-05-21T13:24:00Z" },
+        statusCheckRollup: [
+          { name: "lint", conclusion: "SUCCESS", status: "COMPLETED" },
+        ],
+      },
+      reactions: [
+        {
+          content: "+1",
+          created_at: "2026-05-21T13:23:00Z",
+          user: { login: "chatgpt-codex-connector[bot]" },
+        },
+      ],
+    });
+    assertEqual(summary.ready, mergeStateStatus !== "BEHIND");
+    assertEqual(summary.pr.mergeStateStatus, mergeStateStatus ?? null);
+    assertEqual(summary.pr.autoMergeEnabledAt, "2026-05-21T13:24:00Z");
+    assertEqual(
+      summary.required.blockers.some((item) => item.kind === "base-update"),
+      mergeStateStatus === "BEHIND",
+    );
+  }
 });
 
 test("summarizes merged pull requests as terminal ready", () => {

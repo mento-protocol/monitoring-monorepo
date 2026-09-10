@@ -11,7 +11,10 @@ import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { mock } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
-import { evaluateStackGate } from "./pr-stack-ready-state.mjs";
+import {
+  classifyStackObservation,
+  evaluateStackGate,
+} from "./pr-stack-ready-state.mjs";
 
 const layers = [1, 2].map((number) => ({
   number,
@@ -38,6 +41,156 @@ const state = (number) => {
   };
 };
 const feedback = (value) => ({ ready: value.feedbackReady });
+// Report real API state, never a requested merge or a UI loading indicator.
+const observed = {
+  ...state(2),
+  pr: { ...state(2).pr, mergeStateStatus: "CLEAN" },
+  required: { blockers: [] },
+};
+assert.equal(classifyStackObservation(observed).state, "AWAITING_USER_MERGE");
+for (const terminal of ["MERGED", "CLOSED"])
+  assert.equal(
+    classifyStackObservation({
+      ...observed,
+      pr: { ...observed.pr, state: terminal },
+    }).state,
+    terminal,
+  );
+assert.equal(
+  classifyStackObservation({
+    ...observed,
+    pr: { ...observed.pr, autoMergeEnabledAt: "2026-09-10T12:00:00Z" },
+  }).state,
+  "MERGE_REQUESTED",
+);
+assert.equal(
+  classifyStackObservation({
+    ...observed,
+    pr: { ...observed.pr, state: null },
+    uiSpinner: false,
+  }).state,
+  "UNKNOWN",
+);
+assert.equal(
+  classifyStackObservation({
+    ...observed,
+    pr: { ...observed.pr, mergeStateStatus: null },
+  }).state,
+  "UNKNOWN",
+);
+assert.equal(
+  classifyStackObservation({
+    ...observed,
+    pr: { ...observed.pr, mergeStateStatus: "UNKNOWN" },
+  }).state,
+  "UNKNOWN",
+);
+assert.equal(
+  classifyStackObservation({
+    ...observed,
+    pr: { ...observed.pr, mergeStateStatus: "BEHIND" },
+  }).state,
+  "BASE_UPDATE_REQUIRED",
+);
+for (const key of ["headRefOid", "baseRefOid", "headRefName", "baseRefName"])
+  assert.equal(
+    classifyStackObservation(
+      { ...observed, pr: { ...observed.pr, [key]: "changed" } },
+      observed,
+    ).state,
+    "HEAD_OR_BASE_CHANGED",
+  );
+for (const [checkState, expected] of [
+  ["pending", "CHECKS_PENDING"],
+  ["fail", "CHECKS_FAILED"],
+]) {
+  const blocked = {
+    ...observed,
+    ready: false,
+    required: { blockers: [{ kind: "check", name: "ci", state: checkState }] },
+  };
+  assert.equal(classifyStackObservation(blocked).state, expected);
+}
+const canceledWithReplacement = {
+  ...observed,
+  ready: false,
+  required: {
+    blockers: [
+      { kind: "check", name: "ci", state: "fail" },
+      { kind: "check", name: "ci", state: "pending" },
+    ],
+  },
+};
+assert.equal(
+  classifyStackObservation(canceledWithReplacement).state,
+  "CHECKS_FAILED",
+);
+assert.match(
+  await evaluateStackGate(
+    observed,
+    "owner/repo",
+    async () => ({
+      ...canceledWithReplacement,
+      pr: { ...canceledWithReplacement.pr, ...layers[0] },
+    }),
+    feedback,
+  ),
+  /^PENDING /,
+);
+
+assert.equal(
+  classifyStackObservation({ ...observed, feedbackReady: false }).state,
+  "FEEDBACK_BLOCKED",
+);
+const changedMembership = structuredClone(observed);
+changedMembership.stack.layers[0].headRefOid = "c".repeat(40);
+assert.equal(
+  classifyStackObservation(changedMembership, observed).state,
+  "SNAPSHOT_CHANGED",
+);
+const mergeRequested = (number) => ({
+  ...state(number),
+  pr: {
+    ...state(number).pr,
+    mergeStateStatus: "CLEAN",
+    autoMergeEnabledAt: "2026-09-10T12:00:00Z",
+  },
+});
+assert.match(
+  await evaluateStackGate(
+    mergeRequested(2),
+    "owner/repo",
+    async (args) => mergeRequested(Number(args.prArg)),
+    feedback,
+  ),
+  /^PASS .*MERGE_REQUESTED:/,
+);
+assert.match(
+  await evaluateStackGate(
+    observed,
+    "owner/repo",
+    async (args) => ({ ...state(Number(args.prArg)), feedbackReady: false }),
+    feedback,
+  ),
+  /^PENDING .*FEEDBACK_BLOCKED:/,
+);
+for (const missing of ["headRefOid", "baseRefOid"])
+  assert.equal(
+    classifyStackObservation({
+      ...observed,
+      pr: { ...observed.pr, [missing]: null },
+    }).state,
+    "UNKNOWN",
+  );
+assert.equal(
+  classifyStackObservation({
+    ...observed,
+    ready: false,
+    uiSpinner: false,
+    pr: { ...observed.pr, autoMergeEnabledAt: "2026-09-10T12:00:00Z" },
+  }).state,
+  "UNKNOWN",
+);
 const calls = [];
 assert.match(
   await evaluateStackGate(
