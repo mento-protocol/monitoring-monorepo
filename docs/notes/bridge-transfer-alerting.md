@@ -81,7 +81,7 @@ never-observed state while existing Grafana transfer state stays held.
 This contract assumes the current single Metrics Bridge scrape target. Adding
 shards, changing label sets or removing configured buckets requires a new review
 of per-series eviction; whole-rule NoData does not protect one missing shard while
-another still returns results. [ADR 0094](../adr/0094-isolated-bridge-transfer-observations.md)
+another still returns results. [ADR 0095](../adr/0095-isolated-bridge-transfer-observations.md)
 owns traversal budgets, bounded cardinality and concurrent-pagination limits.
 
 ## Apply order and live proof
