@@ -70,6 +70,10 @@ jobs:
           # The planner's last_content_change evidence uses git log. A shallow
           # checkout would report null for documents unchanged at HEAD.
           fetch-depth: 0
+          # The pool is shared; nothing here talks to git over the network
+          # (no git-protocol lockfile deps, no fetch/push), so the checkout
+          # credential has no reason to stay in .git/config after the step.
+          persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version

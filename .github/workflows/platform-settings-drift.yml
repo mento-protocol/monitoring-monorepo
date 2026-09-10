@@ -75,6 +75,11 @@ jobs:
       actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The pool is shared; nothing here talks to git over the network
+          # (no git-protocol lockfile deps, no fetch/push), so the checkout
+          # credential has no reason to stay in .git/config after the step.
+          persist-credentials: false
 
       - name: Read live setting and evaluate drift
         id: check
