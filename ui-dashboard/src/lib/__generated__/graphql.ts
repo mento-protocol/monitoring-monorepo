@@ -5410,6 +5410,7 @@ export type TroveOperationEventSelectColumn =
   | "debtIncreaseFromUpfrontFee"
   | "id"
   | "instanceId"
+  | "logIndex"
   | "operation"
   | "owner"
   | "timestamp"
@@ -5429,6 +5430,7 @@ export type TroveOperationEventOrderBy = {
   readonly debtIncreaseFromUpfrontFee?: OrderBy;
   readonly id?: OrderBy;
   readonly instanceId?: OrderBy;
+  readonly logIndex?: OrderBy;
   readonly operation?: OrderBy;
   readonly owner?: OrderBy;
   readonly timestamp?: OrderBy;
@@ -5456,6 +5458,7 @@ export type TroveOperationEventBoolExp = {
   readonly debtIncreaseFromUpfrontFee?: ComparisonExp<string>;
   readonly id?: ComparisonExp<string>;
   readonly instanceId?: ComparisonExp<string>;
+  readonly logIndex?: ComparisonExp<number>;
   readonly operation?: ComparisonExp<number>;
   readonly owner?: ComparisonExp<string>;
   readonly timestamp?: ComparisonExp<string>;

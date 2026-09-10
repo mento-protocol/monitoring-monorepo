@@ -193,6 +193,7 @@ export function maybeRecordTroveOperation(args: {
     debtIncreaseFromUpfrontFee: event.params._debtIncreaseFromUpfrontFee,
     timestamp: args.blockTimestamp,
     blockNumber: args.blockNumber,
+    logIndex: event.logIndex,
     txHash: event.transaction.hash,
   });
 }

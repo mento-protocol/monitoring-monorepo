@@ -102,3 +102,41 @@ handler bug. Use Blockscout or an RPC log query to count event topic hashes over
 the contract's complete relevant history. If the event is absent, select a
 different emitted signal, maintain a transition delta, or use a bounded
 `eth_call`; changing handler code cannot manufacture a missing event.
+
+## Operation ordering rollout
+
+`TroveOperationEvent.logIndex` stores the original numeric event ordinal.
+Its ID remains `eventId(chainId, blockNumber, logIndex)`. User-operation
+inclusion and batch snapshot semantics remain unchanged. Numeric readers order
+by `timestamp`, `blockNumber`, and `logIndex` before applying a row limit.
+Legacy readers remain compatible with the additive field. The separate
+`TroveLedgerEvent` contract in ADR 0074 remains unchanged.
+
+A new field in introspection proves compatibility, not historical completeness.
+Use the `deploy-indexer` workflow for candidate replay and promotion. Before
+promotion, record this evidence in the rollout tracker:
+
+1. Record the candidate SHA, resolved configuration, endpoint, and effective
+   start blocks. Mainnet currently configures the three Celo TroveManagers
+   (GBPm, CHFm, JPYm) from block `60664500`; the other mainnet chains have no
+   configured TroveManagers. Celo Sepolia defaults to `18946570`. Verify the
+   candidate configuration and environment overrides; do not move these
+   starts forward to shorten replay.
+2. Wait for the full configured history to replay. For every configured
+   market, query its earliest and recent operation rows. Match `chainId`,
+   `blockNumber`, and `logIndex` to the three numeric ID components and to
+   representative canonical `TroveOperation` logs. Record the covered block
+   range and row counts. Never fill absent ordinals with a default value.
+3. Query a trove with same-timestamp operations using descending numeric
+   `timestamp`, `blockNumber`, and `logIndex`. Confirm the server applies this
+   order before `limit: 1000`. Pair limited live history with the consumer's
+   reproducible Hasura cap-boundary fixture; do not claim live cap coverage
+   when the selected trove has fewer than 1,001 operations.
+4. After separately approved promotion, repeat the field and historical-row
+   checks on the static endpoint. Keep the dashboard's old-schema query
+   available for schema lag and rollback. A capped legacy response cannot
+   guarantee the newest 999 operations, even after client sorting.
+
+A caught-up status, successful deployment job, or new-event sample alone does
+not satisfy the historical replay requirement. Keep rollout issue #2103 open
+until producer promotion and consumer deployment evidence are complete.
