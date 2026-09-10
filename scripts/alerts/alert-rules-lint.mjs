@@ -69,6 +69,7 @@ const GAUGE_SOURCE_FILES = [
   "cdp-metrics.ts",
   "peg/metrics.ts",
   "peg/listing-metrics.ts",
+  "bridge/metrics.ts",
 ];
 
 function readJson(file, label, failures) {

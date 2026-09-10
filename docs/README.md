@@ -81,6 +81,7 @@ Authority: canonical
 - [`docs/notes/agent-quality-gate-mechanics.md`](notes/agent-quality-gate-mechanics.md)
 - [`docs/notes/backlog-ranking.md`](notes/backlog-ranking.md)
 - [`docs/notes/backlog-sweep.md`](notes/backlog-sweep.md)
+- [`docs/notes/bridge-transfer-alerting.md`](notes/bridge-transfer-alerting.md)
 - [`docs/notes/codex-agent-skills.md`](notes/codex-agent-skills.md)
 - [`docs/notes/codex-cloud-setup.md`](notes/codex-cloud-setup.md)
 - [`docs/notes/cross-protocol-context.md`](notes/cross-protocol-context.md)

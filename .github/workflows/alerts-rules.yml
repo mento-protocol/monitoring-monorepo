@@ -199,6 +199,22 @@ jobs:
           terraform_version: 1.14.6
           terraform_wrapper: false
 
+      - name: Test bridge alert behavior
+        working-directory: ${{ github.workspace }}
+        run: |
+          bridge_tools="$RUNNER_TEMP/bridge-promtool"
+          mkdir -p "$bridge_tools"
+          curl --fail --silent --show-error --location --max-time 120 \
+            https://github.com/prometheus/prometheus/releases/download/v3.5.0/prometheus-3.5.0.linux-arm64.tar.gz \
+            --output "$bridge_tools/prometheus.tar.gz"
+          printf '%s  %s\n' \
+            '173389cc42bf09c4e6e54cb53fa07a5a835d7c261e14775d2183181d6e385d1c' \
+            "$bridge_tools/prometheus.tar.gz" | sha256sum --check --strict
+          tar -xzf "$bridge_tools/prometheus.tar.gz" -C "$bridge_tools" \
+            prometheus-3.5.0.linux-arm64/promtool
+          PROMTOOL="$bridge_tools/prometheus-3.5.0.linux-arm64/promtool" \
+            node --test alerts/rules/tests/bridge-behavior.test.mjs
+
       - name: Export PR-safe Terraform inputs
         if: github.event_name == 'pull_request'
         # Current Terraform inputs are single-line tokens/URLs. If a future

@@ -2397,7 +2397,7 @@ test("CLI reports parse failures and unknown bridge metrics", () => {
       join(dir, "broken.tf"),
       [
         'expr = "sum(rate(broken["',
-        'labels = { metric = "mento_pool_does_not_exist" }',
+        'labels = { metric = "mento_pool_does_not_exist", bridge_metric = "mento_ntt_bridge_does_not_exist" }',
         "",
       ].join("\n"),
     );
@@ -2414,12 +2414,69 @@ test("CLI reports parse failures and unknown bridge metrics", () => {
       `expected parse failure to name file, got: ${result.stderr}`,
     );
     assert(
-      /mento_pool_does_not_exist/.test(result.stderr),
+      /mento_pool_does_not_exist/.test(result.stderr) &&
+        /mento_ntt_bridge_does_not_exist/.test(result.stderr),
       `expected unknown metric failure, got: ${result.stderr}`,
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("bridge freshness allowance follows the live Alloy scrape cadence", () => {
+  const alloy = readFileSync(
+    join(repoRoot, "aegis/grafana-agent/config.alloy"),
+    "utf8",
+  );
+  const scrape = extractBlockAt(
+    alloy,
+    alloy.indexOf('prometheus.scrape "metrics_bridge"'),
+  );
+  const allowance = readFileSync(
+    join(repoRoot, "alerts/rules/bridge-promql.tf"),
+    "utf8",
+  ).match(/bridge_scrape_allowance_seconds\s*=\s*(\d+)/)?.[1];
+  const seconds = scrape.match(/scrape_interval\s*=\s*"(\d+)s"/)?.[1];
+  assert(
+    seconds !== undefined && seconds === allowance,
+    "Prometheus sample allowance must match Metrics Bridge scrape interval",
+  );
+});
+
+test("bridge rules expose all metric registrations and use existing URL parameters", () => {
+  const metrics = readFileSync(
+    join(repoRoot, "metrics-bridge/src/bridge/metrics.ts"),
+    "utf8",
+  );
+  assert(
+    registeredMetricNames(metrics).length === 7,
+    "all seven bridge metric families must be visible to the rule linter",
+  );
+  const rules = readFileSync(
+    join(repoRoot, "alerts/rules/bridge-promql.tf"),
+    "utf8",
+  );
+  const urlState = readFileSync(
+    join(
+      repoRoot,
+      "ui-dashboard/src/app/bridge-flows/_components/use-bridge-flow-url-state.ts",
+    ),
+    "utf8",
+  );
+  for (const parameter of ["status", "source", "destination"]) {
+    assert(
+      rules.includes(`${parameter}=`),
+      `bridge rule link must include ${parameter}`,
+    );
+    assert(
+      urlState.includes(`params.get("${parameter}")`),
+      `dashboard must consume ${parameter}`,
+    );
+  }
+  assert(
+    rules.includes("mento_ntt_bridge_invalid_rows == 0"),
+    "unknown data must not resolve a known transfer incident",
+  );
 });
 
 if (failed > 0) {
