@@ -535,7 +535,9 @@ export function buildReport({
 
 export function main(argv = process.argv.slice(2), env = process.env) {
   const { values } = parseArgs({
-    args: argv,
+    // pnpm 11 forwards the `--` separator; parseArgs would read it as the
+    // start of positionals and refuse the options behind it.
+    args: argv.filter((arg) => arg !== "--"),
     options: {
       anchor: { type: "string" },
       candidate: { type: "string" },
