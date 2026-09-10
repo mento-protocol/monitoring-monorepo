@@ -4,7 +4,6 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   existsSync,
-  lstatSync,
   mkdirSync,
   readdirSync,
   readFileSync,
@@ -22,7 +21,6 @@ import {
 import {
   detailDirBase,
   finderArgvDigest,
-  finderDetailSegment,
   resolveFinderPlan,
 } from "./review-eval-finder-override.mjs";
 import { freshness } from "./review-eval-ledger.mjs";
