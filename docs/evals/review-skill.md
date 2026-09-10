@@ -264,6 +264,43 @@ pnpm review:eval:run --kind canary                # the monthly smoke test
 pnpm review:eval:run --kind full                  # the quarterly score of record
 ```
 
+### Probing a different finder
+
+`--kind finder --finder MODEL@EFFORT` runs the pipeline condition alone, one
+draw per fixture, with the contract's finder replaced for that run only. The
+contract on disk never changes: the substitution lives in the plan, which is
+what the orchestrator spawns the finder from, and it moves the plan's
+`finder_argv_digest` so a probe cell can never reuse a canonical run's cell. It
+does not move the comparability key, so the probe is still read against this
+contract. `EFFORT` is `low`, `medium`, `high` or `xhigh`, and each of the two
+flags is refused without the other.
+
+A probe scores and stops. It appends no ledger row, refreshes no clock, cannot
+become a baseline, and `--validate --append` refuses its row outright. Compare
+it against a canonical full run by detail directory:
+
+```bash
+pnpm review:eval:run --kind finder --finder gpt-6-astra@low
+pnpm review:eval:finder-compare -- \
+  --anchor docs/evals/review-skill-runs/<full-run> \
+  --candidate docs/evals/review-skill-runs/<probe-run>
+```
+
+The comparison pairs the pipeline draw-1 cells by PR and prints matched ids,
+P1 recall, wrong claims, the per-PR net and a sign-flip test over the nets. It
+warns when the two runs used different review skills or different judges, which
+makes the numbers unreadable as a finder difference, and notes a difference in
+orchestrator bytes, which does not.
+
+One draw per fixture is enough to reject a finder and never enough to promote
+one: a single draw cannot separate the finder from sampling variance. A winner
+needs a canonical full run on a contract updated to name it.
+
+`run-eval.sh` is in `ORCHESTRATOR_FILES`, and `review-eval.mjs`,
+`review-eval-run-plan.mjs` and `review-eval-finder-override.mjs` are in
+`SCORING_MODULES`. Editing any of them moves the comparability key of every
+later run, so a probe and its anchor must be planned from the same sources.
+
 `run-eval.sh` adds a detached worktree of `origin/main` and reads the contract,
 truth, prompts and scorer from there, so a dirty working tree cannot change
 what is measured. The ledger, the baseline it resolves and the branch the PR
@@ -1128,6 +1165,8 @@ path must exist on `main` before the first run after the moving commit.
 | `scripts/review/review-eval-run-execution.mjs`              | judge execution, environment scrub, and fixture reset    |
 | `scripts/review/review-eval-run-cell.mjs`                   | cell identity, cache reuse, and leak signals             |
 | `scripts/review/review-eval-run-score.mjs`                  | cell scoring, condition folds, rows, and freshness plans |
+| `scripts/review/review-eval-finder-override.mjs`            | finder argv digest and the --finder substitution         |
+| `scripts/review/review-eval-finder-compare.mjs`             | offline pipeline draw-1 comparison of two runs           |
 | `scripts/review/review-eval-score.mjs`                      | scorer logic and scoring-module digest ownership         |
 | `scripts/review/review-eval-stream.mjs`                     | dependency-free stream parser, session budget, envelope  |
 | `scripts/review/review-eval-cell-writer.mjs`                | one finished contestant stream to one cell result        |

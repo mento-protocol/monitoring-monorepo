@@ -81,6 +81,10 @@ import {
   BLIND_JUDGE_TOOLS,
   scorerDigest,
 } from "./review-eval-score.mjs";
+import {
+  applyFinderOverride,
+  parseFinderSpec,
+} from "./review-eval-finder-override.mjs";
 import { runEvidenceProblems } from "./review-eval-run-evidence.mjs";
 import { SESSION_TEXT_BUDGET_CHARS } from "./review-eval-stream.mjs";
 
@@ -90,6 +94,8 @@ const validationModuleLineLimits = new Map([
   ["review-eval.mjs", 900],
   ["review-eval-run.mjs", 100],
   ["review-eval-run-plan.mjs", 600],
+  ["review-eval-finder-override.mjs", 200],
+  ["review-eval-freshness-guard.mjs", 200],
   ["review-eval-run-execution.mjs", 600],
   ["review-eval-run-cell.mjs", 600],
   ["review-eval-run-score.mjs", 600],
@@ -221,7 +227,7 @@ test("the shell split no longer reconstructs the pre-split cell runtime", () => 
   // so this pin still catches an unintended shell edit.
   assert.equal(
     reconstructed,
-    "28844cb2da2ae2559843802a00e1725962c5255021b65381c214a96dc7f23130",
+    "872472fa94dd0bb4c19b038459a90aa5cd35c64fe8fdad7c050d64934ec96d9e",
   );
   // It is no longer the pre-split monolith. Capturing the whole session instead
   // of the CLI's last-message envelope changed what a cell records, so the 24
@@ -531,7 +537,7 @@ test("parseArgs refuses an option that belongs to another mode", () => {
   );
   assert.throws(
     () => parseArgs(["--plan", "--kind", "weekly"]),
-    /--kind must be full, canary, or auto/,
+    /--kind must be full, canary, finder, or auto/,
   );
   assert.throws(
     () => parseArgs(["--schedule-issue", "--repo", "nope"]),
@@ -883,7 +889,7 @@ test("comparabilityKey moves with the contract, the prompts, and the scorer", ()
 
 test("orchestratorSourceDigest binds the shell and the cell modules", () => {
   const expected =
-    "d460aa3fefe45e964e71b6490898ed69e69b1d6e2f99781d7eff2c8252bff61f";
+    "63db76e74b220e34641eafeb6b7fc3c6b5e5e43b9572144c1c03841463b0e528";
   assert.equal(orchestratorSourceDigest(), expected);
   // The cell writer and the stream parser are in the digest for the same
   // reason the shell is: the writer decides what a paid cell records and the
@@ -6723,7 +6729,7 @@ test("the runbook forwards paid-run flags without a literal separator", () => {
     "utf8",
   );
   assert.doesNotMatch(doc, /pnpm review:eval:run -- --kind/);
-  assert.equal([...doc.matchAll(/pnpm review:eval:run --kind/g)].length, 5);
+  assert.equal([...doc.matchAll(/pnpm review:eval:run --kind/g)].length, 6);
 });
 
 test("the ledger branch names one run, not one day", () => {
@@ -9741,4 +9747,145 @@ test("every cell resets its fixture through reset_fixture", () => {
   assert.match(shell, /reset_fixture "\$fixture" "\$fixture_head"/);
   assert.doesNotMatch(shell, /reset --hard --quiet\n/);
   assert.match(shell, /FIXTURE_HEAD="\$\{FIXTURE_HEADS\[\$index\]\}"/);
+});
+
+test("a finder plan is the pipeline condition alone, one draw per fixture", () => {
+  const cells = planCells({ contract, kind: "finder" });
+  assert.equal(cells.length, contract.fixtures.length);
+  assert.ok(cells.every((cell) => cell.condition === "pipeline"));
+  assert.ok(cells.every((cell) => cell.draw === 1));
+  assert.ok(cells.every((cell) => Array.isArray(cell.finder_argv)));
+  assert.deepEqual(
+    cells.map((cell) => cell.cell_id),
+    contract.fixtures.map((fixture) => `pr-${fixture.pr}-pipeline-draw1`),
+  );
+  // `--kind auto` is the launchd schedule's kind. A probe is asked for by hand.
+  for (const rows of [[], [makeRow({ kind: "full" })]]) {
+    assert.notEqual(
+      resolveKind({
+        kind: "auto",
+        rows,
+        contract,
+        contractDigest,
+        now: new Date("2026-12-01T00:00:00Z"),
+      }),
+      "finder",
+    );
+  }
+});
+
+test("--finder rewrites the argv and the label, not the comparability key", () => {
+  const full = buildPlan({
+    contract,
+    contractDigest,
+    kind: "full",
+    repoRoot,
+    write: false,
+    env: planEnv,
+  });
+  const probe = buildPlan({
+    contract,
+    contractDigest,
+    kind: "finder",
+    finder: "gpt-6-astra@xhigh",
+    repoRoot,
+    write: false,
+    env: planEnv,
+  });
+  const argv = probe.cells[0].finder_argv;
+  assert.equal(argv[argv.indexOf("-m") + 1], "gpt-6-astra");
+  assert.ok(argv.includes('model_reasoning_effort="xhigh"'));
+  assert.equal(probe.cells[0].finder, "gpt-6-astra@xhigh");
+  assert.deepEqual(probe.inputs.finder_override, {
+    model: "gpt-6-astra",
+    effort: "xhigh",
+    argv,
+  });
+  // The digest moves, so a probe cell can never reuse a canonical run's cell.
+  assert.notEqual(
+    probe.inputs.finder_argv_digest,
+    full.inputs.finder_argv_digest,
+  );
+  // The key does not, so the probe is still read against this contract.
+  assert.equal(probe.comparability_key, full.comparability_key);
+  assert.ok(probe.detail_dir.includes("-finder-"));
+  // The contract object the caller handed in is untouched.
+  assert.equal(
+    contract.sut.finder.argv[contract.sut.finder.argv.indexOf("-m") + 1],
+    "gpt-5.6-sol",
+  );
+});
+
+test("the two finder flags require each other, and the effort is a closed set", () => {
+  const args = {
+    contract,
+    contractDigest,
+    repoRoot,
+    write: false,
+    env: planEnv,
+  };
+  assert.throws(
+    () => buildPlan({ ...args, kind: "full", finder: "gpt-6-astra@low" }),
+    /--finder is only valid with --kind finder/,
+  );
+  assert.throws(
+    () => buildPlan({ ...args, kind: "finder" }),
+    /--kind finder requires --finder/,
+  );
+  for (const bad of ["gpt-6-astra@ultra", "gpt-6-astra", "@low", "a b@low"]) {
+    assert.throws(() => parseFinderSpec(bad), /--finder/, bad);
+  }
+  assert.deepEqual(parseFinderSpec("gpt-6-astra@medium"), {
+    model: "gpt-6-astra",
+    effort: "medium",
+  });
+  // An argv with nothing to substitute is refused before the run spends.
+  for (const argv of [
+    ["codex", "exec"],
+    ["codex", "-m", "x"],
+  ]) {
+    assert.throws(
+      () =>
+        applyFinderOverride({
+          contract: { ...contract, sut: { ...contract.sut, finder: { argv } } },
+          override: "gpt-6-astra@low",
+        }),
+      /carries no/,
+    );
+  }
+});
+
+test("--validate --append refuses a finder probe row", () => {
+  const root = makeRoot();
+  const rowPath = path.join(root, "finder-row.json");
+  writeFileSync(
+    rowPath,
+    JSON.stringify({ kind: "finder", status: "complete" }),
+  );
+  try {
+    for (const extra of [[], ["--append"]]) {
+      const result = cli(["--validate", rowPath, ...extra, "--json"], { root });
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /never enters the ledger/);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the CLI pairs --kind finder with --finder", () => {
+  const root = makeRoot();
+  try {
+    const orphan = cli(["--plan", "--kind", "full", "--finder", "x@low"], {
+      root,
+    });
+    assert.notEqual(orphan.status, 0);
+    assert.match(orphan.stderr, /--finder is only valid with --kind finder/);
+
+    const bare = cli(["--plan", "--kind", "finder"], { root });
+    assert.notEqual(bare.status, 0);
+    assert.match(bare.stderr, /--kind finder requires --finder/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

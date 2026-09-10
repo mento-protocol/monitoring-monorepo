@@ -38,6 +38,10 @@ import {
   writeScoreResume,
 } from "./review-eval-run-cell.mjs";
 import { resetFixture } from "./review-eval-run-execution.mjs";
+import {
+  applyFinderOverride,
+  finderProbeDecision,
+} from "./review-eval-finder-override.mjs";
 import { baselinePlanIdentity, planCells } from "./review-eval-run-plan.mjs";
 
 /** Read, verify, and parse the same truth bytes that scoring will retain. */
@@ -280,12 +284,21 @@ export async function scorePlan({
   if (plan.contract_digest !== contractDigest) {
     throw new Error("plan contract digest does not match the scoring contract");
   }
-  if (!["full", "canary"].includes(plan.kind)) {
+  if (!["full", "canary", "finder"].includes(plan.kind)) {
     throw new Error(
       `plan has no frozen ${String(plan.kind ?? "unknown")} matrix to score`,
     );
   }
-  const expectedCells = planCells({ contract, kind: plan.kind });
+  // A finder probe's matrix is rebuilt through the substitution the plan
+  // recorded, or the cell check below would read the contract's finder.
+  const isFinderProbe = plan.kind === "finder";
+  const expectedCells = planCells({
+    contract: applyFinderOverride({
+      contract,
+      override: plan.inputs?.finder_override ?? null,
+    }).contract,
+    kind: plan.kind,
+  });
   if (JSON.stringify(plan.cells) !== JSON.stringify(expectedCells)) {
     throw new Error(`plan cells do not match the frozen ${plan.kind} matrix`);
   }
@@ -491,19 +504,21 @@ export async function scorePlan({
   // Automatic scoring creates the row before it appends it. Resolve it as the
   // next ledger entry so clock skew cannot replace append-order semantics with
   // the timestamp fallback reserved for external report files.
-  const baseline =
-    baselineRow ?? resolveBaseline({ rows: [...ledgerRows, row], row });
-  row.vs_baseline = buildVsBaseline({
-    row,
-    baselineRow: baseline,
-    selection: baselineSelection,
-  });
-  const decision = verdict({
-    contract,
-    row,
-    baselineRow: baseline,
-    baselineIsExplicit,
-  });
+  // A finder probe resolves no baseline, records no pairing and carries no
+  // ledger verdict; its per-cell results exist to compare and nothing more.
+  const baseline = isFinderProbe
+    ? null
+    : (baselineRow ?? resolveBaseline({ rows: [...ledgerRows, row], row }));
+  row.vs_baseline = isFinderProbe
+    ? null
+    : buildVsBaseline({
+        row,
+        baselineRow: baseline,
+        selection: baselineSelection,
+      });
+  const decision = isFinderProbe
+    ? finderProbeDecision()
+    : verdict({ contract, row, baselineRow: baseline, baselineIsExplicit });
   row.verdict = decision.verdict;
   if (leaked.length && ["GREEN", "PROMOTE"].includes(row.verdict)) {
     row.verdict = "AMBER";
@@ -526,74 +541,4 @@ export async function scorePlan({
     judged: judgedCells,
     calibrationReused,
   };
-}
-
-/**
- * One staleness issue per contract per month, deduplicated by the marker block
- * the documentation schedulers already use.
- */
-export function planStalenessIssueSync({
-  month,
-  contractDigest,
-  issues,
-  payload,
-}) {
-  const tracked = (issues ?? []).filter((issue) => issue.marker);
-  const open = tracked.find((issue) => issue.state !== "CLOSED");
-  if (open) {
-    return {
-      action:
-        open.marker.month === month &&
-        open.marker.contract_digest === contractDigest
-          ? "keep-current"
-          : "skip-prior-open",
-      reason: `issue #${open.number} for ${open.marker.month} is still open`,
-      issue: open,
-    };
-  }
-  const closed = tracked.find(
-    (issue) =>
-      issue.marker.month === month &&
-      issue.marker.contract_digest === contractDigest,
-  );
-  if (closed) {
-    return {
-      action: "skip-complete",
-      reason: `${month} is already covered by closed issue #${closed.number}`,
-      issue: closed,
-    };
-  }
-  return {
-    action: "create",
-    reason: `no open or completed staleness issue exists for ${month}`,
-    payload,
-  };
-}
-
-// The scheduled workflow always runs on the default branch, so the ref is a
-// constant here. Comparing GITHUB_WORKFLOW_REF against GITHUB_REF would put
-// the same runtime value on both sides of the test and constrain nothing.
-export const FRESHNESS_WORKFLOW_REF = "refs/heads/main";
-
-/**
- * Live issue creation belongs to the scheduled freshness workflow alone. Every
- * other caller plans the synchronization and prints it. `workflow_dispatch` is
- * not accepted: a dispatch can name any branch, and an unattended issue write
- * from an arbitrary branch is exactly what this guard exists to refuse.
- */
-export function assertAuthorizedFreshnessWorkflow(
-  options,
-  { env = process.env } = {},
-) {
-  const expected = `${options.repo}/.github/workflows/review-eval-freshness.yml@${FRESHNESS_WORKFLOW_REF}`;
-  if (
-    env.GITHUB_ACTIONS !== "true" ||
-    String(env.GITHUB_EVENT_NAME ?? "") !== "schedule" ||
-    String(env.GITHUB_REF ?? "") !== FRESHNESS_WORKFLOW_REF ||
-    String(env.GITHUB_WORKFLOW_REF ?? "") !== expected
-  ) {
-    throw new Error(
-      `live issue creation is restricted to the review-eval freshness workflow on its schedule (${FRESHNESS_WORKFLOW_REF}); use --dry-run locally`,
-    );
-  }
 }

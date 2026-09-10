@@ -19,6 +19,10 @@ import {
   PIPELINE_DRAWS,
   scorableTotals,
 } from "./review-eval-fixtures.mjs";
+import {
+  finderArgvDigest,
+  resolveFinderPlan,
+} from "./review-eval-finder-override.mjs";
 import { freshness } from "./review-eval-ledger.mjs";
 import {
   cellReuseDecision,
@@ -58,9 +62,11 @@ export const ORCHESTRATOR_FILES = Object.freeze([
   fileURLToPath(new URL("./review-eval-cell-writer.mjs", import.meta.url)),
   fileURLToPath(new URL("./review-eval-stream.mjs", import.meta.url)),
 ]);
+export { finderArgvDigest };
 export const DEFAULT_RUNS_DIR = "docs/evals/review-skill-runs";
 export const DEFAULT_SKILL_DIR = "~/.claude/skills/review";
-export const PLAN_KINDS = ["full", "canary", "auto"];
+// `finder` is the probe lane: a plan kind, never a ledger kind.
+export const PLAN_KINDS = ["full", "canary", "finder", "auto"];
 
 // Anchored on bench2: the Claude leg of `sol@high -> opus@high` cost $11.05
 // for three PRs. The estimate is a budget warning, never a recorded number.
@@ -222,24 +228,6 @@ function cliVersion(binary, env) {
 }
 
 /**
- * Digest over the finder command a pipeline cell actually executes. The
- * contract pins that argument vector, and `run-eval.sh` spawns it element for
- * element, so this is the finder half of the row's provenance.
- *
- * It replaced a digest of `~/.claude/bin/codex-review.sh`. That wrapper is an
- * operator convenience no cell ever runs: recording it claimed a drift control
- * the harness did not have, because a wrapper regression could not reach a
- * measured number while an edited `argv` moved every pipeline cell unrecorded.
- */
-export function finderArgvDigest(contract) {
-  const argv = contract?.sut?.finder?.argv;
-  if (!Array.isArray(argv) || argv.length === 0) {
-    throw new Error("contract sut.finder.argv must be a non-empty array");
-  }
-  return sha256(JSON.stringify(argv.map(String)));
-}
-
-/**
  * The environment stamped into the ledger row. Every value is either read from
  * disk or overridable by an environment variable, so a test never shells out.
  */
@@ -265,7 +253,7 @@ export function collectInputs({
   };
 }
 
-/** Pick `full` or `canary` from the ledger, for the launchd `--kind auto`. */
+/** Pick `full` or `canary` for `--kind auto`. It never answers `finder`. */
 export function resolveKind({ kind, rows, contract, contractDigest, now }) {
   if (kind !== "auto") return kind;
   const age = freshness({ rows, contract, now, contractDigest });
@@ -311,8 +299,12 @@ export function planCells({ contract, kind }) {
     return cells;
   }
 
+  // The probe lane stops after this loop: the pipeline condition alone, one
+  // draw per fixture. One draw cannot separate a finder from sampling variance,
+  // which is why a probe rejects a finder and never promotes one.
+  const draws = kind === "finder" ? 1 : PIPELINE_DRAWS;
   for (const fixture of contract.fixtures) {
-    for (let draw = 1; draw <= PIPELINE_DRAWS; draw += 1) {
+    for (let draw = 1; draw <= draws; draw += 1) {
       push(fixture, "pipeline", draw, {
         model: verifier.model,
         effort: verifier.effort,
@@ -322,6 +314,7 @@ export function planCells({ contract, kind }) {
       });
     }
   }
+  if (kind === "finder") return cells;
   for (const fixture of gridFixtures(contract)) {
     fixture.finder_reports.forEach((report, index) => {
       push(fixture, "replay", index + 1, {
@@ -501,6 +494,7 @@ export function buildPlan({
   repoRoot,
   outDir = null,
   skillRef = null,
+  finder = null,
   runsDir = DEFAULT_RUNS_DIR,
   ledgerRows = [],
   baselineRow = null,
@@ -508,9 +502,15 @@ export function buildPlan({
   env = process.env,
   write = true,
 }) {
-  if (!["full", "canary"].includes(kind)) {
-    throw new Error(`plan kind must be full or canary, not ${kind}`);
+  if (!["full", "canary", "finder"].includes(kind)) {
+    throw new Error(`plan kind must be full, canary or finder, not ${kind}`);
   }
+  // The substitution shapes the cells and the finder digest, never the key.
+  const { contract: planContract, override } = resolveFinderPlan({
+    contract,
+    kind,
+    finder,
+  });
   // The key binds the committed calibration set by content. Recording that
   // digest in the plan is what lets `--score --calibration PATH` be refused
   // when it names a different set: the agreement that gates the verdict would
@@ -525,7 +525,8 @@ export function buildPlan({
   );
   const key = comparabilityKey({ contract, contractDigest, calibrationDigest });
   const date = now.toISOString().slice(0, 10);
-  const inputs = collectInputs({ contract, skillRef, env });
+  const inputs = collectInputs({ contract: planContract, skillRef, env });
+  if (override) inputs.finder_override = override;
   // The skill under test and the kind are part of the directory name because
   // the directory is also the resume cache: two runs of the same contract with
   // different skills must never land on each other's cells.
@@ -538,7 +539,7 @@ export function buildPlan({
   const planDir = outDir
     ? path.resolve(outDir)
     : path.resolve(repoRoot, detailDir);
-  const cells = planCells({ contract, kind });
+  const cells = planCells({ contract: planContract, kind });
   const resumeFrom =
     resolvedDetail.resumeFrom ??
     resolveLegacySplitCache({
