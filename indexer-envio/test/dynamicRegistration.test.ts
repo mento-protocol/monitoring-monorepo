@@ -22,6 +22,7 @@ import {
   indexerTestHelpers,
   type EntityReader,
   type MockDbWith,
+  registerSimulateAddresses,
 } from "./helpers/indexerTestHarness.js";
 import {
   setHttpRpcErrorMock,
@@ -65,6 +66,13 @@ async function processDeployRegistration(
 ): Promise<AddressRegistration[]> {
   seedDeployRpcMocks(contract, params);
   await waitForHttpTestRpc();
+  registerSimulateAddresses([
+    {
+      chainId: CHAIN_ID,
+      contractName: contract,
+      srcAddress: "0x00000000000000000000000000000000000000cc",
+    },
+  ]);
   const indexer = createTestIndexer();
   const result = await indexer.process({
     chains: {

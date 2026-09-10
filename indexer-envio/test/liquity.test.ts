@@ -1380,9 +1380,14 @@ describe("Liquity CDP helpers", () => {
           },
         });
 
+      const collateralId = makeCollateralId(market);
+      const seeded = LiquityMockDb.createMockDb();
+      seeded.entities.LiquityInstance.set(
+        makeLiquityInstance(collateralId, market.chainId, 0n),
+      );
       const mockDb = await LiquityStabilityPool.DepositUpdated.processEvent({
         event: depositUpdated,
-        mockDb: LiquityMockDb.createMockDb(),
+        mockDb: seeded,
       });
 
       assert.equal(
@@ -1391,9 +1396,7 @@ describe("Liquity CDP helpers", () => {
         ),
         undefined,
       );
-      const instance = mockDb.entities.LiquityInstance.get(
-        makeCollateralId(market),
-      );
+      const instance = mockDb.entities.LiquityInstance.get(collateralId);
       assert.ok(instance);
       assert.equal(instance.lastEventBlock, 0n);
       assert.equal(instance.lastEventTimestamp, 0n);

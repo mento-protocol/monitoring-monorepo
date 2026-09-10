@@ -79,7 +79,7 @@ it(`fails closed before writes for tracked ${EVENT_NAME}`, async () => {
           event,
           mockDb,
         }),
-      /Worker exited with code 1/,
+      /sortedOracles\.(oracleExpiryStateUnavailable|oracleFeedStateUnavailable)/,
     );
     assert.deepEqual(mockDb.entities.Pool.get(poolId), initialPool);
     assert.deepEqual(mockDb.entities.OracleSnapshot.getAll(), []);
