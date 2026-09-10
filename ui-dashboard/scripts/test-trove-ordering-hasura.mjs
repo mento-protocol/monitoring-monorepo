@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Run only against this script's disposable Compose project. Never accepts an endpoint.
 import assert from "node:assert/strict";
+import { randomBytes } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -11,8 +12,13 @@ const compose = fileURLToPath(
 );
 const project = `trove-ordering-${process.pid}`;
 const endpoint = "http://127.0.0.1:8080";
+const fixturePassword = randomBytes(16).toString("hex");
 const docker = (args) =>
-  execFileSync("docker", args, { encoding: "utf8", timeout: 180_000 });
+  execFileSync("docker", args, {
+    encoding: "utf8",
+    timeout: 180_000,
+    env: { ...process.env, TROVE_ORDERING_FIXTURE_PASSWORD: fixturePassword },
+  });
 const run = (...args) =>
   docker(["compose", "-p", project, "-f", compose, ...args]);
 // Refuse any service already owning the required port. This test never reuses

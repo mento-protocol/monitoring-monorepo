@@ -144,7 +144,9 @@ until producer promotion and consumer deployment evidence are complete.
 Run the isolated server ordering regression with
 `node ui-dashboard/scripts/test-trove-ordering-hasura.mjs`. It requires Docker
 and a free local port 8080. It uses the production query strings against
-Hasura v2.46.0 and disposable Postgres data. Each of two 1,001-row histories
+Hasura v2.46.0 and disposable Postgres data. The harness generates a temporary
+database password and passes it through `TROVE_ORDERING_FIXTURE_PASSWORD` to
+its Docker processes. No credential setup is needed. Each of two 1,001-row histories
 puts log 9/10 or block 9/10 at the 1,000-row boundary. The numeric query must
 include 10 and omit 9; the legacy query does the reverse. The script removes
 only its uniquely named containers after the check. It cannot target a hosted
