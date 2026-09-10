@@ -102,6 +102,12 @@ today's cells, and it carries a different comparability key in any case.
 - `control` recall is measured over the 39 grid defects while `pipeline` covers
   all 51. The two rates are over different denominators and must not be
   subtracted from each other within a run.
+- The control-drift waiver was left asking control for the headline's own
+  `regression_net_flips` on that narrower scope, so drift spread evenly over the
+  suite fired a RED control could not waive.
+  [ADR 0093](0093-control-waiver-scaled-to-grid-scope.md) closes that: the
+  magnitude test now reads `verdict_rules.control_waiver_net_flips`, which is the
+  flip rule's share of the grid.
 
 ## Evidence
 

@@ -87,9 +87,9 @@ silently moves the reference.
 - The rule binds the contracts that carry the key. `--report --contract` with a
   contract from before this change still prints the verdict that run saw, so
   history does not move under a rule its runs never ran against.
-- Scaling the control-drift waiver threshold to control's 39-defect scope is a
-  separate verdict-rule decision and stays open as
-  [issue 2333](https://github.com/mento-protocol/monitoring-monorepo/issues/2333).
+- Scaling the control-drift waiver threshold to control's 39-defect scope was a
+  separate verdict-rule decision, taken in
+  [ADR 0093](0093-control-waiver-scaled-to-grid-scope.md).
 
 ## Evidence
 
