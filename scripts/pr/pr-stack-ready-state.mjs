@@ -212,6 +212,15 @@ async function evaluateLayers(initial, repoArg, fetchState, feedback) {
           ready,
           `stack layer #${layer.number} readiness blocked`,
         );
+      if (
+        !["AWAITING_USER_MERGE", "MERGE_REQUESTED"].includes(
+          classifyStackObservation(ready).state,
+        )
+      )
+        return pendingObservation(
+          ready,
+          `stack layer #${layer.number} merge observation incomplete`,
+        );
     }
     const final = await fetchState({
       prArg: String(selected.number),
@@ -235,6 +244,8 @@ async function evaluateLayers(initial, repoArg, fetchState, feedback) {
         "readiness changed during final verification",
       );
     const observation = classifyStackObservation(final);
+    if (!["AWAITING_USER_MERGE", "MERGE_REQUESTED"].includes(observation.state))
+      return pendingObservation(final, "final merge observation incomplete");
     return `PASS stack #${stack.number}: every open layer passed both projections; ${observation.state}: ${observation.message}`;
   } catch {
     return "PENDING stack projections unavailable";

@@ -524,8 +524,9 @@ observed finding cannot be ignored while accepting that snapshot.
 Only complete, stable, ready results produce `PASS`; an unavailable, malformed,
 changed, or blocked result produces `PENDING`. The message identifies observed
 base updates, head/base transitions, required-check failures or pending checks,
-and feedback blockers. These diagnostics do not relax the PASS condition or
-turn a pending merge request into a terminal result. The helper adds no public
+and feedback blockers. Only a fully observed `AWAITING_USER_MERGE` or `MERGE_REQUESTED` result can
+complete the aggregate PASS path; unknown merge observations remain PENDING.
+These diagnostics never turn a pending merge request into a terminal result. The helper adds no public
 command; individual probe JSON remains layer-scoped.
 The native aggregate has a five-minute deadline that cancels active `gh` child
 requests and returns `PENDING` when reached.

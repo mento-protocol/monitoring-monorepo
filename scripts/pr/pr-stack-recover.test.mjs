@@ -121,6 +121,7 @@ fixture(({ git, commit, options, oldParent }) => {
   const receipt = prepareRecovery(options);
   assert.equal(receipt.status, "blocked");
   assert.deepEqual(receipt.conflicts, ["parent.txt"]);
+  assert.equal(receipt.failure.kind, "conflict");
   assert.match(receipt.artifactScope, /committed-prefix-only/);
   assert.match(receipt.candidateStatus, /UU parent.txt/);
   assert.match(
@@ -309,6 +310,73 @@ fixture(({ git, commit, options }) => {
       encoding: "utf8",
     }).stdout.trim(),
     failed,
+  );
+});
+
+fixture(({ root, repo, git, options }) => {
+  const stale = join(root, "stale");
+  git("worktree", "add", "--detach", stale, options.oldParent);
+  const metadata = join(repo, ".git", "worktrees", "stale", "gitdir");
+  const before = readFileSync(metadata, "utf8");
+  rmSync(stale, { recursive: true });
+  assert.match(git("worktree", "list", "--porcelain"), /prunable/);
+  const receipt = prepareRecovery(options);
+  assert.equal(receipt.status, "prepared");
+  assert.equal(readFileSync(metadata, "utf8"), before);
+  assert.match(git("worktree", "list", "--porcelain"), /prunable/);
+  assert.equal(existsSync(stale), false);
+});
+
+fixture(({ root, git, options }) => {
+  const missing = join(root, "locked");
+  git("worktree", "add", "--detach", missing, options.oldParent);
+  git("worktree", "lock", missing);
+  rmSync(missing, { recursive: true });
+  const refs = git("show-ref");
+  assert.throws(() => prepareRecovery(options), /ENOENT/);
+  assert.equal(git("show-ref"), refs);
+  assert.equal(existsSync(options.worktree), false);
+});
+
+fixture(({ git, commit, options }) => {
+  const first = options.oldHead;
+  const combinedEnd = commit("second.txt", "combined second patch\n");
+  options.oldHead = commit("suffix.txt", "not applied upstream\n");
+  git("switch", "-c", "combined-base", options.oldParent);
+  git("merge", "--squash", combinedEnd);
+  git("commit", "-m", "combine first two patches");
+  options.newBase = git("rev-parse", "HEAD");
+  const receipt = prepareRecovery(options);
+  assert.equal(receipt.status, "blocked");
+  assert.equal(receipt.failure.kind, "empty-cherry-pick");
+  assert.equal(receipt.failure.cherryPickHead, first);
+  assert.equal(receipt.failure.indexTree, receipt.failure.headTree);
+  assert.deepEqual(receipt.remaining, [first, combinedEnd, options.oldHead]);
+  assert.deepEqual(receipt.skipped, []);
+  assert.deepEqual(receipt.conflicts, []);
+  assert.equal(receipt.candidateStatus, "");
+  assert.match(receipt.cherryProof, new RegExp(`\\+ ${first}`));
+  assert.equal(receipt.candidateHead, options.newBase);
+  assert.equal(existsSync(join(options.worktree, "suffix.txt")), false);
+  assert.equal(
+    spawnSync("git", ["rev-parse", "CHERRY_PICK_HEAD"], {
+      cwd: options.worktree,
+      encoding: "utf8",
+    }).stdout.trim(),
+    first,
+  );
+  assert.ok(
+    receipt.failure.proofCommands.some(
+      (args) => args.includes(`${first}^`) && args.includes(first),
+    ),
+  );
+  assert.ok(
+    receipt.failure.operatorOptions.some((option) => option.includes("--skip")),
+  );
+  assert.ok(
+    receipt.failure.operatorOptions.some((option) =>
+      option.includes("--allow-empty"),
+    ),
   );
 });
 

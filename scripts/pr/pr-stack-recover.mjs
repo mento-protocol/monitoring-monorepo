@@ -22,7 +22,8 @@ Replays a linear child-only range, recording git cherry proof for skipped patche
 Writes review receipts to NEW_ABSOLUTE_PATH.receipt (must not exist).
 Its comparison.git reads source objects through alternates without source config.
 Conflicts leave the candidate and cherry-pick state intact for inspection.
-After --continue, explicitly replay remaining after its first (failed) commit.
+Inspect failure.kind first: empty-cherry-pick needs explicit proof and skip/keep.
+After resolving the stopped commit, replay remaining after its first commit.
 --continue completes one commit here, not the unattempted suffix.
 Never publishes, merges, resets, aborts, deletes, or changes pre-existing refs.
 Review both axes and validate the candidate before a separately authorized push.
@@ -121,6 +122,29 @@ function newPath(path, roots) {
   throw new Error(`Destination already exists: ${resolved}`);
 }
 
+function worktreeRoots(repo) {
+  const records = git(repo, [
+    "worktree",
+    "list",
+    "--porcelain",
+    "-z",
+  ]).stdout.split("\0\0");
+  return records.flatMap((record) => {
+    const fields = record.split("\0");
+    const field = fields.find((value) => value.startsWith("worktree "));
+    if (!field) return [];
+    try {
+      return [realpathSync(field.slice(9))];
+    } catch (error) {
+      const prunable = fields.some(
+        (value) => value === "prunable" || value.startsWith("prunable "),
+      );
+      if (error.code === "ENOENT" && prunable) return [];
+      throw error;
+    }
+  });
+}
+
 function validate(options) {
   const repo = realpathSync(
     output(resolve(options.repo ?? "."), ["rev-parse", "--show-toplevel"]),
@@ -169,10 +193,7 @@ function validate(options) {
     }).status === 0
   )
     throw new Error("Candidate branch already exists");
-  const roots = git(repo, ["worktree", "list", "--porcelain", "-z"])
-    .stdout.split("\0")
-    .filter((field) => field.startsWith("worktree "))
-    .map((field) => realpathSync(field.slice(9)));
+  const roots = worktreeRoots(repo);
   const worktree = newPath(options.worktree, roots);
   const receiptDir = newPath(`${worktree}.receipt`, roots);
   const cherryProof = output(repo, [
@@ -306,6 +327,69 @@ function writeReceipts(plan, receipt) {
   );
 }
 
+function cherryPickFailure(worktree, commit, conflicts) {
+  const cherryPick = git(
+    worktree,
+    ["rev-parse", "--verify", "CHERRY_PICK_HEAD"],
+    { allowFailure: true },
+  );
+  const headTree = output(worktree, ["rev-parse", "HEAD^{tree}"]);
+  const index = conflicts.length
+    ? null
+    : git(worktree, ["write-tree"], { allowFailure: true });
+  const indexTree = index?.status === 0 ? index.stdout.trim() : null;
+  const cherryPickHead =
+    cherryPick.status === 0 ? cherryPick.stdout.trim() : null;
+  const empty =
+    !conflicts.length && cherryPickHead === commit && indexTree === headTree;
+  const kind = conflicts.length
+    ? "conflict"
+    : empty
+      ? "empty-cherry-pick"
+      : "cherry-pick-failed";
+  return {
+    kind,
+    commit,
+    cherryPickHead,
+    headTree,
+    indexTree,
+    ...(empty
+      ? {
+          explanation:
+            "The index equals HEAD, but git cherry did not prove this individual patch equivalent. Do not run --continue alone or skip without reviewing the original patch and current tree.",
+          proofCommands: [
+            ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+            ["git", "rev-parse", "CHERRY_PICK_HEAD", "HEAD^{tree}"],
+            ["git", "write-tree"],
+            [
+              "git",
+              "diff",
+              "--no-ext-diff",
+              "--no-textconv",
+              "--binary",
+              "--cached",
+              "HEAD",
+            ],
+            [
+              "git",
+              "diff",
+              "--no-ext-diff",
+              "--no-textconv",
+              "--binary",
+              `${commit}^`,
+              commit,
+            ],
+          ],
+          operatorOptions: [
+            "After proving the original patch is already represented in the current tree, explicitly run git cherry-pick --skip.",
+            "If preserving the empty commit is intended, explicitly run git commit --allow-empty --no-edit.",
+            "Then verify CHERRY_PICK_HEAD is absent and explicitly replay remaining after its first (failed) commit. No option is run automatically.",
+          ],
+        }
+      : {}),
+  };
+}
+
 export function prepareRecovery(options) {
   const plan = validate(options);
   const backupPrefix = `refs/stack-recovery/${randomUUID()}`;
@@ -337,6 +421,7 @@ export function prepareRecovery(options) {
     candidateTree: null,
     candidateStatus: null,
     conflicts: [],
+    failure: null,
     artifactErrors: [],
   };
   try {
@@ -372,6 +457,11 @@ export function prepareRecovery(options) {
           ])
             .split("\n")
             .filter(Boolean);
+          receipt.failure = cherryPickFailure(
+            plan.worktree,
+            commit,
+            receipt.conflicts,
+          );
           break;
         }
         receipt.replayed.push({

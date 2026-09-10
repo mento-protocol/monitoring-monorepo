@@ -173,11 +173,20 @@ node scripts/pr/pr-stack-recover.mjs --old-parent <full-parent-sha> --old-head <
 The helper preserves pinned inputs, replays only the linear child range and
 writes a recovery receipt under `<worktree>.receipt`, including an isolated
 `comparison.git` reader that does not load source diff-driver configuration.
-It never fetches, publishes or merges a PR. Resolve any reported conflict in the
-candidate and preserve the conflict evidence. The receipt's `remaining` list
-starts with the failed commit: after resolving it with `git cherry-pick --continue`,
-replay the listed suffix explicitly. That command alone does not finish the range.
-Refresh both review diffs against the final clean candidate after manual work.
+It never fetches, publishes or merges a PR. Inspect a blocked receipt before
+choosing a continuation. For content conflicts, resolve and stage the candidate
+changes, then run `git cherry-pick --continue`. A combined squash in the new base
+can instead leave an empty cherry-pick that `git cherry` did not identify. An
+empty index alone is not equivalence proof: compare the original commit patch
+with the candidate and record why the intended change is already present.
+Then use `git cherry-pick --skip`, or retain the commit explicitly with
+`git commit --allow-empty --no-edit` when its history is needed. Do not repeatedly run
+`--continue` against an empty pick.
+
+The receipt's `remaining` list starts with the stopped commit. After resolving,
+skipping or retaining it, replay the listed suffix explicitly; a continuation
+command does not run that suffix. Preserve the original evidence and refresh
+both review diffs against the final clean candidate after manual work.
 A patch
 already present in the new base may be skipped only with recorded equivalence
 proof. Review the candidate against both the new base and the prior published

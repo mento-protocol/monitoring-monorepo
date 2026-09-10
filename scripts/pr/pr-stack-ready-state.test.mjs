@@ -32,7 +32,7 @@ const stack = {
   layers,
 };
 const state = (number) => {
-  const pr = { ...layers[number - 1] };
+  const pr = { ...layers[number - 1], mergeStateStatus: "CLEAN" };
   return {
     ready: true,
     feedbackReady: true,
@@ -191,6 +191,53 @@ assert.equal(
   }).state,
   "UNKNOWN",
 );
+// Every other layer needs a complete observation, even when selected is clean.
+for (const mergeStateStatus of [null, "UNKNOWN", undefined]) {
+  let reads = 0;
+  const result = await evaluateStackGate(
+    state(1),
+    "owner/repo",
+    async (args) => {
+      reads++;
+      const value = state(Number(args.prArg));
+      if (args.prArg === "2") value.pr.mergeStateStatus = mergeStateStatus;
+      return value;
+    },
+    feedback,
+  );
+  assert.match(
+    result,
+    /^PENDING stack layer #2 merge observation incomplete; UNKNOWN:/,
+  );
+  assert.equal(reads, 4);
+}
+// Incomplete final observations must not pass otherwise green, stable layers.
+for (const patch of [
+  { mergeStateStatus: null },
+  { mergeStateStatus: "UNKNOWN" },
+  { mergeStateStatus: undefined },
+  { state: null },
+  { state: "UNKNOWN" },
+  { state: undefined },
+  { headRefOid: undefined },
+  { baseRefOid: undefined },
+]) {
+  let reads = 0;
+  const result = await evaluateStackGate(
+    state(2),
+    "owner/repo",
+    async (args) => {
+      const value = state(Number(args.prArg));
+      if (++reads === 5) Object.assign(value.pr, patch);
+      return value;
+    },
+    feedback,
+  );
+  assert.match(result, /^PENDING /, JSON.stringify(patch));
+  assert.equal(reads, 5);
+  if (Object.hasOwn(patch, "mergeStateStatus"))
+    assert.match(result, /final merge observation incomplete; UNKNOWN:/);
+}
 const calls = [];
 assert.match(
   await evaluateStackGate(
@@ -331,7 +378,7 @@ try {
   );
   writeFileSync(
     join(root, "scripts/pr/pr-ready-state.mjs"),
-    `import {readFileSync} from 'node:fs'; let calls=0; export function withGhAbortSignal(_signal,callback) { return callback(); } export async function fetchReadyState(args) { calls++; const value=JSON.parse(readFileSync('input.json')); value.pr={...value.stack.layers.find(layer=>String(layer.number)===args.prArg)}; if(process.env.SCENARIO==='blocked' && args.prArg==='1') value.feedbackReady=false; if(process.env.SCENARIO==='moved' && calls===5) value.stack.layers[0].headRefOid='b'.repeat(40); return value; }`,
+    `import {readFileSync} from 'node:fs'; let calls=0; export function withGhAbortSignal(_signal,callback) { return callback(); } export async function fetchReadyState(args) { calls++; const value=JSON.parse(readFileSync('input.json')); value.pr={...value.stack.layers.find(layer=>String(layer.number)===args.prArg),mergeStateStatus:'CLEAN'}; if(process.env.SCENARIO==='blocked' && args.prArg==='1') value.feedbackReady=false; if(process.env.SCENARIO==='moved' && calls===5) value.stack.layers[0].headRefOid='b'.repeat(40); return value; }`,
   );
   writeFileSync(
     join(root, "scripts/pr/pr-feedback-state-core.mjs"),
