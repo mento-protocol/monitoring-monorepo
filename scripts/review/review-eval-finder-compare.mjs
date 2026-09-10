@@ -72,7 +72,7 @@ const DIGEST = /^[0-9a-f]{64}$/;
  * membership, so a numeric string is read as its number, the way the canonical
  * evidence validator compares string forms; anything else is refused.
  */
-function requireIdArray(value, file) {
+function requireIdArray(value, file, scorableIds) {
   if (!Array.isArray(value)) {
     throw new Error(
       `${file} matched_ids must be an array of ids; the result cannot be compared`,
@@ -83,6 +83,11 @@ function requireIdArray(value, file) {
     if (!Number.isSafeInteger(number)) {
       throw new Error(
         `${file} matched_ids carries ${JSON.stringify(id)}, which is not an integer id; the result cannot be compared`,
+      );
+    }
+    if (!scorableIds.includes(number)) {
+      throw new Error(
+        `${file} matched_ids carries ${number}, which is not a scorable id of this fixture; the result cannot be compared`,
       );
     }
     return number;
@@ -131,7 +136,11 @@ export function readArm({ dir, contract }) {
       p1Ids: fixture.p1_ids ?? [],
       draws: [
         {
-          matchedIds: requireIdArray(result.matched_ids, file),
+          matchedIds: requireIdArray(
+            result.matched_ids,
+            file,
+            fixture.scorable_ids,
+          ),
           scorableIds: fixture.scorable_ids,
         },
       ],

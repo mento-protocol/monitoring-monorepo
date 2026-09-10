@@ -59,6 +59,8 @@ CLAUDE.md
 # outside Git and out of any review input. Scored result files live one level
 # above.
 /docs/evals/review-skill-runs/*/cells/
+# Finder probes (ADR 0096) are non-ledger evidence and never committed.
+/docs/evals/review-skill-runs/*-finder-*/
 
 # clawpatch.ai — review-tool state stays local, not committed.
 .clawpatch/

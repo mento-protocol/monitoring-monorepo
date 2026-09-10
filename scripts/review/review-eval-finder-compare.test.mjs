@@ -245,7 +245,7 @@ test("a straddled CLI upgrade warns and names the runtime that moved", () => {
 });
 
 test("a root result outside the completed-cell manifest is stale and reads as missing", () => {
-  const results = { 11: { matched: [1] }, 22: { matched: [2, 3] } };
+  const results = { 11: { matched: [1] }, 22: { matched: [4, 5] } };
   const base = {
     finder: "sol@high",
     cells: [11, 22],
@@ -302,6 +302,18 @@ test("a numeric string id matches the contract's number; a non-integer id is ref
         contract,
       }),
     /not an integer id/,
+  );
+  assert.throws(
+    () =>
+      readArm({
+        dir: writeArm({
+          finder: "astra@low",
+          cells: [11],
+          results: { 11: { matched: [999] } },
+        }),
+        contract,
+      }),
+    /not a scorable id/,
   );
 });
 
