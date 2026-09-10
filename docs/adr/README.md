@@ -155,22 +155,21 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 
 ### metrics-bridge
 
-| ADR                                                           | Decision                                                                      |
-| ------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| [0027](0027-metrics-bridge-hasura-to-prometheus.md)           | A Hasura→Prometheus bridge exists so v3 DB data can drive Grafana alerts      |
-| [0039](0039-multistrategy-pools-historical-fx-volume.md)      | Pool blockage requires every active indexed strategy to be confirmed blocked  |
-| [0042](0042-metrics-bridge-external-price-poller.md)          | The bridge hosts an isolated external market-price peg-polling lifecycle      |
-| [0043](0043-peg-registry-service-local.md)                    | The peg-monitor registry is service-local config, not published shared-config |
-| [0045](0045-peg-paging-semantics.md)                          | Peg paging measures executable sell price; the deep venue pages alone         |
-| [0048](0048-private-gcs-peg-policy-artifact.md)               | Archived: private GCS artifact with superseded dedicated-project hosting      |
-| [0049](0049-peg-decision-package-read-model.md)               | Peg decisions use a bounded Metrics Bridge read model                         |
-| [0052](0052-envio-logs-prometheus-grafana-alerting.md)        | Envio logs diagnose; Prometheus metrics and Grafana rules alert               |
-| [0054](0054-same-project-peg-policy-artifact.md)              | Peg policy stays private and generation-pinned in the monitoring project      |
-| [0055](0055-peg-policy-bucket-controller-recovery.md)         | Peg bucket IAM reconciliation uses a narrow controller and bounded recovery   |
-| [0057](0057-peg-observation-advancement.md)                   | Repeated provider observations retain bounded health, never sample authority  |
-| [0058](0058-metrics-bridge-dedicated-cloud-build-executor.md) | Metrics Bridge uses a dedicated Cloud Build executor                          |
-
-| [0094](0094-isolated-bridge-transfer-observations.md) | Bridge transfers publish only complete bounded observations in an isolated loop |
+| ADR                                                           | Decision                                                                        |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| [0027](0027-metrics-bridge-hasura-to-prometheus.md)           | A Hasura→Prometheus bridge exists so v3 DB data can drive Grafana alerts        |
+| [0039](0039-multistrategy-pools-historical-fx-volume.md)      | Pool blockage requires every active indexed strategy to be confirmed blocked    |
+| [0042](0042-metrics-bridge-external-price-poller.md)          | The bridge hosts an isolated external market-price peg-polling lifecycle        |
+| [0043](0043-peg-registry-service-local.md)                    | The peg-monitor registry is service-local config, not published shared-config   |
+| [0045](0045-peg-paging-semantics.md)                          | Peg paging measures executable sell price; the deep venue pages alone           |
+| [0048](0048-private-gcs-peg-policy-artifact.md)               | Archived: private GCS artifact with superseded dedicated-project hosting        |
+| [0049](0049-peg-decision-package-read-model.md)               | Peg decisions use a bounded Metrics Bridge read model                           |
+| [0052](0052-envio-logs-prometheus-grafana-alerting.md)        | Envio logs diagnose; Prometheus metrics and Grafana rules alert                 |
+| [0054](0054-same-project-peg-policy-artifact.md)              | Peg policy stays private and generation-pinned in the monitoring project        |
+| [0055](0055-peg-policy-bucket-controller-recovery.md)         | Peg bucket IAM reconciliation uses a narrow controller and bounded recovery     |
+| [0057](0057-peg-observation-advancement.md)                   | Repeated provider observations retain bounded health, never sample authority    |
+| [0058](0058-metrics-bridge-dedicated-cloud-build-executor.md) | Metrics Bridge uses a dedicated Cloud Build executor                            |
+| [0094](0094-isolated-bridge-transfer-observations.md)         | Bridge transfers publish only complete bounded observations in an isolated loop |
 
 ### terraform / infra
 
