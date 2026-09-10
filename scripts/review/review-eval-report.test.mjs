@@ -1058,6 +1058,71 @@ test("the drift waiver points the way the regression it waives points", () => {
   );
 });
 
+test("the drift waiver is scaled to the 39 grid defects control scores", () => {
+  // Control scores the 39 grid defects of the 51 the headline scores, so drift
+  // spread evenly over the suite reaches six flips on the headline and five on
+  // control. Under the headline's own `regression_net_flips` that was a RED the
+  // control could not waive; `control_waiver_net_flips` asks control for its
+  // share of the same movement. ADR 0093.
+  const scaled = {
+    row: row({
+      conditions: {
+        pipeline: condition({ found: 14 }),
+        control: condition({ ids: gridIds, found: 5, draws: 1 }),
+      },
+    }),
+    baselineRow: baseline({
+      conditions: {
+        pipeline: condition({ found: 20 }),
+        control: condition({ ids: gridIds, found: 10, draws: 1 }),
+      },
+    }),
+  };
+  assert.equal(rules.control_waiver_net_flips, 5);
+  const waived = verdict({ contract, ...scaled });
+  assert.equal(waived.verdict, "AMBER", waived.reasons.join(" | "));
+  assert.ok(
+    waived.reasons.some((reason) =>
+      /control moved 5 defects in the same direction .*control_waiver_net_flips 5/.test(
+        reason,
+      ),
+    ),
+    waived.reasons.join(" | "),
+  );
+
+  // One flip below the scaled threshold still explains nothing.
+  const short = verdict({
+    contract,
+    row: row({
+      conditions: {
+        pipeline: condition({ found: 14 }),
+        control: condition({ ids: gridIds, found: 6, draws: 1 }),
+      },
+    }),
+    baselineRow: scaled.baselineRow,
+  });
+  assert.equal(short.verdict, "RED", short.reasons.join(" | "));
+
+  // An archived contract never registered the key, and `--report --contract`
+  // has to reproduce the verdict that run saw: the old threshold stands, so
+  // five flips do not waive.
+  const archived = structuredClone(contract);
+  delete archived.verdict_rules.control_waiver_net_flips;
+  assert.equal(verdict({ contract: archived, ...scaled }).verdict, "RED");
+
+  // A contract that claims the scaled waiver and gives it a value the gate
+  // cannot read waives nothing.
+  for (const value of [0, -5, "5", null]) {
+    const broken = structuredClone(contract);
+    broken.verdict_rules.control_waiver_net_flips = value;
+    assert.equal(
+      verdict({ contract: broken, ...scaled }).verdict,
+      "RED",
+      String(value),
+    );
+  }
+});
+
 test("the report states the verdict, the table, and the defects that flipped", () => {
   const candidate = row({
     verdict: "RED",
