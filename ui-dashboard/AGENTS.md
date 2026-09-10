@@ -96,6 +96,9 @@ threshold-derived history uses the threshold captured at event time.
   `aria-sort`. Add deterministic axe coverage for new shared semantic controls.
 - Source files have a soft cap of 600 effective lines and a lint cap of 1,000
   effective lines. The package `max-lines` rule skips blank lines and comments.
+  The tier-1 enrichment entry point and extracted modules use the same rule
+  in `scripts/intel-marathon/tier1-size.test.mjs`, because package ESLint
+  excludes `.mjs` files.
   Generated files under `src/lib/__generated__/`, tests, and `src/lib/types.ts`
   are exempt. Compare the effective count with the merge base. A change that
   reduces an already-over-threshold file does not require another split. For a
