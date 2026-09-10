@@ -46,10 +46,13 @@ defect it scored, and adds a second condition on top of it: the headline must
 have moved that way on the defects control scored as well. Keying direction to
 control's slice alone would let a grid gain sitting beside a larger non-grid
 loss wave through a net regression whose grid share points the other way.
-Keeping only the whole-set test leaves the mirror case: both conditions fall
-overall while falling on disjoint defects, so control's drift explains none of
-the loss it would waive. Both halves are needed, and the lower magnitude
-threshold is what makes the mirror case reachable.
+Keeping only the whole-set test leaves the mirror case: the headline's loss
+sits off the grid while control moves on it, so over the defects control scored
+the headline did not move the way its regression moved. Control's drift then
+explains none of the loss it would waive. Both halves are needed, and the lower
+magnitude threshold is what makes the mirror case reachable. Neither half asks
+the two conditions to flip the same defect ids: control runs a different
+condition, and the drift the waiver reads is aggregate.
 
 `checkShape` derives both bounds from the contract's own scorable id lists:
 the value must be a positive whole number, at most `regression_net_flips`, and

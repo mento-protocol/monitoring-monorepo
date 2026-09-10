@@ -670,8 +670,10 @@ function controlWaiverThreshold(rules) {
  * defects control scored. Since
  * [ADR 0090](../../docs/adr/0090-canonical-eval-matrix-freshness-floor.md)
  * `control` runs the grid alone, so the two conditions can both fall overall
- * and still fall on disjoint defects; when the headline gained where control
- * lost, control's drift explains none of the loss it would waive. Replacing the
+ * while the headline's loss sits off the grid; when the headline gained over
+ * the defects control scored, control's drift explains none of the loss it
+ * would waive. Neither half asks the two to flip the same defect ids, because
+ * control runs a different condition and the drift is aggregate. Replacing the
  * first half with the second would be wrong the other way round: a grid gain
  * sitting beside a larger non-grid loss is a net regression whose grid slice
  * points away from it, and a waiver keyed to the slice alone would wave it
