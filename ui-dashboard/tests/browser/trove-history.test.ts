@@ -223,3 +223,95 @@ test.describe("trove history page", () => {
     ).toBeVisible();
   });
 });
+
+test("interim ordering handles old/new schema, rollback and complete-ledger handoff", async ({
+  page,
+}) => {
+  await page.clock.install({ time: WEEKDAY_FIXTURE_INSTANT });
+  const errors = trackUnexpectedBrowserErrors(page);
+  let mode: "legacy" | "numeric" | "failed" | "ledger" = "legacy";
+  const operationQueries: string[] = [];
+  await page.route("**/graphql", async (route) => {
+    const request = route.request().postDataJSON() as { query: string };
+    if (request.query.includes("query CdpSchemaFields")) {
+      const response = await route.fetch();
+      const body = await response.json();
+      if (mode === "failed") {
+        await route.fulfill({
+          json: { errors: [{ message: "fixture probe unavailable" }] },
+        });
+        return;
+      }
+      body.data.TroveOperationEventType = {
+        fields: mode === "legacy" ? [{ name: "id" }] : [{ name: "logIndex" }],
+      };
+      if (mode !== "ledger") body.data.TroveLedgerEventType = null;
+      await route.fulfill({ json: body });
+      return;
+    }
+    if (request.query.includes("query CdpTroveOperations")) {
+      operationQueries.push(request.query);
+      const numeric = request.query.includes("CdpTroveOperationsNumeric");
+      const rows = Array.from({ length: 1000 }, (_, index) => ({
+        id: `42220_100_${1000 - index}`,
+        troveId: CASE_TROVE_ID,
+        operation: 2,
+        collChange: "0",
+        debtChange: "0",
+        annualInterestRate: "0",
+        debtIncreaseFromUpfrontFee: "0",
+        timestamp: "1776240000",
+        blockNumber: "100",
+        ...(numeric ? { logIndex: 1000 - index } : {}),
+        txHash: `0x${(1000 - index).toString(16).padStart(64, "0")}`,
+      }));
+      await route.fulfill({ json: { data: { TroveOperationEvent: rows } } });
+      return;
+    }
+    await route.continue();
+  });
+  await page.goto(CASE_TROVE_PATH);
+  const operations = page.getByRole("table", {
+    name: "Trove operations",
+    exact: true,
+  });
+  await expect(operations.locator("tbody tr")).toHaveCount(999);
+  await expect(page.getByText(/may omit newer operations/)).toBeVisible();
+  expect(
+    operationQueries.every(
+      (query) => !query.includes("CdpTroveOperationsNumeric"),
+    ),
+  ).toBe(true);
+  mode = "numeric";
+  expect(await page.evaluate(() => document.visibilityState)).toBe("visible");
+  await page.clock.runFor(301_000);
+  await expect
+    .poll(() =>
+      operationQueries.some((query) =>
+        query.includes("CdpTroveOperationsNumeric"),
+      ),
+    )
+    .toBe(true);
+  await expect(page.getByText(/may omit newer operations/)).toHaveCount(0);
+  await expect(operations.locator("tbody tr")).toHaveCount(999);
+  mode = "failed";
+  await page.clock.fastForward(300_001);
+  await expect(
+    page.getByText(/Operation ordering could not be checked/),
+  ).toBeVisible();
+  mode = "legacy";
+  await page.clock.fastForward(300_001);
+  await expect(
+    page.getByText(/Operation ordering is not yet confirmed/),
+  ).toBeVisible();
+  mode = "ledger";
+  await page.clock.fastForward(300_001);
+  await expect(
+    page.getByRole("table", { name: "Trove ledger", exact: true }),
+  ).toBeVisible();
+  await expect(operations).toHaveCount(0);
+  const stoppedCount = operationQueries.length;
+  await page.clock.fastForward(60_001);
+  expect(operationQueries).toHaveLength(stoppedCount);
+  expect(errors).toEqual([]);
+});
