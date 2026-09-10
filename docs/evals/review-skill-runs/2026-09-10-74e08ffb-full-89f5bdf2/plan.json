@@ -15,7 +15,7 @@
   "baseline_selection": "automatic",
   "baseline": null,
   "resume_from": null,
-  "plan_dir": "/private/tmp/claude/review-eval-a3c8bffc/docs/evals/review-skill-runs/2026-09-10-74e08ffb-full-89f5bdf2",
+  "plan_dir": "docs/evals/review-skill-runs/2026-09-10-74e08ffb-full-89f5bdf2",
   "inputs": {
     "skill_digest": "89f5bdf20356c5515974ec1a6112fc4f9dfbf31cf1d60b667084f91dfbe6ec60",
     "skill_ref": "installed",
