@@ -998,6 +998,16 @@ model. Never swap a model and keep comparing against
 the old baseline. A judge retirement follows the same procedure, and a human
 re-audits the calibration set before the new judge's labels are trusted.
 
+The rule binds a swap that would otherwise break a live comparison, so it needs
+a `status: "complete"` row on the outgoing `comparability_key` to pair against:
+`vs_baseline` recomputes its McNemar counts from the two rows' `per_defect`
+vectors, and there is nothing to recompute when the outgoing key holds no
+complete row. A swap on a key with no complete row owes no bridge; the next
+full run anchors that key's baseline. This qualifies the rule; it does not
+retire it. Run the bridge whenever the outgoing key does carry a complete row,
+and run it before the retiring model goes away, because history cannot be
+re-run.
+
 No CLI mode plans a bridge run: `--kind` accepts `full` and `canary`, and
 `buildPlan` refuses anything else. What the harness contributes is the row's
 standing — `bridge` is a valid ledger kind, `--validate --against` re-derives
