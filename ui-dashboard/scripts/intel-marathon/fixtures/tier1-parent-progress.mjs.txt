@@ -1,9 +1,9 @@
 import { existsSync, readFileSync } from "node:fs";
 
-// Default resume keeps all records terminal. Explicit retries retain only non-error records.
+// Keep the existing resume policy: every address-bearing record is terminal.
 export function loadProcessed(
   progressFile,
-  { retryErrors = false, storage = { existsSync, readFileSync } } = {},
+  storage = { existsSync, readFileSync },
 ) {
   const processed = new Set();
   const exists = storage.existsSync(progressFile);
@@ -14,10 +14,8 @@ export function loadProcessed(
       .filter(Boolean);
     for (const line of prior) {
       try {
-        const record = JSON.parse(line);
-        const { address } = record;
-        if (address && (!retryErrors || !Object.hasOwn(record, "error")))
-          processed.add(address);
+        const { address } = JSON.parse(line);
+        if (address) processed.add(address);
       } catch {
         /* skip malformed */
       }
