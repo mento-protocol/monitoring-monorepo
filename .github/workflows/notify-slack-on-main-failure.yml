@@ -106,6 +106,7 @@ jobs:
           COMMIT_MSG: ${{ github.event.workflow_run.display_title }}
           ACTOR: ${{ github.event.workflow_run.triggering_actor.login }}
           EVENT: ${{ github.event.workflow_run.event }}
+          REPOSITORY_NAME: ${{ github.event.repository.name }}
         run: |
           set -euo pipefail
 
@@ -152,13 +153,14 @@ jobs:
               --arg msg "$COMMIT_MSG" \
               --arg actor "$ACTOR" \
               --arg event "$EVENT" \
+              --arg repo "$REPOSITORY_NAME" \
               '($msg | gsub("&"; "&amp;") | gsub("<"; "&lt;") | gsub(">"; "&gt;")) as $safe_msg
                | (if $actor != "" and $actor != "null" then "\n*Triggered by:* " + $actor elif $event == "schedule" then "\n*Triggered by:* scheduled cron" else "" end) as $actor_line
                | {
                 channel: $ch,
-                text: ("❌ " + $wf + " failed on main (" + $sha + ")"),
+                text: ("❌ " + $wf + " failed on main in " + $repo + " (" + $sha + ")"),
                 blocks: [
-                  {type: "section", text: {type: "mrkdwn", text: ("❌ *<" + $url + "|" + $wf + ">* failed on `main`")}},
+                  {type: "section", text: {type: "mrkdwn", text: ("❌ *<" + $url + "|" + $wf + "> failed on* `main` *in " + $repo + "*")}},
                   {type: "section", text: {type: "mrkdwn", text: ("*Commit:* `" + $sha + "` — " + $safe_msg + $actor_line + "\n\n<" + $url + "|View failed run →>")}}
                 ]
               }')
