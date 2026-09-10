@@ -663,7 +663,8 @@ function controlWaiverThreshold(rules) {
  * move together by at least the waiver threshold, the world moved and the score
  * is not attributable to the skill.
  *
- * The direction test has two halves, and the waiver needs both. The first reads
+ * The direction test has two halves, and a contract carrying
+ * `control_waiver_net_flips` needs both. The first reads
  * the delta of the rule being waived: `flips`, over every defect the headline
  * scored. It is a waiver for that RED and nothing else, so control has to have
  * moved the way the loss did. The second reads the headline restricted to the
@@ -693,7 +694,8 @@ function controlMoved({ contract, row, baseline, flips, name }) {
   if (!control || !baseControl) return null;
   const controlFlips = compareConditions(baseControl, control);
   if (controlFlips.delta === 0) return null;
-  const need = controlWaiverThreshold(contract.verdict_rules);
+  const rules = contract.verdict_rules;
+  const need = controlWaiverThreshold(rules);
   if (!Number.isFinite(need)) return null;
   if (Math.sign(controlFlips.delta) !== Math.sign(flips.delta)) return null;
   if (Math.abs(controlFlips.delta) < need) return null;
@@ -702,7 +704,13 @@ function controlMoved({ contract, row, baseline, flips, name }) {
     restrictCondition(baseline.conditions?.[name], scope),
     restrictCondition(row.conditions?.[name], scope),
   );
-  if (Math.sign(headlineOnScope.delta) !== Math.sign(flips.delta)) return null;
+  // The slice half arrived with the scaled threshold and binds the same
+  // contracts, for the same reason: `--report --contract <archived>` has to
+  // reproduce the verdict that run saw, and a run under the old rule was
+  // waived on the aggregate test alone.
+  const scaled = rules?.control_waiver_net_flips !== undefined;
+  if (scaled && Math.sign(headlineOnScope.delta) !== Math.sign(flips.delta))
+    return null;
   return `control moved ${controlFlips.delta} defects in the same direction as the headline, which moved ${headlineOnScope.delta} on the ${scope.size} defect(s) control also scored (control_waiver_net_flips ${need}); the model moved, so the score is not attributable`;
 }
 

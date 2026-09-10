@@ -66,9 +66,11 @@ The rule binds the contracts that carry the key, the binding
 [ADR 0091](0091-promote-needs-replay-corroboration.md) set for
 `promote_corroboration_net_flips`. A contract from before this change never
 registered it, and `--report --contract <archived>` has to reproduce the verdict
-that run saw, so an absent key leaves `regression_net_flips` in place. A key
-present with a value the gate cannot read waives nothing: the contract claims
-the scaled waiver and the gate cannot apply it.
+that run saw, so an absent key leaves `regression_net_flips` in place and leaves
+the direction test on its aggregate half alone. Both halves of this record are
+scoped the same way, because a run under the old rule was waived on the
+aggregate test alone. A key present with a value the gate cannot read waives
+nothing: the contract claims the scaled waiver and the gate cannot apply it.
 
 ## Alternatives considered
 
@@ -115,8 +117,9 @@ the scaled waiver and the gate cannot apply it.
 - `scripts/review/review-eval-report.test.mjs` covers the evenly spread drift
   that now waives, a move one flip short of the threshold, an archived contract
   without the key, an unreadable value, the grid gain the whole-set direction
-  test refuses, the disjoint loss the grid-slice half refuses, and the gain row
-  the widened waiver takes off the ranking;
+  test refuses, the off-grid loss the grid-slice half refuses, the archived
+  contract that replays without that half, and the gain row the widened waiver
+  takes off the ranking;
   `scripts/review/review-eval-fixtures.test.mjs` covers both bounds and the
   derived floor.
 - Raised on [issue 2333](https://github.com/mento-protocol/monitoring-monorepo/issues/2333).

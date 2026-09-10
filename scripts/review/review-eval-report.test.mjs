@@ -1176,6 +1176,59 @@ test("the drift waiver refuses when the headline gained on control's scope", () 
   );
 });
 
+test("an archived contract keeps the aggregate direction test alone", () => {
+  // The slice half of the direction test arrived with the scaled threshold and
+  // binds the same contracts. Here the headline loses six non-grid defects and
+  // control loses six on the grid, where the headline did not move at all. A
+  // contract carrying the key refuses the waiver on the slice; an archived one
+  // has to replay the AMBER its run saw.
+  const gridScope = new Set(gridIds);
+  const nonGridIds = allIds.filter((id) => !gridScope.has(id));
+  const offGrid = {
+    row: row({
+      conditions: {
+        pipeline: splitCondition({
+          ids: allIds,
+          foundIds: gridIds.slice(0, 10),
+        }),
+        control: splitCondition({
+          ids: gridIds,
+          foundIds: gridIds.slice(0, 4),
+          draws: 1,
+        }),
+      },
+    }),
+    baselineRow: baseline({
+      conditions: {
+        pipeline: splitCondition({
+          ids: allIds,
+          foundIds: [...nonGridIds.slice(0, 6), ...gridIds.slice(0, 10)],
+        }),
+        control: splitCondition({
+          ids: gridIds,
+          foundIds: gridIds.slice(0, 10),
+          draws: 1,
+        }),
+      },
+    }),
+  };
+  const current = verdict({ contract, ...offGrid });
+  assert.equal(current.verdict, "RED", current.reasons.join(" | "));
+
+  const archived = structuredClone(contract);
+  delete archived.verdict_rules.control_waiver_net_flips;
+  const replayed = verdict({ contract: archived, ...offGrid });
+  assert.equal(replayed.verdict, "AMBER", replayed.reasons.join(" | "));
+  assert.ok(
+    replayed.reasons.some((reason) =>
+      /control moved 6 defects in the same direction as the headline, which moved 0 on the/.test(
+        reason,
+      ),
+    ),
+    replayed.reasons.join(" | "),
+  );
+});
+
 test("control drift at the scaled threshold takes a gain row off the ranking", () => {
   // The waiver is not only a RED softener. `worldMoved` pushes AMBER whichever
   // way the run moved, so scaling the threshold down to control's own scope
