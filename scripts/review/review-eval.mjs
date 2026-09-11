@@ -12,12 +12,6 @@ import { parseArgs as parseNodeArgs } from "node:util";
 import { pathToFileURL } from "node:url";
 
 import {
-  ensureLabelsExist,
-  ghPaginate,
-  normalizeIssuePages,
-  runGh,
-} from "../lib/gh-issue-lifecycle.mjs";
-import {
   checkFixtures,
   DEFAULT_CONTRACT_PATH,
   frozenInputProblems,
@@ -34,16 +28,9 @@ import {
 } from "./review-eval-ledger.mjs";
 import { revalidateAppendedRows } from "./review-eval-appended.mjs";
 import { planProvenanceProblems } from "./review-eval-plan-evidence.mjs";
-import {
-  parseLeadingReviewEvalMarkers,
-  renderReport,
-  REVIEW_EVAL_OWNERSHIP_LABEL,
-  scheduleIssuePayload,
-  verdict,
-} from "./review-eval-report.mjs";
+import { renderReport, verdict } from "./review-eval-report.mjs";
 import { runEvidenceProblems } from "./review-eval-run-evidence.mjs";
 import {
-  assertAuthorizedFreshnessWorkflow,
   buildPlan,
   claudeExec,
   comparabilityKey,
@@ -51,7 +38,6 @@ import {
   DEFAULT_LEDGER_PATH,
   DEFAULT_RUNS_DIR,
   fileDigest,
-  planStalenessIssueSync,
   resolveKind,
   scorePlan,
 } from "./review-eval-run.mjs";
@@ -61,8 +47,11 @@ import {
   resolveRowReference,
   revalidateRow,
 } from "./review-eval-result-shape.mjs";
+import { runScheduleIssue } from "./review-eval-schedule-issue.mjs";
 
 export { planProvenanceProblems };
+// `review-eval-freshness-publication.mjs` imports this mode from here.
+export { runScheduleIssue };
 
 export const DEFAULT_REVIEW_EVAL_REPO = "mento-protocol/monitoring-monorepo";
 
@@ -368,85 +357,6 @@ export function baseLedgerRows({
     base,
     mode: usedMergeBase ? "merge-base" : "tip",
     reason: null,
-  };
-}
-
-async function defaultListIssues(options) {
-  const pages = await ghPaginate(`repos/${options.repo}/issues?state=all`);
-  return normalizeIssuePages(pages, {
-    ownershipLabel: REVIEW_EVAL_OWNERSHIP_LABEL,
-    parseMarker: parseLeadingReviewEvalMarkers,
-  });
-}
-
-async function defaultCreateIssue(options, payload) {
-  return runGh([
-    "issue",
-    "create",
-    "--repo",
-    options.repo,
-    "--title",
-    payload.title,
-    "--body",
-    payload.body,
-    "--label",
-    payload.labels.join(","),
-  ]);
-}
-
-export async function runScheduleIssue(options, context, deps = {}) {
-  const {
-    listIssues = defaultListIssues,
-    authorize = assertAuthorizedFreshnessWorkflow,
-    ensureLabels = ensureLabelsExist,
-    createIssue = defaultCreateIssue,
-    now = new Date(options.now ?? `${options.date}T00:00:00Z`),
-  } = deps;
-  const rows = readLedger(path.resolve(context.repoRoot, options.ledgerPath));
-  const age = freshness({
-    rows,
-    contract: context.contract,
-    now,
-    contractDigest: context.contractDigest,
-  });
-  const payload = scheduleIssuePayload({
-    freshnessResult: age,
-    contract: context.contract,
-    contractDigest: context.contractDigest,
-    month: options.date.slice(0, 7),
-  });
-  if (!payload) {
-    return {
-      action: "skip-fresh",
-      reason: `ledger is fresh: ${age.daysSinceAny} day(s) since the newest run`,
-      level: age.level,
-      reasons: age.reasons,
-      mutated: false,
-    };
-  }
-  const issues = await listIssues(options);
-  const decision = planStalenessIssueSync({
-    month: options.date.slice(0, 7),
-    contractDigest: context.contractDigest,
-    issues,
-    payload,
-  });
-  let mutated = false;
-  if (decision.action === "create" && !options.dryRun) {
-    await authorize(options);
-    await ensureLabels(options);
-    await createIssue(options, payload);
-    mutated = true;
-  }
-  return {
-    action: decision.action,
-    reason: decision.reason,
-    issue_number: decision.issue?.number ?? null,
-    level: age.level,
-    reasons: age.reasons,
-    title: payload.title,
-    dry_run: options.dryRun,
-    mutated,
   };
 }
 

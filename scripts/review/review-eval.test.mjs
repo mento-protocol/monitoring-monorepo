@@ -96,7 +96,10 @@ import {
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const scriptPath = fileURLToPath(new URL("./review-eval.mjs", import.meta.url));
 const validationModuleLineLimits = new Map([
-  ["review-eval.mjs", 900],
+  // Lowered from 900 when `--schedule-issue` moved out. The file is past the
+  // 600-line soft cap, so it may only shrink: grow a module beside it instead.
+  ["review-eval.mjs", 850],
+  ["review-eval-schedule-issue.mjs", 200],
   ["review-eval-run.mjs", 100],
   ["review-eval-run-plan.mjs", 600],
   ["review-eval-run-detail.mjs", 200],
@@ -239,7 +242,7 @@ test("the shell split no longer reconstructs the pre-split cell runtime", () => 
   // so this pin still catches an unintended shell edit.
   assert.equal(
     reconstructed,
-    "3f03d5d1956981aebd5154f826996c74dc38215ca7688b647b04963c04cfb750",
+    "7cdc7da42fccb8f3439f62b63b32ecd19a92ffdcd22d05d4789ce14b779382ca",
   );
   // It is no longer the pre-split monolith. Capturing the whole session instead
   // of the CLI's last-message envelope changed what a cell records, so the 24
@@ -901,7 +904,7 @@ test("comparabilityKey moves with the contract, the prompts, and the scorer", ()
 
 test("orchestratorSourceDigest binds the shell and the cell modules", () => {
   const expected =
-    "27d53afb313c6f74a40e9c3a0c41e9c6fbba94dddf1b259111715d6493ef1958";
+    "14c6268a554026556cdf3d1ceeb6e5592646877fcb455726977eaf0d50f91480";
   assert.equal(orchestratorSourceDigest(), expected);
   // The cell writer and the stream parser are in the digest for the same
   // reason the shell is: the writer decides what a paid cell records and the
@@ -7143,6 +7146,66 @@ test("the deadline terminates the whole subprocess tree, not only its parent", (
         // Already gone; nothing to clean up.
       }
     }
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the deadline reaches a stream-capped model that has written nothing", () => {
+  // `run_stream_capped` starts the model under job control, which puts it in a
+  // process group `run_bounded`'s watchdog does not signal. A codex that
+  // stalled before writing the bytes `head` waits for therefore outlived the
+  // deadline: the TERM killed the reader, the run reported failure, and the
+  // model kept spending. Run the committed functions, because whether the
+  // model dies is a property of the process groups and not of the source.
+  const bounded = runEvalSource("lifecycle")
+    .match(/^run_bounded\(\) \{\n[\s\S]*?^\}$/m)?.[0]
+    ?.replace("sleep 10", "sleep 1");
+  const stream = runEvalSource("lifecycle").match(
+    /^run_stream_capped\(\) \{\n[\s\S]*?^\}$/m,
+  )?.[0];
+  const inFixture = runEvalSource("runtime").match(
+    /^run_in_fixture\(\) \{\n[\s\S]*?^\}$/m,
+  )?.[0];
+  assert.ok(bounded && stream && inFixture, "the capped stream launcher moved");
+
+  const dir = mkdtempSync(path.join(tmpdir(), "review-eval-stream-stall-"));
+  try {
+    const heartbeat = path.join(dir, "heartbeat");
+    // A model that never writes to stdout, so `head -c` blocks until the
+    // deadline. The heartbeat file is the only evidence that it is alive.
+    const child = `while :; do printf . >> ${JSON.stringify(heartbeat)}; sleep 0.2; done`;
+    const childArg = `'${child.replaceAll("'", `'"'"'`)}'`;
+    const harness = path.join(dir, "harness.sh");
+    writeFileSync(
+      harness,
+      [
+        "#!/usr/bin/env bash",
+        "set -uo pipefail",
+        `TMPROOT=${JSON.stringify(dir)}`,
+        "CELL_ENV=(env)",
+        bounded,
+        inFixture,
+        stream,
+        "status=0",
+        `run_bounded ${JSON.stringify(path.join(dir, "out"))} 3 run_stream_capped 1000000 ${JSON.stringify(dir)} bash -c ${childArg} || status=$?`,
+        'echo "status=$status"',
+      ].join("\n"),
+    );
+    const result = spawnSync("bash", [harness], { encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /status=124/);
+    assert.ok(existsSync(heartbeat), "the stalled model never started");
+    // The group signal lands with the reader's; give the kernel a beat, then
+    // ask twice whether anything is still writing.
+    spawnSync("sleep", ["2"]);
+    const stoppedAt = readFileSync(heartbeat, "utf8").length;
+    spawnSync("sleep", ["1"]);
+    assert.equal(
+      readFileSync(heartbeat, "utf8").length,
+      stoppedAt,
+      "the stalled model kept running after the deadline",
+    );
+  } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });

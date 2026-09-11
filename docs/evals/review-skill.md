@@ -1218,6 +1218,7 @@ path must exist on `main` before the first run after the moving commit.
 | `docs/evals/review-skill-ledger.jsonl`                      | append-only score ledger, one row per run                |
 | `docs/evals/review-skill-runs/`                             | per-run scored detail                                    |
 | `scripts/review/review-eval.mjs`                            | the CLI                                                  |
+| `scripts/review/review-eval-schedule-issue.mjs`             | the `--schedule-issue` mode                              |
 | `scripts/review/review-eval-run.mjs`                        | the stable run-helper import facade                      |
 | `scripts/review/review-eval-run-plan.mjs`                   | plan, input, matrix, and comparability-key construction  |
 | `scripts/review/review-eval-run-detail.mjs`                 | detail-directory naming and the pre-split cell cache     |
