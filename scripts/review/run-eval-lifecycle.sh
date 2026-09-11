@@ -275,18 +275,19 @@ run_stream_capped() {
   local fifo
   fifo="$(mktemp -u "$TMPROOT/review-eval-pipe.XXXXXX")"
   mkfifo "$fifo" || return 1
+  # Job control puts the model in a group of its own, so the deadline TERM that
+  # `run_bounded` sends to this shell's group no longer reaches it. Left
+  # untrapped that TERM kills the `head` below and ends this shell, and the
+  # model survives to spend against its own hour-long timeout. These handlers
+  # carry the deadline across the group boundary and are armed before the
+  # launch, so no window exists between the two. `$child` and `$fifo` expand
+  # when the trap fires, only inside this call: every return path clears them.
+  local child=""
+  trap 'kill -KILL -- "-$child" 2>/dev/null; rm -f "$fifo"; exit 143' TERM INT
   set -m
   run_in_fixture "$fixture" "$@" >"$fifo" &
-  local child=$!
+  child=$!
   set +m
-  # Job control has just put the model in a group of its own, so the deadline
-  # TERM that `run_bounded` sends to this shell's group no longer reaches it.
-  # Left untrapped that TERM kills the `head` below and ends this shell, and
-  # the model survives to spend against its own hour-long timeout. These
-  # handlers carry the deadline across the group boundary. `$child` and
-  # `$fifo` expand when the trap fires, which is only inside this call:
-  # every return path below clears the handlers first.
-  trap 'kill -KILL -- "-$child" 2>/dev/null; rm -f "$fifo"; exit 143' TERM INT
   head -c "$((ceiling + 1))" <"$fifo"
   kill -TERM -- "-$child" 2>/dev/null || true
   local waited=0

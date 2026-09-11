@@ -63,6 +63,13 @@ function readPinnedTruth(repoRoot, fixture) {
   }
 }
 
+// `cost_metered` is a boolean or absent; a string "false" must not read as metered.
+const meteringFlag = ({ cell_id, cost_metered: flag = true }) => {
+  if (typeof flag !== "boolean")
+    throw new Error(`${cell_id}: cost_metered must be a boolean`);
+  return flag;
+};
+
 async function scoreOneCell({
   cell,
   cellResult,
@@ -94,13 +101,10 @@ async function scoreOneCell({
     cellId: cell.cell_id,
     runGit,
   });
-  // Snapshot the logins the fixture already carries while the tree is still the
-  // one `resetFixture` just restored. The exclusion list exists so a reviewer
-  // login that is genuine fixture content is not read as a leak, and the novel
-  // judge below runs with `Bash` inside this same checkout: computed after it,
-  // a login that fixture text prompt-injected the judge into writing into a
-  // tracked file would be excluded, and a transcript naming the reviewer would
-  // evade the hard leak signal.
+  // Snapshot the logins the fixture already carries before the novel judge
+  // runs with `Bash` in this checkout: a login it was prompt-injected into
+  // writing to a tracked file would otherwise be excluded, and a transcript
+  // naming the reviewer would evade the hard leak signal.
   const excludeLogins = [
     ...loginsInFixtureTree({
       fixturePath,
@@ -159,7 +163,7 @@ async function scoreOneCell({
     // A codex cell's CLI reports no price, so the zero above is an absent
     // number rather than a free call. Dropped here, the retained result and the
     // row recorded an unknown-price call as $0 with nothing to tell them apart.
-    usd_metered: cellResult.cost_metered !== false,
+    usd_metered: meteringFlag(cellResult),
     scoring_usd: cellCost.usd,
   };
 }
@@ -305,11 +309,9 @@ export async function scorePlan({
   // recorded, or the cell check below would read the contract's finder.
   const isFinderProbe = plan.kind === "finder";
   const recordedOverride = plan.inputs?.finder_override ?? null;
-  // Only a probe may substitute a finder. A full or canary plan.json is a file
-  // on the branch: were the override honoured for every kind, an edited plan
-  // with matching cells would score and publish a canonical row for a finder
-  // the contract never named, under a comparability key that still names the
-  // contract's finder. Refuse it here, before any judge call spends quota.
+  // Only a probe may substitute a finder: honoured for every kind, an edited
+  // full plan with matching cells would publish a canonical row for a finder
+  // the contract never named. Refuse it before any judge call spends quota.
   if (recordedOverride && !isFinderProbe) {
     throw new Error(
       `plan kind ${plan.kind} carries inputs.finder_override; only a finder probe may substitute a finder`,
