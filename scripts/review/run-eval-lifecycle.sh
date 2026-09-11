@@ -265,19 +265,28 @@ remaining_seconds() {
 # log line that would otherwise carry a bare exit status. The caller removes the
 # file with the stdout file it named.
 # A model process whose stdout is read through `head -c`: the pipe closes at
-# the byte ceiling, the child is then killed rather than left spending, and
-# the caller reads a stream one byte past the ceiling as an overflow. For the
-# codex verifier, whose `ulimit -f` cap would fire on its own sqlite state.
+# the byte ceiling, the child's whole process group is then killed rather than
+# left spending, and the caller reads a stream one byte past the ceiling as an
+# overflow. For the codex verifier, whose `ulimit -f` cap would fire on its own
+# sqlite state. The child is started under job control so its pid is its group.
 run_stream_capped() {
   local ceiling="$1" fixture="$2"
   shift 2
   local fifo
   fifo="$(mktemp -u "$TMPROOT/review-eval-pipe.XXXXXX")"
   mkfifo "$fifo" || return 1
+  set -m
   run_in_fixture "$fixture" "$@" >"$fifo" &
   local child=$!
+  set +m
   head -c "$((ceiling + 1))" <"$fifo"
-  kill -TERM "$child" 2>/dev/null || true
+  kill -TERM -- "-$child" 2>/dev/null || true
+  local waited=0
+  while ((waited < 10)) && kill -0 -- "-$child" 2>/dev/null; do
+    sleep 1
+    waited=$((waited + 1))
+  done
+  kill -KILL -- "-$child" 2>/dev/null || true
   local status=0
   wait "$child" || status=$?
   rm -f "$fifo"
