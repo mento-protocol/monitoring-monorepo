@@ -749,7 +749,6 @@ resource "grafana_rule_group" "fpmms_depletion" {
       resolved_summary  = "Either the thin side recovered above the depletion floor, or the pool crossed into the one-sided page band — check the reserves line."
       current_reserves  = local.deviation_current_reserves_annotation
       value_composition = local.pool_depletion_value_composition_annotation
-      rebalance_reason  = local.deviation_rebalance_reason_annotation
     }
 
     labels = {
@@ -849,7 +848,6 @@ resource "grafana_rule_group" "fpmms_depletion" {
       resolved_summary  = "The thin side is back above the one-sided floor."
       current_reserves  = local.deviation_current_reserves_annotation
       value_composition = local.pool_depletion_value_composition_annotation
-      rebalance_reason  = local.deviation_rebalance_reason_annotation
     }
 
     # `severity = "page"` follows the repo's page convention (trading limits,

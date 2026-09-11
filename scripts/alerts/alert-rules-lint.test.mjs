@@ -2098,6 +2098,10 @@ test("depletion state ignores empty optional rebalance context", () => {
         /\bexpression\s*=\s*"A"/.test(rule),
       `${name} state must remain controlled only by reserve/value-share query A`,
     );
+    assert(
+      !/\brebalance_reason\s*=/.test(rule),
+      `${name} must not declare rebalance context without its optional query data`,
+    );
   }
 
   const [, pageThresholdRaw, pageComparator] = pageRule.match(

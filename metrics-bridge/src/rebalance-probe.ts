@@ -10,8 +10,7 @@
  * firing query's labels, so the annotation reads query B's labels through
  * the `$values` map). It answers "why aren't rebalances landing" on the rules
  * where that is the operator's next question: `Rebalancer Stale` (the
- * actionable pool critical), `Rebalance Ineffective`, `Deviation Breach`, and
- * the `Pool Depletion Risk` rules.
+ * actionable pool critical), `Rebalance Ineffective`, and `Deviation Breach`.
  *
  * Run cadence is controlled by `REBALANCE_PROBE_EVERY_N_POLLS` — see
  * `poller.ts`. The gauge is RESET at the start of each cycle so a pool
@@ -92,7 +91,7 @@ export function eligibleForProbe(pools: PoolRow[]): PoolRow[] {
   // Defense-in-depth VP exclusion via the canonical `isFpmmPool` predicate.
   // The poller already filters to FPMM-only rows at the boundary, but a healed
   // VP that slipped through (or a direct caller passing unfiltered pools) has
-  // no FPMM deviation or depletion alert to annotate, so probing it would emit
+  // no FPMM deviation or rebalancer alert to annotate, so probing it would emit
   // a phantom `mento_pool_rebalance_blocked` gauge.
   return pools.filter(isFpmmPool).filter((pool) => {
     if (Number(pool.deviationBreachStartedAt) <= 0) return false;
