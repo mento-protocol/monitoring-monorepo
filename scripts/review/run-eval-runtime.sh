@@ -485,13 +485,13 @@ run_cell() {
   # is: a stalled contestant would hold the run past its advertised deadline.
   if [[ $tool == codex ]]; then
     # The probe lane's codex verifier: the bare model on the same handoff
-    # prompt, with no skill staged, so the cell measures the model and not the
-    # treatment. Read-only, because it only reads the fixture and writes a
-    # report. `--json` makes the session readable; `-o` holds the final message.
+    # prompt, no skill staged, read-only. `--ephemeral`: the cell's file-size
+    # cap also binds codex's own session rollout, which can exceed it.
     last_message="$(mktemp "$TMPROOT/review-eval-last.XXXXXX")"
     run_bounded "$raw" "$(remaining_seconds "$MATRIX_DEADLINE")" \
       run_capped_in_fixture "$fixture" codex exec --sandbox read-only \
-      --skip-git-repo-check -m "$model" -c "model_reasoning_effort=\"$effort\"" \
+      --skip-git-repo-check --ephemeral -m "$model" \
+      -c "model_reasoning_effort=\"$effort\"" \
       --json -o "$last_message" "$prompt" || claude_status=$?
   else
     # `stream-json` because a cell is scored on the messages it wrote, not on
