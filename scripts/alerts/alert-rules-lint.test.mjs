@@ -2060,6 +2060,68 @@ test("pool depletion tiers measure value share, not token-count share", () => {
   }
 });
 
+// Optional rebalance context is sparse by design: a healthy or not-yet-probed
+// pool has no `mento_pool_rebalance_blocked > 0` series. Grafana can propagate
+// that empty annotation query as NoData for the whole rule, so the depletion
+// rules must not evaluate it at all. Their state is decided by A alone.
+test("depletion state ignores empty optional rebalance context", () => {
+  const fpmmRules = readFileSync(
+    path.resolve(repoRoot, "alerts/rules/rules-fpmms.tf"),
+    "utf8",
+  );
+  const criticalRule = ruleBlockNamed(
+    fpmmRules,
+    /\bname\s*=\s*"Pool Depletion Risk"/,
+  );
+  const pageRule = ruleBlockNamed(
+    fpmmRules,
+    /\bname\s*=\s*"Pool Nearly One-Sided"/,
+  );
+
+  for (const [name, rule] of [
+    ["Pool Depletion Risk", criticalRule],
+    ["Pool Nearly One-Sided", pageRule],
+  ]) {
+    const annotationQueryGroups = [
+      ...rule.matchAll(/\blocal\.([a-z0-9_]+_annotation_queries)\b/g),
+    ].map(([, localName]) => localName);
+    assert(
+      JSON.stringify(annotationQueryGroups) ===
+        JSON.stringify([
+          "pool_depletion_value_share_annotation_queries",
+          "deviation_reserve_annotation_queries",
+        ]),
+      `${name} must evaluate only always-present reserve/value-share annotation queries; got ${annotationQueryGroups.join(", ")}`,
+    );
+    assert(
+      /\bcondition\s*=\s*"threshold"/.test(rule) &&
+        /\bexpression\s*=\s*"A"/.test(rule),
+      `${name} state must remain controlled only by reserve/value-share query A`,
+    );
+  }
+
+  const [, pageThresholdRaw, pageComparator] = pageRule.match(
+    /evaluator\s*=\s*\{\s*params\s*=\s*\[([0-9.]+)\]\s*,\s*type\s*=\s*"([^"]+)"/,
+  ) ?? [null, null, null];
+  assert(
+    pageThresholdRaw !== null && pageComparator === "lt",
+    "Pool Nearly One-Sided must keep its less-than page threshold",
+  );
+
+  const pageThreshold = Number(pageThresholdRaw);
+  const pageState = (minReserveValueShare) =>
+    minReserveValueShare < pageThreshold ? "Alerting" : "Normal";
+
+  assert(
+    pageState(0.09) === "Alerting",
+    "A < 0.1 must remain Alerting when optional rebalance context is empty",
+  );
+  assert(
+    pageState(0.1) === "Normal" && pageState(0.11) === "Normal",
+    "only A >= 0.1 may resolve Pool Nearly One-Sided",
+  );
+});
+
 // The depletion bands read gauges the bridge withholds whenever a pool has no
 // live median or an unread `invertRateFeed`, and `no_data_state = "OK"` turns
 // that withholding into no notification at all. A funded pool can therefore

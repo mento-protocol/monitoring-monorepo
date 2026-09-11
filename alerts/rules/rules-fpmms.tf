@@ -774,14 +774,14 @@ resource "grafana_rule_group" "fpmms_depletion" {
       })
     }
 
-    # Annotation-only R0 / R1 plus the rebalance-blocked reason and its Aegis
-    # reserve-balance companions. Same bounded set the rebalancer rules use;
-    # see main.tf for why they sit outside the threshold condition.
+    # Annotation-only V0 / V1 value shares plus always-present R0 / R1 reserve
+    # shares. Deliberately exclude the sparse rebalance-blocked and Aegis
+    # context: Grafana can propagate an empty annotation query as NoData for
+    # the whole rule even though only A controls the threshold state.
     dynamic "data" {
       for_each = concat(
         local.pool_depletion_value_share_annotation_queries,
         local.deviation_reserve_annotation_queries,
-        local.deviation_rebalancer_annotation_queries,
       )
       content {
         ref_id         = data.value.ref_id
@@ -877,11 +877,12 @@ resource "grafana_rule_group" "fpmms_depletion" {
       })
     }
 
+    # Same reserve/value-share-only annotation set as the critical band. The
+    # optional rebalance context must not participate in page-rule evaluation.
     dynamic "data" {
       for_each = concat(
         local.pool_depletion_value_share_annotation_queries,
         local.deviation_reserve_annotation_queries,
-        local.deviation_rebalancer_annotation_queries,
       )
       content {
         ref_id         = data.value.ref_id
