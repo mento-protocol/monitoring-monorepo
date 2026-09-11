@@ -112,6 +112,7 @@ const scriptPath = fileURLToPath(import.meta.url);
 // `matcher_digest` and comparison is refused across the change.
 export const SCORING_MODULES = [
   "review-eval.mjs",
+  "review-eval-schedule-issue.mjs",
   "review-eval-run.mjs",
   "review-eval-run-plan.mjs",
   "review-eval-run-detail.mjs",

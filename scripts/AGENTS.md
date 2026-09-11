@@ -87,10 +87,11 @@ Move each pin class with its files.
   `.dependency-cruiser.cjs` and root `package.json` both name
   `gate/mapping/engine.test.mjs` (scanned roots);
   `gate/mapping/post-passes.mjs` schedules `code-health:deps` itself.
-- **Review-eval pins.** Runbook: `run-eval*.sh`,
-  `install-review-eval-launchd*`, `review-eval-*publication*`, the cell
-  modules in `ORCHESTRATOR_FILES`, the scorer modules in `SCORING_MODULES`
-  and `validationModuleLineLimits`; file table: `review-eval-experiment*.mjs`.
+- **Review-eval pins.** Runbook: `run-eval*`,
+  `install-review-eval-launchd*`, `review-eval-*publication*`,
+  `ORCHESTRATOR_FILES` cells, `SCORING_MODULES` and
+  `validationModuleLineLimits` scorers (incl. `review-eval-schedule-issue.mjs`),
+  `review-eval-experiment*.mjs`.
 - **Navigation-eval pin.** `forbidden_sources` in
   `docs/evals/documentation-navigation-fixtures.json` names its source.
 - **Verification evidence.** `.gitattributes` pins

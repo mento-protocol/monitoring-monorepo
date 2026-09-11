@@ -182,12 +182,12 @@ matrix_flush_cell_log() {
 matrix_group_worker() {
   local pr="$1" status_dir="$2" slot="$3" rows="$4"
   local row cell_id condition draw model effort finder finder_report prompt_kind
-  local cell=0 cell_log outcome
+  local tool cell=0 cell_log outcome
   while IFS= read -r row || [[ -n $row ]]; do
     [[ -n $row ]] || continue
     cell=$((cell + 1))
-    IFS=$'\t' read -r cell_id _ condition draw model effort finder \
-      finder_report prompt_kind <<<"$row"
+    IFS=$'\x1f' read -r cell_id _ condition draw model effort finder \
+      finder_report prompt_kind tool <<<"$row"
     if [[ $(($(date +%s) - STARTED)) -ge $MATRIX_DEADLINE ]]; then
       : >"$status_dir/deadline"
       return 0
@@ -195,7 +195,7 @@ matrix_group_worker() {
     cell_log="$status_dir/$slot.$cell.log"
     outcome="done"
     run_cell "$cell_id" "$pr" "$condition" "$draw" "$model" "$effort" \
-      "$finder" "$finder_report" "$prompt_kind" >"$cell_log" 2>&1 ||
+      "$finder" "$finder_report" "$prompt_kind" "$tool" >"$cell_log" 2>&1 ||
       outcome=failed
     matrix_flush_cell_log "$cell_log"
     printf '%s\n' "$outcome" >"$status_dir/$slot.$cell.status"
@@ -274,7 +274,7 @@ matrix_wait_for_capacity() {
 # Run the whole planned matrix. Sets DONE, FAILED, TOTAL and STATUS_NOTE.
 run_matrix() {
   local row cell_id pr condition draw model effort finder finder_report
-  local prompt_kind extra index count found next file outcome
+  local prompt_kind tool extra index count found next file outcome
   local -a group_prs=() group_rows=()
 
   TOTAL=0
@@ -285,8 +285,8 @@ run_matrix() {
   # serial run produced. Grouping only decides what may overlap.
   while IFS= read -r row || [[ -n $row ]]; do
     [[ -n $row ]] || continue
-    IFS=$'\t' read -r cell_id pr condition draw model effort finder \
-      finder_report prompt_kind extra <<<"$row"
+    IFS=$'\x1f' read -r cell_id pr condition draw model effort finder \
+      finder_report prompt_kind tool extra <<<"$row"
     if [[ -n ${extra:-} ]]; then
       fail "the plan produced a cell row with an extra field: $extra"
     fi

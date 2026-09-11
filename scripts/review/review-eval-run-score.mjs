@@ -42,6 +42,7 @@ import {
   applyFinderOverride,
   finderArgvDigest,
   finderProbeDecision,
+  normalizeVerifierOverride,
 } from "./review-eval-finder-override.mjs";
 import { baselinePlanIdentity, planCells } from "./review-eval-run-plan.mjs";
 
@@ -61,6 +62,13 @@ function readPinnedTruth(repoRoot, fixture) {
     throw new Error(`could not read valid JSON from ${file}`, { cause: error });
   }
 }
+
+// `cost_metered` is a boolean or absent; a string "false" must not read as metered.
+const meteringFlag = ({ cell_id, cost_metered: flag = true }) => {
+  if (typeof flag !== "boolean")
+    throw new Error(`${cell_id}: cost_metered must be a boolean`);
+  return flag;
+};
 
 async function scoreOneCell({
   cell,
@@ -93,13 +101,10 @@ async function scoreOneCell({
     cellId: cell.cell_id,
     runGit,
   });
-  // Snapshot the logins the fixture already carries while the tree is still the
-  // one `resetFixture` just restored. The exclusion list exists so a reviewer
-  // login that is genuine fixture content is not read as a leak, and the novel
-  // judge below runs with `Bash` inside this same checkout: computed after it,
-  // a login that fixture text prompt-injected the judge into writing into a
-  // tracked file would be excluded, and a transcript naming the reviewer would
-  // evade the hard leak signal.
+  // Snapshot the logins the fixture already carries before the novel judge
+  // runs with `Bash` in this checkout: a login it was prompt-injected into
+  // writing to a tracked file would otherwise be excluded, and a transcript
+  // naming the reviewer would evade the hard leak signal.
   const excludeLogins = [
     ...loginsInFixtureTree({
       fixturePath,
@@ -155,6 +160,10 @@ async function scoreOneCell({
     leak,
     seconds: Number(cellResult.seconds ?? 0),
     usd: Number(cellResult.cost_usd ?? 0),
+    // A codex cell's CLI reports no price, so the zero above is an absent
+    // number rather than a free call. Dropped here, the retained result and the
+    // row recorded an unknown-price call as $0 with nothing to tell them apart.
+    usd_metered: meteringFlag(cellResult),
     scoring_usd: cellCost.usd,
   };
 }
@@ -220,6 +229,12 @@ function foldCondition({ contract, cells, condition, scored }) {
     novel_real: mine.reduce((sum, item) => sum + item.novel.novelReal, 0),
     wrong_claims: mine.reduce((sum, item) => sum + item.novel.novelWrong, 0),
     usd: Number(mine.reduce((sum, item) => sum + item.usd, 0).toFixed(2)),
+    ...(mine.some((item) => item.usd_metered === false)
+      ? {
+          unmetered_cells: mine.filter((item) => item.usd_metered === false)
+            .length,
+        }
+      : {}),
     seconds: Number(
       mine.reduce((sum, item) => sum + item.seconds, 0).toFixed(1),
     ),
@@ -294,11 +309,9 @@ export async function scorePlan({
   // recorded, or the cell check below would read the contract's finder.
   const isFinderProbe = plan.kind === "finder";
   const recordedOverride = plan.inputs?.finder_override ?? null;
-  // Only a probe may substitute a finder. A full or canary plan.json is a file
-  // on the branch: were the override honoured for every kind, an edited plan
-  // with matching cells would score and publish a canonical row for a finder
-  // the contract never named, under a comparability key that still names the
-  // contract's finder. Refuse it here, before any judge call spends quota.
+  // Only a probe may substitute a finder: honoured for every kind, an edited
+  // full plan with matching cells would publish a canonical row for a finder
+  // the contract never named. Refuse it before any judge call spends quota.
   if (recordedOverride && !isFinderProbe) {
     throw new Error(
       `plan kind ${plan.kind} carries inputs.finder_override; only a finder probe may substitute a finder`,
@@ -319,9 +332,26 @@ export async function scorePlan({
       "plan inputs.finder_argv_digest does not match the recorded finder_override",
     );
   }
+  // The verifier substitution is rebuilt the same way and refused the same way.
+  // A full or canary plan whose cells named a codex verifier would otherwise
+  // score and publish a canonical row for a pipeline the contract never named.
+  const recordedVerifier = plan.inputs?.verifier_override ?? null;
+  if (recordedVerifier && !isFinderProbe) {
+    throw new Error(
+      `plan kind ${plan.kind} carries inputs.verifier_override; only a finder probe may substitute a verifier`,
+    );
+  }
+  // Re-parsed rather than trusted. The matrix equality check below rebuilds the
+  // expected cells from this same object, so a `plan.json` naming a tool the
+  // runtime never runs would validate against itself and score cells that did
+  // not run what the plan says they ran. Same rules as the CLI string.
+  const verifierOverride = recordedVerifier
+    ? normalizeVerifierOverride(recordedVerifier)
+    : null;
   const expectedCells = planCells({
     contract: probeContract,
     kind: plan.kind,
+    verifier: verifierOverride,
   });
   if (JSON.stringify(plan.cells) !== JSON.stringify(expectedCells)) {
     throw new Error(`plan cells do not match the frozen ${plan.kind} matrix`);

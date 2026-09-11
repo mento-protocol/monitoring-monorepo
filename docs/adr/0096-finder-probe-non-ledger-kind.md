@@ -66,6 +66,18 @@ under these rules, each enforced in code:
   committed probe directory is inert. This is the one departure from ADR
   0083's "outside the repository" rule, taken so the runner's resume, cell
   cache and source-snapshot machinery apply unchanged.
+- A probe may substitute the verifier too, with
+  `--verifier TOOL:MODEL@EFFORT`, under the same guards: refused without
+  `--kind finder`, recorded as `inputs.verifier_override`, rebuilt and refused
+  the same way by the scorer, and outside the comparability key. TOOL is
+  `claude` or `codex`. A codex verifier is the bare model on the same handoff
+  prompt — no skill staged, read-only sandbox — which is what lets the lane ask
+  whether the skill is doing the work. It reports no price, so those cells
+  record `cost_usd` 0 with `cost_metered` false and the probe's metered Claude
+  spend is the judge pass alone. The override joins the cell fingerprint and
+  the detail-directory name only when there is one, so every run that keeps
+  the contract's verifier keeps the identity it already had. The comparison
+  prints both verifiers and warns, rather than refuses, when they differ.
 - `pnpm review:eval:finder-compare` reads two detail directories offline. It
   refuses arms whose contract, scorer or calibration-set digests differ, an
   arm whose judge failed calibration or that records a suspected leak, and

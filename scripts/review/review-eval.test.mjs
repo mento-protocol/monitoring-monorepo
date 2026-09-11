@@ -84,20 +84,32 @@ import {
 import {
   applyFinderOverride,
   parseFinderSpec,
+  normalizeVerifierOverride,
+  parseVerifierSpec,
 } from "./review-eval-finder-override.mjs";
 import { runEvidenceProblems } from "./review-eval-run-evidence.mjs";
-import { SESSION_TEXT_BUDGET_CHARS } from "./review-eval-stream.mjs";
+import {
+  codexStreamEnvelope,
+  SESSION_TEXT_BUDGET_CHARS,
+} from "./review-eval-stream.mjs";
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const scriptPath = fileURLToPath(new URL("./review-eval.mjs", import.meta.url));
 const validationModuleLineLimits = new Map([
-  ["review-eval.mjs", 900],
+  // Lowered from 900 when `--schedule-issue` moved out. The file is past the
+  // 600-line soft cap, so it may only shrink: grow a module beside it instead.
+  ["review-eval.mjs", 850],
+  ["review-eval-schedule-issue.mjs", 200],
   ["review-eval-run.mjs", 100],
   ["review-eval-run-plan.mjs", 600],
   ["review-eval-run-detail.mjs", 200],
   ["review-eval-finder-compare.mjs", 600],
   ["review-eval-finder-render.mjs", 200],
-  ["review-eval-finder-override.mjs", 200],
+  // Raised from 200 when the probe lane gained its second substitution. The
+  // module now carries the verifier override beside the finder override, and
+  // the two belong together: they are the halves of one probe's pipeline, and
+  // the detail-directory segment reads both. Split it before it takes a third.
+  ["review-eval-finder-override.mjs", 250],
   ["review-eval-freshness-guard.mjs", 200],
   ["review-eval-run-execution.mjs", 600],
   ["review-eval-run-cell.mjs", 600],
@@ -230,7 +242,7 @@ test("the shell split no longer reconstructs the pre-split cell runtime", () => 
   // so this pin still catches an unintended shell edit.
   assert.equal(
     reconstructed,
-    "39947c0b45e0c2f3746377f1994cefcbc399439cb6d1ee1b5514e20ae7d6a29d",
+    "0b1aa3cec2ca46e02ecd420c46e7bef05c9e5a1b647cf02a2c385afa0f0e4d33",
   );
   // It is no longer the pre-split monolith. Capturing the whole session instead
   // of the CLI's last-message envelope changed what a cell records, so the 24
@@ -892,7 +904,7 @@ test("comparabilityKey moves with the contract, the prompts, and the scorer", ()
 
 test("orchestratorSourceDigest binds the shell and the cell modules", () => {
   const expected =
-    "c482e103033a27501287e78919ee8e7160f39443b77f90044f1711b74a54be50";
+    "fee8d511d838ad137aea62f0e6be7b5115383c59d4447ba985efb3e3c3fe48b1";
   assert.equal(orchestratorSourceDigest(), expected);
   // The cell writer and the stream parser are in the digest for the same
   // reason the shell is: the writer decides what a paid cell records and the
@@ -2034,7 +2046,9 @@ test("run-eval.sh keeps the stderr of a bounded command it had to fail", () => {
   // Every failure path that follows a bounded command logs that tail.
   for (const pattern of [
     /the finder exited \$finder_status; not cached"\n\s*log_stderr_tail "\$finder_out\.err"/,
-    /claude exited \$claude_status; not cached"\n\s*fi\n\s*log_stderr_tail "\$raw\.err"/,
+    // `$tool` is `claude` for every canonical cell and `codex` only under a
+    // probe's substituted verifier; both spawns land on this one failure path.
+    /\$tool exited \$claude_status; not cached"\n\s*fi\n\s*log_stderr_tail "\$raw\.err"/,
     /if \[\[ \$SCORE_STATUS -ne 0 \]\]; then\n\s*log_stderr_tail "\$SCORE_OUT\.err"/,
   ]) {
     assert.match(shell, pattern);
@@ -2174,7 +2188,8 @@ function driveMatrix({
 }) {
   const events = path.join(dir, "events");
   // The rows travel through a file, not through the harness source: the fields
-  // are tab-separated and the reader is the thing under test.
+  // are unit-separated (tab is IFS whitespace to bash read and collapses an
+  // empty field) and the reader is the thing under test.
   const rowsFile = path.join(dir, "rows.tsv");
   writeFileSync(
     rowsFile,
@@ -2182,7 +2197,7 @@ function driveMatrix({
       .map(
         ({ pr, id }) =>
           [id, pr, "control", "1", "opus", "high", "", "", "request"].join(
-            "\t",
+            "\x1f",
           ) + "\n",
       )
       .join(""),
@@ -2475,7 +2490,7 @@ test("TERM takes every group worker's process group down with the run", async ()
               "",
               "",
               "request",
-            ].join("\t") + "\n",
+            ].join("\x1f") + "\n",
         )
         .join(""),
     );
@@ -2587,7 +2602,7 @@ test("TERM ends a group worker interrupted before the parent recorded it", async
         "",
         "",
         "request",
-      ].join("\t") + "\n",
+      ].join("\x1f") + "\n",
     );
     const marker = path.join(dir, "survivor");
     const childFile = path.join(dir, "worker-child");
@@ -4800,7 +4815,7 @@ test("scorePlan reports a partial matrix and refuses an empty one", async () => 
 });
 
 /** Write one stubbed cell result under a plan directory. */
-function writeCell(plan, cell, { output, root, usd = 3.5 }) {
+function writeCell(plan, cell, { output, root, usd = 3.5, metered = true }) {
   const dir = path.join(plan.plan_dir, "cells", cell.cell_id);
   mkdirSync(dir, { recursive: true });
   writeFileSync(
@@ -4811,10 +4826,98 @@ function writeCell(plan, cell, { output, root, usd = 3.5 }) {
       output,
       seconds: 300,
       cost_usd: usd,
+      cost_metered: metered,
       fixture_path: root,
     }),
   );
 }
+
+test("an unmetered cell's zero is counted, not read as a free call", async () => {
+  const root = makeRoot();
+  try {
+    const plan = buildPlan({
+      contract,
+      contractDigest,
+      kind: "full",
+      repoRoot: root,
+      outDir: path.join(root, "run"),
+      env: planEnv,
+    });
+    // A codex cell's CLI reports tokens and no price, so its result carries
+    // `cost_metered` false with `cost_usd` 0. Dropped at the score, the row
+    // recorded it as a $0 call and no reader could tell it from a free one.
+    for (const cell of plan.cells) {
+      const unmetered = cell.condition === "replay" && cell.draw === 1;
+      writeCell(plan, cell, {
+        root,
+        output: "scripts/review/run-eval.sh:150 is wrong.",
+        usd: unmetered ? 0 : 3.5,
+        metered: !unmetered,
+      });
+    }
+    const scored = await scorePlan({
+      plan,
+      contract,
+      contractDigest,
+      repoRoot: root,
+      planDir: plan.plan_dir,
+      exec: stubExec().exec,
+      runGit: stubGit().runGit,
+      calibrationSet: JSON.parse(
+        readFileSync(
+          path.join(root, "docs/evals/review-skill-judge-calibration.json"),
+          "utf8",
+        ),
+      ),
+    });
+    const replayDraw1 = plan.cells.filter(
+      (cell) => cell.condition === "replay" && cell.draw === 1,
+    ).length;
+    assert.ok(replayDraw1 > 0);
+    assert.equal(scored.row.conditions.replay.unmetered_cells, replayDraw1);
+    // Every other condition was metered end to end, so nothing about a
+    // canonical row's shape moves.
+    assert.equal(scored.row.conditions.pipeline.unmetered_cells, undefined);
+    assert.deepEqual(validateLedgerRow(scored.row), []);
+
+    // The retained per-cell evidence keeps the flag, which is what `--validate`
+    // re-derives the count from.
+    const sample = plan.cells.find(
+      (cell) => cell.condition === "replay" && cell.draw === 1,
+    );
+    const oneCell = JSON.parse(
+      readFileSync(
+        path.join(plan.plan_dir, `result-${sample.pr}-replay-1.json`),
+        "utf8",
+      ),
+    );
+    assert.equal(oneCell.usd_metered, false);
+    assert.deepEqual(
+      revalidateRow({
+        contract,
+        row: scored.row,
+        repoRoot: root,
+        detailDir: plan.plan_dir,
+      }).problems,
+      [],
+    );
+    const tampered = structuredClone(scored.row);
+    delete tampered.conditions.replay.unmetered_cells;
+    const caught = revalidateRow({
+      contract,
+      row: tampered,
+      repoRoot: root,
+      detailDir: plan.plan_dir,
+    });
+    assert.equal(caught.ok, false);
+    assert.ok(
+      caught.problems.some((problem) => /unmetered_cells is 0/.test(problem)),
+      JSON.stringify(caught.problems),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("a PR is zero-finding only when every draw it ran found nothing", async () => {
   const root = makeRoot();
@@ -5403,6 +5506,171 @@ test("the session envelope keeps the final message inside the judge budget", () 
   assert.equal(judged.assistant_messages_kept, 1);
 });
 
+test("the cell writer reads a codex session into the same result shape", async () => {
+  // A codex verifier writes JSONL events and its final message to a file, not a
+  // `stream-json` session. What the scorer, the judge and the evidence
+  // validator read afterwards must be identical, so the proof is a real writer
+  // run followed by a real scoring pass over what it wrote.
+  const root = makeRoot();
+  try {
+    const plan = buildPlan({
+      contract,
+      contractDigest,
+      kind: "finder",
+      finder: "gpt-5.6-sol@high",
+      verifier: "codex:gpt-6-astra@high",
+      repoRoot: root,
+      outDir: path.join(root, "run"),
+      env: planEnv,
+    });
+    const writer = path.join(
+      repoRoot,
+      "scripts/review/review-eval-cell-writer.mjs",
+    );
+    const report = "scripts/pr/pr-ready-state-core.mjs:750 is too long.";
+    const events = [
+      { type: "thread.started", thread_id: "t" },
+      { type: "turn.started" },
+      {
+        type: "item.completed",
+        item: { id: "item_0", type: "reasoning", text: "not a message" },
+      },
+      {
+        type: "item.completed",
+        item: { id: "item_1", type: "agent_message", text: "a first note" },
+      },
+      {
+        type: "item.completed",
+        item: { id: "item_2", type: "agent_message", text: report },
+      },
+      { type: "turn.completed", usage: { input_tokens: 10 } },
+    ];
+    const stream = `${events.map((event) => JSON.stringify(event)).join("\n")}\n`;
+    for (const cell of plan.cells) {
+      const dir = path.join(plan.plan_dir, "cells", cell.cell_id);
+      mkdirSync(dir, { recursive: true });
+      const raw = path.join(dir, "stream.jsonl");
+      const other = path.join(dir, "other.md");
+      const last = path.join(dir, "last-message.txt");
+      writeFileSync(raw, stream);
+      writeFileSync(other, "the finder's review");
+      writeFileSync(last, report);
+      const run = spawnSync(
+        process.execPath,
+        [writer, raw, other, path.join(dir, "result.json")],
+        {
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            REVIEW_EVAL_CELL: cell.cell_id,
+            REVIEW_EVAL_PR: String(cell.pr),
+            REVIEW_EVAL_CONDITION: cell.condition,
+            REVIEW_EVAL_DRAW: String(cell.draw),
+            REVIEW_EVAL_TOOL: "codex",
+            REVIEW_EVAL_LAST_MESSAGE: last,
+            REVIEW_EVAL_MODEL: cell.model,
+            REVIEW_EVAL_EFFORT: cell.effort,
+            REVIEW_EVAL_FINDER: cell.finder,
+            REVIEW_EVAL_FIXTURE: root,
+            REVIEW_EVAL_SECONDS: "300",
+            REVIEW_EVAL_FINDER_CHARS: "40",
+            REVIEW_EVAL_FINGERPRINT: JSON.stringify(cellFingerprint({ plan })),
+          },
+        },
+      );
+      assert.equal(run.status, 0, run.stderr);
+    }
+    const first = JSON.parse(
+      readFileSync(
+        path.join(plan.plan_dir, "cells", plan.cells[0].cell_id, "result.json"),
+        "utf8",
+      ),
+    );
+    assert.equal(first.tool, "codex");
+    // Every agent message is recorded, the non-message events are not, and the
+    // scored text is the same message-aware session tail a claude cell carries.
+    assert.equal(first.assistant_messages, 2);
+    assert.equal(first.assistant_messages_kept, 2);
+    assert.equal(first.output, `a first note\n\n${report}`);
+    assert.equal(first.stream_chars, stream.length);
+    assert.equal(first.turns, 1);
+    // The CLI reports tokens and no price, so the zero is an absent number.
+    assert.equal(first.cost_usd, 0);
+    assert.equal(first.cost_metered, false);
+
+    const scored = await scorePlan({
+      plan,
+      contract,
+      contractDigest,
+      repoRoot: root,
+      planDir: plan.plan_dir,
+      exec: stubExec().exec,
+      runGit: stubGit().runGit,
+      calibrationSet: JSON.parse(
+        readFileSync(
+          path.join(root, "docs/evals/review-skill-judge-calibration.json"),
+          "utf8",
+        ),
+      ),
+    });
+    assert.deepEqual(scored.missing, []);
+    assert.equal(scored.row.kind, "finder");
+    assert.equal(scored.row.verdict, "EXPERIMENT");
+    // The judge read the codex cells' `output`, so the probe has a pipeline
+    // condition with a real denominator rather than an empty fold.
+    assert.ok(scored.row.conditions.pipeline.recall.opportunities > 0);
+    assert.ok(scored.row.conditions.pipeline.recall.matched > 0);
+    // A probe row is deliberately outside the ledger schema — its kind, its
+    // verdict and both recorded substitutions — which is what keeps it out.
+    assert.deepEqual(validateLedgerRow(scored.row), [
+      "row.kind must be one of full, canary, bridge",
+      "row.verdict must be one of GREEN, AMBER, RED, PROMOTE, INCOMPLETE",
+      "row.inputs has unexpected property finder_override",
+      "row.inputs has unexpected property verifier_override",
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a codex session with no completed turn fails its cell", () => {
+  // `is_error` is the one bit that separates a finished review from a killed
+  // one, and a codex stream carries no `result` event to read it from.
+  const message = JSON.stringify({
+    type: "item.completed",
+    item: { type: "agent_message", text: "half a review" },
+  });
+  assert.equal(
+    codexStreamEnvelope(`${message}\n{"type":"turn.completed"}\n`).is_error,
+    false,
+  );
+  for (const raw of [
+    // No turn ever completed: the process was killed mid-session.
+    `${message}\n`,
+    // The turn failed, or the CLI reported an error event.
+    `${message}\n{"type":"turn.failed"}\n`,
+    `${message}\n{"type":"error","message":"boom"}\n`,
+    // A completed turn that wrote no agent message is not a review.
+    '{"type":"turn.completed"}\n',
+  ]) {
+    assert.equal(codexStreamEnvelope(raw).is_error, true, raw);
+  }
+  // A truncated line fails the cell rather than being scored as a shorter
+  // review, exactly as it does on the claude path.
+  assert.throws(
+    () => codexStreamEnvelope(`${message}\n{"type":"turn.comp`),
+    /malformed stream event/,
+  );
+  // The `-o` file is the authority on the final message: a stream that lost
+  // the closing event still records the answer the cell paid for.
+  const recovered = codexStreamEnvelope(
+    `${message}\n{"type":"turn.completed"}\n`,
+    { lastMessage: "the whole review" },
+  );
+  assert.equal(recovered.final_result, "the whole review");
+  assert.equal(recovered.result, "half a review\n\nthe whole review");
+});
+
 test("the cell writer tells a harness fault from a broken stream", () => {
   // The orchestrator runs the writer out of its sealed source snapshot, and the
   // writer loads the stream parser beside it. `$SPEC` is the live repository
@@ -5557,6 +5825,10 @@ test("a harness fault keeps the stream the cell already paid for", () => {
         `out_dir=${JSON.stringify(outDir)}`,
         `raw=${JSON.stringify(raw)}`,
         `other_file=${JSON.stringify(other)}`,
+        // The branch names the tool in its failure line and removes the codex
+        // last-message file when there is one; a claude cell has neither.
+        `tool="claude"`,
+        `last_message=""`,
         `envelope_status=${status}`,
         "cell_tail() {",
         branch,
@@ -6732,7 +7004,7 @@ test("the runbook forwards paid-run flags without a literal separator", () => {
     "utf8",
   );
   assert.doesNotMatch(doc, /pnpm review:eval:run -- --kind/);
-  assert.equal([...doc.matchAll(/pnpm review:eval:run --kind/g)].length, 6);
+  assert.equal([...doc.matchAll(/pnpm review:eval:run --kind/g)].length, 7);
 });
 
 test("the ledger branch names one run, not one day", () => {
@@ -6806,7 +7078,7 @@ test("the run deadline bounds the cell subprocesses and the judge pass", () => {
   assert.match(script, /kill -KILL "\$target"/);
   // A cell that hit the bound fails the cell; it is never cached as a review.
   assert.match(script, /the finder hit the run deadline; not cached/);
-  assert.match(script, /claude hit the run deadline; not cached/);
+  assert.match(script, /\$tool hit the run deadline; not cached/);
 });
 
 test("the deadline terminates the whole subprocess tree, not only its parent", () => {
@@ -6874,6 +7146,66 @@ test("the deadline terminates the whole subprocess tree, not only its parent", (
         // Already gone; nothing to clean up.
       }
     }
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the deadline reaches a stream-capped model that has written nothing", () => {
+  // `run_stream_capped` starts the model under job control, which puts it in a
+  // process group `run_bounded`'s watchdog does not signal. A codex that
+  // stalled before writing the bytes `head` waits for therefore outlived the
+  // deadline: the TERM killed the reader, the run reported failure, and the
+  // model kept spending. Run the committed functions, because whether the
+  // model dies is a property of the process groups and not of the source.
+  const bounded = runEvalSource("lifecycle")
+    .match(/^run_bounded\(\) \{\n[\s\S]*?^\}$/m)?.[0]
+    ?.replace("sleep 10", "sleep 1");
+  const stream = runEvalSource("lifecycle").match(
+    /^run_stream_capped\(\) \{\n[\s\S]*?^\}$/m,
+  )?.[0];
+  const inFixture = runEvalSource("runtime").match(
+    /^run_in_fixture\(\) \{\n[\s\S]*?^\}$/m,
+  )?.[0];
+  assert.ok(bounded && stream && inFixture, "the capped stream launcher moved");
+
+  const dir = mkdtempSync(path.join(tmpdir(), "review-eval-stream-stall-"));
+  try {
+    const heartbeat = path.join(dir, "heartbeat");
+    // A model that never writes to stdout, so `head -c` blocks until the
+    // deadline. The heartbeat file is the only evidence that it is alive.
+    const child = `while :; do printf . >> ${JSON.stringify(heartbeat)}; sleep 0.2; done`;
+    const childArg = `'${child.replaceAll("'", `'"'"'`)}'`;
+    const harness = path.join(dir, "harness.sh");
+    writeFileSync(
+      harness,
+      [
+        "#!/usr/bin/env bash",
+        "set -uo pipefail",
+        `TMPROOT=${JSON.stringify(dir)}`,
+        "CELL_ENV=(env)",
+        bounded,
+        inFixture,
+        stream,
+        "status=0",
+        `run_bounded ${JSON.stringify(path.join(dir, "out"))} 3 run_stream_capped 1000000 ${JSON.stringify(dir)} bash -c ${childArg} || status=$?`,
+        'echo "status=$status"',
+      ].join("\n"),
+    );
+    const result = spawnSync("bash", [harness], { encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /status=124/);
+    assert.ok(existsSync(heartbeat), "the stalled model never started");
+    // The group signal lands with the reader's; give the kernel a beat, then
+    // ask twice whether anything is still writing.
+    spawnSync("sleep", ["2"]);
+    const stoppedAt = readFileSync(heartbeat, "utf8").length;
+    spawnSync("sleep", ["1"]);
+    assert.equal(
+      readFileSync(heartbeat, "utf8").length,
+      stoppedAt,
+      "the stalled model kept running after the deadline",
+    );
+  } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -7389,7 +7721,7 @@ test("the cell reader emits nothing when the plan carries a forged field", () =>
     writeFileSync(
       planPath,
       JSON.stringify({
-        cells: [cell("first"), cell("second", { model: "opus\thandoff" })],
+        cells: [cell("first"), cell("second", { model: "opus\x1fhandoff" })],
       }),
     );
     const forged = spawnSync(process.execPath, ["-e", program, planPath], {
@@ -7397,7 +7729,7 @@ test("the cell reader emits nothing when the plan carries a forged field", () =>
     });
     assert.notEqual(forged.status, 0);
     assert.equal(forged.stdout, "");
-    assert.match(forged.stderr, /carries a tab or a newline/);
+    assert.match(forged.stderr, /carries a unit separator or a newline/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -10015,4 +10347,319 @@ test("only a probe plan may substitute a finder", async () => {
     scorePlan({ plan: probe, contract, contractDigest, repoRoot }),
     /finder_argv_digest does not match/,
   );
+});
+
+test("--verifier parses both tools and refuses everything else", () => {
+  assert.deepEqual(parseVerifierSpec("codex:gpt-6-astra@high"), {
+    tool: "codex",
+    model: "gpt-6-astra",
+    effort: "high",
+  });
+  // Each tool's own effort set: claude has `max`, codex has `xhigh`, and a
+  // spec that names the other tool's top effort fails at plan time, not after
+  // every cell has paid for its finder call.
+  assert.deepEqual(parseVerifierSpec("claude:claude-opus-5@max"), {
+    tool: "claude",
+    model: "claude-opus-5",
+    effort: "max",
+  });
+  for (const bad of [
+    // No tool at all, an unknown tool, and a tool with no model or effort.
+    "gpt-6-astra@high",
+    "gemini:gpt-6-astra@high",
+    "codex:@high",
+    "codex:gpt-6-astra",
+    "codex:gpt-6-astra@ultra",
+    "codex:gpt-6-astra@max",
+    "claude:claude-opus-5@xhigh",
+    // The runtime spawns the model as one argv element, exactly as it does the
+    // finder's, so the same character set applies.
+    "codex:gpt-6,astra@high",
+  ]) {
+    assert.throws(() => parseVerifierSpec(bad), /--verifier|--finder/, bad);
+  }
+});
+
+test("a verifier override reaches the probe's cells, fingerprint and name", () => {
+  const args = {
+    contract,
+    contractDigest,
+    kind: "finder",
+    finder: "gpt-5.6-sol@high",
+    repoRoot,
+    write: false,
+    env: planEnv,
+    now: new Date("2026-09-11T12:00:00Z"),
+  };
+  const contractVerifier = buildPlan({ ...args });
+  const codexVerifier = buildPlan({
+    ...args,
+    verifier: "codex:gpt-6-astra@high",
+  });
+  const otherCodex = buildPlan({ ...args, verifier: "codex:gpt-6-astra@low" });
+
+  // The contract's verifier still reaches a probe that substitutes none, and
+  // that plan records no override, so its name and fingerprint are unmoved.
+  assert.ok(
+    contractVerifier.cells.every(
+      (cell) =>
+        cell.tool === "claude" &&
+        cell.model === contract.sut.verifier.model &&
+        cell.effort === contract.sut.verifier.effort,
+    ),
+  );
+  assert.equal(contractVerifier.inputs.verifier_override, undefined);
+  assert.equal(
+    cellFingerprint({ plan: contractVerifier }).verifier_digest,
+    undefined,
+  );
+
+  assert.deepEqual(codexVerifier.inputs.verifier_override, {
+    tool: "codex",
+    model: "gpt-6-astra",
+    effort: "high",
+  });
+  assert.ok(
+    codexVerifier.cells.every(
+      (cell) =>
+        cell.tool === "codex" &&
+        cell.model === "gpt-6-astra" &&
+        cell.effort === "high",
+    ),
+  );
+  // The finder is untouched by the second substitution, so the two probes are
+  // separated by the verifier alone — in the fingerprint, which is what stops
+  // one probe reusing the other's paid cells, and in the directory, which is
+  // what stops it overwriting the other's evidence.
+  assert.equal(
+    codexVerifier.inputs.finder_argv_digest,
+    contractVerifier.inputs.finder_argv_digest,
+  );
+  const digests = [contractVerifier, codexVerifier, otherCodex].map(
+    (plan) => cellFingerprint({ plan }).verifier_digest,
+  );
+  assert.equal(new Set(digests).size, 3);
+  const names = [contractVerifier, codexVerifier, otherCodex].map(
+    (plan) => plan.detail_dir,
+  );
+  assert.equal(new Set(names).size, 3);
+  // An identical rerun still resumes.
+  assert.equal(
+    buildPlan({ ...args, verifier: "codex:gpt-6-astra@high" }).detail_dir,
+    codexVerifier.detail_dir,
+  );
+  // The substitution is outside the comparability key, exactly as the finder's
+  // is: a probe is read against the contract, not against its own pipeline.
+  assert.equal(
+    codexVerifier.comparability_key,
+    contractVerifier.comparability_key,
+  );
+});
+
+test("only a probe may substitute a verifier, at the plan and at the score", async () => {
+  assert.throws(
+    () =>
+      buildPlan({
+        contract,
+        contractDigest,
+        kind: "full",
+        repoRoot,
+        write: false,
+        env: planEnv,
+        verifier: "codex:gpt-6-astra@high",
+      }),
+    /--verifier is only valid with --kind finder/,
+  );
+  // plan.json is a file on the branch, so the scorer refuses the same pairing
+  // rather than trusting that planning enforced it.
+  await assert.rejects(
+    scorePlan({
+      plan: {
+        cells: [],
+        kind: "full",
+        contract_digest: contractDigest,
+        inputs: {
+          verifier_override: { tool: "codex", model: "x", effort: "high" },
+        },
+      },
+      contract,
+      contractDigest,
+      repoRoot,
+    }),
+    /only a finder probe may substitute a verifier/,
+  );
+  // And the orchestrator refuses it before it plans anything.
+  assert.match(
+    runEvalSource("wrapper"),
+    /if \[\[ -n \$VERIFIER && \$KIND != finder \]\]; then/,
+  );
+});
+
+test("the CLI refuses --verifier without --kind finder", () => {
+  const root = makeRoot();
+  try {
+    const orphan = cli(
+      ["--plan", "--kind", "full", "--verifier", "codex:x@high"],
+      { root },
+    );
+    assert.notEqual(orphan.status, 0);
+    assert.match(orphan.stderr, /--verifier is only valid with --kind finder/);
+    // It is a plan-mode option, so every other mode refuses it by name.
+    const wrongMode = cli(["--report", "--verifier", "codex:x@high"], { root });
+    assert.notEqual(wrongMode.status, 0);
+    assert.match(wrongMode.stderr, /--verifier is not valid with --report/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("an object verifier override is held to the CLI string's rules", () => {
+  // `buildPlan` and the stored plan.json both hand this an already-split
+  // object. Trusted as-is, `{ tool: "gemini" }` planned cells the runtime would
+  // have run on claude, because the tool it does not know falls through.
+  assert.deepEqual(
+    normalizeVerifierOverride({
+      tool: "codex",
+      model: "gpt-6-astra",
+      effort: "high",
+    }),
+    { tool: "codex", model: "gpt-6-astra", effort: "high" },
+  );
+  assert.deepEqual(
+    normalizeVerifierOverride("codex:gpt-6-astra@high"),
+    normalizeVerifierOverride({
+      tool: "codex",
+      model: "gpt-6-astra",
+      effort: "high",
+    }),
+  );
+  for (const bad of [
+    { tool: "gemini", model: "gpt-6-astra", effort: "high" },
+    { tool: "codex", model: "gpt-6,astra", effort: "high" },
+    { tool: "codex", model: "gpt-6-astra", effort: "ultra" },
+    { tool: "codex", model: "", effort: "high" },
+    // Every field must be a string: stringified, `null` would pass the argv
+    // element rule as the four-letter model token "null".
+    { tool: "codex", model: null, effort: "high" },
+    { tool: "codex", model: "x", effort: 1 },
+    ["codex", "x", "high"],
+    42,
+  ]) {
+    assert.throws(
+      () => normalizeVerifierOverride(bad),
+      /--verifier|--finder|must be a string|must be a TOOL:MODEL@EFFORT string/,
+      JSON.stringify(bad),
+    );
+  }
+  // A `buildPlan` caller reaches the same refusal.
+  assert.throws(
+    () =>
+      buildPlan({
+        contract,
+        contractDigest,
+        kind: "finder",
+        finder: "gpt-5.6-sol@high",
+        verifier: { tool: "gemini", model: "x", effort: "high" },
+        repoRoot,
+        write: false,
+        env: planEnv,
+      }),
+    /--verifier must be TOOL:MODEL@EFFORT/,
+  );
+});
+
+test("a malformed stored verifier_override is refused before any judge call", async () => {
+  const plan = buildPlan({
+    contract,
+    contractDigest,
+    kind: "finder",
+    finder: "gpt-5.6-sol@high",
+    verifier: "codex:gpt-6-astra@high",
+    repoRoot,
+    write: false,
+    env: planEnv,
+  });
+  // Hand-edited on the branch: the tool no cell ran. The matrix equality check
+  // rebuilds the expected cells from this same field, so without a re-parse the
+  // plan validates against itself and scores cells that ran something else.
+  await assert.rejects(
+    scorePlan({
+      plan: {
+        ...plan,
+        inputs: {
+          ...plan.inputs,
+          verifier_override: { tool: "gemini", model: "x", effort: "high" },
+        },
+      },
+      contract,
+      contractDigest,
+      repoRoot,
+    }),
+    /--verifier must be TOOL:MODEL@EFFORT/,
+  );
+  // And the runtime fails the cell rather than taking the claude branch.
+  assert.match(
+    runEvalSource("runtime"),
+    /if \[\[ \$tool != claude && \$tool != codex \]\]; then/,
+  );
+});
+
+test("the estimate prices only the cells that bill", () => {
+  const args = {
+    contract,
+    contractDigest,
+    kind: "finder",
+    finder: "gpt-5.6-sol@high",
+    repoRoot,
+    write: false,
+    env: planEnv,
+  };
+  const claudeVerifier = buildPlan({ ...args });
+  const codexVerifier = buildPlan({
+    ...args,
+    verifier: "codex:gpt-6-astra@high",
+  });
+  // Every cell counted, a codex verifier's nine-cell probe reported about $33
+  // of Claude spend for a leg the harness never meters.
+  assert.equal(codexVerifier.estimate.cells, codexVerifier.cells.length);
+  assert.equal(codexVerifier.estimate.metered_cells, 0);
+  assert.equal(
+    codexVerifier.estimate.unmetered_cells,
+    codexVerifier.cells.length,
+  );
+  assert.equal(codexVerifier.estimate.claude_usd, 0);
+  // The contract's own verifier is claude, so nothing about a canonical
+  // estimate moves.
+  assert.equal(
+    claudeVerifier.estimate.metered_cells,
+    claudeVerifier.cells.length,
+  );
+  assert.equal(claudeVerifier.estimate.unmetered_cells, 0);
+  assert.ok(claudeVerifier.estimate.claude_usd > 0);
+});
+
+test("the matrix carries the tool and the runtime spawns codex bare", () => {
+  const runtime = runEvalSource("runtime");
+  // The TSV gains a column rather than reusing one, and it defaults, so a full
+  // or canary matrix line is what it was before the probe lane took a verifier.
+  assert.match(runtime, /cell\.tool \?\? "claude"/);
+  assert.match(runtime, /local tool="\$\{10:-claude\}"/);
+  // The codex spawn: bare model, read-only sandbox, JSONL events on stdout and
+  // the final message in a file. No skill is staged on this path.
+  const codex = runtime.slice(runtime.indexOf("if [[ $tool == codex ]]; then"));
+  assert.match(
+    codex,
+    /run_stream_capped "\$CELL_STREAM_MAX_BYTES" "\$fixture" codex exec \\\n\s+--sandbox read-only --skip-git-repo-check --ephemeral \\\n\s+--ignore-user-config --ignore-rules -m "\$model" \\\n\s+-c "model_reasoning_effort=\\"\$effort\\"" \\\n\s+--json -o "\$last_message" "\$prompt"/,
+  );
+  const codexBranch = codex.slice(0, codex.indexOf("\n  else\n"));
+  assert.equal(codexBranch.includes("stage_skill"), false);
+  assert.equal(codexBranch.includes("append-system-prompt"), false);
+  // The writer is told which tool wrote the stream, and where the final
+  // message is; without both it would parse a codex session as a claude one.
+  assert.match(runtime, /REVIEW_EVAL_TOOL="\$tool"/);
+  assert.match(runtime, /REVIEW_EVAL_LAST_MESSAGE="\$last_message"/);
+  // The matrix reads the column and passes it on.
+  const matrix = runEvalSource("matrix");
+  assert.match(matrix, /finder_report prompt_kind tool <<<"\$row"/);
+  assert.match(matrix, /"\$finder" "\$finder_report" "\$prompt_kind" "\$tool"/);
 });

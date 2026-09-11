@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import { defaultRunGit } from "./review-eval-fixtures.mjs";
+import { verifierOverrideDigest } from "./review-eval-finder-override.mjs";
 
 const MIN_VERBATIM_TITLE_WORDS = 6;
 
@@ -195,8 +196,18 @@ export function leakSignals({
  * condition spawns, and `orchestrator_digest` is the script that spawns it with
  * its tools, turn limit and skill staging, so both move a recorded number the
  * same way.
+ *
+ * A substituted verifier adds `verifier_digest`, and only then: a plan running
+ * the contract's own verifier keeps the exact fingerprint it recorded before
+ * the flag existed, so every committed run's evidence still recomputes and
+ * every existing cache still resumes. Under a probe the field is present on
+ * both sides or on neither, and the comparison below refuses the mismatch
+ * either way — a cell paid for under one verifier is not this run's cell.
  */
 export function cellFingerprint({ plan }) {
+  const verifierDigest = verifierOverrideDigest(
+    plan?.inputs?.verifier_override ?? null,
+  );
   return {
     skill_digest: plan?.inputs?.skill_digest ?? null,
     kind: plan?.kind ?? null,
@@ -205,6 +216,7 @@ export function cellFingerprint({ plan }) {
     codex_cli: plan?.inputs?.codex_cli ?? null,
     finder_argv_digest: plan?.inputs?.finder_argv_digest ?? null,
     orchestrator_digest: plan?.inputs?.orchestrator_digest ?? null,
+    ...(verifierDigest ? { verifier_digest: verifierDigest } : {}),
   };
 }
 

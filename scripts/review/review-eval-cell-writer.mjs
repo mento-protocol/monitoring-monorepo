@@ -37,9 +37,24 @@ if (first === "--preflight") process.exit(0);
 
 const [rawPath, otherPath, resultPath] = [first, ...rest];
 const raw = readFileSync(rawPath, "utf8");
+// `REVIEW_EVAL_TOOL` is what the cell was spawned as. A codex verifier writes
+// JSONL events instead of a `stream-json` session, and its final message to the
+// file `REVIEW_EVAL_LAST_MESSAGE` names, so the envelope is read from both.
+// Everything the result records afterwards is identical; the tool is recorded
+// on the cell so a reader never has to infer it from the model name.
+const tool = process.env.REVIEW_EVAL_TOOL === "codex" ? "codex" : "claude";
+const lastMessageFile = process.env.REVIEW_EVAL_LAST_MESSAGE || "";
 let envelope;
 try {
-  envelope = stream.claudeStreamEnvelope(raw, { label: "contestant" });
+  envelope =
+    tool === "codex"
+      ? stream.codexStreamEnvelope(raw, {
+          label: "contestant",
+          lastMessage: lastMessageFile
+            ? readFileSync(lastMessageFile, "utf8")
+            : "",
+        })
+      : stream.claudeStreamEnvelope(raw, { label: "contestant" });
 } catch (error) {
   // The parser names what it could not read — a truncated line, a missing
   // result event. Swallowing that left exit 3 as the only evidence, and a
@@ -59,6 +74,7 @@ writeFileSync(
       pr: Number(process.env.REVIEW_EVAL_PR),
       condition: process.env.REVIEW_EVAL_CONDITION,
       draw: Number(process.env.REVIEW_EVAL_DRAW),
+      tool,
       model: process.env.REVIEW_EVAL_MODEL,
       effort: process.env.REVIEW_EVAL_EFFORT,
       finder: process.env.REVIEW_EVAL_FINDER || null,
@@ -73,6 +89,9 @@ writeFileSync(
       finder_chars: Number(process.env.REVIEW_EVAL_FINDER_CHARS),
       seconds: Number(process.env.REVIEW_EVAL_SECONDS),
       cost_usd: envelope.total_cost_usd ?? 0,
+      // False when the CLI reported no price: the cell cost something, and the
+      // zero above is an absent number rather than a free call.
+      cost_metered: envelope.cost_metered !== false,
       turns: envelope.num_turns ?? null,
     },
     null,
