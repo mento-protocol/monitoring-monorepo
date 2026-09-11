@@ -239,7 +239,7 @@ test("the shell split no longer reconstructs the pre-split cell runtime", () => 
   // so this pin still catches an unintended shell edit.
   assert.equal(
     reconstructed,
-    "3e62bd1cb5bfe7b76a65eb2edbcdec1a47fb535436d0dbb90af9c00f33113225",
+    "76f725b59db215dad6100bda7be4299d9e0db87ab5261a2d75db84727904b63e",
   );
   // It is no longer the pre-split monolith. Capturing the whole session instead
   // of the CLI's last-message envelope changed what a cell records, so the 24
@@ -901,7 +901,7 @@ test("comparabilityKey moves with the contract, the prompts, and the scorer", ()
 
 test("orchestratorSourceDigest binds the shell and the cell modules", () => {
   const expected =
-    "86d8b7c0fb7afaa2387d49d789b8834fc42627aa81f0563a997d682cae9fbbfa";
+    "5f66ae51ae6ee85a15d93c997e4b6ab8ce18773ca1c2fa20520b261d9bc9a3be";
   assert.equal(orchestratorSourceDigest(), expected);
   // The cell writer and the stream parser are in the digest for the same
   // reason the shell is: the writer decides what a paid cell records and the
@@ -10581,7 +10581,7 @@ test("the matrix carries the tool and the runtime spawns codex bare", () => {
   const codex = runtime.slice(runtime.indexOf("if [[ $tool == codex ]]; then"));
   assert.match(
     codex,
-    /codex exec --sandbox read-only \\\n\s+--skip-git-repo-check --ephemeral -m "\$model" \\\n\s+-c "model_reasoning_effort=\\"\$effort\\"" \\\n\s+--json -o "\$last_message" "\$prompt"/,
+    /run_stream_capped "\$CELL_STREAM_MAX_BYTES" "\$fixture" codex exec \\\n\s+--sandbox read-only --skip-git-repo-check --ephemeral \\\n\s+--ignore-user-config -m "\$model" \\\n\s+-c "model_reasoning_effort=\\"\$effort\\"" \\\n\s+--json -o "\$last_message" "\$prompt"/,
   );
   const codexBranch = codex.slice(0, codex.indexOf("\n  else\n"));
   assert.equal(codexBranch.includes("stage_skill"), false);

@@ -485,15 +485,15 @@ run_cell() {
   # Bounded by the rest of the matrix budget, as the finder is: a stalled
   # contestant would hold the run past its advertised deadline.
   if [[ $tool == codex ]]; then
-    # Codex verifier: bare model, handoff prompt, no skill, read-only. Uncapped
-    # because `ulimit -f` kills it on its own sqlite state; the byte check bounds it.
+    # Codex verifier: bare model, same prompt, no skill or user config, read-only.
     last_message="$(mktemp "$TMPROOT/review-eval-last.XXXXXX")"
     run_bounded "$raw" "$(remaining_seconds "$MATRIX_DEADLINE")" \
-      run_in_fixture "$fixture" codex exec --sandbox read-only \
-      --skip-git-repo-check --ephemeral -m "$model" \
+      run_stream_capped "$CELL_STREAM_MAX_BYTES" "$fixture" codex exec \
+      --sandbox read-only --skip-git-repo-check --ephemeral \
+      --ignore-user-config -m "$model" \
       -c "model_reasoning_effort=\"$effort\"" \
       --json -o "$last_message" "$prompt" || claude_status=$?
-    if [[ $claude_status -eq 0 && $(wc -c <"$raw" | tr -d " ") -gt $CELL_STREAM_MAX_BYTES ]]; then
+    if [[ $(wc -c <"$raw" | tr -d " ") -gt $CELL_STREAM_MAX_BYTES ]]; then
       claude_status=25
     fi
   else
