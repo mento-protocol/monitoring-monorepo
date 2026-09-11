@@ -2113,6 +2113,10 @@ test("depletion state ignores empty optional rebalance context", () => {
   );
 
   const pageThreshold = Number(pageThresholdRaw);
+  assert(
+    pageThreshold === 0.1,
+    "Pool Nearly One-Sided must keep its 10% page threshold",
+  );
   const pageState = (minReserveValueShare) =>
     minReserveValueShare < pageThreshold ? "Alerting" : "Normal";
 
