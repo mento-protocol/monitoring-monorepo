@@ -238,7 +238,7 @@ test("the shell split no longer reconstructs the pre-split cell runtime", () => 
   // so this pin still catches an unintended shell edit.
   assert.equal(
     reconstructed,
-    "7955a423b7e1d87a1a096adc6f6209b504ff80da2fdb2fb559d1c0e7222216cb",
+    "3f129f14c17fe4d055951c0f47308ae75276591e063a6467a2f83a4a1a13ec9a",
   );
   // It is no longer the pre-split monolith. Capturing the whole session instead
   // of the CLI's last-message envelope changed what a cell records, so the 24
@@ -900,7 +900,7 @@ test("comparabilityKey moves with the contract, the prompts, and the scorer", ()
 
 test("orchestratorSourceDigest binds the shell and the cell modules", () => {
   const expected =
-    "a43b0dd187cd147362e566fc4598ff871ee72a75c9fa15b9874fc693ada62e2b";
+    "7df2b8fde33bc9971180cc96fd00cd440c608a1ab8eb2c898c220434e6983b0e";
   assert.equal(orchestratorSourceDigest(), expected);
   // The cell writer and the stream parser are in the digest for the same
   // reason the shell is: the writer decides what a paid cell records and the

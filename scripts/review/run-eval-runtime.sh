@@ -484,20 +484,20 @@ run_cell() {
   # Bounded by what is left of the matrix budget for the same reason the finder
   # is: a stalled contestant would hold the run past its advertised deadline.
   if [[ $tool == codex ]]; then
-    # The probe lane's codex verifier: the bare model on the same handoff
-    # prompt, no skill staged, read-only. `--ephemeral`: the cell's file-size
-    # cap also binds codex's own session rollout, which can exceed it.
+    # The probe lane's codex verifier: bare model, same handoff prompt, no skill,
+    # read-only. Uncapped like the finder: `ulimit -f` would kill codex on its
+    # own multi-GB sqlite state, so the stream is bounded by the check below.
     last_message="$(mktemp "$TMPROOT/review-eval-last.XXXXXX")"
     run_bounded "$raw" "$(remaining_seconds "$MATRIX_DEADLINE")" \
-      run_capped_in_fixture "$fixture" codex exec --sandbox read-only \
+      run_in_fixture "$fixture" codex exec --sandbox read-only \
       --skip-git-repo-check --ephemeral -m "$model" \
       -c "model_reasoning_effort=\"$effort\"" \
       --json -o "$last_message" "$prompt" || claude_status=$?
+    if [[ $claude_status -eq 0 && $(stat -f %z "$raw") -gt $CELL_STREAM_MAX_BYTES ]]; then
+      claude_status=25
+    fi
   else
-    # `stream-json` because a cell is scored on the messages it wrote, not on
-    # the last alone: `--output-format json` reports that one, so a reviewer
-    # that filed its report and then posted an addendum was scored on the
-    # addendum.
+    # `stream-json`: a cell is scored on every message it wrote, not the last.
     local -a claude_args=(-p "$prompt" --model "$model" --effort "$effort"
       --setting-sources "" --output-format stream-json --verbose
       --permission-mode bypassPermissions
