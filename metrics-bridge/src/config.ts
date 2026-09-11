@@ -21,10 +21,10 @@ export const PEG_POLICY_AUTH_MODE = env.PEG_POLICY_AUTH_MODE;
 
 // Rebalance-reason probe runs every Nth Hasura poll cycle. Its output is an
 // annotation on the alerts that explain a stuck pool — `Rebalancer Stale`,
-// `Rebalance Ineffective`, `Deviation Breach`, and the depletion rules — none
-// of which fires inside a few minutes, so a few-minute probe cadence is well
-// inside the noise floor and keeps RPC load proportional to "pools currently
-// deep in breach", typically 0–3 pools at Mento's scale.
+// `Rebalance Ineffective`, and `Deviation Breach` — none of which fires inside
+// a few minutes, so a few-minute probe cadence is well inside the noise floor
+// and keeps RPC load proportional to "pools currently deep in breach",
+// typically 0–3 pools at Mento's scale.
 export const REBALANCE_PROBE_EVERY_N_POLLS = Math.floor(
   env.REBALANCE_PROBE_EVERY_N_POLLS,
 );
