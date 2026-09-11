@@ -84,6 +84,7 @@ import {
 import {
   applyFinderOverride,
   parseFinderSpec,
+  normalizeVerifierOverride,
   parseVerifierSpec,
 } from "./review-eval-finder-override.mjs";
 import { runEvidenceProblems } from "./review-eval-run-evidence.mjs";
@@ -238,7 +239,7 @@ test("the shell split no longer reconstructs the pre-split cell runtime", () => 
   // so this pin still catches an unintended shell edit.
   assert.equal(
     reconstructed,
-    "3f129f14c17fe4d055951c0f47308ae75276591e063a6467a2f83a4a1a13ec9a",
+    "3e62bd1cb5bfe7b76a65eb2edbcdec1a47fb535436d0dbb90af9c00f33113225",
   );
   // It is no longer the pre-split monolith. Capturing the whole session instead
   // of the CLI's last-message envelope changed what a cell records, so the 24
@@ -900,7 +901,7 @@ test("comparabilityKey moves with the contract, the prompts, and the scorer", ()
 
 test("orchestratorSourceDigest binds the shell and the cell modules", () => {
   const expected =
-    "7df2b8fde33bc9971180cc96fd00cd440c608a1ab8eb2c898c220434e6983b0e";
+    "86d8b7c0fb7afaa2387d49d789b8834fc42627aa81f0563a997d682cae9fbbfa";
   assert.equal(orchestratorSourceDigest(), expected);
   // The cell writer and the stream parser are in the digest for the same
   // reason the shell is: the writer decides what a paid cell records and the
@@ -4811,7 +4812,7 @@ test("scorePlan reports a partial matrix and refuses an empty one", async () => 
 });
 
 /** Write one stubbed cell result under a plan directory. */
-function writeCell(plan, cell, { output, root, usd = 3.5 }) {
+function writeCell(plan, cell, { output, root, usd = 3.5, metered = true }) {
   const dir = path.join(plan.plan_dir, "cells", cell.cell_id);
   mkdirSync(dir, { recursive: true });
   writeFileSync(
@@ -4822,10 +4823,98 @@ function writeCell(plan, cell, { output, root, usd = 3.5 }) {
       output,
       seconds: 300,
       cost_usd: usd,
+      cost_metered: metered,
       fixture_path: root,
     }),
   );
 }
+
+test("an unmetered cell's zero is counted, not read as a free call", async () => {
+  const root = makeRoot();
+  try {
+    const plan = buildPlan({
+      contract,
+      contractDigest,
+      kind: "full",
+      repoRoot: root,
+      outDir: path.join(root, "run"),
+      env: planEnv,
+    });
+    // A codex cell's CLI reports tokens and no price, so its result carries
+    // `cost_metered` false with `cost_usd` 0. Dropped at the score, the row
+    // recorded it as a $0 call and no reader could tell it from a free one.
+    for (const cell of plan.cells) {
+      const unmetered = cell.condition === "replay" && cell.draw === 1;
+      writeCell(plan, cell, {
+        root,
+        output: "scripts/review/run-eval.sh:150 is wrong.",
+        usd: unmetered ? 0 : 3.5,
+        metered: !unmetered,
+      });
+    }
+    const scored = await scorePlan({
+      plan,
+      contract,
+      contractDigest,
+      repoRoot: root,
+      planDir: plan.plan_dir,
+      exec: stubExec().exec,
+      runGit: stubGit().runGit,
+      calibrationSet: JSON.parse(
+        readFileSync(
+          path.join(root, "docs/evals/review-skill-judge-calibration.json"),
+          "utf8",
+        ),
+      ),
+    });
+    const replayDraw1 = plan.cells.filter(
+      (cell) => cell.condition === "replay" && cell.draw === 1,
+    ).length;
+    assert.ok(replayDraw1 > 0);
+    assert.equal(scored.row.conditions.replay.unmetered_cells, replayDraw1);
+    // Every other condition was metered end to end, so nothing about a
+    // canonical row's shape moves.
+    assert.equal(scored.row.conditions.pipeline.unmetered_cells, undefined);
+    assert.deepEqual(validateLedgerRow(scored.row), []);
+
+    // The retained per-cell evidence keeps the flag, which is what `--validate`
+    // re-derives the count from.
+    const sample = plan.cells.find(
+      (cell) => cell.condition === "replay" && cell.draw === 1,
+    );
+    const oneCell = JSON.parse(
+      readFileSync(
+        path.join(plan.plan_dir, `result-${sample.pr}-replay-1.json`),
+        "utf8",
+      ),
+    );
+    assert.equal(oneCell.usd_metered, false);
+    assert.deepEqual(
+      revalidateRow({
+        contract,
+        row: scored.row,
+        repoRoot: root,
+        detailDir: plan.plan_dir,
+      }).problems,
+      [],
+    );
+    const tampered = structuredClone(scored.row);
+    delete tampered.conditions.replay.unmetered_cells;
+    const caught = revalidateRow({
+      contract,
+      row: tampered,
+      repoRoot: root,
+      detailDir: plan.plan_dir,
+    });
+    assert.equal(caught.ok, false);
+    assert.ok(
+      caught.problems.some((problem) => /unmetered_cells is 0/.test(problem)),
+      JSON.stringify(caught.problems),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("a PR is zero-finding only when every draw it ran found nothing", async () => {
   const root = makeRoot();
@@ -10354,6 +10443,131 @@ test("the CLI refuses --verifier without --kind finder", () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("an object verifier override is held to the CLI string's rules", () => {
+  // `buildPlan` and the stored plan.json both hand this an already-split
+  // object. Trusted as-is, `{ tool: "gemini" }` planned cells the runtime would
+  // have run on claude, because the tool it does not know falls through.
+  assert.deepEqual(
+    normalizeVerifierOverride({
+      tool: "codex",
+      model: "gpt-6-astra",
+      effort: "high",
+    }),
+    { tool: "codex", model: "gpt-6-astra", effort: "high" },
+  );
+  assert.deepEqual(
+    normalizeVerifierOverride("codex:gpt-6-astra@high"),
+    normalizeVerifierOverride({
+      tool: "codex",
+      model: "gpt-6-astra",
+      effort: "high",
+    }),
+  );
+  for (const bad of [
+    { tool: "gemini", model: "gpt-6-astra", effort: "high" },
+    { tool: "codex", model: "gpt-6,astra", effort: "high" },
+    { tool: "codex", model: "gpt-6-astra", effort: "ultra" },
+    { tool: "codex", model: "", effort: "high" },
+    // Every field must be a string: stringified, `null` would pass the argv
+    // element rule as the four-letter model token "null".
+    { tool: "codex", model: null, effort: "high" },
+    { tool: "codex", model: "x", effort: 1 },
+    ["codex", "x", "high"],
+    42,
+  ]) {
+    assert.throws(
+      () => normalizeVerifierOverride(bad),
+      /--verifier|--finder|must be a string|must be a TOOL:MODEL@EFFORT string/,
+      JSON.stringify(bad),
+    );
+  }
+  // A `buildPlan` caller reaches the same refusal.
+  assert.throws(
+    () =>
+      buildPlan({
+        contract,
+        contractDigest,
+        kind: "finder",
+        finder: "gpt-5.6-sol@high",
+        verifier: { tool: "gemini", model: "x", effort: "high" },
+        repoRoot,
+        write: false,
+        env: planEnv,
+      }),
+    /--verifier must be TOOL:MODEL@EFFORT/,
+  );
+});
+
+test("a malformed stored verifier_override is refused before any judge call", async () => {
+  const plan = buildPlan({
+    contract,
+    contractDigest,
+    kind: "finder",
+    finder: "gpt-5.6-sol@high",
+    verifier: "codex:gpt-6-astra@high",
+    repoRoot,
+    write: false,
+    env: planEnv,
+  });
+  // Hand-edited on the branch: the tool no cell ran. The matrix equality check
+  // rebuilds the expected cells from this same field, so without a re-parse the
+  // plan validates against itself and scores cells that ran something else.
+  await assert.rejects(
+    scorePlan({
+      plan: {
+        ...plan,
+        inputs: {
+          ...plan.inputs,
+          verifier_override: { tool: "gemini", model: "x", effort: "high" },
+        },
+      },
+      contract,
+      contractDigest,
+      repoRoot,
+    }),
+    /--verifier must be TOOL:MODEL@EFFORT/,
+  );
+  // And the runtime fails the cell rather than taking the claude branch.
+  assert.match(
+    runEvalSource("runtime"),
+    /if \[\[ \$tool != claude && \$tool != codex \]\]; then/,
+  );
+});
+
+test("the estimate prices only the cells that bill", () => {
+  const args = {
+    contract,
+    contractDigest,
+    kind: "finder",
+    finder: "gpt-5.6-sol@high",
+    repoRoot,
+    write: false,
+    env: planEnv,
+  };
+  const claudeVerifier = buildPlan({ ...args });
+  const codexVerifier = buildPlan({
+    ...args,
+    verifier: "codex:gpt-6-astra@high",
+  });
+  // Every cell counted, a codex verifier's nine-cell probe reported about $33
+  // of Claude spend for a leg the harness never meters.
+  assert.equal(codexVerifier.estimate.cells, codexVerifier.cells.length);
+  assert.equal(codexVerifier.estimate.metered_cells, 0);
+  assert.equal(
+    codexVerifier.estimate.unmetered_cells,
+    codexVerifier.cells.length,
+  );
+  assert.equal(codexVerifier.estimate.claude_usd, 0);
+  // The contract's own verifier is claude, so nothing about a canonical
+  // estimate moves.
+  assert.equal(
+    claudeVerifier.estimate.metered_cells,
+    claudeVerifier.cells.length,
+  );
+  assert.equal(claudeVerifier.estimate.unmetered_cells, 0);
+  assert.ok(claudeVerifier.estimate.claude_usd > 0);
 });
 
 test("the matrix carries the tool and the runtime spawns codex bare", () => {

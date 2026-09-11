@@ -25,6 +25,9 @@ function writeArm({
   results,
   // What `--verifier` recorded, or null for the contract's own verifier.
   verifierOverride = null,
+  // The finder half of the arm's provenance, so a test can hold it equal or
+  // move it independently of the verifier.
+  finderArgvDigest = "argv",
   skillDigest = "skill",
   judge,
   contractDigest = HEX("aaaa1111"),
@@ -63,7 +66,7 @@ function writeArm({
       judge: judge ?? { model: "claude-opus-5", effort: "high" },
       inputs: {
         skill_digest: skillDigest,
-        finder_argv_digest: "argv",
+        finder_argv_digest: finderArgvDigest,
         orchestrator_digest: "orch",
         codex_cli: codexCli,
         claude_cli: claudeCli,
@@ -622,5 +625,55 @@ test("a verifier difference warns and names what the nets then measure", () => {
   assert.equal(
     same.filter((warning) => /different verifiers/.test(warning)).length,
     0,
+  );
+});
+
+test("a verifier difference is attributed only when the finders match", () => {
+  const results = { 11: { matched: [1] } };
+  const sut = {
+    verifier: { tool: "claude", model: "claude-opus-5", effort: "high" },
+  };
+  const arm = (over) =>
+    readArm({
+      dir: writeArm({ finder: "sol@high", cells: [11], results, ...over }),
+      contract: { ...contract, sut },
+    });
+  const skilled = arm({});
+  // Both halves of the pipeline substituted at once. The nets are the pair's,
+  // and calling them the verifier's would credit a substitution that shares the
+  // effect with the finder beside it.
+  const both = arm({
+    finderArgvDigest: "argv-astra",
+    verifierOverride: { tool: "codex", model: "gpt-6-astra", effort: "high" },
+  });
+  const confounded = compareArms({ anchor: skilled, candidate: both }).warnings;
+  assert.ok(
+    confounded.some((warning) =>
+      /different verifiers .* AND different finders .* cannot isolate either substitution/.test(
+        warning,
+      ),
+    ),
+    confounded.join("\n"),
+  );
+  assert.equal(
+    confounded.filter((warning) => /is a verifier difference/.test(warning))
+      .length,
+    0,
+  );
+  // The finder held equal, the attribution stands.
+  const verifierOnly = arm({
+    verifierOverride: { tool: "codex", model: "gpt-6-astra", effort: "high" },
+  });
+  const isolated = compareArms({
+    anchor: skilled,
+    candidate: verifierOnly,
+  }).warnings;
+  assert.ok(
+    isolated.some((warning) =>
+      /on the same finder; a matched-id difference between them is a verifier difference/.test(
+        warning,
+      ),
+    ),
+    isolated.join("\n"),
   );
 });

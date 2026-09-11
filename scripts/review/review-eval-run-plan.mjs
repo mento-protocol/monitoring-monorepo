@@ -429,7 +429,12 @@ export function buildPlan({
       inputs,
       cells,
     });
-  const claudeCells = cells.length;
+  // Only a claude cell bills the estimate. A codex verifier's cells report no
+  // price at all (`cost_metered` false), so counting them put about $33 of
+  // Claude spend on a nine-cell probe whose verifier leg is unmetered.
+  const claudeCells = cells.filter(
+    (cell) => (cell.tool ?? "claude") === "claude",
+  ).length;
   const warnings = [];
   for (const binary of ["claude_cli", "codex_cli"]) {
     if (inputs[binary] === "unknown") {
@@ -459,7 +464,9 @@ export function buildPlan({
     inputs,
     totals: scorableTotals(contract),
     estimate: {
-      cells: claudeCells,
+      cells: cells.length,
+      metered_cells: claudeCells,
+      unmetered_cells: cells.length - claudeCells,
       claude_usd: Number((claudeCells * USD_PER_CLAUDE_CELL).toFixed(2)),
     },
     warnings,

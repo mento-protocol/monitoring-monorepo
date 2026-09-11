@@ -74,7 +74,14 @@ export const CONDITION_REQUIRED_KEYS = [
   "seconds",
   "per_defect",
 ];
-export const CONDITION_OPTIONAL_KEYS = ["finder", "zero_finding_prs"];
+export const CONDITION_OPTIONAL_KEYS = [
+  "finder",
+  "zero_finding_prs",
+  // How many of the condition's cells reported no price at all. Present only
+  // when there are any, so every row written before a codex verifier existed
+  // keeps its shape. Without it `usd` reads as a measured total.
+  "unmetered_cells",
+];
 
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const RATE_TOLERANCE = 0.001;
@@ -246,6 +253,14 @@ function validateCondition(condition, label, problems) {
       condition.zero_finding_prs,
       `${label}.zero_finding_prs`,
       problems,
+    );
+  }
+  if (Object.hasOwn(condition, "unmetered_cells")) {
+    checkInteger(
+      condition.unmetered_cells,
+      `${label}.unmetered_cells`,
+      problems,
+      { min: 1 },
     );
   }
   checkInteger(condition.draws, `${label}.draws`, problems, { min: 1 });

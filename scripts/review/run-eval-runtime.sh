@@ -360,17 +360,19 @@ CLAUDE_TOOLS=(Read Write Edit Bash Grep Glob Agent TodoWrite)
 
 # The cell writer, and the stream parser it imports, are sealed beside the shell
 # in the private source snapshot and bound by the plan's orchestrator digest.
-# Loading either from `$SPEC` — live under a candidate run — let the parser
-# change between two cells with every cell fingerprint unchanged. The wrapper
-# sets that variable; only the frozen equivalence harness reaches the fallback.
+# Loading either live from `$SPEC` let the parser change between two cells with
+# every fingerprint unchanged. Only the frozen harness takes the fallback below.
 CELL_WRITER="${RUN_EVAL_SCRIPT_DIR:-$SPEC/scripts/review}/review-eval-cell-writer.mjs"
 
 run_cell() {
   local cell_id="$1" pr="$2" condition="$3" draw="$4" model="$5" effort="$6"
   local finder="$7" finder_report="$8" prompt_kind="$9"
-  # Only a `--kind finder` probe can plan anything but `claude` here, so the
-  # claude path below is the one every canonical run takes.
   local tool="${10:-claude}"
+  # Only a probe plans a tool; the `else` below would run claude for any other.
+  if [[ $tool != claude && $tool != codex ]]; then
+    log "  $cell_id FAILED — unknown cell tool $tool; not cached"
+    return 1
+  fi
   local out_dir="$RUN_DIR/cells/$cell_id"
 
   if [[ -f "$out_dir/result.json" ]]; then
@@ -384,8 +386,7 @@ run_cell() {
     fi
   fi
 
-  # Until this check, a writer that would not load was found after the paid
-  # call. `--preflight` imports it first, so that fault costs nothing.
+  # `--preflight` imports the writer before the paid call, so a load fault is free.
   if ! node "$CELL_WRITER" --preflight; then
     log "  $cell_id FAILED — harness fault before any cost; $CELL_WRITER did not load"
     return 1
@@ -419,9 +420,9 @@ run_cell() {
     # deadline can bound it: a stalled finder inside a command substitution
     # never returns, and the between-cells deadline check never runs again.
     # A finder that hits its session limit or dies mid-report still writes a
-    # partial report, and that is not a review: cached, it would score forever
-    # as a finder that simply missed those defects. Fail the cell on an
-    # unsuccessful exit, on the deadline, or on an empty report.
+    # partial report, and that is not a review: cached, it would score forever as
+    # a finder that missed those defects. Fail the cell on an unsuccessful exit,
+    # the deadline, or an empty report.
     local finder_out finder_status=0
     finder_out="$(mktemp "$TMPROOT/review-eval-finder.XXXXXX")"
     run_bounded "$finder_out" "$(remaining_seconds "$MATRIX_DEADLINE")" \
@@ -481,19 +482,18 @@ run_cell() {
   raw="$(mktemp "$TMPROOT/review-eval-cell.XXXXXX")"
   other_file="$(mktemp "$TMPROOT/review-eval-other.XXXXXX")"
   printf '%s' "$other_review" >"$other_file"
-  # Bounded by what is left of the matrix budget for the same reason the finder
-  # is: a stalled contestant would hold the run past its advertised deadline.
+  # Bounded by the rest of the matrix budget, as the finder is: a stalled
+  # contestant would hold the run past its advertised deadline.
   if [[ $tool == codex ]]; then
-    # The probe lane's codex verifier: bare model, same handoff prompt, no skill,
-    # read-only. Uncapped like the finder: `ulimit -f` would kill codex on its
-    # own multi-GB sqlite state, so the stream is bounded by the check below.
+    # Codex verifier: bare model, handoff prompt, no skill, read-only. Uncapped
+    # because `ulimit -f` kills it on its own sqlite state; the byte check bounds it.
     last_message="$(mktemp "$TMPROOT/review-eval-last.XXXXXX")"
     run_bounded "$raw" "$(remaining_seconds "$MATRIX_DEADLINE")" \
       run_in_fixture "$fixture" codex exec --sandbox read-only \
       --skip-git-repo-check --ephemeral -m "$model" \
       -c "model_reasoning_effort=\"$effort\"" \
       --json -o "$last_message" "$prompt" || claude_status=$?
-    if [[ $claude_status -eq 0 && $(stat -f %z "$raw") -gt $CELL_STREAM_MAX_BYTES ]]; then
+    if [[ $claude_status -eq 0 && $(wc -c <"$raw" | tr -d " ") -gt $CELL_STREAM_MAX_BYTES ]]; then
       claude_status=25
     fi
   else

@@ -305,7 +305,7 @@ identity it already had and still resumes. Like the finder substitution, it does
 not move the comparability key.
 
 A codex verifier is the bare model on the same handoff prompt: the runner spawns
-`codex exec --sandbox read-only --skip-git-repo-check -m MODEL -c
+`codex exec --sandbox read-only --skip-git-repo-check --ephemeral -m MODEL -c
 model_reasoning_effort="EFFORT" --json -o FILE`, stages no skill, and reads the
 JSONL events as the session and the `-o` file as the final message. That is what
 the substitution is for — it asks what the handoff alone buys, with the finder,

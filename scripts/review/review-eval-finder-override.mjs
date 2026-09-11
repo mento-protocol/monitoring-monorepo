@@ -177,13 +177,41 @@ export function parseVerifierSpec(spec) {
   return { tool, model, effort };
 }
 
+/**
+ * Any verifier override, however it arrives, put through `parseVerifierSpec`.
+ * A `buildPlan` caller may pass the already-split object, and a plan read back
+ * from disk carries one. Trusted as-is, `{ tool: "gemini" }` planned cells the
+ * runtime would have run on claude, and a hand-edited `plan.json` could name a
+ * tool or an effort no cell ever ran. Both are refused here, by the rules the
+ * CLI string is held to, with every field required to be a string: `parseFinderSpec`
+ * would otherwise accept the stringified `null` as a model token.
+ */
+export function normalizeVerifierOverride(override) {
+  if (typeof override === "string") return parseVerifierSpec(override);
+  if (!override || typeof override !== "object" || Array.isArray(override)) {
+    throw new Error(
+      `a verifier override must be a TOOL:MODEL@EFFORT string or a {tool, model, effort} object; got ${JSON.stringify(override)}`,
+    );
+  }
+  for (const field of ["tool", "model", "effort"]) {
+    if (typeof override[field] !== "string") {
+      throw new Error(
+        `verifier override ${field} must be a string; got ${JSON.stringify(override[field])}`,
+      );
+    }
+  }
+  return parseVerifierSpec(
+    `${override.tool}:${override.model}@${override.effort}`,
+  );
+}
+
 /** The verifier one plan of this kind runs, with the flag pairing enforced. */
 export function resolveVerifierOverride({ kind, verifier }) {
   if (!verifier) return null;
   if (kind !== "finder") {
     throw new Error("--verifier is only valid with --kind finder");
   }
-  return typeof verifier === "string" ? parseVerifierSpec(verifier) : verifier;
+  return normalizeVerifierOverride(verifier);
 }
 
 /**

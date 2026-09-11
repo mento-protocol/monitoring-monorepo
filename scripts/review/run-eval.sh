@@ -236,8 +236,7 @@ if [[ -n $VERIFIER && $KIND != finder ]]; then
   fail "--verifier is only valid with --kind finder"
 fi
 # A probe resolves no baseline, appends no row and writes no report, so every
-# --against stage is skipped for it. Accepting the flag and ignoring it would
-# let an operator believe a probe was compared against a named anchor.
+# --against stage is skipped. Accepting the flag would mislead about the anchor.
 if [[ $KIND == finder && -n $AGAINST ]]; then
   fail "--against is not valid with --kind finder; compare the detail directories with review-eval-finder-compare.mjs instead"
 fi
@@ -458,7 +457,8 @@ fi
 # shellcheck disable=SC2016  # the single-quoted block is node source
 CELL_COUNT="$(node -e '
   const plan = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
-  process.stdout.write(`${plan.cells.length} cells, about $${plan.estimate.claude_usd}`);
+  const free = plan.estimate.unmetered_cells, u = free ? ` (${free} unmetered)` : "";
+  process.stdout.write(`${plan.cells.length} cells, about $${plan.estimate.claude_usd}${u}`);
 ' "$PLAN_JSON")"
 log "plan $KIND: $CELL_COUNT"
 log "detail directory $RUN_DIR"

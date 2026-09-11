@@ -442,8 +442,16 @@ export function identityWarnings(anchor, candidate, matcherDigest = null) {
   const verifierLabel = (arm) =>
     `${arm.verifier?.tool}:${arm.verifier?.model}@${arm.verifier?.effort}`;
   if (verifierLabel(anchor) !== verifierLabel(candidate)) {
+    // Only a verifier difference when the finder held still. With both halves
+    // of the pipeline substituted at once, the delta is the pair's, and naming
+    // it the verifier's would credit a substitution that shares the effect.
+    const sameFinder =
+      anchor.finder_argv_digest !== null &&
+      anchor.finder_argv_digest === candidate.finder_argv_digest;
     warnings.push(
-      `the two runs used different verifiers (${verifierLabel(anchor)} vs ${verifierLabel(candidate)}); a matched-id difference between them is a verifier difference, not a finder difference`,
+      sameFinder
+        ? `the two runs used different verifiers (${verifierLabel(anchor)} vs ${verifierLabel(candidate)}) on the same finder; a matched-id difference between them is a verifier difference, not a finder difference`
+        : `the two runs used different verifiers (${verifierLabel(anchor)} vs ${verifierLabel(candidate)}) AND different finders (${short(anchor.finder_argv_digest)} vs ${short(candidate.finder_argv_digest)}); this comparison cannot isolate either substitution`,
     );
   }
   for (const [side, arm] of [

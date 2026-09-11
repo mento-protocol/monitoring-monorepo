@@ -42,6 +42,7 @@ import {
   applyFinderOverride,
   finderArgvDigest,
   finderProbeDecision,
+  normalizeVerifierOverride,
 } from "./review-eval-finder-override.mjs";
 import { baselinePlanIdentity, planCells } from "./review-eval-run-plan.mjs";
 
@@ -155,6 +156,10 @@ async function scoreOneCell({
     leak,
     seconds: Number(cellResult.seconds ?? 0),
     usd: Number(cellResult.cost_usd ?? 0),
+    // A codex cell's CLI reports no price, so the zero above is an absent
+    // number rather than a free call. Dropped here, the retained result and the
+    // row recorded an unknown-price call as $0 with nothing to tell them apart.
+    usd_metered: cellResult.cost_metered !== false,
     scoring_usd: cellCost.usd,
   };
 }
@@ -220,6 +225,12 @@ function foldCondition({ contract, cells, condition, scored }) {
     novel_real: mine.reduce((sum, item) => sum + item.novel.novelReal, 0),
     wrong_claims: mine.reduce((sum, item) => sum + item.novel.novelWrong, 0),
     usd: Number(mine.reduce((sum, item) => sum + item.usd, 0).toFixed(2)),
+    ...(mine.some((item) => item.usd_metered === false)
+      ? {
+          unmetered_cells: mine.filter((item) => item.usd_metered === false)
+            .length,
+        }
+      : {}),
     seconds: Number(
       mine.reduce((sum, item) => sum + item.seconds, 0).toFixed(1),
     ),
@@ -328,10 +339,17 @@ export async function scorePlan({
       `plan kind ${plan.kind} carries inputs.verifier_override; only a finder probe may substitute a verifier`,
     );
   }
+  // Re-parsed rather than trusted. The matrix equality check below rebuilds the
+  // expected cells from this same object, so a `plan.json` naming a tool the
+  // runtime never runs would validate against itself and score cells that did
+  // not run what the plan says they ran. Same rules as the CLI string.
+  const verifierOverride = recordedVerifier
+    ? normalizeVerifierOverride(recordedVerifier)
+    : null;
   const expectedCells = planCells({
     contract: probeContract,
     kind: plan.kind,
-    verifier: recordedVerifier,
+    verifier: verifierOverride,
   });
   if (JSON.stringify(plan.cells) !== JSON.stringify(expectedCells)) {
     throw new Error(`plan cells do not match the frozen ${plan.kind} matrix`);
