@@ -649,7 +649,7 @@ test("a verifier difference is attributed only when the finders match", () => {
   const confounded = compareArms({ anchor: skilled, candidate: both }).warnings;
   assert.ok(
     confounded.some((warning) =>
-      /different verifiers .* AND different finders .* cannot isolate either substitution/.test(
+      /different verifiers .* AND a different finder; this comparison cannot isolate any one substitution/.test(
         warning,
       ),
     ),
@@ -670,7 +670,7 @@ test("a verifier difference is attributed only when the finders match", () => {
   }).warnings;
   assert.ok(
     isolated.some((warning) =>
-      /on the same finder; a matched-id difference between them is a verifier difference/.test(
+      /on the same finder and skill; a matched-id difference between them is a verifier difference/.test(
         warning,
       ),
     ),

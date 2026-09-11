@@ -448,10 +448,15 @@ export function identityWarnings(anchor, candidate, matcherDigest = null) {
     const sameFinder =
       anchor.finder_argv_digest !== null &&
       anchor.finder_argv_digest === candidate.finder_argv_digest;
+    const sameSkill = anchor.skill_digest === candidate.skill_digest;
+    const moved = [
+      ...(sameFinder ? [] : ["finder"]),
+      ...(sameSkill ? [] : ["skill"]),
+    ];
     warnings.push(
-      sameFinder
-        ? `the two runs used different verifiers (${verifierLabel(anchor)} vs ${verifierLabel(candidate)}) on the same finder; a matched-id difference between them is a verifier difference, not a finder difference`
-        : `the two runs used different verifiers (${verifierLabel(anchor)} vs ${verifierLabel(candidate)}) AND different finders (${short(anchor.finder_argv_digest)} vs ${short(candidate.finder_argv_digest)}); this comparison cannot isolate either substitution`,
+      moved.length === 0
+        ? `the two runs used different verifiers (${verifierLabel(anchor)} vs ${verifierLabel(candidate)}) on the same finder and skill; a matched-id difference between them is a verifier difference, not a finder difference`
+        : `the two runs used different verifiers (${verifierLabel(anchor)} vs ${verifierLabel(candidate)}) AND a different ${moved.join(" and ")}; this comparison cannot isolate any one substitution`,
     );
   }
   for (const [side, arm] of [

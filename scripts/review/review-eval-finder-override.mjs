@@ -1,13 +1,10 @@
 // The two substitutions behind `--kind finder`: the finder (`--finder
 // MODEL@EFFORT`) and the verifier (`--verifier TOOL:MODEL@EFFORT`).
 //
-// Each rewrites one half of the probe's pipeline and nothing else. The contract
-// on disk never moves, and a substitution reaches the spawned command through
-// the plan, so `finder_argv_digest` and `verifier_override` record what ran and
-// stop a probe cell from reusing a canonical run's cell. Neither may move the
-// comparability key: the key names the contract a probe is read against, and
-// keyed on a substitution a probe would start its own lineage and be comparable
-// with nothing.
+// Each rewrites one half of the probe's pipeline through the plan alone: the
+// contract never moves, `finder_argv_digest` and `verifier_override` record what
+// ran, and neither moves the comparability key, or a probe would start its own
+// lineage and be comparable with nothing.
 
 import { createHash } from "node:crypto";
 
@@ -20,12 +17,8 @@ export const FINDER_EFFORTS = ["low", "medium", "high", "xhigh"];
 export const FINDER_ARGV_ELEMENT = /^[A-Za-z0-9._="@/:-]+$/;
 
 /**
- * Digest over the finder command a pipeline cell actually executes. The contract
- * pins that argument vector and `run-eval.sh` spawns it element for element, so
- * this is the finder half of the row's provenance. It replaced a digest of
- * `~/.claude/bin/codex-review.sh`, a wrapper no cell ever runs: recording that
- * claimed a drift control the harness did not have, because an edited `argv`
- * moved every pipeline cell unrecorded.
+ * Digest over the finder argv a pipeline cell executes: the finder half of the
+ * row's provenance. It replaced a digest of a wrapper no cell ever ran.
  */
 export function finderArgvDigest(contract) {
   const argv = contract?.sut?.finder?.argv;
@@ -163,6 +156,11 @@ export function detailDirBase({ date, key, kind, inputs }) {
 
 export const VERIFIER_TOOLS = ["claude", "codex"];
 
+export const VERIFIER_EFFORTS = Object.freeze({
+  codex: FINDER_EFFORTS,
+  claude: ["low", "medium", "high", "max"],
+});
+
 /** Parse a `--verifier TOOL:MODEL@EFFORT` spec. */
 export function parseVerifierSpec(spec) {
   const value = String(spec ?? "").trim();
@@ -173,18 +171,24 @@ export function parseVerifierSpec(spec) {
       `--verifier must be TOOL:MODEL@EFFORT with TOOL one of ${VERIFIER_TOOLS.join(", ")}; got ${JSON.stringify(spec)}`,
     );
   }
-  const { model, effort } = parseFinderSpec(value.slice(colon + 1));
+  const rest = value.slice(colon + 1);
+  const at = rest.lastIndexOf("@");
+  const effort = at === -1 ? "" : rest.slice(at + 1);
+  if (!VERIFIER_EFFORTS[tool].includes(effort)) {
+    throw new Error(
+      `--verifier effort for ${tool} must be one of ${VERIFIER_EFFORTS[tool].join(", ")}; got ${JSON.stringify(effort)}`,
+    );
+  }
+  const { model } = parseFinderSpec(
+    `${at === -1 ? rest : rest.slice(0, at)}@high`,
+  );
   return { tool, model, effort };
 }
 
 /**
- * Any verifier override, however it arrives, put through `parseVerifierSpec`.
- * A `buildPlan` caller may pass the already-split object, and a plan read back
- * from disk carries one. Trusted as-is, `{ tool: "gemini" }` planned cells the
- * runtime would have run on claude, and a hand-edited `plan.json` could name a
- * tool or an effort no cell ever ran. Both are refused here, by the rules the
- * CLI string is held to, with every field required to be a string: `parseFinderSpec`
- * would otherwise accept the stringified `null` as a model token.
+ * Any override, string or object (a `buildPlan` caller's or a stored plan's),
+ * held to `parseVerifierSpec`; every field must be a string, or a stringified
+ * `null` would pass as a model token.
  */
 export function normalizeVerifierOverride(override) {
   if (typeof override === "string") return parseVerifierSpec(override);

@@ -242,7 +242,7 @@ test("the shell split no longer reconstructs the pre-split cell runtime", () => 
   // so this pin still catches an unintended shell edit.
   assert.equal(
     reconstructed,
-    "7cdc7da42fccb8f3439f62b63b32ecd19a92ffdcd22d05d4789ce14b779382ca",
+    "80adb51b0a9ca5054ca9dee0ef3fba980a4b48aa935b36641fef6f3838badbb6",
   );
   // It is no longer the pre-split monolith. Capturing the whole session instead
   // of the CLI's last-message envelope changed what a cell records, so the 24
@@ -904,7 +904,7 @@ test("comparabilityKey moves with the contract, the prompts, and the scorer", ()
 
 test("orchestratorSourceDigest binds the shell and the cell modules", () => {
   const expected =
-    "14c6268a554026556cdf3d1ceeb6e5592646877fcb455726977eaf0d50f91480";
+    "1d2b8cd636d27d0d97545cec2b52565f60b46952c723569d53e050a021c0818a";
   assert.equal(orchestratorSourceDigest(), expected);
   // The cell writer and the stream parser are in the digest for the same
   // reason the shell is: the writer decides what a paid cell records and the
@@ -10355,10 +10355,13 @@ test("--verifier parses both tools and refuses everything else", () => {
     model: "gpt-6-astra",
     effort: "high",
   });
-  assert.deepEqual(parseVerifierSpec("claude:claude-opus-5@xhigh"), {
+  // Each tool's own effort set: claude has `max`, codex has `xhigh`, and a
+  // spec that names the other tool's top effort fails at plan time, not after
+  // every cell has paid for its finder call.
+  assert.deepEqual(parseVerifierSpec("claude:claude-opus-5@max"), {
     tool: "claude",
     model: "claude-opus-5",
-    effort: "xhigh",
+    effort: "max",
   });
   for (const bad of [
     // No tool at all, an unknown tool, and a tool with no model or effort.
@@ -10367,6 +10370,8 @@ test("--verifier parses both tools and refuses everything else", () => {
     "codex:@high",
     "codex:gpt-6-astra",
     "codex:gpt-6-astra@ultra",
+    "codex:gpt-6-astra@max",
+    "claude:claude-opus-5@xhigh",
     // The runtime spawns the model as one argv element, exactly as it does the
     // finder's, so the same character set applies.
     "codex:gpt-6,astra@high",
@@ -10644,7 +10649,7 @@ test("the matrix carries the tool and the runtime spawns codex bare", () => {
   const codex = runtime.slice(runtime.indexOf("if [[ $tool == codex ]]; then"));
   assert.match(
     codex,
-    /run_stream_capped "\$CELL_STREAM_MAX_BYTES" "\$fixture" codex exec \\\n\s+--sandbox read-only --skip-git-repo-check --ephemeral \\\n\s+--ignore-user-config -m "\$model" \\\n\s+-c "model_reasoning_effort=\\"\$effort\\"" \\\n\s+--json -o "\$last_message" "\$prompt"/,
+    /run_stream_capped "\$CELL_STREAM_MAX_BYTES" "\$fixture" codex exec \\\n\s+--sandbox read-only --skip-git-repo-check --ephemeral \\\n\s+--ignore-user-config --ignore-rules -m "\$model" \\\n\s+-c "model_reasoning_effort=\\"\$effort\\"" \\\n\s+--json -o "\$last_message" "\$prompt"/,
   );
   const codexBranch = codex.slice(0, codex.indexOf("\n  else\n"));
   assert.equal(codexBranch.includes("stage_skill"), false);

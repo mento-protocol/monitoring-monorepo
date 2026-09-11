@@ -490,7 +490,7 @@ run_cell() {
     run_bounded "$raw" "$(remaining_seconds "$MATRIX_DEADLINE")" \
       run_stream_capped "$CELL_STREAM_MAX_BYTES" "$fixture" codex exec \
       --sandbox read-only --skip-git-repo-check --ephemeral \
-      --ignore-user-config -m "$model" \
+      --ignore-user-config --ignore-rules -m "$model" \
       -c "model_reasoning_effort=\"$effort\"" \
       --json -o "$last_message" "$prompt" || claude_status=$?
     if [[ $(wc -c <"$raw" | tr -d " ") -gt $CELL_STREAM_MAX_BYTES ]]; then
