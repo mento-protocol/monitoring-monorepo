@@ -662,7 +662,7 @@ describe("SortedOracles event-sourced feed state", () => {
         }),
         mockDb,
       }),
-      /Worker exited with code 1/,
+      /sortedOracles\.oracleExpiryStateUnavailable/,
     );
 
     assert.equal(

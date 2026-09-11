@@ -198,7 +198,7 @@ runtime effect unless `INDEXER_PERF` is truthy.
 
 For hosted comparisons, use `pnpm deploy:indexer:perf <commit>` to capture the
 deployment registry row, per-chain status/metrics, build highlights, and recent
-warn/error logs in one snapshot. For local Envio CLI checks, `envio@3.2.1`
+warn/error logs in one snapshot. For local Envio CLI checks, `envio@3.10.0`
 also includes `envio metrics runtime` and `envio tools search-docs` /
 `envio tools fetch-docs`.
 

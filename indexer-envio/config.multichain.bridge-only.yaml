@@ -25,9 +25,11 @@ description: |
   Note: codegen writes to ./.envio, overwriting the active generated type
   package. Switch back with pnpm indexer:codegen.
 
-# Disable v3's src/handlers auto-loading. The bridge-only entry point below
-# imports only the Wormhole handlers.
-handlers: null
+# Disable v3's src/handlers auto-loading by pointing it at an empty directory
+# (envio >= 3.9 treats `null` as the `src/handlers` default). The bridge-only
+# entry point below imports only the Wormhole handlers and stays the single
+# registration path; see config.multichain.mainnet.yaml.
+handlers: src/handlers-autoload-off
 
 contracts:
   - name: WormholeNttManager

@@ -1,7 +1,16 @@
 import { createTestIndexer } from "envio";
 import type { TestIndexer } from "envio";
+// envio publishes no `exports` map, so its config singleton is importable. The
+// harness edits it to route synthetic test addresses (see `envioConfig`).
+// @ts-expect-error -- ReScript output ships no type declarations.
+import * as EnvioConfig from "envio/src/Config.res.mjs";
+// @ts-expect-error -- ReScript output ships no type declarations.
+import * as EnvioChainMap from "envio/src/ChainMap.res.mjs";
 
 import { waitForHttpTestRpc } from "../../src/rpc/http-test-mocks.js";
+// Register every handler once, through vitest's module graph, so `vi.mock` and
+// the shared RPC test mocks apply to them. See `envioConfig` below.
+import "../../src/EventHandlers.js";
 
 // Thin Envio v3 test harness that preserves the concise MockDb-style
 // entity assertions used by multi-event integration tests.
@@ -157,6 +166,69 @@ function normalizeEvent(
   };
 }
 
+type EnvioContractConfig = { name: string; addresses: string[] };
+type EnvioChainConfig = { id: number; contracts: EnvioContractConfig[] };
+
+// envio's cached config singleton, which `createTestIndexer()` reads on every
+// call. Two edits keep the handler tests working on envio >= 3.9:
+// 1. `contractHandlers = []` stops `registerAllHandlers` from natively
+//    importing `src/EventHandlers.ts` a second time. vitest already evaluated
+//    it (import above); a second module instance would register every handler
+//    twice and run every event twice. `src/handlers` auto-loading is disabled
+//    in config.yaml (`handlers:` points at an empty directory), and
+//    test/handlerRegistrationNative.test.ts guards the production loader path.
+// 2. `registerSimulateAddresses` adds simulated `(chain, contract, srcAddress)`
+//    triples to the contract address lists the test indexer seeds its routing
+//    table from. envio >= 3.9 drops simulated events from unregistered
+//    addresses; handler tests use synthetic addresses with directly seeded
+//    entities, so this restores the 3.x "route everything" behaviour.
+const envioConfig = EnvioConfig.load() as {
+  chainMap: unknown;
+  contractHandlers: unknown[];
+};
+envioConfig.contractHandlers = [];
+const envioChains = EnvioChainMap.values(
+  envioConfig.chainMap,
+) as EnvioChainConfig[];
+
+export type SimulateSource = {
+  chainId: number;
+  contractName: string;
+  srcAddress: string;
+};
+
+/** Register simulated sources before `createTestIndexer()`. Tests that call
+ * `indexer.process()` directly must call this for every
+ * `(chain, contract, srcAddress)` they simulate; `processEvent` and
+ * `processMockEvents` do it for their callers. */
+export function registerSimulateAddresses(
+  sources: readonly SimulateSource[],
+): void {
+  for (const source of sources) {
+    const chain = envioChains.find((c) => c.id === source.chainId);
+    if (!chain) {
+      throw new Error(
+        `registerSimulateAddresses: chain ${source.chainId} is not in config.yaml`,
+      );
+    }
+    const contract = chain.contracts.find(
+      (c) => c.name === source.contractName,
+    );
+    if (!contract) {
+      throw new Error(
+        `registerSimulateAddresses: contract ${source.contractName} is not configured on chain ${source.chainId}`,
+      );
+    }
+    const address = EnvioConfig.normalizeSimulateAddress(
+      envioConfig,
+      source.srcAddress,
+    ) as string;
+    if (!contract.addresses.includes(address)) {
+      contract.addresses.push(address);
+    }
+  }
+}
+
 function seedIndexer(indexer: TestIndexer, db: MockDb): void {
   const target = indexer as unknown as Record<
     string,
@@ -209,6 +281,7 @@ function makeEventProcessor(contractName: string, eventName: string) {
       mockDb: MockDb;
     }): Promise<MockDb> => {
       await waitForHttpTestRpc();
+      registerSimulateAddresses([event]);
       const indexer = createTestIndexer();
       seedIndexer(indexer, mockDb);
       const block = Number(event.block.number);
@@ -247,6 +320,7 @@ export async function processMockEvents<Db extends MockDb>({
   if (events.length === 0) return mockDb;
   await waitForHttpTestRpc();
   const mockEvents = events as MockEvent[];
+  registerSimulateAddresses(mockEvents);
   const indexer = createTestIndexer();
   seedIndexer(indexer, mockDb);
   const chains: Record<

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createTestIndexer } from "envio";
 import {
   indexerTestHelpers,
+  registerSimulateAddresses,
   type EntityReader,
   type MockEntity,
   type MockDbWith,
@@ -73,6 +74,10 @@ async function processEventsInOneBatch(
   mockDb: MockDb,
   events: readonly unknown[],
 ): Promise<MockDb> {
+  const normalized = events as readonly NormalizedMockEvent[];
+  const first = normalized[0];
+  assert.ok(first, "processEventsInOneBatch requires at least one event");
+  registerSimulateAddresses(normalized);
   const indexer = createTestIndexer();
   const target = indexer as unknown as Record<
     string,
@@ -86,9 +91,6 @@ async function processEventsInOneBatch(
     }
   }
 
-  const normalized = events as readonly NormalizedMockEvent[];
-  const first = normalized[0];
-  assert.ok(first, "processEventsInOneBatch requires at least one event");
   const block = Number(first.block.number);
   const chainId = first.chainId;
   const result = await indexer.process({

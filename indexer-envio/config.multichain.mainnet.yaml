@@ -2,13 +2,16 @@
 name: mento-multichain-mainnet
 description: Mento multichain mainnet indexer — Ethereum (1) + Celo (42220) + Monad (143) + Polygon (137)
 
-# Disable v3's `src/handlers/` auto-loading. Each contract below explicitly
-# points at `src/EventHandlers.ts`, which side-effect imports the same
-# files in `src/handlers/`. Without this `null`, v3 would auto-load
-# `src/handlers/*` AND fire the same files via the entry point — double
-# registration would double-apply every stateful update (volumes, fee
-# snapshots, breach counters, etc.).
-handlers: null
+# Disable v3's `src/handlers/` auto-loading by pointing it at an empty
+# directory, so `src/EventHandlers.ts` (named by every contract below) is the
+# only registration path. That entry point side-effect imports the same files
+# in `src/handlers/`; loading them a second way registers every handler twice
+# under vitest (two module graphs), which doubles every stateful update in the
+# test indexer. `handlers: null` no longer disables auto-loading: envio >= 3.9
+# treats null as the `src/handlers` default.
+# test/handlerRegistrationNative.test.ts checks that this committed config
+# yields one handler execution per event under envio's own loader.
+handlers: src/handlers-autoload-off
 #
 # ⚠️  BREAKING CHANGE — DEPLOYMENT CHECKLIST ⚠️
 #

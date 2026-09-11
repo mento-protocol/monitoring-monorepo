@@ -1,7 +1,7 @@
 import { createTestIndexer } from "envio";
 import { assert } from "vitest";
-import "../src/EventHandlers.ts";
 import { makePoolId } from "../src/helpers.ts";
+import { registerSimulateAddresses } from "./helpers/indexerTestHarness.js";
 
 const CHAIN_ID = 42220;
 const POOL = "0x00000000000000000000000000000000000000aa";
@@ -81,6 +81,13 @@ function finalRows(
 
 describe("OpenLiquidityStrategy handlers", () => {
   it("keeps one OlsPool row per PoolAdded registration and rolls counters into the latest active registration", async () => {
+    registerSimulateAddresses([
+      {
+        chainId: CHAIN_ID,
+        contractName: "OpenLiquidityStrategy",
+        srcAddress: OLS,
+      },
+    ]);
     const indexer = createTestIndexer();
     const result = await indexer.process({
       chains: {
