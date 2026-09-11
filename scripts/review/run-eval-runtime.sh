@@ -585,13 +585,13 @@ cell_rows() {
         cell.tool ?? "claude",
       ].map(String);
       for (const [index, field] of fields.entries()) {
-        if (/[\t\r\n]/.test(field)) {
+        if (/[\x1f\r\n]/.test(field)) {
           throw new Error(
-            `cell ${cell.cell_id} field ${index} carries a tab or a newline: ${JSON.stringify(field)}`,
+            `cell ${cell.cell_id} field ${index} carries a unit separator or a newline: ${JSON.stringify(field)}`,
           );
         }
       }
-      lines.push(fields.join("\t") + "\n");
+      lines.push(fields.join("\x1f") + "\n"); // not tab: bash read collapses empties
     }
     process.stdout.write(lines.join(""));
   ' "$PLAN_JSON"

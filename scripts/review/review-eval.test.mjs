@@ -238,7 +238,7 @@ test("the shell split no longer reconstructs the pre-split cell runtime", () => 
   // so this pin still catches an unintended shell edit.
   assert.equal(
     reconstructed,
-    "2901fbc9bfced973b046c58c2ef0fa71d8c317e7d6a9fc9270572371800a5a99",
+    "c0e3ec41d2cd9ba10951b93247999805dda26609914f59742d3632b73b7a10e9",
   );
   // It is no longer the pre-split monolith. Capturing the whole session instead
   // of the CLI's last-message envelope changed what a cell records, so the 24
@@ -900,7 +900,7 @@ test("comparabilityKey moves with the contract, the prompts, and the scorer", ()
 
 test("orchestratorSourceDigest binds the shell and the cell modules", () => {
   const expected =
-    "c352b05015cd67a07817929d2aca044f2d23ca21e88a8711a73d2070dd42768a";
+    "73ada37c3672503ffe572f269e36b292ac1b99a3ae008650cf3a51f3710aad85";
   assert.equal(orchestratorSourceDigest(), expected);
   // The cell writer and the stream parser are in the digest for the same
   // reason the shell is: the writer decides what a paid cell records and the
@@ -2184,7 +2184,8 @@ function driveMatrix({
 }) {
   const events = path.join(dir, "events");
   // The rows travel through a file, not through the harness source: the fields
-  // are tab-separated and the reader is the thing under test.
+  // are unit-separated (tab is IFS whitespace to bash read and collapses an
+  // empty field) and the reader is the thing under test.
   const rowsFile = path.join(dir, "rows.tsv");
   writeFileSync(
     rowsFile,
@@ -2192,7 +2193,7 @@ function driveMatrix({
       .map(
         ({ pr, id }) =>
           [id, pr, "control", "1", "opus", "high", "", "", "request"].join(
-            "\t",
+            "\x1f",
           ) + "\n",
       )
       .join(""),
@@ -2485,7 +2486,7 @@ test("TERM takes every group worker's process group down with the run", async ()
               "",
               "",
               "request",
-            ].join("\t") + "\n",
+            ].join("\x1f") + "\n",
         )
         .join(""),
     );
@@ -2597,7 +2598,7 @@ test("TERM ends a group worker interrupted before the parent recorded it", async
         "",
         "",
         "request",
-      ].join("\t") + "\n",
+      ].join("\x1f") + "\n",
     );
     const marker = path.join(dir, "survivor");
     const childFile = path.join(dir, "worker-child");
@@ -7568,7 +7569,7 @@ test("the cell reader emits nothing when the plan carries a forged field", () =>
     writeFileSync(
       planPath,
       JSON.stringify({
-        cells: [cell("first"), cell("second", { model: "opus\thandoff" })],
+        cells: [cell("first"), cell("second", { model: "opus\x1fhandoff" })],
       }),
     );
     const forged = spawnSync(process.execPath, ["-e", program, planPath], {
@@ -7576,7 +7577,7 @@ test("the cell reader emits nothing when the plan carries a forged field", () =>
     });
     assert.notEqual(forged.status, 0);
     assert.equal(forged.stdout, "");
-    assert.match(forged.stderr, /carries a tab or a newline/);
+    assert.match(forged.stderr, /carries a unit separator or a newline/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

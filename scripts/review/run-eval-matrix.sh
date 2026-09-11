@@ -186,7 +186,7 @@ matrix_group_worker() {
   while IFS= read -r row || [[ -n $row ]]; do
     [[ -n $row ]] || continue
     cell=$((cell + 1))
-    IFS=$'\t' read -r cell_id _ condition draw model effort finder \
+    IFS=$'\x1f' read -r cell_id _ condition draw model effort finder \
       finder_report prompt_kind tool <<<"$row"
     if [[ $(($(date +%s) - STARTED)) -ge $MATRIX_DEADLINE ]]; then
       : >"$status_dir/deadline"
@@ -285,7 +285,7 @@ run_matrix() {
   # serial run produced. Grouping only decides what may overlap.
   while IFS= read -r row || [[ -n $row ]]; do
     [[ -n $row ]] || continue
-    IFS=$'\t' read -r cell_id pr condition draw model effort finder \
+    IFS=$'\x1f' read -r cell_id pr condition draw model effort finder \
       finder_report prompt_kind tool extra <<<"$row"
     if [[ -n ${extra:-} ]]; then
       fail "the plan produced a cell row with an extra field: $extra"
