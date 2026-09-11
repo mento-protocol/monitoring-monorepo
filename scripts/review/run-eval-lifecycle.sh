@@ -505,6 +505,13 @@ keep_baseline_copy() {
 }
 
 abort() {
+  # A finder probe has no ledger row to fail. `finder` is not a LEDGER_KINDS
+  # value, so `write_failed_row` would clear the result-*.json the compare CLI
+  # reads and then die on schema validation with a message about the ledger.
+  # Keep the paid evidence and name the probe and its directory instead.
+  if [[ $KIND == finder ]]; then
+    fail "finder probe $FINDER failed: $1 — nothing was appended; the partial evidence is in $RUN_DIR"
+  fi
   # The failed row goes into the checkout's ledger, so leaving it there and
   # exiting zero wedges the schedule: launchd reads a healthy run while the next
   # one refuses to start against a ledger with uncommitted changes, and nothing

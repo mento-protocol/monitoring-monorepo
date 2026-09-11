@@ -70,7 +70,7 @@ export const DEFAULT_REVIEW_EVAL_REPO = "mento-protocol/monitoring-monorepo";
 const MODE_OPTIONS = {
   "check-fixtures": ["offline", "src-repo"],
   "check-ledger": ["base-ref", "require-base", "revalidate-appended"],
-  plan: ["kind", "skill-ref", "out", "runs-dir", "against"],
+  plan: ["kind", "finder", "skill-ref", "out", "runs-dir", "against"],
   score: ["against", "calibration"],
   validate: ["append", "against", "calibration", "detail-dir"],
   report: ["against", "row"],
@@ -91,6 +91,7 @@ const OPTION_SPEC = {
   "require-base": { type: "boolean" },
   "revalidate-appended": { type: "boolean" },
   kind: { type: "string" },
+  finder: { type: "string" },
   "skill-ref": { type: "string" },
   out: { type: "string" },
   "runs-dir": { type: "string" },
@@ -170,6 +171,7 @@ export function parseArgs(argv, env = process.env) {
     requireBase: values["require-base"] === true,
     revalidateAppended: values["revalidate-appended"] === true,
     kind: values.kind ?? null,
+    finder: values.finder ?? null,
     skillRef: values["skill-ref"] ?? null,
     outDir: values.out ?? null,
     planDir: mode === "score" ? values.score : null,
@@ -195,8 +197,14 @@ export function parseArgs(argv, env = process.env) {
   };
   if (mode === "plan") {
     options.kind = options.kind ?? "auto";
-    if (!["full", "canary", "auto"].includes(options.kind)) {
-      throw new Error("--kind must be full, canary, or auto");
+    if (!["full", "canary", "finder", "auto"].includes(options.kind)) {
+      throw new Error("--kind must be full, canary, finder, or auto");
+    }
+    if (options.finder !== null && options.kind !== "finder") {
+      throw new Error("--finder is only valid with --kind finder");
+    }
+    if (options.kind === "finder" && options.finder === null) {
+      throw new Error("--kind finder requires --finder MODEL@EFFORT");
     }
   }
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(options.repo)) {
@@ -230,7 +238,12 @@ Options:
   --require-base         Fail when the base ref does not resolve (--check-ledger)
   --revalidate-appended  Recompute every row this branch appends from its
                          committed detail (--check-ledger); calls no model
-  --kind full|canary|auto  Run matrix to plan (default: auto, read from ledger)
+  --kind full|canary|finder|auto
+                         Run matrix to plan (default: auto, read from ledger);
+                         finder is the throwaway probe lane, which appends no
+                         ledger row and cannot become a baseline
+  --finder MODEL@EFFORT  Substitute the contract's finder for this plan only
+                         (--kind finder); effort is low, medium, high or xhigh
   --skill-ref PATH       Evaluate a candidate skill directory; stamps dirty
   --out DIR              Plan directory (default: the run's detail directory)
   --runs-dir PATH        Detail root (default: ${DEFAULT_RUNS_DIR})
@@ -527,6 +540,7 @@ async function modePlan(options, context) {
     repoRoot: context.repoRoot,
     outDir: options.outDir,
     skillRef: options.skillRef,
+    finder: options.finder,
     runsDir: options.runsDir,
     // The rows decide which detail directory this execution may own: one a row
     // already points at holds that row's evidence and is never written again.
@@ -639,6 +653,14 @@ async function modeScore(options, context) {
 async function modeValidate(options, context) {
   const rowPath = path.resolve(options.resultPath);
   const row = readJson(rowPath);
+  // A finder probe is not a measurement of the skill. Its matrix is a ninth of
+  // a full run under a finder the contract does not name, so it may not refresh
+  // a clock, anchor a comparison, or sit in the ledger at all.
+  if (row?.kind === "finder") {
+    throw new Error(
+      "this row came from a --kind finder probe; it never enters the ledger. Read it with scripts/review/review-eval-finder-compare.mjs",
+    );
+  }
   const ledgerPath = path.resolve(context.repoRoot, options.ledgerPath);
   const ledgerRows = readLedger(ledgerPath);
   const calibrationFile = path.resolve(

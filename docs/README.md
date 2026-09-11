@@ -223,6 +223,7 @@ Authority: canonical
 - [`adr/0093-opt-in-native-stacked-pull-requests.md`](adr/0093-opt-in-native-stacked-pull-requests.md) — Adopt native stacked pull requests through an opt-in pilot
 - [`adr/0094-grid-waiver.md`](adr/0094-grid-waiver.md) — Scale the control waiver to grid scope
 - [`adr/0095-isolated-bridge-transfer-observations.md`](adr/0095-isolated-bridge-transfer-observations.md) — Bridge transfers use isolated complete observations
+- [`adr/0096-finder-probe-non-ledger-kind.md`](adr/0096-finder-probe-non-ledger-kind.md) — Non-ledger finder probes
 
 Authority: non-canonical
 

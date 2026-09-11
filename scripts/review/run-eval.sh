@@ -40,6 +40,15 @@
 #   run-eval.sh [--kind full|canary|auto] [--skill-ref PATH] [--pr] [--no-pr]
 #               [--repo PATH] [--cache-dir DIR] [--deadline SECONDS]
 #               [--against REF]
+#   run-eval.sh --kind finder --finder MODEL@EFFORT [other options]
+#
+# --kind finder is the probe lane: the pipeline cells alone, one draw per
+# fixture, with the contract's finder replaced by MODEL@EFFORT for that run only
+# (EFFORT is low, medium, high or xhigh; the contract on disk never changes). It
+# scores and stops — nothing appended, no row validated, no PR — and prints the
+# detail directory review-eval-finder-compare.mjs reads against a full run. One
+# draw per fixture rejects a finder; it never promotes one. Each flag needs the
+# other; --against is refused. Editing this file moves the comparability key.
 #
 # --against names the baseline row this run is planned, scored, validated and
 # reported against: a row file path or an executed_at prefix. The candidate
@@ -61,6 +70,7 @@
 set -euo pipefail
 
 KIND="auto"
+FINDER=""
 SKILL_REF=""
 OPEN_PR=0
 REPO=""
@@ -166,6 +176,11 @@ while [[ $# -gt 0 ]]; do
       KIND="$2"
       shift 2
       ;;
+    --finder)
+      require_value "$1" "${2:-}"
+      FINDER="$2"
+      shift 2
+      ;;
     --skill-ref)
       require_value "$1" "${2:-}"
       SKILL_REF="$2"
@@ -206,7 +221,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     -h | --help)
-      sed -n '2,57p' "$0"
+      sed -n '2,66p' "$0"
       exit 0
       ;;
     *) fail "unknown argument: $1" ;;
@@ -214,9 +229,24 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$KIND" in
-  full | canary | auto) ;;
-  *) fail "--kind must be full, canary, or auto" ;;
+  full | canary | finder | auto) ;;
+  *) fail "--kind must be full, canary, finder, or auto" ;;
 esac
+if [[ -n $FINDER && $KIND != finder ]]; then
+  fail "--finder is only valid with --kind finder"
+fi
+if [[ $KIND == finder && -z $FINDER ]]; then
+  fail "--kind finder requires --finder MODEL@EFFORT"
+fi
+# A probe resolves no baseline, appends no row and writes no report, so every
+# --against stage is skipped for it. Accepting the flag and ignoring it would
+# let an operator believe a probe was compared against a named anchor.
+if [[ $KIND == finder && -n $AGAINST ]]; then
+  fail "--against is not valid with --kind finder; compare the detail directories with review-eval-finder-compare.mjs instead"
+fi
+if [[ $KIND == finder && $OPEN_PR -eq 1 ]]; then
+  fail "--pr is not valid with --kind finder; a probe appends no row and publishes nothing"
+fi
 
 if [[ -z $REPO ]]; then
   REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -337,6 +367,9 @@ fi
 
 PLAN_OUT="$(mktemp "$TMPROOT/review-eval-plan.XXXXXX")"
 PLAN_ARGS=(--root "$SPEC" --ledger "$LEDGER" --plan --kind "$KIND" --json)
+if [[ -n $FINDER ]]; then
+  PLAN_ARGS+=(--finder "$FINDER")
+fi
 if [[ -n $SKILL_REF ]]; then
   PLAN_ARGS+=(--skill-ref "$SKILL_REF")
 fi
@@ -365,6 +398,9 @@ KIND="$(json_field "$PLAN_OUT" kind)"
 RUN_DIR="$REPO/$DETAIL_DIR"
 PLAN_ARGS=(--root "$SPEC" --ledger "$LEDGER" --plan --kind "$KIND" --json
   --out "$RUN_DIR")
+if [[ -n $FINDER ]]; then
+  PLAN_ARGS+=(--finder "$FINDER")
+fi
 if [[ -n $SKILL_REF ]]; then
   PLAN_ARGS+=(--skill-ref "$SKILL_REF")
 fi
@@ -491,6 +527,14 @@ if [[ $SCORE_STATUS -eq 124 ]]; then
   abort "scoring hit the run deadline of ${DEADLINE}s"
 elif [[ $SCORE_STATUS -ne 0 ]]; then
   abort "scoring failed"
+fi
+
+# A probe scores and stops: no ledger row to validate, no baseline to report
+# against, no PR to open. The detail directory above is what the comparison reads.
+if [[ $KIND == finder ]]; then
+  log "finder probe $FINDER: nothing was appended to the ledger"
+  log "compare: node scripts/review/review-eval-finder-compare.mjs --anchor <full-run detail dir> --candidate $RUN_DIR"
+  exit 0
 fi
 
 log "validating the row against its own detail"

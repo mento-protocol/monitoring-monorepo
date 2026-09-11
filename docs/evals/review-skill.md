@@ -264,6 +264,72 @@ pnpm review:eval:run --kind canary                # the monthly smoke test
 pnpm review:eval:run --kind full                  # the quarterly score of record
 ```
 
+### Probing a different finder
+
+`--kind finder --finder MODEL@EFFORT` runs the pipeline condition alone, one
+draw per fixture, with the contract's finder replaced for that run only. The
+contract on disk never changes: the substitution lives in the plan, which is
+what the orchestrator spawns the finder from, and it moves the plan's
+`finder_argv_digest` so a probe cell can never reuse a canonical run's cell. It
+does not move the comparability key, so the probe is still read against this
+contract. `EFFORT` is `low`, `medium`, `high` or `xhigh`, and each of the two
+flags is refused without the other.
+
+A probe scores and stops. It appends no ledger row, refreshes no clock, cannot
+become a baseline, and `--validate --append` refuses its row outright. It
+resolves no baseline and publishes nothing either, so `--against` and `--pr` are
+refused rather than ignored. Its detail directory ends in two short digests, the
+overridden finder argv and the two recorded CLI versions, because no ledger row
+records the name: two probes of one day would otherwise land on one directory
+and the second would overwrite the first. The CLI digest is there because the
+versions are outside the comparability key — after a `claude` or `codex` upgrade
+the name would be unchanged while `cellFingerprint` rejected every cell the
+earlier runtime paid for. An identical rerun still resumes. Compare a probe
+against a canonical full run by detail directory:
+
+```bash
+pnpm review:eval:run --kind finder --finder gpt-6-astra@low
+pnpm review:eval:finder-compare -- \
+  --anchor docs/evals/review-skill-runs/<full-run> \
+  --candidate docs/evals/review-skill-runs/<probe-run>
+```
+
+The comparison pairs the pipeline draw-1 cells by PR and prints matched ids,
+P1 recall, wrong claims, the per-PR net and a sign-flip test over the nets.
+
+It refuses, rather than warns, when the two plans name different contracts,
+scorers or judge calibration sets, and when either arm's contract differs from
+the one this process loaded. Those decide what a matched id counts as — the
+frozen ids and the recall denominator, what matches one, and what qualified the
+judge — so a net computed across a difference in them answers no question.
+`--allow-scorer-drift` turns the scorer refusal alone into a warning: the
+scorer digest covers every scoring module, so a harness edit that never
+touches matching still moves it, and the operator who has read that diff can
+accept the comparison with the difference printed. It
+also refuses a run whose `row.json` is missing, records a judge that failed
+calibration, or records a suspected leak, and one whose cells carry
+`leak.suspected` or no `novel.novelWrong` count. The canonical baseline path
+refuses a leaked or uncalibrated row for the same reason.
+
+Two differences only warn, because refusing on either would refuse every probe
+against every earlier anchor. The comparability key binds the orchestrator
+digest, and a probe of a new finder is normally planned on an edited harness, so
+its key almost always differs from the anchor's. The checkout's own scorer moves
+whenever any scoring module is edited, and it did not produce either arm's
+`matched_ids`: those are committed evidence, and the only thing recomputed here
+is recall arithmetic, applied identically to both sides. Different review skills
+and different judges warn too, and a difference in orchestrator bytes is noted.
+
+One draw per fixture is enough to reject a finder and never enough to promote
+one: a single draw cannot separate the finder from sampling variance. A winner
+needs a canonical full run on a contract updated to name it.
+
+`run-eval.sh` is in `ORCHESTRATOR_FILES`, and `review-eval.mjs`,
+`review-eval-run-plan.mjs`, `review-eval-run-detail.mjs` and
+`review-eval-finder-override.mjs` are in `SCORING_MODULES`. Editing any of them
+moves the comparability key of every later run, so a probe and its anchor must
+be planned from the same sources.
+
 `run-eval.sh` adds a detached worktree of `origin/main` and reads the contract,
 truth, prompts and scorer from there, so a dirty working tree cannot change
 what is measured. The ledger, the baseline it resolves and the branch the PR
@@ -1008,8 +1074,10 @@ retire it. Run the bridge whenever the outgoing key does carry a complete row,
 and run it before the retiring model goes away, because history cannot be
 re-run.
 
-No CLI mode plans a bridge run: `--kind` accepts `full` and `canary`, and
-`buildPlan` refuses anything else. What the harness contributes is the row's
+No CLI mode plans a bridge run: `--kind` accepts `full`, `canary` and `finder`,
+and `buildPlan` refuses anything else. `finder` is no help here — it is the
+probe lane, appends no row, and is not a ledger kind, so it can neither be a
+bridge nor plan one. What the harness contributes is the row's
 standing — `bridge` is a valid ledger kind, `--validate --against` re-derives
 its cross-key pairing, and `--report` renders it. Ordinary scoring refuses a
 cross-key baseline.
@@ -1125,9 +1193,13 @@ path must exist on `main` before the first run after the moving commit.
 | `scripts/review/review-eval.mjs`                            | the CLI                                                  |
 | `scripts/review/review-eval-run.mjs`                        | the stable run-helper import facade                      |
 | `scripts/review/review-eval-run-plan.mjs`                   | plan, input, matrix, and comparability-key construction  |
+| `scripts/review/review-eval-run-detail.mjs`                 | detail-directory naming and the pre-split cell cache     |
 | `scripts/review/review-eval-run-execution.mjs`              | judge execution, environment scrub, and fixture reset    |
 | `scripts/review/review-eval-run-cell.mjs`                   | cell identity, cache reuse, and leak signals             |
-| `scripts/review/review-eval-run-score.mjs`                  | cell scoring, condition folds, rows, and freshness plans |
+| `scripts/review/review-eval-run-score.mjs`                  | cell scoring, condition folds, and row construction      |
+| `scripts/review/review-eval-freshness-guard.mjs`            | staleness plans and the authorized freshness workflow    |
+| `scripts/review/review-eval-finder-override.mjs`            | finder argv digest, `--finder` substitution, run naming  |
+| `scripts/review/review-eval-finder-compare.mjs`             | offline pipeline draw-1 comparison of two runs           |
 | `scripts/review/review-eval-score.mjs`                      | scorer logic and scoring-module digest ownership         |
 | `scripts/review/review-eval-stream.mjs`                     | dependency-free stream parser, session budget, envelope  |
 | `scripts/review/review-eval-cell-writer.mjs`                | one finished contestant stream to one cell result        |

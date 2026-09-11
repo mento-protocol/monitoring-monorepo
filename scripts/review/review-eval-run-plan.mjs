@@ -4,7 +4,6 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   existsSync,
-  lstatSync,
   mkdirSync,
   readdirSync,
   readFileSync,
@@ -19,12 +18,17 @@ import {
   PIPELINE_DRAWS,
   scorableTotals,
 } from "./review-eval-fixtures.mjs";
+import {
+  detailDirBase,
+  finderArgvDigest,
+  resolveFinderPlan,
+} from "./review-eval-finder-override.mjs";
 import { freshness } from "./review-eval-ledger.mjs";
 import {
-  cellReuseDecision,
-  LEGACY_SPLIT_CACHE_PLAN,
-  legacySplitCachePlanMatches,
-} from "./review-eval-run-cell.mjs";
+  DEFAULT_RUNS_DIR,
+  resolveDetailDir,
+  resolveLegacySplitCache,
+} from "./review-eval-run-detail.mjs";
 import { scorerDigest } from "./review-eval-score.mjs";
 
 export const PLAN_SCHEMA_VERSION = 1;
@@ -58,9 +62,12 @@ export const ORCHESTRATOR_FILES = Object.freeze([
   fileURLToPath(new URL("./review-eval-cell-writer.mjs", import.meta.url)),
   fileURLToPath(new URL("./review-eval-stream.mjs", import.meta.url)),
 ]);
-export const DEFAULT_RUNS_DIR = "docs/evals/review-skill-runs";
+export { finderArgvDigest };
+// Re-exported: `review-eval.mjs` and the tests import both from here.
+export { DEFAULT_RUNS_DIR, resolveDetailDir };
 export const DEFAULT_SKILL_DIR = "~/.claude/skills/review";
-export const PLAN_KINDS = ["full", "canary", "auto"];
+// `finder` is the probe lane: a plan kind, never a ledger kind.
+export const PLAN_KINDS = ["full", "canary", "finder", "auto"];
 
 // Anchored on bench2: the Claude leg of `sol@high -> opus@high` cost $11.05
 // for three PRs. The estimate is a budget warning, never a recorded number.
@@ -222,24 +229,6 @@ function cliVersion(binary, env) {
 }
 
 /**
- * Digest over the finder command a pipeline cell actually executes. The
- * contract pins that argument vector, and `run-eval.sh` spawns it element for
- * element, so this is the finder half of the row's provenance.
- *
- * It replaced a digest of `~/.claude/bin/codex-review.sh`. That wrapper is an
- * operator convenience no cell ever runs: recording it claimed a drift control
- * the harness did not have, because a wrapper regression could not reach a
- * measured number while an edited `argv` moved every pipeline cell unrecorded.
- */
-export function finderArgvDigest(contract) {
-  const argv = contract?.sut?.finder?.argv;
-  if (!Array.isArray(argv) || argv.length === 0) {
-    throw new Error("contract sut.finder.argv must be a non-empty array");
-  }
-  return sha256(JSON.stringify(argv.map(String)));
-}
-
-/**
  * The environment stamped into the ledger row. Every value is either read from
  * disk or overridable by an environment variable, so a test never shells out.
  */
@@ -265,7 +254,7 @@ export function collectInputs({
   };
 }
 
-/** Pick `full` or `canary` from the ledger, for the launchd `--kind auto`. */
+/** Pick `full` or `canary` for `--kind auto`. It never answers `finder`. */
 export function resolveKind({ kind, rows, contract, contractDigest, now }) {
   if (kind !== "auto") return kind;
   const age = freshness({ rows, contract, now, contractDigest });
@@ -311,8 +300,12 @@ export function planCells({ contract, kind }) {
     return cells;
   }
 
+  // The probe lane stops after this loop: the pipeline condition alone, one
+  // draw per fixture. One draw cannot separate a finder from sampling variance,
+  // which is why a probe rejects a finder and never promotes one.
+  const draws = kind === "finder" ? 1 : PIPELINE_DRAWS;
   for (const fixture of contract.fixtures) {
-    for (let draw = 1; draw <= PIPELINE_DRAWS; draw += 1) {
+    for (let draw = 1; draw <= draws; draw += 1) {
       push(fixture, "pipeline", draw, {
         model: verifier.model,
         effort: verifier.effort,
@@ -322,6 +315,7 @@ export function planCells({ contract, kind }) {
       });
     }
   }
+  if (kind === "finder") return cells;
   for (const fixture of gridFixtures(contract)) {
     fixture.finder_reports.forEach((report, index) => {
       push(fixture, "replay", index + 1, {
@@ -343,153 +337,6 @@ export function planCells({ contract, kind }) {
   return cells;
 }
 
-// How many executions of one date, key, kind and skill the runs directory may
-// hold before the plan refuses to name another. Reaching it means a script is
-// re-running the same matrix in a loop, which is a bug worth stopping on.
-const MAX_RUNS_PER_NAME = 50;
-
-function reusableCellResultCount({ cellsDir, cells, plan }) {
-  try {
-    if (!lstatSync(cellsDir).isDirectory()) return 0;
-    return cells.filter((cell) => {
-      const resultPath = path.join(cellsDir, cell.cell_id, "result.json");
-      try {
-        return (
-          lstatSync(resultPath).isFile() &&
-          cellReuseDecision({ plan, resultPath }).reuse
-        );
-      } catch {
-        return false;
-      }
-    }).length;
-  } catch {
-    return 0;
-  }
-}
-
-/**
- * Find the one pre-split cache whose raw cells the recorded split preserves.
- * The first plan runs in the clean spec worktree and does not scan. The second
- * plan writes to the real checkout, so its conventional out directory names
- * the physical runs directory that can hold the ignored cell cache.
- */
-function resolveLegacySplitCache({
-  runsDir,
-  outDir,
-  detailDir,
-  contractDigest,
-  calibrationDigest,
-  kind,
-  inputs,
-  cells,
-}) {
-  if (
-    runsDir !== DEFAULT_RUNS_DIR ||
-    !outDir ||
-    path.basename(path.resolve(outDir)) !== path.posix.basename(detailDir) ||
-    existsSync(path.join(path.resolve(outDir), "cells"))
-  ) {
-    return null;
-  }
-  const physicalRunsDir = path.dirname(path.resolve(outDir));
-  if (
-    path.basename(physicalRunsDir) !== path.posix.basename(DEFAULT_RUNS_DIR)
-  ) {
-    return null;
-  }
-  let entries;
-  try {
-    entries = readdirSync(physicalRunsDir, { withFileTypes: true });
-  } catch {
-    return null;
-  }
-  const prefix = LEGACY_SPLIT_CACHE_PLAN.comparabilityKey.slice(0, 8);
-  const skill = String(inputs.skill_digest).slice(0, 8);
-  const namePattern = new RegExp(
-    `^\\d{4}-\\d{2}-\\d{2}-${prefix}-${kind}-${skill}(?:-(?:[2-9]|[1-4]\\d|50))?$`,
-  );
-  let best = null;
-  for (const entry of entries) {
-    if (!entry.isDirectory() || !namePattern.test(entry.name)) continue;
-    const relative = path.posix.join(runsDir, entry.name);
-    const physical = path.join(physicalRunsDir, entry.name);
-    let cachedPlan;
-    try {
-      const planPath = path.join(physical, "plan.json");
-      if (!lstatSync(planPath).isFile()) continue;
-      cachedPlan = JSON.parse(readFileSync(planPath, "utf8"));
-    } catch {
-      continue;
-    }
-    if (
-      !legacySplitCachePlanMatches({
-        plan: cachedPlan,
-        detailDir: relative,
-        contractDigest,
-        calibrationDigest,
-        kind,
-        inputs,
-        cells,
-      })
-    ) {
-      continue;
-    }
-    const results = reusableCellResultCount({
-      cellsDir: path.join(physical, "cells"),
-      cells,
-      plan: { kind, contract_digest: contractDigest, inputs },
-    });
-    const plannedAt =
-      typeof cachedPlan.planned_at === "string" ? cachedPlan.planned_at : "";
-    if (
-      results > 0 &&
-      (!best ||
-        results > best.results ||
-        (results === best.results && plannedAt > best.plannedAt) ||
-        (results === best.results &&
-          plannedAt === best.plannedAt &&
-          relative > best.relative))
-    ) {
-      best = { relative, results, plannedAt };
-    }
-  }
-  return best?.relative ?? null;
-}
-
-/**
- * The detail directory this execution owns, and the one it may resume from.
- *
- * The base name — date, comparability key, kind, skill digest — is the resume
- * cache: an execution killed before it recorded anything is retried by running
- * the same command, and it must land on its own cells rather than re-spend the
- * matrix. But that directory is also the evidence a ledger row points at, so
- * once a row records it the next execution must not write there: it would
- * overwrite the plan, the scored results, the row and the report the earlier row
- * still claims, and reuse that row's publication branch name. So the name is
- * taken as soon as a row records it, and this execution takes the next one and
- * names the directory it superseded, whose paid cells the orchestrator seeds
- * from — every one of them is re-checked against this run's fingerprint.
- */
-export function resolveDetailDir({ runsDir, base, ledgerRows = [] }) {
-  const taken = new Set(
-    (ledgerRows ?? []).map((row) => String(row?.detail_dir ?? "")),
-  );
-  let previous = null;
-  for (let attempt = 1; attempt <= MAX_RUNS_PER_NAME; attempt += 1) {
-    const candidate = path.posix.join(
-      runsDir,
-      attempt === 1 ? base : `${base}-${attempt}`,
-    );
-    if (!taken.has(candidate)) {
-      return { detailDir: candidate, resumeFrom: previous };
-    }
-    previous = candidate;
-  }
-  throw new Error(
-    `the ledger already records ${MAX_RUNS_PER_NAME} runs named ${path.posix.join(runsDir, base)}; refusing to plan another`,
-  );
-}
-
 /**
  * Build the plan and write `plan.json`. The plan is the only thing the money
  * spending orchestrator reads, so it carries every digest the ledger row needs.
@@ -501,6 +348,7 @@ export function buildPlan({
   repoRoot,
   outDir = null,
   skillRef = null,
+  finder = null,
   runsDir = DEFAULT_RUNS_DIR,
   ledgerRows = [],
   baselineRow = null,
@@ -508,9 +356,16 @@ export function buildPlan({
   env = process.env,
   write = true,
 }) {
-  if (!["full", "canary"].includes(kind)) {
-    throw new Error(`plan kind must be full or canary, not ${kind}`);
+  if (!["full", "canary", "finder"].includes(kind)) {
+    throw new Error(`plan kind must be full, canary or finder, not ${kind}`);
   }
+  // The substitution shapes the cells and the finder digest, never the key.
+  const { contract: planContract, override } = resolveFinderPlan({
+    contract,
+    kind,
+    finder,
+    baselineRow,
+  });
   // The key binds the committed calibration set by content. Recording that
   // digest in the plan is what lets `--score --calibration PATH` be refused
   // when it names a different set: the agreement that gates the verdict would
@@ -525,20 +380,18 @@ export function buildPlan({
   );
   const key = comparabilityKey({ contract, contractDigest, calibrationDigest });
   const date = now.toISOString().slice(0, 10);
-  const inputs = collectInputs({ contract, skillRef, env });
-  // The skill under test and the kind are part of the directory name because
-  // the directory is also the resume cache: two runs of the same contract with
-  // different skills must never land on each other's cells.
+  const inputs = collectInputs({ contract: planContract, skillRef, env });
+  if (override) inputs.finder_override = override;
   const resolvedDetail = resolveDetailDir({
     runsDir,
-    base: `${date}-${key.slice(0, 8)}-${kind}-${String(inputs.skill_digest).slice(0, 8)}`,
+    base: detailDirBase({ date, key, kind, inputs }),
     ledgerRows,
   });
   const { detailDir } = resolvedDetail;
   const planDir = outDir
     ? path.resolve(outDir)
     : path.resolve(repoRoot, detailDir);
-  const cells = planCells({ contract, kind });
+  const cells = planCells({ contract: planContract, kind });
   const resumeFrom =
     resolvedDetail.resumeFrom ??
     resolveLegacySplitCache({
