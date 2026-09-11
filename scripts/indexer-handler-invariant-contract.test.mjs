@@ -174,7 +174,7 @@ test("focused external inputs and exact owners cannot drift", () => {
 test("the live indexer module inventory keeps its routing totals", () => {
   for (const [label, paths, routed, excluded] of [
     ["source", currentIndexerSources, 127, 5],
-    ["test", currentIndexerTests, 86, 5],
+    ["test", currentIndexerTests, 88, 5],
   ]) {
     const decisions = getIndexerHandlerInvariantChecklistDecisions(paths);
     assert.equal(decisions.length, paths.length, `${label} decision count`);
@@ -211,7 +211,7 @@ test("the live indexer module inventory keeps its routing totals", () => {
     132,
     "current source module inventory",
   );
-  assert.equal(currentIndexerTests.length, 91, "current test module inventory");
+  assert.equal(currentIndexerTests.length, 93, "current test module inventory");
   assert.doesNotThrow(
     () =>
       getIndexerHandlerInvariantChecklistDecisions([

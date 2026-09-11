@@ -274,6 +274,7 @@ export const INDEXER_HANDLER_INVARIANT_FAMILIES = [
     owner: "test-invariant-support",
     route: true,
     exact: [
+      "indexer-envio/test/fixtures/nativeHandlerRegistration.probe.mjs",
       "indexer-envio/test/helpers/eventFixtures.ts",
       "indexer-envio/test/helpers/httpRpc.ts",
       "indexer-envio/test/helpers/indexerTestHarness.ts",
@@ -311,6 +312,7 @@ export const INDEXER_HANDLER_INVARIANT_FAMILIES = [
       "indexer-envio/test/feeTokenSharedConfigSync.test.ts",
       "indexer-envio/test/fetchFees.test.ts",
       "indexer-envio/test/fixtures/failClosedSortedOracles.case.ts",
+      "indexer-envio/test/handlerRegistrationNative.test.ts",
       "indexer-envio/test/fpmmBatchOrdering.test.ts",
       "indexer-envio/test/fx-calendar.test.ts",
       "indexer-envio/test/getPoolsByFeed.test.ts",
