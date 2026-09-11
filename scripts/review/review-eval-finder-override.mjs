@@ -1,34 +1,31 @@
-// The finder substitution behind `--kind finder --finder MODEL@EFFORT`.
+// The two substitutions behind `--kind finder`: the finder (`--finder
+// MODEL@EFFORT`) and the verifier (`--verifier TOOL:MODEL@EFFORT`).
 //
-// It rewrites the contract's finder for one plan and nothing else. The contract
-// on disk never moves, and the substitution reaches the spawned command through
-// the plan: `run-eval-runtime.sh` reads `FINDER_ARGV` from the plan's own
-// pipeline cell. `finder_argv_digest` therefore records the overridden vector,
-// which is what stops a probe cell from reusing a canonical run's cell.
-//
-// What it must not move is the comparability key. The key names the contract a
-// probe is read against; keyed on the substitution instead, a probe would start
-// its own lineage and be comparable with nothing.
+// Each rewrites one half of the probe's pipeline and nothing else. The contract
+// on disk never moves, and a substitution reaches the spawned command through
+// the plan, so `finder_argv_digest` and `verifier_override` record what ran and
+// stop a probe cell from reusing a canonical run's cell. Neither may move the
+// comparability key: the key names the contract a probe is read against, and
+// keyed on a substitution a probe would start its own lineage and be comparable
+// with nothing.
 
 import { createHash } from "node:crypto";
 
 export const FINDER_EFFORTS = ["low", "medium", "high", "xhigh"];
 
 // The rule every finder argv element must satisfy: `run-eval-runtime.sh` reads
-// the vector one element per line and refuses anything outside this set, and
-// the contract test pins the same set. A model token that fails it plans fine
-// and then kills the run at its first cell, so refuse it at plan time.
+// the vector one element per line and refuses anything outside this set, and the
+// contract test pins the same set. A model token that fails it plans fine and
+// then kills the run at its first cell, so it is refused at plan time.
 export const FINDER_ARGV_ELEMENT = /^[A-Za-z0-9._="@/:-]+$/;
 
 /**
- * Digest over the finder command a pipeline cell actually executes. The
- * contract pins that argument vector, and `run-eval.sh` spawns it element for
- * element, so this is the finder half of the row's provenance.
- *
- * It replaced a digest of `~/.claude/bin/codex-review.sh`. That wrapper is an
- * operator convenience no cell ever runs: recording it claimed a drift control
- * the harness did not have, because a wrapper regression could not reach a
- * measured number while an edited `argv` moved every pipeline cell unrecorded.
+ * Digest over the finder command a pipeline cell actually executes. The contract
+ * pins that argument vector and `run-eval.sh` spawns it element for element, so
+ * this is the finder half of the row's provenance. It replaced a digest of
+ * `~/.claude/bin/codex-review.sh`, a wrapper no cell ever runs: recording that
+ * claimed a drift control the harness did not have, because an edited `argv`
+ * moved every pipeline cell unrecorded.
  */
 export function finderArgvDigest(contract) {
   const argv = contract?.sut?.finder?.argv;
@@ -106,8 +103,7 @@ export function resolveFinderPlan({ contract, kind, finder, baselineRow }) {
   if (kind === "finder" && !finder) {
     throw new Error("--kind finder requires --finder MODEL@EFFORT");
   }
-  // A probe scores and stops: it resolves no baseline, appends no row and
-  // reports nothing, so `--against` would be accepted and then ignored.
+  // A probe scores and stops, so `--against` would be accepted and ignored.
   if (kind === "finder" && baselineRow) {
     throw new Error(
       "--against is not valid with --kind finder; a probe resolves no baseline and appends no row",
@@ -117,19 +113,18 @@ export function resolveFinderPlan({ contract, kind, finder, baselineRow }) {
 }
 
 /**
- * The detail-directory segment that separates two probes planned on one day.
- * The rest of the base name — date, comparability key, kind, skill digest — is
- * identical for every probe of a contract, and a finder run appends no ledger
- * row, so without this the second probe would overwrite the first one's
- * evidence in place.
+ * The detail-directory segment that separates two probes planned on one day. The
+ * rest of the base name is identical for every probe of a contract, and a probe
+ * appends no ledger row, so without this the second would overwrite the first
+ * one's evidence in place.
  *
- * Two things differ and both are in the segment. The overridden argv is the
- * probe's subject. The two CLI versions are not: they are outside the
- * comparability key, so a `claude` or `codex` upgrade between two probes of one
- * finder leaves the name identical while `cellFingerprint` rejects every cell
- * the earlier runtime paid for — a second, partial matrix writing beside the
- * first one's stale root `result-*.json`. An identical rerun still resumes,
- * because identical inputs give the same digest.
+ * Three things go in. The overridden argv is the probe's subject. The two CLI
+ * versions are outside the comparability key, so an upgrade between two probes
+ * of one finder would leave the name identical while `cellFingerprint` rejected
+ * every cell the earlier runtime paid for — a second, partial matrix writing
+ * beside the first one's stale root `result-*.json`. A substituted verifier is
+ * appended only when there is one. An identical rerun still resumes, because
+ * identical inputs give the same digest.
  */
 export function finderDetailSegment({ kind, inputs }) {
   if (kind !== "finder") return "";
@@ -143,18 +138,71 @@ export function finderDetailSegment({ kind, inputs }) {
     )
     .digest("hex")
     .slice(0, 8);
-  return `-${argv}-${cli}`;
+  const verifier = verifierOverrideDigest(inputs?.verifier_override ?? null);
+  return `-${argv}-${cli}${verifier ? `-${verifier.slice(0, 8)}` : ""}`;
 }
 
 /**
  * The detail-directory name a plan takes before `resolveDetailDir` disambiguates
- * it against the ledger. The skill under test and the kind are in it because the
- * directory is also the resume cache: two runs of the same contract with
- * different skills must never land on each other's cells.
+ * it against the ledger. The skill and the kind are in it because the directory
+ * is also the resume cache: two runs of one contract with different skills must
+ * never land on each other's cells.
  */
 export function detailDirBase({ date, key, kind, inputs }) {
   const skill = String(inputs?.skill_digest ?? "").slice(0, 8);
   return `${date}-${String(key).slice(0, 8)}-${kind}-${skill}${finderDetailSegment({ kind, inputs })}`;
+}
+
+// --- the verifier substitution ----------------------------------------------
+//
+// Valid only with `--kind finder`, for the same reason `--finder` is: a
+// canonical row must name the contract's own pipeline. `codex` is the second
+// tool because the question the lane asks is whether a bare model reads a
+// handoff as well as the skilled verifier does — so a codex verifier runs with
+// no skill staged, in a read-only sandbox, and reports no price.
+
+export const VERIFIER_TOOLS = ["claude", "codex"];
+
+/** Parse a `--verifier TOOL:MODEL@EFFORT` spec. */
+export function parseVerifierSpec(spec) {
+  const value = String(spec ?? "").trim();
+  const colon = value.indexOf(":");
+  const tool = colon === -1 ? "" : value.slice(0, colon);
+  if (!VERIFIER_TOOLS.includes(tool)) {
+    throw new Error(
+      `--verifier must be TOOL:MODEL@EFFORT with TOOL one of ${VERIFIER_TOOLS.join(", ")}; got ${JSON.stringify(spec)}`,
+    );
+  }
+  const { model, effort } = parseFinderSpec(value.slice(colon + 1));
+  return { tool, model, effort };
+}
+
+/** The verifier one plan of this kind runs, with the flag pairing enforced. */
+export function resolveVerifierOverride({ kind, verifier }) {
+  if (!verifier) return null;
+  if (kind !== "finder") {
+    throw new Error("--verifier is only valid with --kind finder");
+  }
+  return typeof verifier === "string" ? parseVerifierSpec(verifier) : verifier;
+}
+
+/**
+ * What separates one probe's cells and detail directory from another's when the
+ * two substitute different verifiers. `null` for a plan running the contract's
+ * own verifier, which therefore keeps the cell fingerprint and directory name it
+ * had before this flag existed.
+ */
+export function verifierOverrideDigest(override) {
+  if (!override) return null;
+  const parts = [override.tool, override.model, override.effort].map(String);
+  return createHash("sha256").update(JSON.stringify(parts)).digest("hex");
+}
+
+/** The verifier a plan's pipeline cells run: the override, or the contract's. */
+export function planVerifier({ contract, override = null }) {
+  if (override) return { ...override };
+  const { tool = "claude", model, effort } = contract?.sut?.verifier ?? {};
+  return { tool, model, effort };
 }
 
 /** The row verdict of a finder probe: outside the ledger set, so it never appends. */

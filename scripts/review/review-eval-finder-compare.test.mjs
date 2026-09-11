@@ -23,6 +23,8 @@ function writeArm({
   finder,
   cells,
   results,
+  // What `--verifier` recorded, or null for the contract's own verifier.
+  verifierOverride = null,
   skillDigest = "skill",
   judge,
   contractDigest = HEX("aaaa1111"),
@@ -65,6 +67,7 @@ function writeArm({
         orchestrator_digest: "orch",
         codex_cli: codexCli,
         claude_cli: claudeCli,
+        ...(verifierOverride ? { verifier_override: verifierOverride } : {}),
       },
       cells: cells.map((pr) => ({
         cell_id: `pr-${pr}-pipeline-draw1`,
@@ -560,4 +563,64 @@ test("a result missing its wrong-claim count is refused, not read as zero", () =
       JSON.stringify(novel),
     );
   }
+});
+
+test("a verifier difference warns and names what the nets then measure", () => {
+  const results = { 11: { matched: [1] } };
+  const skilled = readArm({
+    dir: writeArm({ finder: "sol@high", cells: [11], results }),
+    contract: {
+      ...contract,
+      sut: {
+        verifier: { tool: "claude", model: "claude-opus-5", effort: "high" },
+      },
+    },
+  });
+  const bare = readArm({
+    dir: writeArm({
+      finder: "sol@high",
+      cells: [11],
+      results,
+      verifierOverride: { tool: "codex", model: "gpt-6-astra", effort: "high" },
+    }),
+    contract,
+  });
+
+  // A run planned before `--verifier` existed reads as the contract verifier it
+  // in fact used, rather than as an unknown.
+  assert.deepEqual(skilled.identity.verifier, {
+    tool: "claude",
+    model: "claude-opus-5",
+    effort: "high",
+  });
+  assert.deepEqual(bare.identity.verifier, {
+    tool: "codex",
+    model: "gpt-6-astra",
+    effort: "high",
+  });
+
+  // Warned, never refused: substituting one half of the pipeline is what the
+  // lane is for. What the reader must not do is call the difference a finder's.
+  const warnings = compareArms({ anchor: skilled, candidate: bare }).warnings;
+  assert.ok(
+    warnings.some((warning) =>
+      /different verifiers .*is a verifier difference, not a finder difference/.test(
+        warning,
+      ),
+    ),
+    warnings.join("\n"),
+  );
+  assert.ok(
+    warnings.some((warning) =>
+      /the candidate ran a codex verifier .* no skill staged/.test(warning),
+    ),
+    warnings.join("\n"),
+  );
+
+  // Two arms under the same verifier say nothing about one.
+  const same = compareArms({ anchor: bare, candidate: bare }).warnings;
+  assert.equal(
+    same.filter((warning) => /different verifiers/.test(warning)).length,
+    0,
+  );
 });

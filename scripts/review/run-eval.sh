@@ -2,45 +2,31 @@
 # Run the review-skill evaluation end to end. This is the only script that
 # spends model quota, and it never runs in CI.
 #
-# The contract that scores a run is the committed one: the script adds a
-# detached worktree of origin/main and reads the fixtures, truth, prompts and
-# scorer from there, so a dirty working tree cannot silently change what is
-# being measured. --skill-ref is the deliberate exception for evaluating a
-# candidate skill; it uses the current checkout and stamps dirty into the row.
+# The contract that scores a run is the committed one: the script adds a detached
+# worktree of origin/main and reads the fixtures, truth, prompts and scorer from
+# there, so a dirty working tree cannot change what is measured. --skill-ref is
+# the exception for a candidate skill; it uses the current checkout and stamps
+# dirty into the row.
 #
-# Leak-proofing during a contestant run: every GitHub token variable is unset,
-# a gh that refuses is placed first on PATH, and git runs with no global or
-# system config, no credential helper, no prompt, no askpass and no protocol
-# but file. This is defense in depth, not containment — the model API hosts
-# stay reachable because codex and claude need them, and a cell runs with Bash.
-# The stronger controls are structural: the fixture is a detached checkout at a
-# 2026-08 commit, the answer key exists only on main, and a transcript that
-# names a withheld commit is scored as a hard leak signal.
+# Leak-proofing during a contestant run: every GitHub token variable is unset, a
+# gh that refuses is first on PATH, and git runs with no global or system config,
+# no credential helper, no prompt, no askpass and no protocol but file. That is
+# defense in depth, not containment — the model API hosts stay reachable. The
+# structural controls are stronger: the fixture is a detached 2026-08 checkout,
+# the answer key exists only on main, and a transcript naming a withheld commit
+# is scored as a hard leak signal.
 #
-# Every cell writes its own output directory and is resumable. A failed cell is
-# never cached: a session-limit error returns in seconds and, cached, would
-# permanently score as a zero-recall review. A cached cell is reused only when
-# its fingerprint — skill digest, kind, contract digest — matches this run.
-# A run that ends before it scores keeps those cells so the retry reuses them;
-# they never reach the PR.
-#
-# The detail directory belongs to one execution. A run killed before it recorded
-# anything is retried into the same directory and reuses its cells; once a ledger
-# row points at that directory it is evidence, so the next execution takes the
-# next name and seeds its cells from the old one instead of overwriting a row's
-# plan, results, report and publication branch.
-#
-# One run at a time. The fixture cache and the ledger are shared but move
-# independently — the cache with --cache-dir, the ledger and the detail
-# directory with --repo — so the script locks both roots and refuses to start
-# while another run holds either, rather than letting two runs rewrite each
-# other's fixture checkouts or race the same ledger appends.
+# Every cell writes its own directory and is resumable. A failed cell is never
+# cached; a cached one is reused only when its fingerprint matches this run. The
+# detail directory belongs to one execution, and one run holds the shared roots
+# at a time. The full rules are in docs/evals/review-skill.md.
 #
 # Usage:
 #   run-eval.sh [--kind full|canary|auto] [--skill-ref PATH] [--pr] [--no-pr]
 #               [--repo PATH] [--cache-dir DIR] [--deadline SECONDS]
 #               [--against REF]
-#   run-eval.sh --kind finder --finder MODEL@EFFORT [other options]
+#   run-eval.sh --kind finder --finder MODEL@EFFORT
+#               [--verifier TOOL:MODEL@EFFORT] [other options]
 #
 # --kind finder is the probe lane: the pipeline cells alone, one draw per
 # fixture, with the contract's finder replaced by MODEL@EFFORT for that run only
@@ -50,27 +36,30 @@
 # draw per fixture rejects a finder; it never promotes one. Each flag needs the
 # other; --against is refused. Editing this file moves the comparability key.
 #
+# --verifier substitutes the verifier of that same probe and is refused without
+# --kind finder. TOOL is claude or codex. A codex verifier runs the bare model on
+# the same handoff prompt, with no skill staged and a read-only sandbox, and it
+# reports no price: the cells record cost 0 with cost_metered false.
+#
 # --against names the baseline row this run is planned, scored, validated and
-# reported against: a row file path or an executed_at prefix. The candidate
-# procedure needs it — a --skill-ref run must be compared against the installed
-# run from the same sitting, not against the ledger's stored anchor, or the
-# comparison carries whatever the model did between the anchor and today.
+# reported against: a row file path or an executed_at prefix. A --skill-ref run
+# must name the installed run from the same sitting, or the comparison carries
+# whatever the model did between the ledger's stored anchor and today.
 #
-# --deadline bounds the whole run, cells and scoring together. Three quarters of
-# it start cells and bound each finder and contestant process; the rest is
-# reserved for the judge pass, which is itself bounded.
+# --deadline bounds the whole run. Three quarters of it start cells and bound
+# each finder and contestant process; the rest is reserved for the judge pass.
 #
-# Default is --no-pr: the branch, push and gh pr create commands are printed,
-# not executed. Every run appends its row to the checkout's ledger — a scored
-# one and the status:failed row of a run that fails alike — so both publish the
-# same way, and both exit non-zero when the run could only print the commands.
-# Until they are run the next run refuses to start against a ledger with
-# uncommitted changes, and the scheduled job runs without --pr.
+# Default is --no-pr: the branch, push and gh pr create commands are printed, not
+# executed. Every run appends its row to the checkout's ledger — a scored one and
+# the status:failed row of a failed run alike — so both publish the same way, and
+# both exit non-zero when only the commands were printed. Until they are run the
+# next run refuses to start against a dirty ledger.
 
 set -euo pipefail
 
 KIND="auto"
 FINDER=""
+VERIFIER=""
 SKILL_REF=""
 OPEN_PR=0
 REPO=""
@@ -181,6 +170,11 @@ while [[ $# -gt 0 ]]; do
       FINDER="$2"
       shift 2
       ;;
+    --verifier)
+      require_value "$1" "${2:-}"
+      VERIFIER="$2"
+      shift 2
+      ;;
     --skill-ref)
       require_value "$1" "${2:-}"
       SKILL_REF="$2"
@@ -221,7 +215,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     -h | --help)
-      sed -n '2,66p' "$0"
+      sed -n '2,56p' "$0"
       exit 0
       ;;
     *) fail "unknown argument: $1" ;;
@@ -237,6 +231,9 @@ if [[ -n $FINDER && $KIND != finder ]]; then
 fi
 if [[ $KIND == finder && -z $FINDER ]]; then
   fail "--kind finder requires --finder MODEL@EFFORT"
+fi
+if [[ -n $VERIFIER && $KIND != finder ]]; then
+  fail "--verifier is only valid with --kind finder"
 fi
 # A probe resolves no baseline, appends no row and writes no report, so every
 # --against stage is skipped for it. Accepting the flag and ignoring it would
@@ -370,6 +367,9 @@ PLAN_ARGS=(--root "$SPEC" --ledger "$LEDGER" --plan --kind "$KIND" --json)
 if [[ -n $FINDER ]]; then
   PLAN_ARGS+=(--finder "$FINDER")
 fi
+if [[ -n $VERIFIER ]]; then
+  PLAN_ARGS+=(--verifier "$VERIFIER")
+fi
 if [[ -n $SKILL_REF ]]; then
   PLAN_ARGS+=(--skill-ref "$SKILL_REF")
 fi
@@ -400,6 +400,9 @@ PLAN_ARGS=(--root "$SPEC" --ledger "$LEDGER" --plan --kind "$KIND" --json
   --out "$RUN_DIR")
 if [[ -n $FINDER ]]; then
   PLAN_ARGS+=(--finder "$FINDER")
+fi
+if [[ -n $VERIFIER ]]; then
+  PLAN_ARGS+=(--verifier "$VERIFIER")
 fi
 if [[ -n $SKILL_REF ]]; then
   PLAN_ARGS+=(--skill-ref "$SKILL_REF")

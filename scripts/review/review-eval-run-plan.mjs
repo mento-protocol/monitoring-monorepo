@@ -21,7 +21,9 @@ import {
 import {
   detailDirBase,
   finderArgvDigest,
+  planVerifier,
   resolveFinderPlan,
+  resolveVerifierOverride,
 } from "./review-eval-finder-override.mjs";
 import { freshness } from "./review-eval-ledger.mjs";
 import {
@@ -272,8 +274,17 @@ export function resolveKind({ kind, rows, contract, contractDigest, now }) {
  * a baseline anchor, so it buys breadth of PRs rather than repeat draws, and
  * the comparison that ranks two skills lives in the experiment lane
  * (`docs/adr/0086-review-eval-lane-any-grid-multi-draw.md`).
+ *
+ * `verifier` is the probe lane's second substitution. Only the finder kind's
+ * pipeline cells read it, and they carry the tool beside the model and the
+ * effort, because a codex verifier is spawned differently and runs without the
+ * skill. Every other kind keeps the cells it produced before the flag existed.
  */
-export function planCells({ contract, kind }) {
+export function planCells({
+  contract,
+  kind,
+  verifier: verifierOverride = null,
+}) {
   const cells = [];
   const push = (fixture, condition, draw, extra) =>
     cells.push({
@@ -304,11 +315,16 @@ export function planCells({ contract, kind }) {
   // draw per fixture. One draw cannot separate a finder from sampling variance,
   // which is why a probe rejects a finder and never promotes one.
   const draws = kind === "finder" ? 1 : PIPELINE_DRAWS;
+  const probeVerifier = planVerifier({
+    contract,
+    override: kind === "finder" ? verifierOverride : null,
+  });
   for (const fixture of contract.fixtures) {
     for (let draw = 1; draw <= draws; draw += 1) {
       push(fixture, "pipeline", draw, {
-        model: verifier.model,
-        effort: verifier.effort,
+        ...(kind === "finder" ? { tool: probeVerifier.tool } : {}),
+        model: kind === "finder" ? probeVerifier.model : verifier.model,
+        effort: kind === "finder" ? probeVerifier.effort : verifier.effort,
         finder: finderLabel,
         finder_argv: [...finder.argv],
         prompt: "handoff",
@@ -349,6 +365,7 @@ export function buildPlan({
   outDir = null,
   skillRef = null,
   finder = null,
+  verifier = null,
   runsDir = DEFAULT_RUNS_DIR,
   ledgerRows = [],
   baselineRow = null,
@@ -366,6 +383,9 @@ export function buildPlan({
     finder,
     baselineRow,
   });
+  // The second substitution. It never reaches the contract copy: only the
+  // pipeline cells and the plan's own record of what ran carry it.
+  const verifierOverride = resolveVerifierOverride({ kind, verifier });
   // The key binds the committed calibration set by content. Recording that
   // digest in the plan is what lets `--score --calibration PATH` be refused
   // when it names a different set: the agreement that gates the verdict would
@@ -382,6 +402,7 @@ export function buildPlan({
   const date = now.toISOString().slice(0, 10);
   const inputs = collectInputs({ contract: planContract, skillRef, env });
   if (override) inputs.finder_override = override;
+  if (verifierOverride) inputs.verifier_override = verifierOverride;
   const resolvedDetail = resolveDetailDir({
     runsDir,
     base: detailDirBase({ date, key, kind, inputs }),
@@ -391,7 +412,11 @@ export function buildPlan({
   const planDir = outDir
     ? path.resolve(outDir)
     : path.resolve(repoRoot, detailDir);
-  const cells = planCells({ contract: planContract, kind });
+  const cells = planCells({
+    contract: planContract,
+    kind,
+    verifier: verifierOverride,
+  });
   const resumeFrom =
     resolvedDetail.resumeFrom ??
     resolveLegacySplitCache({

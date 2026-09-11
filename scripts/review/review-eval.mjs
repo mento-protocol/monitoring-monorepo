@@ -2,8 +2,7 @@
 
 // CLI for the review-skill evaluation. Every mode except `--score` is
 // deterministic and safe in CI: no model, no credential, no mutation. `--score`
-// is the only mode that spends model quota, and only the local orchestrator
-// (`run-eval.sh`) invokes it.
+// alone spends model quota, and only `run-eval.sh` invokes it.
 
 import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, lstatSync, readFileSync } from "node:fs";
@@ -70,7 +69,15 @@ export const DEFAULT_REVIEW_EVAL_REPO = "mento-protocol/monitoring-monorepo";
 const MODE_OPTIONS = {
   "check-fixtures": ["offline", "src-repo"],
   "check-ledger": ["base-ref", "require-base", "revalidate-appended"],
-  plan: ["kind", "finder", "skill-ref", "out", "runs-dir", "against"],
+  plan: [
+    "kind",
+    "finder",
+    "verifier",
+    "skill-ref",
+    "out",
+    "runs-dir",
+    "against",
+  ],
   score: ["against", "calibration"],
   validate: ["append", "against", "calibration", "detail-dir"],
   report: ["against", "row"],
@@ -92,6 +99,7 @@ const OPTION_SPEC = {
   "revalidate-appended": { type: "boolean" },
   kind: { type: "string" },
   finder: { type: "string" },
+  verifier: { type: "string" },
   "skill-ref": { type: "string" },
   out: { type: "string" },
   "runs-dir": { type: "string" },
@@ -172,6 +180,7 @@ export function parseArgs(argv, env = process.env) {
     revalidateAppended: values["revalidate-appended"] === true,
     kind: values.kind ?? null,
     finder: values.finder ?? null,
+    verifier: values.verifier ?? null,
     skillRef: values["skill-ref"] ?? null,
     outDir: values.out ?? null,
     planDir: mode === "score" ? values.score : null,
@@ -185,10 +194,10 @@ export function parseArgs(argv, env = process.env) {
     date: values.date ?? new Date().toISOString().slice(0, 10),
     // The instant freshness is evaluated at, which is not the start of
     // `--date`. The scheduled workflow runs mid-morning UTC, and a row merged
-    // earlier the same day is dated after midnight: `freshness()` counts such a
-    // row as future-dated and lets no clock read it, so the workflow stays red
-    // and keeps a staleness issue open over a run that is already there. An
-    // explicit `--date` is the dated-test case and keeps naming that midnight.
+    // earlier the same day is dated after midnight: `freshness()` reads such a
+    // row as future-dated, so the workflow stays red and keeps a staleness
+    // issue open over a run that is already there. An explicit `--date` is the
+    // dated-test case and keeps naming that midnight.
     now:
       values.date === undefined
         ? new Date().toISOString()
@@ -205,6 +214,9 @@ export function parseArgs(argv, env = process.env) {
     }
     if (options.kind === "finder" && options.finder === null) {
       throw new Error("--kind finder requires --finder MODEL@EFFORT");
+    }
+    if (options.verifier !== null && options.kind !== "finder") {
+      throw new Error("--verifier is only valid with --kind finder");
     }
   }
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(options.repo)) {
@@ -244,6 +256,9 @@ Options:
                          ledger row and cannot become a baseline
   --finder MODEL@EFFORT  Substitute the contract's finder for this plan only
                          (--kind finder); effort is low, medium, high or xhigh
+  --verifier TOOL:MODEL@EFFORT
+                         Substitute the verifier for this plan only (--kind
+                         finder); codex is the bare model, unskilled, unmetered
   --skill-ref PATH       Evaluate a candidate skill directory; stamps dirty
   --out DIR              Plan directory (default: the run's detail directory)
   --runs-dir PATH        Detail root (default: ${DEFAULT_RUNS_DIR})
@@ -301,12 +316,11 @@ function loadContext(options) {
  *
  * Two outcomes are not the same failure and are never reported as one. A base
  * ref that does not resolve means the append-only check cannot run at all, and
- * `--require-base` turns that into a hard failure. A ref that resolves while
- * the ledger is absent there is a legitimate bootstrap branch: there is
- * nothing committed to compare against yet.
+ * `--require-base` turns that into a hard failure. A ref that resolves while the
+ * ledger is absent there is a legitimate bootstrap branch.
  *
- * The comparison point is `git merge-base <baseRef> HEAD` when that resolves,
- * so a branch that predates later rows on the base branch is not accused of
+ * The comparison point is `git merge-base <baseRef> HEAD` when that resolves, so
+ * a branch that predates later rows on the base branch is not accused of
  * deleting them. It falls back to the base ref tip and says which it used.
  */
 export function baseLedgerRows({
@@ -441,12 +455,11 @@ async function modeCheckFixtures(options, context) {
     contract: context.contract,
     repoRoot: context.repoRoot,
     offline: options.offline,
-    // Offline resolves the eval tags in the local object store, which is the
-    // only store there is without the network. Online is the mode that proves
-    // the tags against the remote the contract names, so it must not fall back
-    // to this checkout: a local tag that still points at the pinned commit
-    // passes while the remote tag has moved or been deleted. An explicit
-    // --src-repo names a clone to resolve from and wins in both modes.
+    // Offline resolves the eval tags in the local object store, the only one
+    // there is without the network. Online proves them against the remote the
+    // contract names and must not fall back to this checkout: a local tag still
+    // pointing at the pinned commit passes while the remote tag has moved or
+    // been deleted. --src-repo names a clone and wins in both modes.
     srcRepo: options.srcRepo
       ? path.resolve(options.srcRepo)
       : options.offline
@@ -541,6 +554,7 @@ async function modePlan(options, context) {
     outDir: options.outDir,
     skillRef: options.skillRef,
     finder: options.finder,
+    verifier: options.verifier,
     runsDir: options.runsDir,
     // The rows decide which detail directory this execution may own: one a row
     // already points at holds that row's evidence and is never written again.
@@ -561,10 +575,8 @@ async function modeScore(options, context) {
   // The contract digest covers the contract JSON, not the files it pins by
   // sha256. `--check-fixtures` verified those before the matrix started, and
   // under `--skill-ref` the spec worktree is the live checkout the operator
-  // keeps editing for the hours the matrix runs. `scoreOneCell` reads the truth
-  // files here, and the cells above already read the prompts and the frozen
-  // finder reports, so an edit during the run would score against different
-  // bytes under the planned comparability key. Recheck them before the judge.
+  // keeps editing while the matrix runs. `scoreOneCell` reads the truth files
+  // here, so an edit would score other bytes under the planned key.
   const frozen = frozenInputProblems({
     contract: context.contract,
     repoRoot: context.repoRoot,
@@ -576,8 +588,8 @@ async function modeScore(options, context) {
   }
   // The plan's `comparability_key` already hashed a calibration set. Scoring
   // with a different one would produce an agreement number, and through it a
-  // verdict, from pairs that key never saw, and the row would still be paired
-  // against every default-calibration row. Refuse the mismatch instead.
+  // verdict, from pairs that key never saw, while the row stayed paired against
+  // every default-calibration row. Refuse the mismatch instead.
   const calibrationFile = path.resolve(
     context.repoRoot,
     options.calibrationPath,
@@ -590,10 +602,9 @@ async function modeScore(options, context) {
   }
   // A full run takes hours, and under `--skill-ref` the spec is the live
   // checkout. A scorer module or judge prompt edited between planning and
-  // scoring would score these cells with new code while the row keeps the
-  // planned `comparability_key`, pairing it against rows produced by a
-  // different pipeline. The key is recomputed rather than only compared field
-  // by field, so the judge model and the frozen prompt hashes are covered too.
+  // scoring would score these cells with new code while the row kept the
+  // planned `comparability_key`. The key is recomputed, so the judge model and
+  // prompt hashes are covered too.
   const matcherDigest = scorerDigest();
   if (plan.matcher_digest !== matcherDigest) {
     throw new Error(
@@ -667,10 +678,9 @@ async function modeValidate(options, context) {
     context.repoRoot,
     options.calibrationPath,
   );
-  // An automatic row is scored at the next ledger position. Before append it
-  // is still an external object, so timestamp fallback can wrongly exclude an
-  // established anchor whose clock is later. Give validation the same pending
-  // append position that scorePlan used.
+  // An automatic row is scored at the next ledger position. Before append it is
+  // still an external object, so timestamp fallback can wrongly exclude an
+  // anchor whose clock is later: give validation scorePlan's pending position.
   const validationLedgerRows = options.append
     ? [...ledgerRows, row]
     : ledgerRows;
@@ -691,9 +701,8 @@ async function modeValidate(options, context) {
     // verdict is rechecked against a baseline it was never scored on.
     baselineRow,
     // The frozen pairs the recorded calibration outcomes must be about, so a
-    // detail file cannot relabel what the judge was expected to answer. A row
-    // validated outside a checkout that carries the set still has its recorded
-    // agreement re-derived from the outcomes themselves.
+    // detail file cannot relabel what the judge was expected to answer. Outside
+    // a checkout carrying the set, agreement is re-derived from the outcomes.
     calibrationSet: existsSync(calibrationFile)
       ? readJson(calibrationFile)
       : null,
@@ -747,21 +756,18 @@ async function modeValidate(options, context) {
       }),
     );
   }
-  // `revalidateRow` recomputes the conditions the row lists, and over the ids
-  // each one lists. What it cannot see is what is not there. A condition that
-  // is absent: a `kind: "full"`, `status: "complete"` row with `control`
-  // deleted claims a whole matrix on a subset, and appending it would refresh
-  // the full-run clock and make it an automatic baseline. And a defect that is
-  // absent: a condition that kept one frozen id per PR passes the matrix check,
-  // which only asks whether some id from each required PR is present, while its
-  // recall and McNemar denominators have quietly shrunk. `--check-ledger`
-  // applies both to the committed ledger; append must apply both before the row
-  // gets in, or the committed ledger is where the fault is first reported.
-  // The schema check runs here rather than only inside `appendRow`. Without
-  // it a `--validate FILE` with no `--append` reports `ok: true` for a row
-  // missing required `inputs` fields or carrying an out-of-schema kind, status
-  // or verdict — the mode whose whole job is to say whether the row is sound,
-  // answering yes about a row the ledger would refuse.
+  // `revalidateRow` recomputes the conditions the row lists, over the ids each
+  // one lists; what it cannot see is what is not there. An absent condition: a
+  // `kind: "full"`, `status: "complete"` row with `control` deleted claims a
+  // whole matrix on a subset, and appending it would refresh the full-run clock.
+  // An absent defect: a condition that kept one frozen id per PR passes the
+  // matrix check, which only asks whether some id from each required PR is
+  // present, while its recall and McNemar denominators have quietly shrunk.
+  // Append applies both, or the committed ledger is where the fault surfaces.
+  // The schema check runs here rather than only inside `appendRow`. Without it
+  // a `--validate FILE` with no `--append` reports `ok: true` for a row missing
+  // required `inputs` fields or carrying an out-of-schema kind, status or
+  // verdict — answering yes about a row the ledger would refuse.
   problems.push(
     ...validateLedgerRow(row, "row"),
     ...frozenDefectProblems({ contract: context.contract, row, label: "row" }),
@@ -793,13 +799,11 @@ async function modeValidate(options, context) {
 
 async function modeReport(options, context) {
   const rows = readLedger(path.resolve(context.repoRoot, options.ledgerPath));
-  // The ledger is append-only, so a fixture or model contract refresh leaves
-  // the rows it scored in place as history. Their bits were produced against a
-  // different truth index and different verdict thresholds, so reporting one
-  // under this contract recomputes a verdict the run never had and prints it
-  // as current. The default selection takes the newest row of this contract,
-  // and a row named explicitly must be one too — report an older row by
-  // passing the contract it was scored against with `--contract`.
+  // The ledger is append-only, so a contract refresh leaves the rows it scored
+  // in place as history. Their bits came from a different truth index and
+  // different verdict thresholds, so reporting one under this contract prints a
+  // verdict the run never had. Both selections take a row of this contract;
+  // name an older one's contract with `--contract` to report it.
   const named = resolveRowReference({
     reference: options.rowPath,
     rows,

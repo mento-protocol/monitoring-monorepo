@@ -20,6 +20,7 @@ import {
   judgeCalibrationPasses,
   leakSuspected,
 } from "./review-eval-report.mjs";
+import { planVerifier } from "./review-eval-finder-override.mjs";
 import { render } from "./review-eval-finder-render.mjs";
 import { aggregateDraws, scorerDigest } from "./review-eval-score.mjs";
 
@@ -187,6 +188,14 @@ export function readArm({ dir, contract }) {
     byPr,
     identity: {
       finder: plan.cells?.find((cell) => cell.finder)?.finder ?? null,
+      // The verifier the pipeline cells ran: the probe's substitution when the
+      // plan recorded one, and the contract's own otherwise. A run planned
+      // before `--verifier` existed therefore reads as the contract verifier it
+      // did in fact use, rather than as an unknown.
+      verifier: planVerifier({
+        contract,
+        override: plan.inputs?.verifier_override ?? null,
+      }),
       finder_argv_digest: plan.inputs?.finder_argv_digest ?? null,
       skill_digest: plan.inputs?.skill_digest ?? null,
       orchestrator_digest: plan.inputs?.orchestrator_digest ?? null,
@@ -425,6 +434,27 @@ export function identityWarnings(anchor, candidate, matcherDigest = null) {
     warnings.push(
       "the two runs used different review skills; a matched-id difference is not a finder difference",
     );
+  }
+  // Warned, never refused, for the same reason the skill digest is: the probe
+  // lane exists to substitute one half of the pipeline, and the operator who
+  // asked for a different verifier is entitled to the paired numbers. What the
+  // reader must not do is attribute the difference to the finder.
+  const verifierLabel = (arm) =>
+    `${arm.verifier?.tool}:${arm.verifier?.model}@${arm.verifier?.effort}`;
+  if (verifierLabel(anchor) !== verifierLabel(candidate)) {
+    warnings.push(
+      `the two runs used different verifiers (${verifierLabel(anchor)} vs ${verifierLabel(candidate)}); a matched-id difference between them is a verifier difference, not a finder difference`,
+    );
+  }
+  for (const [side, arm] of [
+    ["anchor", anchor],
+    ["candidate", candidate],
+  ]) {
+    if (arm.verifier?.tool === "codex") {
+      warnings.push(
+        `the ${side} ran a codex verifier (${verifierLabel(arm)}); that cell is the bare model on the handoff prompt with no skill staged, so its matched ids measure the model rather than the review skill`,
+      );
+    }
   }
   // The CLI versions are deliberately outside the comparability key (ADR
   // 0085), so a straddled upgrade is named here: a codex change can move the

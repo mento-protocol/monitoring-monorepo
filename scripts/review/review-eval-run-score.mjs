@@ -319,9 +319,19 @@ export async function scorePlan({
       "plan inputs.finder_argv_digest does not match the recorded finder_override",
     );
   }
+  // The verifier substitution is rebuilt the same way and refused the same way.
+  // A full or canary plan whose cells named a codex verifier would otherwise
+  // score and publish a canonical row for a pipeline the contract never named.
+  const recordedVerifier = plan.inputs?.verifier_override ?? null;
+  if (recordedVerifier && !isFinderProbe) {
+    throw new Error(
+      `plan kind ${plan.kind} carries inputs.verifier_override; only a finder probe may substitute a verifier`,
+    );
+  }
   const expectedCells = planCells({
     contract: probeContract,
     kind: plan.kind,
+    verifier: recordedVerifier,
   });
   if (JSON.stringify(plan.cells) !== JSON.stringify(expectedCells)) {
     throw new Error(`plan cells do not match the frozen ${plan.kind} matrix`);
