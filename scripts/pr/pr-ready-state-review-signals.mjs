@@ -89,14 +89,32 @@ export function headUpdatedAtFromTimeline(timelineItems = [], headSha) {
   return null;
 }
 
-export function fetchHeadUpdatedAt({ headSha, timelineItems, observedAt }) {
+function earliestIsoTimestamp(left, right) {
+  if (!left) return right;
+  if (!right) return left;
+  return Date.parse(right) < Date.parse(left) ? right : left;
+}
+
+export function fetchHeadUpdatedAt({
+  headSha,
+  timelineItems,
+  observedAt,
+  openedAt = null,
+}) {
   const timelineTimestamp = headUpdatedAtFromTimeline(timelineItems, headSha);
   const statusTimestamp = validIsoTimestamp(observedAt);
-  if (!timelineTimestamp) return statusTimestamp;
-  if (!statusTimestamp) return timelineTimestamp;
-  return Date.parse(statusTimestamp) < Date.parse(timelineTimestamp)
-    ? statusTimestamp
-    : timelineTimestamp;
+  const evidence = earliestIsoTimestamp(timelineTimestamp, statusTimestamp);
+  if (!evidence) return null;
+  // A branch pushed before its PR opened carries commit and check timestamps
+  // older than the PR. The head became this PR's head no earlier than the PR
+  // opened, and the opening review starts then, so the PR creation time is a
+  // floor for the head's age. With no other evidence the head's real age stays
+  // unknown, and the caller fails closed.
+  const openedTimestamp = validIsoTimestamp(openedAt);
+  if (!openedTimestamp) return evidence;
+  return Date.parse(openedTimestamp) > Date.parse(evidence)
+    ? openedTimestamp
+    : evidence;
 }
 
 function isAtOrAfter(timestamp, lowerBound) {

@@ -1970,6 +1970,49 @@ test("falls back to check observation time when timeline has no post-head timest
   );
 });
 
+test("floors head freshness at PR creation for a branch pushed earlier", () => {
+  // The branch was pushed and checked 20 minutes before the PR opened. Opening
+  // the PR is what starts CodeRabbit's automatic review, so the head is no
+  // older than the PR for the closeout grace.
+  const timelineItems = [
+    {
+      event: "committed",
+      sha: "new-head",
+      created_at: "2026-09-14T14:00:00Z",
+    },
+  ];
+  assertEqual(
+    fetchHeadUpdatedAt({
+      headSha: "new-head",
+      timelineItems,
+      observedAt: "2026-09-14T14:01:00Z",
+      openedAt: "2026-09-14T14:20:00Z",
+    }),
+    "2026-09-14T14:20:00Z",
+  );
+  // A later push is newer than the PR, so the floor does not apply.
+  assertEqual(
+    fetchHeadUpdatedAt({
+      headSha: "new-head",
+      timelineItems,
+      observedAt: "2026-09-14T14:01:00Z",
+      openedAt: "2026-09-14T13:00:00Z",
+    }),
+    "2026-09-14T14:00:00Z",
+  );
+  // With no head evidence the age stays unknown; the PR creation time alone is
+  // only a lower bound and must not end the fail-closed wait.
+  assertEqual(
+    fetchHeadUpdatedAt({
+      headSha: "new-head",
+      timelineItems: [],
+      observedAt: null,
+      openedAt: "2026-09-14T14:20:00Z",
+    }),
+    null,
+  );
+});
+
 test("does not derive head freshness from commit metadata", () => {
   assertEqual(
     fetchHeadUpdatedAt({

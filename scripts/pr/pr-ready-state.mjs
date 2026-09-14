@@ -650,6 +650,7 @@ export async function fetchReadyState({
       "baseRefName",
       "baseRefOid",
       "changedFiles",
+      "createdAt",
       "headRefName",
       "headRefOid",
       "isDraft",
@@ -731,6 +732,7 @@ export async function fetchReadyState({
     headSha: pr.headRefOid,
     timelineItems: timelineResult.ok ? timelineResult.value : [],
     observedAt,
+    openedAt: pr.createdAt ?? null,
   });
   const pathFilterCandidate = findCodeRabbitPathFilterSkipCandidate({
     issueComments,

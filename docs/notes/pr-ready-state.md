@@ -236,7 +236,10 @@ precedence:
   rate-limited inside the refill hour; posting again supersedes it.
 - `wait_for_head_grace` — the head is less than 5 minutes old and no CodeRabbit
   run or check has appeared for it. An automatic run may still start, including
-  the full re-review a base merge or rebase can draw. The gate reports this wait
+  the full re-review a base merge or rebase can draw. The head is no older than
+  the PR: a branch pushed and checked before its PR opened gets the grace from
+  the PR creation time, because opening the PR is what starts the automatic
+  review. The gate reports this wait
   as well when the probe cannot establish the head update time — a failed or
   empty timeline or status read — because it cannot prove the automatic run has
   had its chance; if the time stays unknown across two polls at least five
