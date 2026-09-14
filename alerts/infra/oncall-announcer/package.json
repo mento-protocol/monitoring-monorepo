@@ -27,7 +27,7 @@
   "dependencies": {
     "@google-cloud/functions-framework": "5.0.5",
     "@google-cloud/logging": "^11.2.1",
-    "env-schema": "^7.0.0"
+    "env-schema": "^8.0.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
