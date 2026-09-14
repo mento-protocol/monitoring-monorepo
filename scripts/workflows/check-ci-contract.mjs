@@ -300,10 +300,8 @@ export function runnerLabelViolations(root = ROOT) {
     let workflow;
     try {
       workflow = yaml.load(readFileSync(join(dir, name), "utf8"), { schema: yaml.CORE_SCHEMA });
-    } catch {
-      workflow = null;
-    }
-    if (!isMapping(workflow)) continue;
+    } catch (error) { errors.push(`${name} could not be parsed as YAML: ${error.message}`); continue; }
+    if (!isMapping(workflow)) { errors.push(`${name} has no top-level workflow mapping`); continue; }
     for (const [jobName, job] of Object.entries(workflow.jobs ?? {})) {
       if (!isMapping(job) || job["runs-on"] === undefined) continue;
       const runsOn = job["runs-on"];

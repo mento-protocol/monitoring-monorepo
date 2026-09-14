@@ -548,6 +548,18 @@ test("runnerLabelViolations rejects an unregistered runs-on label and a byte-mis
     !sequenceErrors.some((e) => e.includes(":call ")),
     `a reusable-workflow-call job with no runs-on must not be flagged, got ${JSON.stringify(sequenceErrors)}`,
   );
+
+  writeFileSync(
+    join(dir, ".github/workflows/broken.yml"),
+    "jobs:\n  a:\n    runs-on: ubuntu-latest\n    runs-on: evil\n",
+  );
+  const parseErrors = runnerLabelViolations(dir);
+  assert.ok(
+    parseErrors.some((e) => e.includes("broken.yml")),
+    `a workflow that fails to parse must fail closed, got ${JSON.stringify(parseErrors)}`,
+  );
+  rmSync(join(dir, ".github/workflows/broken.yml"));
+
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -561,9 +573,10 @@ test("the replacement checker and tests stay within their size budgets", () => {
   const tests = readFileSync(fileURLToPath(import.meta.url), "utf8")
     .trimEnd()
     .split(/\r?\n/u).length;
-  // Raised from 300/500 for runnerLabelViolations tests (issue #2400).
+  // Raised from 300/500 for runnerLabelViolations tests (issue #2400);
+  // tests raised again to 600 for the fail-closed YAML-parse-error test.
   assert.ok(implementation < 340, `${implementation} implementation lines`);
-  assert.ok(tests < 580, `${tests} test lines`);
+  assert.ok(tests < 600, `${tests} test lines`);
   assert.ok(
     tests < implementation * 2,
     `${tests} tests vs ${implementation} implementation`,
