@@ -1107,7 +1107,7 @@ jobs:
           failed=0
           while IFS=$'\t' read -r id path state_prefix ci_plan ci_apply apply_policy; do
             [[ -n "$id" ]] || continue
-            if node scripts/tf-stacks.mjs validate "$id"; then
+            if node scripts/tf-stacks.mjs validate "$id" </dev/null; then
               result="pass"
             else
               echo "::error::Terraform validate failed for stack: $id"

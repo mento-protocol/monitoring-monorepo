@@ -318,6 +318,16 @@ try {
     /scripts\/tf-stacks\.mjs validate/u,
     "ci.yml Terraform validation must validate each classified stack",
   );
+  assert.match(
+    String(ciValidateChangedStacks.run),
+    /GITHUB_STEP_SUMMARY/u,
+    "ci.yml Terraform validation must publish the per-stack summary table",
+  );
+  assert.match(
+    String(ciValidateChangedStacks.run),
+    /failed=1/u,
+    "ci.yml Terraform validation must collect every failing stack instead of stopping at the first",
+  );
 
   const productionInfraContract = ciWorkflow.jobs["production-infra-contract"];
   assert(
