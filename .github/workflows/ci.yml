@@ -251,11 +251,11 @@ jobs:
               - .node-version
               - .github/workflows/ci.yml
               - .github/actions/pnpm-install/**
-            # Code-health policy files. A PR that touches ONLY the dep-cruiser
-            # rules or a package's knip config would otherwise leave all four
-            # package filters false → the cross-package `deps` job would skip
-            # → blocking architecture rule changes ship unvalidated. This
-            # filter fires the `deps` job whenever the policy itself moves.
+            # Code-health policy files. `pnpm code-health:deps` now runs in the
+            # unconditional `production-infra-contract` job, so this filter no
+            # longer gates it. Keep it in `routed`: dropping it would leave a
+            # policy-only PR outside the routed set, and `all_count !=
+            # routed_count` would force the whole fan-out instead.
             codeHealth: &codeHealth
               - .dependency-cruiser.cjs
               - "*/knip.json"
@@ -385,19 +385,20 @@ jobs:
               - .github/workflows/ci.yml
               - .github/actions/pnpm-install/**
             # Dependency manifest and pnpm catalog/lifecycle policy drift.
-            # This runs independently of package quality jobs so a manifest-only
-            # PR cannot satisfy the required `ci` sentinel while bypassing the
-            # catalog-vs-literal version invariant.
+            # `pnpm skew:check` now runs in the unconditional
+            # `production-infra-contract` job, so no manifest-only PR can
+            # satisfy the `ci` sentinel while bypassing the catalog-vs-literal
+            # version invariant. This filter is kept for `routed` accounting.
             versionSkew: &versionSkew
               - package.json
               - "**/package.json"
               - pnpm-workspace.yaml
               - "**/pnpm-workspace.yaml"
               - patches/**
-              # Enumerated on purpose: this job runs one checker, and widening
-              # to scripts/supply-chain/** would fire it on every lockfile-lint
-              # or audit-gate edit. An enumerated filter goes silent when a file
-              # moves, so both paths move with the checker in the same PR.
+              # Enumerated on purpose: this filter pins one checker, and
+              # widening to scripts/supply-chain/** would match every
+              # lockfile-lint or audit-gate edit. An enumerated filter goes
+              # silent when a file moves, so both paths move with it.
               - scripts/supply-chain/version-skew-check.mjs
               - scripts/supply-chain/version-skew-check.test.mjs
               - .github/workflows/ci.yml

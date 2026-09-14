@@ -70,27 +70,26 @@ the raw text for duplicate keys instead.
 `.github/workflows/ci.yml` carries no `if:`, sits in the `ci` sentinel's
 `needs`, and is absent from its `allowed-skips`. This follows
 [ADR 0010](0010-required-checks-no-paths-filters.md): a skipped required check
-counts as satisfied. The first implementation put the two commands in the
-path-gated `scripts` job, which admits on `scripts/**` and may skip — so a PR
-editing only `AGENTS.md` and dropping a pinned sentence skipped the check while
-`ci` stayed green. The Sentry suites left it for the same reason. A dedicated
-unconditional job came next; the commands now run in the host above, after its
-pnpm-install composite so a prose failure cannot abort the sole pnpm cache
-write. The suite pins its own wiring: the host job id, both `run:` strings, the
+counts as satisfied. The first implementation put both commands in the
+path-gated `scripts` job, which may skip — so a PR editing only `AGENTS.md` and
+dropping a pinned sentence skipped the check while `ci` stayed green. The Sentry
+suites left it for the same reason. A dedicated job came next; the commands now
+run in the host above, after its pnpm-install step so a prose failure cannot
+abort the pnpm cache write. The suite pins its own wiring: the host job id, both `run:` strings, the
 sentinel's `needs`, and the absence of an allowed-skip, each with a negative
 control that mutates the real workflow.
 
 **The wiring assertion runs from two jobs, so neither is its own only witness.**
 Read alone, the paragraph above is circular: the assertion that the host runs
-both commands lived only inside that host, so one edit dropping the steps and
-its sentinel entry deleted the assertion too and left `ci` green over nothing.
+both commands lives only inside it, so one edit dropping the steps and its
+sentinel entry deleted the assertion too and left `ci` green over nothing.
 The suite therefore also runs as a step of the path-gated `scripts` job. That
 job's `rootScripts` filter includes `.github/workflows/**`, so any edit able to
-unwire the host admits `scripts` and reds there; and the suite asserts that
-second host as well, so dropping the extra step reds in the first. Each is the
-other's witness. Removing both in one commit still passes — no check can outlive
-its own removal — but that edit is visible in a single diff, which is the
-property being bought throughout this record. The cost is one duplicate
+unwire the host admits `scripts` and reds there; the suite asserts that second
+host too, so dropping the extra step reds in the first. Each is the other's
+witness. Removing both in one commit still passes — no check outlives its own
+removal — but that edit is visible in a single diff, which is the property
+bought throughout this record. The cost is one duplicate
 sub-second run on `scripts/**` diffs.
 
 **Present is not the same as enforcing.** A `run:` line proves the command is

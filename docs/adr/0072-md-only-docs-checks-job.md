@@ -234,9 +234,8 @@ costs a duplicate run on mixed diffs and nothing else.
   constraint this ADR imposes.
 - **The nine checks now exist in two jobs and must move together.** A step
   added to one and forgotten in the other silently narrows coverage for one
-  class of diff. `check-ci-contract.mjs` asserts the pairing: every `run:`
-  string in `docs-checks` must appear verbatim in `scripts`, or the fixed
-  CI contract reds and names it.
+  class of diff. `check-ci-contract.mjs` asserts it: every `run:` string in
+  `docs-checks` must also run in `scripts`, or the CI contract reds.
 - **Membership rests on reading each suite, and that reading is fallible.**
   Four of the eleven corpus readers — `agent:context-budget:test`,
   `docs:navigation-eval:test`, `docs:index:test` and `agent:quality-gate:test` —
