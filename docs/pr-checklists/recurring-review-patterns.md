@@ -3,7 +3,7 @@ title: Recurring PR Review Patterns
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-02
+last_verified: 2026-09-14
 doc_type: checklist
 scope: repo-wide
 review_interval_days: 90
@@ -289,6 +289,10 @@ tldr: **ruleset-required** workflows (`ci`, `Code Quality`, `Sentry suites`, the
 ### Dynamic-route metadata + private data — [checklist](dynamic-route-metadata.md)
 
 tldr: `generateMetadata` reading access-controlled data must gate on `isPublic === true` before emitting tags (no session, tags visible to crawlers). `export const revalidate = 0` for access-controlled sources (ISR would serve stale post-revocation tags from the edge cache). Metadata-fetching body lives in a dedicated `_lib/og-metadata.ts` helper imported by the page — not directly in `layout.tsx` — to keep the RSC label-leak guard allowlist narrow (PR #345 commit `b476776`). Full rules in the linked checklist.
+
+### Segment metadata replaces the inherited Open Graph block
+
+tldr: Next merges metadata one segment at a time and replaces the whole `openGraph` object, images included (`mergeMetadata`, `case 'openGraph'`), so a page that sets `openGraph` for its own title or description silently drops the card contributed by an `opengraph-image.tsx` in a parent segment — the homepage unfurled with no `og:image` until PR #2399 (issue #2340). A page that needs its own text and the inherited card reads `generateMetadata`'s second `parent: ResolvingMetadata` argument and spreads `parent.openGraph.images`; moving the shared `app/opengraph-image.tsx` into one route's segment is the wrong fix, because every route that still inherits it loses its card — `/pools`, `/volume`, `/stables`, `/cdps` and `/cdps/[symbol]` all did on 2026-09-14, as does the `/sign-in` page that auth-gated routes redirect crawlers to, and that list is examples rather than an inventory: any route whose page sets no `openGraph` inherits. Spread the images conditionally: `mergeStaticMetadata` guards on `!source?.openGraph?.hasOwnProperty('images')`, so an `images: undefined` key still counts as present and would block a future same-segment `opengraph-image.tsx`. `twitter.images` needs nothing — `postProcessMetadata` fills it from `openGraph.images` when the page's `twitter` block sets none. Prove it with the cookie-free crawler fetch in [`../notes/dashboard-verification.md`](../notes/dashboard-verification.md); a unit test over `generateMetadata` cannot show what Next actually passes as the parent.
 
 ### SWR optimistic-update + React-key remount races
 

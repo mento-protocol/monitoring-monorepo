@@ -3,7 +3,7 @@ title: Dashboard Local and Browser Verification
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-02
+last_verified: 2026-09-14
 doc_type: runbook
 scope: ui-dashboard
 review_interval_days: 90
@@ -356,7 +356,15 @@ preview results are not production proof.
   access-controlled route, compare an authenticated fetch and reject any
   credential dependence. Require HTTP 200. Match the response type and
   dimensions with the declared image metadata. Require `Cache-Control` and
-  `Age` that match policy. Browser cache controls do not bypass a CDN cache.
+  `Age` that match policy. Vercel's proxy consumes `s-maxage` and
+  `stale-while-revalidate` and does not include them in the response sent to
+  the client, so a card served through the CDN carries only its browser
+  directives. On 2026-09-14 the homepage and bridge-flows cards both returned
+  `public, max-age=60` where each route also sets `s-maxage=60` and
+  `stale-while-revalidate=86400`. Read the policy from the route's source
+  header together with `x-vercel-cache` and `Age`, and treat a missing
+  shared-cache directive as expected rather than as drift. Browser cache
+  controls do not bypass a CDN cache.
 - Inspect the image for the correct route and data or fallback. Require no blank
   or clipped content. Check browser console errors after both loads.
 - Test a URL that Slack has not expanded. An old message is cached evidence.
