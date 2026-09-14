@@ -224,6 +224,7 @@ Authority: canonical
 - [`adr/0094-grid-waiver.md`](adr/0094-grid-waiver.md) — Scale the control waiver to grid scope
 - [`adr/0095-isolated-bridge-transfer-observations.md`](adr/0095-isolated-bridge-transfer-observations.md) — Bridge transfers use isolated complete observations
 - [`adr/0096-finder-probe-non-ledger-kind.md`](adr/0096-finder-probe-non-ledger-kind.md) — Non-ledger finder probes
+- [`adr/0097-retire-duplicate-bundle-size-workflow.md`](adr/0097-retire-duplicate-bundle-size-workflow.md) — Retire the duplicate bundle-size advisory workflow
 
 Authority: non-canonical
 
