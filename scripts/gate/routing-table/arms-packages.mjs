@@ -134,7 +134,7 @@ export const PACKAGE_ARMS = [
         args: ["ui-dashboard React Doctor score should stay 100"],
       },
       {
-        why: "Bundle size budget gate — mirrors `.github/workflows/size-limit.yml`. Any change under ui-dashboard/ that can affect the client build (src files, root config files like postcss/sentry-shared/next/tsconfig) re-runs the build + size-limit check locally before opening a PR. Browser fixtures and other nested .mjs files are deliberately excluded: they can invalidate browser-test cache entries without forcing an unrelated dashboard build cache miss.",
+        why: "Bundle size budget gate — mirrors ci.yml's `ui` job path filter and turbo `size-limit` task inputs. Any change under ui-dashboard/ that can affect the client build (src files, root config files like postcss/sentry-shared/next/tsconfig) re-runs the build + size-limit check locally before opening a PR. Browser fixtures and other nested .mjs files are deliberately excluded: they can invalidate browser-test cache entries without forcing an unrelated dashboard build cache miss.",
         dispatch: "path",
         arms: [
           {
