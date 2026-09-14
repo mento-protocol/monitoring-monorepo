@@ -1,0 +1,74 @@
+{
+  "cell_id": "pr-1995-pipeline-draw1",
+  "fingerprint": {
+    "skill_digest": "89f5bdf20356c5515974ec1a6112fc4f9dfbf31cf1d60b667084f91dfbe6ec60",
+    "kind": "full",
+    "contract_digest": "59b82ee3e6d7ccf2cfbe75cb11aa40e6ec93b92a754a992adee4a1a69166a259",
+    "claude_cli": "2.1.270 (Claude Code)",
+    "codex_cli": "codex-cli 0.154.0",
+    "finder_argv_digest": "40099c93f78800efefbc46f57772ae2cbadc86b378bdd22f474945abfd7b450c",
+    "orchestrator_digest": "fee8d511d838ad137aea62f0e6be7b5115383c59d4447ba985efb3e3c3fe48b1"
+  },
+  "treatment": {
+    "skill_ref": "installed",
+    "dirty": false
+  },
+  "pr": 1995,
+  "condition": "pipeline",
+  "draw": 1,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": "gpt-5.6-sol@high",
+  "claims": [
+    "A focus exported in your shell cuts the gate's self-test down during `--no-lock` runs: the guard at `scripts/agent-quality-gate.test.sh:600-604` only refuses a focus when `AGENT_QUALITY_GATE_LOCK_HELD` or `GITHUB_ACTIONS` is set, so with `--no-lock` or `AGENT_QUALITY_GATE_LOCK=0` the mapped test script inherits the focus, runs one family, and exits 0",
+    "The same wrong statement appears in the comment at `:595-597` and in the doc at `docs/notes/agent-quality-gate-mechanics.md:1143-1146`",
+    "The whole-run success stamp still gets written (`agent-quality-gate.sh:5866-5878`) and `stamp_line` (`:4764-4773`) never looks at the environment, so a focused `--no-lock` run lets a later push with `--skip-if-fresh` skip the full self-test entirely, breaking the rule in `scripts/AGENTS.md:164-166`",
+    "Tests added above the partition aren't caught: the checker only covers lines from the `# >>> gate family body start` marker to the end of the file, so an `assert_contains` line inserted above the `verify_gate_family_partition` call passes the check and would run in every focused mode"
+  ],
+  "matched_ids": [
+    3830042123
+  ],
+  "judge_reasoning": {
+    "3829986398": "Review doesn't mention the abort trap expanding unset output_file under set -u.",
+    "3829986403": "Review's partition mutation tests don't cover multiple dispatch calls being accepted.",
+    "3830003055": "Review doesn't note that a missing dispatch call passes validation. It says a line after the end marker gives exit 1, which is not the same issue.",
+    "3830042123": "Review's must-fix #1 is exactly this: the focus guard allows GATE_TEST_FOCUS during --no-lock or AGENT_QUALITY_GATE_LOCK=0 runs.",
+    "3830042128": "Review doesn't mention the hard-coded path pin missing from the path-pin inventory.",
+    "3830695396": "Review mentions the doc text only for the lock-guard inaccuracy, not the 'is set' vs non-empty wording or 'reds the suite'."
+  },
+  "novel": {
+    "claims": 4,
+    "novelReal": 1,
+    "novelWrong": 0,
+    "novelVague": 0,
+    "restatedKnown": 3,
+    "alreadyMatched": 1,
+    "verdicts": {
+      "1": {
+        "class": "known",
+        "why": "The guard at test.sh:600-604 does only check AGENT_QUALITY_GATE_LOCK_HELD and GITHUB_ACTIONS, and the gate exports LOCK_HELD at gate.sh:1143 only after taking the lock. This is the known defect at :628, 'Reject focus during lock-free gate runs'."
+      },
+      "2": {
+        "class": "known",
+        "why": "The comment at test.sh:595-597 and the doc at mechanics.md:1143-1146 do overstate that the focus can't shrink the gate's self-test. But that is the same lock-free focus defect already known at :628, just described again."
+      },
+      "3": {
+        "class": "known",
+        "why": "stamp_line (gate.sh:4764-4773) contains no environment input, and the success stamp is written at :5866-5878. This is only a downstream effect of the known lock-free focus defect (:628), not a separate bug."
+      },
+      "4": {
+        "class": "real",
+        "why": "In the awk checker, 'body == 0 { previous = $0; next }' (test.sh:509) skips every line before the '# >>> gate family body start' marker. So an assert line placed above the verify_gate_family_partition call passes the check and runs in every focused mode, even though the doc says the check fails the suite for any test line outside every family."
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 464,
+  "usd": 1.5620355,
+  "usd_metered": true,
+  "scoring_usd": 0.269655
+}

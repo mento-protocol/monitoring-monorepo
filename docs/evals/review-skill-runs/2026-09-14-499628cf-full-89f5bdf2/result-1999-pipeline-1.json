@@ -1,0 +1,85 @@
+{
+  "cell_id": "pr-1999-pipeline-draw1",
+  "fingerprint": {
+    "skill_digest": "89f5bdf20356c5515974ec1a6112fc4f9dfbf31cf1d60b667084f91dfbe6ec60",
+    "kind": "full",
+    "contract_digest": "59b82ee3e6d7ccf2cfbe75cb11aa40e6ec93b92a754a992adee4a1a69166a259",
+    "claude_cli": "2.1.270 (Claude Code)",
+    "codex_cli": "codex-cli 0.154.0",
+    "finder_argv_digest": "40099c93f78800efefbc46f57772ae2cbadc86b378bdd22f474945abfd7b450c",
+    "orchestrator_digest": "fee8d511d838ad137aea62f0e6be7b5115383c59d4447ba985efb3e3c3fe48b1"
+  },
+  "treatment": {
+    "skill_ref": "installed",
+    "dirty": false
+  },
+  "pr": 1999,
+  "condition": "pipeline",
+  "draw": 1,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": "gpt-5.6-sol@high",
+  "claims": [
+    "The Terraform test still expects the old Slack title: `alerts/rules/peg-rule-definitions.tftest.hcl:68-69` still requires the title to contain `$alert.Annotations.summary` and `$alert.Annotations.resolved_summary`, but `peg-message-templates.tf:14` now makes the title just an icon, so `terraform test` will fail in the required `ci` check (`.github/workflows/ci.yml:874-879`); it also contradicts the new check in `scripts/alerts/alert-rules-lint.test.mjs:1257-1269`, so the two tests can't both pass",
+    "Stale doc: `docs/notes/peg-monitoring.md:118-119` still says \"Slack titles use the severity icon plus that summary\"",
+    "Wrong wording for failures on rules with no price source (`peg-alert-events.ts:230-242`): `pegAlertSourceName(\"\")` returns \"Price source\", so rules with `source = \"\"` show \"Grafana could not evaluate the Price source Peg rule\"; both recovery messages (lines 241-242) have the same problem",
+    "After an Error, a real alert loses its pairing (`peg-alert-events.ts:109-110`, `cycleKey` at 320-321): Error → Alerting is classified as `error-recovered-alerting`, which closes the error entry but never starts an alert entry, so the later clear shows as a standalone \"resolved\" entry with no \"lasted …\" duration and the alert's cause text never appears",
+    "Older problem: Alerting → Error → Normal still leaves the alert looking active until it ages out of the 7-day window, because the new Error → Normal row only closes the error entry"
+  ],
+  "matched_ids": [
+    3830366234,
+    3830366243,
+    3830366547,
+    3830371325,
+    3830416461
+  ],
+  "judge_reasoning": {
+    "3830366234": "Must-fix #1 says the tftest.hcl lines 68-69 still require summary/resolved_summary in the now icon-only title, which fails the required ci.yml Terraform job.",
+    "3830366243": "The 'Stale doc' bullet says docs/notes/peg-monitoring.md:118-119 still describes the title as icon plus summary and needs updating.",
+    "3830366247": "The review never mentions recoveries through Pending, or that errorStateHistoryUrl omits Pending transitions.",
+    "3830366547": "The 'Related, older problem' section says Alerting → Error → Normal leaves the alert looking active because the Error → Normal row only closes the error entry.",
+    "3830366556": "No mention of Error → Pending leaving an orphaned error cycle or a stuck 'monitoring failed' row.",
+    "3830371307": "The review does not discuss fragile marker-index extraction or unscoped link checks in the lint test.",
+    "3830371325": "The defect text is truncated but points at error-recovered-alerting and cycle pairing. Finding #3 says error-recovered-alerting closes the error entry but never opens an alert entry, so the later clear goes unpaired.",
+    "3830416461": "Finding #2 says source-less rules get labeled 'Price source' via pegAlertSourceName(\"\") in both the failure and recovery rows."
+  },
+  "novel": {
+    "claims": 5,
+    "novelReal": 1,
+    "novelWrong": 0,
+    "novelVague": 0,
+    "restatedKnown": 4,
+    "alreadyMatched": 5,
+    "verdicts": {
+      "1": {
+        "class": "known",
+        "why": "peg-rule-definitions.tftest.hcl:68-69 still requires $alert.Annotations.summary/resolved_summary in the title, but the new icon-only title no longer has them; this is the known 'Update the stale Terraform title assertion' defect"
+      },
+      "2": {
+        "class": "known",
+        "why": "docs/notes/peg-monitoring.md:118-119 does still say 'Slack titles use the severity icon plus that summary'; this is the known 'Keep the Peg runbook aligned with the new title' defect"
+      },
+      "3": {
+        "class": "known",
+        "why": "peg-alert-copy.ts:49 returns 'Price source' for an empty source, and evaluationCause puts that into the failure and recovery leads; this is the known 'Label source-less evaluation failures by rule' defect"
+      },
+      "4": {
+        "class": "real",
+        "why": "transitionKind maps Error→Alerting to error-recovered-alerting, and cycleKey puts it under the 'error' key, so it only closes the error entry; the later Alerting→Normal clear finds no open or observed alert entry and ends up in unpairedCleared, shown as a standalone resolved entry with no 'lasted' duration and no raise cause"
+      },
+      "5": {
+        "class": "known",
+        "why": "Alerting opens the 'alert' key and Error→Normal (error-recovered) only closes the 'error' key, so the alert stays open at the end of pairStateTransitions; this is the known 'Error recovery leaves breach active' (line 352) defect"
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 433,
+  "usd": 1.15874,
+  "usd_metered": true,
+  "scoring_usd": 0.4114985
+}

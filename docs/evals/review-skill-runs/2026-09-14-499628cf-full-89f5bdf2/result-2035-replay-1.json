@@ -1,0 +1,96 @@
+{
+  "cell_id": "pr-2035-replay-draw1",
+  "fingerprint": {
+    "skill_digest": "89f5bdf20356c5515974ec1a6112fc4f9dfbf31cf1d60b667084f91dfbe6ec60",
+    "kind": "full",
+    "contract_digest": "59b82ee3e6d7ccf2cfbe75cb11aa40e6ec93b92a754a992adee4a1a69166a259",
+    "claude_cli": "2.1.270 (Claude Code)",
+    "codex_cli": "codex-cli 0.154.0",
+    "finder_argv_digest": "40099c93f78800efefbc46f57772ae2cbadc86b378bdd22f474945abfd7b450c",
+    "orchestrator_digest": "fee8d511d838ad137aea62f0e6be7b5115383c59d4447ba985efb3e3c3fe48b1"
+  },
+  "treatment": {
+    "skill_ref": "installed",
+    "dirty": false
+  },
+  "pr": 2035,
+  "condition": "replay",
+  "draw": 1,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": "gpt-5.6-sol@high",
+  "claims": [
+    "The `--quota-floor` stop goes stale when Arkham sends no Remaining header (`tier1-bulk-enrich.mjs:541-546`, `:1000`, `:1058`): `quota.remaining` is only set when `/subscription/intel-usage` is polled and is never recalculated from Usage/Limit headers, so the check at `:1000` compares against an old number and the stop can't fire for up to 500 lookups",
+    "`--limit` with no value silently removes the cap (`tier1-bulk-enrich.mjs:112-117`, `:126`): `--limit --quota-floor 50` or `--limit` as the last argument returns `undefined`, so the limit becomes `Infinity` and the whole ~68k queue runs",
+    "`--chain` with no value quietly becomes `\"all\"`, which points resume at the wrong progress file",
+    "`--limit \"\"` becomes 0",
+    "Tier-2's forensic tags are still dropped in the final label write (`tier2-light-forensic.mjs:672-682`): `mergedTags` puts `existingEntry.tags` first, then `derived.tags`, then keeps only the first 20, so `entity:`, `slug:`, `ctp:` and `type:contract` tags are cut off",
+    "Refresh merges drop tier-2 and human-added tags (`tier1-bulk-enrich.mjs:726-728`, and `src/lib/arkham.ts:374-376` `mergeRefreshEntry`): fresh Arkham tags are put first, then existing tags, then only the first 20 are kept, so tags added by tier 2 or a person are deleted, including by the production refresh cron",
+    "A truncated discovery source only logs a warning (`tier1-bulk-enrich.mjs:284-288`): when a source hits `HARD_PAGE_CAP` it isn't added to `failedSources`, so the run goes ahead on a truncated set",
+    "Addresses that error before a circuit-breaker halt are never retried (`tier1-bulk-enrich.mjs:1043-1047`, `:966`, `:804-813`): error lines in the progress file carry `address` and resume treats every such address as done, so each trip of the 10-error breaker permanently skips those addresses"
+  ],
+  "matched_ids": [
+    3845596185,
+    3845607361,
+    3845618202
+  ],
+  "judge_reasoning": {
+    "3845594538": "The review never covers flushWrites splicing the pending batch before the pipeline call, which loses writes on a transient failure. Finding 6 concerns error lines in the progress file, a different problem.",
+    "3845596185": "Finding 5 matches: a source that hits HARD_PAGE_CAP isn't added to failedSources, so the run goes ahead on a truncated set.",
+    "3845603922": "The review doesn't mention the run.sh tfvars key prefix-matching bug. It even clears run.sh.",
+    "3845603940": "The review looks at sanitizeEntry's cut-to-20-then-dedup order and clears it as a correct mirror, so it doesn't flag this defect.",
+    "3845607361": "Finding 3 matches: tier2's mergedTags puts existingEntry.tags first and keeps only 20, so ctp:/type: forensic tags get dropped.",
+    "3845618202": "Finding 4 matches: refresh merges put fresh Arkham tags first and slice to 20, which wipes tier-2 forensic tags."
+  },
+  "novel": {
+    "claims": 8,
+    "novelReal": 4,
+    "novelWrong": 0,
+    "novelVague": 1,
+    "restatedKnown": 3,
+    "alreadyMatched": 3,
+    "verdicts": {
+      "1": {
+        "class": "real",
+        "why": "noteQuotaHeaders (l.531-549) sets quota.remaining only from a Remaining header and never computes limit-usage. With no Remaining header, the only other source is logIntelUsage, which runs every INTEL_USAGE_EVERY=500 addresses (l.1060), so the floor check at l.1000 uses a number up to 500 lookups old."
+      },
+      "2": {
+        "class": "real",
+        "why": "flagValue returns undefined when the next arg is missing or starts with '--' (l.112-117), and numericFlag then returns the Infinity fallback (l.126), so a bare --limit slips past the hard-fail check that was added for bad values and the cap is gone (l.855)."
+      },
+      "3": {
+        "class": "real",
+        "why": "The base script exited when --chain had no value. Now flagValue returns undefined, so scope becomes 'all' (l.135) and the run silently uses tier1-progress-all.jsonl (l.801) instead of the chain's progress file."
+      },
+      "4": {
+        "class": "vague",
+        "why": "Number('') is 0, so the limit is 0 and nothing gets processed. That fails safe and the claim names no harm."
+      },
+      "5": {
+        "class": "known",
+        "why": "Same as known tier2-light-forensic.mjs:395 'Preserve Tier 2 tags when merging capped labels'. mergedTags puts existing tags first and then applies slice(0,20)."
+      },
+      "6": {
+        "class": "known",
+        "why": "Same as known tier1-bulk-enrich.mjs:774 'Refresh wipes forensic tags'. buildWriteEntry and mergeRefreshEntry put fresh tags first, then sanitize and cap."
+      },
+      "7": {
+        "class": "known",
+        "why": "Same as known tier1:328 / tier1:311 HARD_PAGE_CAP findings. A capped source only gets a log suffix (l.284-288) and is never added to failedSources."
+      },
+      "8": {
+        "class": "real",
+        "why": "Error lines are written as {address,error} (l.1043-1047), and resume adds every line's address to processed (l.805-813). The new breaker exits(3) and says the progress file 'resumes the queue' (l.966), but those errored addresses are skipped for good."
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 164,
+  "usd": 1.0976115,
+  "usd_metered": true,
+  "scoring_usd": 0.36421250000000005
+}

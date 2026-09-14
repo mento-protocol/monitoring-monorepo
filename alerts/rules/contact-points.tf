@@ -62,8 +62,10 @@ resource "grafana_contact_point" "pool_page" {
   slack {
     token     = var.slack_bot_token
     recipient = var.slack_channel_critical
-    title     = "{{ if eq .Status \"firing\" }}🚨{{ else }}✅{{ end }}"
-    text      = local.slack_body_template
+    # `.CommonAnnotations` is safe here only while Pool Nearly One-Sided is the
+    # sole rule on notify_page_pool; the alert contract test pins that invariant.
+    title = "{{ if eq .Status \"firing\" }}🚨{{ else if ne (index .CommonAnnotations \"grafana_state_reason\") \"\" }}⚪{{ else }}✅{{ end }}"
+    text  = local.slack_body_template
   }
 
   victorops {
@@ -183,6 +185,9 @@ locals {
   #      so rules that don't set the annotation render nothing — no empty
   #      "*Foo:*" placeholder. Add new lines here when introducing rule-
   #      specific context fields; rules that don't set them are unaffected.
+  #      Resolved one-sided-pool pages omit query-backed reserve/value rows:
+  #      Grafana can carry the alerting values forward, so recovery copy must
+  #      not appear beside an apparent live 100/0. Other alerts retain them.
   #
   #      The *Rebalance Blocked* row is sourced from the metrics-bridge
   #      `mento_pool_rebalance_blocked` gauge, so the operator sees the
@@ -224,9 +229,18 @@ locals {
   slack_body_template = <<-EOT
     {{ range .Alerts -}}
     {{ $isResolved := eq .Status "resolved" -}}
+    {{ $stateReason := index .Annotations "grafana_state_reason" -}}
+    {{ $isOneSidedPoolPage := eq .Labels.alertname "Pool Nearly One-Sided" -}}
+    {{ $nonThresholdResolution := and $isResolved $isOneSidedPoolPage (ne $stateReason "") -}}
+    {{ $nonThresholdTitle := "Pool Alert Stopped Without Recovery Confirmation" -}}
+    {{ if .Annotations.non_threshold_resolved_title -}}{{ $nonThresholdTitle = .Annotations.non_threshold_resolved_title }}{{ end -}}
+    {{ $nonThresholdSummary := "Grafana stopped the alert for a non-threshold state transition. This does not confirm recovery." -}}
+    {{ if .Annotations.non_threshold_resolved_summary -}}{{ $nonThresholdSummary = .Annotations.non_threshold_resolved_summary }}{{ end -}}
+    {{ $omitResolvedPoolValues := and $isResolved $isOneSidedPoolPage -}}
     {{ $title := .Labels.alertname -}}
     {{ if .Annotations.title -}}{{ $title = .Annotations.title }}{{ end -}}
     {{ if and $isResolved .Annotations.resolved_title -}}{{ $title = .Annotations.resolved_title }}{{ end -}}
+    {{ if $nonThresholdResolution -}}{{ $title = $nonThresholdTitle }}{{ end -}}
     {{ if .Labels.pool_id -}}
     *<https://monitoring.mento.org/pool/{{ .Labels.pool_id }}|{{ $title }}{{ if .Labels.pair }} — {{ .Labels.pair }}{{ end }}{{ if .Labels.chain_name }} · {{ .Labels.chain_name | title }}{{ end }}>*
     {{ else if and (eq .Labels.service "cdps") .Labels.symbol -}}
@@ -234,16 +248,17 @@ locals {
     {{ else -}}
     *{{ $title }}*
     {{ end -}}
-    {{ if and $isResolved .Annotations.resolved_summary }}{{ .Annotations.resolved_summary }}
+    {{ if $nonThresholdResolution }}{{ $nonThresholdSummary }}
+    {{ else if and $isResolved .Annotations.resolved_summary }}{{ .Annotations.resolved_summary }}
     {{ else if .Annotations.summary }}{{ .Annotations.summary }}
     {{ end -}}
     {{ if and .Annotations.description (eq .Labels.severity "critical") -}}
     _{{ .Annotations.description }}_
     {{ end -}}
-    {{ if .Annotations.current_reserves -}}
+    {{ if and (not $omitResolvedPoolValues) .Annotations.current_reserves -}}
     *Reserves:* {{ .Annotations.current_reserves }}
     {{ end -}}
-    {{ if .Annotations.value_composition -}}
+    {{ if and (not $omitResolvedPoolValues) .Annotations.value_composition -}}
     *Value Share:* {{ .Annotations.value_composition }}
     {{ end -}}
     {{ if .Annotations.breach_duration -}}
@@ -293,9 +308,12 @@ locals {
   EOT
 
   victorops_pool_page_message = <<-EOT
-    {{ range .Alerts }}{{ if .Annotations.summary }}{{ .Annotations.summary }}
-    {{ end }}{{ if .Annotations.current_reserves }}Reserves: {{ .Annotations.current_reserves }}
-    {{ end }}{{ if .Annotations.value_composition }}Value share: {{ .Annotations.value_composition }}
+    {{ range .Alerts }}{{ $isResolved := eq .Status "resolved" }}{{ $stateReason := index .Annotations "grafana_state_reason" }}{{ $nonThresholdResolution := and $isResolved (ne $stateReason "") }}{{ $nonThresholdTitle := "Pool Alert Stopped Without Recovery Confirmation" }}{{ if .Annotations.non_threshold_resolved_title }}{{ $nonThresholdTitle = .Annotations.non_threshold_resolved_title }}{{ end }}{{ $nonThresholdSummary := "Grafana stopped the alert for a non-threshold state transition. This does not confirm recovery." }}{{ if .Annotations.non_threshold_resolved_summary }}{{ $nonThresholdSummary = .Annotations.non_threshold_resolved_summary }}{{ end }}{{ if $nonThresholdResolution }}{{ $nonThresholdTitle }}
+    {{ $nonThresholdSummary }}
+    {{ else if and $isResolved .Annotations.resolved_summary }}{{ .Annotations.resolved_summary }}
+    {{ else if .Annotations.summary }}{{ .Annotations.summary }}
+    {{ end }}{{ if and (not $isResolved) .Annotations.current_reserves }}Reserves: {{ .Annotations.current_reserves }}
+    {{ end }}{{ if and (not $isResolved) .Annotations.value_composition }}Value Share: {{ .Annotations.value_composition }}
     {{ end }}{{ if .Annotations.rebalance_reason }}Rebalance blocked: {{ .Annotations.rebalance_reason }}
     {{ end }}{{ if .Labels.pool_id }}Pool: https://monitoring.mento.org/pool/{{ .Labels.pool_id }}
     {{ end }}Alert ID: {{ .Fingerprint }}

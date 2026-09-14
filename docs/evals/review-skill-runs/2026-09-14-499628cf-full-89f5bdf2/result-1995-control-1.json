@@ -1,0 +1,64 @@
+{
+  "cell_id": "pr-1995-control-draw1",
+  "fingerprint": {
+    "skill_digest": "89f5bdf20356c5515974ec1a6112fc4f9dfbf31cf1d60b667084f91dfbe6ec60",
+    "kind": "full",
+    "contract_digest": "59b82ee3e6d7ccf2cfbe75cb11aa40e6ec93b92a754a992adee4a1a69166a259",
+    "claude_cli": "2.1.270 (Claude Code)",
+    "codex_cli": "codex-cli 0.154.0",
+    "finder_argv_digest": "40099c93f78800efefbc46f57772ae2cbadc86b378bdd22f474945abfd7b450c",
+    "orchestrator_digest": "fee8d511d838ad137aea62f0e6be7b5115383c59d4447ba985efb3e3c3fe48b1"
+  },
+  "treatment": {
+    "skill_ref": "installed",
+    "dirty": false
+  },
+  "pr": 1995,
+  "condition": "control",
+  "draw": 1,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": null,
+  "claims": [
+    "scripts/agent-quality-gate.test.sh:601: the focus guard doesn't catch `--no-lock` runs, and the skipped suite can be recorded as a pass. It checks `AGENT_QUALITY_GATE_LOCK_HELD`, which is never set with `--no-lock` or `AGENT_QUALITY_GATE_LOCK=0`. So the claim that 'every command a real gate run spawns carries it' is false (comment at lines 595–597, repeated in docs/notes/agent-quality-gate-mechanics.md:1143-1146). A focused self-test exits 0, the gate writes `last-success.stamp`, and `--skip-if-fresh` then skips the full suite.",
+    "docs/notes/agent-quality-gate-mechanics.md:1116: the text calls it 'the whole ~9-minute suite', but the per-family times in the table add up to 696s, about 11.6 minutes."
+  ],
+  "matched_ids": [
+    3830042123
+  ],
+  "judge_reasoning": {
+    "3829986398": "Review does not mention the abort trap expanding an unset output_file under set -u.",
+    "3829986403": "Review says the partition checker correctly fails on anything after the end marker other than the one dispatch call. It never flags that duplicate calls are accepted, so it asserts the opposite of the defect.",
+    "3830003055": "Review does not identify that a missing dispatch call passes the check. It claims the checker is fine.",
+    "3830042123": "Review finding #1 matches: the focus guard relies on AGENT_QUALITY_GATE_LOCK_HELD, which is not set under --no-lock or AGENT_QUALITY_GATE_LOCK=0, so a focused subset can answer for the full gate.",
+    "3830042128": "Review does not mention the hard-coded self-test path pin missing from the path-pin inventory.",
+    "3830695396": "Review's doc note is about the ~9-minute runtime not matching the table. It is not about the 'is set' vs 'non-empty' wording or 'reds'."
+  },
+  "novel": {
+    "claims": 2,
+    "novelReal": 1,
+    "novelWrong": 0,
+    "novelVague": 0,
+    "restatedKnown": 1,
+    "alreadyMatched": 1,
+    "verdicts": {
+      "1": {
+        "class": "known",
+        "why": "The guard at test.sh:601 only checks AGENT_QUALITY_GATE_LOCK_HELD or GITHUB_ACTIONS, so the claim is accurate, but it is the same defect as the known item 'test.sh:628 Reject focus during lock-free gate runs'."
+      },
+      "2": {
+        "class": "real",
+        "why": "Families run one after another in the dispatch loop (test.sh:644-646). The table's solo runtimes (2+1+52+86+41+15+10+92+27+51+319) add up to 696s, about 11.6 minutes, which contradicts the '~9-minute suite' at docs line 1116."
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 174,
+  "usd": 0.9728080000000001,
+  "usd_metered": true,
+  "scoring_usd": 0.1901205
+}

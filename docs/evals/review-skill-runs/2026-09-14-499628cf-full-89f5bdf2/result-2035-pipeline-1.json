@@ -1,0 +1,90 @@
+{
+  "cell_id": "pr-2035-pipeline-draw1",
+  "fingerprint": {
+    "skill_digest": "89f5bdf20356c5515974ec1a6112fc4f9dfbf31cf1d60b667084f91dfbe6ec60",
+    "kind": "full",
+    "contract_digest": "59b82ee3e6d7ccf2cfbe75cb11aa40e6ec93b92a754a992adee4a1a69166a259",
+    "claude_cli": "2.1.270 (Claude Code)",
+    "codex_cli": "codex-cli 0.154.0",
+    "finder_argv_digest": "40099c93f78800efefbc46f57772ae2cbadc86b378bdd22f474945abfd7b450c",
+    "orchestrator_digest": "fee8d511d838ad137aea62f0e6be7b5115383c59d4447ba985efb3e3c3fe48b1"
+  },
+  "treatment": {
+    "skill_ref": "installed",
+    "dirty": false
+  },
+  "pr": 2035,
+  "condition": "pipeline",
+  "draw": 1,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": "gpt-5.6-sol@high",
+  "claims": [
+    "tier2's reordering doesn't reach what gets stored (`tier2-light-forensic.mjs:672-682`, caused by the change at `:394-395`): the write step builds `new Set([...existingEntry.tags, ...derived.tags]).slice(0, 20)`, so stored tier1 tags come first; for the 81 addresses with >15 tags at most two `ctp:` tags survive and `type:contract` is lost every time",
+    "`--limit` / `--quota-floor` with a missing value is silently ignored (`tier1-bulk-enrich.mjs:112-126`): `flagValue` returns `undefined` both when the flag is absent and when its value is missing, so `--limit --no-refresh` runs with no limit and can sweep the whole ~68k queue",
+    "A source that hits the page cap still counts as complete (`tier1-bulk-enrich.mjs:284-287`): on `capped: true` the script only prints a warning and never adds the source to `failedSources`, so the abort-on-incomplete-discovery check doesn't apply and quota is spent on a truncated set",
+    "The quota floor is only checked every 500 addresses when Remaining comes from the API body (`tier1-bulk-enrich.mjs:1000`, `:1058`): without the `X-Intel-Datapoints-Remaining` header, remaining can go from ~500 to 0 between polls and the run ends on a 402/403 halt instead of stopping cleanly above the floor",
+    "A leftover comment contradicts the corrected header (`run.sh:44`): the inline comment still says \"A dry run touches neither Arkham nor Upstash\", which lines 15-19 now contradict",
+    "File-size budget: tier1 grows from 474 to 1,088 raw lines, and the checklist (`recurring-review-patterns.md:204-206`) says a file pushed past 600 lines should be split in the same PR",
+    "Progress written before the batched write is flushed: a crash can lose up to 99 results that resume will then skip (pre-existing at base)"
+  ],
+  "matched_ids": [
+    3845596185,
+    3845607361
+  ],
+  "judge_reasoning": {
+    "3845594538": "No match. The review's only related note is that progress is written before the flush, so a crash can lose results. It dismisses that as pre-existing and never identifies splice-before-network dropping batches on a transient pipeline failure.",
+    "3845596185": "Match. Review finding 3 says a source returning capped: true is only warned about and never added to failedSources, so the incomplete-discovery abort doesn't fire.",
+    "3845603922": "No match. The review never mentions the tfvars key prefix-matching in run.sh.",
+    "3845603940": "No match. The review doesn't discuss tags being sliced before dedup in the sanitizers.",
+    "3845607361": "Match. Review finding 1 says tier2's final merge puts existingEntry.tags before derived.tags and slices to 20, dropping ctp:/type: tags now that tier1 stores up to 20 tags.",
+    "3845618202": "No match. The review explicitly clears tier1's buildWriteEntry/sanitizeEntry and never flags refresh putting fresh Arkham tags first and wiping tier2's forensic tags."
+  },
+  "novel": {
+    "claims": 7,
+    "novelReal": 3,
+    "novelWrong": 0,
+    "novelVague": 2,
+    "restatedKnown": 2,
+    "alreadyMatched": 2,
+    "verdicts": {
+      "1": {
+        "class": "known",
+        "why": "tier2-light-forensic.mjs:672-682 puts the stored tags ahead of derived.tags before .slice(0,20). This is the same issue as the known 'Preserve Tier 2 tags when merging capped labels' (tier2:395)."
+      },
+      "2": {
+        "class": "real",
+        "why": "At tier1-bulk-enrich.mjs:113-117, flagValue returns undefined when the next arg starts with '--'. numericFlag then uses the fallback (Infinity for --limit), so `--limit --no-refresh` quietly runs with no limit, even though numericFlag is documented as failing hard on bad input."
+      },
+      "3": {
+        "class": "known",
+        "why": "At :284-287, capped only adds a warning to the log line and is never pushed to failedSources. This matches the known HARD_PAGE_CAP truncation defects (:311/:328)."
+      },
+      "4": {
+        "class": "real",
+        "why": "quota.remaining is only updated from the body when there's no Remaining header, and logIntelUsage runs only every INTEL_USAGE_EVERY=500 addresses (:1058). The floor check at :1000 can therefore use a stale value and miss the default floor of 50, so the run ends on the 402/403 halt instead of stopping cleanly."
+      },
+      "5": {
+        "class": "real",
+        "why": "The diff adds the run.sh:44 comment 'A dry run touches neither Arkham nor Upstash', but the new header at lines 15-19 says the dry run DOES use Upstash and still mints a REST token."
+      },
+      "6": {
+        "class": "vague",
+        "why": "The file did grow from 474 to 1088 lines, but recurring-review-patterns.md:204 calls the 600-line limit a 'soft cap, advisory'. That makes this a style/process note, not a functional defect."
+      },
+      "7": {
+        "class": "vague",
+        "why": "Progress is appended at :1010 before the batched flush, and base does the same (base lines 382/392). The claim itself says this predates the change, so it isn't a defect this change introduced."
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 477,
+  "usd": 1.3970985,
+  "usd_metered": true,
+  "scoring_usd": 0.42066099999999995
+}

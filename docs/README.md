@@ -197,7 +197,6 @@ Authority: canonical
 - [`adr/0064-scripts-module-directories.md`](adr/0064-scripts-module-directories.md) — scripts/ may use module subdirectories; basenames and pinned paths are the constraint
 - [`adr/0065-scripts-file-size-watchlist-scope.md`](adr/0065-scripts-file-size-watchlist-scope.md) — scripts/ is inside the file-size watchlist, with named-mechanism exemptions
 - [`adr/0066-coderabbit-replaces-bugbot-third-reviewer.md`](adr/0066-coderabbit-replaces-bugbot-third-reviewer.md) — CodeRabbit replaces Cursor BugBot as the third PR review bot
-- [`adr/0067-pool-criticality-is-depletion-risk.md`](adr/0067-pool-criticality-is-depletion-risk.md) — Pool criticality is depletion risk, not deviation magnitude
 - [`adr/0069-gate-routing-table-as-data.md`](adr/0069-gate-routing-table-as-data.md) — The quality gate's routing table is data, compiled by the repo's own bash-case translator
 - [`adr/0070-sentry-requeue-settlement-sentinel.md`](adr/0070-sentry-requeue-settlement-sentinel.md) — A withheld terminal label serializes the Sentry archive settlement against the triage re-queue
 - [`adr/0071-susds-launch-aligned-daily-sampler.md`](adr/0071-susds-launch-aligned-daily-sampler.md) — sUSDS actuals use a launch-aligned bounded daily sampler
@@ -224,11 +223,13 @@ Authority: canonical
 - [`adr/0094-grid-waiver.md`](adr/0094-grid-waiver.md) — Scale the control waiver to grid scope
 - [`adr/0095-isolated-bridge-transfer-observations.md`](adr/0095-isolated-bridge-transfer-observations.md) — Bridge transfers use isolated complete observations
 - [`adr/0096-finder-probe-non-ledger-kind.md`](adr/0096-finder-probe-non-ledger-kind.md) — Non-ledger finder probes
-- [`adr/0097-retire-duplicate-bundle-size-workflow.md`](adr/0097-retire-duplicate-bundle-size-workflow.md) — Retire the duplicate bundle-size advisory workflow
+- [`adr/0097-recovery.md`](adr/0097-recovery.md) — Pool recovery
+- [`adr/0098-retire-duplicate-bundle-size-workflow.md`](adr/0098-retire-duplicate-bundle-size-workflow.md) — Retire the duplicate bundle-size advisory workflow
 
 Authority: non-canonical
 
 - [`adr/0020-swr-polling-read-model.md`](adr/0020-swr-polling-read-model.md) — Read model is SWR polling plus bounded snapshot composition at current scale (archived)
+- [`adr/0067-depletion-alerts.md`](adr/0067-depletion-alerts.md) — Depletion alerts (archived)
 - [`adr/0068-sentry-fixture-authoring-policy.md`](adr/0068-sentry-fixture-authoring-policy.md) — Adversarial fixtures are authored to scan clean; no value or line registry (archived)
 - [`adr/0075-pr-merge.md`](adr/0075-pr-merge.md) — One sanctioned operator merge path (archived)
 - [`adr/0079-sealed-exact-file-patch-secret-suppression.md`](adr/0079-sealed-exact-file-patch-secret-suppression.md) — Autoreview permits only sealed exact-file-patch secret suppression (archived)

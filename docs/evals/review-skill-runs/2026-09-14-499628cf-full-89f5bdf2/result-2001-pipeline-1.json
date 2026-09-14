@@ -1,0 +1,53 @@
+{
+  "cell_id": "pr-2001-pipeline-draw1",
+  "fingerprint": {
+    "skill_digest": "89f5bdf20356c5515974ec1a6112fc4f9dfbf31cf1d60b667084f91dfbe6ec60",
+    "kind": "full",
+    "contract_digest": "59b82ee3e6d7ccf2cfbe75cb11aa40e6ec93b92a754a992adee4a1a69166a259",
+    "claude_cli": "2.1.270 (Claude Code)",
+    "codex_cli": "codex-cli 0.154.0",
+    "finder_argv_digest": "40099c93f78800efefbc46f57772ae2cbadc86b378bdd22f474945abfd7b450c",
+    "orchestrator_digest": "fee8d511d838ad137aea62f0e6be7b5115383c59d4447ba985efb3e3c3fe48b1"
+  },
+  "treatment": {
+    "skill_ref": "installed",
+    "dirty": false
+  },
+  "pr": 2001,
+  "condition": "pipeline",
+  "draw": 1,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": "gpt-5.6-sol@high",
+  "claims": [
+    "daily-series.ts:69-73: the `try/catch` in `isZeroWei` can never catch anything, because the regex already guarantees `BigInt` will parse"
+  ],
+  "matched_ids": [],
+  "judge_reasoning": {
+    "3830423746": "The review explicitly clears the next-day calculation and says a zero row is fine. It never identifies the negative revenue spike that happens when a nonzero prior baseline is followed by a zero row.",
+    "3830513980": "The review says a wallet with past yield can't be read as an empty row. It doesn't consider a full transfer to another tracked wallet that zeroes all four fields, so it misses the unsubtracted prior yield."
+  },
+  "novel": {
+    "claims": 1,
+    "novelReal": 0,
+    "novelWrong": 0,
+    "novelVague": 1,
+    "restatedKnown": 0,
+    "alreadyMatched": 0,
+    "verdicts": {
+      "1": {
+        "class": "vague",
+        "why": "Checked daily-series.ts:66-74: the /^-?\\d+$/ regex only matches ASCII digits with an optional minus sign, which BigInt always parses, so the catch really is unreachable. That makes it harmless dead code, a style point rather than a defect."
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 343,
+  "usd": 0.953986,
+  "usd_metered": true,
+  "scoring_usd": 0.11566399999999999
+}
