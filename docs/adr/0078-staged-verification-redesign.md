@@ -177,7 +177,9 @@ M3 adds the two confirmed gate-only gaps to existing required jobs. The
 normal production build and bundle-size limit. The Infra validation and
 bundle-size workflows duplicate required coverage. Lighthouse, PR Description,
 duplication, and schema diff remain reviewed advisory exceptions with their
-current triggers.
+current triggers. **Amended 2026-09-14**: duplication's trigger narrowed from
+`paths-ignore` to a positive `paths:` allow-list mirroring `.jscpd.json`'s
+scan roots (PR #2411); its advisory-exception status is unchanged.
 
 ### Keep local checks bounded and non-authoritative
 

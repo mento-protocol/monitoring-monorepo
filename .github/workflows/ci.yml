@@ -203,8 +203,8 @@ jobs:
               - .github/actions/pnpm-install/**
               - .github/actions/resolve-eslint-baseline/**
             terraform: &terraform
-              # Coarse admission only. `scripts/tf-stacks.mjs` classifies the
-              # exact stacks after this job starts. Keep this list equal to
+              # Admission only. `scripts/tf-stacks.mjs` classifies the exact
+              # stacks after this job starts. Keep this list equal to
               # terraform.stacks.json `workflowAdmissionPatterns`; `pnpm
               # tf:test` enforces equality and registry-pattern subsumption.
               - terraform/**
@@ -212,7 +212,12 @@ jobs:
               - aegis/**
               - governance-watchdog/**
               - metrics-bridge/**
-              - scripts/**
+              - scripts/alerts/**
+              - scripts/lib/**
+              - scripts/production-infra-identity-contract/**
+              - scripts/terraform/**
+              - scripts/tf-stacks.mjs
+              - scripts/tf-stacks.test.mjs
               - .github/workflows/**
               - terraform.stacks.json
               - shared-config/**
@@ -405,8 +410,8 @@ jobs:
               - .github/actions/pnpm-install/**
             # Closed-world fallback for the existing fixed fan-out. `routed`
             # reuses the live filters through YAML aliases. `ordinary` names
-            # the stable product and documentation namespaces where affected
-            # selection is allowed. A path outside either set selects every
+            # every known namespace a live filter already routes, so affected
+            # selection is allowed there. A path outside either set selects every
             # conditional job. This catches a new top-level service even when
             # its README also matches the broad documentation filter.
             routed:
@@ -434,6 +439,31 @@ jobs:
               - metrics-bridge/**
               - terraform/**
               - ui-dashboard/**
+              # Tooling namespaces and root files that already own a
+              # functional filter above. While they were missing, every
+              # scripts/**, .github/** or shared-config/** edit counted as an
+              # unknown path and forced all thirteen conditional jobs. A new
+              # top-level namespace is still unknown here and still forces.
+              - .agents/**
+              - .claude/**
+              - .codex/**
+              - .github/**
+              - patches/**
+              - scripts/**
+              - shared-config/**
+              - .coderabbit.yaml
+              - .dependency-cruiser.cjs
+              - .gcloudignore
+              - .gitignore
+              - .gitmodules
+              - .lighthouserc.cjs
+              - .node-version
+              - cloudbuild.yaml
+              - eslint.config.mjs
+              - package.json
+              - pnpm-lock.yaml
+              - pnpm-workspace.yaml
+              - terraform.stacks.json
             # Package-manager and package-local toolchain files inside an
             # ordinary namespace can change how required checks execute.
             # Select the full fixed set for those control-plane inputs.
@@ -658,6 +688,11 @@ jobs:
         run: >-
           node -e 'const { rmSync } = require("node:fs"); const { homedir } = require("node:os"); const { join } = require("node:path"); rmSync(join(homedir(), ".cache", "ms-playwright"), { force: true, recursive: true });'
       - name: Install Playwright Chromium
+        # A healthy install is 0.28 min p50 / 0.38 p90 and a genuine cold
+        # download is ~84 s, so 5 minutes is inert on a normal run. On
+        # 2026-09-11 a broken download retried internally for 12.8-13.8 min
+        # seven times before failing; this bounds that to the cap.
+        timeout-minutes: 5
         run: pnpm --filter @mento-protocol/ui-dashboard exec playwright install --with-deps chromium
       - name: Save Playwright Chromium
         if: ${{ !inputs.no_skip_audit && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.playwright-cache.outputs.cache-hit != 'true' }}
@@ -1012,7 +1047,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.govWatchdog == 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 10
+    timeout-minutes: 8
     permissions:
       contents: read
       actions: read
@@ -1080,7 +1115,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.terraform == 'true'
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
-    timeout-minutes: 10
+    timeout-minutes: 5
     permissions:
       contents: read
       actions: read
@@ -1226,9 +1261,11 @@ jobs:
     needs: changes
     if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.rootScripts == 'true'
     runs-on: blacksmith-2vcpu-ubuntu-2404
-    # The legacy gate regression suite no longer runs in required CI. Keep the
-    # existing job bound until M6 measures the retained root checks.
-    timeout-minutes: 55
+    # Sized after PR #2296 removed the legacy gate regression suite: 135
+    # post-removal runs are p90 3.08 min and max 3.73 min. 10 minutes also
+    # covers the no-skip audit path, which re-enters this job with no cache
+    # restore.
+    timeout-minutes: 10
     permissions:
       contents: read
       actions: read
@@ -1598,7 +1635,7 @@ jobs:
     # This required job is deliberately unconditional. It validates production
     # infrastructure and the repo-wide issue-board proof for every candidate.
     runs-on: blacksmith-2vcpu-ubuntu-2404
-    timeout-minutes: 5
+    timeout-minutes: 8
     permissions:
       contents: read
       actions: read
@@ -1692,7 +1729,7 @@ jobs:
     # env for defense in depth; the gate additionally refuses to start if
     # NODE_OPTIONS or NODE_PATH is set and re-strips both per spawned suite.
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     permissions:
       contents: read
     steps:

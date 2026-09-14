@@ -15,7 +15,7 @@ const ORDINARY_GATE_IF = "${{ !inputs.no_skip_audit }}", AUDIT_GATE_IF = "${{ in
 // prettier-ignore
 const CHECKOUT_STEP = Object.freeze({ uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", if: "${{ !inputs.no_skip_audit }}", with: { "persist-credentials": false } }), TIMELINE_STEP = Object.freeze({ uses: "Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad", if: "always() && !inputs.no_skip_audit" });
 // prettier-ignore
-const ORDINARY = "*.md|aegis/**|alerts/**|docs/**|governance-watchdog/**|indexer-envio/**|integration-probes/**|metrics-bridge/**|terraform/**|ui-dashboard/**".split("|");
+const ORDINARY = "*.md|aegis/**|alerts/**|docs/**|governance-watchdog/**|indexer-envio/**|integration-probes/**|metrics-bridge/**|terraform/**|ui-dashboard/**|.agents/**|.claude/**|.codex/**|.github/**|patches/**|scripts/**|shared-config/**|.coderabbit.yaml|.dependency-cruiser.cjs|.gcloudignore|.gitignore|.gitmodules|.lighthouserc.cjs|.node-version|cloudbuild.yaml|eslint.config.mjs|package.json|pnpm-lock.yaml|pnpm-workspace.yaml|terraform.stacks.json".split("|");
 // prettier-ignore
 const CONTROL_PLANE = ".node-version|**/package.json|**/package.json5|**/package.yaml|**/pnpm-workspace.yaml|**/pnpm-lock.yaml|**/.npmrc|**/.pnpmfile.cjs|**/pnpmfile.cjs|**/patches|**/patches/**|**/node_modules|**/node_modules/**|**/tsconfig*.json|**/eslint.config.*|**/vitest*.{js,cjs,mjs,ts,cts,mts}|**/knip.json|**/react-doctor.config.json".split("|");
 export const FORCE_ALL_OUTPUT =
@@ -32,7 +32,7 @@ export const FIXED_JOBS = Object.freeze(["changes", ...CONDITIONAL_JOBS, "produc
 const EXPECTED_CONDITIONS = Object.freeze({ shared: `${FORCE_ALL} || needs.changes.outputs.shared == 'true'`, "ui-static": `${FORCE_ALL} || needs.changes.outputs.ui == 'true'`, ui: `${FORCE_ALL} || needs.changes.outputs.ui == 'true'`, "indexer-test": `${FORCE_ALL} || needs.changes.outputs.indexer == 'true'`, "indexer-checks": `${FORCE_ALL} || needs.changes.outputs.indexer == 'true'`, bridge: `${FORCE_ALL} || needs.changes.outputs.bridge == 'true'`, "integration-probes": `${FORCE_ALL} || needs.changes.outputs.integrationProbes == 'true'`, aegis: `${FORCE_ALL} || needs.changes.outputs.aegis == 'true'`, alerts: `${FORCE_ALL} || needs.changes.outputs.alerts == 'true'`, "gov-watchdog": `${FORCE_ALL} || needs.changes.outputs.govWatchdog == 'true'`, terraform: `${FORCE_ALL} || needs.changes.outputs.terraform == 'true'`, scripts: `${FORCE_ALL} || needs.changes.outputs.rootScripts == 'true'`, "docs-checks": `${FORCE_ALL} || needs.changes.outputs.docs == 'true'` });
 
 // prettier-ignore
-const EXPECTED_TIMEOUTS = Object.freeze({ changes: 2, shared: 10, "ui-static": 10, ui: 25, "indexer-test": 20, "indexer-checks": 10, bridge: 10, "integration-probes": 10, alerts: 10, "gov-watchdog": 10, terraform: 10, aegis: 15, scripts: 55, "docs-checks": 10, "production-infra-contract": 5, "sentry-suites": 5, ci: 2 });
+const EXPECTED_TIMEOUTS = Object.freeze({ changes: 2, shared: 10, "ui-static": 10, ui: 25, "indexer-test": 20, "indexer-checks": 10, bridge: 10, "integration-probes": 10, alerts: 10, "gov-watchdog": 8, terraform: 5, aegis: 15, scripts: 10, "docs-checks": 10, "production-infra-contract": 8, "sentry-suites": 8, ci: 2 });
 // prettier-ignore
 const EXPECTED_RUNNERS = Object.freeze({ changes: "blacksmith-2vcpu-ubuntu-2404-arm", shared: "blacksmith-2vcpu-ubuntu-2404", "ui-static": "blacksmith-4vcpu-ubuntu-2404", ui: "blacksmith-4vcpu-ubuntu-2404", "indexer-test": "blacksmith-4vcpu-ubuntu-2404", "indexer-checks": "blacksmith-4vcpu-ubuntu-2404", bridge: "blacksmith-2vcpu-ubuntu-2404", "integration-probes": "blacksmith-2vcpu-ubuntu-2404", aegis: "blacksmith-2vcpu-ubuntu-2404", alerts: "blacksmith-2vcpu-ubuntu-2404", "gov-watchdog": "blacksmith-4vcpu-ubuntu-2404", terraform: "blacksmith-2vcpu-ubuntu-2404-arm", scripts: "blacksmith-2vcpu-ubuntu-2404", "docs-checks": "blacksmith-2vcpu-ubuntu-2404", "production-infra-contract": "blacksmith-2vcpu-ubuntu-2404", "sentry-suites": "ubuntu-latest", ci: "ubuntu-latest" });
 // prettier-ignore
@@ -206,6 +206,9 @@ export function workflowViolations(workflow, filters) {
     JSON.stringify(FILTER_NAMES.map((name) => filters?.[name]))
   )
     errors.push("routed filter is not the functional-filter union");
+  // A namespace a live filter routes but `ordinary` omits forces every job.
+  // prettier-ignore
+  for (const [name, root] of FILTER_NAMES.flatMap((name) => list(filters?.[name]).flat(Infinity).map((rule) => [name, String(rule).split("/")[0]]))) if (!root.includes("*") && !list(filters?.ordinary).some((rule) => rule === root || rule === `${root}/**`)) errors.push(`ordinary misses routed namespace ${root} from ${name}`);
   for (const name of [...FILTER_NAMES, "controlPlane"]) {
     const rules = filters?.[name];
     if (!Array.isArray(rules)) {
@@ -226,13 +229,10 @@ export function workflowViolations(workflow, filters) {
     }
   }
   // ADR 0072 splits ten corpus checks across `docs-checks` and `scripts` so a
-  // Markdown-only diff still runs them. The two copies must not drift: every
-  // command in `docs-checks` has to run in `scripts` too, or a mixed diff
-  // checks less than a Markdown-only one. Only `run:` steps carry commands —
-  // checkout, pnpm-install and actions-timeline are `uses:` steps. The twin
-  // must also enforce: a copy carrying `continue-on-error` or a different
-  // `if:` reports nothing on failure, or does not run at all, so matching the
-  // command text alone would accept a silently narrower `scripts` job.
+  // Markdown-only diff still runs them. Every `run:` command in `docs-checks`
+  // must also run in `scripts`, under the same `if:` and without
+  // `continue-on-error`: otherwise a mixed diff checks less than a
+  // Markdown-only one, or the twin runs but stays silent on failure.
   // prettier-ignore
   const twin = (step) => `${step.if ?? ""}\u0000${step.run}`;
   // prettier-ignore
