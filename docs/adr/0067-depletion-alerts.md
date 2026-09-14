@@ -1,9 +1,10 @@
 ---
-title: Pool criticality is depletion risk, not deviation magnitude
-status: active
+title: Depletion alerts
+status: archived
 owner: eng
-canonical: true
-last_verified: 2026-08-20
+canonical: false
+last_verified: 2026-09-14
+superseded_by: ADR-0097
 scope: alerts
 date: 2026-08
 doc_type: adr
@@ -13,7 +14,8 @@ garden_lane: adrs-architecture
 
 # ADR 0067 — Pool criticality is depletion risk, not deviation magnitude
 
-**Status:** Accepted (Aug 2026), in force.
+**Status:** Superseded by [ADR 0097](0097-recovery.md)
+(Sep 2026). Historical decision retained.
 **Scope:** alerts (constrains shared-config thresholds, metrics-bridge, and the
 dashboard's reading of pool health)
 
