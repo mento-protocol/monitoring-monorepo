@@ -38,15 +38,18 @@ import {
 import { formatCompact, formatHuman } from "./pr-ready-state-format.mjs";
 import { verifyReadinessSnapshot } from "./pr-ready-state-stack.mjs";
 import {
+  fetchHeadUpdatedAt,
+  headCommitTimestampFromTimeline,
+  headTimeForPullRequest,
+  headUpdatedAtFromTimeline,
+  headUpdatedAtIsUpperBound,
+  readyForReviewAtFromTimeline,
+} from "./pr-ready-state-head-time.mjs";
+import {
   annotateStatusCheckSources,
   fetchRequiredStatusContexts,
   fetchReadinessBases,
-  fetchHeadUpdatedAt,
-  headCommitTimestampFromTimeline,
-  headUpdatedAtFromTimeline,
-  headUpdatedAtIsUpperBound,
   parseArgs,
-  readyForReviewAtFromTimeline,
   renderSummary,
   repoFromPullRequestUrl,
   requiredStatusContextsFromProtection,
@@ -2122,6 +2125,43 @@ test("distinguishes the head commit's own timestamp from a later surrogate", () 
       observedAt: null,
     }),
     "no evidence at all is unknown, not an upper bound",
+  );
+});
+
+test("headTimeForPullRequest pairs the head time with its upper-bound flag", () => {
+  const surrogate = [
+    { event: "committed", sha: "new-head" },
+    { event: "commented", created_at: "2026-05-21T13:23:00Z" },
+  ];
+  assertDeepEqual(
+    headTimeForPullRequest({
+      headSha: "new-head",
+      timelineItems: surrogate,
+      observedAt: null,
+    }),
+    { headUpdatedAt: "2026-05-21T13:23:00Z", headUpdatedAtIsUpperBound: true },
+  );
+  assertDeepEqual(
+    headTimeForPullRequest({
+      headSha: "new-head",
+      timelineItems: [
+        {
+          event: "committed",
+          sha: "new-head",
+          created_at: "2026-05-21T13:20:00Z",
+        },
+      ],
+      observedAt: "2026-05-21T13:25:00Z",
+    }),
+    { headUpdatedAt: "2026-05-21T13:20:00Z", headUpdatedAtIsUpperBound: false },
+  );
+  assertDeepEqual(
+    headTimeForPullRequest({
+      headSha: "new-head",
+      timelineItems: [],
+      observedAt: null,
+    }),
+    { headUpdatedAt: null, headUpdatedAtIsUpperBound: false },
   );
 });
 

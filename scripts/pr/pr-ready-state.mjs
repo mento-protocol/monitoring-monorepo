@@ -14,13 +14,7 @@ import {
   summarizeReadyState,
   summarizeTerminalReadyState,
 } from "./pr-ready-state-core.mjs";
-import {
-  fetchHeadUpdatedAt,
-  headCommitTimestampFromTimeline,
-  headUpdatedAtFromTimeline,
-  headUpdatedAtIsUpperBound as headUpdatedAtIsUpperBoundFor,
-  readyForReviewAtFromTimeline,
-} from "./pr-ready-state-head-time.mjs";
+import { headTimeForPullRequest } from "./pr-ready-state-head-time.mjs";
 import {
   findCodeRabbitPathFilterSkipCandidate,
   validateCodeRabbitPathFilterSkip,
@@ -39,13 +33,6 @@ import {
   ghApiJsonPagesResult,
 } from "./pr-ready-state-gh.mjs";
 
-export {
-  fetchHeadUpdatedAt,
-  headCommitTimestampFromTimeline,
-  headUpdatedAtFromTimeline,
-  headUpdatedAtIsUpperBoundFor as headUpdatedAtIsUpperBound,
-  readyForReviewAtFromTimeline,
-};
 export { withGhAbortSignal } from "./pr-ready-state-gh.mjs";
 
 function addRequiredContext(byKey, context, integrationId = null) {
@@ -739,27 +726,15 @@ export async function fetchReadyState({
     readinessBasesPromise,
     timelinePromise,
   ]);
-  const timelineItems = timelineResult.ok ? timelineResult.value : [];
-  const headUpdatedAt = fetchHeadUpdatedAt({
+  const headTime = headTimeForPullRequest({
     headSha: pr.headRefOid,
-    timelineItems,
+    timelineItems: timelineResult.ok ? timelineResult.value : [],
     observedAt,
     openedAt: pr.createdAt ?? null,
   });
-  // When the selected head time is not the head commit's own timestamp, it
-  // comes from a later timeline event or the first check on the head, both
-  // after the push: an upper bound. The pending-request wait then cannot use
-  // it as a lower bound for requests, and a marked request keeps counting.
-  const headUpdatedAtIsUpperBound =
-    headUpdatedAt !== null &&
-    headUpdatedAtIsUpperBoundFor({
-      headSha: pr.headRefOid,
-      timelineItems,
-      observedAt,
-    });
   const pathFilterCandidate = findCodeRabbitPathFilterSkipCandidate({
     issueComments,
-    headUpdatedAt,
+    headUpdatedAt: headTime.headUpdatedAt,
   });
   let codeRabbitPathFilterSkip = null;
   if (pathFilterCandidate) {
@@ -790,8 +765,7 @@ export async function fetchReadyState({
   });
   const annotatedPr = {
     ...pr,
-    headUpdatedAt,
-    headUpdatedAtIsUpperBound,
+    ...headTime,
     statusCheckRollup: annotateStatusCheckSources(
       pr.statusCheckRollup ?? [],
       sourceMap,

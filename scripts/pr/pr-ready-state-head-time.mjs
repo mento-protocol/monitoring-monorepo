@@ -126,3 +126,30 @@ export function fetchHeadUpdatedAt({
   );
   return latestIsoTimestamp(evidence, activationFloor);
 }
+
+/**
+ * The head time the probe annotates a PR with, and whether that time is only
+ * an upper bound. When the selected time is not the head commit's own
+ * timeline timestamp it comes from a later timeline event or the first check
+ * on the head, both after the push, so the pending-request wait cannot use it
+ * as a lower bound for requests and a marked request keeps counting.
+ */
+export function headTimeForPullRequest({
+  headSha,
+  timelineItems,
+  observedAt,
+  openedAt = null,
+}) {
+  const headUpdatedAt = fetchHeadUpdatedAt({
+    headSha,
+    timelineItems,
+    observedAt,
+    openedAt,
+  });
+  return {
+    headUpdatedAt,
+    headUpdatedAtIsUpperBound:
+      headUpdatedAt !== null &&
+      headUpdatedAtIsUpperBound({ headSha, timelineItems, observedAt }),
+  };
+}
