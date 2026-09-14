@@ -2476,6 +2476,12 @@ test("pool pages deliver through one bundled contact point, never the policy tre
     contactPoints.includes('eq .Labels.alertname "Pool Nearly One-Sided"'),
     "the resolved-value suppression guard must stay coupled to the one-sided page rule name",
   );
+  assert(
+    contactPoints.includes(
+      "$nonThresholdResolution := and $isResolved $isOneSidedPoolPage",
+    ),
+    "the shared Slack fallback must stay scoped to the one-sided page rule",
+  );
 
   const stripped = stripComments(contactPoints);
   const [pageRoute] = blocksFor(stripped, "notify_page_pool = ");

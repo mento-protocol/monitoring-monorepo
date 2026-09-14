@@ -230,12 +230,13 @@ locals {
     {{ range .Alerts -}}
     {{ $isResolved := eq .Status "resolved" -}}
     {{ $stateReason := index .Annotations "grafana_state_reason" -}}
-    {{ $nonThresholdResolution := and $isResolved (ne $stateReason "") -}}
+    {{ $isOneSidedPoolPage := eq .Labels.alertname "Pool Nearly One-Sided" -}}
+    {{ $nonThresholdResolution := and $isResolved $isOneSidedPoolPage (ne $stateReason "") -}}
     {{ $nonThresholdTitle := "Pool Alert Stopped Without Recovery Confirmation" -}}
     {{ if .Annotations.non_threshold_resolved_title -}}{{ $nonThresholdTitle = .Annotations.non_threshold_resolved_title }}{{ end -}}
     {{ $nonThresholdSummary := "Grafana stopped the alert for a non-threshold state transition. This does not confirm recovery." -}}
     {{ if .Annotations.non_threshold_resolved_summary -}}{{ $nonThresholdSummary = .Annotations.non_threshold_resolved_summary }}{{ end -}}
-    {{ $omitResolvedPoolValues := and $isResolved (eq .Labels.alertname "Pool Nearly One-Sided") -}}
+    {{ $omitResolvedPoolValues := and $isResolved $isOneSidedPoolPage -}}
     {{ $title := .Labels.alertname -}}
     {{ if .Annotations.title -}}{{ $title = .Annotations.title }}{{ end -}}
     {{ if and $isResolved .Annotations.resolved_title -}}{{ $title = .Annotations.resolved_title }}{{ end -}}

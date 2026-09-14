@@ -180,5 +180,26 @@ func TestPoolResolutionNotifications(t *testing.T) {
 				}
 			}
 		})
+
+		if destination.name == "slack" {
+			t.Run("unrelated-non-threshold-resolution", func(t *testing.T) {
+				unrelated := alert("resolved", "Updated")
+				unrelated.Labels["alertname"] = "Metrics Bridge Not Reporting"
+				delete(unrelated.Labels, "pool_id")
+				delete(unrelated.Labels, "pair")
+				unrelated.Annotations["resolved_title"] = "Metrics Bridge Reporting Again"
+				unrelated.Annotations["resolved_summary"] = "Metrics are arriving again."
+				input := map[string]any{"Status": "resolved", "CommonAnnotations": map[string]string{"grafana_state_reason": "Updated"}, "Alerts": []poolAlert{unrelated}}
+				output := render(t, destination.template, input)
+				for _, phrase := range []string{"Metrics Bridge Reporting Again", "Metrics are arriving again."} {
+					if !strings.Contains(output, phrase) {
+						t.Fatalf("unrelated resolution is missing %q in %q", phrase, output)
+					}
+				}
+				if strings.Contains(output, "Pool Alert Stopped Without Recovery Confirmation") {
+					t.Fatalf("unrelated resolution inherited pool-page fallback in %q", output)
+				}
+			})
+		}
 	}
 }
