@@ -15,16 +15,30 @@
  * Caps are parsed from every workflow YAML file, keyed by workflow `name:` +
  * job `name:`. This does NOT import EXPECTED_TIMEOUTS from
  * check-ci-contract.mjs: that map is keyed by ci.yml job id, has no
- * display-name mapping, and does not cover other workflows.
+ * display-name mapping, and does not cover other workflows. It also does not
+ * use `js-yaml`, a devDependency: this module runs unmodified inside
+ * `actions/github-script`, which never runs an install step, the same
+ * constraint that keeps collect-m6-canary.mjs and
+ * file-size-watchlist-issue.mjs dependency-free. Instead it scans the
+ * two-space-indented shape every workflow in this repository uses: a
+ * top-level `name:`, then `jobs:` with one job id per two-space level and a
+ * flat field body one level deeper. A `name:` or `timeout-minutes:` elsewhere
+ * (matrix data, step fields, `run:` bodies) sits at a different indent and is
+ * ignored; an unparsed field falls back to the job id or DEFAULT_CAP_MINUTES,
+ * so a workflow shape this scan does not expect degrades caps, not crashes.
  *
  * Tests exercise the pure functions with fixtures, no network:
  * `node --test scripts/workflows/report-ci-reliability.test.mjs`
  */
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import yaml from "js-yaml";
 
-export const MARKER = "<!-- ci-health-report:monthly -->";
+export const MARKER_PREFIX = "<!-- ci-health-report:monthly:";
+// A marker keyed by calendar month, so a second run in the same month
+// updates that month's issue while a new month opens its own issue instead
+// of overwriting the previous month's history.
+export const markerFor = (isoDate) =>
+  `${MARKER_PREFIX}${isoDate.slice(0, 7)} -->`;
 export const LABEL = "ci-health-report";
 export const WINDOW_DAYS = 30;
 export const DEFAULT_CAP_MINUTES = 360;
@@ -35,20 +49,45 @@ export const CAP_NEAR_RATIO = 0.8; // "within 20% of the cap"
 const mins = (ms) => ms / 60000;
 
 // prettier-ignore
+function scalarAfter(line, key) {
+  const match = new RegExp(`^${key}:\\s*(.*?)\\s*(?:#.*)?$`, "u").exec(line);
+  return match ? match[1].replace(/^["']|["']$/gu, "") : null;
+}
+
+// prettier-ignore
+function parseWorkflowCaps(text, fallbackName, caps) {
+  let workflowName = fallbackName;
+  let jobsIndent = null;
+  let job = null;
+  const flush = () => { if (job) caps.set(`${workflowName}::${job.name}`, job.cap ?? DEFAULT_CAP_MINUTES); };
+  for (const raw of text.split(/\r?\n/u)) {
+    const indent = raw.length - raw.trimStart().length;
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) continue;
+    if (jobsIndent === null) {
+      const name = indent === 0 ? scalarAfter(line, "name") : null;
+      if (name) workflowName = name;
+      if (indent === 0 && /^jobs:\s*(?:#.*)?$/u.test(line)) jobsIndent = 0;
+      continue;
+    }
+    const jobKey = indent === jobsIndent + 2 ? /^([\w.-]+):\s*(?:#.*)?$/u.exec(line) : null;
+    if (jobKey) { flush(); job = { name: jobKey[1], cap: null }; continue; }
+    if (job && indent === jobsIndent + 4) {
+      const name = scalarAfter(line, "name");
+      if (name) job.name = name;
+      const cap = scalarAfter(line, "timeout-minutes");
+      if (cap && /^\d+$/u.test(cap)) job.cap = Number(cap);
+    }
+  }
+  flush();
+}
+
 export function workflowCaps(root = process.cwd()) {
   const dir = join(root, ".github", "workflows");
   const caps = new Map();
   for (const file of readdirSync(dir)) {
     if (!/\.ya?ml$/u.test(file)) continue;
-    const doc = yaml.load(readFileSync(join(dir, file), "utf8"));
-    if (!doc || typeof doc !== "object") continue;
-    const workflowName = typeof doc.name === "string" ? doc.name : file;
-    for (const [jobId, job] of Object.entries(doc.jobs ?? {})) {
-      if (!job || typeof job !== "object") continue;
-      const jobName = typeof job.name === "string" ? job.name : jobId;
-      const cap = Number.isFinite(job["timeout-minutes"]) ? job["timeout-minutes"] : DEFAULT_CAP_MINUTES;
-      caps.set(`${workflowName}::${jobName}`, cap);
-    }
+    parseWorkflowCaps(readFileSync(join(dir, file), "utf8"), file, caps);
   }
   return caps;
 }
@@ -62,6 +101,21 @@ export function percentile(values, p) {
   const sorted = [...values].sort((a, b) => a - b);
   const index = Math.min(sorted.length - 1, Math.ceil((p / 100) * sorted.length) - 1);
   return sorted[Math.max(0, index)];
+}
+
+/**
+ * Whole-run wall-clock p50/p90 in minutes (`created_at` -> `updated_at`) for
+ * one workflow's runs of one event, e.g. `CI` `pull_request` — the metric the
+ * per-job duration table cannot answer, and the one the budget in
+ * docs/pr-checklists/ci-workflow-gates.md compares month over month. Costs no
+ * extra API call: both timestamps are already on every run-listing row.
+ */
+// prettier-ignore
+export function wallDurationPercentiles(runs, { workflow, event }) {
+  const durations = runs
+    .filter((run) => run.workflow === workflow && run.event === event && run.created_at && run.updated_at)
+    .map((run) => mins(Date.parse(run.updated_at) - Date.parse(run.created_at)));
+  return { samples: durations.length, p50Minutes: percentile(durations, 50), p90Minutes: percentile(durations, 90) };
 }
 
 /** Per-workflow run count, attempt>1 rate, and cancellation rate (every run). */
@@ -188,6 +242,12 @@ export function formatMarkdownReport(report) {
     `Window: ${report.windowStart.slice(0, 10)} to ${report.windowEnd.slice(0, 10)} (${WINDOW_DAYS} days).`,
     sampleLine,
     "",
+    "### CI pull_request wall duration in minutes (every run, not sampled)",
+    "",
+    report.ciPullRequestWall.samples === 0
+      ? "No `CI` `pull_request` runs in the window."
+      : `p50 ${durationText(report.ciPullRequestWall.p50Minutes)}, p90 ${durationText(report.ciPullRequestWall.p90Minutes)}, over ${report.ciPullRequestWall.samples} runs. Compare this p90 to last month's report for the budget in docs/pr-checklists/ci-workflow-gates.md.`,
+    "",
     "### Per-workflow run counts, attempt>1 rate, cancellation rate",
     "",
     table(["| Workflow | Runs | Attempt>1 rate | Cancellation rate |", "| --- | ---: | ---: | ---: |"], report.perWorkflow.map((r) => `| ${r.workflow} | ${r.runs} | ${pct(r.attemptGt1Rate)} | ${pct(r.cancelRate)} |`), "No runs in the window."),
@@ -224,9 +284,10 @@ export const issueTitle = (isoDate) =>
 
 // prettier-ignore
 export async function upsertReportIssue({ github, owner, repo, body, now = new Date() }) {
+  const marker = markerFor(now.toISOString());
   const issues = await github.paginate(github.rest.issues.listForRepo, { owner, repo, state: "all", labels: LABEL, per_page: 100 });
-  const existing = issues.find((issue) => issue.pull_request === undefined && issue.body?.includes(MARKER));
-  const payload = { title: issueTitle(now.toISOString()), body: `${MARKER}\n\n${body}`, labels: [LABEL] };
+  const existing = issues.find((issue) => issue.pull_request === undefined && issue.body?.includes(marker));
+  const payload = { title: issueTitle(now.toISOString()), body: `${marker}\n\n${body}`, labels: [LABEL] };
   if (existing) {
     const { data } = await github.rest.issues.update({ owner, repo, issue_number: existing.number, state: "open", ...payload });
     return data;
@@ -246,7 +307,7 @@ function sampleRandom(list, size) {
 // prettier-ignore
 async function fetchRunsForWorkflow({ github, owner, repo, workflowId, workflowName, sinceIso }) {
   const runs = await github.paginate(github.rest.actions.listWorkflowRuns, { owner, repo, workflow_id: workflowId, created: `>=${sinceIso}`, per_page: 100 });
-  return runs.map((run) => ({ workflow: workflowName, event: run.event, conclusion: run.conclusion, run_attempt: run.run_attempt, id: run.id }));
+  return runs.map((run) => ({ workflow: workflowName, event: run.event, conclusion: run.conclusion, run_attempt: run.run_attempt, id: run.id, created_at: run.created_at, updated_at: run.updated_at }));
 }
 
 // prettier-ignore
@@ -291,6 +352,7 @@ export async function collectCiHealthReport({ github, context, core, root = proc
     windowStart: sinceIso,
     windowEnd: new Date().toISOString(),
     sampleInfo,
+    ciPullRequestWall: wallDurationPercentiles(allRuns, { workflow: "CI", event: "pull_request" }),
     perWorkflow: summarizeRunRates(allRuns),
     perJobDuration: summarizeJobDurations(sampledJobs),
     stepMinutes: stepMinutesByTotal(sampledJobs, { workflow: "CI" }),

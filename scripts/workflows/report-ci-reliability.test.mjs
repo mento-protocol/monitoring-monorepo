@@ -9,13 +9,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import {
-  MARKER,
+  MARKER_PREFIX,
+  markerFor,
   LABEL,
   DEFAULT_CAP_MINUTES,
   JOB_FANOUT_WORKFLOWS,
   workflowCaps,
   capFor,
   percentile,
+  wallDurationPercentiles,
   summarizeRunRates,
   summarizeJobDurations,
   stepMinutesByTotal,
@@ -75,6 +77,57 @@ test("percentile: p50/p90 over a known set, and null for empty input", () => {
   assert.equal(percentile(values, 90), 9);
   assert.equal(percentile([], 50), null);
   assert.equal(percentile([42], 50), 42);
+});
+
+test("wallDurationPercentiles: p50/p90 minutes for one workflow+event, ignores other workflows/events/missing timestamps", () => {
+  const runs = [
+    {
+      workflow: "CI",
+      event: "pull_request",
+      created_at: "2026-09-01T00:00:00Z",
+      updated_at: "2026-09-01T00:05:00Z",
+    },
+    {
+      workflow: "CI",
+      event: "pull_request",
+      created_at: "2026-09-01T00:00:00Z",
+      updated_at: "2026-09-01T00:10:00Z",
+    },
+    {
+      workflow: "CI",
+      event: "push",
+      created_at: "2026-09-01T00:00:00Z",
+      updated_at: "2026-09-01T01:00:00Z",
+    },
+    {
+      workflow: "Trunk",
+      event: "pull_request",
+      created_at: "2026-09-01T00:00:00Z",
+      updated_at: "2026-09-01T02:00:00Z",
+    },
+    {
+      workflow: "CI",
+      event: "pull_request",
+      created_at: "2026-09-01T00:00:00Z",
+      updated_at: null,
+    },
+  ];
+  const result = wallDurationPercentiles(runs, {
+    workflow: "CI",
+    event: "pull_request",
+  });
+  assert.equal(result.samples, 2);
+  assert.equal(result.p50Minutes, 5);
+  assert.equal(result.p90Minutes, 10);
+});
+
+test("wallDurationPercentiles: zero samples when nothing matches", () => {
+  const result = wallDurationPercentiles([], {
+    workflow: "CI",
+    event: "pull_request",
+  });
+  assert.equal(result.samples, 0);
+  assert.equal(result.p50Minutes, null);
 });
 
 test("summarizeRunRates: attempt>1 rate and cancellation rate per workflow", () => {
@@ -277,6 +330,7 @@ test("formatMarkdownReport: every section renders with units, and empty sections
     windowStart: "2026-08-15T00:00:00Z",
     windowEnd: "2026-09-14T00:00:00Z",
     sampleInfo: [{ workflow: "CI", sampledRuns: 40, totalRuns: 1084 }],
+    ciPullRequestWall: { samples: 854, p50Minutes: 5.67, p90Minutes: 8.43 },
     perWorkflow: [
       { workflow: "CI", runs: 1084, attemptGt1Rate: 0.059, cancelRate: 0.213 },
     ],
@@ -307,6 +361,7 @@ test("formatMarkdownReport: every section renders with units, and empty sections
   assert.match(body, /## CI health report/);
   assert.match(body, /2026-08-15 to 2026-09-14/);
   assert.match(body, /40 of 1084 runs/);
+  assert.match(body, /p50 5\.7 min, p90 8\.4 min, over 854 runs/);
   assert.match(body, /5\.9%/);
   assert.match(body, /21\.3%/);
   assert.match(body, /8\.4 min/);
@@ -334,26 +389,35 @@ test("upsertReportIssue creates a new marked issue when none exists", async () =
       },
     },
   };
+  const now = new Date("2026-09-14T00:00:00.000Z");
   const issue = await upsertReportIssue({
     github,
     owner: "o",
     repo: "r",
     body: "report body",
+    now,
   });
   assert.equal(issue.number, 7);
   assert.equal(calls[0][0], "create");
   assert.match(
     calls[0][1].body,
-    new RegExp(MARKER.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")),
+    new RegExp(
+      markerFor(now.toISOString()).replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"),
+    ),
   );
   assert.deepEqual(calls[0][1].labels, [LABEL]);
 });
 
 test("upsertReportIssue updates the existing marked issue and reopens it", async () => {
   const calls = [];
+  const now = new Date("2026-09-14T00:00:00.000Z");
   const github = {
     paginate: async () => [
-      { number: 3, pull_request: undefined, body: `${MARKER}\nold report` },
+      {
+        number: 3,
+        pull_request: undefined,
+        body: `${markerFor(now.toISOString())}\nold report`,
+      },
     ],
     rest: {
       issues: {
@@ -369,10 +433,51 @@ test("upsertReportIssue updates the existing marked issue and reopens it", async
     owner: "o",
     repo: "r",
     body: "new report body",
+    now,
   });
   assert.equal(issue.number, 3);
   assert.equal(calls[0][1].issue_number, 3);
   assert.equal(calls[0][1].state, "open");
+});
+
+test("upsertReportIssue opens a new issue for a new month instead of overwriting last month's", async () => {
+  const calls = [];
+  const lastMonth = new Date("2026-08-14T00:00:00.000Z");
+  const thisMonth = new Date("2026-09-14T00:00:00.000Z");
+  const github = {
+    paginate: async () => [
+      {
+        number: 3,
+        pull_request: undefined,
+        body: `${markerFor(lastMonth.toISOString())}\naugust report`,
+      },
+    ],
+    rest: {
+      issues: {
+        create: async (params) => {
+          calls.push(["create", params]);
+          return {
+            data: { number: 11, html_url: "https://example/issues/11" },
+          };
+        },
+      },
+    },
+  };
+  const issue = await upsertReportIssue({
+    github,
+    owner: "o",
+    repo: "r",
+    body: "september report",
+    now: thisMonth,
+  });
+  assert.equal(issue.number, 11);
+  assert.equal(calls[0][0], "create");
+  assert.match(
+    calls[0][1].body,
+    new RegExp(
+      MARKER_PREFIX.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&") + "2026-09",
+    ),
+  );
 });
 
 test("upsertReportIssue ignores an issue carrying the label but not the marker", async () => {
@@ -489,6 +594,9 @@ test("collectCiHealthReport samples only JOB_FANOUT_WORKFLOWS and covers every r
       );
       assert.equal(result.report.sampleInfo.length, 1);
       assert.equal(result.report.sampleInfo[0].workflow, "CI");
+      // Fixture runs carry no created_at/updated_at, so the wall-duration
+      // metric is wired through with zero samples rather than throwing.
+      assert.equal(result.report.ciPullRequestWall.samples, 0);
       assert.ok(summaryLines.length === 1);
       assert.deepEqual([...JOB_FANOUT_WORKFLOWS], ["CI", "PR Description"]);
     },
