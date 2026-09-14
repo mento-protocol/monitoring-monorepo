@@ -73,8 +73,7 @@ gh pr view <pr> --repo mento-protocol/monitoring-monorepo --json number,state,he
 # No-skip rejects package-execution/instrument drift. Only package drift permits ordinary-force-all evidence.
 # Stop above 45 runner-minutes per run. Approved M6 cumulative ceiling: 800 minutes.
 gh workflow run no-skip-audit.yml --repo mento-protocol/monitoring-monorepo --ref main -f pr_number=<pr> -f source_sha=<headRefOid> -f base_sha=<baseRefOid>
-# Merged #2399/#2408 recovery uses m6-audit-recovery.yml; read ADR 0098 first.
-# Its finite amendment permits one fresh #2399 and unused #2408; any new failure stops.
+# Merged #2399/#2408: m6-audit-recovery.yml; finite amendment rules in ADR 0098.
 pnpm verification:inventory:check  # Validate Phase 0 inventory schema, unique IDs, and complete dispositions
 pnpm verification:manifest:write   # Regenerate the terminal pre-M1 gate-rooted control-plane baseline manifest
 pnpm verification:manifest:check   # Recompute and compare the terminal pre-M1 baseline manifest
