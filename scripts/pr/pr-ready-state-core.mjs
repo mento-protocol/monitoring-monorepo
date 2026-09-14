@@ -512,12 +512,9 @@ function terminalGates({ merged }) {
       state: merged ? "approved" : "not_applicable",
       fallbackAction: "wait",
     },
-    codeRabbitReviewSignal: {
-      ready: true,
-      required: false,
-      state: "not_applicable",
-      fallbackAction: "wait",
-    },
+    // Same shape as the live gate, counters included, so consumers see one
+    // schema across the terminal transition.
+    codeRabbitReviewSignal: summarizeCodeRabbitReviewGate("not_applicable"),
     reviewCommentReplies: {
       ready: true,
       required: merged,

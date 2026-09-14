@@ -2462,6 +2462,15 @@ test("summarizes merged pull requests as terminal ready", () => {
   assertEqual(summary.gates.codexReviewSignal.fallbackAction, "wait");
   assertEqual(summary.gates.codeRabbitReviewSignal.state, "not_applicable");
   assertEqual(summary.codeRabbitReviewSignal, "not_applicable");
+  // The terminal gate keeps the live gate's shape, counters included.
+  assertDeepEqual(summary.gates.codeRabbitReviewSignal, {
+    ready: true,
+    required: false,
+    state: "not_applicable",
+    fallbackAction: "wait",
+    requestCount: 0,
+    requestBudget: 2,
+  });
   assert(!formatCompact(summary).includes("undefined"));
   assert(!formatHuman(summary).includes("undefined"));
 });
