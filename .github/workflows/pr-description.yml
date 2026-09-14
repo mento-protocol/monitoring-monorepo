@@ -32,7 +32,13 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # A title-only `edited` event that the job below skips must not cancel a
+  # validation run already in flight for the current body/base — cancel only
+  # when this event itself is validation-worthy (same predicate as the job
+  # `if:` below).
+  cancel-in-progress: >-
+    ${{ github.event.action != 'edited' || github.event.changes.body != null
+    || github.event.changes.base != null }}
 
 permissions:
   contents: read
