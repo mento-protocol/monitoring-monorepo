@@ -229,14 +229,15 @@ precedence:
   merge commit.
 - `wait_for_running_review` — the current head's CodeRabbit check is still
   running. A request now supersedes it and bills the discarded review.
-- `wait_for_pending_request` — a trusted `@coderabbitai review` or
-  `@coderabbitai full review` comment without a marker for the current head
-  (bare, or carrying another head's marker, which is stale instead) was posted
-  at or after the head update and less than 60 minutes ago. It will run or be
+- `wait_for_pending_request` — a trusted bare `@coderabbitai review` or
+  `@coderabbitai full review` comment, with no head marker at all, was posted
+  at or after the head update and less than 60 minutes ago (a marker for this
+  head is the `requested` signal; a marker for another head is stale, whatever
+  its age). It will run or be
   rate-limited inside the refill hour; posting again supersedes it. When the
-  head time comes only from the first check on the head (the timeline does not
-  carry the head commit yet), it lands after the push, so any such request in
-  the last hour counts as pending.
+  head time comes from a later timeline event or the first check on the head
+  (the head commit carries no timestamp of its own yet), it lands after the
+  push, so any bare request in the last hour counts as pending.
 - `wait_for_head_grace` — the head is less than 5 minutes old and no CodeRabbit
   run or check has appeared for it. An automatic run may still start, including
   the full re-review a base merge or rebase can draw. The head is no older than

@@ -42,6 +42,7 @@ import {
   fetchRequiredStatusContexts,
   fetchReadinessBases,
   fetchHeadUpdatedAt,
+  headCommitTimestampFromTimeline,
   headUpdatedAtFromTimeline,
   parseArgs,
   readyForReviewAtFromTimeline,
@@ -2053,6 +2054,36 @@ test("does not derive head freshness from commit metadata", () => {
   );
 });
 
+test("distinguishes the head commit's own timestamp from a later surrogate", () => {
+  // The surrogate a later event supplies is an upper bound on the push; the
+  // probe marks such a head so request bounds do not lean on it.
+  const withoutOwnTimestamp = [
+    { event: "committed", sha: "new-head" },
+    { event: "commented", created_at: "2026-05-21T13:23:00Z" },
+  ];
+  assertEqual(
+    headCommitTimestampFromTimeline(withoutOwnTimestamp, "new-head"),
+    null,
+  );
+  assertEqual(
+    headUpdatedAtFromTimeline(withoutOwnTimestamp, "new-head"),
+    "2026-05-21T13:23:00Z",
+  );
+  assertEqual(
+    headCommitTimestampFromTimeline(
+      [
+        {
+          event: "committed",
+          sha: "new-head",
+          created_at: "2026-05-21T13:22:00Z",
+        },
+      ],
+      "new-head",
+    ),
+    "2026-05-21T13:22:00Z",
+  );
+});
+
 test("returns null when the current head is absent from the timeline", () => {
   assertEqual(
     headUpdatedAtFromTimeline(
@@ -3173,6 +3204,20 @@ test("waits out a bare CodeRabbit request posted inside the refill hour", () => 
       observedAt,
     }),
     "a marker for the current head is the requested signal, not a pending wait",
+  );
+  assert(
+    !hasPendingBareCodeRabbitReviewRequest({
+      issueComments: [
+        {
+          ...bareRequest(observedAt - minutesMs(20)),
+          body: `@coderabbitai review\n\n<!-- coderabbit-final-head-review:${"a".repeat(40)} -->`,
+        },
+      ],
+      currentHeadOid,
+      headUpdatedAt: null,
+      observedAt,
+    }),
+    "a marker for another head is stale even without a lower bound",
   );
 
   const pr = {

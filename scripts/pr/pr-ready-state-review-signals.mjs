@@ -64,27 +64,40 @@ function timelineEventTimestamp(item) {
   );
 }
 
-export function headUpdatedAtFromTimeline(timelineItems = [], headSha) {
+function headCommitTimelineEntry(timelineItems = [], headSha) {
   const normalizedHeadSha = String(headSha ?? "").toLowerCase();
-  if (!normalizedHeadSha) return null;
-
-  let headCommitIndex = -1;
-  let headCommitTimestamp = null;
-  for (const [index, item] of timelineItems.entries()) {
+  if (!normalizedHeadSha) return { index: -1, timestamp: null };
+  let index = -1;
+  let timestamp = null;
+  for (const [itemIndex, item] of timelineItems.entries()) {
     if (
       item?.event === "committed" &&
       String(item.sha ?? "").toLowerCase() === normalizedHeadSha
     ) {
-      headCommitIndex = index;
-      headCommitTimestamp = timelineEventTimestamp(item);
+      index = itemIndex;
+      timestamp = timelineEventTimestamp(item);
     }
   }
-  if (headCommitIndex < 0) return null;
-  if (headCommitTimestamp) return headCommitTimestamp;
+  return { index, timestamp };
+}
 
-  for (const item of timelineItems.slice(headCommitIndex + 1)) {
-    const timestamp = timelineEventTimestamp(item);
-    if (timestamp) return timestamp;
+/**
+ * The head commit's own timeline timestamp, or null. Unlike
+ * `headUpdatedAtFromTimeline`, this never substitutes a later event, so a
+ * null here means every other head time is only an upper bound.
+ */
+export function headCommitTimestampFromTimeline(timelineItems = [], headSha) {
+  return headCommitTimelineEntry(timelineItems, headSha).timestamp;
+}
+
+export function headUpdatedAtFromTimeline(timelineItems = [], headSha) {
+  const { index, timestamp } = headCommitTimelineEntry(timelineItems, headSha);
+  if (index < 0) return null;
+  if (timestamp) return timestamp;
+
+  for (const item of timelineItems.slice(index + 1)) {
+    const later = timelineEventTimestamp(item);
+    if (later) return later;
   }
   return null;
 }
@@ -191,23 +204,18 @@ export function countTrustedCodeRabbitReviewRequests(issueComments = []) {
 
 export function hasPendingBareCodeRabbitReviewRequest({
   issueComments = [],
-  currentHeadOid = null,
   headUpdatedAt = null,
   observedAt = Date.now(),
 } = {}) {
-  const currentHead = String(currentHeadOid ?? "").toLowerCase();
-
   return issueComments.some((comment) => {
     if (!isTrustedCodeRabbitReviewRequestComment(comment)) return false;
     const body = String(comment?.body ?? "");
     if (!CODERABBIT_REVIEW_REQUEST_COMMAND.test(body)) return false;
 
-    // A marker for the current head is the "requested" signal, not a pending
-    // wait. A marker for another head belongs to a superseded push.
-    const requestedHead = codeRabbitFinalHeadReviewRequestHead(body);
-    if (requestedHead && requestedHead.toLowerCase() === currentHead) {
-      return false;
-    }
+    // A marked request is never pending: a marker for the current head is the
+    // "requested" signal, and a marker for another head proves the request
+    // belongs to a superseded push, whatever its timestamp.
+    if (codeRabbitFinalHeadReviewRequestHead(body)) return false;
 
     const createdAt = comment?.created_at ?? comment?.createdAt ?? null;
     const timestamp = parseTimestamp(createdAt);

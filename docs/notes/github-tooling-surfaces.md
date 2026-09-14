@@ -332,9 +332,10 @@ polled. Do not foreground-poll and never sleep-poll.
      If the signal is missing or stale, the PR carries fewer than two requests,
      no CodeRabbit check is running on the current head, no trusted top-level
      comment posted at or after the head update and in the last hour asks for
-     a review without the current head's marker (an older request belongs to a
-     superseded head and is stale, not pending; when the head time is known
-     only from the first check on the head, count any such request in the
+     a review with no head marker at all (an older request belongs to a
+     superseded head and is stale, not pending, and so is any request marked
+     for another head; when the head time is known only from a later timeline
+     event or the first check on the head, count any such bare request in the
      last hour), the head is more than five minutes old counting from the PR
      creation or the latest ready-for-review conversion when those are later,
      the head update time is known, and no trusted top-level
