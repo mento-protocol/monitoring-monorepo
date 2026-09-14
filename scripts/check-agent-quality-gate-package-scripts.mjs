@@ -97,6 +97,11 @@ const expectedScripts = {
   "alerts:rules:lint:test": "node scripts/alerts/alert-rules-lint.test.mjs",
   "lockfile:lint": "node scripts/supply-chain/lockfile-lint.mjs",
   "lockfile:lint:test": "node scripts/supply-chain/lockfile-lint.test.mjs",
+  // Runs inside the unconditional production-infra-contract job, which also
+  // writes the shared pnpm cache. An unpinned alias there is redefinable by
+  // the pull request under test.
+  "code-health:deps":
+    "depcruise --config .dependency-cruiser.cjs shared-config ui-dashboard indexer-envio metrics-bridge integration-probes aegis",
   "skew:check": "node scripts/supply-chain/version-skew-check.mjs",
   "skew:check:test": "node scripts/supply-chain/version-skew-check.test.mjs",
   "override:prune-report":

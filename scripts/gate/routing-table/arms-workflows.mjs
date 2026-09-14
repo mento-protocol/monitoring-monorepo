@@ -59,7 +59,7 @@ export const WORKFLOW_ARMS = [
                 reason: "central CI workflow changed",
               },
               {
-                why: "Same shape as the Sentry contract above: this workflow is the input. The suite asserts the unconditional `guardrail-prose` job still exists, carries no `if:`, runs both commands, and reaches the `ci` sentinel without an allowed-skip — plus the mirrored step in `scripts` that keeps neither job as its own only witness. Without this arm a ci.yml-only edit could unwire the guardrail check and the local gate would schedule nothing that notices.",
+                why: "Same shape as the Sentry contract above: this workflow is the input. The suite asserts the unconditional `production-infra-contract` job still hosts both commands, carries no `if:`, and reaches the `ci` sentinel without an allowed-skip — plus the mirrored step in `scripts` that keeps neither job as its own only witness. Without this arm a ci.yml-only edit could unwire the guardrail check and the local gate would schedule nothing that notices.",
                 command:
                   "node scripts/repo-health/check-guardrail-prose.test.mjs",
                 reason: "central CI workflow changed",

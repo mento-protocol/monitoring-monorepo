@@ -310,7 +310,7 @@ test("root CLAUDE.md is pinned and still resolves to AGENTS.md", () => {
 });
 
 const CI_WORKFLOW = path.join(REPO_ROOT, ".github/workflows/ci.yml");
-const GUARDRAIL_JOB = "guardrail-prose";
+const GUARDRAIL_JOB = "production-infra-contract";
 const SUITE_HOST_JOB = "scripts";
 const SUITE_COMMAND = "node scripts/repo-health/check-guardrail-prose.test.mjs";
 const GUARDRAIL_COMMANDS = [
@@ -385,8 +385,8 @@ function stepEnforcementProblems(jobLines, jobId, command) {
 /**
  * The second host that keeps the wiring assertion from dying with its subject.
  *
- * The assertion below runs inside `guardrail-prose`, so on its own it is
- * self-referential: the one edit that deletes that job deletes its only witness
+ * The assertion below runs inside `production-infra-contract`, so on its own it
+ * is self-referential: an edit that unwires that job removes its only witness
  * and leaves the required `ci` sentinel green over nothing. The path-gated
  * `scripts` job runs the same suite for that reason. Its `rootScripts` filter
  * includes `.github/workflows/**`, so every edit able to remove the
@@ -485,15 +485,18 @@ test("the wiring assertion reds on each way that wiring could rot", () => {
     [
       "the job is renamed",
       (text) =>
-        text.replace("\n  guardrail-prose:\n", "\n  moved-elsewhere:\n"),
-      /defines no `guardrail-prose` job/,
+        text.replace(
+          "\n  production-infra-contract:\n",
+          "\n  moved-elsewhere:\n",
+        ),
+      /defines no `production-infra-contract` job/,
     ],
     [
       "the job gains a paths filter",
       (text) =>
         text.replace(
-          "  guardrail-prose:\n    name: Guardrail prose pins\n",
-          "  guardrail-prose:\n    name: Guardrail prose pins\n    if: needs.changes.outputs.rootScripts == 'true'\n",
+          "  production-infra-contract:\n    name: Production infrastructure contract\n",
+          "  production-infra-contract:\n    name: Production infrastructure contract\n    if: needs.changes.outputs.rootScripts == 'true'\n",
         ),
       /carries a job-level `if:`/,
     ],
@@ -507,7 +510,7 @@ test("the wiring assertion reds on each way that wiring could rot", () => {
           "      - name: Guardrail prose pins\n        run: node scripts/repo-health/check-guardrail-prose.mjs\n      - name: Guardrail prose pin suite\n        run: node scripts/repo-health/check-guardrail-prose.test.mjs\n",
           "      - name: Guardrail prose pins\n        run: node scripts/repo-health/check-guardrail-prose.mjs\n",
         ),
-      /the `guardrail-prose` job no longer runs `node scripts\/repo-health\/check-guardrail-prose\.test\.mjs`/,
+      /the `production-infra-contract` job no longer runs `node scripts\/repo-health\/check-guardrail-prose\.test\.mjs`/,
     ],
     [
       "the second host stops running the suite",
@@ -551,22 +554,22 @@ test("the wiring assertion reds on each way that wiring could rot", () => {
       "the whole job is made advisory with continue-on-error",
       (text) =>
         text.replace(
-          "  guardrail-prose:\n    name: Guardrail prose pins\n",
-          "  guardrail-prose:\n    name: Guardrail prose pins\n    continue-on-error: true\n",
+          "  production-infra-contract:\n    name: Production infrastructure contract\n",
+          "  production-infra-contract:\n    name: Production infrastructure contract\n    continue-on-error: true\n",
         ),
       /job sets `continue-on-error`/,
     ],
     [
       "the sentinel stops needing it",
-      (text) => text.replace("\n        guardrail-prose,", ""),
-      /does not need `guardrail-prose`/,
+      (text) => text.replace("\n        production-infra-contract,", ""),
+      /does not need `production-infra-contract`/,
     ],
     [
       "the sentinel is allowed to skip it",
       (text) =>
         text.replace(
           "allowed-skips: shared,",
-          "allowed-skips: guardrail-prose,shared,",
+          "allowed-skips: production-infra-contract,shared,",
         ),
       /allowed-skips/,
     ],

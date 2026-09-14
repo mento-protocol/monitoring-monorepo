@@ -554,11 +554,12 @@ test("freshness, CI routes, and Turbo inputs pin the external family source", ()
 
 test("indexer CI runs the parity test that enforces explicit current owners", () => {
   const ci = read("/.github/workflows/ci.yml");
-  const indexerJob = /\n {2}indexer:\n([\s\S]*?)\n {2}bridge:\n/.exec(ci)?.[1];
-  assert.ok(indexerJob, "ci.yml has no bounded indexer job");
+  // prettier-ignore
+  const indexerJob = /\n {2}indexer-checks:\n([\s\S]*?)\n {2}bridge:\n/.exec(ci)?.[1];
+  assert.ok(indexerJob, "ci.yml has no bounded indexer-checks job");
   assert.match(
     indexerJob,
     /^\s+run:\s+node --test scripts\/gate\/routing-table\/indexer-invariant-parity\.test\.mjs\s*$/m,
-    "the indexer job does not enforce the routing inventory",
+    "the indexer-checks job does not enforce the routing inventory",
   );
 });
