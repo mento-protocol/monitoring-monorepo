@@ -17,9 +17,11 @@
  */
 import { strict as assert } from "assert";
 import type {
+  InterestRateBracket,
   LiquidationEvent,
   LiquityCollateral,
   LiquityInstance,
+  PendingBatchMembershipOperation,
   RedemptionEvent,
   StabilityPoolLossAccumulator,
   StabilityPoolLossScale,
@@ -30,8 +32,12 @@ import {
   LIQUITY_MARKETS,
   makeCollateralId,
 } from "../src/handlers/liquity/config";
+import { pendingTroveKey } from "../src/handlers/liquity/keys";
 import { OP } from "../src/handlers/liquity/operations";
-import { makeTroveId } from "../src/handlers/liquity/troves";
+import {
+  makeInterestRateBracketId,
+  makeTroveId,
+} from "../src/handlers/liquity/troves";
 import {
   indexerTestHelpers,
   processMockEvents,
@@ -41,9 +47,11 @@ import {
 } from "./helpers/indexerTestHarness.js";
 
 type LifecycleMockDb = MockDbWith<{
+  InterestRateBracket: EntityReader<InterestRateBracket>;
   LiquityCollateral: WritableEntity<LiquityCollateral>;
   LiquityInstance: WritableEntity<LiquityInstance>;
   Trove: WritableEntity<Trove>;
+  PendingBatchMembershipOperation: EntityReader<PendingBatchMembershipOperation>;
   LiquidationEvent: EntityReader<LiquidationEvent>;
   RedemptionEvent: EntityReader<RedemptionEvent>;
   StabilityPoolLossAccumulator: WritableEntity<StabilityPoolLossAccumulator>;
@@ -140,24 +148,25 @@ describe("Liquity trove lifecycle — harness-driven multi-entity consistency", 
     const troveId = 1n;
     const troveEntityId = makeTroveId(collateralId, "0x1");
 
-    // OPEN: TroveOperation(OPEN_TROVE) + TroveUpdated(debt=1000, coll=500) in
-    // one tx — matches the real on-chain emission order.
+    // OPEN: TroveUpdated(debt=1000, coll=500) + TroveOperation(OPEN_TROVE) in
+    // one tx — the real on-chain emission order (`onOpenTrove` emits
+    // TroveUpdated first).
     mockDb = await processMockEvents({
       mockDb,
       events: [
-        troveOperationEvent({
-          troveId,
-          operation: OP.OPEN_TROVE,
-          blockNumber: 100,
-          blockTimestamp: 1_000,
-          logIndex: 1,
-          txHash: "0xopen",
-        }),
         troveUpdatedEvent({
           troveId,
           debt: 1_000n * 10n ** 18n,
           coll: 500n * 10n ** 18n,
           stake: 500n * 10n ** 18n,
+          blockNumber: 100,
+          blockTimestamp: 1_000,
+          logIndex: 1,
+          txHash: "0xopen",
+        }),
+        troveOperationEvent({
+          troveId,
+          operation: OP.OPEN_TROVE,
           blockNumber: 100,
           blockTimestamp: 1_000,
           logIndex: 2,
@@ -174,25 +183,26 @@ describe("Liquity trove lifecycle — harness-driven multi-entity consistency", 
     assert.equal(instance?.activeTroveCount, 1);
     assert.equal(instance?.troveOpenedCountBucket, 1);
 
-    // ADJUST: borrow more — debt 1000 -> 1500, coll 500 -> 600.
+    // ADJUST: borrow more — debt 1000 -> 1500, coll 500 -> 600, in the same
+    // TroveUpdated-first order (`onAdjustTrove`).
     mockDb = await processMockEvents({
       mockDb,
       events: [
-        troveOperationEvent({
-          troveId,
-          operation: OP.ADJUST_TROVE,
-          debtChangeFromOperation: 500n * 10n ** 18n,
-          collChangeFromOperation: 100n * 10n ** 18n,
-          blockNumber: 101,
-          blockTimestamp: 1_100,
-          logIndex: 1,
-          txHash: "0xadjust",
-        }),
         troveUpdatedEvent({
           troveId,
           debt: 1_500n * 10n ** 18n,
           coll: 600n * 10n ** 18n,
           stake: 600n * 10n ** 18n,
+          blockNumber: 101,
+          blockTimestamp: 1_100,
+          logIndex: 1,
+          txHash: "0xadjust",
+        }),
+        troveOperationEvent({
+          troveId,
+          operation: OP.ADJUST_TROVE,
+          debtChangeFromOperation: 500n * 10n ** 18n,
+          collChangeFromOperation: 100n * 10n ** 18n,
           blockNumber: 101,
           blockTimestamp: 1_100,
           logIndex: 2,
@@ -608,6 +618,345 @@ describe("Liquity trove lifecycle — harness-driven multi-entity consistency", 
       instance?.rebalanceRedemptionDebtCum,
       100n * 10n ** 18n,
       "rebalance subset excludes the user redemption's debt",
+    );
+  });
+});
+
+/**
+ * Issue #2097 — `REMOVE_FROM_BATCH` driven in the real `onRemoveFromBatch`
+ * emission order: `TroveUpdated` (full individual debt and rate), then
+ * `TroveOperation(9)`, then the exit `BatchUpdated`, with no
+ * `BatchedTroveUpdated`. `TroveUpdated` runs before `TroveOperation(9)` stages
+ * the membership row, so the operation must own the batch exit.
+ */
+describe("Liquity batch exit — real emission order", () => {
+  type Tx = { blockNumber: number; blockTimestamp: number; txHash: string };
+  const D18 = 10n ** 18n;
+  const troveId = 30n;
+  const troveEntityId = makeTroveId(collateralId, "0x1e");
+  const oldManager = "0x00000000000000000000000000000000000000b1";
+  const newManager = "0x00000000000000000000000000000000000000b2";
+  const individualRate = 5n * 10n ** 16n;
+  const oldBatchRate = 6n * 10n ** 16n;
+  const exitRate = 7n * 10n ** 16n;
+  const newBatchRate = 8n * 10n ** 16n;
+  const openTx: Tx = {
+    blockNumber: 500,
+    blockTimestamp: 5_000,
+    txHash: "0xopenBatchExit",
+  };
+  const joinTx: Tx = {
+    blockNumber: 501,
+    blockTimestamp: 5_100,
+    txHash: "0xjoinBatchExit",
+  };
+  const exitTx: Tx = {
+    blockNumber: 502,
+    blockTimestamp: 5_200,
+    txHash: "0xexitBatch",
+  };
+
+  function eventData(tx: Tx, logIndex: number) {
+    return {
+      chainId: market.chainId,
+      srcAddress: market.troveManager,
+      logIndex,
+      block: { number: tx.blockNumber, timestamp: tx.blockTimestamp },
+      transaction: { hash: tx.txHash },
+    };
+  }
+
+  function batchedTroveUpdatedEvent(
+    tx: Tx,
+    logIndex: number,
+    batchManager: string,
+  ) {
+    return LiquityTroveManager.BatchedTroveUpdated.createMockEvent({
+      _troveId: troveId,
+      _interestBatchManager: batchManager,
+      _batchDebtShares: 1_000n * D18,
+      _coll: 500n * D18,
+      _stake: 500n * D18,
+      _snapshotOfTotalCollRedist: 0n,
+      _snapshotOfTotalDebtRedist: 0n,
+      mockEventData: eventData(tx, logIndex),
+    });
+  }
+
+  /** One-trove batch: total debt shares track batch debt 1:1. */
+  function batchUpdatedEvent(
+    tx: Tx,
+    logIndex: number,
+    args: {
+      batchManager: string;
+      debt: bigint;
+      coll: bigint;
+      annualInterestRate: bigint;
+    },
+  ) {
+    return LiquityTroveManager.BatchUpdated.createMockEvent({
+      _interestBatchManager: args.batchManager,
+      _operation: 0n,
+      _debt: args.debt,
+      _coll: args.coll,
+      _annualInterestRate: args.annualInterestRate,
+      _annualManagementFee: 0n,
+      _totalDebtShares: args.debt,
+      _debtIncreaseFromUpfrontFee: 0n,
+      mockEventData: eventData(tx, logIndex),
+    });
+  }
+
+  function removeFromBatchEvents(tx: Tx, args: { debt: bigint; rate: bigint }) {
+    return [
+      troveUpdatedEvent({
+        ...tx,
+        troveId,
+        debt: args.debt,
+        coll: 500n * D18,
+        stake: 500n * D18,
+        annualInterestRate: args.rate,
+        logIndex: 1,
+      }),
+      troveOperationEvent({
+        ...tx,
+        troveId,
+        operation: OP.REMOVE_FROM_BATCH,
+        annualInterestRate: args.rate,
+        logIndex: 2,
+      }),
+      batchUpdatedEvent(tx, 3, {
+        batchManager: oldManager,
+        debt: 0n,
+        coll: 0n,
+        annualInterestRate: oldBatchRate,
+      }),
+    ];
+  }
+
+  function bracketDebt(mockDb: LifecycleMockDb, rate: bigint): bigint {
+    return (
+      mockDb.entities.InterestRateBracket.get(
+        makeInterestRateBracketId(collateralId, rate),
+      )?.totalDebt ?? 0n
+    );
+  }
+
+  async function openTrove(): Promise<LifecycleMockDb> {
+    const mockDb = MockDb.createMockDb();
+    seedLoadedCollateral(mockDb);
+    return processMockEvents({
+      mockDb,
+      events: [
+        troveUpdatedEvent({
+          ...openTx,
+          troveId,
+          debt: 1_000n * D18,
+          coll: 500n * D18,
+          stake: 500n * D18,
+          annualInterestRate: individualRate,
+          logIndex: 1,
+        }),
+        troveOperationEvent({
+          ...openTx,
+          troveId,
+          operation: OP.OPEN_TROVE,
+          annualInterestRate: individualRate,
+          logIndex: 2,
+        }),
+      ],
+    });
+  }
+
+  /** Open an individual trove, then join `oldManager`'s batch in the real
+   * `onSetInterestBatchManager` order: BatchedTroveUpdated →
+   * TroveOperation(8) → BatchUpdated. */
+  async function openAndJoinBatch(): Promise<LifecycleMockDb> {
+    const mockDb = await processMockEvents({
+      mockDb: await openTrove(),
+      events: [
+        batchedTroveUpdatedEvent(joinTx, 1, oldManager),
+        troveOperationEvent({
+          ...joinTx,
+          troveId,
+          operation: OP.SET_INTEREST_BATCH_MANAGER,
+          annualInterestRate: oldBatchRate,
+          logIndex: 2,
+        }),
+        batchUpdatedEvent(joinTx, 3, {
+          batchManager: oldManager,
+          debt: 1_000n * D18,
+          coll: 500n * D18,
+          annualInterestRate: oldBatchRate,
+        }),
+      ],
+    });
+    assert.equal(
+      mockDb.entities.Trove.get(troveEntityId)?.interestBatchId,
+      `${collateralId}-${oldManager}`,
+      "precondition: the trove is batch-managed",
+    );
+    assert.equal(
+      bracketDebt(mockDb, individualRate),
+      0n,
+      "precondition: joining moved the debt out of the individual bracket",
+    );
+    assert.equal(
+      bracketDebt(mockDb, oldBatchRate),
+      1_000n * D18,
+      "precondition: the batch bracket holds the debt",
+    );
+    return mockDb;
+  }
+
+  it("TroveOperation(9) clears batch membership and moves the individual debt into its rate bracket", async () => {
+    const mockDb = await processMockEvents({
+      mockDb: await openAndJoinBatch(),
+      events: removeFromBatchEvents(exitTx, {
+        debt: 1_050n * D18,
+        rate: exitRate,
+      }),
+    });
+
+    const trove = mockDb.entities.Trove.get(troveEntityId);
+    assert.equal(
+      trove?.interestBatchId,
+      undefined,
+      "the trove is individual after the whole tx, including the exit BatchUpdated",
+    );
+    assert.equal(trove?.batchDebtShares, 0n);
+    assert.equal(trove?.interestRate, exitRate);
+    assert.equal(trove?.debt, 1_050n * D18);
+    assert.equal(
+      bracketDebt(mockDb, exitRate),
+      1_050n * D18,
+      "the individual-rate bracket holds the trove's full debt",
+    );
+    assert.equal(
+      bracketDebt(mockDb, oldBatchRate),
+      0n,
+      "the exit BatchUpdated removes the batch debt",
+    );
+    assert.equal(
+      mockDb.entities.PendingBatchMembershipOperation.get(
+        pendingTroveKey(market.chainId, exitTx.txHash, collateralId, "0x1e"),
+      ),
+      undefined,
+      "the exit BatchUpdated consumes the membership row",
+    );
+    assert.equal(
+      mockDb.entities.LiquityInstance.get(collateralId)?.systemDebt,
+      1_050n * D18,
+    );
+  });
+
+  it("a trove that left its batch is individual for later operations", async () => {
+    let mockDb = await processMockEvents({
+      mockDb: await openAndJoinBatch(),
+      events: removeFromBatchEvents(exitTx, {
+        debt: 1_050n * D18,
+        rate: exitRate,
+      }),
+    });
+    const adjustTx: Tx = {
+      blockNumber: 503,
+      blockTimestamp: 5_300,
+      txHash: "0xadjustAfterExit",
+    };
+    mockDb = await processMockEvents({
+      mockDb,
+      events: [
+        troveUpdatedEvent({
+          ...adjustTx,
+          troveId,
+          debt: 1_200n * D18,
+          coll: 500n * D18,
+          stake: 500n * D18,
+          annualInterestRate: exitRate,
+          logIndex: 1,
+        }),
+        troveOperationEvent({
+          ...adjustTx,
+          troveId,
+          operation: OP.ADJUST_TROVE,
+          debtChangeFromOperation: 150n * D18,
+          annualInterestRate: exitRate,
+          logIndex: 2,
+        }),
+      ],
+    });
+
+    assert.equal(
+      mockDb.entities.Trove.get(troveEntityId)?.interestBatchId,
+      undefined,
+    );
+    assert.equal(
+      bracketDebt(mockDb, exitRate),
+      1_200n * D18,
+      "the adjust replaces the trove's bracket debt exactly once",
+    );
+    assert.equal(
+      mockDb.entities.LiquityInstance.get(collateralId)?.systemDebt,
+      1_200n * D18,
+    );
+  });
+
+  it("TroveOperation(9) on a trove already outside a batch does not count its debt twice", async () => {
+    const mockDb = await processMockEvents({
+      mockDb: await openTrove(),
+      events: removeFromBatchEvents(exitTx, {
+        debt: 1_050n * D18,
+        rate: exitRate,
+      }),
+    });
+
+    assert.equal(
+      bracketDebt(mockDb, exitRate),
+      1_050n * D18,
+      "TroveUpdated already moved the individual debt; the exit adds nothing",
+    );
+    assert.equal(bracketDebt(mockDb, individualRate), 0n);
+  });
+
+  it("switchBatchManager ends in the new batch without double-counting the transient individual debt", async () => {
+    // `BorrowerOperations.switchBatchManager` runs `removeFromBatch` at the
+    // old batch's rate, then `setInterestBatchManager`, in one tx.
+    const mockDb = await processMockEvents({
+      mockDb: await openAndJoinBatch(),
+      events: [
+        ...removeFromBatchEvents(exitTx, {
+          debt: 1_000n * D18,
+          rate: oldBatchRate,
+        }),
+        batchedTroveUpdatedEvent(exitTx, 4, newManager),
+        troveOperationEvent({
+          ...exitTx,
+          troveId,
+          operation: OP.SET_INTEREST_BATCH_MANAGER,
+          annualInterestRate: newBatchRate,
+          logIndex: 5,
+        }),
+        batchUpdatedEvent(exitTx, 6, {
+          batchManager: newManager,
+          debt: 1_000n * D18,
+          coll: 500n * D18,
+          annualInterestRate: newBatchRate,
+        }),
+      ],
+    });
+
+    const trove = mockDb.entities.Trove.get(troveEntityId);
+    assert.equal(trove?.interestBatchId, `${collateralId}-${newManager}`);
+    assert.equal(trove?.batchDebtShares, 1_000n * D18);
+    assert.equal(
+      bracketDebt(mockDb, oldBatchRate),
+      0n,
+      "the old rate bracket keeps neither the batch debt nor the transient individual debt",
+    );
+    assert.equal(bracketDebt(mockDb, newBatchRate), 1_000n * D18);
+    assert.equal(
+      mockDb.entities.LiquityInstance.get(collateralId)?.systemDebt,
+      1_000n * D18,
     );
   });
 });

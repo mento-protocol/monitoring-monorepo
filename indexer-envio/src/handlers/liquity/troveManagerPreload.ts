@@ -120,6 +120,18 @@ export async function preloadTroveOperation(
       interestBatchId: trove?.interestBatchId,
       timestamp: args.blockTimestamp,
     });
+    if (args.operation === OP.REMOVE_FROM_BATCH) {
+      // Warm the individual-rate bracket `exitInterestBatch` moves the
+      // trove's debt into during processing.
+      await preloadInterestRateBracketDebt(context, {
+        collateralId: args.collateralId,
+        prevRate: 0n,
+        nextRate: args.annualInterestRate,
+        prevDebt: 0n,
+        nextDebt: trove?.debt ?? 0n,
+        untilTimestamp: args.blockTimestamp,
+      });
+    }
   }
 }
 
