@@ -11,7 +11,7 @@ review_interval_days: 90
 garden_lane: adrs-architecture
 ---
 
-# ADR 0099 — Monthly CI reliability report is a repository-owned, issue-only scheduler
+# ADR 0100 — Monthly CI reliability report is a repository-owned, issue-only scheduler
 
 **Status:** Accepted (Sep 2026), in force.
 **Scope:** ci/process
