@@ -73,8 +73,9 @@ this source tree. An orphaned pre-cutover coordinator still holds a draining req
 
 Cutover is `d4d7e15eb5bc2b6d858ed2a788d7fa04bd2c21fd` (#2237).
 The retirement PR and its merge record bind the retirement commit; record that
-exact merge SHA in #2128 before closing it. The pre-retirement source is
-`7623f5282c166dbc2c397f16169835427b3c3575`.
+exact merge SHA in #2128 before closing it. The rollback rehearsal used
+pre-retirement source `7623f5282c166dbc2c397f16169835427b3c3575`. The final
+manifests also include main integration `e95372d0ef9542db7147497cbf1952e543dd9380`.
 
 1. Stop merges through the normal human repository process.
 2. Read ruleset `13494367`. Keep its strict current-base required checks. If

@@ -549,8 +549,7 @@ Then spawn one worker subagent per issue. Give each a brief containing:
   `.node-version`, package manifest, lockfile, pnpm configuration, or patch
   change before the first package-manager command. Run the selected direct
   commands in the order that step defines. Record every result as `passed`,
-  `failed`, or `not run` with its reason. The legacy quality gate is diagnostic
-  and is not the normal worker path.
+  `failed`, or `not run` with its reason.
 
   Start a long author check with the runtime's background mechanism and poll it
   to completion inside the same turn. Judge the command by its exit status,

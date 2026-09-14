@@ -1228,8 +1228,7 @@ jobs:
         #   that trust safe by rejecting a
         #   drifted command (e.g. an appended `&& <command>`) before it executes.
         #   check-sentry-suites-in-ci.test.mjs pins this ordering, because the
-        #   `sentry:*` aliases the optional legacy diagnostic trusts are pinned
-        #   by the same validator.
+        #   direct `sentry:*` author-check aliases use the same validator.
         run: node scripts/check-agent-quality-gate-package-scripts.mjs
       # GitHub resolves $/ from the running commit; actionlint lacks support.
       # trunk-ignore(actionlint/action)
@@ -1479,14 +1478,13 @@ jobs:
   docs-checks:
     name: Documentation corpus checks
     needs: changes
-    # ADR 0072. The nine checks below are the ones in the `scripts` job above
+    # ADR 0072. The eight checks below are the ones in the `scripts` job above
     # whose outcome a Markdown-only diff can change. Six read the live tracked
     # Markdown tree through `git ls-files`; two are unit suites that look like
     # fixture tests but assert against the real tree as well
     # (agent:context-budget:test pins the ten AGENTS.md routes,
     # docs:navigation-eval:test picks the cheapest route by live document
-    # bytes); and the gate routing-table suite asserts that the 23 Markdown
-    # paths its table names still exist.
+    # bytes).
     # Three suites stay in `scripts` because they cannot be affected by a
     # Markdown edit at all: docs:audit:test, docs:garden:test and
     # check-agent-context.test.mjs build their fixtures in a temporary
@@ -1665,8 +1663,7 @@ jobs:
         # The gate above proves the suites ran; it cannot prove its own job still
         # exists, is unconditional, and still reaches the required `ci` context —
         # so this pins that, re-proves the one suite the gate does not run
-        # (sentry-provider-contract, via `pnpm tf:test`), and holds the optional
-        # diagnostic's `sentry:*` allowlist to its pins. It ran in the path-gated
+        # (sentry-provider-contract, via `pnpm tf:test`). It ran in the path-gated
         # `scripts` job until this PR, where a dashboard-only, indexer-only or
         # non-Markdown doc-asset diff skipped it entirely.
         run: node scripts/sentry/ci-wiring/check-sentry-suites-in-ci.test.mjs

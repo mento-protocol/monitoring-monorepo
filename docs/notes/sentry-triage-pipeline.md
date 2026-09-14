@@ -2053,8 +2053,8 @@ by path, e.g. `node scripts/sentry/triage/sentry-triage-ingest.test.mjs` or
 `node --test scripts/sentry/broker/sentry-mcp-broker.test.mjs`.
 
 The `pnpm sentry:*:test` aliases run these suites for direct author checks. The
-required CI Sentry suite gate is the backstop. The pin validator also keeps the
-aliases used by the optional legacy gate safe.
+required CI Sentry suite gate is the backstop. The package-script validator
+rejects changes to these trusted aliases before installation.
 
 ```bash
 # Read-only previews that require local credentials:

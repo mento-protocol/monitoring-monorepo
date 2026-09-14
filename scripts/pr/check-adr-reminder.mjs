@@ -195,11 +195,9 @@ function existsAtBase(base, path) {
  * Collect the diff facts the pure detector needs.
  *
  * Added files come from the base→head diff (committed + staged additions). When
- * `includeUntracked` is set — which the quality gate passes so this checker sees
- * exactly the gate's changed-path set — untracked new files are added too, so a
- * not-yet-committed new package/workflow is not invisible during a local gate
- * run. Standalone runs leave it off, so an unrelated untracked scratch file
- * never nags.
+ * `includeUntracked` is set, untracked new files are added too. Callers can
+ * include a new package or workflow before committing it. Standalone runs
+ * leave it off, so unrelated untracked scratch files do not produce reminders.
  */
 export function collectGitState(
   base,

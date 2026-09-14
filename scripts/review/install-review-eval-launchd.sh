@@ -7,11 +7,8 @@ fail() {
   exit 1
 }
 
-# This installer is operator-run only. It is never a mapped gate command. The
-# Darwin broker preflight allowlists it on exactly that claim: a launchctl
-# client that cannot execute during a gate run cannot create a process that the
-# gate's Darwin lineage tracking would miss. Enforce the claim here, before any
-# launchctl call and before any file this installer would create.
+# This installer is operator-run only. Preserve the historical gate-execution
+# refusal before any launchctl call or file creation for old operator shells.
 #
 # Retain refusal of inherited legacy markers for old operator shells.
 # This installer never owns or clears another process's state.
