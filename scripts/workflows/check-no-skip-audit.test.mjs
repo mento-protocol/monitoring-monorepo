@@ -20,6 +20,7 @@ import {
 } from "./check-no-skip-audit.mjs";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const FILES = [
+  ".github/workflows/m6-audit-recovery.yml",
   ".github/workflows/no-skip-audit.yml",
   ".github/workflows/ci.yml",
   ".github/actions/pnpm-install/action.yml",
@@ -403,7 +404,6 @@ test("audit result semantics reject skips, misses, failures, and extras", () => 
     /unexpected job: rogue/u,
   );
 });
-
 test("the M4 checker and mutation suite stay within phase budgets", () => {
   const implementationLines =
     readFileSync(
