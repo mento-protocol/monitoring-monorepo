@@ -165,3 +165,73 @@ export function claudeStreamEnvelope(
     duration_ms: finiteNumber(result.duration_ms),
   };
 }
+
+/**
+ * The same envelope, read from one `codex exec --json` session.
+ *
+ * A codex verifier is the probe lane's second substitution, and the scorer,
+ * the judge and the evidence validator all read the shape above, so this
+ * produces that shape rather than a second one. The mapping is:
+ *
+ * - an agent message is `item.completed` carrying an `agent_message` item,
+ *   which is the only event that holds text the reviewer wrote;
+ * - the scored text is the same message-aware session tail `claudeStreamEnvelope`
+ *   scores, so a codex cell and a claude cell are judged on the same budget;
+ * - `lastMessage` is what `codex exec -o FILE` wrote. It is the final agent
+ *   message, and it is preferred for `final_result` because a session whose
+ *   last event was lost still recorded its answer there;
+ * - `num_turns` counts the `turn.completed` events;
+ * - a session with no completed turn, or one that reports `turn.failed` or an
+ *   `error` event, is an error.
+ *
+ * `total_cost_usd` is 0 because the CLI reports tokens and no price. A probe
+ * under a codex verifier is therefore unmetered, and the cell says so with
+ * `cost_metered: false` rather than implying the call was free.
+ */
+export function codexStreamEnvelope(
+  raw,
+  { label = "codex", lastMessage = "", budget } = {},
+) {
+  const text = typeof raw === "string" ? raw : String(raw ?? "");
+  const messages = [];
+  let turns = 0;
+  let failed = false;
+  for (const line of text.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("{")) continue;
+    let event;
+    try {
+      event = JSON.parse(trimmed);
+    } catch (error) {
+      throw new Error(
+        `${label} wrote a malformed stream event: ${error.message}`,
+        { cause: error },
+      );
+    }
+    if (!event || typeof event !== "object" || Array.isArray(event)) continue;
+    if (event.type === "turn.completed") turns += 1;
+    if (event.type === "turn.failed" || event.type === "error") failed = true;
+    if (event.type !== "item.completed") continue;
+    if (event.item?.type !== "agent_message") continue;
+    const message = String(event.item?.text ?? "").trim();
+    if (message) messages.push(message);
+  }
+  const tail = String(lastMessage ?? "").trim();
+  // The file is the authority on the final message: an agent message the
+  // stream lost would otherwise drop the answer the cell paid for.
+  if (tail && messages.at(-1) !== tail) messages.push(tail);
+  const session = sessionText(messages, budget ?? SESSION_TEXT_BUDGET_CHARS);
+  return {
+    result: session.text,
+    final_result: tail || (messages.at(-1) ?? ""),
+    assistant_messages: messages.length,
+    assistant_messages_kept: session.kept,
+    stream_chars: text.length,
+    total_cost_usd: 0,
+    cost_metered: false,
+    num_turns: turns > 0 ? turns : null,
+    is_error: failed || turns === 0 || messages.length === 0,
+    session_id: null,
+    duration_ms: null,
+  };
+}
