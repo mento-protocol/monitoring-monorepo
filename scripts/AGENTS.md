@@ -106,11 +106,11 @@ Move each pin class together.
   `repo-health/dependency-cruiser-root-contract.test.mjs`, and the retained
   graph. Moves update ADR 0064 and all pins.
   The CI test imports `workflows/collect-m6-canary.test.mjs` for temporary M6
-  collection coverage. The no-skip admission excludes
+  coverage. The no-skip admission excludes
   `workflows/collect-m6-canary.mjs`, its workflow, and the CI contract entry
   points from candidate changes (ADR 0088).
   `workflows/m6-audit-recovery.test.mjs` pins `m6-audit-recovery.yml`; the CI
-  contract imports it for ADR 0098's two tuples. `ci.yml` also pins
+  contract imports it for ADR 0098's two tuples. `ci.yml` pins
   `report-ci-reliability{,.test}.mjs` (ADR 0100).
 - **Terraform stack registry.** `terraform.stacks.json` `changedPathPatterns`
   pins exact `scripts/` paths per stack. The broad workflow admission boundary
@@ -120,7 +120,7 @@ Move each pin class together.
   the base (issue 1904; ADR 0064).
 - **PR validation boundary pins.** Move
   `workflows/check-pr-validation-boundary{,.test}.mjs` with `ci.yml` and
-  `trunk.yml`. ADR 0078 defines the boundary.
+  `trunk.yml`. ADR 0078 defines it.
 - **Production identity pins.** In `production-infra-identity-contract/`, align
   `workflow-inventory.mjs`, `workflow.test.mjs`,
   `dependabot-auto-merge.test.mjs`, and `index.test.mjs` with their
@@ -160,7 +160,7 @@ in one PR.
   mutation.
 - Run `pnpm lint:scripts` for new Node root scripts and `bash -n` for new shell
   scripts. Add focused tests beyond lint and syntax. Add required CI wiring if
-  no fixed job owns them.
+  unowned.
 - The file-size watchlist replaces ESLint `max-lines` here, excluding tests.
   No exemptions remain:
   [ADR 0065](../docs/adr/0065-scripts-file-size-watchlist-scope.md).

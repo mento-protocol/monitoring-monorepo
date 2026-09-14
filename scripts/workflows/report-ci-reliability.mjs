@@ -195,19 +195,23 @@ function jobDuration(job) {
 }
 
 /**
- * Cancelled/failed jobs whose wall duration is at/above their own cap — a job
- * cannot exceed `timeout-minutes` except by being killed at it, so this is an
- * exact classifier, not a heuristic band, GIVEN the cap it is compared
- * against. `caps` is read from the current checkout, not from the workflow
- * revision each sampled run actually executed under, so a `timeout-minutes`
- * edit inside the 30-day window can misclassify the runs on the other side of
- * that edit. Accepted for an advisory, human-reviewed report: resolving each
- * run's own historical cap would cost one more API call per sampled run.
+ * Cancelled/timed-out/failed jobs whose wall duration is at/above their own
+ * cap — a job cannot exceed `timeout-minutes` except by being killed at it,
+ * so this is an exact classifier, not a heuristic band, GIVEN the cap it is
+ * compared against. GitHub Actions reports a runner-enforced timeout kill as
+ * either `cancelled` or `timed_out` depending on where in the job it lands
+ * (the Slack failure notifier in this diff treats both as timeout signals),
+ * so both conclusions are included here. `caps` is read from the current
+ * checkout, not from the workflow revision each sampled run actually
+ * executed under, so a `timeout-minutes` edit inside the 30-day window can
+ * misclassify the runs on the other side of that edit. Accepted for an
+ * advisory, human-reviewed report: resolving each run's own historical cap
+ * would cost one more API call per sampled run.
  */
 // prettier-ignore
 export function capKills(jobs, caps) {
   return jobs
-    .filter((job) => ["cancelled", "failure"].includes(job.conclusion) && job.started_at && job.completed_at)
+    .filter((job) => ["cancelled", "failure", "timed_out"].includes(job.conclusion) && job.started_at && job.completed_at)
     .map((job) => ({ ...jobDuration(job), cap: capFor(caps, job.workflow, job.name) }))
     .filter((row) => row.durationMinutes >= row.cap);
 }
@@ -224,6 +228,10 @@ export function nearCapJobs(jobs, caps, ratio = CAP_NEAR_RATIO) {
 /**
  * Per-step failing-run rate, counted by DISTINCT RUN (not job record), so one
  * outage that fails many jobs in one run counts once, not once per job.
+ * Keyed by job name + step name (not step name alone): `ci.yml` reuses step
+ * names such as "Lint" across several independently-owned jobs, and a
+ * step-name-only key would merge their failures into one ambiguous row that
+ * cannot name the owner the CI health budget requires.
  */
 // prettier-ignore
 export function failingStepRunRates(jobs, { workflow }) {
@@ -235,7 +243,7 @@ export function failingStepRunRates(jobs, { workflow }) {
     for (const step of job.steps ?? []) {
       if (step.conclusion !== "failure") continue;
       const set = runFailingSteps.get(job.run_id) ?? new Set();
-      set.add(step.name);
+      set.add(`${job.name} › ${step.name}`);
       runFailingSteps.set(job.run_id, set);
     }
   }
@@ -294,7 +302,7 @@ export function formatMarkdownReport(report) {
     "",
     "### CI failing-step rate by distinct run (sampled, top 10)",
     "",
-    table(["| Step | Runs | Rate |", "| --- | ---: | ---: |"], report.failingSteps.slice(0, 10).map((r) => `| ${r.step} | ${r.runs} | ${pct(r.rate)} |`), "No failing steps in the sample."),
+    table(["| Job › step | Runs | Rate |", "| --- | ---: | ---: |"], report.failingSteps.slice(0, 10).map((r) => `| ${r.step} | ${r.runs} | ${pct(r.rate)} |`), "No failing steps in the sample."),
     "",
   ].join("\n");
 }

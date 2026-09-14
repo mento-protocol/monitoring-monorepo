@@ -310,6 +310,22 @@ test("capKills does not misclassify a supersession cancellation well under the c
   assert.deepEqual(capKills(jobs, caps), []);
 });
 
+test("capKills includes timed_out jobs, which GitHub Actions reports separately from cancelled", () => {
+  const caps = new Map([["CI::Version skew", 5]]);
+  const jobs = [
+    {
+      workflow: "CI",
+      name: "Version skew",
+      conclusion: "timed_out",
+      started_at: "2026-01-01T00:00:00Z",
+      completed_at: "2026-01-01T00:05:12Z",
+    },
+  ];
+  const rows = capKills(jobs, caps);
+  assert.equal(rows.length, 1);
+  assert.ok(rows[0].durationMinutes >= 5);
+});
+
 test("nearCapJobs: only successful jobs within the ratio of their cap", () => {
   const caps = new Map([["CI::Quality Checks", 5]]);
   const jobs = [
@@ -344,30 +360,56 @@ test("failingStepRunRates: counts distinct runs, not job records — one outage 
   const jobs = [
     {
       workflow: "CI",
+      name: "scripts",
       run_id: 1,
       steps: [{ name: "pnpm-install", conclusion: "failure" }],
     },
     {
       workflow: "CI",
+      name: "scripts",
       run_id: 1,
       steps: [{ name: "pnpm-install", conclusion: "failure" }],
     },
     {
       workflow: "CI",
+      name: "scripts",
       run_id: 2,
       steps: [{ name: "pnpm-install", conclusion: "success" }],
     },
     {
       workflow: "CI",
+      name: "ui-dashboard",
       run_id: 3,
       steps: [{ name: "playwright", conclusion: "failure" }],
     },
   ];
   const rows = failingStepRunRates(jobs, { workflow: "CI" });
   const byStep = Object.fromEntries(rows.map((r) => [r.step, r]));
-  assert.equal(byStep["pnpm-install"].runs, 1);
-  assert.equal(byStep["pnpm-install"].rate, 1 / 3);
-  assert.equal(byStep.playwright.runs, 1);
+  assert.equal(byStep["scripts › pnpm-install"].runs, 1);
+  assert.equal(byStep["scripts › pnpm-install"].rate, 1 / 3);
+  assert.equal(byStep["ui-dashboard › playwright"].runs, 1);
+});
+
+test("failingStepRunRates: keys by job name plus step name, so same-named steps in different jobs stay distinct", () => {
+  const jobs = [
+    {
+      workflow: "CI",
+      name: "shared-config",
+      run_id: 1,
+      steps: [{ name: "Lint", conclusion: "failure" }],
+    },
+    {
+      workflow: "CI",
+      name: "ui-dashboard",
+      run_id: 2,
+      steps: [{ name: "Lint", conclusion: "failure" }],
+    },
+  ];
+  const rows = failingStepRunRates(jobs, { workflow: "CI" });
+  const byStep = Object.fromEntries(rows.map((r) => [r.step, r]));
+  assert.equal(byStep["shared-config › Lint"].runs, 1);
+  assert.equal(byStep["ui-dashboard › Lint"].runs, 1);
+  assert.equal(rows.length, 2);
 });
 
 test("formatMarkdownReport: every section renders with units, and empty sections say so", () => {
