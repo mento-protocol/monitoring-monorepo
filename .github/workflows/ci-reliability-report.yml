@@ -3,7 +3,7 @@ name: CI Reliability Report
 # Monthly CI health report. Reads the Actions runs/jobs API for the
 # last 30 days and publishes per-workflow run/attempt/cancellation rates,
 # per-job duration and queue percentiles, CI per-step minutes ranked by
-# total, and jobs within 20% of their timeout-minutes cap — see ADR 0099.
+# total, and jobs within 20% of their timeout-minutes cap — see ADR 0100.
 # Never edits repository content or opens pull requests. Same shape as
 # file-size-watchlist.yml (issue-only scheduler) and m6-canary.yml (Actions
 # API reader via github-script).

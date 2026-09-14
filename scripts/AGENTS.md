@@ -111,7 +111,7 @@ Move each pin class together.
   collection coverage. The no-skip admission excludes
   `workflows/collect-m6-canary.mjs`, its workflow, and the CI contract entry
   points from candidate changes (ADR 0088). `ci.yml` also pins
-  `report-ci-reliability{,.test}.mjs` (ADR 0099).
+  `report-ci-reliability{,.test}.mjs` (ADR 0100).
 - **Terraform stack registry.** `terraform.stacks.json` `changedPathPatterns`
   pins exact `scripts/` paths per stack. The broad workflow admission boundary
   covers the directory; `pnpm tf:test` enforces subsumption.

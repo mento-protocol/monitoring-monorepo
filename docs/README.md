@@ -224,7 +224,7 @@ Authority: canonical
 - [`adr/0095-isolated-bridge-transfer-observations.md`](adr/0095-isolated-bridge-transfer-observations.md) — Bridge transfers use isolated complete observations
 - [`adr/0096-finder-probe-non-ledger-kind.md`](adr/0096-finder-probe-non-ledger-kind.md) — Non-ledger finder probes
 - [`adr/0097-recovery.md`](adr/0097-recovery.md) — Pool recovery
-- [`adr/0099-monthly-ci-reliability-report.md`](adr/0099-monthly-ci-reliability-report.md) — Monthly CI reliability report is a repository-owned, issue-only scheduler
+- [`adr/0100-monthly-ci-reliability-report.md`](adr/0100-monthly-ci-reliability-report.md) — Monthly CI reliability report is a repository-owned, issue-only scheduler
 
 Authority: non-canonical
 

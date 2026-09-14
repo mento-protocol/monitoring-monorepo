@@ -1386,7 +1386,7 @@ jobs:
         # and job summarizers, the exact cap-kill classifier, the
         # calendar-month-keyed issue upsert, and the end-to-end orchestrator.
         # The report itself only runs monthly via ci-reliability-report.yml;
-        # this required job is its only regression coverage (ADR 0099).
+        # this required job is its only regression coverage (ADR 0100).
         run: node --test scripts/workflows/report-ci-reliability.test.mjs
       - name: PR validation boundary suite
         # Pins the M2 read-only permission, secret ordering, restore-only cache,
