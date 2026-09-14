@@ -17,6 +17,8 @@ import {
   workflowCaps,
   capFor,
   percentile,
+  RUN_QUERY_WINDOWS,
+  runQueryWindows,
   wallDurationPercentiles,
   summarizeRunRates,
   summarizeJobDurations,
@@ -128,6 +130,18 @@ test("wallDurationPercentiles: zero samples when nothing matches", () => {
   });
   assert.equal(result.samples, 0);
   assert.equal(result.p50Minutes, null);
+});
+
+test("runQueryWindows: splits the window into count contiguous, non-overlapping ranges covering start to now", () => {
+  const since = "2026-08-15T00:00:00.000Z";
+  const now = "2026-09-14T00:00:00.000Z";
+  const windows = runQueryWindows(since, now, 5);
+  assert.equal(windows.length, 5);
+  assert.equal(windows[0][0], since);
+  assert.equal(windows.at(-1)[1], now);
+  for (let i = 1; i < windows.length; i += 1) {
+    assert.equal(windows[i][0], windows[i - 1][1]);
+  }
 });
 
 test("summarizeRunRates: attempt>1 rate and cancellation rate per workflow", () => {
@@ -599,6 +613,59 @@ test("collectCiHealthReport samples only JOB_FANOUT_WORKFLOWS and covers every r
       assert.equal(result.report.ciPullRequestWall.samples, 0);
       assert.ok(summaryLines.length === 1);
       assert.deepEqual([...JOB_FANOUT_WORKFLOWS], ["CI", "PR Description"]);
+    },
+  );
+});
+
+test("collectCiHealthReport queries runs in RUN_QUERY_WINDOWS ranges and deduplicates a run returned by more than one window", async () => {
+  await withFixtureRoot(
+    { "ci.yml": "name: CI\njobs:\n  scripts:\n" },
+    async (root) => {
+      const workflows = [{ id: 1, name: "CI" }];
+      const createdParams = [];
+      const github = {
+        paginate: async (_method, params) => {
+          if (params.workflow_id !== undefined) {
+            createdParams.push(params.created);
+            // Every window "sees" the same run near its boundary, as GitHub
+            // would for a run whose created_at sits in more than one range.
+            return [
+              {
+                id: 101,
+                event: "pull_request",
+                conclusion: "success",
+                run_attempt: 1,
+              },
+            ];
+          }
+          if (params.run_id !== undefined) return [];
+          return workflows;
+        },
+        rest: {
+          actions: {
+            listRepoWorkflows: "l",
+            listWorkflowRuns: "l",
+            listJobsForWorkflowRun: "l",
+          },
+          issues: {
+            listForRepo: "l",
+            create: async () => ({ data: { number: 1, html_url: "u" } }),
+          },
+        },
+      };
+      const context = { repo: { owner: "o", repo: "r" } };
+      const result = await collectCiHealthReport({
+        github,
+        context,
+        core: undefined,
+        root,
+      });
+      assert.equal(createdParams.length, RUN_QUERY_WINDOWS);
+      assert.ok(createdParams.every((c) => /^.+\.\..+$/u.test(c)));
+      assert.equal(
+        result.report.perWorkflow.find((r) => r.workflow === "CI").runs,
+        1,
+      );
     },
   );
 });

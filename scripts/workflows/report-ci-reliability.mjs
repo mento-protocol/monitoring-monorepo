@@ -304,10 +304,30 @@ function sampleRandom(list, size) {
   return sample;
 }
 
+export const RUN_QUERY_WINDOWS = 5; // 30 days / 5 keeps each `created` range well under GitHub's ~1,000-result cap
+
+/**
+ * Split [sinceIso, now] into `count` equal `created:from..to` ranges. A
+ * single `created:>=sinceIso` query over 30 days can carry ~1,450 `CI` runs,
+ * close enough to GitHub's practical per-query result cap that a busy month
+ * could silently drop the oldest runs while this report claims full
+ * coverage; querying in bounded ranges and merging keeps each request small
+ * regardless of monthly volume.
+ */
 // prettier-ignore
-async function fetchRunsForWorkflow({ github, owner, repo, workflowId, workflowName, sinceIso }) {
-  const runs = await github.paginate(github.rest.actions.listWorkflowRuns, { owner, repo, workflow_id: workflowId, created: `>=${sinceIso}`, per_page: 100 });
-  return runs.map((run) => ({ workflow: workflowName, event: run.event, conclusion: run.conclusion, run_attempt: run.run_attempt, id: run.id, created_at: run.created_at, updated_at: run.updated_at }));
+export function runQueryWindows(sinceIso, nowIso = new Date().toISOString(), count = RUN_QUERY_WINDOWS) {
+  const start = Date.parse(sinceIso), end = Date.parse(nowIso), step = (end - start) / count;
+  return Array.from({ length: count }, (_, i) => [new Date(start + i * step).toISOString(), i === count - 1 ? nowIso : new Date(start + (i + 1) * step).toISOString()]);
+}
+
+// prettier-ignore
+async function fetchRunsForWorkflow({ github, owner, repo, workflowId, workflowName, sinceIso, nowIso }) {
+  const byId = new Map();
+  for (const [from, to] of runQueryWindows(sinceIso, nowIso)) {
+    const runs = await github.paginate(github.rest.actions.listWorkflowRuns, { owner, repo, workflow_id: workflowId, created: `${from}..${to}`, per_page: 100 });
+    for (const run of runs) byId.set(run.id, { workflow: workflowName, event: run.event, conclusion: run.conclusion, run_attempt: run.run_attempt, id: run.id, created_at: run.created_at, updated_at: run.updated_at });
+  }
+  return [...byId.values()];
 }
 
 // prettier-ignore
@@ -331,6 +351,7 @@ async function fetchSampledJobs({ github, owner, repo, workflowName, runs, sampl
 // prettier-ignore
 export async function collectCiHealthReport({ github, context, core, root = process.cwd() }) {
   const { owner, repo } = context.repo;
+  const nowIso = new Date().toISOString();
   const sinceIso = new Date(Date.now() - WINDOW_DAYS * 86400000).toISOString();
   const caps = workflowCaps(root);
   const workflows = await github.paginate(github.rest.actions.listRepoWorkflows, { owner, repo, per_page: 100 });
@@ -339,7 +360,7 @@ export async function collectCiHealthReport({ github, context, core, root = proc
   const sampleInfo = [];
   const sampledJobs = [];
   for (const workflow of workflows) {
-    const runs = await fetchRunsForWorkflow({ github, owner, repo, workflowId: workflow.id, workflowName: workflow.name, sinceIso });
+    const runs = await fetchRunsForWorkflow({ github, owner, repo, workflowId: workflow.id, workflowName: workflow.name, sinceIso, nowIso });
     allRuns.push(...runs);
     if (JOB_FANOUT_WORKFLOWS.has(workflow.name)) {
       const { jobs, sampledRunCount } = await fetchSampledJobs({ github, owner, repo, workflowName: workflow.name, runs, sampleSize: SAMPLE_PER_STRATUM });
@@ -350,7 +371,7 @@ export async function collectCiHealthReport({ github, context, core, root = proc
 
   const report = {
     windowStart: sinceIso,
-    windowEnd: new Date().toISOString(),
+    windowEnd: nowIso,
     sampleInfo,
     ciPullRequestWall: wallDurationPercentiles(allRuns, { workflow: "CI", event: "pull_request" }),
     perWorkflow: summarizeRunRates(allRuns),
