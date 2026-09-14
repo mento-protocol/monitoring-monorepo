@@ -203,8 +203,8 @@ jobs:
               - .github/actions/pnpm-install/**
               - .github/actions/resolve-eslint-baseline/**
             terraform: &terraform
-              # Coarse admission only. `scripts/tf-stacks.mjs` classifies the
-              # exact stacks after this job starts. Keep this list equal to
+              # Admission only. `scripts/tf-stacks.mjs` classifies the exact
+              # stacks after this job starts. Keep this list equal to
               # terraform.stacks.json `workflowAdmissionPatterns`; `pnpm
               # tf:test` enforces equality and registry-pattern subsumption.
               - terraform/**
@@ -212,7 +212,12 @@ jobs:
               - aegis/**
               - governance-watchdog/**
               - metrics-bridge/**
-              - scripts/**
+              - scripts/alerts/**
+              - scripts/lib/**
+              - scripts/production-infra-identity-contract/**
+              - scripts/terraform/**
+              - scripts/tf-stacks.mjs
+              - scripts/tf-stacks.test.mjs
               - .github/workflows/**
               - terraform.stacks.json
               - shared-config/**
@@ -751,7 +756,7 @@ jobs:
         run: pnpm --filter @mento-protocol/indexer-envio knip
       - name: Indexer handler invariant contract
         # Retained owner inventory and fail-closed schema checks. Keep this
-        # separate from the legacy routing parity suite below.
+        # independent of the retired local routing table.
         run: node --test scripts/indexer-handler-invariant-contract.test.mjs
       - name: Test with coverage
         run: pnpm --filter @mento-protocol/indexer-envio test:coverage
