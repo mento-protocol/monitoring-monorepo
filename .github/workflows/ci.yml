@@ -979,7 +979,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.govWatchdog == 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 6
+    timeout-minutes: 8
     permissions:
       contents: read
       actions: read
@@ -1195,8 +1195,8 @@ jobs:
     runs-on: blacksmith-2vcpu-ubuntu-2404
     # Sized after PR #2296 removed the legacy gate regression suite: 135
     # post-removal runs are p90 3.08 min and max 3.73 min. 10 minutes also
-    # covers the no-skip audit path, which re-enters this job with full
-    # history and no cache restore.
+    # covers the no-skip audit path, which re-enters this job with no cache
+    # restore.
     timeout-minutes: 10
     permissions:
       contents: read
