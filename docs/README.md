@@ -224,7 +224,8 @@ Authority: canonical
 - [`adr/0095-isolated-bridge-transfer-observations.md`](adr/0095-isolated-bridge-transfer-observations.md) — Bridge transfers use isolated complete observations
 - [`adr/0096-finder-probe-non-ledger-kind.md`](adr/0096-finder-probe-non-ledger-kind.md) — Non-ledger finder probes
 - [`adr/0097-recovery.md`](adr/0097-recovery.md) — Pool recovery
-- [`adr/0098-retire-duplicate-bundle-size-workflow.md`](adr/0098-retire-duplicate-bundle-size-workflow.md) — Retire the duplicate bundle-size advisory workflow
+- [`adr/0098-m6-audit-recovery.md`](adr/0098-m6-audit-recovery.md) — M6 audit recovery
+- [`adr/0099-retire-duplicate-bundle-size-workflow.md`](adr/0099-retire-duplicate-bundle-size-workflow.md) — Retire the duplicate bundle-size advisory workflow
 
 Authority: non-canonical
 

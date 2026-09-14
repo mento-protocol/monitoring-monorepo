@@ -1,0 +1,60 @@
+name: M6 supplemental audit recovery
+run-name: "M6 recovery PR #${{ inputs.pr_number }}"
+on:
+  workflow_dispatch:
+    # checkov:skip=CKV_GHA_7: selects only two approved immutable merged PR tuples after protected-main admission.
+    inputs:
+      pr_number:
+        description: Approved retrospective observation
+        required: true
+        type: choice
+        options: ["2399", "2408"]
+permissions: read-all
+concurrency:
+  group: m6-supplemental-audit-recovery
+  cancel-in-progress: false
+jobs:
+  admit:
+    if: github.ref == 'refs/heads/main' && github.repository == 'mento-protocol/monitoring-monorepo'
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+    name: Admit approved retrospective observation
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    timeout-minutes: 5
+    outputs:
+      source: ${{ steps.admission.outputs.source }}
+      base: ${{ steps.admission.outputs.base }}
+    steps:
+      - name: Check out protected workflow revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify tuple, integration, runtime and budget
+        id: admission
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const { admitRecovery } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/workflows/m6-audit-recovery.mjs`);
+            const proof = await admitRecovery({ github, context: { ...context, repo: context.repo, runAttempt: Number(process.env.GITHUB_RUN_ATTEMPT) } });
+            core.setOutput('source', proof.source);
+            core.setOutput('base', proof.base);
+            await core.summary.addHeading('Supplemental retrospective M6 evidence').addCodeBlock(JSON.stringify(proof, null, 2), 'json').write();
+  audit:
+    if: github.run_attempt == 1
+    name: Supplemental retained deterministic audit
+    needs: admit
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+    # GitHub resolves $/ from the running commit; actionlint lacks support.
+    # trunk-ignore(actionlint/workflow-call)
+    uses: $/.github/workflows/ci.yml
+    with:
+      no_skip_audit: true
+      audit_source_sha: ${{ needs.admit.outputs.source }}
+      audit_base_sha: ${{ needs.admit.outputs.base }}
