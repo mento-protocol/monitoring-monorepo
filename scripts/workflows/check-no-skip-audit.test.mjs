@@ -53,7 +53,7 @@ const MUTATIONS = [
   ["bridge test cannot skip", CI, "      - name: Test bridge alert behavior\n        run:", "      - name: Test bridge alert behavior\n        if: false\n        run:", /retained audit workflow graph changed/u],
   ["bridge test cannot ignore failures", CI, "      - name: Test bridge alert behavior\n        run:", "      - name: Test bridge alert behavior\n        continue-on-error: true\n        run:", /retained audit workflow graph changed/u],
   ["bridge engine checksum stays exact", CI, "173389cc42bf09c4e6e54cb53fa07a5a835d7c261e14775d2183181d6e385d1c", "073389cc42bf09c4e6e54cb53fa07a5a835d7c261e14775d2183181d6e385d1c", /retained audit workflow graph changed/u],
-  ["bridge Go action stays pinned", CI, "actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16", "actions/setup-go@v6", /retained audit workflow graph changed/u],
+  ["bridge Go action stays pinned", CI, "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e", "actions/setup-go@v7", /retained audit workflow graph changed/u],
   ["bridge job cannot gain a cloud secret", CI, "    name: Terraform Validate (registry)", "    name: Terraform Validate (registry)\n    env:\n      TOKEN: ${{ secrets.CLOUD_TOKEN }}", /retained audit workflow graph changed/u],
   ["scheduled trigger", DISPATCH, "on:\n  workflow_dispatch:", "on:\n  schedule:\n    - cron: '0 0 * * *'\n  workflow_dispatch:", /only the three manual immutable inputs/u],
   ["run identity", DISPATCH, "run-name: \"No-skip audit PR #", "run-name: \"Audit PR #", /identity changed/u],

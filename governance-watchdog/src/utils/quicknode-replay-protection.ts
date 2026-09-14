@@ -26,9 +26,12 @@ interface ReplayProtectionOptions {
   fetchImpl?: Fetch;
 }
 
-let cachedMetadataToken:
-  | { accessToken: string; expiresAtMs: number }
-  | undefined;
+interface MetadataToken {
+  accessToken: string;
+  expiresAtMs: number;
+}
+
+let cachedMetadataToken: MetadataToken | undefined;
 
 export async function reserveQuickNodeNonce(
   nonce: string,
