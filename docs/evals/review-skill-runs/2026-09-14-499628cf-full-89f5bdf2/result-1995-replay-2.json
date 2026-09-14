@@ -1,0 +1,85 @@
+{
+  "cell_id": "pr-1995-replay-draw2",
+  "fingerprint": {
+    "skill_digest": "89f5bdf20356c5515974ec1a6112fc4f9dfbf31cf1d60b667084f91dfbe6ec60",
+    "kind": "full",
+    "contract_digest": "59b82ee3e6d7ccf2cfbe75cb11aa40e6ec93b92a754a992adee4a1a69166a259",
+    "claude_cli": "2.1.270 (Claude Code)",
+    "codex_cli": "codex-cli 0.154.0",
+    "finder_argv_digest": "40099c93f78800efefbc46f57772ae2cbadc86b378bdd22f474945abfd7b450c",
+    "orchestrator_digest": "fee8d511d838ad137aea62f0e6be7b5115383c59d4447ba985efb3e3c3fe48b1"
+  },
+  "treatment": {
+    "skill_ref": "installed",
+    "dirty": false
+  },
+  "pr": 1995,
+  "condition": "replay",
+  "draw": 2,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": "gpt-5.6-sol@high",
+  "claims": [
+    "A focused run inside a no-lock gate run passes: `scripts/agent-quality-gate.test.sh:600-603`. The lock function returns early when locking is off (`scripts/agent-quality-gate.sh:1616-1618`), so `AGENT_QUALITY_GATE_LOCK_HELD` is never exported. With `GATE_TEST_FOCUS` exported, a `--no-lock` / `AGENT_QUALITY_GATE_LOCK=0` gate run runs only the chosen families and still counts the self-test as passed.",
+    "Its success stamp can let a later push skip checks: the whole-run success stamp (`:5863-5878`) doesn't include `GATE_TEST_FOCUS`, and the self-test's reuse exemption (`:5220-5229`) only covers per-command stamps. So `GATE_TEST_FOCUS=gate-contract ... --run --no-lock` followed by a push within two hours skips the gate, full self-test included.",
+    "Docs `:1143-1146` are stale: they say `AGENT_QUALITY_GATE_LOCK_HELD` covers \"any command a real gate run spawns\", which is not true under `--no-lock`.",
+    "The \"Unset runs everything\" docs bullet says the same thing and is not true under `--no-lock`.",
+    "On Bash 3.2 the abort message now points at the wrong line: `scripts/agent-quality-gate.test.sh:21` (the new `arm_suite_abort_trap`). `$LINENO` inside an ERR trap in a function gives the function's opening line, so an abort anywhere in e.g. `routing-sources` is reported as line 2072.",
+    "If someone deletes the `dispatch_gate_test_families` line, the partition check doesn't notice; the suite would then exit 0 without running any tests or printing the success line."
+  ],
+  "matched_ids": [
+    3830003055,
+    3830042123
+  ],
+  "judge_reasoning": {
+    "3829986398": "No match. The review's trap finding is about Bash 3.2 reporting the wrong $LINENO. It never mentions unset output_file expanding under set -u before the variable is initialized.",
+    "3829986403": "No match. The review never says that a second dispatch_gate_test_families call passes validation and runs families twice.",
+    "3830003055": "Match. The review notes that deleting the dispatch_gate_test_families line goes unnoticed by the partition check, so the suite exits 0 without running tests or printing success.",
+    "3830042123": "Match. The review's main finding is that GATE_TEST_FOCUS in a --no-lock or AGENT_QUALITY_GATE_LOCK=0 gate run lets a focused subset pass as the full self-test.",
+    "3830042128": "No match. The review never mentions the hard-coded scripts/agent-quality-gate.test.sh fallback or the path-pin inventory.",
+    "3830695396": "No match. The review flags different stale docs (LOCK_HELD coverage under --no-lock). It does not raise 'is set' vs 'is non-empty' or the 'reds the suite' wording."
+  },
+  "novel": {
+    "claims": 6,
+    "novelReal": 4,
+    "novelWrong": 0,
+    "novelVague": 0,
+    "restatedKnown": 2,
+    "alreadyMatched": 2,
+    "verdicts": {
+      "1": {
+        "class": "known",
+        "why": "The focus refusal (test.sh ~600-603) only checks AGENT_QUALITY_GATE_LOCK_HELD, and the lock function returns early for gate_lock_enabled=0 (gate.sh:1616-1618) before that variable is exported (gate.sh:1143). This is the known 'Reject focus during lock-free gate runs' item."
+      },
+      "2": {
+        "class": "real",
+        "why": "stamp_line (gate.sh:4764-4772) hashes base/paths/plan/implementation/content/package fields, not GATE_TEST_FOCUS. The success stamp is written at gate.sh:5872-5877 whether or not the lock is on, is_stamp_exempt_command covers only per-command stamps, and the trunk pre-push hook (.trunk/trunk.yaml:136) uses --skip-if-fresh, so a focused --no-lock green run can let a push skip the gate."
+      },
+      "3": {
+        "class": "real",
+        "why": "Docs lines 1143-1146 say AGENT_QUALITY_GATE_LOCK_HELD is set for 'any command a real gate run spawns', but with --no-lock or AGENT_QUALITY_GATE_LOCK=0 the lock function returns before the export, so the doc overstates what the refusal covers."
+      },
+      "4": {
+        "class": "real",
+        "why": "The 'Unset runs everything' bullet (docs 1139-1142) says the gate's own mapped self-test always runs in full mode. Under --no-lock an exported GATE_TEST_FOCUS is not refused, so the gate's self-test runs only the focused families."
+      },
+      "5": {
+        "class": "real",
+        "why": "Ran a repro with /bin/bash 3.2.57: an ERR trap set inside a helper and re-armed inside a function reported the function's opening line (6) instead of the failing line (10). Bash 5.3 reports 10. So on 3.2 every abort points at the family's `run_*_family() {` line."
+      },
+      "6": {
+        "class": "known",
+        "why": "The awk in verify_gate_family_partition (body==2 branch) skips a dispatch_gate_test_families line if present but never requires it, so deleting it gives exit 0 with no tests run. This is the known 'Partition allows missing dispatch' item (test.sh:572)."
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 289,
+  "usd": 1.5502134999999997,
+  "usd_metered": true,
+  "scoring_usd": 0.526169
+}

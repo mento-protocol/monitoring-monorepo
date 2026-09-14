@@ -1,0 +1,85 @@
+{
+  "cell_id": "pr-2035-replay-draw2",
+  "fingerprint": {
+    "skill_digest": "89f5bdf20356c5515974ec1a6112fc4f9dfbf31cf1d60b667084f91dfbe6ec60",
+    "kind": "full",
+    "contract_digest": "59b82ee3e6d7ccf2cfbe75cb11aa40e6ec93b92a754a992adee4a1a69166a259",
+    "claude_cli": "2.1.270 (Claude Code)",
+    "codex_cli": "codex-cli 0.154.0",
+    "finder_argv_digest": "40099c93f78800efefbc46f57772ae2cbadc86b378bdd22f474945abfd7b450c",
+    "orchestrator_digest": "fee8d511d838ad137aea62f0e6be7b5115383c59d4447ba985efb3e3c3fe48b1"
+  },
+  "treatment": {
+    "skill_ref": "installed",
+    "dirty": false
+  },
+  "pr": 2035,
+  "condition": "replay",
+  "draw": 2,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": "gpt-5.6-sol@high",
+  "claims": [
+    "[P1] Quota poll only at start and every 500 (`tier1-bulk-enrich.mjs:1058`): with no `X-Intel-Datapoints-Remaining` header, `quota.remaining` only changes at startup (`:859`) and every 500 addresses, so the check at `:1000` reads a stale number and the run can use up the trial quota, stopping only on the 402/403 halt",
+    "Usage and Limit headers are also never turned into a Remaining value (`:541-542`)",
+    "[P1] A numeric flag with no value falls back silently (`:112-126`): `--limit --no-refresh` or a trailing `--limit` becomes `Infinity`, and a trailing `--quota-floor` becomes 50",
+    "[P2] Capped discovery source only warns (`:284-287`): a source that hits `capped: true` logs a warning and then passes the abort gate at `:300`, which only looks at `failedSources`, contradicting the header comment at `:15-17`",
+    "The tier2 tag-ordering fix gets undone when the new tags are merged with the existing entry (`tier2-light-forensic.mjs:671-682`): existing tags come first in `new Set([...existingEntry.tags, ...derived.tags]).slice(0, 20)`, so addresses tier1 labeled with about 14+ Arkham ids lose their `ctp:*`/`type:contract` tags",
+    "The new circuit breaker's \"resumes the queue\" message isn't true for the addresses that tripped it (`tier1-bulk-enrich.mjs:1043-1047`, `:809-813`, `:966`): failed addresses get `{address, error}` progress lines that resume treats as processed, so the 10 addresses behind the halt, and every address whose 429 retry failed, are skipped forever"
+  ],
+  "matched_ids": [
+    3845596185,
+    3845607361
+  ],
+  "judge_reasoning": {
+    "3845594538": "Not identified. The review never says flushWrites splices the batch out before the network call and so loses writes on an Upstash failure. Its circuit-breaker point is about resume skipping errored addresses.",
+    "3845596185": "Identified. The review confirms that a source returning capped: true only warns and still passes the abort gate, which checks only failedSources.",
+    "3845603922": "Not identified. The review clears run.sh's grep and never mentions prefix matching of tfvars keys.",
+    "3845603940": "Not identified. The review notices slice-before-dedup but treats it as correct parity with the shared helper, not as a defect.",
+    "3845607361": "Identified. Finding 2 says tier2's write path puts existingEntry.tags first and slices to 20, so tier1's populatedTags push out the ctp:/type: tags ordered at :395.",
+    "3845618202": "Not identified. The review raises the tag-ordering loss only for tier2's write path. It does not flag tier1's refresh buildWriteEntry putting fresh tags ahead of existing forensic tags."
+  },
+  "novel": {
+    "claims": 6,
+    "novelReal": 4,
+    "novelWrong": 0,
+    "novelVague": 0,
+    "restatedKnown": 2,
+    "alreadyMatched": 2,
+    "verdicts": {
+      "1": {
+        "class": "real",
+        "why": "quota.remaining is only set by noteQuotaHeaders (needs the Remaining header, :543-546) or logIntelUsage, which runs at start and every INTEL_USAGE_EVERY=500 (:1058), so the default floor of 50 checked at :1000 can be overrun by hundreds of lookups between polls"
+      },
+      "2": {
+        "class": "real",
+        "why": "noteQuotaHeaders stores usage/limit (:541-542) but only sets quota.remaining from the Remaining header, and never computes limit-usage, so a per-request Usage/Limit pair never refreshes the brake"
+      },
+      "3": {
+        "class": "real",
+        "why": "flagValue returns undefined when the next arg is missing or starts with '--' (:117), and numericFlag then returns the fallback without an error (:127), so --limit becomes Infinity and --quota-floor becomes 50. That goes against the hard-fail intent in the comment at :119-123"
+      },
+      "4": {
+        "class": "known",
+        "why": "Same as the known HARD_PAGE_CAP defects: at :284-287 capped only logs a warning, and the abort at :300 only checks failedSources"
+      },
+      "5": {
+        "class": "known",
+        "why": "Same as the known tier2-light-forensic.mjs:395 'Preserve Tier 2 tags when merging capped labels': existing tags go first in the Set and then .slice(0,20) at :671-682"
+      },
+      "6": {
+        "class": "real",
+        "why": "The resume loader (:805-813) adds any line with an address to processed, including {address,error} lines written at :1043-1047, so the addresses that trip the new circuit breaker (:966 exit) are skipped on re-run even though the message says the progress file 'resumes the queue'"
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 137,
+  "usd": 0.9968525,
+  "usd_metered": true,
+  "scoring_usd": 0.4201825
+}

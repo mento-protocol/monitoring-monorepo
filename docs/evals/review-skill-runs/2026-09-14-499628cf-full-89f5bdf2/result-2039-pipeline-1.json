@@ -1,0 +1,111 @@
+{
+  "cell_id": "pr-2039-pipeline-draw1",
+  "fingerprint": {
+    "skill_digest": "89f5bdf20356c5515974ec1a6112fc4f9dfbf31cf1d60b667084f91dfbe6ec60",
+    "kind": "full",
+    "contract_digest": "59b82ee3e6d7ccf2cfbe75cb11aa40e6ec93b92a754a992adee4a1a69166a259",
+    "claude_cli": "2.1.270 (Claude Code)",
+    "codex_cli": "codex-cli 0.154.0",
+    "finder_argv_digest": "40099c93f78800efefbc46f57772ae2cbadc86b378bdd22f474945abfd7b450c",
+    "orchestrator_digest": "fee8d511d838ad137aea62f0e6be7b5115383c59d4447ba985efb3e3c3fe48b1"
+  },
+  "treatment": {
+    "skill_ref": "installed",
+    "dirty": false
+  },
+  "pr": 2039,
+  "condition": "pipeline",
+  "draw": 1,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": "gpt-5.6-sol@high",
+  "claims": [
+    "Probe branch name can collide (`codex-cloud-setup.sh:192`): `$(date +%s)-$$` isn't unique; containers have their own process-ID numbering, so two fresh containers can easily get the same ID",
+    "On a probe branch collision, one setup deletes the branch and the other's delete at `:217` fails, so that setup aborts claiming it couldn't delete its own probe",
+    "If `HEAD` differs on a probe branch collision, the second push is rejected and prints the wrong message (\"cannot create… give Contents read/write\")",
+    "Runbook doesn't list OS package repos (`docs/notes/codex-cloud-setup.md:61-70`): `--with-deps` runs `apt-get update/install` against the image's package repos, and those hosts aren't in the list that claims to be what setup needs (same gap for the `gh` apt install path)",
+    "Playwright install now blocks all of setup (`codex-cloud-setup.sh:537`, called at `:583`): unlike `claude-code-web-setup.sh:141-153` and `scripts/setup.sh:144`, it fails the whole setup in Codex Cloud, so any environment without Playwright CDN and apt access can't start any task after merge",
+    "The pull-request check doesn't prove what the runbook requires (`codex-cloud-setup.sh:184-185`): the probe only does a GET on the open-PR list, so a token with Contents write but PR read-only passes setup, then fails at `gh pr create` during ship",
+    "If the repo is public, even the PR read check can't fail, since any token can list PRs",
+    "The probe branch may create a Vercel preview deployment: `ui-dashboard/vercel.json` only turns off deployments for `sentry-autofix/*`, so every setup pushes a branch Vercel will look at, producing an 'ignored' deployment record or a real preview build that may fail because the branch is deleted within seconds",
+    "`verify_github_api_capabilities` has no test",
+    "The \"created but couldn't delete\" branch (`:217-221`) isn't tested",
+    "The existing write-probe tests use a fake `git`, so they prove nothing about real push behavior"
+  ],
+  "matched_ids": [
+    3846756487,
+    3846756922,
+    3846757191
+  ],
+  "judge_reasoning": {
+    "3846756487": "The review's missed-item 2 says the PR probe only GETs the PR list, while the runbook requires read/write, so a token with PR read-only access passes.",
+    "3846756810": "The review never raises the missing non-github.com origin guard in verify_github_api_capabilities or verify_origin_write_access.",
+    "3846756918": "The review says the opposite: it clears cleanup logic ('created is reset on both delete paths') and does not flag the lost EXIT-trap fallback after a failed delete.",
+    "3846756922": "The review confirms the probe branch name `$(date +%s)-$$` isn't unique because of container PID reuse, describes the resulting collisions, and suggests a random suffix.",
+    "3846757143": "The review never suggests `git push --dry-run` or objects to mutating origin. Its Vercel point is a different side effect.",
+    "3846757191": "The review confirms the runbook's outbound list omits the OS apt package repos needed by `playwright install --with-deps`."
+  },
+  "novel": {
+    "claims": 11,
+    "novelReal": 3,
+    "novelWrong": 0,
+    "novelVague": 1,
+    "restatedKnown": 7,
+    "alreadyMatched": 3,
+    "verdicts": {
+      "1": {
+        "class": "known",
+        "why": "Line 192 `probe_branch=\"codex-cloud-write-probe-$(date +%s)-$$\"`; the known defect at codex-cloud-setup.sh:192 already says to make the branch name globally unique."
+      },
+      "2": {
+        "class": "known",
+        "why": "Deleting a branch that is already gone makes the `git push origin --delete` at :217 fail and return 1. This is a consequence of the name collision already covered by the known :192 uniqueness defect."
+      },
+      "3": {
+        "class": "known",
+        "why": "The rejected create push at :206 does print the Contents read/write message, but it only happens after a name collision. That root cause is the known :192 uniqueness defect."
+      },
+      "4": {
+        "class": "known",
+        "why": "The docs outbound-access list (md:61-70) has no OS/apt package repos. This matches the known docs/notes/codex-cloud-setup.md:70 'Document the distribution package source'."
+      },
+      "5": {
+        "class": "real",
+        "why": "`install_playwright_host_dependencies` is called plainly under `set -euo pipefail`, so any failure stops setup. claude-code-web-setup.sh:147-152 and scripts/setup.sh:145-150 wrap the same command in `if ! ...; then warn` and keep going. Blocked CDN or apt access aborts Codex setup unless someone opts out."
+      },
+      "6": {
+        "class": "known",
+        "why": "Lines 184-185 only GET `pulls?state=open&per_page=1`, even though the docs ask for PR read/write. This is the known :195 'Verify pull-request write access' defect."
+      },
+      "7": {
+        "class": "known",
+        "why": "This extends the same PR-read-only probe weakness (GET on /pulls) that the known :195 defect already covers."
+      },
+      "8": {
+        "class": "known",
+        "why": "vercel.json only disables `sentry-autofix/*`, but the concern is side effects of the probe mutating origin on every run, which the known :231 P3 covers. Also, ignore-build.sh would normally skip because HEAD matches main and changes no dashboard paths."
+      },
+      "9": {
+        "class": "real",
+        "why": "The test file has no case that calls or stubs `verify_github_api_capabilities` (grep finds no matches). The new API probe steps have no test coverage."
+      },
+      "10": {
+        "class": "real",
+        "why": "The only tests are origin-write-access (git always succeeds) and origin-write-access-refused (git always fails, so the create step fails first). No case covers create succeeding and delete failing, which is exactly where the known cleanup-fallback bug sits."
+      },
+      "11": {
+        "class": "vague",
+        "why": "Stubbing `git` in unit tests is the file's normal pattern (it also stubs pnpm). The claim names no specific behavior the fakes miss, beyond a general preference for integration tests."
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 490,
+  "usd": 1.314022,
+  "usd_metered": true,
+  "scoring_usd": 0.39296600000000004
+}
