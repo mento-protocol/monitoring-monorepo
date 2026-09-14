@@ -1619,6 +1619,13 @@ jobs:
         with:
           restore-cache: ${{ !inputs.no_skip_audit }}
           write-cache: ${{ !inputs.no_skip_audit && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+      - name: Terraform production infrastructure contract
+        # Deliberately unconditional, and deliberately the first command here.
+        # check-sentry-suites-in-ci-coverage.test.mjs exempts
+        # sentry-provider-contract.test.mjs only while an unconditional step of
+        # this job runs tf-stacks.test.mjs, so this step may never carry an
+        # `if:` — and anything ahead of it that can fail would skip it.
+        run: pnpm tf:test
       # Moved here from the deleted unconditional `guardrail-prose` job, which
       # paid a whole runner boot for two sub-second commands. This job is the
       # same kind of host: it carries no `if:`, sits in the `ci` sentinel's
@@ -1630,20 +1637,16 @@ jobs:
       # `rootScripts` filter includes `.github/workflows/**`, so the very edit
       # that unwires this host admits that job and reds there instead.
       #
-      # They run after the pnpm-install composite, not before it. The composite
-      # owns the sole pnpm-store cache write and the `.node-version` pin: ahead
-      # of it a prose failure on a main push would abort before the cache save
-      # and leave every other job on cold installs, and the two commands would
-      # run on the image's default Node.
+      # That same suite forbids a step-level `if:` on these two, so they sit
+      # between `pnpm tf:test` and the guarded steps below: a prose failure
+      # cannot suppress a retained command, and only a Terraform-contract
+      # failure — which reds this job anyway — defers the prose result to the
+      # next run. They also run after the pnpm-install composite, which owns the
+      # sole pnpm-store cache write and the `.node-version` pin.
       - name: Guardrail prose pins
         run: node scripts/repo-health/check-guardrail-prose.mjs
       - name: Guardrail prose pin suite
         run: node scripts/repo-health/check-guardrail-prose.test.mjs
-      - name: Terraform production infrastructure contract
-        # Guarded like the contract steps below it: a guardrail-prose failure
-        # above must not suppress a retained command in this required job.
-        if: ${{ !cancelled() }}
-        run: pnpm tf:test
       - name: Issue board owner-mutation confinement contract
         if: ${{ !cancelled() }}
         run: pnpm issue:board:test
