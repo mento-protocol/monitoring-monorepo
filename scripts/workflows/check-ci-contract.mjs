@@ -229,12 +229,17 @@ export function workflowViolations(workflow, filters) {
   // Markdown-only diff still runs them. The two copies must not drift: every
   // command in `docs-checks` has to run in `scripts` too, or a mixed diff
   // checks less than a Markdown-only one. Only `run:` steps carry commands —
-  // checkout, pnpm-install and actions-timeline are `uses:` steps.
+  // checkout, pnpm-install and actions-timeline are `uses:` steps. The twin
+  // must also enforce: a copy carrying `continue-on-error` or a different
+  // `if:` reports nothing on failure, or does not run at all, so matching the
+  // command text alone would accept a silently narrower `scripts` job.
   // prettier-ignore
-  const scriptRuns = new Set(list(jobs.scripts?.steps).map((step) => step.run).filter((run) => typeof run === "string"));
+  const twin = (step) => `${step.if ?? ""}\u0000${step.run}`;
+  // prettier-ignore
+  const scriptRuns = new Set(list(jobs.scripts?.steps).filter((step) => typeof step.run === "string" && step["continue-on-error"] == null).map(twin));
   for (const step of list(jobs["docs-checks"]?.steps)) {
     // prettier-ignore
-    if (typeof step.run === "string" && !scriptRuns.has(step.run)) errors.push(`scripts no longer runs the docs-checks command ${step.run}`);
+    if (typeof step.run === "string" && !scriptRuns.has(twin(step))) errors.push(`scripts no longer runs the docs-checks command ${step.run}`);
   }
   const ci = jobs.ci ?? {};
   // prettier-ignore

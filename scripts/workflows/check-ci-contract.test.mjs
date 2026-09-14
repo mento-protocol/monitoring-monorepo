@@ -266,6 +266,10 @@ const STATIC_MUTATIONS = [
   ["docs-checks command dropped from scripts", /scripts no longer runs the docs-checks command pnpm docs:index --check/u, ({ workflow }) => { workflow.jobs.scripts.steps = workflow.jobs.scripts.steps.filter((step) => step.run !== "pnpm docs:index --check"); }],
   // prettier-ignore
   ["docs-checks command added without a scripts twin", /scripts no longer runs the docs-checks command pnpm docs:new-corpus-check/u, ({ workflow }) => { workflow.jobs["docs-checks"].steps.push({ name: "New corpus check", run: "pnpm docs:new-corpus-check" }); }],
+  // prettier-ignore
+  ["scripts twin gated off", /scripts no longer runs the docs-checks command pnpm docs:index --check/u, ({ workflow }) => { workflow.jobs.scripts.steps.find((step) => step.run === "pnpm docs:index --check").if = false; }],
+  // prettier-ignore
+  ["scripts twin made advisory", /scripts no longer runs the docs-checks command pnpm docs:index --check/u, ({ workflow }) => { workflow.jobs.scripts.steps.find((step) => step.run === "pnpm docs:index --check")["continue-on-error"] = true; }],
   [
     "cross-cancelling main concurrency",
     /workflow concurrency/u,
