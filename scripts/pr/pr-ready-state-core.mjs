@@ -5,10 +5,9 @@ import {
   countTrustedCodeRabbitReviewRequests,
   hasCodexApprovalReaction,
   hasCodexInFlightReaction,
-  hasPendingBareCodeRabbitReviewRequest,
   parseTimestamp,
-  summarizeCodeRabbitReviewGate,
 } from "./pr-ready-state-review-signals.mjs";
+import { summarizeCodeRabbitReviewGate } from "./pr-ready-state-closeout.mjs";
 import {
   CODEX_DESCRIPTION_APPROVAL_OVERRIDE_GATE,
   HUMAN_OVERRIDE_ASSOCIATIONS,
@@ -164,28 +163,6 @@ export function groupStatusChecks(statusCheckRollup = []) {
   }
 
   return grouped;
-}
-
-const CODERABBIT_CHECK_NAME = "coderabbit";
-const CODERABBIT_RUNNING_VALUES = new Set([
-  "IN_PROGRESS",
-  "PENDING",
-  "QUEUED",
-  "REQUESTED",
-  "WAITING",
-]);
-
-export function isCodeRabbitReviewRunning(statusCheckRollup = []) {
-  return (statusCheckRollup ?? []).some((check) => {
-    if (checkDisplayName(check).toLowerCase() !== CODERABBIT_CHECK_NAME) {
-      return false;
-    }
-    // A conclusion means the run finished, whatever the reported status is.
-    if (normalizeStatusValue(check.conclusion)) return false;
-    return [check.status, check.state]
-      .map(normalizeStatusValue)
-      .some((value) => CODERABBIT_RUNNING_VALUES.has(value));
-  });
 }
 
 function requiredContextName(context) {
@@ -629,7 +606,6 @@ export function summarizeReadyState({
     issueComments,
     reviews: pr.reviews ?? [],
     headUpdatedAt,
-    headUpdatedAtIsUpperBound: Boolean(pr.headUpdatedAtIsUpperBound),
     currentHeadOid,
     pathFilterSkip: codeRabbitPathFilterSkip,
   });
@@ -766,20 +742,12 @@ export function summarizeReadyState({
       codeRabbitPathFilterSkip,
       {
         mergeStateStatus: pr.mergeStateStatus ?? null,
-        reviewRunning: isCodeRabbitReviewRunning(pr.statusCheckRollup ?? []),
+        // CodeRabbit registers a check run while it reviews; the pending group
+        // already classifies status-only runs as pending.
+        reviewRunning: statusChecks.pending.some(
+          (check) => String(check.name).toLowerCase() === "coderabbit",
+        ),
         requestCount: countTrustedCodeRabbitReviewRequests(issueComments),
-        pendingRequest: hasPendingBareCodeRabbitReviewRequest({
-          issueComments,
-          // A head time from a later timeline event or the first check lands
-          // after the push, so it cannot bound requests from below; treat any
-          // recent bare request as pending rather than as the previous head's.
-          headUpdatedAt: pr.headUpdatedAtIsUpperBound ? null : headUpdatedAt,
-          observedAt: now,
-        }),
-        // A failed timeline read hides the latest ready-for-review event, so
-        // the probe marks the age unknown even when a status time exists.
-        headFreshnessKnown:
-          headUpdatedAt !== null && pr.headFreshnessKnown !== false,
         headUpdatedAt,
         observedAt: now,
       },

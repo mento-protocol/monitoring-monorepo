@@ -315,42 +315,22 @@ polled. Do not foreground-poll and never sleep-poll.
      one after review fixes; and never post while a CodeRabbit check is running
      on the current head, because the request supersedes that review and the
      vendor charges the one it discards. The local probe publishes that
-     decision as `gates.codeRabbitReviewSignal.fallbackAction`
-     (`merge_base_first`; `wait_for_running_review`;
-     `wait_for_pending_request`, a trusted unmarked `@coderabbitai review` or
-     `full review` comment posted after the head update and less than an hour
-     ago, which will run or be rate-limited inside the refill hour and which a
-     second post supersedes; `wait_for_head_grace`, a head under five minutes
-     old with no run yet, where an automatic run may still start, including the
-     full re-review a base merge or rebase can draw;
-     `request_budget_exhausted`; else `request_review_once_for_head`); derive it
-     in the same precedence here and follow it rather than inventing a
-     different rule. The stack rule and the head-config rule still apply on
-     top of it: a native stack layer brings its base in through the stacked
-     PR workflow, and a head that still enables incremental review waits for
-     the automatic attempt first.
-     If the signal is missing or stale, the PR carries fewer than two requests,
-     no CodeRabbit check is running on the current head, no trusted top-level
-     comment posted at or after the head update and in the last hour asks for
-     a review with no head marker at all (an older request belongs to a
-     superseded head and is stale, not pending, and so is any request marked
-     for another head; when the head time is known only from a later timeline
-     event or the first check on the head, count any such bare request in the
-     last hour), the head is more than five minutes old counting from the PR
-     creation or the latest ready-for-review conversion when those are later,
-     the head update time is known, and no trusted top-level
-     comment contains `@coderabbitai review` or `@coderabbitai full review`
-     together with `<!-- coderabbit-final-head-review:<full-head-sha> -->`, use
-     `add_issue_comment` to post `@coderabbitai review`, a blank line, and that
-     exact marker. A marker comment is trusted only when its author association
-     is `OWNER`, `MEMBER`, or `COLLABORATOR`, or its author login is `claude`,
+     decision as `gates.codeRabbitReviewSignal.fallbackAction`; its precedence
+     is stated once, in [`pr-ready-state.md`](pr-ready-state.md). When the
+     probe cannot run here, derive the same answer by hand from that list —
+     do not restate or re-derive it on this surface — and post only when it
+     says `request_review_once_for_head`: use `add_issue_comment` to post
+     `@coderabbitai review`, a blank line, and
+     `<!-- coderabbit-final-head-review:<full-head-sha> -->`, after
+     re-resolving the full head immediately before the write. The stack rule
+     and the head-config rule still apply on top of it: a native stack layer
+     brings its base in through the stacked PR workflow, and a head that still
+     enables incremental review waits for the automatic attempt first. A
+     request comment counts only when its author association is `OWNER`,
+     `MEMBER`, or `COLLABORATOR`, or its author login is `claude`,
      `claude[bot]`, `chatgpt-codex-connector`, or
-     `chatgpt-codex-connector[bot]`. When the head-update time is available,
-     require the request comment to be at or after it — a head time taken from
-     a later timeline event or from the first check on the head, rather than
-     from the head commit's own timestamp, is not the head-update time, so
-     accept the exact-head marker on its own then — and recheck the current
-     full head immediately before the write. The marker detects completed
+     `chatgpt-codex-connector[bot]`; that trust rule bounds the two-per-PR
+     budget as well as the exact-head marker. The marker detects completed
      requests and provides best-effort duplicate suppression; the issue-comment
      API has no atomic claim. After posting, wait for that closeout attempt to
      become terminal before the final feedback sweep, bounded by the babysit

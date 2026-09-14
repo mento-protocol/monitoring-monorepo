@@ -19,7 +19,6 @@ import {
   classifyCodexReviewSignal,
   classifyCodeRabbitReviewSignal,
   isCodeRabbitFinalHeadReviewRequestBody,
-  isCodeRabbitReviewRunning,
   isCodexReviewRequestBody,
   parseReadinessOverrideComment,
   summarizeReadyState,
@@ -29,26 +28,20 @@ import {
 import {
   countTrustedCodeRabbitReviewRequests,
   findCodeRabbitPathFilterSkipCandidate,
-  hasPendingBareCodeRabbitReviewRequest,
-  summarizeCodeRabbitReviewGate,
   validateCodeRabbitPathFilterSkip,
-  CODERABBIT_HEAD_GRACE_MS,
-  CODERABBIT_PENDING_REQUEST_WINDOW_MS,
 } from "./pr-ready-state-review-signals.mjs";
+import {
+  summarizeCodeRabbitReviewGate,
+  CODERABBIT_HEAD_GRACE_MS,
+} from "./pr-ready-state-closeout.mjs";
 import { formatCompact, formatHuman } from "./pr-ready-state-format.mjs";
 import { verifyReadinessSnapshot } from "./pr-ready-state-stack.mjs";
-import {
-  fetchHeadUpdatedAt,
-  headCommitTimestampFromTimeline,
-  headTimeForPullRequest,
-  headUpdatedAtFromTimeline,
-  headUpdatedAtIsUpperBound,
-  readyForReviewAtFromTimeline,
-} from "./pr-ready-state-head-time.mjs";
 import {
   annotateStatusCheckSources,
   fetchRequiredStatusContexts,
   fetchReadinessBases,
+  fetchHeadUpdatedAt,
+  headUpdatedAtFromTimeline,
   parseArgs,
   renderSummary,
   repoFromPullRequestUrl,
@@ -1976,71 +1969,6 @@ test("falls back to check observation time when timeline has no post-head timest
   );
 });
 
-test("floors head freshness at PR creation for a branch pushed earlier", () => {
-  // The branch was pushed and checked 20 minutes before the PR opened. Opening
-  // the PR is what starts CodeRabbit's automatic review, so the head is no
-  // older than the PR for the closeout grace.
-  const timelineItems = [
-    {
-      event: "committed",
-      sha: "new-head",
-      created_at: "2026-09-14T14:00:00Z",
-    },
-  ];
-  assertEqual(
-    fetchHeadUpdatedAt({
-      headSha: "new-head",
-      timelineItems,
-      observedAt: "2026-09-14T14:01:00Z",
-      openedAt: "2026-09-14T14:20:00Z",
-    }),
-    "2026-09-14T14:20:00Z",
-  );
-  // A later push is newer than the PR, so the floor does not apply.
-  assertEqual(
-    fetchHeadUpdatedAt({
-      headSha: "new-head",
-      timelineItems,
-      observedAt: "2026-09-14T14:01:00Z",
-      openedAt: "2026-09-14T13:00:00Z",
-    }),
-    "2026-09-14T14:00:00Z",
-  );
-  // A draft marked ready starts its automatic review at the conversion, so
-  // the latest ready_for_review event is a floor as well.
-  assertEqual(
-    fetchHeadUpdatedAt({
-      headSha: "new-head",
-      timelineItems: [
-        ...timelineItems,
-        { event: "ready_for_review", created_at: "2026-09-14T14:30:00Z" },
-        { event: "ready_for_review", created_at: "2026-09-14T14:45:00Z" },
-      ],
-      observedAt: "2026-09-14T14:01:00Z",
-      openedAt: "2026-09-14T13:00:00Z",
-    }),
-    "2026-09-14T14:45:00Z",
-  );
-  assertEqual(
-    readyForReviewAtFromTimeline([
-      { event: "ready_for_review", created_at: "2026-09-14T14:30:00Z" },
-      { event: "commented", created_at: "2026-09-14T15:00:00Z" },
-    ]),
-    "2026-09-14T14:30:00Z",
-  );
-  // With no head evidence the age stays unknown; the PR creation time alone is
-  // only a lower bound and must not end the fail-closed wait.
-  assertEqual(
-    fetchHeadUpdatedAt({
-      headSha: "new-head",
-      timelineItems: [],
-      observedAt: null,
-      openedAt: "2026-09-14T14:20:00Z",
-    }),
-    null,
-  );
-});
-
 test("does not derive head freshness from commit metadata", () => {
   assertEqual(
     fetchHeadUpdatedAt({
@@ -2055,187 +1983,6 @@ test("does not derive head freshness from commit metadata", () => {
       observedAt: null,
     }),
     null,
-  );
-});
-
-test("distinguishes the head commit's own timestamp from a later surrogate", () => {
-  // The surrogate a later event supplies is an upper bound on the push; the
-  // probe marks such a head so request bounds do not lean on it.
-  const withoutOwnTimestamp = [
-    { event: "committed", sha: "new-head" },
-    { event: "commented", created_at: "2026-05-21T13:23:00Z" },
-  ];
-  assertEqual(
-    headCommitTimestampFromTimeline(withoutOwnTimestamp, "new-head"),
-    null,
-  );
-  assertEqual(
-    headUpdatedAtFromTimeline(withoutOwnTimestamp, "new-head"),
-    "2026-05-21T13:23:00Z",
-  );
-  const withOwnTimestamp = [
-    {
-      event: "committed",
-      sha: "new-head",
-      created_at: "2026-05-21T13:22:00Z",
-    },
-  ];
-  assertEqual(
-    headCommitTimestampFromTimeline(withOwnTimestamp, "new-head"),
-    "2026-05-21T13:22:00Z",
-  );
-
-  // The flag follows the timestamp the probe actually selects.
-  assert(
-    headUpdatedAtIsUpperBound({
-      headSha: "new-head",
-      timelineItems: withoutOwnTimestamp,
-      observedAt: null,
-    }),
-    "a later-event surrogate is an upper bound",
-  );
-  assert(
-    headUpdatedAtIsUpperBound({
-      headSha: "new-head",
-      timelineItems: [],
-      observedAt: "2026-05-21T13:23:00Z",
-    }),
-    "a first-check time is an upper bound",
-  );
-  assert(
-    headUpdatedAtIsUpperBound({
-      headSha: "new-head",
-      timelineItems: withOwnTimestamp,
-      observedAt: "2026-05-21T13:21:00Z",
-    }),
-    "an earlier first-check time wins the selection and stays an upper bound",
-  );
-  assert(
-    !headUpdatedAtIsUpperBound({
-      headSha: "new-head",
-      timelineItems: withOwnTimestamp,
-      observedAt: "2026-05-21T13:23:00Z",
-    }),
-    "the commit's own timestamp is exact",
-  );
-  assert(
-    !headUpdatedAtIsUpperBound({
-      headSha: "new-head",
-      timelineItems: [],
-      observedAt: null,
-    }),
-    "no evidence at all is unknown, not an upper bound",
-  );
-  // The activation floor moves the selected time past the commit's own
-  // timestamp, so a marked request posted while the PR was a draft must keep
-  // counting instead of reading as stale.
-  assert(
-    headUpdatedAtIsUpperBound({
-      headSha: "new-head",
-      timelineItems: [
-        ...withOwnTimestamp,
-        { event: "ready_for_review", created_at: "2026-05-21T13:40:00Z" },
-      ],
-      observedAt: "2026-05-21T13:23:00Z",
-    }),
-    "a ready-for-review floor makes the selected time an upper bound",
-  );
-  assert(
-    headUpdatedAtIsUpperBound({
-      headSha: "new-head",
-      timelineItems: withOwnTimestamp,
-      observedAt: "2026-05-21T13:23:00Z",
-      openedAt: "2026-05-21T13:40:00Z",
-    }),
-    "a PR-creation floor makes the selected time an upper bound",
-  );
-});
-
-test("headTimeForPullRequest pairs the head time with its upper-bound flag", () => {
-  const surrogate = [
-    { event: "committed", sha: "new-head" },
-    { event: "commented", created_at: "2026-05-21T13:23:00Z" },
-  ];
-  assertDeepEqual(
-    headTimeForPullRequest({
-      headSha: "new-head",
-      timelineItems: surrogate,
-      observedAt: null,
-    }),
-    {
-      headUpdatedAt: "2026-05-21T13:23:00Z",
-      headUpdatedAtIsUpperBound: true,
-      headFreshnessKnown: true,
-    },
-  );
-  assertDeepEqual(
-    headTimeForPullRequest({
-      headSha: "new-head",
-      timelineItems: [
-        {
-          event: "committed",
-          sha: "new-head",
-          created_at: "2026-05-21T13:20:00Z",
-        },
-      ],
-      observedAt: "2026-05-21T13:25:00Z",
-    }),
-    {
-      headUpdatedAt: "2026-05-21T13:20:00Z",
-      headUpdatedAtIsUpperBound: false,
-      headFreshnessKnown: true,
-    },
-  );
-  assertDeepEqual(
-    headTimeForPullRequest({
-      headSha: "new-head",
-      timelineItems: [],
-      observedAt: null,
-    }),
-    {
-      headUpdatedAt: null,
-      headUpdatedAtIsUpperBound: false,
-      headFreshnessKnown: false,
-    },
-  );
-  assertDeepEqual(
-    headTimeForPullRequest({
-      headSha: "new-head",
-      timelineItems: null,
-      observedAt: "2026-05-21T13:25:00Z",
-    }),
-    {
-      headUpdatedAt: "2026-05-21T13:25:00Z",
-      headUpdatedAtIsUpperBound: true,
-      headFreshnessKnown: false,
-    },
-  );
-});
-
-test("waits out the grace when the timeline read failed", () => {
-  // Without the timeline the latest ready-for-review event is unknown, so a
-  // status time older than the grace window may still be a fresh activation
-  // whose automatic review is about to start. The time itself stays known so
-  // the required review signals keep their lower bound.
-  const observedAt = Date.parse("2026-09-13T12:00:00Z");
-  const {
-    headUpdatedAt: _headUpdatedAt,
-    commits: _commits,
-    ...prWithoutHeadTime
-  } = basePr;
-  const summary = summarizeReadyState({
-    pr: {
-      ...prWithoutHeadTime,
-      headRefOid: "b".repeat(40),
-      headUpdatedAt: new Date(observedAt - minutesMs(10)).toISOString(),
-      headFreshnessKnown: false,
-    },
-    now: observedAt,
-  });
-  assertEqual(
-    summary.gates.codeRabbitReviewSignal.fallbackAction,
-    "wait_for_head_grace",
-    "a failed timeline read must not buy a review the vendor may run for free",
   );
 });
 
@@ -3181,11 +2928,18 @@ test("emits the closeout fallback action for missing and stale signals", () => {
   // `docs/notes/pr-ready-state.md` mirrors in prose. Nothing else pinned it
   // before, so a rename could silently desynchronise the probe from the
   // runbook.
+  const observedAt = Date.parse("2026-09-13T12:00:00Z");
+  const oldHead = { headUpdatedAt: observedAt - 10 * 60 * 1000, observedAt };
   for (const state of ["missing", "stale"]) {
     assertEqual(
-      summarizeCodeRabbitReviewGate(state).fallbackAction,
+      summarizeCodeRabbitReviewGate(state, null, oldHead).fallbackAction,
       "request_review_once_for_head",
       `${state} must instruct one closeout request for the head`,
+    );
+    assertEqual(
+      summarizeCodeRabbitReviewGate(state).fallbackAction,
+      "wait_for_head_grace",
+      `${state} without a head time must wait, not request`,
     );
   }
 
@@ -3202,13 +2956,13 @@ test("ranks the CodeRabbit closeout fallbacks by the review each one wastes", ()
   const exhausted = { requestCount: 2, requestBudget: 2 };
   const observedAt = Date.parse("2026-09-13T12:00:00Z");
   const freshHead = { headUpdatedAt: observedAt - 2 * 60 * 1000, observedAt };
+  const oldHead = { headUpdatedAt: observedAt - 10 * 60 * 1000, observedAt };
 
   for (const state of ["missing", "stale"]) {
     assertEqual(
       summarizeCodeRabbitReviewGate(state, null, {
         mergeStateStatus: "behind",
         reviewRunning: true,
-        pendingRequest: true,
         ...freshHead,
         ...exhausted,
       }).fallbackAction,
@@ -3217,22 +2971,22 @@ test("ranks the CodeRabbit closeout fallbacks by the review each one wastes", ()
     );
     assertEqual(
       summarizeCodeRabbitReviewGate(state, null, {
+        mergeStateStatus: "DIRTY",
         reviewRunning: true,
-        pendingRequest: true,
+        ...freshHead,
+        ...exhausted,
+      }).fallbackAction,
+      "merge_base_first",
+      `${state} with merge conflicts must merge the base first`,
+    );
+    assertEqual(
+      summarizeCodeRabbitReviewGate(state, null, {
+        reviewRunning: true,
         ...freshHead,
         ...exhausted,
       }).fallbackAction,
       "wait_for_running_review",
       `${state} with a running review must not supersede it`,
-    );
-    assertEqual(
-      summarizeCodeRabbitReviewGate(state, null, {
-        pendingRequest: true,
-        ...freshHead,
-        ...exhausted,
-      }).fallbackAction,
-      "wait_for_pending_request",
-      `${state} with a request already posted must not post another`,
     );
     assertEqual(
       summarizeCodeRabbitReviewGate(state, null, {
@@ -3243,12 +2997,16 @@ test("ranks the CodeRabbit closeout fallbacks by the review each one wastes", ()
       `${state} on a fresh head must wait for the automatic run`,
     );
     assertEqual(
-      summarizeCodeRabbitReviewGate(state, null, exhausted).fallbackAction,
+      summarizeCodeRabbitReviewGate(state, null, {
+        ...oldHead,
+        ...exhausted,
+      }).fallbackAction,
       "request_budget_exhausted",
       `${state} at the budget must stop requesting`,
     );
     assertEqual(
       summarizeCodeRabbitReviewGate(state, null, {
+        ...oldHead,
         requestCount: 1,
         requestBudget: 2,
       }).fallbackAction,
@@ -3262,7 +3020,6 @@ test("ranks the CodeRabbit closeout fallbacks by the review each one wastes", ()
       summarizeCodeRabbitReviewGate(state, null, {
         mergeStateStatus: "BEHIND",
         reviewRunning: true,
-        pendingRequest: true,
         ...freshHead,
         ...exhausted,
       }).fallbackAction,
@@ -3273,159 +3030,6 @@ test("ranks the CodeRabbit closeout fallbacks by the review each one wastes", ()
 });
 
 const minutesMs = (minutes) => minutes * 60 * 1000;
-
-test("waits out a bare CodeRabbit request posted inside the refill hour", () => {
-  assertEqual(CODERABBIT_PENDING_REQUEST_WINDOW_MS, minutesMs(60));
-  const currentHeadOid = "b".repeat(40);
-  const observedAt = Date.parse("2026-09-13T12:00:00Z");
-  const headUpdatedAt = observedAt - minutesMs(30);
-  const bareRequest = (createdAtMs, authorAssociation = "MEMBER") => ({
-    body: "@coderabbitai review",
-    author_association: authorAssociation,
-    user: { login: "chapati23" },
-    created_at: new Date(createdAtMs).toISOString(),
-  });
-
-  // A head time taken from the first check on the head lands after the push,
-  // so a request posted in between must still read as pending, not stale.
-  const upperBound = summarizeReadyState({
-    pr: {
-      ...basePr,
-      headRefOid: currentHeadOid,
-      headUpdatedAt: new Date(headUpdatedAt).toISOString(),
-      headUpdatedAtIsUpperBound: true,
-      statusCheckRollup: [],
-    },
-    issueComments: [bareRequest(headUpdatedAt - minutesMs(1))],
-    now: observedAt,
-  });
-  assertEqual(
-    upperBound.gates.codeRabbitReviewSignal.fallbackAction,
-    "wait_for_pending_request",
-  );
-  const lowerBound = summarizeReadyState({
-    pr: {
-      ...basePr,
-      headRefOid: currentHeadOid,
-      headUpdatedAt: new Date(headUpdatedAt).toISOString(),
-      statusCheckRollup: [],
-    },
-    issueComments: [bareRequest(headUpdatedAt - minutesMs(1))],
-    now: observedAt,
-  });
-  assertEqual(
-    lowerBound.gates.codeRabbitReviewSignal.fallbackAction,
-    "request_review_once_for_head",
-    "a timeline-dated head bounds requests from below",
-  );
-
-  assert(
-    hasPendingBareCodeRabbitReviewRequest({
-      issueComments: [bareRequest(observedAt - minutesMs(20))],
-      currentHeadOid,
-      headUpdatedAt,
-      observedAt,
-    }),
-    "a trusted bare request posted after the head update is still pending",
-  );
-  assert(
-    !hasPendingBareCodeRabbitReviewRequest({
-      issueComments: [bareRequest(observedAt - minutesMs(90))],
-      currentHeadOid,
-      headUpdatedAt: observedAt - minutesMs(100),
-      observedAt,
-    }),
-    "a request older than the refill hour is no longer pending",
-  );
-  assert(
-    !hasPendingBareCodeRabbitReviewRequest({
-      issueComments: [bareRequest(observedAt - minutesMs(20), "NONE")],
-      currentHeadOid,
-      headUpdatedAt,
-      observedAt,
-    }),
-    "an untrusted commenter cannot hold the gate open",
-  );
-  assert(
-    !hasPendingBareCodeRabbitReviewRequest({
-      issueComments: [bareRequest(headUpdatedAt - minutesMs(5))],
-      currentHeadOid,
-      headUpdatedAt,
-      observedAt,
-    }),
-    "a request that predates the head update ran against the old head",
-  );
-  assert(
-    !hasPendingBareCodeRabbitReviewRequest({
-      issueComments: [
-        {
-          ...bareRequest(observedAt - minutesMs(20)),
-          body: `@coderabbitai review\n\n<!-- coderabbit-final-head-review:${currentHeadOid} -->`,
-        },
-      ],
-      currentHeadOid,
-      headUpdatedAt,
-      observedAt,
-    }),
-    "a marker for the current head is the requested signal, not a pending wait",
-  );
-  assert(
-    !hasPendingBareCodeRabbitReviewRequest({
-      issueComments: [
-        {
-          ...bareRequest(observedAt - minutesMs(20)),
-          body: `@coderabbitai review\n\n<!-- coderabbit-final-head-review:${"a".repeat(40)} -->`,
-        },
-      ],
-      currentHeadOid,
-      headUpdatedAt: null,
-      observedAt,
-    }),
-    "a marker for another head is stale even without a lower bound",
-  );
-
-  const pr = {
-    ...basePr,
-    headRefOid: currentHeadOid,
-    headUpdatedAt: new Date(headUpdatedAt).toISOString(),
-    statusCheckRollup: [],
-  };
-  const pending = summarizeReadyState({
-    pr,
-    issueComments: [bareRequest(observedAt - minutesMs(20))],
-    now: observedAt,
-  });
-  assertEqual(pending.codeRabbitReviewSignal, "missing");
-  assertEqual(pending.gates.codeRabbitReviewSignal.requestCount, 1);
-  assertEqual(
-    pending.gates.codeRabbitReviewSignal.fallbackAction,
-    "wait_for_pending_request",
-  );
-
-  const expired = summarizeReadyState({
-    pr,
-    issueComments: [bareRequest(observedAt - minutesMs(90))],
-    now: observedAt,
-  });
-  assertEqual(
-    expired.gates.codeRabbitReviewSignal.fallbackAction,
-    "request_review_once_for_head",
-    "an expired bare request no longer blocks the one closeout request",
-  );
-
-  const marked = summarizeReadyState({
-    pr,
-    issueComments: [
-      {
-        ...bareRequest(observedAt - minutesMs(20)),
-        body: `@coderabbitai review\n\n<!-- coderabbit-final-head-review:${currentHeadOid} -->`,
-      },
-    ],
-    now: observedAt,
-  });
-  assertEqual(marked.codeRabbitReviewSignal, "requested");
-  assertEqual(marked.gates.codeRabbitReviewSignal.fallbackAction, "wait");
-});
 
 test("waits out the head grace before asking CodeRabbit for a review", () => {
   assertEqual(CODERABBIT_HEAD_GRACE_MS, minutesMs(5));
@@ -3505,42 +3109,6 @@ test("waits when the head update time is unknown", () => {
   );
 });
 
-test("keeps readiness overrides reachable through the ready-state summary", () => {
-  // parseReadinessOverrideComment moved to pr-ready-state-overrides.mjs; this
-  // pins the path that summarizeReadyState still drives through
-  // findActiveReadinessOverrides.
-  const currentHeadOid = "b".repeat(40);
-  const override = {
-    body: `/pr-ready-override gate=codex-description-approval head=${currentHeadOid} reason=connector outage`,
-    author_association: "OWNER",
-    user: { login: "chapati23", type: "User" },
-    created_at: "2026-09-13T11:00:00Z",
-    html_url:
-      "https://github.com/mento-protocol/monitoring-monorepo/pull/123#issuecomment-1",
-  };
-  const summary = summarizeReadyState({
-    pr: { ...basePr, headRefOid: currentHeadOid },
-    issueComments: [override],
-  });
-
-  assertEqual(summary.readinessOverrides.length, 1);
-  assertEqual(summary.readinessOverrides[0].state, "active");
-  assertEqual(summary.readinessOverrides[0].reason, "connector outage");
-  assertEqual(summary.gates.codexDescriptionApproval.ready, true);
-  assertEqual(summary.gates.codexDescriptionApproval.state, "overridden");
-  assertEqual(
-    summary.gates.codexDescriptionApproval.override.url,
-    override.html_url,
-  );
-
-  const ignored = summarizeReadyState({
-    pr: { ...basePr, headRefOid: currentHeadOid },
-    issueComments: [{ ...override, author_association: "NONE" }],
-  });
-  assertEqual(ignored.readinessOverrides.length, 0);
-  assertEqual(ignored.gates.codexDescriptionApproval.ready, false);
-});
-
 test("counts trusted head-bound and bare CodeRabbit requests against the budget", () => {
   const currentHeadOid = "b".repeat(40);
   const oldHeadOid = "a".repeat(40);
@@ -3596,39 +3164,7 @@ test("counts trusted head-bound and bare CodeRabbit requests against the budget"
   );
 });
 
-test("treats only in-flight CodeRabbit check runs as a running review", () => {
-  assertEqual(
-    isCodeRabbitReviewRunning([
-      { name: "CodeRabbit", status: "IN_PROGRESS", conclusion: null },
-    ]),
-    true,
-  );
-  assertEqual(
-    isCodeRabbitReviewRunning([
-      { name: "coderabbit", status: "QUEUED", conclusion: null },
-    ]),
-    true,
-    "the check name matches case-insensitively",
-  );
-  assertEqual(
-    isCodeRabbitReviewRunning([{ name: "CodeRabbit", state: "PENDING" }]),
-    true,
-  );
-  assertEqual(
-    isCodeRabbitReviewRunning([
-      { name: "CodeRabbit", status: "COMPLETED", conclusion: "SUCCESS" },
-    ]),
-    false,
-    "a finished run is not running",
-  );
-  assertEqual(
-    isCodeRabbitReviewRunning([
-      { name: "ci", status: "IN_PROGRESS", conclusion: null },
-    ]),
-    false,
-    "another pending check is not a CodeRabbit review",
-  );
-
+test("waits while a CodeRabbit check run is in flight on the head", () => {
   const running = summarizeReadyState({
     pr: {
       ...basePr,
@@ -3642,41 +3178,20 @@ test("treats only in-flight CodeRabbit check runs as a running review", () => {
     running.gates.codeRabbitReviewSignal.fallbackAction,
     "wait_for_running_review",
   );
-
-  const behind = summarizeReadyState({
+  const finished = summarizeReadyState({
     pr: {
       ...basePr,
       headRefOid: "b".repeat(40),
-      mergeStateStatus: "BEHIND",
       statusCheckRollup: [
-        { name: "CodeRabbit", status: "IN_PROGRESS", conclusion: null },
+        { name: "CodeRabbit", status: "COMPLETED", conclusion: "SUCCESS" },
       ],
     },
   });
-  assertEqual(
-    behind.gates.codeRabbitReviewSignal.fallbackAction,
-    "merge_base_first",
-    "the base merge outranks the running review",
+  assert(
+    finished.gates.codeRabbitReviewSignal.fallbackAction !==
+      "wait_for_running_review",
+    "a finished run is not running",
   );
-});
-
-test("keeps the CodeRabbit gate shape for callers without closeout context", () => {
-  assertDeepEqual(summarizeCodeRabbitReviewGate("missing"), {
-    ready: false,
-    required: false,
-    state: "missing",
-    fallbackAction: "request_review_once_for_head",
-    requestCount: 0,
-    requestBudget: 2,
-  });
-  assertDeepEqual(summarizeCodeRabbitReviewGate("reviewed"), {
-    ready: true,
-    required: false,
-    state: "reviewed",
-    fallbackAction: "wait",
-    requestCount: 0,
-    requestBudget: 2,
-  });
 });
 
 test("human and compact output name the CodeRabbit closeout fallback", () => {
@@ -3777,18 +3292,8 @@ test("binds one CodeRabbit closeout request to the full current head", () => {
       headUpdatedAt: Date.parse("2026-08-21T08:13:33Z"),
       issueComments: [beforeStatusTime],
     }),
-    "stale",
-    "a timeline-dated head still bounds marked requests from below",
-  );
-  assertEqual(
-    classifyCodeRabbitReviewSignal({
-      currentHeadOid,
-      headUpdatedAt: Date.parse("2026-08-21T08:13:33Z"),
-      headUpdatedAtIsUpperBound: true,
-      issueComments: [beforeStatusTime],
-    }),
     "requested",
-    "a status-dated head keeps the exact-head marker as the request",
+    "the exact-head marker is the request whatever its timestamp",
   );
   assertEqual(
     classifyCodeRabbitReviewSignal({

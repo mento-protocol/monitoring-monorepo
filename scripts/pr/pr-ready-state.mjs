@@ -14,7 +14,10 @@ import {
   summarizeReadyState,
   summarizeTerminalReadyState,
 } from "./pr-ready-state-core.mjs";
-import { headTimeForPullRequest } from "./pr-ready-state-head-time.mjs";
+import {
+  fetchHeadUpdatedAt,
+  headUpdatedAtFromTimeline,
+} from "./pr-ready-state-closeout.mjs";
 import {
   findCodeRabbitPathFilterSkipCandidate,
   validateCodeRabbitPathFilterSkip,
@@ -33,6 +36,7 @@ import {
   ghApiJsonPagesResult,
 } from "./pr-ready-state-gh.mjs";
 
+export { fetchHeadUpdatedAt, headUpdatedAtFromTimeline };
 export { withGhAbortSignal } from "./pr-ready-state-gh.mjs";
 
 function addRequiredContext(byKey, context, integrationId = null) {
@@ -648,7 +652,6 @@ export async function fetchReadyState({
       "baseRefName",
       "baseRefOid",
       "changedFiles",
-      "createdAt",
       "headRefName",
       "headRefOid",
       "isDraft",
@@ -726,15 +729,14 @@ export async function fetchReadyState({
     readinessBasesPromise,
     timelinePromise,
   ]);
-  const headTime = headTimeForPullRequest({
+  const headUpdatedAt = fetchHeadUpdatedAt({
     headSha: pr.headRefOid,
-    timelineItems: timelineResult.ok ? timelineResult.value : null,
+    timelineItems: timelineResult.ok ? timelineResult.value : [],
     observedAt,
-    openedAt: pr.createdAt ?? null,
   });
   const pathFilterCandidate = findCodeRabbitPathFilterSkipCandidate({
     issueComments,
-    headUpdatedAt: headTime.headUpdatedAt,
+    headUpdatedAt,
   });
   let codeRabbitPathFilterSkip = null;
   if (pathFilterCandidate) {
@@ -765,7 +767,7 @@ export async function fetchReadyState({
   });
   const annotatedPr = {
     ...pr,
-    ...headTime,
+    headUpdatedAt,
     statusCheckRollup: annotateStatusCheckSources(
       pr.statusCheckRollup ?? [],
       sourceMap,

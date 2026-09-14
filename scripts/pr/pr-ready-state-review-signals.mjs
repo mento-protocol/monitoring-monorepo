@@ -23,16 +23,6 @@ const CODERABBIT_FINAL_HEAD_REQUEST_MARKER =
   /<!--\s*coderabbit-final-head-review:([0-9a-f]{40})\s*-->/i;
 const CODERABBIT_REVIEW_REQUEST_COMMAND =
   /(^|\s)@coderabbitai\s+(?:full\s+)?review\b/i;
-// One opening closeout request plus one after the fixes. Each extra request
-// bills another review, and a request posted while one runs supersedes and
-// wastes it.
-export const CODERABBIT_REVIEW_REQUEST_BUDGET = 2;
-// CodeRabbit refills its request allowance hourly. A bare request posted inside
-// that hour still runs or is rate-limited; posting again supersedes it.
-export const CODERABBIT_PENDING_REQUEST_WINDOW_MS = 60 * 60 * 1000;
-// A push usually draws an automatic run within a few minutes. Requesting inside
-// that window buys a billed review the vendor would have run for free.
-export const CODERABBIT_HEAD_GRACE_MS = 5 * 60 * 1000;
 const CODERABBIT_SUMMARY_MARKER =
   /<!--\s*This is an auto-generated comment:\s*summarize by coderabbit\.ai\s*-->/gi;
 const CODERABBIT_SKIP_REVIEW_MARKER =
@@ -90,43 +80,17 @@ export function isCodexReviewRequestBody(body) {
 
 function codeRabbitFinalHeadReviewRequestHead(body) {
   const text = String(body ?? "");
-  // The same matcher counts requests against the budget, so a marked
-  // `full review` is both counted and recognized as the current-head request.
   if (!CODERABBIT_REVIEW_REQUEST_COMMAND.test(text)) return null;
   return text.match(CODERABBIT_FINAL_HEAD_REQUEST_MARKER)?.[1] ?? null;
 }
 
+/** Trusted request comments, marked or bare, counted against the budget. */
 export function countTrustedCodeRabbitReviewRequests(issueComments = []) {
   return issueComments.filter(
     (comment) =>
       isTrustedCodeRabbitReviewRequestComment(comment) &&
       CODERABBIT_REVIEW_REQUEST_COMMAND.test(String(comment?.body ?? "")),
   ).length;
-}
-
-export function hasPendingBareCodeRabbitReviewRequest({
-  issueComments = [],
-  headUpdatedAt = null,
-  observedAt = Date.now(),
-} = {}) {
-  return issueComments.some((comment) => {
-    if (!isTrustedCodeRabbitReviewRequestComment(comment)) return false;
-    const body = String(comment?.body ?? "");
-    if (!CODERABBIT_REVIEW_REQUEST_COMMAND.test(body)) return false;
-
-    // A marked request is never pending: a marker for the current head is the
-    // "requested" signal, and a marker for another head proves the request
-    // belongs to a superseded push, whatever its timestamp.
-    if (codeRabbitFinalHeadReviewRequestHead(body)) return false;
-
-    const createdAt = comment?.created_at ?? comment?.createdAt ?? null;
-    const timestamp = parseTimestamp(createdAt);
-    if (timestamp === null) return false;
-    if (headUpdatedAt !== null && !isAtOrAfter(createdAt, headUpdatedAt)) {
-      return false;
-    }
-    return observedAt - timestamp < CODERABBIT_PENDING_REQUEST_WINDOW_MS;
-  });
 }
 
 function isTrustedCodeRabbitReviewRequestComment(comment) {
@@ -314,92 +278,6 @@ export function validateCodeRabbitPathFilterSkip({
   };
 }
 
-function nonNegativeCount(value, fallback) {
-  const count = Number(value);
-  return Number.isFinite(count) && count >= 0 ? count : fallback;
-}
-
-function codeRabbitCloseoutFallbackAction(
-  state,
-  {
-    mergeStateStatus,
-    reviewRunning,
-    pendingRequest,
-    headFreshnessKnown = true,
-    headUpdatedAt,
-    observedAt,
-    requestCount,
-    requestBudget,
-  },
-) {
-  if (!["missing", "stale"].includes(state)) return "wait";
-  // A base merge rewrites the head, so a request posted first is wasted and can
-  // itself draw an unprompted full re-review.
-  if (
-    String(mergeStateStatus ?? "")
-      .trim()
-      .toUpperCase() === "BEHIND"
-  ) {
-    return "merge_base_first";
-  }
-  // A new request supersedes the running review; the vendor bills the
-  // superseded run and discards it.
-  if (reviewRunning) return "wait_for_running_review";
-  // The request is in, but no check run has appeared yet. Posting again
-  // supersedes it inside the same refill hour.
-  if (pendingRequest) return "wait_for_pending_request";
-  // The head's age is unknown, so its automatic run cannot be ruled out.
-  // Waiting costs a poll; requesting can duplicate the opening or post-merge
-  // review, so fail closed.
-  if (!headFreshnessKnown) return "wait_for_head_grace";
-  // A fresh head still draws its automatic run: the opening review, or the full
-  // re-review a base merge or rebase triggers.
-  if (
-    headUpdatedAt !== null &&
-    observedAt - headUpdatedAt < CODERABBIT_HEAD_GRACE_MS
-  ) {
-    return "wait_for_head_grace";
-  }
-  if (requestCount >= requestBudget) return "request_budget_exhausted";
-  return "request_review_once_for_head";
-}
-
-function normalizeEpochMs(value) {
-  if (Number.isFinite(value)) return value;
-  return parseTimestamp(value);
-}
-
-export function summarizeCodeRabbitReviewGate(
-  state,
-  pathFilterSkip = null,
-  context = {},
-) {
-  const requestCount = nonNegativeCount(context?.requestCount, 0);
-  const requestBudget = nonNegativeCount(
-    context?.requestBudget,
-    CODERABBIT_REVIEW_REQUEST_BUDGET,
-  );
-
-  return {
-    ready: ["reviewed", "not_applicable"].includes(state),
-    required: false,
-    state,
-    fallbackAction: codeRabbitCloseoutFallbackAction(state, {
-      mergeStateStatus: context?.mergeStateStatus ?? null,
-      reviewRunning: Boolean(context?.reviewRunning),
-      pendingRequest: Boolean(context?.pendingRequest),
-      headFreshnessKnown: Boolean(context?.headFreshnessKnown ?? true),
-      headUpdatedAt: normalizeEpochMs(context?.headUpdatedAt),
-      observedAt: normalizeEpochMs(context?.observedAt) ?? Date.now(),
-      requestCount,
-      requestBudget,
-    }),
-    requestCount,
-    requestBudget,
-    ...(state === "not_applicable" ? pathFilterSkip : {}),
-  };
-}
-
 export function isCodeRabbitFinalHeadReviewRequestBody(
   body,
   currentHeadOid = null,
@@ -530,7 +408,6 @@ export function classifyCodeRabbitReviewSignal({
   reviews = [],
   currentHeadOid = null,
   headUpdatedAt = null,
-  headUpdatedAtIsUpperBound = false,
   pathFilterSkip = null,
 } = {}) {
   const currentHead = String(currentHeadOid ?? "").toLowerCase();
@@ -580,13 +457,9 @@ export function classifyCodeRabbitReviewSignal({
     const matchesCurrentHead =
       currentHead && requestedHead.toLowerCase() === currentHead;
 
-    // A head time taken from the first check on the head lands after the
-    // push, so it cannot date a request posted in between; the exact-head
-    // marker already binds the request to this head.
-    const recent =
-      headUpdatedAtIsUpperBound ||
-      isCurrentSignal(comment.created_at ?? comment.createdAt, headUpdatedAt);
-    if (matchesCurrentHead && recent) {
+    // The marker names the full head SHA, so the request cannot predate the
+    // head it binds to; no timestamp test is needed.
+    if (matchesCurrentHead) {
       hasCurrentRequest = true;
     } else {
       hasHistoricalSignal = true;

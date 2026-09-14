@@ -386,27 +386,19 @@ four passages named at its end.
   per report on 7-8 files — a higher rate per file. Documentation and prose
   carry 30% of findings but only 22% of Major ones. Tests are 22% of reviewed
   files and 4% of Major findings.
-- **Decision (a): the ready-state oracle enforces closeout hygiene.** The
-  `summarizeCodeRabbitReviewGate` projection in
-  `scripts/pr/pr-ready-state-review-signals.mjs` now reports
-  `requestCount` and `requestBudget` and one of six `fallbackAction` values, in
-  precedence: `merge_base_first` (merge the base before requesting, so the
-  request does not turn into a billed full re-review),
-  `wait_for_running_review` (a review is already running; a second request
-  would supersede and waste it), `wait_for_pending_request` (a trusted unmarked
-  request posted after the head update and less than an hour ago will run or be
-  rate-limited inside the refill hour; posting again supersedes it),
-  `wait_for_head_grace` (the head is under five minutes old and no run has
-  appeared; an automatic run may still start, including the full re-review a
-  base merge or rebase can draw; the gate fails closed into this wait when a
-  failed or empty timeline or status read leaves the head update time unknown),
-  `request_budget_exhausted` (budget 2 per PR),
-  and `request_review_once_for_head`. The two waits were added because the
-  closeout review on this PR found that a base merge followed by an immediate
-  request, or a bare maintainer request, could still draw a duplicate billed
-  review. The ready-state and tooling runbooks match:
-  merge the base first, batch a fix round into one push, and never use GitHub's
-  "Update branch" button or edit files in the web UI on an open PR.
+- **Decision (a): the ready-state oracle enforces closeout hygiene.**
+  `summarizeCodeRabbitReviewGate` in `scripts/pr/pr-ready-state-closeout.mjs`
+  reports `requestCount`, `requestBudget` (2 per PR), and a `fallbackAction`
+  whose precedence [`../notes/pr-ready-state.md`](../notes/pr-ready-state.md)
+  states: merge the base first, never post while a CodeRabbit check runs on
+  the head, wait out a head under five minutes old or of unknown age, stop at
+  the budget, else post one marked request for the head. The runbooks match:
+  merge the base first, batch a fix round into one push, and never use
+  GitHub's "Update branch" button or edit files in the web UI on an open PR.
+  A first version also modelled the head's age to the minute (activation
+  floors, upper-bound flags, a pending bare-request wait); it was removed
+  before merge because each piece guarded a rare case whose cost is one extra
+  advisory request, which the budget already bounds.
 - **Decision (b): three path filters added** — `!.claude/skills/**`,
   `!docs/metrics/**`, and `!scripts/repo-health/**`. Each class drew zero
   findings across all 265 PRs, and each is billed again on every push that

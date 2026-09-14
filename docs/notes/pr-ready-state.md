@@ -222,29 +222,16 @@ The closeout request follows one order, on every surface:
 For a missing or stale signal the gate reports `fallbackAction` in this
 precedence:
 
-- `merge_base_first` — the PR is BEHIND its base. Merge the base before any
-  request. For a native stack layer, bring the base in through the
+- `merge_base_first` — the PR is BEHIND its base or DIRTY (merge conflicts).
+  Merge the base before any request. For a native stack layer, bring the base in through the
   history-change procedure in
   [`stacked-pull-requests.md`](stacked-pull-requests.md), never as a local
   merge commit.
 - `wait_for_running_review` — the current head's CodeRabbit check is still
   running. A request now supersedes it and bills the discarded review.
-- `wait_for_pending_request` — a trusted bare `@coderabbitai review` or
-  `@coderabbitai full review` comment, with no head marker at all, was posted
-  at or after the head update and less than 60 minutes ago (a marker for this
-  head is the `requested` signal; a marker for another head is stale, whatever
-  its age). It will run or be
-  rate-limited inside the refill hour; posting again supersedes it. When the
-  head time comes from a later timeline event or the first check on the head
-  (the head commit carries no timestamp of its own yet), it lands after the
-  push, so any bare request in the last hour counts as pending.
 - `wait_for_head_grace` — the head is less than 5 minutes old and no CodeRabbit
   run or check has appeared for it. An automatic run may still start, including
-  the full re-review a base merge or rebase can draw. The head is no older than
-  the PR: a branch pushed and checked before its PR opened, or while it was a
-  draft, gets the grace from the PR creation time or the latest ready-for-review
-  conversion, because that is what starts the automatic review. The gate
-  reports this wait
+  the full re-review a base merge or rebase can draw. The gate reports this wait
   as well when the probe cannot establish the head update time — a failed or
   empty timeline or status read — because it cannot prove the automatic run has
   had its chance; if the time stays unknown across two polls at least five
@@ -259,9 +246,11 @@ precedence:
   automatic attempt to become terminal first, because the gate does not read
   that file.
 
-The gate also reports `requestCount` and `requestBudget`, which is 2. The two
-waits read the observation time and the head update time, so a probe run
-immediately after a push reports a wait rather than a request.
+The gate also reports `requestCount` and `requestBudget`, which is 2. The grace
+wait reads the observation time and the head update time, so a probe run
+immediately after a push reports a wait rather than a request. A bare trusted
+request counts against the budget like a marked one; if someone already asked
+in the last hour, do not ask again.
 
 **Then wait for the closeout attempt before the final sweep.** Once the request
 is posted, the signal sits at `requested` and readiness will not hold it —
@@ -500,7 +489,8 @@ Field expectations:
   protection so post-merge babysitting exits quickly and does not mistake
   GitHub's post-merge `mergeable: UNKNOWN` for a blocker.
 - `pr.mergeStateStatus`: GitHub's aggregate merge status. `BEHIND` is an
-  explicit base-update blocker; other aggregate states do not replace the
+  explicit base-update blocker, and `BEHIND` or `DIRTY` sends the CodeRabbit
+  closeout to `merge_base_first`; other aggregate states do not replace the
   required-check and feedback projections.
 - `pr.autoMergeEnabledAt`: the observed pending auto-merge enable timestamp,
   or null. It records intent and never proves merge completion.
@@ -545,8 +535,8 @@ Field expectations:
   and `ignoredPaths` as described above. The gate also carries `requestCount`,
   `requestBudget` (2), and `fallbackAction`. For a missing or stale signal,
   `fallbackAction` is `merge_base_first`, `wait_for_running_review`,
-  `wait_for_pending_request`, `wait_for_head_grace`,
-  `request_budget_exhausted`, or `request_review_once_for_head`, in that
+  `wait_for_head_grace`, `request_budget_exhausted`, or
+  `request_review_once_for_head`, in that
   precedence; act on it instead of re-deriving the decision. Human output
   prints `CodeRabbit review signal: <state> (fallback: <action>)`, and the
   compact line adds `coderabbit_fallback=<value>`.

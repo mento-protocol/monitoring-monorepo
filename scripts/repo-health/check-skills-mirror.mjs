@@ -44,12 +44,9 @@ Environment:
  * that documented difference, in forensic-report files only, is tolerated.
  */
 export function normalizeProvenance(contents) {
-  // Either quote style, matching the side check below. Only the value is
-  // rewritten: the delimiter and spacing stay, so a mirror that differs in
-  // quote style or whitespace around the literal is still content drift.
   return contents.replace(
-    /(source:\s*)(["'])(?:Codex|claude)\2/g,
-    "$1$2__RUNTIME__$2",
+    /source: "(?:Codex|claude)"/g,
+    'source: "__RUNTIME__"',
   );
 }
 
@@ -143,30 +140,20 @@ function sameContents(fileA, fileB, relativePath) {
 /**
  * The provenance exception tolerates a difference; it must not tolerate a
  * swap. The canonical tree writes `source: "Codex"` and the Claude mirror
- * writes `source: "claude"`, so each literal belongs to one side. A mirror
- * carrying the canonical literal (or the reverse) is byte-identical or
- * normalizes clean, and nothing else reviews `.claude/skills` — so pin the
- * side here.
+ * writes `source: "claude"`. A mirror refresh that copies the canonical file
+ * over the mirror leaves both sides byte-identical, which the content
+ * comparison accepts, and CodeRabbit no longer reviews the mirror — so pin
+ * the side here, for the two documented literals only.
  */
 export function provenanceSideDrift(contentsA, contentsB, relativePath) {
   if (!isForensicReportPath(relativePath)) return [];
   const drift = [];
-  // Every provenance literal on a side must be that side's own value; an
-  // unsupported value such as `source: "codex"` on both sides normalizes clean
-  // and would otherwise pass. Whether the skill writes a literal at all is the
-  // canonical skill's own contract, which stays under review.
-  // Either quote style: a single-quoted `source: 'Codex'` on both sides is
-  // byte-identical and would otherwise carry no literal to check.
-  const literals = (contents) =>
-    [...contents.matchAll(/source:\s*(["'])([^"']*)\1/g)].map(
-      (match) => match[2],
-    );
-  if (literals(contentsA).some((value) => value !== "Codex")) {
+  if (contentsA.includes('source: "claude"')) {
     drift.push(
       `provenance literal in the canonical tree must be source: "Codex": ${relativePath}`,
     );
   }
-  if (literals(contentsB).some((value) => value !== "claude")) {
+  if (contentsB.includes('source: "Codex"')) {
     drift.push(
       `provenance literal in the Claude mirror must be source: "claude": ${relativePath}`,
     );

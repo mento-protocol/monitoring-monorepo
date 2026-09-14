@@ -491,19 +491,11 @@ If root `package.json` changed, first run
    feedback ledger must be clean **first**. Before the final pair, apply the
    CodeRabbit exact-head closeout in
    [`pr-ready-state.md`](pr-ready-state.md), in its order: merge the base
-   first, batch every fix commit into one push, then post at most one marked
-   request per head and at most two per PR — the opening closeout and one after
-   review fixes — following the gate's `fallbackAction` rather than re-deriving
-   the decision, after the stack and head-config rules it cannot read. Its
-   precedence is `merge_base_first`;
-   `wait_for_running_review`; `wait_for_pending_request`, a trusted unmarked
-   request posted after the head update and less than an hour ago, which a
-   second post supersedes; `wait_for_head_grace`, a head under five minutes old
-   with no run yet, where an automatic run may still start, including the full
-   re-review a base merge or rebase can draw; `request_budget_exhausted`; else
-   `request_review_once_for_head`. Never post while a CodeRabbit check is still
-   running on the current head: the request supersedes that review and the
-   vendor charges the one it discards. The subsequent
+   first, batch every fix commit into one push, never post while a CodeRabbit
+   check is running on the current head, and post at most one marked request
+   per head and at most two per PR, following the gate's `fallbackAction`
+   rather than re-deriving the decision (that note states the precedence),
+   after the stack and head-config rules it cannot read. The subsequent
    current-head `pr:ready-state` must report ready, including the current-head
    `chatgpt-codex-connector[bot]` PR-description approval, unless a documented
    human break-glass comment applies:

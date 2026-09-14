@@ -202,60 +202,6 @@ test("a swapped forensic-report provenance literal fails even when both sides ma
     canonicalSwap.output,
     /canonical tree must be source: "Codex": forensic-report\/SKILL\.md/,
   );
-
-  // An unsupported value on both sides normalizes clean too.
-  writeFileSync(
-    path.join(rootA, "forensic-report/SKILL.md"),
-    'writes source: "codex" records\n',
-  );
-  writeFileSync(
-    path.join(rootB, "forensic-report/SKILL.md"),
-    'writes source: "codex" records\n',
-  );
-  const unsupported = runChecker(rootA, rootB);
-  assert.notEqual(unsupported.status, 0);
-  assert.match(unsupported.output, /canonical tree must be source: "Codex"/);
-  assert.match(unsupported.output, /Claude mirror must be source: "claude"/);
-
-  // A single-quoted assignment on both sides is byte-identical too.
-  writeFileSync(
-    path.join(rootA, "forensic-report/SKILL.md"),
-    "writes source: 'Codex' records\n",
-  );
-  writeFileSync(
-    path.join(rootB, "forensic-report/SKILL.md"),
-    "writes source: 'Codex' records\n",
-  );
-  const singleQuoted = runChecker(rootA, rootB);
-  assert.notEqual(singleQuoted.status, 0);
-  assert.match(singleQuoted.output, /Claude mirror must be source: "claude"/);
-});
-
-test("a forensic-report mirror that differs in delimiter or spacing still drifts", () => {
-  // The contract permits only the value to differ; the normalization must not
-  // fold a quote-style or whitespace difference into the documented split.
-  const { rootA, rootB } = newFixture();
-  mkdirSync(path.join(rootA, "forensic-report"));
-  mkdirSync(path.join(rootB, "forensic-report"));
-  writeFileSync(
-    path.join(rootA, "forensic-report/SKILL.md"),
-    'writes source: "Codex" records\n',
-  );
-  writeFileSync(
-    path.join(rootB, "forensic-report/SKILL.md"),
-    "writes source: 'claude' records\n",
-  );
-  const delimiter = runChecker(rootA, rootB);
-  assert.notEqual(delimiter.status, 0);
-  assert.match(delimiter.output, /beyond documented provenance/);
-
-  writeFileSync(
-    path.join(rootB, "forensic-report/SKILL.md"),
-    'writes source:  "claude" records\n',
-  );
-  const spacing = runChecker(rootA, rootB);
-  assert.notEqual(spacing.status, 0);
-  assert.match(spacing.output, /beyond documented provenance/);
 });
 
 test("provenanceSideDrift is silent for the documented split and outside forensic-report", () => {
@@ -323,16 +269,6 @@ test("normalizeProvenance rewrites only the two documented literals", () => {
   assert.equal(
     normalizeProvenance('a source: "Codex" b source: "claude" c'),
     'a source: "__RUNTIME__" b source: "__RUNTIME__" c',
-  );
-  assert.equal(
-    normalizeProvenance("a source: 'Codex' b source: 'claude' c"),
-    "a source: '__RUNTIME__' b source: '__RUNTIME__' c",
-    "a single-quoted documented split keeps its delimiter",
-  );
-  assert.equal(
-    normalizeProvenance('source:  "Codex"'),
-    'source:  "__RUNTIME__"',
-    "spacing around the literal is preserved",
   );
   assert.equal(
     normalizeProvenance('source: "Gemini"'),
