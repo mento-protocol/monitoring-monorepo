@@ -423,7 +423,7 @@ closed.
 
 ## 12. CI health budget
 
-ADR 0097's monthly report is context, not a gate, except:
+ADR 0099's monthly report is context, not a gate, except:
 
 - [ ] `CI` `pull_request` wall p90 must not regress vs. last month.
 - [ ] No CI step fails in >1% of sampled `CI` runs (distinct run) unowned.
