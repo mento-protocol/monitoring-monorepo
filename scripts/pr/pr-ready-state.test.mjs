@@ -2126,6 +2126,29 @@ test("distinguishes the head commit's own timestamp from a later surrogate", () 
     }),
     "no evidence at all is unknown, not an upper bound",
   );
+  // The activation floor moves the selected time past the commit's own
+  // timestamp, so a marked request posted while the PR was a draft must keep
+  // counting instead of reading as stale.
+  assert(
+    headUpdatedAtIsUpperBound({
+      headSha: "new-head",
+      timelineItems: [
+        ...withOwnTimestamp,
+        { event: "ready_for_review", created_at: "2026-05-21T13:40:00Z" },
+      ],
+      observedAt: "2026-05-21T13:23:00Z",
+    }),
+    "a ready-for-review floor makes the selected time an upper bound",
+  );
+  assert(
+    headUpdatedAtIsUpperBound({
+      headSha: "new-head",
+      timelineItems: withOwnTimestamp,
+      observedAt: "2026-05-21T13:23:00Z",
+      openedAt: "2026-05-21T13:40:00Z",
+    }),
+    "a PR-creation floor makes the selected time an upper bound",
+  );
 });
 
 test("headTimeForPullRequest pairs the head time with its upper-bound flag", () => {
@@ -2139,7 +2162,11 @@ test("headTimeForPullRequest pairs the head time with its upper-bound flag", () 
       timelineItems: surrogate,
       observedAt: null,
     }),
-    { headUpdatedAt: "2026-05-21T13:23:00Z", headUpdatedAtIsUpperBound: true },
+    {
+      headUpdatedAt: "2026-05-21T13:23:00Z",
+      headUpdatedAtIsUpperBound: true,
+      headFreshnessKnown: true,
+    },
   );
   assertDeepEqual(
     headTimeForPullRequest({
@@ -2153,7 +2180,11 @@ test("headTimeForPullRequest pairs the head time with its upper-bound flag", () 
       ],
       observedAt: "2026-05-21T13:25:00Z",
     }),
-    { headUpdatedAt: "2026-05-21T13:20:00Z", headUpdatedAtIsUpperBound: false },
+    {
+      headUpdatedAt: "2026-05-21T13:20:00Z",
+      headUpdatedAtIsUpperBound: false,
+      headFreshnessKnown: true,
+    },
   );
   assertDeepEqual(
     headTimeForPullRequest({
@@ -2161,7 +2192,50 @@ test("headTimeForPullRequest pairs the head time with its upper-bound flag", () 
       timelineItems: [],
       observedAt: null,
     }),
-    { headUpdatedAt: null, headUpdatedAtIsUpperBound: false },
+    {
+      headUpdatedAt: null,
+      headUpdatedAtIsUpperBound: false,
+      headFreshnessKnown: false,
+    },
+  );
+  assertDeepEqual(
+    headTimeForPullRequest({
+      headSha: "new-head",
+      timelineItems: null,
+      observedAt: "2026-05-21T13:25:00Z",
+    }),
+    {
+      headUpdatedAt: "2026-05-21T13:25:00Z",
+      headUpdatedAtIsUpperBound: true,
+      headFreshnessKnown: false,
+    },
+  );
+});
+
+test("waits out the grace when the timeline read failed", () => {
+  // Without the timeline the latest ready-for-review event is unknown, so a
+  // status time older than the grace window may still be a fresh activation
+  // whose automatic review is about to start. The time itself stays known so
+  // the required review signals keep their lower bound.
+  const observedAt = Date.parse("2026-09-13T12:00:00Z");
+  const {
+    headUpdatedAt: _headUpdatedAt,
+    commits: _commits,
+    ...prWithoutHeadTime
+  } = basePr;
+  const summary = summarizeReadyState({
+    pr: {
+      ...prWithoutHeadTime,
+      headRefOid: "b".repeat(40),
+      headUpdatedAt: new Date(observedAt - minutesMs(10)).toISOString(),
+      headFreshnessKnown: false,
+    },
+    now: observedAt,
+  });
+  assertEqual(
+    summary.gates.codeRabbitReviewSignal.fallbackAction,
+    "wait_for_head_grace",
+    "a failed timeline read must not buy a review the vendor may run for free",
   );
 });
 

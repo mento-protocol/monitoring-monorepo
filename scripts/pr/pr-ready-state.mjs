@@ -728,7 +728,7 @@ export async function fetchReadyState({
   ]);
   const headTime = headTimeForPullRequest({
     headSha: pr.headRefOid,
-    timelineItems: timelineResult.ok ? timelineResult.value : [],
+    timelineItems: timelineResult.ok ? timelineResult.value : null,
     observedAt,
     openedAt: pr.createdAt ?? null,
   });

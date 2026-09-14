@@ -81,27 +81,31 @@ function latestIsoTimestamp(left, right) {
 }
 
 /**
- * True when the head time `fetchHeadUpdatedAt` would select is not the head
- * commit's own timeline timestamp: a later timeline event or the first check
- * on the head both land after the push, so the selected time only bounds the
- * push from above and cannot bound requests from below.
+ * True when the head time `fetchHeadUpdatedAt` selects is not the head
+ * commit's own timeline timestamp: a later timeline event, the first check on
+ * the head, and the activation floor (PR creation, ready-for-review) all land
+ * after the push, so the selected time only bounds the push from above and
+ * cannot bound requests from below.
  */
 export function headUpdatedAtIsUpperBound({
   headSha,
   timelineItems,
   observedAt,
+  openedAt = null,
 }) {
   const commitTimestamp = headCommitTimestampFromTimeline(
     timelineItems,
     headSha,
   );
-  const evidence = earliestIsoTimestamp(
-    headUpdatedAtFromTimeline(timelineItems, headSha),
-    validIsoTimestamp(observedAt),
-  );
-  if (!evidence) return false;
+  const selected = fetchHeadUpdatedAt({
+    headSha,
+    timelineItems,
+    observedAt,
+    openedAt,
+  });
+  if (!selected) return false;
   return (
-    !commitTimestamp || Date.parse(evidence) !== Date.parse(commitTimestamp)
+    !commitTimestamp || Date.parse(selected) !== Date.parse(commitTimestamp)
   );
 }
 
@@ -128,11 +132,16 @@ export function fetchHeadUpdatedAt({
 }
 
 /**
- * The head time the probe annotates a PR with, and whether that time is only
- * an upper bound. When the selected time is not the head commit's own
- * timeline timestamp it comes from a later timeline event or the first check
- * on the head, both after the push, so the pending-request wait cannot use it
- * as a lower bound for requests and a marked request keeps counting.
+ * The head time the probe annotates a PR with, whether that time is only an
+ * upper bound, and whether the head's age is known well enough for the
+ * closeout grace decision. When the selected time is not the head commit's
+ * own timeline timestamp the pending-request wait cannot use it as a lower
+ * bound for requests and a marked request keeps counting. A null
+ * `timelineItems` means the timeline read failed: the latest ready-for-review
+ * event is then unknown, so a status time older than the grace window may
+ * still be a fresh activation. The age stays unknown for the grace decision
+ * while the time itself keeps bounding the required review signals, which
+ * fail closed on a null time.
  */
 export function headTimeForPullRequest({
   headSha,
@@ -140,9 +149,11 @@ export function headTimeForPullRequest({
   observedAt,
   openedAt = null,
 }) {
+  const timelineAvailable = Array.isArray(timelineItems);
+  const items = timelineAvailable ? timelineItems : [];
   const headUpdatedAt = fetchHeadUpdatedAt({
     headSha,
-    timelineItems,
+    timelineItems: items,
     observedAt,
     openedAt,
   });
@@ -150,6 +161,12 @@ export function headTimeForPullRequest({
     headUpdatedAt,
     headUpdatedAtIsUpperBound:
       headUpdatedAt !== null &&
-      headUpdatedAtIsUpperBound({ headSha, timelineItems, observedAt }),
+      headUpdatedAtIsUpperBound({
+        headSha,
+        timelineItems: items,
+        observedAt,
+        openedAt,
+      }),
+    headFreshnessKnown: timelineAvailable && headUpdatedAt !== null,
   };
 }

@@ -776,7 +776,10 @@ export function summarizeReadyState({
           headUpdatedAt: pr.headUpdatedAtIsUpperBound ? null : headUpdatedAt,
           observedAt: now,
         }),
-        headFreshnessKnown: headUpdatedAt !== null,
+        // A failed timeline read hides the latest ready-for-review event, so
+        // the probe marks the age unknown even when a status time exists.
+        headFreshnessKnown:
+          headUpdatedAt !== null && pr.headFreshnessKnown !== false,
         headUpdatedAt,
         observedAt: now,
       },
