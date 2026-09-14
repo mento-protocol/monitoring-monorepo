@@ -15,7 +15,7 @@ export function render(report) {
   for (const side of ["anchor", "candidate"]) {
     const arm = report[side];
     lines.push(
-      `${side.padEnd(9)} finder ${arm.finder} argv ${short(arm.finder_argv_digest)} skill ${short(arm.skill_digest)} orchestrator ${short(arm.orchestrator_digest)} judge ${arm.judge?.model}@${arm.judge?.effort} calibration ${arm.judge_calibration?.agreement}/${arm.judge_calibration?.total} cli ${arm.codex_cli} / ${arm.claude_cli}`,
+      `${side.padEnd(9)} finder ${arm.finder} argv ${short(arm.finder_argv_digest)} verifier ${arm.verifier?.tool}:${arm.verifier?.model}@${arm.verifier?.effort} skill ${short(arm.skill_digest)} orchestrator ${short(arm.orchestrator_digest)} judge ${arm.judge?.model}@${arm.judge?.effort} calibration ${arm.judge_calibration?.agreement}/${arm.judge_calibration?.total} cli ${arm.codex_cli} / ${arm.claude_cli}`,
     );
     lines.push(
       `${" ".repeat(9)} contract ${short(arm.contract_digest)} scorer ${short(arm.matcher_digest)} calibration set ${short(arm.calibration_digest)} key ${short(arm.comparability_key)}`,

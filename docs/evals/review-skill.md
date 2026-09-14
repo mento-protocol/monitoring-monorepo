@@ -294,6 +294,33 @@ pnpm review:eval:finder-compare -- \
   --candidate docs/evals/review-skill-runs/<probe-run>
 ```
 
+A probe can substitute the verifier as well, with
+`--verifier TOOL:MODEL@EFFORT`, where `TOOL` is `claude` or `codex`. The flag is
+refused without `--kind finder`, for the reason `--finder` is: a canonical row
+must name the contract's own pipeline. The plan records
+`inputs.verifier_override`, the pipeline cells carry its tool, model and effort,
+and both the cell fingerprint and the detail-directory name gain a digest of it
+— only when there is one, so a run that keeps the contract's verifier keeps the
+identity it already had and still resumes. Like the finder substitution, it does
+not move the comparability key.
+
+A codex verifier is the bare model on the same handoff prompt: the runner spawns
+`codex exec --sandbox read-only --skip-git-repo-check --ephemeral --ignore-user-config --ignore-rules -m MODEL -c
+model_reasoning_effort="EFFORT" --json -o FILE`, stages no skill, and reads the
+JSONL events as the session and the `-o` file as the final message. That is what
+the substitution is for — it asks what the handoff alone buys, with the finder,
+the fixtures and the judge held equal. The CLI reports tokens and no price, so
+those cells record `cost_usd` 0 with `cost_metered` false: a codex-verifier
+probe is unmetered on that leg, and only the judge pass shows up as Claude
+spend. The comparison prints each arm's verifier, warns when the two differ —
+naming a matched-id difference a verifier difference rather than a finder one —
+and says when an arm ran without the skill.
+
+```bash
+pnpm review:eval:run --kind finder --finder gpt-5.6-sol@high \
+  --verifier codex:gpt-6-astra@high
+```
+
 The comparison pairs the pipeline draw-1 cells by PR and prints matched ids,
 P1 recall, wrong claims, the per-PR net and a sign-flip test over the nets.
 
@@ -1191,6 +1218,7 @@ path must exist on `main` before the first run after the moving commit.
 | `docs/evals/review-skill-ledger.jsonl`                      | append-only score ledger, one row per run                |
 | `docs/evals/review-skill-runs/`                             | per-run scored detail                                    |
 | `scripts/review/review-eval.mjs`                            | the CLI                                                  |
+| `scripts/review/review-eval-schedule-issue.mjs`             | the `--schedule-issue` mode                              |
 | `scripts/review/review-eval-run.mjs`                        | the stable run-helper import facade                      |
 | `scripts/review/review-eval-run-plan.mjs`                   | plan, input, matrix, and comparability-key construction  |
 | `scripts/review/review-eval-run-detail.mjs`                 | detail-directory naming and the pre-split cell cache     |
