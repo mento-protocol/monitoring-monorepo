@@ -2465,7 +2465,11 @@ test("pool pages deliver through one bundled contact point, never the policy tre
     "a page-severity fpmms rule still needs rule-level notification_settings",
   );
   assert(
-    [...fpmmRules.matchAll(/\blocal\.notify_page_pool\b/g)].length === 1,
+    [
+      ...fpmmRules.matchAll(
+        /\bcontact_point\s*=\s*local\.notify_page_pool\.contact_point\b/g,
+      ),
+    ].length === 1,
     "Pool Nearly One-Sided must remain the sole rule on pool_page while its Slack title reads CommonAnnotations",
   );
   assert(
