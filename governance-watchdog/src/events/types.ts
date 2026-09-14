@@ -106,6 +106,8 @@ export type QuicknodeEvent = {
 export interface QuicknodePayload {
   result: QuicknodeEvent[];
 }
+type DedupStrategy = "proposalId" | "rateFeedId" | "transactionHash" | "custom";
+
 /**
  * Extended event configuration that includes metadata for routing and processing
  */
@@ -114,8 +116,7 @@ export interface ExtendedEventHandlerConfig<
   T extends QuicknodeEvent,
 > extends EventHandlerConfig<T> {
   // Deduplication strategy for this event type
-  deduplicationStrategy:
-    "proposalId" | "rateFeedId" | "transactionHash" | "custom";
+  deduplicationStrategy: DedupStrategy;
 
   // Custom deduplication function if strategy is 'custom'
   customDeduplicationKey?: (event: T) => string;
@@ -156,8 +157,7 @@ export interface EventConfig<T extends QuicknodeEvent = QuicknodeEvent> {
   emoji: string;
 
   // Processing metadata
-  deduplicationStrategy:
-    "proposalId" | "rateFeedId" | "transactionHash" | "custom";
+  deduplicationStrategy: DedupStrategy;
   customDeduplicationKey?: (event: T) => string;
   isHealthCheck?: boolean;
 }
