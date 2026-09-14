@@ -17,6 +17,10 @@ name: PR Description
 # the job via the `changes.body`/`changes.base` guard below rather than
 # re-validating an unchanged body; a base-change `edited` event still runs,
 # since retargeting to `main` can be the only event a PR ever gets.
+# One exception: the bootstrap fallback below runs the PR-head copy when the
+# base branch lacks the validator, so the PR that introduces or moves
+# scripts/pr/check-pr-description.mjs is head-dependent and must be
+# re-checked by an `edited` event or a manual re-run.
 # Promoting this check to required needs
 # `synchronize` restored in the same change. Draft PRs and Dependabot PRs
 # are skipped.
@@ -42,7 +46,7 @@ jobs:
       github.event.pull_request.draft == false &&
       github.event.pull_request.user.login != 'dependabot[bot]' &&
       (github.event.action != 'edited' || github.event.changes.body != null ||
-        github.event.changes.base != null)
+      github.event.changes.base != null)
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     steps:
       - name: Checkout trusted validator

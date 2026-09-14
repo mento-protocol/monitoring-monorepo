@@ -371,11 +371,9 @@ Decision framework for `runs-on` (applied in PR #822 — partial migration savin
 
 - [ ] If the new workflow runs on push to `main` (`on.push.branches: [main]`, OR a branchless `on.push:` with no `branches:`/`branches-ignore:` key, which runs on every branch) OR has `on.schedule`, add its `name:` value to the `workflow_run.workflows` list in `notify-slack-on-main-failure.yml`
 - [ ] If it's intentionally advisory/non-blocking and you don't want Slack noise on flakes, add its `name:` value to the `EXCLUDED_NAMES` set in `scripts/workflows/check-notifier-coverage.mjs` with a comment explaining why
-- [ ] `node scripts/workflows/check-notifier-coverage.mjs` must pass after the change — it runs in the `scripts` CI job and enforces this structurally. The `scripts` job's `rootScripts` path filter includes `.github/workflows/**`, so adding a workflow file alone is enough to fire the check (no script edit required)
+- [ ] `node scripts/workflows/check-notifier-coverage.mjs` must pass after the change — it runs in the `scripts` CI job and enforces this structurally. Its `rootScripts` filter includes `.github/workflows/**`, so adding a workflow file alone fires the check
 
-`workflow_run.workflows` does NOT support wildcards — every new workflow name must be listed explicitly.
-
-- [ ] `on.workflow_run` also filters `branches: [main]`, redundant with the job `if:` branch check — update both together if a watched workflow's failures must ever page from a non-main ref
+`workflow_run.workflows` does NOT support wildcards — list every name. Also filters `branches: [main]`, redundant with job `if:` condition — change both together.
 
 ## 10. Autofix CI trust boundary — machine-authored PRs are untrusted
 

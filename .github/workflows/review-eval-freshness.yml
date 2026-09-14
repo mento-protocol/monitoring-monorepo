@@ -14,6 +14,9 @@ name: Review Skill Eval Freshness
 # Advisory by design. The job is deliberately not a required check: an operator
 # vacation must not block unrelated merges. A red scheduled run plus an open
 # issue is the intended pressure.
+#
+# No `pull_request:` trigger: ci.yml's required `scripts` job runs these same
+# three commands on a strict superset of the paths this file used to watch.
 
 on:
   schedule:
