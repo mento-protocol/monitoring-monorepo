@@ -11728,7 +11728,7 @@ snapshots:
   '@google-cloud/projectify@6.0.1': {}
 
   '@google-cloud/promisify@4.0.0': {}
-  
+
   '@google-cloud/promisify@6.0.1': {}
 
   '@google-cloud/secret-manager@7.0.0':
