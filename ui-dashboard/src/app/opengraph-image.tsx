@@ -53,9 +53,9 @@ function buildAlt(data: HomepageOgData | null): string {
   return parts.join(" · ");
 }
 
-// Large TVL line chart — fills most of the card as the single main KPI
-// after the hero number. Draws a filled area under the line for extra
-// visual weight at Slack-thumbnail scale.
+// Large TVL line chart with its window caption — fills most of the card as the
+// single main KPI after the hero number. Draws a filled area under the line for
+// extra visual weight at Slack-thumbnail scale.
 function TvlChart({ series }: { series: number[] }) {
   if (series.length < 2) return null;
   const w = 1088;
@@ -77,17 +77,164 @@ function TvlChart({ series }: { series: number[] }) {
   const lastX = pad + (series.length - 1) * step;
   const areaPoints = `${firstX},${baselineY} ${points} ${lastX.toFixed(1)},${baselineY}`;
   return (
-    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`}>
-      <polygon points={areaPoints} fill={ACCENT} fillOpacity={0.18} />
-      <polyline
-        points={points}
-        fill="none"
-        stroke={ACCENT}
-        strokeWidth={3}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
+    // An explicit column, not a fragment: Satori gives a fragment's children
+    // their own implicit container that lays out as a row, so the caption sat
+    // beside the chart and was squeezed into the leftover width — three
+    // wrapped lines running past the card's 56px padding (issue #2398).
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`}>
+        <polygon points={areaPoints} fill={ACCENT} fillOpacity={0.18} />
+        <polyline
+          points={points}
+          fill="none"
+          stroke={ACCENT}
+          strokeWidth={3}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <span
+          style={{
+            fontSize: 18,
+            letterSpacing: 1.5,
+            textTransform: "uppercase",
+            color: MUTED,
+          }}
+        >
+          Last 30 days
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// Brand row plus the at-a-glance context pills. Split out of `Card` to keep
+// that function under the package's max-lines-per-function rule.
+function CardHeader({ data }: { data: HomepageOgData | null }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+        <div
+          style={{
+            width: 18,
+            height: 18,
+            borderRadius: 6,
+            background: ACCENT,
+          }}
+        />
+        <span
+          style={{
+            fontSize: 28,
+            fontWeight: 700,
+            letterSpacing: 0.5,
+            color: TEXT,
+          }}
+        >
+          Mento Analytics
+        </span>
+      </div>
+      {data ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          {data.partial ? (
+            <span
+              style={{
+                fontSize: 22,
+                fontWeight: 600,
+                padding: "10px 20px",
+                borderRadius: 999,
+                background: "rgba(251, 191, 36, 0.15)",
+                border: "1px solid rgba(251, 191, 36, 0.4)",
+                color: WARN_COLOR,
+              }}
+            >
+              Partial · {data.offlineChains.join(", ")} offline
+            </span>
+          ) : null}
+          <span style={{ fontSize: 24, color: MUTED }}>
+            {data.poolCount} pools
+          </span>
+          <span
+            style={{
+              fontSize: 26,
+              padding: "12px 26px",
+              borderRadius: 999,
+              background: TILE_BG,
+              border: `1px solid ${TILE_BORDER}`,
+              color: MUTED,
+            }}
+          >
+            {data.chains.join(" · ")}
+          </span>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// The headline TVL figure and its week-over-week delta.
+function TvlHero({
+  tvl,
+  tvlWow,
+}: {
+  tvl: string;
+  tvlWow: { text: string; color: string } | null;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 8,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 20,
+        }}
+      >
+        <span
+          style={{
+            fontSize: 22,
+            letterSpacing: 2,
+            textTransform: "uppercase",
+            color: MUTED,
+          }}
+        >
+          Total TVL
+        </span>
+        {tvlWow ? (
+          <span
+            style={{
+              fontSize: 24,
+              fontWeight: 600,
+              color: tvlWow.color,
+            }}
+          >
+            {tvlWow.text}
+          </span>
+        ) : null}
+      </div>
+      <span
+        style={{
+          fontSize: 92,
+          fontWeight: 800,
+          letterSpacing: -2,
+          color: TEXT,
+          lineHeight: 1,
+        }}
+      >
+        {tvl}
+      </span>
+    </div>
   );
 }
 
@@ -112,117 +259,9 @@ function Card({ data }: { data: HomepageOgData | null }) {
         gap: 36,
       }}
     >
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <div
-            style={{
-              width: 18,
-              height: 18,
-              borderRadius: 6,
-              background: ACCENT,
-            }}
-          />
-          <span
-            style={{
-              fontSize: 28,
-              fontWeight: 700,
-              letterSpacing: 0.5,
-              color: TEXT,
-            }}
-          >
-            Mento Analytics
-          </span>
-        </div>
-        {data ? (
-          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-            {data.partial ? (
-              <span
-                style={{
-                  fontSize: 22,
-                  fontWeight: 600,
-                  padding: "10px 20px",
-                  borderRadius: 999,
-                  background: "rgba(251, 191, 36, 0.15)",
-                  border: "1px solid rgba(251, 191, 36, 0.4)",
-                  color: WARN_COLOR,
-                }}
-              >
-                Partial · {data.offlineChains.join(", ")} offline
-              </span>
-            ) : null}
-            <span style={{ fontSize: 24, color: MUTED }}>
-              {data.poolCount} pools
-            </span>
-            <span
-              style={{
-                fontSize: 26,
-                padding: "12px 26px",
-                borderRadius: 999,
-                background: TILE_BG,
-                border: `1px solid ${TILE_BORDER}`,
-                color: MUTED,
-              }}
-            >
-              {data.chains.join(" · ")}
-            </span>
-          </div>
-        ) : null}
-      </div>
+      <CardHeader data={data} />
 
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          gap: 8,
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 20,
-          }}
-        >
-          <span
-            style={{
-              fontSize: 22,
-              letterSpacing: 2,
-              textTransform: "uppercase",
-              color: MUTED,
-            }}
-          >
-            Total TVL
-          </span>
-          {tvlWow ? (
-            <span
-              style={{
-                fontSize: 24,
-                fontWeight: 600,
-                color: tvlWow.color,
-              }}
-            >
-              {tvlWow.text}
-            </span>
-          ) : null}
-        </div>
-        <span
-          style={{
-            fontSize: 92,
-            fontWeight: 800,
-            letterSpacing: -2,
-            color: TEXT,
-            lineHeight: 1,
-          }}
-        >
-          {tvl}
-        </span>
-      </div>
+      <TvlHero tvl={tvl} tvlWow={tvlWow} />
 
       <div
         style={{
@@ -230,26 +269,10 @@ function Card({ data }: { data: HomepageOgData | null }) {
           flexDirection: "column",
           flex: 1,
           justifyContent: "flex-end",
-          gap: 10,
           marginTop: 32,
         }}
       >
-        {data && data.tvlSeries.length >= 2 ? (
-          <>
-            <TvlChart series={data.tvlSeries} />
-            <span
-              style={{
-                fontSize: 18,
-                letterSpacing: 1.5,
-                textTransform: "uppercase",
-                color: MUTED,
-                alignSelf: "flex-end",
-              }}
-            >
-              Last 30 days
-            </span>
-          </>
-        ) : null}
+        {data ? <TvlChart series={data.tvlSeries} /> : null}
       </div>
     </div>
   );
