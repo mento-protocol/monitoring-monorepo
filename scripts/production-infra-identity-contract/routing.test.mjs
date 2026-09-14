@@ -31,7 +31,22 @@ const SHARED_PARSING_CORES = [
   "scripts/lib/hcl.mjs",
   "scripts/lib/workflow-yaml.mjs",
 ];
-const NESTED_ADMISSION_EXCEPTIONS = new Set([".github/workflows/**"]);
+// Documented nested admission entries. `.github/workflows/**` is a directory
+// the registry names file-by-file; the `scripts/` entries replace the former
+// `scripts/**` boundary, which admitted 76% of first-parent `main` commits
+// since 2026-08-12 while the registry routed 29%; these six admit 40%.
+// Each entry must cover at least one stack changedPathPatterns entry; the
+// subsumption assertion below proves coverage the other way only, so adding
+// an entry here is a reviewed registration, not a checked one (issue #2406).
+const NESTED_ADMISSION_EXCEPTIONS = new Set([
+  ".github/workflows/**",
+  "scripts/alerts/**",
+  "scripts/lib/**",
+  "scripts/production-infra-identity-contract/**",
+  "scripts/terraform/**",
+  "scripts/tf-stacks.mjs",
+  "scripts/tf-stacks.test.mjs",
+]);
 
 function parseSimplePathPattern(pattern) {
   assert.equal(typeof pattern, "string", "path patterns must be strings");
@@ -272,7 +287,7 @@ try {
     "ci.yml scripts job must run when rootScripts changes",
   );
 
-  // These three coarse filters decide whether registry classification runs.
+  // These three filters decide whether registry classification runs.
   // The registry owns the boundary, and every stack-specific path must fit it.
   const infraWorkflow = loadYaml(
     readFileSync(
