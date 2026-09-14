@@ -170,8 +170,9 @@ export async function recordTroveLedgerOnOperation(
   // individual again — see the `onRemoveFromBatch` emit site), so the
   // entity already holds post-operation debt/coll and the row writes
   // directly. Its exit `BatchUpdated` replays no trove rows, so a staged
-  // batch row would never finalize; the stale `interestBatchId` still on
-  // the entry state (cleared only at batch replay) must not stage one.
+  // batch row would never finalize. The entry state still carries the
+  // batch the trove is leaving (`exitInterestBatch` clears it after entry
+  // capture), so it must not stage one.
   const batched =
     op !== OP.REMOVE_FROM_BATCH &&
     (capture?.batched === true ||

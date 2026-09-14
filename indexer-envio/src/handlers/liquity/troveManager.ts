@@ -44,7 +44,6 @@ import {
 import {
   applyTroveUpdatedFields,
   moveTroveUpdatedInterestRateBracketDebt,
-  removesFromBatch,
 } from "./troveUpdates.js";
 import { getOrLoadSystemParams, preloadSystemParams } from "./systemParams.js";
 import {
@@ -251,11 +250,7 @@ indexer.onEvent(
     // preload-handler-note: price and cold-start params are preload-warmed; trove transitions require ordered state.
     // preload-effect-helpers: loadLiquityPrice, getOrLoadSystemParams
     if (context.isPreload) {
-      const [trove, pendingBatchOperation] = await Promise.all([
-        context.Trove.get(makeTroveId(collateralId, troveId)),
-        context.PendingBatchMembershipOperation.get(pendingId),
-      ]);
-      const leavesBatch = removesFromBatch(pendingBatchOperation);
+      const trove = await context.Trove.get(makeTroveId(collateralId, troveId));
       await Promise.all([
         preloadLiquityMarket(context, market),
         preloadSystemParams(context, market),
@@ -264,9 +259,9 @@ indexer.onEvent(
         preloadBorrowingRevenueRollover(context, collateralId, blockTimestamp),
         preloadInterestRateBracketDebt(context, {
           collateralId,
-          prevRate: leavesBatch ? 0n : (trove?.interestRate ?? 0n),
+          prevRate: trove?.interestRate ?? 0n,
           nextRate: event.params._annualInterestRate,
-          prevDebt: leavesBatch ? 0n : (trove?.debt ?? 0n),
+          prevDebt: trove?.debt ?? 0n,
           nextDebt: event.params._debt,
           untilTimestamp: blockTimestamp,
         }),
@@ -311,15 +306,11 @@ indexer.onEvent(
       timestamp: blockTimestamp,
       blockNumber,
     });
-    const [pendingRedemption, pendingBatchOperation] = await Promise.all([
-      context.PendingRedemption.get(pendingId),
-      context.PendingBatchMembershipOperation.get(pendingId),
-    ]);
+    const pendingRedemption = await context.PendingRedemption.get(pendingId);
     await moveTroveUpdatedInterestRateBracketDebt(context, {
       chainId: event.chainId,
       collateralId,
       trove,
-      pendingBatchOperation,
       annualInterestRate: event.params._annualInterestRate,
       debt: event.params._debt,
       timestamp: blockTimestamp,
@@ -341,7 +332,6 @@ indexer.onEvent(
       blockTimestamp,
       blockNumber,
       txHash: event.transaction.hash,
-      pendingBatchOperation,
     });
     if (
       (trove.status !== TROVE_STATUS.CLOSED ||

@@ -10,6 +10,7 @@ import {
   statusFromCollateral,
   transitionTroveStatus,
 } from "./troves.js";
+import { exitInterestBatch } from "./troveUpdates.js";
 
 export const isForcedOperation = (op: number): boolean =>
   op === OP.REDEEM_COLLATERAL ||
@@ -23,12 +24,13 @@ type TroveOperationTransitionContext = {
     ) => Promise<{ minDebt: bigint; systemParamsLoaded: boolean } | undefined>;
   };
 } & Parameters<typeof setPendingRedemption>[0] &
-  Parameters<typeof setPendingBatchMembershipOperation>[0];
+  Parameters<typeof setPendingBatchMembershipOperation>[0] &
+  Parameters<typeof exitInterestBatch>[0];
 
 /** Per-op state transition for one `TroveOperation` event: open/close/
  * liquidate counters and status flips, redemption cumulatives plus the
- * pending-redemption marker, and batch-membership pending markers.
- * Extracted verbatim from the TroveOperation handler. */
+ * pending-redemption marker, batch-membership pending markers, and the
+ * `REMOVE_FROM_BATCH` batch exit. */
 export async function applyTroveOperationTransition(
   context: TroveOperationTransitionContext,
   args: {
@@ -100,6 +102,17 @@ export async function applyTroveOperationTransition(
       timestamp: blockTimestamp,
       blockNumber,
     });
+    // Stage before the exit clears `interestBatchId`: the exit
+    // `BatchUpdated` matches this row by the batch the trove is leaving.
+    if (op === OP.REMOVE_FROM_BATCH) {
+      trove = await exitInterestBatch(context, {
+        chainId,
+        collateralId,
+        trove,
+        timestamp: blockTimestamp,
+        blockNumber,
+      });
+    }
   }
   return { trove, instance };
 }

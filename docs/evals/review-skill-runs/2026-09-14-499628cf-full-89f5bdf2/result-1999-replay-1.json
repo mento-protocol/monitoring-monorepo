@@ -1,0 +1,118 @@
+{
+  "cell_id": "pr-1999-replay-draw1",
+  "fingerprint": {
+    "skill_digest": "89f5bdf20356c5515974ec1a6112fc4f9dfbf31cf1d60b667084f91dfbe6ec60",
+    "kind": "full",
+    "contract_digest": "59b82ee3e6d7ccf2cfbe75cb11aa40e6ec93b92a754a992adee4a1a69166a259",
+    "claude_cli": "2.1.270 (Claude Code)",
+    "codex_cli": "codex-cli 0.154.0",
+    "finder_argv_digest": "40099c93f78800efefbc46f57772ae2cbadc86b378bdd22f474945abfd7b450c",
+    "orchestrator_digest": "fee8d511d838ad137aea62f0e6be7b5115383c59d4447ba985efb3e3c3fe48b1"
+  },
+  "treatment": {
+    "skill_ref": "installed",
+    "dirty": false
+  },
+  "pr": 1999,
+  "condition": "replay",
+  "draw": 1,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": "gpt-5.6-sol@high",
+  "claims": [
+    "The required Terraform test fails: alerts/rules/peg-rule-definitions.tftest.hcl:68-69 asserts that peg_slack_title contains $alert.Annotations.summary and $alert.Annotations.resolved_summary, but the new title template has neither, so the `Test Peg rule definitions` step (.github/workflows/ci.yml:874-879) fails on every PR run",
+    "New regression: a breach entered from Error loses its start, so the later clear has no duration or measured cause (peg-alert-events.ts:109-110 and :320-321). Error → Alerting is now filed as `error-recovered-alerting` and nothing opens the alert cycle, so the later Alerting → Normal shows up unpaired for any Normal → Error → Alerting → Normal sequence",
+    "The canonical runbook docs/notes/peg-monitoring.md:118-119 is out of date: it still says Slack titles are \"the severity icon plus that summary\"",
+    "The canonical runbook docs/notes/peg-monitoring.md:132-133 is out of date: it still says history \"reads only fired and resolved transitions\", but root AGENTS.md requires canonical docs to stay current",
+    "A rule that recovers from Error into Pending keeps a \"Monitoring failed\" entry with no recovery (peg-alert-events.ts:105-115, route.ts:51-54): only previous=Error&current=Normal is queried, so Error → Pending and any path through Pending never closes the Error cycle",
+    "Alerting → Error → Normal leaves the breach looking active (peg-alert-events.ts:344-352, 356): the recovery closes only the Error cycle, and the earlier raised entry stays open and keeps its \"Urgent alert active\" dot",
+    "The route's failure tests would pass even if validation were broken (route.test.ts:819, 832, 846): .mockResolvedValue(json(...)) hands the same Response object to all three concurrent fetches, so the second body read fails and becomes a 502 whether or not the malformed-frame, size or truncation checks work",
+    "Rules without a source get misleading failure text (peg-alert-events.ts:230-242): seven Peg rules have source = \"\" and pegAlertSourceName(\"\") returns \"Price source\", so the failure reads \"Grafana could not evaluate the Price source Peg rule\"",
+    "The Slack-template lint test can't fail (scripts/alerts/alert-rules-lint.test.mjs:1215-1220): if the resource marker is renamed, indexOf returns -1, the slice becomes an empty string, and both \"must not contain\" checks pass",
+    "In scripts/alerts/alert-rules-lint.test.mjs:1258-1268, the link checks search the whole file instead of the Slack message resource",
+    "One test assertion checks nothing (recent-alerts.test.tsx:193): not.toContain(\"sell price is below peg\") can never fail because no explanation contains that text (peg-alert-explanation.ts:247), so the test misses the case where both texts render"
+  ],
+  "matched_ids": [
+    3830366247,
+    3830366547,
+    3830366556,
+    3830371307,
+    3830371315,
+    3830371325,
+    3830371329,
+    3830416461
+  ],
+  "judge_reasoning": {
+    "3830366247": "Review #4 says a rule that recovers from Error into Pending is never captured, because only previous=Error&current=Normal is queried.",
+    "3830366547": "Review #5 says Alerting → Error → Normal closes only the Error cycle and leaves the earlier raised entry looking active.",
+    "3830366556": "Review #4 says an Error → Pending path never closes the Error cycle, leaving a stuck 'Monitoring failed' row.",
+    "3830371307": "Review #8 says the lint slice does not validate marker indexes (indexOf -1 gives wrong text) and the link checks search the whole file.",
+    "3830371315": "Review #6 says mockResolvedValue shares one Response across the concurrent fetches, so the second body read fails with a 502.",
+    "3830371325": "The defect text is truncated, but it concerns error-recovered-alerting handling near line 352. Review #2 flags that error-recovered-alerting does not open the alert cycle, which leaves later clears unpaired.",
+    "3830371329": "Review #9 says the not.toContain('sell price is below peg') assertion can never fail because no production string produces that text.",
+    "3830416461": "Review #7 says source-less rules get pegAlertSourceName('') = 'Price source', which produces misleading failure text."
+  },
+  "novel": {
+    "claims": 11,
+    "novelReal": 2,
+    "novelWrong": 0,
+    "novelVague": 1,
+    "restatedKnown": 8,
+    "alreadyMatched": 8,
+    "verdicts": {
+      "1": {
+        "class": "known",
+        "why": "peg-rule-definitions.tftest.hcl:68-69 does still require $alert.Annotations.summary and resolved_summary in peg_slack_title, which the new template drops. This is the known stale Terraform title assertion."
+      },
+      "2": {
+        "class": "real",
+        "why": "transitionKind (peg-alert-events.ts:108-110) now files Error→Alerting as error-recovered-alerting, and cycleKey (:320-321) puts it in the error cycle, so no alert cycle opens. The later Alerting→Normal clear finds nothing open, lands in unpairedCleared, and is shown without a duration. Before this change Error→Alerting counted as raised."
+      },
+      "3": {
+        "class": "known",
+        "why": "docs/notes/peg-monitoring.md:118-119 does still say titles are the icon plus the summary. This is the known item about keeping the runbook aligned with the new title."
+      },
+      "4": {
+        "class": "real",
+        "why": "docs/notes/peg-monitoring.md:132-133 still says the backend \"reads only fired and resolved transitions\". route.ts now also queries current=Error and previous=Error, and those Error transitions show up in history."
+      },
+      "5": {
+        "class": "known",
+        "why": "errorStateHistoryUrl in route.ts only adds current=Error and previous=Error&current=Normal, so recoveries into Pending are never fetched. This matches the known Pending recovery items (peg-alert-events.ts:114/116)."
+      },
+      "6": {
+        "class": "known",
+        "why": "At :344-352 an Error→Normal recovery closes only the error key, so the open alert raise is left for :356 to emit. This matches the known 'Error recovery leaves breach active' (:352)."
+      },
+      "7": {
+        "class": "known",
+        "why": "At route.test.ts:819/832/846, mockResolvedValue reuses one Response across the three remaining concurrent fetches. This is the known route.test.ts:819 item."
+      },
+      "8": {
+        "class": "known",
+        "why": "At :230-242 the evaluation-failure lead uses pegAlertSourceName(labels.source). This is the known ':230 Label source-less evaluation failures by rule'."
+      },
+      "9": {
+        "class": "known",
+        "why": "At lint test :1215-1220, if the title marker is missing, indexOf returns -1, slice(-1, n) is empty, and both negative checks pass. This matches the known alert-rules-lint.test.mjs functional-correctness item."
+      },
+      "10": {
+        "class": "vague",
+        "why": "The link includes() checks at :1260-1268 do run on the whole templates string, but the claim names no concrete way this would hide a broken template, and the negative title checks already use the title slice."
+      },
+      "11": {
+        "class": "known",
+        "why": "recent-alerts.test.tsx:193 checks for a phrase that no explanation text contains (grep found no 'below peg' in peg-alert-explanation.ts). This is the known recent-alerts.test.tsx:193 item."
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 209,
+  "usd": 1.4009919999999998,
+  "usd_metered": true,
+  "scoring_usd": 0.4952985
+}

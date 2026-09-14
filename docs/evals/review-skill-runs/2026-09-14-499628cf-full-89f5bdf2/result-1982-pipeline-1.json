@@ -1,0 +1,104 @@
+{
+  "cell_id": "pr-1982-pipeline-draw1",
+  "fingerprint": {
+    "skill_digest": "89f5bdf20356c5515974ec1a6112fc4f9dfbf31cf1d60b667084f91dfbe6ec60",
+    "kind": "full",
+    "contract_digest": "59b82ee3e6d7ccf2cfbe75cb11aa40e6ec93b92a754a992adee4a1a69166a259",
+    "claude_cli": "2.1.270 (Claude Code)",
+    "codex_cli": "codex-cli 0.154.0",
+    "finder_argv_digest": "40099c93f78800efefbc46f57772ae2cbadc86b378bdd22f474945abfd7b450c",
+    "orchestrator_digest": "fee8d511d838ad137aea62f0e6be7b5115383c59d4447ba985efb3e3c3fe48b1"
+  },
+  "treatment": {
+    "skill_ref": "installed",
+    "dirty": false
+  },
+  "pr": 1982,
+  "condition": "pipeline",
+  "draw": 1,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": "gpt-5.6-sol@high",
+  "claims": [
+    "Backfill can write an older claim's ownership onto an issue someone else now holds: `selectNewestTrustedClaim` throws away comments it can't parse before it picks the newest one, so if the latest claim comment doesn't parse, it quietly picks an older one that does (`scripts/pr/issue-board-backfill.mjs:145-147` and `:117-122`)",
+    "The helper's own format leaves out the `Branch:` line when there's no branch (`issue-board-commands.mjs:74`, with `branch || undefined` at `:143`), but the parser rejects any claim without one",
+    "The parser rejects a claim with more than 4 lines after the fields, or more than 1000 characters there; the fallback asks that note to say Project #12 fields weren't set, so a long note is enough to make it fail",
+    "A later \"Released agent claim\" comment is ignored, so a released claim still counts",
+    "No test covers finding 1 (backfill picking an older claim); all 37 tests pass",
+    "If Branch is made optional, `buildBackfillPlan` as written would push `value: null`, and `updateTextField` treats `null` as \"clear this field\"",
+    "Backfill fails when the issue isn't on Project #12 yet: `issue-board-backfill.mjs:223-226` throws, and the MCP fallback only changes labels and posts a comment, so nothing adds the issue to the board",
+    "The runbooks tell you to run backfill first (`.claude/skills/doc-garden/SKILL.md:38`, `.agents/skills/doc-garden/SKILL.md:38`, `docs/notes/github-tooling-surfaces.md:105-111`); for an issue not yet on the board, following them step by step hits the error",
+    "The test suite doesn't cover finding 2 (backfill failing when the issue isn't on the board)",
+    "Formatting (unconfirmed): `docs/notes/github-tooling-surfaces.md:109` starts at column 0 in the middle of a list item; a Prettier check might flag it"
+  ],
+  "matched_ids": [
+    3827636772,
+    3827655676
+  ],
+  "judge_reasoning": {
+    "3827636772": "Review finding 1 notes that buildClaimComment omits the Branch: line when there is no branch, that the parser rejects any claim without one, and suggests making Branch optional.",
+    "3827647420": "Review discusses the read-to-write timing window but clears it as acceptable because post-write verification catches it; it does not flag the need to revalidate during the batch.",
+    "3827655676": "Review flags docs/notes/github-tooling-surfaces.md:109 starting at column 0 mid-list-item, which is the same formatting defect.",
+    "3827655684": "Review mentions handoff rejection for more than 4 lines or 1000 chars, but never the trailing blank line / empty-line rejection in isBoundedCloudHandoff.",
+    "3827663924": "Same as 4: the trailing newline after the handoff text is not identified."
+  },
+  "novel": {
+    "claims": 10,
+    "novelReal": 4,
+    "novelWrong": 1,
+    "novelVague": 3,
+    "restatedKnown": 2,
+    "alreadyMatched": 2,
+    "verdicts": {
+      "1": {
+        "class": "real",
+        "why": "selectNewestTrustedClaim (backfill.mjs:145-147) runs parseClaimComment and drops nulls before picking the newest createdAt. If the latest claim comment is malformed, an older valid claim gets picked and written to empty fields."
+      },
+      "2": {
+        "class": "known",
+        "why": "buildClaimComment leaves out Branch when there isn't one (commands.mjs:74/144), and the parser requires Branch at backfill.mjs:119. That is the known P1 at :119."
+      },
+      "3": {
+        "class": "real",
+        "why": "isBoundedCloudHandoff (backfill.mjs:68-76) rejects more than 4 lines or more than 1000 chars. The MCP fallback docs ask for a note but don't limit its length, so a longer note makes the claim invalid without any warning."
+      },
+      "4": {
+        "class": "wrong",
+        "why": "isBackfillable needs an open issue with agent-active or in-pr. A release moves it to agent-ready/needs-grooming, so a released claim is refused unless the issue is claimed again, which posts a newer claim comment."
+      },
+      "5": {
+        "class": "vague",
+        "why": "Only says a test is missing for claim 1; names no defect of its own (the 37 tests do pass)."
+      },
+      "6": {
+        "class": "vague",
+        "why": "Hypothetical about a future change (Branch made optional). As the code stands, metadata always has Branch, so no null write can happen."
+      },
+      "7": {
+        "class": "real",
+        "why": "readSnapshot throws when findIssueProjectItem returns nothing (backfill.mjs:223-226). Backfill never adds the item; only sync/ensureProjectItem does (projects.mjs:308)."
+      },
+      "8": {
+        "class": "real",
+        "why": "SKILL.md:38 and github-tooling-surfaces.md:105-112 say to run backfill first and sync afterwards. Sync is the step that adds a missing issue to the board, so for an issue not yet on the board, backfill throws before sync ever runs."
+      },
+      "9": {
+        "class": "vague",
+        "why": "Only a missing test for claim 7; no separate defect (the tests stub findIssueProjectItem to return 'item')."
+      },
+      "10": {
+        "class": "known",
+        "why": "github-tooling-surfaces.md:108-109 wraps the `Claim ID` code span so 'ID`' starts at column 0 inside the list item. That is the known docs maintainability note at :112."
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 528,
+  "usd": 1.1244005,
+  "usd_metered": true,
+  "scoring_usd": 0.4854735
+}

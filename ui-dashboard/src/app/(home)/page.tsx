@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, ResolvingMetadata } from "next";
 import GlobalPage from "../page-client";
 import { fetchHomepageOgData } from "@/lib/homepage-og";
 import { fetchInitialNetworkData } from "@/lib/network-fetcher/server-cache";
@@ -42,8 +42,19 @@ export function buildDescription(
   return parts.join(" · ");
 }
 
-export async function generateMetadata(): Promise<Metadata> {
-  const data = await fetchHomepageOgData();
+export async function generateMetadata(
+  _props: unknown,
+  parent: ResolvingMetadata,
+): Promise<Metadata> {
+  const [data, parentMetadata] = await Promise.all([
+    fetchHomepageOgData(),
+    parent,
+  ]);
+  // Next attaches app/opengraph-image.tsx to the root segment, then replaces
+  // that whole `openGraph` object with this page's, images included. Carry the
+  // root card forward; `twitter` sets no images, so Next copies these into it.
+  const parentImages = parentMetadata.openGraph?.images;
+  const ogImages = parentImages?.length ? { images: parentImages } : {};
   if (!data) {
     return {
       title: FALLBACK_TITLE,
@@ -52,6 +63,7 @@ export async function generateMetadata(): Promise<Metadata> {
         title: FALLBACK_TITLE,
         description: FALLBACK_DESCRIPTION,
         type: "website",
+        ...ogImages,
       },
       twitter: {
         card: "summary_large_image",
@@ -68,6 +80,7 @@ export async function generateMetadata(): Promise<Metadata> {
       title: FALLBACK_TITLE,
       description,
       type: "website",
+      ...ogImages,
     },
     twitter: {
       card: "summary_large_image",
