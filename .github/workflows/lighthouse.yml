@@ -94,7 +94,7 @@ jobs:
     # ARM runner image has no Chrome to launch. Migrating would require
     # pointing CHROME_PATH at Playwright's arm64 Chromium — a behavior
     # change to the audit browser.
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     # The preview phase historically completes in ~5 minutes. The deterministic
     # production-build fixture phase adds a build, browser smoke, and three
     # isolated Lighthouse collections, so keep a separate timeout envelope.

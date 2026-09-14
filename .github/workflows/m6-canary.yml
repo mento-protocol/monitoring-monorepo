@@ -17,7 +17,7 @@ jobs:
     # Upstream events are wake-ups only. No upstream code, output, artifact,
     # or cache enters this writer. Every decision re-reads GitHub API state.
     if: github.repository == 'mento-protocol/monitoring-monorepo' && github.ref == 'refs/heads/main'
-    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 5
     permissions:
       contents: read

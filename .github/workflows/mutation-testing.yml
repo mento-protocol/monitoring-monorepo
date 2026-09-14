@@ -29,7 +29,7 @@ jobs:
     # sets `break: 86`, so when the mutation step runs a score below 86% fails
     # the job.
     name: Dashboard logic baseline
-    runs-on: blacksmith-4vcpu-ubuntu-2404-arm
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     # `pull-requests: read` is required by `dorny/paths-filter` in PR mode.
     permissions:
@@ -112,7 +112,7 @@ jobs:
     # sets `break: 94`, so when the mutation step runs a score below 94% fails
     # the job.
     name: Indexer logic baseline
-    runs-on: blacksmith-4vcpu-ubuntu-2404-arm
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     # `pull-requests: read` is required by `dorny/paths-filter` in PR mode.
     permissions:
@@ -197,7 +197,7 @@ jobs:
     # sets `break: 86`, so when the mutation step runs a score below 86% fails
     # the job.
     name: Bridge rebalance probe baseline
-    runs-on: blacksmith-4vcpu-ubuntu-2404-arm
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     # `pull-requests: read` is required by `dorny/paths-filter` in PR mode.
     permissions:

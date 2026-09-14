@@ -24,7 +24,7 @@ permissions: read-all
 jobs:
   admit:
     name: Admit immutable PR revision
-    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 5
     permissions:
       contents: read

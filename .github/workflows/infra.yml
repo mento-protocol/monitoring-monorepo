@@ -44,7 +44,7 @@ permissions: read-all
 jobs:
   discover:
     name: Discover Terraform stacks
-    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 5
     permissions:
       contents: read
@@ -107,7 +107,7 @@ jobs:
     name: Terraform Validate (${{ matrix.id }})
     needs: discover
     if: needs.discover.outputs.has-stacks == 'true'
-    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 10
     permissions:
       contents: read

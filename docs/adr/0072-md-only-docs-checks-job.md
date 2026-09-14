@@ -113,7 +113,7 @@ Move `*.md` and `**/*.md` out of `rootScripts` into a new `docs` paths-filter,
 byte-identical, and add a `docs-checks` job gated on it.
 
 - `docs-checks` runs `if: needs.changes.outputs.docs == 'true'` on
-  `blacksmith-2vcpu-ubuntu-2404` with `timeout-minutes: 10` and only
+  `ubuntu-latest` with `timeout-minutes: 10` and only
   `contents: read` plus `actions: read` — none of its nine checks calls the
   GitHub API.
 - It carries nine of the eleven corpus readers named in the Context above, each

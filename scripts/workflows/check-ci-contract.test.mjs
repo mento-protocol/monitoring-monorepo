@@ -1,7 +1,15 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
 import "./collect-m6-canary.test.mjs";
-import { readFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -14,6 +22,7 @@ import {
   forceAllForChanges,
   loadCi,
   matchedFiles,
+  runnerLabelViolations,
   workflowViolations,
 } from "./check-ci-contract.mjs";
 
@@ -480,6 +489,68 @@ test("concurrency cancels stale PR heads but separates PRs and main SHAs", () =>
   );
 });
 
+test("runnerLabelViolations is clean on the live repo", () => {
+  assert.deepEqual(runnerLabelViolations(), []);
+});
+
+test("runnerLabelViolations rejects an unregistered runs-on label and a byte-mismatched actionlint mirror", () => {
+  const dir = mkdtempSync(join(tmpdir(), "runner-label-test-"));
+  mkdirSync(join(dir, ".github/workflows"), { recursive: true });
+  mkdirSync(join(dir, ".trunk/configs"), { recursive: true });
+  writeFileSync(
+    join(dir, ".github/actionlint.yaml"),
+    "self-hosted-runner:\n  labels: []\n",
+  );
+  writeFileSync(
+    join(dir, ".trunk/configs/actionlint.yaml"),
+    "self-hosted-runner:\n  labels: []\n",
+  );
+  writeFileSync(
+    join(dir, ".github/workflows/sample.yml"),
+    "name: Sample\non: push\njobs:\n  build:\n    runs-on: blacksmith-2vcpu-ubuntu-2404\n    steps: []\n",
+  );
+  const labelErrors = runnerLabelViolations(dir);
+  assert.ok(
+    labelErrors.some((e) => e.includes("blacksmith-2vcpu-ubuntu-2404")),
+    `expected an unregistered-label violation, got ${JSON.stringify(labelErrors)}`,
+  );
+
+  writeFileSync(
+    join(dir, ".github/workflows/sample.yml"),
+    "name: Sample\non: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps: []\n",
+  );
+  writeFileSync(
+    join(dir, ".trunk/configs/actionlint.yaml"),
+    "self-hosted-runner:\n  labels: [drift]\n",
+  );
+  const mirrorErrors = runnerLabelViolations(dir);
+  assert.ok(
+    mirrorErrors.some((e) => e.includes("byte-identical")),
+    `expected a byte-identical violation, got ${JSON.stringify(mirrorErrors)}`,
+  );
+
+  writeFileSync(
+    join(dir, ".trunk/configs/actionlint.yaml"),
+    "self-hosted-runner:\n  labels: []\n",
+  );
+  writeFileSync(
+    join(dir, ".github/workflows/sample.yml"),
+    "name: Sample\non: push\njobs:\n  build:\n    runs-on: [self-hosted, linux]\n    steps: []\n  call:\n    uses: ./.github/workflows/other.yml\n",
+  );
+  const sequenceErrors = runnerLabelViolations(dir);
+  assert.ok(
+    sequenceErrors.some(
+      (e) => e.includes("sample.yml:build") && e.includes("self-hosted"),
+    ),
+    `expected a sequence runs-on to be rejected, got ${JSON.stringify(sequenceErrors)}`,
+  );
+  assert.ok(
+    !sequenceErrors.some((e) => e.includes(":call ")),
+    `a reusable-workflow-call job with no runs-on must not be flagged, got ${JSON.stringify(sequenceErrors)}`,
+  );
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test("the replacement checker and tests stay within their size budgets", () => {
   const implementation = readFileSync(
     fileURLToPath(new URL("./check-ci-contract.mjs", import.meta.url)),
@@ -490,8 +561,9 @@ test("the replacement checker and tests stay within their size budgets", () => {
   const tests = readFileSync(fileURLToPath(import.meta.url), "utf8")
     .trimEnd()
     .split(/\r?\n/u).length;
-  assert.ok(implementation < 300, `${implementation} implementation lines`);
-  assert.ok(tests < 500, `${tests} test lines`);
+  // Raised from 300/500 for runnerLabelViolations tests (issue #2400).
+  assert.ok(implementation < 340, `${implementation} implementation lines`);
+  assert.ok(tests < 580, `${tests} test lines`);
   assert.ok(
     tests < implementation * 2,
     `${tests} tests vs ${implementation} implementation`,

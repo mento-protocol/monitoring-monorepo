@@ -46,7 +46,7 @@ concurrency:
 jobs:
   contract:
     name: Check the evaluation contract and ledger
-    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 10
     permissions:
       contents: read
@@ -106,7 +106,7 @@ jobs:
     # Schedule only. A pull request checks the contract; it must not open or
     # touch an issue.
     if: github.event_name == 'schedule'
-    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 10
     permissions:
       contents: read
