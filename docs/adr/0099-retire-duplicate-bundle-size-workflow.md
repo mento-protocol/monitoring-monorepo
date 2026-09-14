@@ -23,8 +23,9 @@ sentinel's `ui` job "the normal production build and bundle-size limit" and
 noted that "the separate Infra validation and bundle-size workflows duplicate
 required coverage," but chose to keep both rather than remove the duplicate in
 that PR. `.github/workflows/size-limit.yml` runs the same `next build` and
-checks the same `ui-dashboard/.size-limit.cjs` budget that `ci.yml`'s `ui` job
-already runs via `pnpm exec turbo run size-limit`, on the same runner label.
+checks the same `ui-dashboard/.size-limit.cjs` budget that `ci.yml`'s
+`ui-static` job already runs via `pnpm exec turbo run size-limit`, on the same
+runner label.
 It has no unique coverage: every path it triggers on already selects `ui`,
 either through `ci.yml`'s `ui` filter anchor or through the `forceAll`
 fallback (`.npmrc`, the one path outside that anchor, sits in the

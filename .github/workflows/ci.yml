@@ -1635,6 +1635,8 @@ jobs:
     # This required job is deliberately unconditional. It validates production
     # infrastructure and the repo-wide issue-board proof for every candidate.
     runs-on: blacksmith-2vcpu-ubuntu-2404
+    # 8 is main's variance-sized cap (#2412), carried forward unmeasured for
+    # this job's new folded command set; re-size after the first main run.
     timeout-minutes: 8
     permissions:
       contents: read

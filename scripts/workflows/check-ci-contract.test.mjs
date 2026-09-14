@@ -272,6 +272,8 @@ const STATIC_MUTATIONS = [
   ["scripts twin gated off", /scripts no longer runs the docs-checks command pnpm docs:index --check/u, ({ workflow }) => { workflow.jobs.scripts.steps.find((step) => step.run === "pnpm docs:index --check").if = false; }],
   // prettier-ignore
   ["scripts twin made advisory", /scripts no longer runs the docs-checks command pnpm docs:index --check/u, ({ workflow }) => { workflow.jobs.scripts.steps.find((step) => step.run === "pnpm docs:index --check")["continue-on-error"] = true; }],
+  // prettier-ignore
+  ["docs-checks source step made advisory", /docs-checks command pnpm docs:index --check must not be continue-on-error/u, ({ workflow }) => { workflow.jobs["docs-checks"].steps.find((step) => step.run === "pnpm docs:index --check")["continue-on-error"] = true; }],
   [
     "cross-cancelling main concurrency",
     /workflow concurrency/u,

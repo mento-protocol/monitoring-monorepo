@@ -239,7 +239,7 @@ export function workflowViolations(workflow, filters) {
   const scriptRuns = new Set(list(jobs.scripts?.steps).filter((step) => typeof step.run === "string" && step["continue-on-error"] == null).map(twin));
   for (const step of list(jobs["docs-checks"]?.steps)) {
     // prettier-ignore
-    if (typeof step.run === "string" && !scriptRuns.has(twin(step))) errors.push(`scripts no longer runs the docs-checks command ${step.run}`);
+    if (typeof step.run === "string" && (step["continue-on-error"] != null || !scriptRuns.has(twin(step)))) errors.push(step["continue-on-error"] != null ? `docs-checks command ${step.run} must not be continue-on-error` : `scripts no longer runs the docs-checks command ${step.run}`);
   }
   const ci = jobs.ci ?? {};
   // prettier-ignore
