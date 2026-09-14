@@ -121,7 +121,8 @@ function checkDispatcher(root, errors) {
 // prettier-ignore
 function checkCandidateGraph(root, errors) {
   const raw = readFileSync(join(root, CI), "utf8"), ci = yaml(root, CI), call = ci.on?.workflow_call ?? {};
-  add(errors, hash(stable(ci)) === CI_GRAPH_HASH, "retained audit workflow graph changed");
+  const ciGraphHash = hash(stable(ci));
+  add(errors, ciGraphHash === CI_GRAPH_HASH, `retained audit workflow graph changed (pinned ${CI_GRAPH_HASH}, computed ${ciGraphHash})`);
   add(errors, stable(call.inputs) === stable(CALL_INPUTS) && stable(call.secrets) === stable({ CODECOV_TOKEN: { description: "Optional upload token for ordinary reusable calls", required: false } }), "reusable CI audit inputs or optional Codecov secret changed");
   add(errors, stable(ci.concurrency) === stable({ group: "${{ inputs.no_skip_audit && format('ci-no-skip-{0}', github.run_id) || format('{0}-{1}', github.workflow, github.event_name == 'pull_request' && github.ref || github.sha) }}", "cancel-in-progress": "${{ !inputs.no_skip_audit }}" }), "reusable CI must keep audit runs independent");
   add(errors, ci.jobs?.changes?.outputs?.forceAll === FORCE_ALL, "audit mode must force every routed job");

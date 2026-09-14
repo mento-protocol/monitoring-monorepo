@@ -12,7 +12,7 @@ garden_lane: pr-checklists-process
 
 # CI workflow gates checklist
 
-Use this checklist for any change to `.github/workflows/`. CI mistakes don't surface until the next merge — and by then the bad pattern is already shipped to other workflows by copy-paste.
+Use this checklist for any change to `.github/workflows/`. CI mistakes don't surface until the next merge — by then the bad pattern is already copy-pasted elsewhere.
 
 ## Operating rule
 
@@ -47,10 +47,9 @@ gh api repos/mento-protocol/monitoring-monorepo/rulesets \
 After changing a required-status workflow or replacing the tool that reports its
 checks, verify the live PR status rollup with
 `pnpm pr:ready-state --pr <number> --json`. Confirm the intended required
-context is the only tool-owned check GitHub surfaces. PR #1008/#1010 exposed the
-failure mode: an action-created `Trunk Check` Checks API run appeared alongside
-the intended `Code Quality` job, and GitHub grouped the extra failure under the
-advisory schema-diff workflow in the PR UI.
+context is the only tool-owned check GitHub surfaces. PR #1008/#1010: an
+action-created `Trunk Check` run appeared beside `Code Quality`, and GitHub
+grouped the failure under the advisory schema-diff workflow.
 
 - [ ] **Ruleset-required** workflows MUST NOT use `paths:` / `paths-ignore:` filters — they must run on every PR. If you want path-conditional work, run every PR but skip the expensive job inside via `if:` checks (or `paths-filter`-style gating that reports a green check on no-op).
 - [ ] Registry-backed Terraform routing uses the `workflowAdmissionPatterns` list in `terraform.stacks.json`. Keep the required CI workflow unfiltered at workflow level. Its internal `terraform` filter and the Infra push/pull-request filters copy that list. Prefer a top-level boundary; register a nested entry in `NESTED_ADMISSION_EXCEPTIONS`. `pnpm tf:test` enforces exact equality and subsumption of every registry pattern.
@@ -63,9 +62,8 @@ advisory schema-diff workflow in the PR UI.
 ### Fixed fan-out contract
 
 Run `pnpm ci:contract:test` after a change to `ci.yml`, its fixed job set, or
-the pull request validation boundary. The unconditional `Production
-infrastructure contract` job runs the same command on every pull request and
-`main` push.
+the validation boundary. The unconditional `Production infrastructure
+contract` job runs it on every PR and `main` push.
 
 The command checks these contracts without defining a second runtime router:
 
