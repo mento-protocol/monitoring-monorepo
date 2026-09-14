@@ -1,5 +1,5 @@
 ---
-title: Monthly CI reliability report is a repository-owned, issue-only scheduler
+title: Monthly CI reliability report is an issue-only scheduler
 status: active
 owner: eng
 canonical: true
@@ -11,7 +11,7 @@ review_interval_days: 90
 garden_lane: adrs-architecture
 ---
 
-# ADR 0100 — Monthly CI reliability report is a repository-owned, issue-only scheduler
+# ADR 0100 — Monthly CI reliability report is an issue-only scheduler
 
 **Status:** Accepted (Sep 2026), in force.
 **Scope:** ci/process

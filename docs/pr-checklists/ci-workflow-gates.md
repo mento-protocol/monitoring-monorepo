@@ -44,12 +44,11 @@ gh api repos/mento-protocol/monitoring-monorepo/rulesets \
   -q '.rules[] | select(.type=="required_status_checks").parameters.required_status_checks[].context'
 ```
 
-After changing a required-status workflow or replacing the tool that reports its
-checks, verify the live PR status rollup with
-`pnpm pr:ready-state --pr <number> --json`. Confirm the intended required
-context is the only tool-owned check GitHub surfaces. PR #1008/#1010: an
-action-created `Trunk Check` run appeared beside `Code Quality`, and GitHub
-grouped the failure under the advisory schema-diff workflow.
+After changing a required-status workflow or its reporting tool, verify the
+live PR status rollup with `pnpm pr:ready-state --pr <number> --json` and
+confirm GitHub surfaces only the intended check. PR #1008/#1010: an
+action-created `Trunk Check` run appeared beside `Code Quality`, grouped under
+the advisory schema-diff workflow.
 
 - [ ] **Ruleset-required** workflows MUST NOT use `paths:` / `paths-ignore:` filters — they must run on every PR. If you want path-conditional work, run every PR but skip the expensive job inside via `if:` checks (or `paths-filter`-style gating that reports a green check on no-op).
 - [ ] Registry-backed Terraform routing uses the `workflowAdmissionPatterns` list in `terraform.stacks.json`. Keep the required CI workflow unfiltered at workflow level. Its internal `terraform` filter and the Infra push/pull-request filters copy that list. Prefer a top-level boundary; register a nested entry in `NESTED_ADMISSION_EXCEPTIONS`. `pnpm tf:test` enforces exact equality and subsumption of every registry pattern.
@@ -200,8 +199,7 @@ after the workflow reaches protected `main`.
 - [ ] Every deploy job MUST include `if: github.ref == 'refs/heads/main'` (or equivalent environment guard) at the job level
 - [ ] Don't rely on the `push.branches: [main]` filter alone — `workflow_dispatch` doesn't honor it
 
-Canonical good example: the `deploy` job guard in
-`.github/workflows/metrics-bridge.yml`.
+Example: the `deploy` job guard in `metrics-bridge.yml`.
 
 ## 3. Pinning third-party actions
 
@@ -211,16 +209,14 @@ A `uses: org/action@v4` line trusts whoever owns that tag to never re-point it a
 - [ ] Self-repository actions such as `uses: $/.github/actions/pnpm-install` and local relative actions such as `uses: ./.github/actions/pnpm-install` are allowed. Use `$` when the action must come from the running protected commit. Use `./` when the checked-out source intentionally owns the action. The scanner follows either target and checks nested third-party `uses:` entries too.
 - [ ] Run `node scripts/workflows/check-github-action-pins.mjs` locally when editing `.github/workflows/**`, `.github/actions/**`, or `.trunk/setup-ci/**`; the required `Code Quality` workflow runs the same check on every PR.
 
-Canonical good example: `.github/workflows/metrics-bridge.yml` — every external
-action is SHA-pinned.
+Example: every external action in `metrics-bridge.yml` is SHA-pinned.
 
 ## 4. Concurrency and serialization
 
 - [ ] Deploy workflows MUST set a concurrency group that serializes ALL invocations against the same target (e.g. `group: ${{ github.workflow }}`, with `cancel-in-progress: false`). Two close main-merges racing on `gcloud run services update` can otherwise stomp each other
 - [ ] Non-deploy workflows MAY use a per-ref concurrency group with `cancel-in-progress: true` to drop stale runs on force-push
 
-Canonical good example: the workflow-level `concurrency` block in
-`.github/workflows/metrics-bridge.yml`.
+Example: the workflow-level `concurrency` block in `metrics-bridge.yml`.
 
 ## 5. Cache trust and keys
 
@@ -365,11 +361,11 @@ Decision framework for `runs-on` (applied in PR #822 — partial migration savin
 
 ## 9. Notifier coverage — keeping Slack alerts wired
 
-`notify-slack-on-main-failure.yml` fires for every workflow whose failure would otherwise be silent. It must be kept in sync whenever a new workflow is added.
+`notify-slack-on-main-failure.yml` fires for every workflow whose failure would otherwise be silent. Keep it in sync when adding a workflow.
 
 - [ ] If the new workflow runs on push to `main` (`on.push.branches: [main]`, OR a branchless `on.push:` with no `branches:`/`branches-ignore:` key, which runs on every branch) OR has `on.schedule`, add its `name:` value to the `workflow_run.workflows` list in `notify-slack-on-main-failure.yml`
 - [ ] If it's intentionally advisory/non-blocking and you don't want Slack noise on flakes, add its `name:` value to the `EXCLUDED_NAMES` set in `scripts/workflows/check-notifier-coverage.mjs` with a comment explaining why
-- [ ] `node scripts/workflows/check-notifier-coverage.mjs` must pass after the change — it runs in the `scripts` CI job and enforces this structurally. The `scripts` job's `rootScripts` path filter includes `.github/workflows/**`, so adding a workflow file alone is enough to fire the check (no script edit required)
+- [ ] `node scripts/workflows/check-notifier-coverage.mjs` must pass after the change — it runs in the `scripts` CI job. That job's `rootScripts` path filter includes `.github/workflows/**`, so adding a workflow file alone fires the check; no script edit is required
 
 `workflow_run.workflows` does NOT support wildcards — every new workflow name must be listed explicitly.
 
@@ -421,7 +417,7 @@ closed.
 
 ## 12. CI health budget
 
-ADR 0100's monthly report is context, not a gate, except:
+ADR 0100's report is context, not a gate, except:
 
 - [ ] `CI` `pull_request` wall p90 <= last month's p90 + 1 min.
 - [ ] No `CI` step fails in >1% of sampled runs (distinct); else file a deflake issue (step + owner).
