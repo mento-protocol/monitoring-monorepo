@@ -63,13 +63,6 @@
     "linePreview": " | function Card({ data }: { data: BridgeFlowsOgData | null }) { | // null → \"—\" (snapshot query failed); 0 → \"$0\" (genuinely no bridge"
   },
   {
-    "file": "src/app/opengraph-image.tsx",
-    "ruleId": "max-lines-per-function",
-    "message": "Function 'Card' has too many lines (158). Maximum allowed is 100.",
-    "line": 94,
-    "linePreview": " | function Card({ data }: { data: HomepageOgData | null }) { | // null → \"—\" (unavailable); 0 → \"$0.00\" (real empty state)."
-  },
-  {
     "file": "src/app/pool/[poolId]/_components/ols-liquidity-events.tsx",
     "ruleId": "complexity",
     "message": "Function 'OlsLiquidityEvents' has a complexity of 35. Maximum allowed is 15.",
