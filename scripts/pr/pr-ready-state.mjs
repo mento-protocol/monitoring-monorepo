@@ -16,11 +16,13 @@ import {
 } from "./pr-ready-state-core.mjs";
 import {
   fetchHeadUpdatedAt,
-  findCodeRabbitPathFilterSkipCandidate,
   headCommitTimestampFromTimeline,
   headUpdatedAtFromTimeline,
   headUpdatedAtIsUpperBound as headUpdatedAtIsUpperBoundFor,
   readyForReviewAtFromTimeline,
+} from "./pr-ready-state-head-time.mjs";
+import {
+  findCodeRabbitPathFilterSkipCandidate,
   validateCodeRabbitPathFilterSkip,
 } from "./pr-ready-state-review-signals.mjs";
 import { formatCompact, formatHuman } from "./pr-ready-state-format.mjs";
