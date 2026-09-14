@@ -44,8 +44,7 @@ import {
  * (the overflow count is threaded out through the shared `budget`).
  *
  * This is one of the caps the finalize suite's select-job timeout pin derives
- * its worst-case `gh` call count from, so this module routes to that suite too
- * (scripts/agent-quality-gate.sh).
+ * its worst-case `gh` call count from. CI runs that suite for this module.
  */
 export const MAX_HANDLED_ID_QUERIES = 40;
 
