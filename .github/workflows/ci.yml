@@ -146,8 +146,8 @@ jobs:
               - indexer-envio/**
               - shared-config/**
               - scripts/eslint-baseline-diff.mjs
-              - scripts/gate/routing-table/indexer-handler-invariant-contract.mjs
-              - scripts/gate/routing-table/indexer-handler-invariant-families.mjs
+              - scripts/workflows/indexer-handler-invariant-contract.mjs
+              - scripts/workflows/indexer-handler-invariant-families.mjs
               - scripts/indexer-handler-invariant-contract.test.mjs
               - pnpm-lock.yaml
               - package.json
@@ -753,12 +753,6 @@ jobs:
         # Retained owner inventory and fail-closed schema checks. Keep this
         # separate from the legacy routing parity suite below.
         run: node --test scripts/indexer-handler-invariant-contract.test.mjs
-      - name: Legacy indexer routing parity suite
-        # This remaining suite checks only the optional legacy diagnostic's
-        # table and checklist router. The no-skip audit measures retained
-        # commands.
-        if: ${{ !inputs.no_skip_audit }}
-        run: node --test scripts/gate/routing-table/indexer-invariant-parity.test.mjs
       - name: Test with coverage
         run: pnpm --filter @mento-protocol/indexer-envio test:coverage
       - uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
@@ -1268,18 +1262,6 @@ jobs:
         # Preserve the independent architecture-root equality that was embedded
         # in the legacy gate suite.
         run: node --test scripts/repo-health/dependency-cruiser-root-contract.test.mjs
-      - name: Gate routing-table suite
-        # ADR 0069. The gate's routing is data in scripts/gate/routing-table/,
-        # compiled by the Node mapping engine; D5c retired the bash `case` arms
-        # that held it before. This suite is what checks the data: ADR 0064's
-        # pairing lint, the path staleness check, the /bin/bash oracle for the
-        # pattern compiler, the closed verb set against the engine, and the
-        # `implementation_signature()` pin that keeps the freshness stamp honest.
-        # Required CI is authoritative and must reject a broken diagnostic
-        # table even when no author invokes the optional local diagnostic.
-        # It is not part of the retained no-skip target command set.
-        if: ${{ !inputs.no_skip_audit }}
-        run: pnpm gate:routing-table:test
       - name: CodeRabbit config allowlist pin
         # ADR 0066. CodeRabbit resolves .coderabbit.yaml from the PR's SOURCE
         # branch, so a PR can weaken the reviewer that reviews it — and its
@@ -1588,18 +1570,6 @@ jobs:
           pnpm docs:navigation-eval -- --validate
           docs/evals/documentation-navigation-baseline.json
           --fixtures docs/evals/documentation-navigation-baseline-fixtures.json
-      - name: Gate routing-table suite
-        # ADR 0069's table names 799 repository paths, 23 of them Markdown:
-        # eleven of the twelve docs/pr-checklists/*.md (all but
-        # review-prompt-exclusions.md), README.md, AGENTS.md, BACKLOG.md,
-        # SPEC.md, two ADRs and more. Its staleness check asserts each still
-        # exists, so renaming or deleting one of those documents is a
-        # Markdown-only diff that breaks the gate. Without this step here, such
-        # a PR would merge green and leave the gate pointing reviewers at a
-        # document that is not there. The no-skip audit excludes this legacy
-        # selector suite.
-        if: ${{ !inputs.no_skip_audit }}
-        run: pnpm gate:routing-table:test
       - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
         if: always() && !inputs.no_skip_audit
 

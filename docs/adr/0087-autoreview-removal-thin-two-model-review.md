@@ -196,7 +196,7 @@ name. The residual is documented instead.
 - The operating flow: [`docs/notes/pr-operating-card.md`](../notes/pr-operating-card.md)
   step 4.
 - The invariant contract that left the deleted core:
-  [`scripts/gate/routing-table/indexer-handler-invariant-contract.mjs`](../../scripts/gate/routing-table/indexer-handler-invariant-contract.mjs)
+  [`scripts/workflows/indexer-handler-invariant-contract.mjs`](../../scripts/workflows/indexer-handler-invariant-contract.mjs)
   and its families module, with
   [`scripts/indexer-handler-invariant-contract.test.mjs`](../../scripts/indexer-handler-invariant-contract.test.mjs).
 - Tracking issue

@@ -126,8 +126,7 @@ If root `package.json` changed, first run
    A failed author check blocks the ready handoff and cannot be relabeled.
    Record an unavailable tool as `not run`. Required CI remains merge authority
    and owns routine coverage and Knip, broad dependency and supply-chain audits,
-   and full-browser suites. The optional legacy diagnostic and its self-tests
-   are outside required CI during M6 observation. A table row or triggered
+   and full-browser suites. The legacy diagnostic and its self-tests are retired. A table row or triggered
    checklist can require a focused policy or configuration check.
 
    Apply only the rows affected by a material fix before publishing the new

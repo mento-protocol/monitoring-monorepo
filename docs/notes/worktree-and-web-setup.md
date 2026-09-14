@@ -59,7 +59,7 @@ Fresh per-PR worktrees start warm because `setup.sh`,
 shared local cache directory outside any worktree. The mechanics, the fallback
 when that directory is unset or unwritable, and the `AGENT_TURBO_SHARED_CACHE=0`
 opt-out are owned by
-[agent-quality-gate-mechanics.md](agent-quality-gate-mechanics.md).
+[pr-operating-card.md](pr-operating-card.md).
 
 ## Claude Code on the web setup
 
@@ -115,7 +115,7 @@ the Trusted defaults:
 - The optional legacy gate classifies that cold-cache 403 as
   environment-blocked and skips its Trunk arm instead of hard-failing; a 404
   stays a hard failure. See
-  [agent-quality-gate-mechanics.md](agent-quality-gate-mechanics.md).
+  [pr-operating-card.md](pr-operating-card.md).
 
 If the container's Node major is older than the repo's `.node-version` (for
 example, an image shipping Node v22 against a `.node-version` of `24`), the

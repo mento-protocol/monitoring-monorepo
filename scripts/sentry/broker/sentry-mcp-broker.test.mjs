@@ -1665,7 +1665,7 @@ test("the probe runs the immutable staged copy, before the agent", () => {
     "the probe is not in the staging step's copy list",
   );
   assert.ok(
-    stagingBlock.includes('scripts/gate/mapped-command-process-identity.mjs"'),
+    stagingBlock.includes('scripts/lib/mapped-command-process-identity.mjs"'),
     "the probe's shared marker helper is not in the staging step's copy list",
   );
   assert.match(

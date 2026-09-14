@@ -23,9 +23,6 @@ import test from "node:test";
 import {
   bashFunctionSource,
   FIXTURE_CLASSIFIER,
-  GATE,
-  GATE_FUNCTION,
-  GATE_PATH,
   gateFixture,
   installedBashes,
   legacyFunctionSource,
@@ -430,16 +427,5 @@ ${close}
         `bash ${version} accepted a classifier enclosed in ${label}`,
       );
     }
-
-    // The case that matters most: the live subject must still read as top
-    // level. ADR 0069's routing-table suite extracts this exact function from
-    // this exact file to prove `implementation_signature()` lists every module
-    // it must hash, so a refusal here is that pin going dark.
-    assert.ok(
-      bashFunctionSource(GATE, GATE_FUNCTION, GATE_PATH, candidate).startsWith(
-        `${GATE_FUNCTION}() {`,
-      ),
-      `bash ${version} no longer reads ${GATE_FUNCTION} in the real gate as top level`,
-    );
   }
 });

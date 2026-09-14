@@ -248,7 +248,7 @@ names, compared on whole path segments (`scripts/pr/` against
 `scripts/sentry/` is disjoint, `docs/` against `docs/notes/` is not); and
 neither names a shared root file or control root —
 `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `.trunk/**`,
-`.github/workflows/**`, `scripts/agent-quality-gate.sh`, or `scripts/gate/**`.
+`.github/workflows/**`, `scripts/workflows/**`.
 Normalize the mirrored skill trees first, by path segments rather than by text:
 a path whose first two segments are `.claude/skills` is read with those replaced
 by `.agents/skills`, whatever follows and whether or not it ends in a slash. The

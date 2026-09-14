@@ -1,7 +1,6 @@
 import { closeSync, constants, fstatSync, lstatSync, openSync } from "node:fs";
 
-// The same flags the gate itself opens a marker with (gate_run_marker_verify in
-// scripts/gate/run-handles.sh). O_NOFOLLOW refuses a symlink planted at the
+// Open inherited process markers without following links. O_NOFOLLOW refuses a symlink planted at the
 // declared name, and O_NONBLOCK keeps a FIFO left there from parking this
 // process forever waiting for a writer that never comes.
 const MARKER_OPEN_FLAGS =

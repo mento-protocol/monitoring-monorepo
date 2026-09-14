@@ -21,6 +21,8 @@ The `docs-checks` split and its `gate:routing-table:test` coverage remain in
 force. References below to keeping the legacy gate suite in `scripts` describe
 the original decision and no longer define current CI behavior.
 
+Retirement amendment: [ADR 0100](0100-legacy-gate-retirement.md) removes the optional legacy diagnostic, its self-tests and temporary M6 adapters. Direct author checks, staged formatting, documentation checks, ADR reminders and required CI remain in force. Historical gate execution details below no longer prescribe current commands.
+
 ## Context
 
 The `rootScripts` paths-filter carried `*.md` and `**/*.md`, so any Markdown

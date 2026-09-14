@@ -587,7 +587,7 @@ source and fails if the staging list stops matching it, so the attack cannot
 move one file over. `scripts/sentry/broker/sentry-mcp-broker.mjs` and
 `scripts/sentry/broker/sentry-mcp-probe.mjs` are staged alongside it even though
 no grant names either. The probe's canonical
-`scripts/gate/mapped-command-process-identity.mjs` dependency is staged in the
+`scripts/lib/mapped-command-process-identity.mjs` dependency is staged in the
 same read-only directory. The rule for this job is that it executes nothing from
 the agent-writable checkout. The agent job's checkout also sets
 `persist-credentials: false`, matching the autofix agent job.

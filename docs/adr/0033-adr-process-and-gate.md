@@ -18,6 +18,8 @@ now runs in the existing required root-scripts CI job. Direct author checks
 also route control-plane changes to the focused contract.
 **Scope:** ci/process
 
+Retirement amendment: [ADR 0100](0100-legacy-gate-retirement.md) removes the optional legacy diagnostic, its self-tests and temporary M6 adapters. Direct author checks, staged formatting, documentation checks, ADR reminders and required CI remain in force. Historical gate execution details below no longer prescribe current commands.
+
 ## Context
 
 The repo's architecture was carried only in people's heads and in scattered

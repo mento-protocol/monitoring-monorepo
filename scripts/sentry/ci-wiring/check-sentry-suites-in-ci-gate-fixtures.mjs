@@ -8,16 +8,10 @@
  * The fixtures build SYNTHETIC bash scripts. Since D5c the gate holds no
  * routing `case` arms and no `classify_root_package_json_changes`, so the
  * function these fixtures define is named here rather than taken from the gate;
- * what the extractor is proven on is the shape of a bash function, which is not
- * a property of any particular one. `GATE_FUNCTION` is the live counter-example:
- * a real function in the real gate that ADR 0069's routing-table suite extracts
- * for its `implementation_signature()` pin, so "the extractor still reads the
- * real file" stays a check on something load-bearing.
+ * The extractor and settlement tests use synthetic scripts after gate retirement.
  */
 
-import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
 import {
   bashFunctionSource,
   probeDirs,
@@ -30,15 +24,8 @@ export { bashFunctionSource, probeDirs, runProbeShell };
 /** The function name the synthetic fixtures below define. */
 export const FIXTURE_CLASSIFIER = "classify_root_package_json_changes";
 
-/** The real gate, and a real top-level function inside it. */
-export const GATE_PATH = fileURLToPath(
-  new URL("../../agent-quality-gate.sh", import.meta.url),
-);
-export const GATE = readFileSync(GATE_PATH, "utf8");
-export const GATE_FUNCTION = "implementation_signature";
-
 /** A root-manifest pointer the gate trusts, and one it does not. */
-export const TRUSTED_PATH = "/scripts/agent:quality-gate";
+export const TRUSTED_PATH = "/scripts/tf:test";
 export const UNTRUSTED_PATH = "/scripts/__not_an_allowlisted_alias__";
 
 /**

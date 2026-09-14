@@ -62,21 +62,21 @@ The raw manifest fixes the complete gate-rooted before surface. It does not
 classify every whole file as a deletion candidate. The terminal source retains
 this shared closure:
 
-| Retained shared file                                    | Physical lines |
-| ------------------------------------------------------- | -------------: |
-| `scripts/gate/darwin-process-identity.c`                |            785 |
-| `scripts/gate/darwin-process-identity-runtime.inc.c`    |            657 |
-| `scripts/gate/darwin-process-identity-helper.mjs`       |          1,311 |
-| `scripts/gate/darwin-process-identity.test.mjs`         |          1,881 |
-| `scripts/gate/darwin-process-lineage-model.mjs`         |            793 |
-| `scripts/gate/darwin-process-lineage-state.mjs`         |          1,466 |
-| `scripts/gate/darwin-process-lineage.mjs`               |          1,611 |
-| `scripts/gate/darwin-process-lineage.test.mjs`          |          3,754 |
-| `scripts/gate/mapped-command-process-identity.mjs`      |            107 |
-| `scripts/gate/mapped-command-process-identity.test.mjs` |            178 |
-| **Retained shared closure**                             |     **12,543** |
-| `scripts/check-agent-quality-gate-package-scripts.mjs`  |            159 |
-| **Wholly retained implementation and test lines**       |     **12,702** |
+| Retained shared file                                   | Physical lines |
+| ------------------------------------------------------ | -------------: |
+| `scripts/gate/darwin-process-identity.c`               |            785 |
+| `scripts/gate/darwin-process-identity-runtime.inc.c`   |            657 |
+| `scripts/gate/darwin-process-identity-helper.mjs`      |          1,311 |
+| `scripts/gate/darwin-process-identity.test.mjs`        |          1,881 |
+| `scripts/gate/darwin-process-lineage-model.mjs`        |            793 |
+| `scripts/gate/darwin-process-lineage-state.mjs`        |          1,466 |
+| `scripts/gate/darwin-process-lineage.mjs`              |          1,611 |
+| `scripts/gate/darwin-process-lineage.test.mjs`         |          3,754 |
+| `scripts/lib/mapped-command-process-identity.mjs`      |            107 |
+| `scripts/lib/mapped-command-process-identity.test.mjs` |            178 |
+| **Retained shared closure**                            |     **12,543** |
+| `scripts/check-agent-quality-gate-package-scripts.mjs` |            159 |
+| **Wholly retained implementation and test lines**      |     **12,702** |
 
 Subtracting the 12,543-line shared closure and the wholly retained 159-line
 package-script checker from the 95,815 whole-file implementation and test lines

@@ -32,6 +32,8 @@ M6 collection procedure below. It adds temporary event-driven dispatch and
 pending evidence collection. It does not change the audit target, sample
 acceptance, spend limits, or separate legacy-deletion approval.
 
+Retirement amendment: [ADR 0100](0100-legacy-gate-retirement.md) removes the optional legacy diagnostic, its self-tests and temporary M6 adapters. Direct author checks, staged formatting, documentation checks, ADR reminders and required CI remain in force. Historical gate execution details below no longer prescribe current commands.
+
 ## Context
 
 The local quality gate combines path routing, validation, process cleanup,

@@ -33,7 +33,7 @@ import { join } from "node:path";
 import {
   closeReopenedGateMarkers,
   inheritGateMarkerStdio,
-} from "../../gate/mapped-command-process-identity.mjs";
+} from "../../lib/mapped-command-process-identity.mjs";
 
 /**
  * How long any probe shell may run before it is killed and reported.

@@ -220,3 +220,5 @@ prove load-bearing, or delete this note when it goes stale:
   [`aegis/AGENTS.md`](../../aegis/AGENTS.md); left as package rule, not an ADR.
 - **Weekend FX-calendar KPI conventions** (7d/WoW over 24h) — a product/data
   convention in `shared-config` `fx-calendar.json`; borderline for ADR status.
+
+- [0100 — Legacy gate retirement](0100-legacy-gate-retirement.md)

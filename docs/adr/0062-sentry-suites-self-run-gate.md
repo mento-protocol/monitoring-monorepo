@@ -16,6 +16,8 @@ garden_lane: adrs-architecture
 **Status:** Accepted (Aug 2026), in force.
 **Scope:** ci/process
 
+Retirement amendment: [ADR 0100](0100-legacy-gate-retirement.md) removes local gate routing and its pins. Retained Sentry supervision, package policy, CI wiring and indexer contracts remain; their current paths are listed in `scripts/AGENTS.md`. Gate-only path lists below are historical.
+
 ## Context
 
 PR #1754 added a static checker that proves CI _would_ run the Sentry test
