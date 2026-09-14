@@ -107,6 +107,8 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0096](0096-finder-probe-non-ledger-kind.md)                | Non-ledger finder probes run in the canonical runner, narrowing ADR 0083             |
 | [0099](0099-retire-duplicate-bundle-size-workflow.md)       | Retire the duplicate bundle-size advisory workflow; the required `ui` job keeps it   |
 
+| [0100](0100-legacy-gate-retirement.md) | Retire the legacy local gate after accepted M6 evaluation; preserve retained CI and shared safeguards |
+
 ### shared-config
 
 | ADR                                                  | Decision                                                                                       |
@@ -220,5 +222,3 @@ prove load-bearing, or delete this note when it goes stale:
   [`aegis/AGENTS.md`](../../aegis/AGENTS.md); left as package rule, not an ADR.
 - **Weekend FX-calendar KPI conventions** (7d/WoW over 24h) — a product/data
   convention in `shared-config` `fx-calendar.json`; borderline for ADR status.
-
-- [0100 — Legacy gate retirement](0100-legacy-gate-retirement.md)

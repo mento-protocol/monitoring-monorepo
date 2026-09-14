@@ -22,8 +22,7 @@ The later [repository preflight](pr-operating-card.md) does not attest bootstrap
 
 ## New Worktree / Clone Setup
 
-Setup does not require the Xcode Command Line Tools. On macOS, install them with
-`xcode-select --install` only before you run the optional legacy gate.
+Setup does not require the Xcode Command Line Tools.
 
 After creating a new worktree manually or cloning the repo, run:
 
@@ -54,12 +53,12 @@ every fresh macOS worktree. Linux still requires a per-worktree successful
 Playwright installer marker because `--with-deps` also provisions host libraries
 there.
 
-Fresh per-PR worktrees start warm because `setup.sh`,
-`bootstrap-worktree.sh`, and the optional legacy gate all point Turbo at one
-shared local cache directory outside any worktree. The mechanics, the fallback
-when that directory is unset or unwritable, and the `AGENT_TURBO_SHARED_CACHE=0`
-opt-out are owned by
-[pr-operating-card.md](pr-operating-card.md).
+`scripts/setup.sh` uses a shared Turbo cache at
+`~/.cache/turbo-monitoring-monorepo` when it can create and write that directory.
+It respects an existing `TURBO_CACHE_DIR`. Set `AGENT_TURBO_SHARED_CACHE=0` to
+use Turbo's default cache instead. An unavailable shared directory also falls
+back to the default. These settings apply to commands run by setup; later
+shell commands use their own environment.
 
 ## Claude Code on the web setup
 
@@ -112,10 +111,9 @@ the Trusted defaults:
   `tools/trunk` reads `$TRUNK_CACHE`, else `$XDG_CACHE_HOME/trunk`, else
   `~/.cache/trunk`, so prewarming only the last one misses a session that sets
   either override.
-- The optional legacy gate classifies that cold-cache 403 as
-  environment-blocked and skips its Trunk arm instead of hard-failing; a 404
-  stays a hard failure. See
-  [pr-operating-card.md](pr-operating-card.md).
+- A direct Trunk check reports the download failure. Restore network access or
+  use a prewarmed cache before rerunning the check. The
+  [PR operating card](pr-operating-card.md) defines the required author checks.
 
 If the container's Node major is older than the repo's `.node-version` (for
 example, an image shipping Node v22 against a `.node-version` of `24`), the

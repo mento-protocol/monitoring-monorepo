@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  closeSync,
   constants,
   fstatSync,
   mkdirSync,
@@ -548,8 +549,13 @@ test("closeReopenedGateMarkers releases only the parent's reopened copies", () =
   assert.throws(() => fstatSync(reopened[0]), { code: "EBADF" });
   // Descriptor 8 was never ours to close, and a second call is a no-op rather
   // than a double close of a number the runtime may have since reused.
-  assert.equal(fstatSync(8).isFile !== undefined, true);
-  closeReopenedGateMarkers();
+  const untouched = openSync(markerFile(), constants.O_RDONLY);
+  try {
+    closeReopenedGateMarkers();
+    assert.equal(fstatSync(untouched).isFile(), true);
+  } finally {
+    closeSync(untouched);
+  }
 });
 
 test("every declared descriptor is inspected before any path is reopened", () => {

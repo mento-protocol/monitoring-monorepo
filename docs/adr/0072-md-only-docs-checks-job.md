@@ -3,7 +3,7 @@ title: The Markdown globs route to a small docs-checks CI job instead of the scr
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-04
+last_verified: 2026-09-14
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -13,15 +13,14 @@ garden_lane: adrs-architecture
 
 # ADR 0072 — the Markdown globs route to `docs-checks`, not the long-running `scripts` job
 
-**Status:** Accepted (Aug 2026), amended 2026-09-04, in force.
+**Status:** Accepted (Aug 2026), amended 2026-09-14, in force.
 **Scope:** ci/process
 
-The 2026-09-04 M6 amendment removed `agent:quality-gate:test` from required CI.
-The `docs-checks` split and its `gate:routing-table:test` coverage remain in
-force. References below to keeping the legacy gate suite in `scripts` describe
-the original decision and no longer define current CI behavior.
-
-Retirement amendment: [ADR 0100](0100-legacy-gate-retirement.md) removes the optional legacy diagnostic, its self-tests and temporary M6 adapters. Direct author checks, staged formatting, documentation checks, ADR reminders and required CI remain in force. Historical gate execution details below no longer prescribe current commands.
+The `docs-checks` job remains in force. [ADR 0100](0100-legacy-gate-retirement.md)
+retires the local gate and removes `gate:routing-table:test` from CI. The
+retained documentation, checklist, context, and navigation checks still run.
+The rationale and implementation evidence below describe the original split;
+references to local gate suites are historical, not current commands.
 
 ## Context
 
