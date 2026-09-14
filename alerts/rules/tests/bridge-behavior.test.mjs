@@ -15,6 +15,22 @@ import test from "node:test";
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const promtool = process.env.PROMTOOL ?? "promtool";
 
+function heredocLocal(source, name) {
+  const match = source.match(
+    new RegExp(`\\b${name}\\s*=\\s*<<-EOT\\n([\\s\\S]*?)\\n\\s*EOT`),
+  );
+  if (!match) throw new Error(`${name} heredoc should exist`);
+  return match[1];
+}
+
+function poolPageSlackTitle(source) {
+  const match = source.match(
+    /resource "grafana_contact_point" "pool_page" \{[\s\S]*?\n\s*title\s*=\s*"((?:\\.|[^"])*)"/,
+  );
+  if (!match) throw new Error("pool_page Slack title should exist");
+  return JSON.parse(`"${match[1]}"`);
+}
+
 function command(binary, args, options = {}) {
   return execFileSync(binary, args, {
     encoding: "utf8",
@@ -325,10 +341,24 @@ test(
       );
       command(promtool, ["test", "rules", fixture]);
       const templates = join(directory, "templates.json");
+      const contactPoints = readFileSync(
+        join(repo, "alerts/rules/contact-points.tf"),
+        "utf8",
+      );
+      contract.pool_slack = heredocLocal(contactPoints, "slack_body_template");
+      contract.pool_victorops = heredocLocal(
+        contactPoints,
+        "victorops_pool_page_message",
+      );
+      contract.pool_slack_title = poolPageSlackTitle(contactPoints);
       writeFileSync(templates, JSON.stringify(contract));
       command(
         "go",
-        ["test", join(repo, "alerts/rules/tests/bridge-notification_test.go")],
+        [
+          "test",
+          join(repo, "alerts/rules/tests/bridge-notification_test.go"),
+          join(repo, "alerts/rules/tests/pool-notification_test.go"),
+        ],
         {
           env: {
             ...process.env,

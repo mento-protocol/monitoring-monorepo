@@ -12,11 +12,9 @@ garden_lane: agent-entry-points
 
 # AGENTS.md — Scripts
 
-Read the relevant [ADR](../docs/adr/README.md) before changing script behavior.
+Read the owning [ADR](../docs/adr/README.md) before edits.
 
 ## Scope
-
-`scripts/` holds repository tools.
 
 ## Layout
 
@@ -51,7 +49,7 @@ readers.
 `peg-policy-digest.mjs` defines the peg version-digest contract for both
 validators. Inventories, pinned hashes, and identities stay with their domain.
 
-## Why Files Stay Flat
+## Path Pins
 
 Move each pin class with its files.
 
@@ -72,7 +70,7 @@ Move each pin class with its files.
   `repo-health/check-guardrail-prose{,.test}.mjs` and
   `repo-health/guardrail-prose.json` route the guardrail suite. `ci.yml`,
   quick-commands, and the manifest pin it (ADR 0073).
-- **Gate runtime pins.** Before `cd`, `agent-quality-gate.sh` resolves
+- **Gate runtime pins.** Before `cd`, the gate resolves
   `gate/run-handles.sh`, coordinator files,
   `docs/docs-navigation-eval-helpers.mjs`, and `gate/lockfile-scope.mjs` from
   `$script_source_dir`; tests hash them from `$repo_root`. Move these paths with
@@ -111,6 +109,8 @@ Move each pin class with its files.
   collection coverage. The no-skip admission excludes
   `workflows/collect-m6-canary.mjs`, its workflow, and the CI contract entry
   points from candidate changes (ADR 0088).
+  `workflows/m6-audit-recovery.test.mjs` pins `m6-audit-recovery.yml`; the CI
+  contract imports it for ADR 0098's two tuples.
 - **Terraform stack registry.** `terraform.stacks.json` `changedPathPatterns`
   pins exact `scripts/` paths per stack. The broad workflow admission boundary
   covers the directory; `pnpm tf:test` enforces subsumption.
@@ -136,7 +136,7 @@ Move each pin class with its files.
 
 ## Sweep Checklist for a Move
 
-Apply every item in
+Apply
 [ADR 0064's move checklist](../docs/adr/0064-scripts-module-directories.md#sweep-checklist-for-a-move)
 in the same PR.
 
@@ -160,8 +160,8 @@ in the same PR.
 - Run `pnpm lint:scripts` for new Node root scripts and `bash -n` for new shell
   scripts. Add focused tests beyond lint and syntax. Add required CI wiring if
   no fixed job owns them.
-- No ESLint `max-lines` reaches this tree. The file-size watchlist reports it
-  instead — tests aside, and the exemption list is now empty:
+- The file-size watchlist replaces ESLint `max-lines` here, excluding tests.
+  No exemptions remain:
   [ADR 0065](../docs/adr/0065-scripts-file-size-watchlist-scope.md).
 - `pnpm tf plan/apply platform` owns one private saved plan. Never accept a
   caller plan path, or print, upload, or cache either plan form. Mechanism and
