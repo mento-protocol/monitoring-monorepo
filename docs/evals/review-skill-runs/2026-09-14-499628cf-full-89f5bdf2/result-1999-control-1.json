@@ -1,0 +1,98 @@
+{
+  "cell_id": "pr-1999-control-draw1",
+  "fingerprint": {
+    "skill_digest": "89f5bdf20356c5515974ec1a6112fc4f9dfbf31cf1d60b667084f91dfbe6ec60",
+    "kind": "full",
+    "contract_digest": "59b82ee3e6d7ccf2cfbe75cb11aa40e6ec93b92a754a992adee4a1a69166a259",
+    "claude_cli": "2.1.270 (Claude Code)",
+    "codex_cli": "codex-cli 0.154.0",
+    "finder_argv_digest": "40099c93f78800efefbc46f57772ae2cbadc86b378bdd22f474945abfd7b450c",
+    "orchestrator_digest": "fee8d511d838ad137aea62f0e6be7b5115383c59d4447ba985efb3e3c3fe48b1"
+  },
+  "treatment": {
+    "skill_ref": "installed",
+    "dirty": false
+  },
+  "pr": 1999,
+  "condition": "control",
+  "draw": 1,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": null,
+  "claims": [
+    "`ui-dashboard/src/app/api/peg-monitoring/alerts/peg-alert-events.ts:108-112`, `:318-321`: A breach that follows an evaluation error loses its own event (regression). `transitionKind` now labels `Error → Alerting` as `error-recovered-alerting` and `cycleKey` groups it with error events, so nothing opens the alert cycle.",
+    "In the `Error → Alerting` then `Alerting → Normal` sequence, no alert cycle is open at t3, so the clear goes to `unpairedCleared`. It shows as a lone \"sell price was … below peg\" with no \"lasted\" duration.",
+    "The t2 event takes its evidence from the error row (`raised?.line`, line 262). That row has `values: {}`, so the breach numbers are dropped and no event ever says \"sell price is 51 bps below peg\".",
+    "`peg-alert-events.ts:344-356`: `Alerting → Error → Normal` leaves the breach looking active. Nothing closes `id:alert`, so line 356 shows it as a still-open `page`/`warning` breach for the rest of the 7-day window. This branch now fetches the `Error → Normal` row (`route.ts:51-53`) but still doesn't use it to close the open breach.",
+    "`route.ts:43-56`, `peg-alert-events.ts:105-115`: `Error → Pending` is never fetched, and `transitionKind` would ignore it anyway. Rules with `for_duration` > 0 that recover from Error go to Pending, so the \"Grafana could not evaluate\" page event would stay open all week.",
+    "`alerts/rules/peg-message-templates.tf:14`: Slack notification previews now show only an emoji. With the title cut down to `🚨`, `🟡` or `✅`, push notifications, desktop notifications, the channel sidebar and screen readers show only the emoji, so on-call can't see what fired.",
+    "Hidden extra requests: `fetchJson` (`route.ts:58-84`) now works out and sends the Error queries itself by reading the query parameters, and returns an array only for those two URLs. A function called `fetchJson` quietly sending two requests is easy to break later.",
+    "Crowded history list: each short evaluation error now produces two events, and the list is capped at `PEG_ALERTS_MAX_EVENTS = 4`, so a couple of brief errors can push a real breach out of the list."
+  ],
+  "matched_ids": [
+    3830366247,
+    3830366547,
+    3830366556,
+    3830371325
+  ],
+  "judge_reasoning": {
+    "3830366234": "The review's item 4 objects to the emoji-only title on UX grounds. It never mentions the tftest.hcl assertion that would now fail.",
+    "3830366243": "The review does not mention the peg-monitoring.md runbook or any documentation drift.",
+    "3830366247": "Review item 3 says Error → Pending is never fetched or classified, so recovery into Pending is missed.",
+    "3830366547": "Review item 2 says Alerting → Error → Normal leaves the alert cycle open, so the breach still shows as active.",
+    "3830366556": "Review item 3 says that when a rule recovers via Pending, the error cycle never closes and the failure row stays open all week.",
+    "3830371325": "This defect is about error-recovered-alerting handling in the pairing logic. Review item 1 names that problem: Error → Alerting closes the error cycle but never opens an alert cycle, so the later clear goes unpaired. The defect text is truncated, so this match is less certain.",
+    "3830416461": "The review does not mention empty labels.source producing a 'Price source' label for asset-wide or policy rules."
+  },
+  "novel": {
+    "claims": 8,
+    "novelReal": 3,
+    "novelWrong": 0,
+    "novelVague": 3,
+    "restatedKnown": 2,
+    "alreadyMatched": 4,
+    "verdicts": {
+      "1": {
+        "class": "real",
+        "why": "In peg-alert-events.ts transitionKind now returns 'error-recovered-alerting' for Error→Alerting, where it used to return 'raised' (the base current=Alerting query already returns these rows). Its cycleKey is `identity:error` and isOpening is false, so it only closes the error cycle and no `identity:alert` cycle is ever opened."
+      },
+      "2": {
+        "class": "real",
+        "why": "In pairStateTransitions, the later Alerting→Normal finds nothing open under `identity:alert` and observedRaised does not have that key. It goes to unpairedCleared and is phrased without `raised`, so there is no 'lasted' duration and it uses the cleared cause copy."
+      },
+      "3": {
+        "class": "real",
+        "why": "phraseTransition uses `evidence = raised?.line ?? transition.line`. The paired Error→Alerting event takes the error row (values {}), and evaluationCause swaps the breach cause for 'Grafana can evaluate … again; its alert condition is active'. The breach values never appear in any event."
+      },
+      "4": {
+        "class": "known",
+        "why": "Same as the known 'Error recovery leaves breach active' defect (peg-alert-events.ts:352)."
+      },
+      "5": {
+        "class": "known",
+        "why": "Same as the known 'Include recoveries that resume in Pending' and 'Pending recovery orphans error cycle' defects."
+      },
+      "6": {
+        "class": "vague",
+        "why": "The emoji-only title is a deliberate, commented choice. It copies the existing pattern in alerts/rules/contact-points.tf:12-18, whose comment gives the same title_link limitation, so this is a design preference rather than a defect introduced here."
+      },
+      "7": {
+        "class": "vague",
+        "why": "route.ts fetchJson does derive and send the extra Error query, but the claim only says this is 'easy to break later'. That is a maintainability preference with no concrete defect."
+      },
+      "8": {
+        "class": "vague",
+        "why": "combinePegAlertEvents sorts by time and keeps the newest PEG_ALERTS_MAX_EVENTS. Showing error events is the point of the change, and newer events pushing out older ones already happened with breaches, so no concrete defect is shown."
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 140,
+  "usd": 0.8952494999999998,
+  "usd_metered": true,
+  "scoring_usd": 0.41845550000000004
+}

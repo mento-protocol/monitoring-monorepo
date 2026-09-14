@@ -192,7 +192,8 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0060](0060-upstash-management-key-bootstrap.md)              | Upstash management API keys use a human-owned bootstrap integration                                               |
 | [0061](0061-exact-plan-guard-for-manual-platform-applies.md)  | Manual platform applies check and consume one private exact plan                                                  |
 | [0063](0063-dashboard-grafana-history-read-access.md)         | The platform stack mints the dashboard's read-only Grafana identity and token                                     |
-| [0067](0067-pool-criticality-is-depletion-risk.md)            | Pool alerts page on depletion risk or rebalancer inaction, never on deviation magnitude                           |
+| [0067](0067-depletion-alerts.md)                              | Archived: depletion paging                                                                                        |
+| [0097](0097-recovery.md)                                      | Bounded pool-page recovery                                                                                        |
 
 ### governance-watchdog
 

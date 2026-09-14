@@ -1,0 +1,79 @@
+{
+  "cell_id": "pr-1984-pipeline-draw1",
+  "fingerprint": {
+    "skill_digest": "89f5bdf20356c5515974ec1a6112fc4f9dfbf31cf1d60b667084f91dfbe6ec60",
+    "kind": "full",
+    "contract_digest": "59b82ee3e6d7ccf2cfbe75cb11aa40e6ec93b92a754a992adee4a1a69166a259",
+    "claude_cli": "2.1.270 (Claude Code)",
+    "codex_cli": "codex-cli 0.154.0",
+    "finder_argv_digest": "40099c93f78800efefbc46f57772ae2cbadc86b378bdd22f474945abfd7b450c",
+    "orchestrator_digest": "fee8d511d838ad137aea62f0e6be7b5115383c59d4447ba985efb3e3c3fe48b1"
+  },
+  "treatment": {
+    "skill_ref": "installed",
+    "dirty": false
+  },
+  "pr": 1984,
+  "condition": "pipeline",
+  "draw": 1,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": "gpt-5.6-sol@high",
+  "claims": [
+    "scripts/sentry/autofix/sentry-autofix-finalize.mjs:853 — if you leave out `--refused-inventory-repo`, `readFlag` returns `null` (`finalize.mjs:712`), and passing `null` explicitly skips the default value `renderRefusedStubInventory` would otherwise use (`run-record.mjs:66`); output prints `([#5](https://github.com/null/issues/5))`",
+    "docs/notes/sentry-triage-pipeline.md:1030 — \"The issue remains open until a human records dispositions…\" never says which issue; \"the issue\" doesn't point to anything there",
+    "docs/notes/sentry-triage-pipeline.md — the operator-attribution story for #1304 and #1313 is stated as fact, and I couldn't check it against anything in the repo",
+    "sentry-autofix.yml:1419, sentry-autofix-refused-inventory.mjs:245 — every failure (auth, rate limit, timeout, bad response) ends up as the same `unknown`; the workflow throws away stderr and the catch block drops the error, so the job log gives no reason",
+    "the result is parsed twice, once in the finalize CLI (`finalize.mjs:824`) and again inside `renderRefusedStubInventory`",
+    "in `isPositiveIssueNumber` (`refused-inventory.mjs:44`), the `String(value) === String(Math.trunc(value))` check adds nothing after `Number.isSafeInteger`"
+  ],
+  "matched_ids": [],
+  "judge_reasoning": {
+    "3828303385": "The review explicitly checked the unquoted colon label query and cleared it as fine, so it did not flag the defect.",
+    "3828304403": "The review ran the quality gate dry-run and saw the routing work, but it never mentions registering the pin in the scripts path-pin inventory.",
+    "3828313971": "The review flags docs line 1030 for vague wording ('the issue' never says which one), not the MD018 problem of a line starting with #."
+  },
+  "novel": {
+    "claims": 6,
+    "novelReal": 1,
+    "novelWrong": 0,
+    "novelVague": 3,
+    "restatedKnown": 2,
+    "alreadyMatched": 0,
+    "verdicts": {
+      "1": {
+        "class": "known",
+        "why": "Verified: readFlag returns null when the flag is missing (finalize.mjs:712-713). That null goes to renderRefusedStubInventory, and a null argument skips the repo default (run-record.mjs:66), so links read github.com/null. This is the known 'Repo default bypassed by null' defect."
+      },
+      "2": {
+        "class": "known",
+        "why": "The docs lines 1030-1031 do say 'The issue remains open…' without naming the issue. This matches the known docs maintainability finding at sentry-triage-pipeline.md:1031."
+      },
+      "3": {
+        "class": "vague",
+        "why": "The reviewer only says they couldn't check the #1304/#1313 operator-attribution story against the repo. That names no concrete defect in the code or docs."
+      },
+      "4": {
+        "class": "real",
+        "why": "Verified: the workflow runs the helper with 2>/dev/null and falls back to {\"state\":\"unknown\"}. readRefusedStubInventory's bare catch drops the error, including the stderr text runGhWithTimeout puts in it. Auth, rate-limit, timeout and parse failures all end up as the same 'unknown' with nothing in the job log."
+      },
+      "5": {
+        "class": "vague",
+        "why": "True that finalize.mjs:824 calls parseRefusedStubInventoryResult and renderRefusedStubInventory calls it again. The parse is idempotent (a known object passes through unchanged), so this is redundancy, not a bug."
+      },
+      "6": {
+        "class": "vague",
+        "why": "True that Number.isSafeInteger already implies an integer, so the String/Math.trunc check is redundant. Output is unchanged, so this is a style note, not a defect."
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 299,
+  "usd": 0.85411,
+  "usd_metered": true,
+  "scoring_usd": 0.283134
+}

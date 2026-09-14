@@ -1,0 +1,102 @@
+{
+  "cell_id": "pr-1990-pipeline-draw1",
+  "fingerprint": {
+    "skill_digest": "89f5bdf20356c5515974ec1a6112fc4f9dfbf31cf1d60b667084f91dfbe6ec60",
+    "kind": "full",
+    "contract_digest": "59b82ee3e6d7ccf2cfbe75cb11aa40e6ec93b92a754a992adee4a1a69166a259",
+    "claude_cli": "2.1.270 (Claude Code)",
+    "codex_cli": "codex-cli 0.154.0",
+    "finder_argv_digest": "40099c93f78800efefbc46f57772ae2cbadc86b378bdd22f474945abfd7b450c",
+    "orchestrator_digest": "fee8d511d838ad137aea62f0e6be7b5115383c59d4447ba985efb3e3c3fe48b1"
+  },
+  "treatment": {
+    "skill_ref": "installed",
+    "dirty": false
+  },
+  "pr": 1990,
+  "condition": "pipeline",
+  "draw": 1,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": "gpt-5.6-sol@high",
+  "claims": [
+    "scripts/pr/pr-ready-state-core.mjs:750 — the file grows from 998 to 1,077 lines, crossing the 1,000-line hard cap; docs/pr-checklists/recurring-review-patterns.md:189-194 requires a file pushed past a cap to be split in the same PR",
+    "a new sibling module has to be added to `required_runtime_names` in `scripts/agent-autoreview.sh:4319-4325`, otherwise `agent:autoreview` copies the runtime files without it and the import fails there even though local tests pass",
+    "docs/notes/pr-ready-state.md:399-408 — the closeout step comes after the only projection pair: runs the pair at step 5, posts the request at step 8, and signals all-clear at step 10 with no second pair, contrary to AGENTS.md:90-95 requiring ordered runbooks to match",
+    "\"Idempotent\" overstates what the marker does (.agents/skills/babysit-pr/SKILL.md:310 and .claude mirror, .agents/skills/ship/SKILL.md:214, cloud-watch-loop.md:55, the ADR) — it's a check-then-post: two babysitters can both see `missing` and both post a paid request",
+    "Anyone can post the request marker: at `pr-ready-state-core.mjs:772-778`, a comment with the mention and marker for the current head counts no matter who wrote it; a spoofed or ignored comment leaves the state stuck at `requested`, so the agent never sends a real request",
+    "`classifyCodexReviewSignal` (line 718) has the same gap of accepting a marker comment from any author",
+    "A plain `@coderabbitai review` from a human is ignored: the classifier only counts requests carrying the marker (lines 439-441), so it reports `missing` and the agent posts a second paid request",
+    "The `gates` block in the JSON example (`pr-ready-state.md:276-298`) lacks `codeRabbitReviewSignal`, so it's now incomplete",
+    "`reviewed` needs a PR review whose body has `**Run ID**`; if a clean CodeRabbit follow-up run only edits the walkthrough comment, heads that have actually been reviewed still show `stale` and agents would pay for an extra request on every clean head (unconfirmed)"
+  ],
+  "matched_ids": [
+    3829654081,
+    3829659544,
+    3829659546,
+    3830259678
+  ],
+  "judge_reasoning": {
+    "3829654081": "Review item 1 flags pr-ready-state-core.mjs:750 growing from 998 to 1,077 lines past the cap and requires a split in this PR.",
+    "3829659544": "Review item 6 notes the gates block in the pr-ready-state.md JSON example lacks codeRabbitReviewSignal.",
+    "3829659546": "Review item 2 flags that the closeout step in pr-ready-state.md:399-408 comes after the final projection pair, and asks for the order to be fixed.",
+    "3829659550": "The review considers the missing head SHA fallback and explicitly dismisses it as unable to happen, so it does not identify this as a defect.",
+    "3830259678": "Review item 4 notes that at pr-ready-state-core.mjs:772-778 any commenter's marker counts as requested, regardless of author, and suggests checking trusted authors.",
+    "3830394205": "Review item 4 covers only the core classifier (and the Codex classifier). It never names the cloud-watch-loop.md condition as accepting unauthenticated markers."
+  },
+  "novel": {
+    "claims": 9,
+    "novelReal": 1,
+    "novelWrong": 1,
+    "novelVague": 4,
+    "restatedKnown": 3,
+    "alreadyMatched": 4,
+    "verdicts": {
+      "1": {
+        "class": "known",
+        "why": "The diff takes pr-ready-state-core.mjs from 998 to 1077 lines. That is the known 'Split the growing ready-state core' defect at :750."
+      },
+      "2": {
+        "class": "vague",
+        "why": "The change adds no new sibling module, so required_runtime_names at agent-autoreview.sh:4319-4325 already covers every imported file. The claim only matters if a hypothetical split happens."
+      },
+      "3": {
+        "class": "known",
+        "why": "pr-ready-state.md steps 5/8/10 do put the CodeRabbit request after the only projection pair. This is the known Major defect at pr-ready-state.md:408."
+      },
+      "4": {
+        "class": "vague",
+        "why": "Run one after another, the marker does suppress repeat requests: a current-head marker gives 'requested'. The two-babysitter race is a speculative wording nitpick with no shown concurrent runner."
+      },
+      "5": {
+        "class": "known",
+        "why": "The issue-comment loop at core.mjs:771-783 has no author check. This restates the known 'Trust only authorized closeout requests' at :772."
+      },
+      "6": {
+        "class": "wrong",
+        "why": "classifyCodexReviewSignal is unchanged pre-existing code outside the diff. It never had a marker; any @codex review request counts on purpose, so this change adds no such gap."
+      },
+      "7": {
+        "class": "vague",
+        "why": "isCodeRabbitFinalHeadReviewRequestBody does require the marker, and a test asserts plain requests don't count, so this is deliberate. A duplicate needs the human-triggered run to be missing after the check finishes, which the claim doesn't show."
+      },
+      "8": {
+        "class": "real",
+        "why": "The gates JSON example at pr-ready-state.md:276-298 still lists codexReviewSignal but not the new codeRabbitReviewSignal gate. The top-level field is missing from the example too, though the code emits both."
+      },
+      "9": {
+        "class": "vague",
+        "why": "The claim labels itself unconfirmed and depends on unverified CodeRabbit behavior (edit-only follow-up runs). Nothing in the repo shows a clean run without a Run ID review."
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 505,
+  "usd": 1.052843,
+  "usd_metered": true,
+  "scoring_usd": 0.5219095
+}
