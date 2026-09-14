@@ -48,9 +48,9 @@ vi.mock("../utils/quicknode-replay-protection.js", () => ({
   reserveQuickNodeNonce: mockReserveQuickNodeNonce,
 }));
 
-type MockResponse = Response & {
-  send: ReturnType<typeof vi.fn>;
-  status: ReturnType<typeof vi.fn>;
+type MockResponse = Omit<Response, "send" | "status"> & {
+  send: ReturnType<typeof vi.fn<(body?: unknown) => Response>>;
+  status: ReturnType<typeof vi.fn<(code: number) => Response>>;
 };
 
 function makeRes(): MockResponse {
