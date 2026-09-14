@@ -274,6 +274,7 @@ function recomputeFromDetail({ dir, condition, ids, prForId }) {
   let wrongClaims = 0;
   let novelReal = 0;
   let usd = 0;
+  let unmeteredCells = 0;
   let seconds = 0;
   const claimsByPr = new Map();
   for (const file of files) {
@@ -286,6 +287,7 @@ function recomputeFromDetail({ dir, condition, ids, prForId }) {
     wrongClaims += Number(record.novel?.novelWrong ?? 0);
     novelReal += Number(record.novel?.novelReal ?? 0);
     const cellUsd = record.usd;
+    if (record.usd_metered === false) unmeteredCells += 1;
     const cellSeconds = record.seconds;
     usd =
       typeof cellUsd === "number" && Number.isFinite(cellUsd) && cellUsd >= 0
@@ -320,7 +322,15 @@ function recomputeFromDetail({ dir, condition, ids, prForId }) {
         .map((draw) => (byDraw.get(draw).matched.has(id) ? 1 : 0)),
     );
   }
-  return { bits, wrongClaims, novelReal, usd, seconds, zeroFindingPrs };
+  return {
+    bits,
+    wrongClaims,
+    novelReal,
+    usd,
+    unmeteredCells,
+    seconds,
+    zeroFindingPrs,
+  };
 }
 
 /** Report a stated number that is not what the detail sums to. */
@@ -705,6 +715,14 @@ export function revalidateRow({
     // runbook's guarantee is that every recorded number is re-derived rather
     // than believed. An aggregation bug or an edited row is a validation
     // problem here instead of a figure a reader has no way to check.
+    // `usd` below is a sum over cells whose price the CLI reported. This says
+    // how many it could not, so a reader is never handed an unmetered total as
+    // a measured one.
+    if ((condition.unmetered_cells ?? 0) !== recomputed.unmeteredCells) {
+      problems.push(
+        `${label}.unmetered_cells is ${condition.unmetered_cells ?? 0}; the run detail gives ${recomputed.unmeteredCells}`,
+      );
+    }
     if (condition.novel_real !== recomputed.novelReal) {
       problems.push(
         `${label}.novel_real is ${condition.novel_real}; the run detail gives ${recomputed.novelReal}`,

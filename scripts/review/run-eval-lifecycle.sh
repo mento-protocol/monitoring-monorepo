@@ -264,6 +264,45 @@ remaining_seconds() {
 # contestant or the scorer says why it exited, and every failure path below is a
 # log line that would otherwise carry a bare exit status. The caller removes the
 # file with the stdout file it named.
+# A model process whose stdout is read through `head -c`: the pipe closes at
+# the byte ceiling, the child's whole process group is then killed rather than
+# left spending, and the caller reads a stream one byte past the ceiling as an
+# overflow. For the codex verifier, whose `ulimit -f` cap would fire on its own
+# sqlite state. The child is started under job control so its pid is its group.
+run_stream_capped() {
+  local ceiling="$1" fixture="$2"
+  shift 2
+  local fifo
+  fifo="$(mktemp -u "$TMPROOT/review-eval-pipe.XXXXXX")"
+  mkfifo "$fifo" || return 1
+  # Job control puts the model in a group of its own, so the deadline TERM that
+  # `run_bounded` sends to this shell's group no longer reaches it. Left
+  # untrapped that TERM kills the `head` below and ends this shell, and the
+  # model survives to spend against its own hour-long timeout. These handlers
+  # carry the deadline across the group boundary and are armed before the
+  # launch, so no window exists between the two. `$child` and `$fifo` expand
+  # when the trap fires, only inside this call: every return path clears them.
+  local child=""
+  trap 'kill -KILL -- "-$child" 2>/dev/null; rm -f "$fifo"; exit 143' TERM INT
+  set -m
+  run_in_fixture "$fixture" "$@" >"$fifo" &
+  child=$!
+  set +m
+  head -c "$((ceiling + 1))" <"$fifo"
+  kill -TERM -- "-$child" 2>/dev/null || true
+  local waited=0
+  while ((waited < 10)) && kill -0 -- "-$child" 2>/dev/null; do
+    sleep 1
+    waited=$((waited + 1))
+  done
+  kill -KILL -- "-$child" 2>/dev/null || true
+  local status=0
+  wait "$child" || status=$?
+  trap - TERM INT
+  rm -f "$fifo"
+  return "$status"
+}
+
 run_bounded() {
   local out_file="$1" limit="$2"
   shift 2
