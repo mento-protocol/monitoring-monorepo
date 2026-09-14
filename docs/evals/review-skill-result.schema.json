@@ -180,6 +180,11 @@
           "minimum": 0,
           "description": "PRs on which this condition emitted no parseable finding. Absent means zero."
         },
+        "unmetered_cells": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Cells of this condition whose CLI reported no price, so usd is a sum over the metered cells alone. Absent means every cell was metered."
+        },
         "per_defect": {
           "type": "object",
           "description": "Frozen scorable defect id to one found/missed bit per draw its own PR completed. The vector is at most `draws` long, and shorter when that PR ran fewer draws, so a cell that never ran shrinks opportunities instead of recording a miss. Every later comparison reads these committed booleans; no model is re-invoked to compare two runs.",
