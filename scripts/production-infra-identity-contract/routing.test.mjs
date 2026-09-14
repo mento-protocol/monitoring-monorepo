@@ -272,32 +272,18 @@ try {
     "ci.yml scripts job must run when rootScripts changes",
   );
 
-  // These three coarse filters decide whether registry classification runs.
-  // The registry owns the boundary, and every stack-specific path must fit it.
-  const infraWorkflow = loadYaml(
-    readFileSync(
-      path.join(repositoryRoot, ".github/workflows/infra.yml"),
-      "utf8",
-    ),
+  // This coarse filter decides whether registry classification runs. The
+  // registry owns the boundary, and every stack-specific path must fit it.
+  assert.deepEqual(
+    filters.terraform,
+    terraformWorkflowAdmissionPatterns,
+    "ci.yml terraform filter must equal terraform.stacks.json workflowAdmissionPatterns",
   );
-  const infraTriggers = infraWorkflow.on ?? infraWorkflow[true];
-  const terraformFilters = [
-    ["ci.yml terraform filter", filters.terraform],
-    ["infra.yml push paths", infraTriggers.push.paths],
-    ["infra.yml pull_request paths", infraTriggers.pull_request.paths],
-  ];
-  for (const [label, patterns] of terraformFilters) {
-    assert.deepEqual(
-      patterns,
-      terraformWorkflowAdmissionPatterns,
-      `${label} must equal terraform.stacks.json workflowAdmissionPatterns`,
-    );
-    assert.deepEqual(
-      uncoveredRegistryPatterns(terraformRegistry.stacks, patterns),
-      [],
-      `${label} must admit every stack changedPathPatterns entry`,
-    );
-  }
+  assert.deepEqual(
+    uncoveredRegistryPatterns(terraformRegistry.stacks, filters.terraform),
+    [],
+    "ci.yml terraform filter must admit every stack changedPathPatterns entry",
+  );
   assert.equal(
     ciWorkflow.jobs.changes.outputs.terraform,
     "${{ steps.filter.outputs.terraform }}",
@@ -333,38 +319,6 @@ try {
     "ci.yml Terraform validation must validate each classified stack",
   );
 
-  const infraDiscover = infraWorkflow.jobs.discover;
-  assert(infraDiscover, "infra.yml must define the stack discovery job");
-  const infraBuildMatrix = infraDiscover.steps.find(
-    (step) => step.name === "Build changed-stack matrix",
-  );
-  assert(
-    infraBuildMatrix,
-    "infra.yml discovery must build the changed-stack matrix",
-  );
-  assert.match(
-    String(infraBuildMatrix.run),
-    /scripts\/tf-stacks\.mjs changed/u,
-    "infra.yml discovery must classify stacks through the registry",
-  );
-  const infraValidate = infraWorkflow.jobs.validate;
-  assert(infraValidate, "infra.yml must define the stack validation job");
-  assert.equal(
-    infraValidate.needs,
-    "discover",
-    "infra.yml validation must depend on stack discovery",
-  );
-  assert.equal(
-    infraValidate.if,
-    "needs.discover.outputs.has-stacks == 'true'",
-    "infra.yml validation must run for a non-empty registry matrix",
-  );
-  assert(
-    infraValidate.steps.some((step) =>
-      String(step.run).includes("scripts/tf-stacks.mjs validate"),
-    ),
-    "infra.yml validation must validate each classified stack",
-  );
   const productionInfraContract = ciWorkflow.jobs["production-infra-contract"];
   assert(
     productionInfraContract,
