@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
 import "./collect-m6-canary.test.mjs";
+import "./m6-audit-recovery.test.mjs";
 import {
   mkdirSync,
   mkdtempSync,
@@ -12,7 +13,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-
 import {
   CONDITIONAL_JOBS,
   FILTER_NAMES,
