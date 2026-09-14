@@ -48,13 +48,11 @@ strings in `scripts/gate/routing-table/arms-packages.mjs` and
 
 ## Alternatives considered
 
-- **Keep both, as ADR 0078 did.** Rejected: it is a pure duplicate boot with
-  no coverage benefit, at measured cost (hundreds of runner boots a month for
-  no unique signal).
+- **Keep both, as ADR 0078 did.** Rejected: a pure duplicate boot at measured
+  cost (hundreds of runner boots a month) with no coverage benefit.
 - **Add `.npmrc` to the `ci.yml` `ui` filter first, to "close a coverage
-  gap."** Rejected: no gap exists. `.npmrc` is already in the `controlPlane`
-  filter, which sets `forceAll` and runs `ui` unconditionally; adding it to
-  `ui` is a no-op that only narrows the unrouted-path fallback.
+  gap."** Rejected: no gap exists — `.npmrc` already sits in the
+  `controlPlane` filter, which forces `ui` unconditionally.
 - **Move the budget check out of `ci.yml` into `size-limit.yml`.** Rejected:
   that would make the budget enforceable only through a non-required
   workflow, weakening rather than preserving the gate.
@@ -66,19 +64,16 @@ strings in `scripts/gate/routing-table/arms-packages.mjs` and
   bundle-size budget".
 - The budget check runs after `ui`'s earlier steps (lint, knip, react-doctor,
   coverage), so a PR failing one of those no longer gets an independent
-  bundle-size signal in the same run.
-- `turbo.json`'s `build`, `size-limit`, and `test:browser` task inputs drop
-  one now-nonexistent cache-key input each.
+  bundle-size signal in the same run; `turbo.json`'s `build`, `size-limit`,
+  and `test:browser` task inputs each drop one now-nonexistent cache-key input.
 
 ## Evidence
 
-- `.github/workflows/ci.yml` — `ui` job runs
+- `.github/workflows/ci.yml`'s `ui` job runs
   `VERCEL_DEPLOYMENT_ID=ci pnpm exec turbo run size-limit --filter=@mento-protocol/ui-dashboard`
-  against the same `ui-dashboard/.size-limit.cjs` budget; its `ui` filter
-  anchor and the `controlPlane`/`forceAll` fallback together already select
-  `ui` on every path the deleted workflow triggered on.
-- `scripts/workflows/check-ci-contract.mjs` pins that exact `ui`-job command,
-  so the surviving check cannot silently disappear.
-- `scripts/workflows/check-ci-contract.test.mjs` asserts `.npmrc` forces
+  against the same `ui-dashboard/.size-limit.cjs` budget, already selected by
+  its `ui` filter anchor plus the `controlPlane`/`forceAll` fallback on every
+  path the deleted workflow triggered on; `scripts/workflows/check-ci-contract.mjs`
+  pins that command, and `check-ci-contract.test.mjs` asserts `.npmrc` forces
   `forceAll` today, refuting the coverage-gap premise.
 - Raised on [issue #2403](https://github.com/mento-protocol/monitoring-monorepo/issues/2403).

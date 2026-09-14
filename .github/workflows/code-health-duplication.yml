@@ -8,8 +8,8 @@ on:
     # positive `paths:` filter is safe (a skipped run cannot leave a
     # *required* check pending). These globs mirror .jscpd.json's `pattern`
     # scan roots: jscpd cannot flag duplication in a PR that touches none of
-    # them. Keep this list in sync with .jscpd.json if the scan roots change.
-    paths: &jscpd-paths
+    # them. Keep both copies in sync with .jscpd.json if the scan roots change.
+    paths:
       - shared-config/src/**
       - ui-dashboard/src/**
       - indexer-envio/src/**
@@ -23,7 +23,18 @@ on:
       - .github/workflows/code-health-duplication.yml
   push:
     branches: [main]
-    paths: *jscpd-paths
+    paths:
+      - shared-config/src/**
+      - ui-dashboard/src/**
+      - indexer-envio/src/**
+      - metrics-bridge/src/**
+      - aegis/src/**
+      - governance-watchdog/src/**
+      - alerts/infra/onchain-event-handler/src/**
+      - alerts/infra/oncall-announcer/src/**
+      - .jscpd.json
+      - package.json
+      - .github/workflows/code-health-duplication.yml
 
 # PR runs cancel on new pushes to the same PR ref; push to main uses a
 # SHA-unique group so consecutive main runs never cancel each other.
