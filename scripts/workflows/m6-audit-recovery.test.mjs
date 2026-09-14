@@ -9,6 +9,8 @@ import {
   BASELINE_SECONDS,
   jobSeconds,
   REPOSITORY,
+  REVIEWED_FAILURE,
+  failureReceiptDigest,
   TUPLES,
   validateIdentity,
   verifyGit,
@@ -212,7 +214,277 @@ test("deduplicates copied jobs with new IDs and retains real retries", () =>
   ));
 test("rejects missing timestamps", () =>
   assert.throws(() => jobSeconds([[{ ...job, completed_at: null }]])));
+const FAILED_RUN = {
+  id: 34872200578,
+  event: "workflow_dispatch",
+  head_branch: "main",
+  head_sha: "0d895b23e8bf45f3933698aea3af8f55a7be3920",
+  path: ".github/workflows/m6-audit-recovery.yml",
+  workflow_id: 358023090,
+  display_title: "M6 recovery PR #2399",
+  status: "completed",
+  conclusion: "failure",
+  run_attempt: 1,
+  created_at: "2026-09-14T17:01:31Z",
+  updated_at: "2026-09-14T17:07:28Z",
+  run_started_at: "2026-09-14T17:01:31Z",
+  referenced_workflows: [
+    {
+      path: "mento-protocol/monitoring-monorepo/.github/workflows/ci.yml@0d895b23e8bf45f3933698aea3af8f55a7be3920",
+      sha: "0d895b23e8bf45f3933698aea3af8f55a7be3920",
+      ref: "refs/heads/main",
+    },
+  ],
+};
+const FAILED_JOBS = [
+  [
+    104070588677,
+    34872200578,
+    1,
+    "0d895b23e8bf45f3933698aea3af8f55a7be3920",
+    "Admit approved retrospective observation",
+    "completed",
+    "success",
+    "2026-09-14T17:01:34Z",
+    "2026-09-14T17:01:56Z",
+    209545,
+  ],
+  [
+    104070721822,
+    34872200578,
+    1,
+    "0d895b23e8bf45f3933698aea3af8f55a7be3920",
+    "Supplemental retained deterministic audit / Production infrastructure contract",
+    "completed",
+    "success",
+    "2026-09-14T17:01:57Z",
+    "2026-09-14T17:04:56Z",
+    209552,
+  ],
+  [
+    104070721835,
+    34872200578,
+    1,
+    "0d895b23e8bf45f3933698aea3af8f55a7be3920",
+    "Supplemental retained deterministic audit / Guardrail prose pins",
+    "completed",
+    "success",
+    "2026-09-14T17:01:58Z",
+    "2026-09-14T17:02:15Z",
+    1000117847,
+  ],
+  [
+    104070721897,
+    34872200578,
+    1,
+    "0d895b23e8bf45f3933698aea3af8f55a7be3920",
+    "Supplemental retained deterministic audit / Sentry suites",
+    "completed",
+    "success",
+    "2026-09-14T17:01:58Z",
+    "2026-09-14T17:03:04Z",
+    1000117846,
+  ],
+  [
+    104070721950,
+    34872200578,
+    1,
+    "0d895b23e8bf45f3933698aea3af8f55a7be3920",
+    "Supplemental retained deterministic audit / Detect changes",
+    "completed",
+    "success",
+    "2026-09-14T17:01:58Z",
+    "2026-09-14T17:02:07Z",
+    209556,
+  ],
+  [
+    104070784832,
+    34872200578,
+    1,
+    "0d895b23e8bf45f3933698aea3af8f55a7be3920",
+    "Supplemental retained deterministic audit / Quality Checks (alerts Cloud Functions)",
+    "completed",
+    "success",
+    "2026-09-14T17:02:09Z",
+    "2026-09-14T17:03:10Z",
+    209554,
+  ],
+  [
+    104070784866,
+    34872200578,
+    1,
+    "0d895b23e8bf45f3933698aea3af8f55a7be3920",
+    "Supplemental retained deterministic audit / Quality Checks (integration-probes)",
+    "completed",
+    "success",
+    "2026-09-14T17:02:09Z",
+    "2026-09-14T17:03:00Z",
+    209555,
+  ],
+  [
+    104070784908,
+    34872200578,
+    1,
+    "0d895b23e8bf45f3933698aea3af8f55a7be3920",
+    "Supplemental retained deterministic audit / Quality Checks (indexer-envio)",
+    "completed",
+    "success",
+    "2026-09-14T17:02:09Z",
+    "2026-09-14T17:03:45Z",
+    209549,
+  ],
+  [
+    104070784921,
+    34872200578,
+    1,
+    "0d895b23e8bf45f3933698aea3af8f55a7be3920",
+    "Supplemental retained deterministic audit / Documentation corpus checks",
+    "completed",
+    "success",
+    "2026-09-14T17:02:09Z",
+    "2026-09-14T17:03:16Z",
+    209544,
+  ],
+  [
+    104070784923,
+    34872200578,
+    1,
+    "0d895b23e8bf45f3933698aea3af8f55a7be3920",
+    "Supplemental retained deterministic audit / Quality Checks (shared-config)",
+    "completed",
+    "success",
+    "2026-09-14T17:02:09Z",
+    "2026-09-14T17:02:54Z",
+    209547,
+  ],
+  [
+    104070784927,
+    34872200578,
+    1,
+    "0d895b23e8bf45f3933698aea3af8f55a7be3920",
+    "Supplemental retained deterministic audit / Quality Checks (ui-dashboard)",
+    "completed",
+    "failure",
+    "2026-09-14T17:02:33Z",
+    "2026-09-14T17:07:21Z",
+    209567,
+  ],
+  [
+    104070784967,
+    34872200578,
+    1,
+    "0d895b23e8bf45f3933698aea3af8f55a7be3920",
+    "Supplemental retained deterministic audit / Quality Checks (governance-watchdog)",
+    "completed",
+    "success",
+    "2026-09-14T17:02:09Z",
+    "2026-09-14T17:02:51Z",
+    209543,
+  ],
+  [
+    104070784970,
+    34872200578,
+    1,
+    "0d895b23e8bf45f3933698aea3af8f55a7be3920",
+    "Supplemental retained deterministic audit / Quality Checks (metrics-bridge)",
+    "completed",
+    "success",
+    "2026-09-14T17:02:09Z",
+    "2026-09-14T17:03:08Z",
+    209550,
+  ],
+  [
+    104070785038,
+    34872200578,
+    1,
+    "0d895b23e8bf45f3933698aea3af8f55a7be3920",
+    "Supplemental retained deterministic audit / Quality Checks (aegis)",
+    "completed",
+    "success",
+    "2026-09-14T17:02:09Z",
+    "2026-09-14T17:03:25Z",
+    209548,
+  ],
+  [
+    104070785053,
+    34872200578,
+    1,
+    "0d895b23e8bf45f3933698aea3af8f55a7be3920",
+    "Supplemental retained deterministic audit / Version skew",
+    "completed",
+    "success",
+    "2026-09-14T17:02:09Z",
+    "2026-09-14T17:02:53Z",
+    209553,
+  ],
+  [
+    104070785075,
+    34872200578,
+    1,
+    "0d895b23e8bf45f3933698aea3af8f55a7be3920",
+    "Supplemental retained deterministic audit / Lint + test root scripts",
+    "completed",
+    "success",
+    "2026-09-14T17:02:09Z",
+    "2026-09-14T17:04:55Z",
+    209551,
+  ],
+  [
+    104070785110,
+    34872200578,
+    1,
+    "0d895b23e8bf45f3933698aea3af8f55a7be3920",
+    "Supplemental retained deterministic audit / Terraform Validate (registry)",
+    "completed",
+    "success",
+    "2026-09-14T17:02:09Z",
+    "2026-09-14T17:03:08Z",
+    209542,
+  ],
+  [
+    104070785145,
+    34872200578,
+    1,
+    "0d895b23e8bf45f3933698aea3af8f55a7be3920",
+    "Supplemental retained deterministic audit / Code Health (cross-package)",
+    "completed",
+    "success",
+    "2026-09-14T17:02:09Z",
+    "2026-09-14T17:02:54Z",
+    209546,
+  ],
+  [
+    104072584616,
+    34872200578,
+    1,
+    "0d895b23e8bf45f3933698aea3af8f55a7be3920",
+    "Supplemental retained deterministic audit / ci",
+    "completed",
+    "failure",
+    "2026-09-14T17:07:23Z",
+    "2026-09-14T17:07:27Z",
+    1000117859,
+  ],
+].map((row) =>
+  Object.fromEntries(
+    [
+      "id",
+      "run_id",
+      "run_attempt",
+      "head_sha",
+      "name",
+      "status",
+      "conclusion",
+      "started_at",
+      "completed_at",
+      "runner_id",
+    ].map((key, index) => [key, row[index]]),
+  ),
+);
+
 function harness(pr = "2399") {
+  const failedRun = structuredClone(FAILED_RUN);
+  const failedJobs = structuredClone(FAILED_JOBS);
   const ctx = context(pr);
   const runs = {
     "no-skip-audit.yml": [
@@ -233,7 +505,9 @@ function harness(pr = "2399") {
       },
     ],
   };
+  runs["m6-audit-recovery.yml"].push(failedRun);
   const actions = {
+    getWorkflowRun: async () => ({ data: failedRun }),
     getWorkflow: async () => ({ data: { state: "disabled_manually" } }),
     listWorkflowRuns: "runs",
     listJobsForWorkflowRunAttempt: "jobs",
@@ -245,14 +519,18 @@ function harness(pr = "2399") {
       pulls: { get: async () => ({ data: pull(pr) }) },
     },
     paginate: async (method, args) =>
-      method === "runs" ? runs[args.workflow_id] : [job],
+      method === "runs"
+        ? runs[args.workflow_id]
+        : args.run_id === REVIEWED_FAILURE
+          ? failedJobs
+          : [job],
   };
-  return { github, context: ctx, git: mockGit, runs };
+  return { github, context: ctx, git: mockGit, runs, failedRun, failedJobs };
 }
 test("reserves one full run without changing baseline", async () =>
   assert.equal(
     (await admitRecovery(harness())).secondsBeforeRun,
-    BASELINE_SECONDS,
+    BASELINE_SECONDS + 1396,
   ));
 for (const [name, mutate] of [
   [
@@ -297,20 +575,6 @@ for (const [name, mutate] of [
       h.runs["m6-audit-recovery.yml"][0].head_sha = BASE;
     },
   ],
-  [
-    "overrun",
-    (h) => {
-      h.runs["no-skip-audit.yml"].push({
-        id: ANCHOR + 1,
-        status: "completed",
-        run_attempt: 1,
-      });
-      h.github.paginate = async (method, args) =>
-        method === "runs"
-          ? h.runs[args.workflow_id]
-          : [{ ...job, completed_at: "2026-09-14T13:00:00Z" }];
-    },
-  ],
 ])
   test(`admission rejects ${name}`, async () => {
     const h = harness();
@@ -332,13 +596,17 @@ test("charges the earlier distinct recovery", async () => {
   h.runs["m6-audit-recovery.yml"].push({
     id: 1,
     display_title: "M6 recovery PR #2399",
+    event: "workflow_dispatch",
+    head_branch: "main",
+    path: ".github/workflows/m6-audit-recovery.yml",
+    head_sha: REVISION,
     status: "completed",
     conclusion: "success",
     run_attempt: 1,
   });
   assert.equal(
     (await admitRecovery(h)).secondsBeforeRun,
-    BASELINE_SECONDS + 60,
+    BASELINE_SECONDS + 1396 + 60,
   );
 });
 test("stops after any prior unclassified failure", async () => {
@@ -346,6 +614,10 @@ test("stops after any prior unclassified failure", async () => {
   h.runs["m6-audit-recovery.yml"].push({
     id: 1,
     display_title: "M6 recovery PR #2399",
+    event: "workflow_dispatch",
+    head_branch: "main",
+    path: ".github/workflows/m6-audit-recovery.yml",
+    head_sha: REVISION,
     status: "completed",
     conclusion: "failure",
     run_attempt: 1,
@@ -364,7 +636,7 @@ test("fails closed on missing historical timestamp and exhausted selections", as
       status: "completed",
       conclusion: "success",
     });
-  await assert.rejects(admitRecovery(full), /selection limit/u);
+  await assert.rejects(admitRecovery(full), /New ordinary audit/u);
 });
 
 test("blocks a partial recovery rerun even if admission was reused", async () => {
@@ -372,6 +644,10 @@ test("blocks a partial recovery rerun even if admission was reused", async () =>
   h.runs["m6-audit-recovery.yml"].push({
     id: 1,
     display_title: "M6 recovery PR #2399",
+    event: "workflow_dispatch",
+    head_branch: "main",
+    path: ".github/workflows/m6-audit-recovery.yml",
+    head_sha: REVISION,
     status: "completed",
     conclusion: "success",
     run_attempt: 2,
@@ -399,4 +675,150 @@ test("fetches only the admitted immutable source before object proof", async () 
     throw new Error("fetch must not execute");
   };
   await assert.rejects(admitRecovery(invalid), /Unapproved PR number/u);
+});
+
+for (const pr of ["2399", "2408"]) {
+  test(`admits only the reviewed failed receipt before fresh ${pr}`, async () => {
+    const h = harness(pr);
+    const proof = await admitRecovery(h);
+    assert.equal(proof.secondsBeforeRun, 28983);
+    assert.equal(proof.reviewedFailure, REVIEWED_FAILURE);
+    assert.equal(proof.reservedSeconds, 2700);
+  });
+}
+test("failed receipt digest is order independent but binds every job", () => {
+  assert.equal(
+    failureReceiptDigest(FAILED_RUN, FAILED_JOBS),
+    failureReceiptDigest(FAILED_RUN, [...FAILED_JOBS].reverse()),
+  );
+  assert.equal(FAILED_JOBS.length, 19);
+  assert.equal(
+    FAILED_JOBS.filter((entry) => entry.conclusion === "failure").length,
+    2,
+  );
+  assert.equal(jobSeconds([FAILED_JOBS]), 1396);
+});
+for (const field of [
+  "event",
+  "head_branch",
+  "head_sha",
+  "path",
+  "workflow_id",
+  "display_title",
+  "status",
+  "conclusion",
+  "updated_at",
+  "created_at",
+  "referenced_workflows",
+]) {
+  test(`rejects reviewed failure changed ${field}`, async () => {
+    const h = harness();
+    h.failedRun[field] = "changed";
+    await assert.rejects(admitRecovery(h));
+  });
+}
+for (const field of [
+  "id",
+  "run_id",
+  "run_attempt",
+  "head_sha",
+  "name",
+  "status",
+  "conclusion",
+  "started_at",
+  "completed_at",
+  "runner_id",
+]) {
+  test(`rejects reviewed failed job changed ${field}`, async () => {
+    const h = harness();
+    h.failedJobs[0][field] = "changed";
+    await assert.rejects(admitRecovery(h));
+  });
+}
+for (const [label, mutate] of [
+  ["missing failed run", (h) => h.runs["m6-audit-recovery.yml"].pop()],
+  ["rerun failed run", (h) => (h.failedRun.run_attempt = 2)],
+  ["missing failed job", (h) => h.failedJobs.pop()],
+  ["extra failed job", (h) => h.failedJobs.push({ ...h.failedJobs[0], id: 4 })],
+  [
+    "new ordinary audit",
+    (h) =>
+      h.runs["no-skip-audit.yml"].push({ id: ANCHOR + 1, status: "completed" }),
+  ],
+  [
+    "two extra runs",
+    (h) => h.runs["m6-audit-recovery.yml"].push({ id: 1 }, { id: 2 }),
+  ],
+])
+  test(`finite amendment rejects ${label}`, async () => {
+    const h = harness();
+    mutate(h);
+    await assert.rejects(admitRecovery(h));
+  });
+
+test("failed receipt ignores reference key and array order", () => {
+  const references = [
+    { path: "z", sha: "z", ref: "z" },
+    ...FAILED_RUN.referenced_workflows,
+  ];
+  const reordered = references
+    .toReversed()
+    .map(({ path, sha, ref }) => ({ ref, sha, path }));
+  assert.equal(
+    failureReceiptDigest(
+      { ...FAILED_RUN, referenced_workflows: references },
+      FAILED_JOBS,
+    ),
+    failureReceiptDigest(
+      { ...FAILED_RUN, referenced_workflows: reordered },
+      FAILED_JOBS,
+    ),
+  );
+});
+
+function earlierFreshRun(pr) {
+  return {
+    id: 1,
+    display_title: `M6 recovery PR #${pr}`,
+    event: "workflow_dispatch",
+    head_branch: "main",
+    path: ".github/workflows/m6-audit-recovery.yml",
+    head_sha: REVISION,
+    status: "completed",
+    conclusion: "success",
+    run_attempt: 1,
+  };
+}
+for (const pr of ["2399", "2408"])
+  test(`permits ${pr} second only after the other fresh tuple succeeds`, async () => {
+    const h = harness(pr);
+    h.runs["m6-audit-recovery.yml"].push(
+      earlierFreshRun(pr === "2399" ? "2408" : "2399"),
+    );
+    assert.equal((await admitRecovery(h)).secondsBeforeRun, 29043);
+  });
+for (const field of [
+  "display_title",
+  "event",
+  "head_branch",
+  "path",
+  "head_sha",
+  "conclusion",
+])
+  test(`rejects fresh predecessor changed ${field}`, async () => {
+    const h = harness("2408"),
+      previous = earlierFreshRun("2399");
+    previous[field] = "changed";
+    h.runs["m6-audit-recovery.yml"].push(previous);
+    await assert.rejects(admitRecovery(h));
+  });
+test("retains the per-run stop for a successful fresh predecessor", async () => {
+  const h = harness("2408");
+  h.runs["m6-audit-recovery.yml"].push(earlierFreshRun("2399"));
+  const paginate = h.github.paginate;
+  h.github.paginate = (method, args) =>
+    method === "jobs" && args.run_id === 1
+      ? [{ ...job, completed_at: "2026-09-14T13:00:00Z" }]
+      : paginate(method, args);
+  await assert.rejects(admitRecovery(h), /per-run stop/u);
 });
