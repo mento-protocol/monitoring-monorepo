@@ -25,8 +25,11 @@ collection without a new verification service or another required check.
 
 ## Decision
 
-Use `.github/workflows/m6-canary.yml` after `CI` and `No-skip audit` completion.
-Keep a protected-main manual dispatch for recovery. Do not add a timer.
+Use `.github/workflows/m6-canary.yml` after `CI` succeeds or after any
+`No-skip audit` completion — a failed or cancelled `CI` run can never select
+a candidate, so it does not wake the collector, but `No-skip audit`'s
+fail-closed stop path must still post promptly on every completion (PR
+#2427). Keep a protected-main manual dispatch for recovery. Do not add a timer.
 The event only wakes the collector. The collector re-reads GitHub state and
 uses one fixed Actions concurrency group with cancellation disabled. It never
 checks out upstream code, installs dependencies, or consumes upstream outputs,
