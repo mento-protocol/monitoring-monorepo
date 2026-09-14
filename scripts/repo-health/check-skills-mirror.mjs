@@ -44,10 +44,12 @@ Environment:
  * that documented difference, in forensic-report files only, is tolerated.
  */
 export function normalizeProvenance(contents) {
-  // Either quote style, matching the side check below.
+  // Either quote style, matching the side check below. Only the value is
+  // rewritten: the delimiter and spacing stay, so a mirror that differs in
+  // quote style or whitespace around the literal is still content drift.
   return contents.replace(
-    /source:\s*(["'])(?:Codex|claude)\1/g,
-    'source: "__RUNTIME__"',
+    /(source:\s*)(["'])(?:Codex|claude)\2/g,
+    "$1$2__RUNTIME__$2",
   );
 }
 

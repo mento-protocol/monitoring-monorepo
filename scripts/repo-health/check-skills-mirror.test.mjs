@@ -231,6 +231,33 @@ test("a swapped forensic-report provenance literal fails even when both sides ma
   assert.match(singleQuoted.output, /Claude mirror must be source: "claude"/);
 });
 
+test("a forensic-report mirror that differs in delimiter or spacing still drifts", () => {
+  // The contract permits only the value to differ; the normalization must not
+  // fold a quote-style or whitespace difference into the documented split.
+  const { rootA, rootB } = newFixture();
+  mkdirSync(path.join(rootA, "forensic-report"));
+  mkdirSync(path.join(rootB, "forensic-report"));
+  writeFileSync(
+    path.join(rootA, "forensic-report/SKILL.md"),
+    'writes source: "Codex" records\n',
+  );
+  writeFileSync(
+    path.join(rootB, "forensic-report/SKILL.md"),
+    "writes source: 'claude' records\n",
+  );
+  const delimiter = runChecker(rootA, rootB);
+  assert.notEqual(delimiter.status, 0);
+  assert.match(delimiter.output, /beyond documented provenance/);
+
+  writeFileSync(
+    path.join(rootB, "forensic-report/SKILL.md"),
+    'writes source:  "claude" records\n',
+  );
+  const spacing = runChecker(rootA, rootB);
+  assert.notEqual(spacing.status, 0);
+  assert.match(spacing.output, /beyond documented provenance/);
+});
+
 test("provenanceSideDrift is silent for the documented split and outside forensic-report", () => {
   assert.deepEqual(
     provenanceSideDrift(
@@ -299,8 +326,13 @@ test("normalizeProvenance rewrites only the two documented literals", () => {
   );
   assert.equal(
     normalizeProvenance("a source: 'Codex' b source: 'claude' c"),
-    'a source: "__RUNTIME__" b source: "__RUNTIME__" c',
-    "a single-quoted documented split normalizes the same way",
+    "a source: '__RUNTIME__' b source: '__RUNTIME__' c",
+    "a single-quoted documented split keeps its delimiter",
+  );
+  assert.equal(
+    normalizeProvenance('source:  "Codex"'),
+    'source:  "__RUNTIME__"',
+    "spacing around the literal is preserved",
   );
   assert.equal(
     normalizeProvenance('source: "Gemini"'),
