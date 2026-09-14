@@ -50,8 +50,32 @@ Admission runs the helper from the protected workflow checkout, never from the
 historical candidate. The new helper and its tests have fixed root CI ownership
 through `check-ci-contract.test.mjs`; the full adapter is pinned by its test.
 
-Each tuple is single-use. A failed admission also consumes that tuple attempt.
-Admission rejects reruns and prior tuple attempts; the audit caller also
+The original authorization made each tuple single-use. After #2399 run
+[34872200578](https://github.com/mento-protocol/monitoring-monorepo/actions/runs/34872200578)
+failed its browser ledger assertion, the operator
+[approved one finite amendment](https://github.com/mento-protocol/monitoring-monorepo/issues/2128#issuecomment-5667946775).
+Issue #2423 implements it through an independent session. The failure remains
+unclassified beyond the observed assertion timeout. Original exact-head CI
+passed the same test, and five unchanged local repetitions passed. Those
+results do not prove an infrastructure cause. GitHub retained no uploaded
+trace artifact for the failed run.
+
+Permit exactly one fresh #2399 run and the unused #2408 run. Pin the failed
+run's native identity, workflow revision, first attempt, status, conclusion,
+timestamps and called workflow, plus all 19 job identities, outcomes and
+timestamps. A SHA-256 digest over a fixed projection with jobs sorted by ID
+binds that receipt. Read the full run through `getWorkflowRun`; do not rely on
+the run-list projection alone. Preserve its 1,396 job-seconds and consumed
+selection. The reconciled total is 28,983 seconds, or 483.05 minutes. Five of
+the prior six additional selections remain; this amendment uses at most two.
+
+Only that exact failed run is exempt from prior-failure and duplicate-tuple
+rejection. Any missing or changed receipt, new ordinary audit, unknown recovery,
+additional duplicate, rerun or further failure stops admission. A prior fresh
+recovery must be the other tuple and use the same protected-main workflow
+revision as the current run. If main changes between them, stop for review.
+A failed admission also consumes its fresh tuple attempt.
+Admission rejects reruns and all other prior tuple attempts; the audit caller also
 requires attempt 1. Do not manually rerun individual retained jobs. GitHub may
 reuse successful admission during partial reruns; that provider behavior has
 not been verified for this adapter. Any actual rerun remains chargeable and
@@ -78,7 +102,12 @@ its protected-main revision. Reconcile the ledger and dispatch one tuple:
 gh workflow run m6-audit-recovery.yml --repo mento-protocol/monitoring-monorepo --ref main -f pr_number=2399
 ```
 
-Use `pr_number=2408` only after the first result is classified. Preserve every
+The failed run is already classified for this bounded amendment; its cause
+remains unknown. After separate approval to merge this implementation, either
+newly authorized tuple may run first. Use `pr_number=2408` for the indexer
+observation. Dispatch the other tuple only after the first new run succeeds
+and its spend is reconciled. Any further failure stops both execution and
+acceptance. Do not rerun an existing run or individual job. Preserve every
 attempt's job timestamps, failed jobs and cost. Record ordinary CI, the exact
 source/base/workflow identities, the merge proof and service-specific production
 closeout. A failure found only by the complete graph still stops acceptance.
@@ -91,7 +120,7 @@ Repository writers can already run arbitrary branch workflows; this lane does
 not restrict repository-wide writer spend. The approved ceiling governs the
 recovery operations described here.
 
-Only first-attempt successful runs provide supplemental retrospective dashboard-only/indexer-only
+Only successful first attempts of the two newly authorized runs provide supplemental retrospective dashboard-only/indexer-only
 coverage. They do not change the selected ten-PR cohort, observation dates,
 timing decision, pre-merge readiness, or merge authority. This is an explicit
 extension to the frozen evidence forms, not an assertion that prior runs met

@@ -214,6 +214,8 @@ const STATIC_MUTATIONS = [
   // prettier-ignore
   ["empty routed filter", /routed filter is not the functional-filter union/u, ({ filters }) => { filters.routed = []; }],
   // prettier-ignore
+  ["routed namespace dropped from ordinary", /ordinary misses routed namespace scripts from rootScripts/u, ({ filters }) => { filters.ordinary = filters.ordinary.filter((rule) => rule !== "scripts/**"); }],
+  // prettier-ignore
   ["functional exclusion rule", /ui must not use exclusion rules/u, ({ filters }) => filters.ui.push("!ui-dashboard/generated/**")],
   // prettier-ignore
   ["null functional filter", /ui must be an array/u, ({ filters }) => { filters.ui = null; filters.routed = FILTER_NAMES.map((name) => filters[name]); }],
@@ -358,22 +360,12 @@ test("unknown, control-plane, and mixed diffs select every conditional job", asy
 });
 
 test("ordinary package and documentation diffs keep affected selection", async () => {
-  for (const path of [
-    "ui-dashboard/src/app/page.tsx",
-    "docs/notes/example.md",
-    "README.md",
-  ]) {
-    assert.equal(
-      (await forceAllForChanges(LIVE.filters, [changed(path)])).forceAll,
-      false,
-      path,
-    );
-  }
-  const unroutedDocsAsset = await forceAllForChanges(LIVE.filters, [
-    changed("docs/notes/example.json"),
-  ]);
-  assert.equal(unroutedDocsAsset.forceAll, true);
-  assert.deepEqual(unroutedDocsAsset.unknown, ["docs/notes/example.json"]);
+  // Tooling namespaces route like product ones: they must not force all.
+  // prettier-ignore
+  for (const path of "ui-dashboard/src/app/page.tsx|docs/notes/example.md|README.md|scripts/pr/pr-ready-state.mjs|.github/workflows/claude.yml|.claude/skills/ship/SKILL.md|.agents/skills/ship/SKILL.md|.codex/config.toml|shared-config/chains.json|.coderabbit.yaml|terraform.stacks.json|.gitignore|cloudbuild.yaml".split("|")) assert.equal((await forceAllForChanges(LIVE.filters, [changed(path)])).forceAll, false, path);
+  // An unrouted path still forces, whether or not `ordinary` names it.
+  // prettier-ignore
+  for (const path of "docs/notes/example.json|turbo.json|.github/dependabot.yml".split("|")) { const unrouted = await forceAllForChanges(LIVE.filters, [changed(path)]); assert.equal(unrouted.forceAll, true, path); assert.deepEqual(unrouted.unknown, [path]); }
   const narrowed = structuredClone(LIVE.filters);
   narrowed.ui = ["ui-dashboard/src/**"];
   narrowed.routed = FILTER_NAMES.map((name) => narrowed[name]);
@@ -390,8 +382,8 @@ test("overlapping functional filters count one changed path once", async () => {
     "shared-config/chains.json",
   ]);
   const decision = await forceAllForChanges(LIVE.filters, changes);
-  assert.equal(decision.forceAll, true);
-  assert.deepEqual(decision.unknown, ["shared-config/chains.json"]);
+  assert.equal(decision.forceAll, false);
+  assert.deepEqual(decision.unknown, []);
 });
 
 test("the pull-request file limit fails closed at 3,000", async () => {
