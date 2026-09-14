@@ -74,7 +74,7 @@ export const CHECKER_COMMAND =
 export const CANONICAL_JOB = {
   name: "Sentry suites",
   "runs-on": "ubuntu-latest",
-  "timeout-minutes": 5,
+  "timeout-minutes": 8,
   permissions: { contents: "read" },
   steps: [
     {

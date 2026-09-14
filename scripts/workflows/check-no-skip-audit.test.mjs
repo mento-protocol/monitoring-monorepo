@@ -50,7 +50,7 @@ const BASELINE = ".github/actions/resolve-eslint-baseline/action.yml";
 // Each mutation removes one admission, trust, normalization, or cold-run fact.
 // prettier-ignore
 const MUTATIONS = [
-  ["bridge test cannot skip", CI, "      - name: Test bridge alert behavior\n        run:", "      - name: Test bridge alert behavior\n        if: false\n        run:", /retained audit workflow graph changed/u],
+  ["bridge test cannot skip", CI, "      - name: Test bridge alert behavior\n        run:", "      - name: Test bridge alert behavior\n        if: false\n        run:", /retained audit workflow graph changed \(pinned [0-9a-f]{64}, computed [0-9a-f]{64}\)/u],
   ["bridge test cannot ignore failures", CI, "      - name: Test bridge alert behavior\n        run:", "      - name: Test bridge alert behavior\n        continue-on-error: true\n        run:", /retained audit workflow graph changed/u],
   ["bridge engine checksum stays exact", CI, "173389cc42bf09c4e6e54cb53fa07a5a835d7c261e14775d2183181d6e385d1c", "073389cc42bf09c4e6e54cb53fa07a5a835d7c261e14775d2183181d6e385d1c", /retained audit workflow graph changed/u],
   ["bridge Go action stays pinned", CI, "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e", "actions/setup-go@v7", /retained audit workflow graph changed/u],
