@@ -1,0 +1,74 @@
+{
+  "cell_id": "pr-1990-control-draw1",
+  "fingerprint": {
+    "skill_digest": "89f5bdf20356c5515974ec1a6112fc4f9dfbf31cf1d60b667084f91dfbe6ec60",
+    "kind": "full",
+    "contract_digest": "59b82ee3e6d7ccf2cfbe75cb11aa40e6ec93b92a754a992adee4a1a69166a259",
+    "claude_cli": "2.1.270 (Claude Code)",
+    "codex_cli": "codex-cli 0.154.0",
+    "finder_argv_digest": "40099c93f78800efefbc46f57772ae2cbadc86b378bdd22f474945abfd7b450c",
+    "orchestrator_digest": "fee8d511d838ad137aea62f0e6be7b5115383c59d4447ba985efb3e3c3fe48b1"
+  },
+  "treatment": {
+    "skill_ref": "installed",
+    "dirty": false
+  },
+  "pr": 1990,
+  "condition": "control",
+  "draw": 1,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": null,
+  "claims": [
+    "A clean CodeRabbit run can never count as `reviewed`, so the closeout re-requests on every clean head: `scripts/pr/pr-ready-state-core.mjs:762` (also `docs/notes/pr-ready-state.md:113`, `cloud-watch-loop.md:49`); `classifyCodeRabbitReviewSignal` only returns `reviewed` when there's a PR review record containing `**Run ID**`, and never looks at issue comments for a finished run, so every clean PR and every clean fix push uses one extra paid review round, and state stays at `requested` for good",
+    "The new tests don't catch this because they only use review bodies that contain `**Run ID**`; a test is needed for a walkthrough/summary comment covering the current head",
+    "Any commenter can suppress the closeout request (minor): `scripts/pr/pr-ready-state-core.mjs:774` — the loop over request comments doesn't check who wrote the comment, so anyone can post the marker for the current head, set state to `requested`, and block the real request",
+    "The existing Codex request detection has the same gap (doesn't check comment author)"
+  ],
+  "matched_ids": [
+    3830259678
+  ],
+  "judge_reasoning": {
+    "3829654081": "Review does not mention file size or splitting the core file.",
+    "3829659544": "Review does not mention the sample JSON missing codeRabbitReviewSignal.",
+    "3829659546": "Review does not discuss workflow ordering of closeout vs projection pair.",
+    "3829659550": "Review does not raise the null currentHeadOid fallback; its finding is about clean runs without review records.",
+    "3830259678": "Review item 2 says the request-comment loop doesn't check the author, so any commenter can set the state to requested and suppress the real request.",
+    "3830394205": "Review item 2 cites only the core .mjs loop. Its cloud-watch-loop.md reference is attached to item 1, not to marker authentication in the cloud loop."
+  },
+  "novel": {
+    "claims": 4,
+    "novelReal": 2,
+    "novelWrong": 1,
+    "novelVague": 0,
+    "restatedKnown": 1,
+    "alreadyMatched": 1,
+    "verdicts": {
+      "1": {
+        "class": "real",
+        "why": "classifyCodeRabbitReviewSignal (pr-ready-state-core.mjs:759-770) returns 'reviewed' only for a CodeRabbit review whose body matches CODERABBIT_REVIEW_RUN_MARKER, and the issue-comment loop (772-784) only looks for request markers, never a finished run. So a run that posts no review record reads as missing/stale, one closeout request goes out per head, and the state then stays 'requested'. That clean runs post only a summary comment is CodeRabbit's behavior and can't be confirmed from the repo."
+      },
+      "2": {
+        "class": "real",
+        "why": "The new tests in pr-ready-state.test.mjs (2223-2338) only give review bodies containing '**Run ID**' or empty bodies; no test uses a summary/walkthrough issue comment for the current head, so the gap in claim 1 goes untested."
+      },
+      "3": {
+        "class": "known",
+        "why": "The request-comment loop at core.mjs:772-784 never checks the comment author, but this is the known item 'pr-ready-state-core.mjs:772 Trust only authorized closeout requests'."
+      },
+      "4": {
+        "class": "wrong",
+        "why": "The Codex loop (core.mjs:707-731) does skip the author check on request comments, but that code already exists in base (base line 696) and this diff doesn't touch it, so it isn't a defect in this change."
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 94,
+  "usd": 0.7492064999999999,
+  "usd_metered": true,
+  "scoring_usd": 0.4408665
+}

@@ -1,0 +1,105 @@
+{
+  "cell_id": "pr-2039-control-draw1",
+  "fingerprint": {
+    "skill_digest": "89f5bdf20356c5515974ec1a6112fc4f9dfbf31cf1d60b667084f91dfbe6ec60",
+    "kind": "full",
+    "contract_digest": "59b82ee3e6d7ccf2cfbe75cb11aa40e6ec93b92a754a992adee4a1a69166a259",
+    "claude_cli": "2.1.270 (Claude Code)",
+    "codex_cli": "codex-cli 0.154.0",
+    "finder_argv_digest": "40099c93f78800efefbc46f57772ae2cbadc86b378bdd22f474945abfd7b450c",
+    "orchestrator_digest": "fee8d511d838ad137aea62f0e6be7b5115383c59d4447ba985efb3e3c3fe48b1"
+  },
+  "treatment": {
+    "skill_ref": "installed",
+    "dirty": false
+  },
+  "pr": 2039,
+  "condition": "control",
+  "draw": 1,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": null,
+  "claims": [
+    "New GitHub checks break setup when origin isn't on GitHub (`scripts/bootstrap/codex-cloud-setup.sh:556-557`, functions at `:177` and `:188`): the two new checks run after `verify_origin_git_auth` with no skip for non-GitHub origins",
+    "`verify_github_api_capabilities` calls `gh repo view`, which fails when no remote points at GitHub; because the script uses `set -e`, setup aborts",
+    "`verify_origin_write_access` would push and delete a branch on whatever origin is set, even when origin is not GitHub",
+    "The throwaway test branch triggers a Vercel deploy on every fresh container (`scripts/bootstrap/codex-cloud-setup.sh:206`, `ui-dashboard/vercel.json:6-10`): each setup starts a Vercel deployment and posts a GitHub deployment status for a branch deleted seconds later",
+    "Each setup runs a full preview build if HEAD contains dashboard changes compared to `main`, because `vercel-ignore-build.sh` compares the branch against `main`",
+    "Unlike every other check in this script, the write check can't be turned off; environments meant to use a read-only token can no longer finish setup at all",
+    "The outbound-access list leaves out apt mirrors (`docs/notes/codex-cloud-setup.md:61-72`): `install --with-deps` needs distro package mirrors, so following the list exactly, setup fails at the Playwright step",
+    "Missing test cases (`codex-cloud-setup.test.sh:271-292`): nothing tests the case where the branch is created but can't be deleted (`:217-221`)",
+    "Nothing asserts that the cleanup on exit deletes the branch if the script stops after creating it",
+    "Misleading label (`agent-quality-gate` routing, `arms-scripts.mjs:261`): reason still says \"Codex Cloud Foundry installer contract changed\" but the suite now also covers the GitHub checks and Playwright"
+  ],
+  "matched_ids": [
+    3846756810,
+    3846757191
+  ],
+  "judge_reasoning": {
+    "3846756487": "The review never says the probe only checks PR read access while the docs claim read/write access.",
+    "3846756810": "Review item 1 says verify_github_api_capabilities and verify_origin_write_access lack the non-GitHub origin skip that verify_origin_git_auth has.",
+    "3846756918": "The review notes there is no test for a branch that can't be deleted. It does not flag that setting created=false blocks the EXIT trap from retrying cleanup.",
+    "3846756922": "Branch-name uniqueness and collisions between concurrent runs are not mentioned.",
+    "3846757143": "The review raises side effects of pushing a probe branch (Vercel deploys) but never suggests git push --dry-run. It is a different concern about the mutation itself, not this suggestion.",
+    "3846757191": "Review item 3 says the outbound-access list omits the apt mirrors needed by install --with-deps."
+  },
+  "novel": {
+    "claims": 10,
+    "novelReal": 1,
+    "novelWrong": 1,
+    "novelVague": 2,
+    "restatedKnown": 6,
+    "alreadyMatched": 2,
+    "verdicts": {
+      "1": {
+        "class": "known",
+        "why": "At codex-cloud-setup.sh:556-557 the new checks run with no non-GitHub skip, while verify_origin_git_auth at :158-161 has one. This is the known :179 [P2] consistency finding."
+      },
+      "2": {
+        "class": "known",
+        "why": "verify_github_api_capabilities calls `gh repo view` with no origin-host guard, so it fails under set -e. Same root cause as the known :179 finding about the missing non-GitHub skip."
+      },
+      "3": {
+        "class": "known",
+        "why": "verify_origin_write_access pushes and deletes on any origin without checking the host. Same missing-skip issue as known :179."
+      },
+      "4": {
+        "class": "known",
+        "why": "Checked vercel.json: deploys are only disabled for sentry-autofix/*, so the probe branch does trigger Vercel. But this is a side effect of the probe changing the real repo on every run, which is known :231 [P3]."
+      },
+      "5": {
+        "class": "known",
+        "why": "vercel-ignore-build.sh, first-push branch path: it diffs HEAD against the main merge-base and builds if dashboard paths changed, so the claim is accurate. It is still the same known :231 issue of the probe pushing to real origin."
+      },
+      "6": {
+        "class": "wrong",
+        "why": "Not every other check has an opt-out: verify_origin_git_auth, ensure_github_auth and ensure_autoreview_helper have none. The docs also say read/write is required and the probe is meant to fail closed."
+      },
+      "7": {
+        "class": "known",
+        "why": "The missing distro package sources for `install --with-deps` in docs/notes/codex-cloud-setup.md is the known :70 'Document the distribution package source' finding."
+      },
+      "8": {
+        "class": "real",
+        "why": "The new test cases only cover all git calls succeeding and all failing. Nothing tests create-succeeds/delete-fails, the path at setup.sh:217-221 that has the known cleanup bug."
+      },
+      "9": {
+        "class": "vague",
+        "why": "`created=true` is set right before an `if !`-guarded delete, so the trap only matters when a signal interrupts. The missing test covers almost nothing and names no real failure."
+      },
+      "10": {
+        "class": "vague",
+        "why": "arms-scripts.mjs:261 isn't in the diff. The old reason string is only slightly out of date now that the suite has more cases; it's a wording nit with no effect on behavior."
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 123,
+  "usd": 0.6963299999999999,
+  "usd_metered": true,
+  "scoring_usd": 0.43459349999999997
+}

@@ -1,0 +1,116 @@
+{
+  "cell_id": "pr-2039-replay-draw1",
+  "fingerprint": {
+    "skill_digest": "89f5bdf20356c5515974ec1a6112fc4f9dfbf31cf1d60b667084f91dfbe6ec60",
+    "kind": "full",
+    "contract_digest": "59b82ee3e6d7ccf2cfbe75cb11aa40e6ec93b92a754a992adee4a1a69166a259",
+    "claude_cli": "2.1.270 (Claude Code)",
+    "codex_cli": "codex-cli 0.154.0",
+    "finder_argv_digest": "40099c93f78800efefbc46f57772ae2cbadc86b378bdd22f474945abfd7b450c",
+    "orchestrator_digest": "fee8d511d838ad137aea62f0e6be7b5115383c59d4447ba985efb3e3c3fe48b1"
+  },
+  "treatment": {
+    "skill_ref": "installed",
+    "dirty": false
+  },
+  "pr": 2039,
+  "condition": "replay",
+  "draw": 1,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": "gpt-5.6-sol@high",
+  "claims": [
+    "[P1] Pull-request write access isn't verified (`codex-cloud-setup.sh:184-185`): the GET on the pulls endpoint only needs read access, so it can't show that the token can write",
+    "If the repo is public, both GETs succeed for any valid token, so they add nothing beyond `gh auth status`",
+    "Pre-push hooks run during the write probe (`:205-206`): real, but only on re-runs, if someone re-runs setup by hand in an already-configured checkout; add `--no-verify` to both probe pushes (`:199`, `:206`, `:217`)",
+    "Maintenance doesn't refresh Chromium (`:583`): someone running `test:browser` directly on a branch that bumps `@playwright/test`, outside the gate, would hit a missing browser",
+    "Setup now aborts when `origin` isn't a GitHub URL (`codex-cloud-setup.sh:556-557`): the two new checks don't skip non-GitHub origins; `gh repo view` (`:179`) fails and `set -e` stops setup",
+    "Any failed probe push is reported as a token-permission problem (`:206-213`): the message blames Contents permission, but hooks, a ruleset blocking branch creation, or a network error produce the same message",
+    "The probe pushes `HEAD` before `ensure_origin_main_ref`, so git may have to upload objects, which can fail on a shallow clone (guess, unconfirmed)",
+    "The new Playwright step fails setup while the other setup scripts only warn (`:537`): any new Codex environment whose network policy lacks the Playwright or apt hosts now fails setup",
+    "The outbound-access list in the docs is incomplete (`docs/notes/codex-cloud-setup.md:61-70`): `--with-deps` and the GitHub CLI fallback need the distro's apt mirrors, which the list doesn't mention",
+    "Test gaps (`codex-cloud-setup.test.sh`): no test covers `verify_github_api_capabilities`",
+    "Test gaps (`codex-cloud-setup.test.sh`): no test covers the branch where the probe branch is created but can't be deleted (`:217-221`)",
+    "Vercel: a push to any branch may create a Vercel preview deployment record, so every setup run may leave one behind (unconfirmed)"
+  ],
+  "matched_ids": [
+    3846756487,
+    3846756810,
+    3846757191
+  ],
+  "judge_reasoning": {
+    "3846756487": "Review claim 1 says the GET on the pulls endpoint only needs read access, so it cannot show the token can write to pull requests. That is the same defect.",
+    "3846756810": "Review finding A says verify_origin_git_auth skips non-GitHub origins but the two new checks (gh repo view, etc.) lack the same guard, so setup aborts. That is the same defect.",
+    "3846756918": "No match. The review explicitly clears the created flag logic as correct after a failed delete, the opposite of this defect.",
+    "3846756922": "No match. The review explicitly says $$ plus a timestamp is unique enough for the branch name.",
+    "3846757143": "No match. The review never suggests git push --dry-run and never flags the create/delete mutation of origin as the problem. Its Vercel note is a different side effect.",
+    "3846757191": "Review finding D says the docs' outbound-access list lacks the distro apt mirrors needed by --with-deps. That is the same defect."
+  },
+  "novel": {
+    "claims": 12,
+    "novelReal": 4,
+    "novelWrong": 1,
+    "novelVague": 3,
+    "restatedKnown": 4,
+    "alreadyMatched": 3,
+    "verdicts": {
+      "1": {
+        "class": "known",
+        "why": "Lines 184-185 only do a GET on repos/{repo}/pulls. The known item about verifying PR write access at :195 already covers this."
+      },
+      "2": {
+        "class": "vague",
+        "why": "This is a design remark about how much the GETs at :182/:185 add over gh auth status, not a concrete defect. The PR-write overlap is already a known item."
+      },
+      "3": {
+        "class": "real",
+        "why": "core.hooksPath .trunk/hooks is set only after the probe (:559-560) and persists in the checkout. On a re-run, both git pushes at :206 and :217 fire .trunk/hooks/pre-push (trunk) without --no-verify."
+      },
+      "4": {
+        "class": "vague",
+        "why": "codex-cloud-maintenance.sh was not changed and has no Playwright step. This is a hypothetical about running outside the gate, not a defect introduced by this diff."
+      },
+      "5": {
+        "class": "known",
+        "why": "Line 179 runs gh repo view with no non-GitHub skip, unlike verify_origin_git_auth at :158-161. That is exactly the known :179 consistency item."
+      },
+      "6": {
+        "class": "real",
+        "why": "At :206-213, any non-zero exit from git push (hook, ruleset, network) prints the same message blaming Contents read/write permission."
+      },
+      "7": {
+        "class": "vague",
+        "why": "Admitted guess. HEAD in a fresh Codex checkout comes from origin, so no object upload is shown, and the ordering relative to ensure_origin_main_ref doesn't affect the push."
+      },
+      "8": {
+        "class": "wrong",
+        "why": "Other setup steps fail closed too: install_trunk_tools, install_foundry and check_osv_api_egress all return 1 under set -e, and the docs say setup fails closed. They don't just warn."
+      },
+      "9": {
+        "class": "known",
+        "why": "Missing distro apt sources in the outbound-access list matches the known docs item 'Document the distribution package source' (codex-cloud-setup.md:70)."
+      },
+      "10": {
+        "class": "real",
+        "why": "The new test cases only cover playwright-host-dependencies(-disabled) and origin-write-access(-refused). Nothing exercises verify_github_api_capabilities."
+      },
+      "11": {
+        "class": "real",
+        "why": "The refused test's git stub fails the first push, and the success test succeeds on both pushes. No case has create succeed and delete fail (:217-221)."
+      },
+      "12": {
+        "class": "known",
+        "why": "vercel.json deploymentEnabled only excludes sentry-autofix/*, so probe branches can trigger deployments. That is a side effect of the known P3 item that the probe mutates origin on every setup run."
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 291,
+  "usd": 1.406221,
+  "usd_metered": true,
+  "scoring_usd": 0.437101
+}

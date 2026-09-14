@@ -1,0 +1,79 @@
+{
+  "cell_id": "pr-1995-replay-draw1",
+  "fingerprint": {
+    "skill_digest": "89f5bdf20356c5515974ec1a6112fc4f9dfbf31cf1d60b667084f91dfbe6ec60",
+    "kind": "full",
+    "contract_digest": "59b82ee3e6d7ccf2cfbe75cb11aa40e6ec93b92a754a992adee4a1a69166a259",
+    "claude_cli": "2.1.270 (Claude Code)",
+    "codex_cli": "codex-cli 0.154.0",
+    "finder_argv_digest": "40099c93f78800efefbc46f57772ae2cbadc86b378bdd22f474945abfd7b450c",
+    "orchestrator_digest": "fee8d511d838ad137aea62f0e6be7b5115383c59d4447ba985efb3e3c3fe48b1"
+  },
+  "treatment": {
+    "skill_ref": "installed",
+    "dirty": false
+  },
+  "pr": 1995,
+  "condition": "replay",
+  "draw": 1,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": "gpt-5.6-sol@high",
+  "claims": [
+    "A focused self-test can pass as the full gate when the gate runs without its lock (`scripts/agent-quality-gate.test.sh:601`): with `--no-lock` or `AGENT_QUALITY_GATE_LOCK=0`, `AGENT_QUALITY_GATE_LOCK_HELD` is never set, so an exported `GATE_TEST_FOCUS` makes the gate's self-test step run only the chosen families; a green lockless run writes the whole-run success stamp and the pre-push hook with `--skip-if-fresh` skips for up to 2 hours on a partial self-test",
+    "Stale docs: `agent-quality-gate-mechanics.md:1143-1146` and the commit message say the lock variable marks \"any command a real gate run spawns\", which is wrong for lockless runs",
+    "The partition check skips everything above its own call (around `agent-quality-gate.test.sh:655`): a test placed among the helpers, above the `verify_gate_family_partition` call, passes the check and runs in every focused mode",
+    "The docs (`mechanics.md:1112-1114`, \"Every test lives inside exactly one family\", and 1133-1136) don't admit the partition check's limit that the region above the marker is unchecked",
+    "Runtime claims don't add up: `mechanics.md:1116` calls it a \"~9-minute suite\", but the solo runtimes in the table sum to 696s (about 11.6 minutes)"
+  ],
+  "matched_ids": [
+    3830042123
+  ],
+  "judge_reasoning": {
+    "3829986398": "Review does not mention the abort trap expanding unset output_file under set -u.",
+    "3829986403": "Review does not flag multiple dispatch_gate_test_families calls being accepted; it lists partition checks that fail correctly.",
+    "3830003055": "Review does not identify that a missing dispatch call passes validation; its partition finding is about tests above the marker.",
+    "3830042123": "Review finding 1 is the same issue: with --no-lock or AGENT_QUALITY_GATE_LOCK=0, a GATE_TEST_FOCUS subset passes as the full gate.",
+    "3830042128": "Review does not mention the hard-coded self-test path pin missing from the path-pin inventory.",
+    "3830695396": "Review raises other doc problems (lock-variable claim, runtime figure) but not the 'is set' vs non-empty wording or 'reds'."
+  },
+  "novel": {
+    "claims": 5,
+    "novelReal": 2,
+    "novelWrong": 1,
+    "novelVague": 0,
+    "restatedKnown": 2,
+    "alreadyMatched": 1,
+    "verdicts": {
+      "1": {
+        "class": "known",
+        "why": "Same issue as the known 'Reject focus during lock-free gate runs': the refusal at test.sh:601 only checks AGENT_QUALITY_GATE_LOCK_HELD, and the gate exports that only when it takes the lock (agent-quality-gate.sh:1143)."
+      },
+      "2": {
+        "class": "known",
+        "why": "The doc text at mechanics.md:1143-1146 and the comment at test.sh:595 do say 'every command a real gate run spawns', but this is just the docs side of the known lock-free focus defect."
+      },
+      "3": {
+        "class": "real",
+        "why": "In the awk check, `body == 0 { previous = $0; next }` (test.sh:509) skips every line above the start marker, so a test placed among the helpers before line 655 passes the check and runs in every focused mode. The commit message says any test outside a family fails the suite."
+      },
+      "4": {
+        "class": "real",
+        "why": "mechanics.md:1112-1114 and 1147-1151 say every test lives in a family and that a test outside every family fails the suite, without saying that only lines after the start marker are checked. Some of the cited line numbers are table rows, but the overstatement is there."
+      },
+      "5": {
+        "class": "wrong",
+        "why": "The column is labelled 'Solo runtime'. run_gate caches results in a shared gate_cache_dir (test.sh:37, 121-126) that stays warm across families in a full run, so solo runs adding up to 696s doesn't contradict a ~9-minute full run."
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 302,
+  "usd": 1.577597,
+  "usd_metered": true,
+  "scoring_usd": 0.41085550000000004
+}
