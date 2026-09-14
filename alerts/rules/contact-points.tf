@@ -231,11 +231,15 @@ locals {
     {{ $isResolved := eq .Status "resolved" -}}
     {{ $stateReason := index .Annotations "grafana_state_reason" -}}
     {{ $nonThresholdResolution := and $isResolved (ne $stateReason "") -}}
+    {{ $nonThresholdTitle := "Pool Alert Stopped Without Recovery Confirmation" -}}
+    {{ if .Annotations.non_threshold_resolved_title -}}{{ $nonThresholdTitle = .Annotations.non_threshold_resolved_title }}{{ end -}}
+    {{ $nonThresholdSummary := "Grafana stopped the alert for a non-threshold state transition. This does not confirm recovery." -}}
+    {{ if .Annotations.non_threshold_resolved_summary -}}{{ $nonThresholdSummary = .Annotations.non_threshold_resolved_summary }}{{ end -}}
     {{ $omitResolvedPoolValues := and $isResolved (eq .Labels.alertname "Pool Nearly One-Sided") -}}
     {{ $title := .Labels.alertname -}}
     {{ if .Annotations.title -}}{{ $title = .Annotations.title }}{{ end -}}
     {{ if and $isResolved .Annotations.resolved_title -}}{{ $title = .Annotations.resolved_title }}{{ end -}}
-    {{ if and $nonThresholdResolution .Annotations.non_threshold_resolved_title -}}{{ $title = .Annotations.non_threshold_resolved_title }}{{ end -}}
+    {{ if $nonThresholdResolution -}}{{ $title = $nonThresholdTitle }}{{ end -}}
     {{ if .Labels.pool_id -}}
     *<https://monitoring.mento.org/pool/{{ .Labels.pool_id }}|{{ $title }}{{ if .Labels.pair }} — {{ .Labels.pair }}{{ end }}{{ if .Labels.chain_name }} · {{ .Labels.chain_name | title }}{{ end }}>*
     {{ else if and (eq .Labels.service "cdps") .Labels.symbol -}}
@@ -243,7 +247,7 @@ locals {
     {{ else -}}
     *{{ $title }}*
     {{ end -}}
-    {{ if and $nonThresholdResolution .Annotations.non_threshold_resolved_summary }}{{ .Annotations.non_threshold_resolved_summary }}
+    {{ if $nonThresholdResolution }}{{ $nonThresholdSummary }}
     {{ else if and $isResolved .Annotations.resolved_summary }}{{ .Annotations.resolved_summary }}
     {{ else if .Annotations.summary }}{{ .Annotations.summary }}
     {{ end -}}
@@ -303,8 +307,8 @@ locals {
   EOT
 
   victorops_pool_page_message = <<-EOT
-    {{ range .Alerts }}{{ $isResolved := eq .Status "resolved" }}{{ $stateReason := index .Annotations "grafana_state_reason" }}{{ $nonThresholdResolution := and $isResolved (ne $stateReason "") }}{{ if and $nonThresholdResolution .Annotations.non_threshold_resolved_title }}{{ .Annotations.non_threshold_resolved_title }}
-    {{ end }}{{ if and $nonThresholdResolution .Annotations.non_threshold_resolved_summary }}{{ .Annotations.non_threshold_resolved_summary }}
+    {{ range .Alerts }}{{ $isResolved := eq .Status "resolved" }}{{ $stateReason := index .Annotations "grafana_state_reason" }}{{ $nonThresholdResolution := and $isResolved (ne $stateReason "") }}{{ $nonThresholdTitle := "Pool Alert Stopped Without Recovery Confirmation" }}{{ if .Annotations.non_threshold_resolved_title }}{{ $nonThresholdTitle = .Annotations.non_threshold_resolved_title }}{{ end }}{{ $nonThresholdSummary := "Grafana stopped the alert for a non-threshold state transition. This does not confirm recovery." }}{{ if .Annotations.non_threshold_resolved_summary }}{{ $nonThresholdSummary = .Annotations.non_threshold_resolved_summary }}{{ end }}{{ if $nonThresholdResolution }}{{ $nonThresholdTitle }}
+    {{ $nonThresholdSummary }}
     {{ else if and $isResolved .Annotations.resolved_summary }}{{ .Annotations.resolved_summary }}
     {{ else if .Annotations.summary }}{{ .Annotations.summary }}
     {{ end }}{{ if and (not $isResolved) .Annotations.current_reserves }}Reserves: {{ .Annotations.current_reserves }}

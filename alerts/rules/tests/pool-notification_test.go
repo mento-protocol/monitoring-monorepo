@@ -159,5 +159,26 @@ func TestPoolResolutionNotifications(t *testing.T) {
 				}
 			})
 		}
+
+		t.Run(destination.name+"-legacy-updated-alert", func(t *testing.T) {
+			legacy := alert("resolved", "Updated")
+			delete(legacy.Annotations, "non_threshold_resolved_title")
+			delete(legacy.Annotations, "non_threshold_resolved_summary")
+			input := map[string]any{"Status": "resolved", "CommonAnnotations": map[string]string{"grafana_state_reason": "Updated"}, "Alerts": []poolAlert{legacy}}
+			output := render(t, destination.template, input)
+			for _, phrase := range []string{
+				"Pool Alert Stopped Without Recovery Confirmation",
+				"This does not confirm recovery.",
+			} {
+				if !strings.Contains(strings.ToLower(output), strings.ToLower(phrase)) {
+					t.Fatalf("legacy Updated resolution is missing %q in %q", phrase, output)
+				}
+			}
+			for _, misleading := range []string{"Pool Two-Sided Again", "back above the one-sided floor"} {
+				if strings.Contains(output, misleading) {
+					t.Fatalf("legacy Updated resolution contains recovery claim %q in %q", misleading, output)
+				}
+			}
+		})
 	}
 }
