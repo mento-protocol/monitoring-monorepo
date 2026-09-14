@@ -320,10 +320,10 @@ locals {
   # Two mutually exclusive bands, same shape as the oracle-jump tiers: a pool
   # matches the page rule or the critical rule, never both, so one depleting
   # pool never produces two notifications. The page band is open-ended
-  # downward (a fully drained 0% side still pages); the critical band is
-  # floored at the page share here and capped by its own Grafana evaluator.
+  # downward (a fully drained 0% side still pages); known below-floor samples
+  # become non-breaching 1s so they reset critical Pending immediately.
   pool_depletion_page_active_promql     = local.pool_min_reserve_value_share_promql
-  pool_depletion_critical_active_promql = "(${local.pool_min_reserve_value_share_promql}) >= 0.1"
+  pool_depletion_critical_active_promql = "((${local.pool_min_reserve_value_share_promql}) >= 0.1) or (((${local.pool_min_reserve_value_share_promql}) < 0.1) * 0 + 1)"
 
   # ── Value-share coverage gap ─────────────────────────────────────────────
   # Both bands above read the VALUE-share gauges, which the bridge publishes

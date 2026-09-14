@@ -717,13 +717,11 @@ resource "grafana_rule_group" "fpmms_depletion" {
   folder_uid       = grafana_folder.fpmms.uid
   interval_seconds = 60
 
-  # NEITHER depletion rule carries `keep_firing_for`, unlike every other
-  # flap-prone pool critical in this file. A hold is what makes two adjacent
-  # bands double-notify: hold the critical and a pool crossing down into the
-  # page band pages while the critical is still held open; hold the page and a
-  # pool recovering up into the critical band fires the critical while the page
-  # is still held. There is no hold placement that survives both crossings, and
-  # single notification per depleting pool is the property this design is for.
+  # The critical tier deliberately has no `keep_firing_for`: a pool crossing
+  # down into the page band must close the critical incident immediately so the
+  # two adjacent bands cannot notify at once. The page tier carries a short 2m
+  # recovery hold, which is safe because it expires well before this tier's 15m
+  # pending period can fire on an upward crossing.
   #
   # What absorbs churn instead: the 15m dwell on the critical tier, and the
   # 10-percentage-point gap between the bands — a pool has to move a long way
@@ -832,22 +830,33 @@ resource "grafana_rule_group" "fpmms_depletion" {
     name      = "Pool Nearly One-Sided"
     condition = "threshold"
     # 1m, not 15m: below 10% the pool is minutes away from rejecting one swap
-    # direction outright. The dwell exists only to smooth a single-eval Mimir
-    # NoData blip, the same reason the oracle-jump rules carry it. See the note
-    # above the critical rule for why this tier carries no `keep_firing_for`.
-    for            = "1m"
-    exec_err_state = "Error"
-    no_data_state  = "OK"
+    # direction outright. The firing dwell smooths a single-eval Mimir NoData
+    # blip before opening the page. Once open, the 2m recovery hold requires
+    # continuously non-breaching evaluations before Grafana resolves it; a
+    # renewed breach during Recovering returns directly to Alerting without a
+    # false resolved/re-fired pair. Grafana handles a vanished labelled series
+    # outside that state machine, so pin its separate stale-series counter to
+    # two evaluations as the equivalent 2m persistence boundary.
+    for                             = "1m"
+    keep_firing_for                 = "2m"
+    missing_series_evals_to_resolve = 2
+    exec_err_state                  = "Error"
+    no_data_state                   = "OK"
 
     annotations = {
       summary = local.pool_depletion_summary_annotation
       # The page band is open-ended downward, so leaving it can only mean the
       # thin side grew. This resolution can honestly claim recovery where the
       # critical tier's cannot.
-      resolved_title    = "Pool Two-Sided Again"
-      resolved_summary  = "The thin side is back above the one-sided floor."
-      current_reserves  = local.deviation_current_reserves_annotation
-      value_composition = local.pool_depletion_value_composition_annotation
+      resolved_title   = "Pool Two-Sided Again"
+      resolved_summary = "The thin side is back above the one-sided floor."
+      # Any non-empty `grafana_state_reason` means Grafana stopped the alert for
+      # something other than an ordinary threshold recovery (for example
+      # MissingSeries, NoData, Error, Updated, Paused, or RuleDeleted).
+      non_threshold_resolved_title   = "Pool Alert Stopped Without Recovery Confirmation"
+      non_threshold_resolved_summary = "Grafana stopped the one-sided alert for a non-threshold state transition. This does not confirm that the pool recovered."
+      current_reserves               = local.deviation_current_reserves_annotation
+      value_composition              = local.pool_depletion_value_composition_annotation
     }
 
     # `severity = "page"` follows the repo's page convention (trading limits,
