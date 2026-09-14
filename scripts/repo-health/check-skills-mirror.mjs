@@ -148,14 +148,20 @@ function sameContents(fileA, fileB, relativePath) {
 export function provenanceSideDrift(contentsA, contentsB, relativePath) {
   if (!isForensicReportPath(relativePath)) return [];
   const drift = [];
-  if (contentsA.includes('source: "claude"')) {
+  // Every provenance literal on a side must be that side's own value; an
+  // unsupported value such as `source: "codex"` on both sides normalizes clean
+  // and would otherwise pass. Whether the skill writes a literal at all is the
+  // canonical skill's own contract, which stays under review.
+  const literals = (contents) =>
+    [...contents.matchAll(/source: "([^"]*)"/g)].map((match) => match[1]);
+  if (literals(contentsA).some((value) => value !== "Codex")) {
     drift.push(
-      `provenance literal belongs to the Claude mirror, not the canonical tree: ${relativePath}`,
+      `provenance literal in the canonical tree must be source: "Codex": ${relativePath}`,
     );
   }
-  if (contentsB.includes('source: "Codex"')) {
+  if (literals(contentsB).some((value) => value !== "claude")) {
     drift.push(
-      `provenance literal belongs to the canonical tree, not the Claude mirror: ${relativePath}`,
+      `provenance literal in the Claude mirror must be source: "claude": ${relativePath}`,
     );
   }
   return drift;

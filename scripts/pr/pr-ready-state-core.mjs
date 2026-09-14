@@ -773,7 +773,10 @@ export function summarizeReadyState({
         pendingRequest: hasPendingBareCodeRabbitReviewRequest({
           issueComments,
           currentHeadOid,
-          headUpdatedAt,
+          // A status-derived head time lands after the push, so it cannot
+          // bound requests from below; treat any recent bare request as
+          // pending rather than as the previous head's.
+          headUpdatedAt: pr.headUpdatedAtIsUpperBound ? null : headUpdatedAt,
           observedAt: now,
         }),
         headFreshnessKnown: headUpdatedAt !== null,

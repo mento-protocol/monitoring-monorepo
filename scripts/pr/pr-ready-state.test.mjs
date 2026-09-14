@@ -44,6 +44,7 @@ import {
   fetchHeadUpdatedAt,
   headUpdatedAtFromTimeline,
   parseArgs,
+  readyForReviewAtFromTimeline,
   renderSummary,
   repoFromPullRequestUrl,
   requiredStatusContextsFromProtection,
@@ -2000,6 +2001,28 @@ test("floors head freshness at PR creation for a branch pushed earlier", () => {
     }),
     "2026-09-14T14:00:00Z",
   );
+  // A draft marked ready starts its automatic review at the conversion, so
+  // the latest ready_for_review event is a floor as well.
+  assertEqual(
+    fetchHeadUpdatedAt({
+      headSha: "new-head",
+      timelineItems: [
+        ...timelineItems,
+        { event: "ready_for_review", created_at: "2026-09-14T14:30:00Z" },
+        { event: "ready_for_review", created_at: "2026-09-14T14:45:00Z" },
+      ],
+      observedAt: "2026-09-14T14:01:00Z",
+      openedAt: "2026-09-14T13:00:00Z",
+    }),
+    "2026-09-14T14:45:00Z",
+  );
+  assertEqual(
+    readyForReviewAtFromTimeline([
+      { event: "ready_for_review", created_at: "2026-09-14T14:30:00Z" },
+      { event: "commented", created_at: "2026-09-14T15:00:00Z" },
+    ]),
+    "2026-09-14T14:30:00Z",
+  );
   // With no head evidence the age stays unknown; the PR creation time alone is
   // only a lower bound and must not end the fail-closed wait.
   assertEqual(
@@ -3067,6 +3090,39 @@ test("waits out a bare CodeRabbit request posted inside the refill hour", () => 
     user: { login: "chapati23" },
     created_at: new Date(createdAtMs).toISOString(),
   });
+
+  // A head time taken from the first check on the head lands after the push,
+  // so a request posted in between must still read as pending, not stale.
+  const upperBound = summarizeReadyState({
+    pr: {
+      ...basePr,
+      headRefOid: currentHeadOid,
+      headUpdatedAt: new Date(headUpdatedAt).toISOString(),
+      headUpdatedAtIsUpperBound: true,
+      statusCheckRollup: [],
+    },
+    issueComments: [bareRequest(headUpdatedAt - minutesMs(1))],
+    now: observedAt,
+  });
+  assertEqual(
+    upperBound.gates.codeRabbitReviewSignal.fallbackAction,
+    "wait_for_pending_request",
+  );
+  const lowerBound = summarizeReadyState({
+    pr: {
+      ...basePr,
+      headRefOid: currentHeadOid,
+      headUpdatedAt: new Date(headUpdatedAt).toISOString(),
+      statusCheckRollup: [],
+    },
+    issueComments: [bareRequest(headUpdatedAt - minutesMs(1))],
+    now: observedAt,
+  });
+  assertEqual(
+    lowerBound.gates.codeRabbitReviewSignal.fallbackAction,
+    "request_review_once_for_head",
+    "a timeline-dated head bounds requests from below",
+  );
 
   assert(
     hasPendingBareCodeRabbitReviewRequest({

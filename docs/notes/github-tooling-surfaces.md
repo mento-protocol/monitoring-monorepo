@@ -333,8 +333,11 @@ polled. Do not foreground-poll and never sleep-poll.
      no CodeRabbit check is running on the current head, no trusted top-level
      comment posted at or after the head update and in the last hour asks for
      a review without the current head's marker (an older request belongs to a
-     superseded head and is stale, not pending), the head is more than five
-     minutes old, the head update time is known, and no trusted top-level
+     superseded head and is stale, not pending; when the head time is known
+     only from the first check on the head, count any such request in the
+     last hour), the head is more than five minutes old counting from the PR
+     creation or the latest ready-for-review conversion when those are later,
+     the head update time is known, and no trusted top-level
      comment contains `@coderabbitai review` or `@coderabbitai full review`
      together with `<!-- coderabbit-final-head-review:<full-head-sha> -->`, use
      `add_issue_comment` to post `@coderabbitai review`, a blank line, and that

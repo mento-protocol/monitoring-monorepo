@@ -185,7 +185,7 @@ test("a swapped forensic-report provenance literal fails even when both sides ma
   assert.notEqual(mirrorSwap.status, 0);
   assert.match(
     mirrorSwap.output,
-    /belongs to the canonical tree, not the Claude mirror: forensic-report\/SKILL\.md/,
+    /Claude mirror must be source: "claude": forensic-report\/SKILL\.md/,
   );
 
   writeFileSync(
@@ -200,8 +200,22 @@ test("a swapped forensic-report provenance literal fails even when both sides ma
   assert.notEqual(canonicalSwap.status, 0);
   assert.match(
     canonicalSwap.output,
-    /belongs to the Claude mirror, not the canonical tree: forensic-report\/SKILL\.md/,
+    /canonical tree must be source: "Codex": forensic-report\/SKILL\.md/,
   );
+
+  // An unsupported value on both sides normalizes clean too.
+  writeFileSync(
+    path.join(rootA, "forensic-report/SKILL.md"),
+    'writes source: "codex" records\n',
+  );
+  writeFileSync(
+    path.join(rootB, "forensic-report/SKILL.md"),
+    'writes source: "codex" records\n',
+  );
+  const unsupported = runChecker(rootA, rootB);
+  assert.notEqual(unsupported.status, 0);
+  assert.match(unsupported.output, /canonical tree must be source: "Codex"/);
+  assert.match(unsupported.output, /Claude mirror must be source: "claude"/);
 });
 
 test("provenanceSideDrift is silent for the documented split and outside forensic-report", () => {

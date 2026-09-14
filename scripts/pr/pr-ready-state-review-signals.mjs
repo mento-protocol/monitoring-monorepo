@@ -95,6 +95,25 @@ function earliestIsoTimestamp(left, right) {
   return Date.parse(right) < Date.parse(left) ? right : left;
 }
 
+/** The latest `ready_for_review` event: with drafts unreviewed, review starts there. */
+export function readyForReviewAtFromTimeline(timelineItems = []) {
+  let latest = null;
+  for (const item of timelineItems) {
+    if (item?.event !== "ready_for_review") continue;
+    const timestamp = validIsoTimestamp(item.created_at);
+    if (timestamp && (!latest || Date.parse(timestamp) > Date.parse(latest))) {
+      latest = timestamp;
+    }
+  }
+  return latest;
+}
+
+function latestIsoTimestamp(left, right) {
+  if (!left) return right;
+  if (!right) return left;
+  return Date.parse(right) > Date.parse(left) ? right : left;
+}
+
 export function fetchHeadUpdatedAt({
   headSha,
   timelineItems,
@@ -105,16 +124,16 @@ export function fetchHeadUpdatedAt({
   const statusTimestamp = validIsoTimestamp(observedAt);
   const evidence = earliestIsoTimestamp(timelineTimestamp, statusTimestamp);
   if (!evidence) return null;
-  // A branch pushed before its PR opened carries commit and check timestamps
-  // older than the PR. The head became this PR's head no earlier than the PR
-  // opened, and the opening review starts then, so the PR creation time is a
-  // floor for the head's age. With no other evidence the head's real age stays
-  // unknown, and the caller fails closed.
-  const openedTimestamp = validIsoTimestamp(openedAt);
-  if (!openedTimestamp) return evidence;
-  return Date.parse(openedTimestamp) > Date.parse(evidence)
-    ? openedTimestamp
-    : evidence;
+  // A branch pushed before its PR opened, or while the PR was a draft, carries
+  // commit and check timestamps older than the moment review could start. The
+  // automatic review starts when the PR opens or is marked ready, so the later
+  // of those is a floor for the head's age. With no other evidence the head's
+  // real age stays unknown, and the caller fails closed.
+  const activationFloor = latestIsoTimestamp(
+    validIsoTimestamp(openedAt),
+    readyForReviewAtFromTimeline(timelineItems),
+  );
+  return latestIsoTimestamp(evidence, activationFloor);
 }
 
 function isAtOrAfter(timestamp, lowerBound) {

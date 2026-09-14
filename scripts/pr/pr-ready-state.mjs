@@ -18,6 +18,7 @@ import {
   fetchHeadUpdatedAt,
   findCodeRabbitPathFilterSkipCandidate,
   headUpdatedAtFromTimeline,
+  readyForReviewAtFromTimeline,
   validateCodeRabbitPathFilterSkip,
 } from "./pr-ready-state-review-signals.mjs";
 import { formatCompact, formatHuman } from "./pr-ready-state-format.mjs";
@@ -34,7 +35,11 @@ import {
   ghApiJsonPagesResult,
 } from "./pr-ready-state-gh.mjs";
 
-export { fetchHeadUpdatedAt, headUpdatedAtFromTimeline };
+export {
+  fetchHeadUpdatedAt,
+  headUpdatedAtFromTimeline,
+  readyForReviewAtFromTimeline,
+};
 export { withGhAbortSignal } from "./pr-ready-state-gh.mjs";
 
 function addRequiredContext(byKey, context, integrationId = null) {
@@ -728,12 +733,19 @@ export async function fetchReadyState({
     readinessBasesPromise,
     timelinePromise,
   ]);
+  const timelineItems = timelineResult.ok ? timelineResult.value : [];
   const headUpdatedAt = fetchHeadUpdatedAt({
     headSha: pr.headRefOid,
-    timelineItems: timelineResult.ok ? timelineResult.value : [],
+    timelineItems,
     observedAt,
     openedAt: pr.createdAt ?? null,
   });
+  // Without the head commit in the timeline, the head time comes from the
+  // first check on the head, which lands after the push: an upper bound. The
+  // pending-request wait then cannot use it as a lower bound for requests.
+  const headUpdatedAtIsUpperBound =
+    headUpdatedAt !== null &&
+    headUpdatedAtFromTimeline(timelineItems, pr.headRefOid) === null;
   const pathFilterCandidate = findCodeRabbitPathFilterSkipCandidate({
     issueComments,
     headUpdatedAt,
@@ -768,6 +780,7 @@ export async function fetchReadyState({
   const annotatedPr = {
     ...pr,
     headUpdatedAt,
+    headUpdatedAtIsUpperBound,
     statusCheckRollup: annotateStatusCheckSources(
       pr.statusCheckRollup ?? [],
       sourceMap,
