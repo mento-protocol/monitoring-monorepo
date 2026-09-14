@@ -47,9 +47,9 @@ patterns for exact classification.
 - Cross-stack resource moves are import-then-`state rm` (state can't cross backends),
   as done for the Aegis service-health rule group move into `alerts-rules`.
 - The registry is authoritative for ownership and changed-stack
-  classification. The required CI internal Terraform filter and both Infra
-  admission filters copy the registry's broad boundary. `pnpm tf:test` enforces
-  exact equality and proves that the boundary subsumes every stack pattern.
+  classification. The required CI internal Terraform filter copies the
+  registry's broad boundary. `pnpm tf:test` enforces exact equality and
+  proves that the boundary subsumes every stack pattern.
 
 ## Evidence
 

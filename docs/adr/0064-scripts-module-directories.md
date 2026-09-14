@@ -224,7 +224,7 @@ routing, not procedure.
 
 1. Root `package.json` — 74 entries reference `scripts/`.
 2. `check-agent-quality-gate-package-scripts.mjs` — pinned alias map.
-3. `.github/workflows/` — 24 of 35 files pin a `scripts/` path. `ci.yml`
+3. `.github/workflows/` — 25 of 36 files pin a `scripts/` path. `ci.yml`
    (`versionSkew`; `rootScripts` is the recursive `scripts/**`),
    `alerts-rules.yml`, `peg-policy-publication.yml`, and `schema-diff.yml` list
    individual files.
