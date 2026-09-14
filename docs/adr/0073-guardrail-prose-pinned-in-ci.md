@@ -157,9 +157,8 @@ the binding route.
 - Adding a new normative sentence does not pin it. Coverage grows only when
   someone adds the pin, so the list will trail the prose. The 90-day
   re-verification on this record is where that gap is reviewed.
-- CI gains one job boot per PR: a checkout, a Node, and two sub-second commands
-  with no `pnpm install`, since the checker and its suite import only `node:`
-  builtins.
+- CI adds no job boot: the two sub-second commands run as steps of the
+  unconditional `production-infra-contract` job, after its pnpm install.
 - Moving `AGENTS.md`, `CLAUDE.md`, or the operating card means editing the pin
   keys in the same PR. `scripts/AGENTS.md` records this pin class under the
   move-sweep inventory ADR 0064 requires.

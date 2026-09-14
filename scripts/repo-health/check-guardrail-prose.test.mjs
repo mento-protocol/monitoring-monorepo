@@ -321,10 +321,10 @@ const GUARDRAIL_COMMANDS = [
 /**
  * The body lines of one top-level workflow job, or null when it is absent.
  *
- * A bounded text scan rather than a YAML parse, because this suite runs inside
- * the very job it is checking and that job installs no dependencies, so
- * `js-yaml` is out of reach. Job keys sit at two spaces and everything within
- * them at four or more, so the next two-space key ends the block.
+ * A bounded text scan rather than a YAML parse, because the negative controls
+ * below mutate literal `ci.yml` text and must match what a reviewer reads in
+ * the diff. Job keys sit at two spaces and everything within them at four or
+ * more, so the next two-space key ends the block.
  */
 function jobBody(workflow, jobId) {
   const lines = workflow.split("\n");
