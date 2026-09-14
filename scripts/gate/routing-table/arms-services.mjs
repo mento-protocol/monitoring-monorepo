@@ -233,7 +233,7 @@ export const SERVICE_ARMS = [
         reason: "shared-config consumers should typecheck",
       },
       {
-        why: "shared-config is imported into the dashboard client bundle via `@mento-protocol/config` — changes to chain/token metadata or helpers can shift the emitted JS. Mirrors the `shared-config/**` entry in `.github/workflows/size-limit.yml`.",
+        why: "shared-config is imported into the dashboard client bundle via `@mento-protocol/config` — changes to chain/token metadata or helpers can shift the emitted JS. Mirrors the `shared-config/**` entry in ci.yml's `ui` job path filter.",
         verb: "add_ui_size_limit",
         args: ["shared-config exports feed the dashboard bundle"],
       },

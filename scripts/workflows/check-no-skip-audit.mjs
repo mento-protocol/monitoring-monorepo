@@ -30,7 +30,7 @@ const READ_SCOPES = Object.freeze({ actions: "read", contents: "read", "pull-req
 // prettier-ignore
 const ADMISSION_STEP_HASH = "18f1c3741064363a488462c96fd34772c3b66eeee4a3f4bd2fb2a86275c3a203", CHECKOUT_STEP_HASH = "2d39e2e5293845e1c63f0f2e95ab8eb7e3d65360955c5b2c54ea1bddff57c22d", PROTECTED_DRIFT_STEP_HASH = "019ce295d3b3b50fe6684a65a93a2387a8a29d7c6c62db83cdc00bf1e8cf7a04", SUMMARY_STEP_HASH = "b6def63e8f5ccb7e13a6460f546cb391bf0e86350876470a787f038ea7cebb10";
 const CI_GRAPH_HASH =
-    "c3db63070983a85e31b5d3050930285537424df6d7de307980e3c89ea2a05ec0",
+    "91130bc248fc7e3e7b1b740e65da3ef45c03c84805ca36b386599b951ed52271",
   BASELINE_HASH =
     "467641beda8b2b45d49d0c62429d8e95f62b05c1db96f6665b106012a09cef12";
 // prettier-ignore
@@ -121,7 +121,8 @@ function checkDispatcher(root, errors) {
 // prettier-ignore
 function checkCandidateGraph(root, errors) {
   const raw = readFileSync(join(root, CI), "utf8"), ci = yaml(root, CI), call = ci.on?.workflow_call ?? {};
-  add(errors, hash(stable(ci)) === CI_GRAPH_HASH, "retained audit workflow graph changed");
+  const ciGraphHash = hash(stable(ci));
+  add(errors, ciGraphHash === CI_GRAPH_HASH, `retained audit workflow graph changed (pinned ${CI_GRAPH_HASH}, computed ${ciGraphHash})`);
   add(errors, stable(call.inputs) === stable(CALL_INPUTS) && stable(call.secrets) === stable({ CODECOV_TOKEN: { description: "Optional upload token for ordinary reusable calls", required: false } }), "reusable CI audit inputs or optional Codecov secret changed");
   add(errors, stable(ci.concurrency) === stable({ group: "${{ inputs.no_skip_audit && format('ci-no-skip-{0}', github.run_id) || format('{0}-{1}', github.workflow, github.event_name == 'pull_request' && github.ref || github.sha) }}", "cancel-in-progress": "${{ !inputs.no_skip_audit }}" }), "reusable CI must keep audit runs independent");
   add(errors, ci.jobs?.changes?.outputs?.forceAll === FORCE_ALL, "audit mode must force every routed job");

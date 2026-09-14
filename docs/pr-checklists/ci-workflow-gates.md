@@ -12,7 +12,7 @@ garden_lane: pr-checklists-process
 
 # CI workflow gates checklist
 
-Use this checklist for any change to `.github/workflows/`. CI mistakes don't surface until the next merge — and by then the bad pattern is already shipped to other workflows by copy-paste.
+Use this checklist for any change to `.github/workflows/`. CI mistakes don't surface until the next merge — by then the bad pattern is already copy-pasted elsewhere.
 
 ## Operating rule
 
@@ -47,15 +47,14 @@ gh api repos/mento-protocol/monitoring-monorepo/rulesets \
 After changing a required-status workflow or replacing the tool that reports its
 checks, verify the live PR status rollup with
 `pnpm pr:ready-state --pr <number> --json`. Confirm the intended required
-context is the only tool-owned check GitHub surfaces. PR #1008/#1010 exposed the
-failure mode: an action-created `Trunk Check` Checks API run appeared alongside
-the intended `Code Quality` job, and GitHub grouped the extra failure under the
-advisory schema-diff workflow in the PR UI.
+context is the only tool-owned check GitHub surfaces. PR #1008/#1010: an
+action-created `Trunk Check` run appeared beside `Code Quality`, and GitHub
+grouped the failure under the advisory schema-diff workflow.
 
-- [ ] **Ruleset-required** workflows MUST NOT use `paths:` / `paths-ignore:` filters — they must run on every PR. For path-conditional work, run every PR but skip the expensive job via `if:` checks (or `paths-filter` gating that reports green on no-op).
-- [ ] Registry-backed Terraform routing uses the broad `workflowAdmissionPatterns` list in `terraform.stacks.json`. Keep the required CI workflow unfiltered at workflow level; its internal `terraform` filter and the Infra push/pull-request filters copy that list. Don't enumerate stack-specific paths there — `pnpm tf:test` proves the boundary subsumes every `changedPathPatterns` entry.
-- [ ] **Advisory** workflows (everything _not_ in the ruleset list above) SHOULD use a workflow-level `paths:` filter so they don't boot a runner on irrelevant PRs — a skipped advisory check is simply absent, never a pending required one. Deliberate CI-cost control; see `lighthouse.yml`, `size-limit.yml`, `supply-chain.yml`. `schema-diff.yml` is a reviewed exception: it keeps its every-PR trigger for a visible summary and skips irrelevant work in-job instead.
-- [ ] **Scheduled advisory** workflows SHOULD state the detection/rebuild SLO they serve and use the slowest cadence that satisfies it. Prefer daily+ cadence for multi-hour/day failure modes unless an operator page-time requirement says otherwise; don't default to 15 minutes just because it's cheap.
+- [ ] **Ruleset-required** workflows MUST NOT use `paths:` / `paths-ignore:` filters — they must run on every PR. If you want path-conditional work, run every PR but skip the expensive job inside via `if:` checks (or `paths-filter`-style gating that reports a green check on no-op).
+- [ ] Registry-backed Terraform routing uses the `workflowAdmissionPatterns` list in `terraform.stacks.json`. Keep the required CI workflow unfiltered at workflow level. Its internal `terraform` filter and the Infra push/pull-request filters copy that list. Prefer a top-level boundary; register a nested entry in `NESTED_ADMISSION_EXCEPTIONS`. `pnpm tf:test` enforces exact equality and subsumption of every registry pattern.
+- [ ] **Advisory** workflows (everything _not_ in the ruleset list above) SHOULD use a workflow-level `paths:` filter so they don't boot a runner on irrelevant PRs. A skipped advisory check is simply absent — it cannot leave a _required_ check pending. This is a deliberate CI-cost control; see `lighthouse.yml`, `size-limit.yml`, and `supply-chain.yml` for the pattern. `schema-diff.yml` is a reviewed exception. It keeps its every-PR trigger so every pull request gets a visible job summary. Its in-job classifier skips irrelevant work and runs the schema diff when path detection fails.
+- [ ] **Scheduled advisory** workflows SHOULD state the detection/rebuild SLO they serve and use the slowest cadence that satisfies it. Backstop monitors for multi-hour/day failure modes should prefer daily or similarly low cadence unless there is an explicit operator page-time requirement; do not default to every 15 minutes just because the check is cheap.
 - [ ] If you make an advisory workflow required, add it to the ruleset **and** remove its `paths:` filter in the same change.
 
 > ⚠️ The ruleset and these docs have drifted before: advisory gates were written as if required (run-on-every-PR, no `paths:`) when the ruleset never enforced them. Update both the ruleset and this list when you add or "promote" a check.
@@ -63,9 +62,8 @@ advisory schema-diff workflow in the PR UI.
 ### Fixed fan-out contract
 
 Run `pnpm ci:contract:test` after a change to `ci.yml`, its fixed job set, or
-the pull request validation boundary. The unconditional `Production
-infrastructure contract` job runs the same command on every pull request and
-`main` push.
+the validation boundary. The unconditional `Production infrastructure
+contract` job runs it on every PR and `main` push.
 
 The command checks these contracts without defining a second runtime router:
 

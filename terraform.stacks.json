@@ -7,7 +7,12 @@
     "aegis/**",
     "governance-watchdog/**",
     "metrics-bridge/**",
-    "scripts/**",
+    "scripts/alerts/**",
+    "scripts/lib/**",
+    "scripts/production-infra-identity-contract/**",
+    "scripts/terraform/**",
+    "scripts/tf-stacks.mjs",
+    "scripts/tf-stacks.test.mjs",
     ".github/workflows/**",
     "terraform.stacks.json",
     "shared-config/**"

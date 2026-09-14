@@ -5,7 +5,7 @@ on:
   push:
     branches: [main]
     paths:
-      # Coarse admission only. The discover job classifies exact stacks from
+      # Admission only. The discover job classifies exact stacks from
       # terraform.stacks.json after the workflow starts. Keep this list equal
       # to `workflowAdmissionPatterns`; `pnpm tf:test` enforces the contract.
       - terraform/**
@@ -13,7 +13,12 @@ on:
       - aegis/**
       - governance-watchdog/**
       - metrics-bridge/**
-      - scripts/**
+      - scripts/alerts/**
+      - scripts/lib/**
+      - scripts/production-infra-identity-contract/**
+      - scripts/terraform/**
+      - scripts/tf-stacks.mjs
+      - scripts/tf-stacks.test.mjs
       - .github/workflows/**
       - terraform.stacks.json
       - shared-config/**
@@ -27,7 +32,12 @@ on:
       - aegis/**
       - governance-watchdog/**
       - metrics-bridge/**
-      - scripts/**
+      - scripts/alerts/**
+      - scripts/lib/**
+      - scripts/production-infra-identity-contract/**
+      - scripts/terraform/**
+      - scripts/tf-stacks.mjs
+      - scripts/tf-stacks.test.mjs
       - .github/workflows/**
       - terraform.stacks.json
       - shared-config/**

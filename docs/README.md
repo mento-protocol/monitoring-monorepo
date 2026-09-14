@@ -225,6 +225,7 @@ Authority: canonical
 - [`adr/0096-finder-probe-non-ledger-kind.md`](adr/0096-finder-probe-non-ledger-kind.md) — Non-ledger finder probes
 - [`adr/0097-recovery.md`](adr/0097-recovery.md) — Pool recovery
 - [`adr/0098-m6-audit-recovery.md`](adr/0098-m6-audit-recovery.md) — M6 audit recovery
+- [`adr/0099-retire-duplicate-bundle-size-workflow.md`](adr/0099-retire-duplicate-bundle-size-workflow.md) — Retire the duplicate bundle-size advisory workflow
 - [`adr/0100-monthly-ci-reliability-report.md`](adr/0100-monthly-ci-reliability-report.md) — Monthly CI reliability report is a repository-owned, issue-only scheduler
 
 Authority: non-canonical

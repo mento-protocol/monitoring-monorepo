@@ -113,8 +113,8 @@ Move each pin class together.
   contract imports it for ADR 0098's two tuples. `ci.yml` pins
   `report-ci-reliability{,.test}.mjs` (ADR 0100).
 - **Terraform stack registry.** `terraform.stacks.json` `changedPathPatterns`
-  pins exact `scripts/` paths per stack. The broad workflow admission boundary
-  covers the directory; `pnpm tf:test` enforces subsumption.
+  pins exact `scripts/` paths per stack. Admission lists six `scripts/`
+  entries, not the tree; `pnpm tf:test` enforces subsumption.
 - **Trusted-validator probes.** `pr-description.yml` resolves the validator at
   the PR base tip. After a move, keep dual probes until the new path reaches
   the base (issue 1904; ADR 0064).
