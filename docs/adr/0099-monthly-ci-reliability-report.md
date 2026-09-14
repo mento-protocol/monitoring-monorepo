@@ -51,9 +51,11 @@ rather than a `gh api` shell-out.
   the runs-listing endpoint, queried **per workflow** (not repo-wide) to stay
   under the pagination ceiling, and cover every run in the 30-day window.
 - Per-job duration/queue percentiles, CI per-step minutes, and cap
-  comparisons need one job-list call per run, so they sample at most 60 runs
-  per event, at random, for `CI` and `PR Description` only — the two
-  workflows worth the token spend — and the report states the sample size.
+  comparisons need one job-list call per run, so they sample at most 60
+  `pull_request` runs, at random, for `CI` and `PR Description` only — the
+  two workflows worth the token spend. `push`/`workflow_call` runs are
+  excluded from sampling so a small, uneven fraction of `CI`'s volume cannot
+  outweigh its dominant event once merged; the report states the sample size.
 - Timeout-minutes caps are parsed directly from every workflow YAML file,
   keyed by workflow `name:` + job `name:`, defaulting to GitHub's implicit
   360-minute cap. This does not import `EXPECTED_TIMEOUTS`.
