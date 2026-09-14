@@ -18,7 +18,7 @@ export enum EventType {
  * Mapping of EventType to its corresponding event interface
  * Add new events here - the QuicknodeEvent union will be auto-derived
  */
-export interface EventTypeMap {
+interface EventTypeMap {
   [EventType.ProposalCreated]: ProposalCreatedEvent;
   [EventType.ProposalQueued]: ProposalQueuedEvent;
   [EventType.ProposalExecuted]: ProposalExecutedEvent;
@@ -115,10 +115,7 @@ export interface ExtendedEventHandlerConfig<
 > extends EventHandlerConfig<T> {
   // Deduplication strategy for this event type
   deduplicationStrategy:
-    | "proposalId"
-    | "rateFeedId"
-    | "transactionHash"
-    | "custom";
+    "proposalId" | "rateFeedId" | "transactionHash" | "custom";
 
   // Custom deduplication function if strategy is 'custom'
   customDeduplicationKey?: (event: T) => string;
@@ -160,10 +157,7 @@ export interface EventConfig<T extends QuicknodeEvent = QuicknodeEvent> {
 
   // Processing metadata
   deduplicationStrategy:
-    | "proposalId"
-    | "rateFeedId"
-    | "transactionHash"
-    | "custom";
+    "proposalId" | "rateFeedId" | "transactionHash" | "custom";
   customDeduplicationKey?: (event: T) => string;
   isHealthCheck?: boolean;
 }
