@@ -100,6 +100,7 @@ export const checkWebhookStatus = async (): Promise<WebhookHealthResult> => {
     const secretDuration = Date.now() - secretStartTime;
     throw new Error(
       `Failed to retrieve QuickNode API key from Secret Manager after ${String(secretDuration)}ms: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
     );
   }
   const secretDuration = Date.now() - secretStartTime;
@@ -141,6 +142,7 @@ export const checkWebhookStatus = async (): Promise<WebhookHealthResult> => {
               ? error.message
               : String(error)
         }`,
+        { cause: error },
       );
     }
 

@@ -34,22 +34,22 @@
   },
   "dependencies": {
     "@google-cloud/functions-framework": "5.0.5",
-    "@google-cloud/logging": "^11.2.1",
+    "@google-cloud/logging": "^12.0.1",
     "axios": "^1.20.0",
-    "env-schema": "^7.0.0",
+    "env-schema": "^8.0.0",
     "viem": "2.56.3"
   },
   "devDependencies": {
-    "@eslint/js": "^9.39.1",
+    "@eslint/js": "^10.0.1",
     "@types/node": "^24.10.1",
     "@vitest/coverage-v8": "^5.0.0",
-    "eslint": "^9.39.1",
-    "knip": "^5.70.0",
+    "eslint": "^10.9.0",
+    "knip": "^6.32.2",
     "nodemon": "^3.1.11",
-    "prettier": "^3.6.2",
+    "prettier": "^3.9.6",
     "rimraf": "^6.1.0",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.46.4",
+    "typescript-eslint": "^8.69.0",
     "vitest": "^5.0.0"
   }
 }
