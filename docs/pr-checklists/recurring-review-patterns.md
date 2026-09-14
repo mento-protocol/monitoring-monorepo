@@ -3,7 +3,7 @@ title: Recurring PR Review Patterns
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-02
+last_verified: 2026-09-14
 doc_type: checklist
 scope: repo-wide
 review_interval_days: 90
@@ -289,6 +289,10 @@ tldr: **ruleset-required** workflows (`ci`, `Code Quality`, `Sentry suites`, the
 ### Dynamic-route metadata + private data — [checklist](dynamic-route-metadata.md)
 
 tldr: `generateMetadata` reading access-controlled data must gate on `isPublic === true` before emitting tags (no session, tags visible to crawlers). `export const revalidate = 0` for access-controlled sources (ISR would serve stale post-revocation tags from the edge cache). Metadata-fetching body lives in a dedicated `_lib/og-metadata.ts` helper imported by the page — not directly in `layout.tsx` — to keep the RSC label-leak guard allowlist narrow (PR #345 commit `b476776`). Full rules in the linked checklist.
+
+### Segment metadata replaces the inherited Open Graph block
+
+tldr: Next replaces the whole `openGraph` object at each segment that sets one, images included, so a page adding its own title or description drops the card from a parent `opengraph-image.tsx` — the homepage unfurled with no `og:image` until PR #2399 (issue #2340). Keep both by awaiting `generateMetadata`'s second `parent: ResolvingMetadata` argument — it is a promise — and spreading `(await parent).openGraph?.images`. Do not move the shared file into one route's segment instead: every route that sets no `openGraph` and has no `opengraph-image.tsx` of its own inherits it (`/pools`, `/volume`, `/stables`, `/cdps`, and the `/sign-in` page crawlers are redirected to) and would lose its card. Spread conditionally — `mergeStaticMetadata` skips the file when the segment's `openGraph` merely _has_ an `images` key, `undefined` included. `twitter.images` needs nothing; `postProcessMetadata` fills it from `openGraph.images`. Verify with the cookie-free crawler fetch in [`../notes/dashboard-verification.md`](../notes/dashboard-verification.md): a unit test cannot show what Next passes as the parent.
 
 ### SWR optimistic-update + React-key remount races
 
