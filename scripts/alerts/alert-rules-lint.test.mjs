@@ -2001,6 +2001,10 @@ test("one healthy depletion evaluation cannot resolve and reopen a 100/0 page", 
     path.resolve(repoRoot, "alerts/rules/rules-fpmms.tf"),
     "utf8",
   );
+  const mainRules = readFileSync(
+    path.resolve(repoRoot, "alerts/rules/main.tf"),
+    "utf8",
+  );
   const pageRule = ruleBlockNamed(
     fpmmRules,
     /\bname\s*=\s*"Pool Nearly One-Sided"/,
@@ -2039,6 +2043,24 @@ test("one healthy depletion evaluation cannot resolve and reopen a 100/0 page", 
   assert(
     keepSeconds < criticalPendingSeconds,
     "the page recovery hold must expire before the adjacent critical tier can finish pending",
+  );
+  assert(
+    /pool_depletion_critical_active_promql\s*=\s*"[^"]*< 0\.1\) \* 0 \+ 1\)/.test(
+      mainRules,
+    ),
+    "known page-band samples must emit a non-breaching critical value instead of MissingSeries",
+  );
+  const oscillatingShares = Array.from({ length: 20 }, (_, index) =>
+    index % 2 === 0 ? 0.15 : 0.05,
+  );
+  let consecutiveCriticalSeconds = 0;
+  assert(
+    !oscillatingShares.some((share) => {
+      consecutiveCriticalSeconds =
+        share >= 0.1 && share < 0.2 ? consecutiveCriticalSeconds + 60 : 0;
+      return consecutiveCriticalSeconds >= criticalPendingSeconds;
+    }),
+    "alternating critical/page evaluations must reset critical Pending before it can fire",
   );
 
   const [, missingSeriesEvalsRaw] =

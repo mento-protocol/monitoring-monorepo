@@ -48,8 +48,8 @@ only the page tier's recovery behavior:
   non-breaching for two minutes before Grafana resolves it.
 - Pin `missing_series_evals_to_resolve = 2` on the same rule because true
   MissingSeries resolution bypasses `keep_firing_for`.
-- Keep `Pool Depletion Risk` without a recovery hold. A downward crossing into
-  the page band therefore closes the critical incident immediately.
+- Keep `Pool Depletion Risk` without a recovery hold and emit a non-breaching
+  value in the page band, resetting critical on its first page-band evaluation.
 - Keep the page hold shorter than the critical tier's 15-minute pending period.
   On an upward crossing, the page resolves before the critical tier can fire;
   the adjacent bands still cannot produce two Alerting notifications.
