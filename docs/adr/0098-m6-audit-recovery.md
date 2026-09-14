@@ -35,6 +35,8 @@ these recorded tuples:
 | #2408 | 645b8197ce5a0a96301f6425889592b5782bfb6e | 199df9dcace086097540a2a8a4edacb9c0ea703d |
 
 The historical base is `c186a7e5ca0433c80d7588acb4ab38f24988ccc7`.
+After identity admission, fetch the exact approved source from the canonical
+public repository; squash-merged heads may be absent from branch history.
 The helper proves exact repository, head, merged state, main ancestry,
 historical merge-base and clean merge tree. It checks every historical
 protected path between source and base. Between runtime and base it permits
@@ -80,6 +82,14 @@ Use `pr_number=2408` only after the first result is classified. Preserve every
 attempt's job timestamps, failed jobs and cost. Record ordinary CI, the exact
 source/base/workflow identities, the merge proof and service-specific production
 closeout. A failure found only by the complete graph still stops acceptance.
+
+Before acceptance, read GitHub's native run event, branch and workflow SHA.
+Require `workflow_dispatch`, `main` and the reviewed protected-main revision,
+then reconcile the admitted tuple and complete retained graph. A workflow
+summary alone cannot establish provenance. Branch-edited runs cannot qualify.
+Repository writers can already run arbitrary branch workflows; this lane does
+not restrict repository-wide writer spend. The approved ceiling governs the
+recovery operations described here.
 
 Only first-attempt successful runs provide supplemental retrospective dashboard-only/indexer-only
 coverage. They do not change the selected ten-PR cohort, observation dates,

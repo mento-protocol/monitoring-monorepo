@@ -378,3 +378,25 @@ test("blocks a partial recovery rerun even if admission was reused", async () =>
   });
   await assert.rejects(admitRecovery(h), /rerun requires separate review/u);
 });
+
+test("fetches only the admitted immutable source before object proof", async () => {
+  const h = harness(),
+    calls = [];
+  h.git = (...args) => {
+    calls.push(args);
+    return mockGit(...args);
+  };
+  await admitRecovery(h);
+  assert.deepEqual(calls[0], [
+    "fetch",
+    "--no-tags",
+    `https://github.com/${REPOSITORY}.git`,
+    TUPLES[2399].source,
+  ]);
+  const invalid = harness();
+  invalid.context.payload.inputs.pr_number = "2128";
+  invalid.git = () => {
+    throw new Error("fetch must not execute");
+  };
+  await assert.rejects(admitRecovery(invalid), /Unapproved PR number/u);
+});

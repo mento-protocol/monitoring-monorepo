@@ -153,7 +153,18 @@ export async function admitRecovery({ github, context, git }) {
     pull_number: Number(pr),
   });
   const tuple = validateIdentity(context, pull, main.object.sha);
-  const proof = verifyGit(tuple, context.sha, git);
+  // Squash-merged source heads may only remain reachable through hidden PR refs.
+  // Fetch the approved immutable object without persisting any credentials.
+  const runGit =
+    git ??
+    ((...args) => execFileSync("git", args, { encoding: "utf8" }).trim());
+  runGit(
+    "fetch",
+    "--no-tags",
+    `https://github.com/${REPOSITORY}.git`,
+    tuple.source,
+  );
+  const proof = verifyGit(tuple, context.sha, runGit);
   const { data: collector } = await actions.getWorkflow({
     ...repo,
     workflow_id: "m6-canary.yml",
