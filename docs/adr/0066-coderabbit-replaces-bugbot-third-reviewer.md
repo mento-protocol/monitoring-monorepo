@@ -3,7 +3,7 @@ title: CodeRabbit replaces Cursor BugBot as the third PR review bot
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-03
+last_verified: 2026-09-14
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -15,7 +15,8 @@ garden_lane: adrs-architecture
 
 **Status:** Accepted (Aug 2026) — BugBot disabled on 2026-08-31; the live
 compatibility paths retired on 2026-09-02; amended 2026-09-02 (usage add-on
-enabled, incremental reviews off).
+enabled, incremental reviews off) and 2026-09-14 (census, closeout budget, path
+filters).
 **Scope:** ci/process
 
 ## Context
@@ -263,7 +264,10 @@ and stay in place as history.
   the opening review never completed either, and CodeRabbit may retry an
   unfinished review when the head moves regardless of this key. A clean
   measurement needs a PR whose opening review completed, so it waits for the
-  2026-09-18 cap reset.
+  2026-09-18 cap reset. **Corrected 2026-09-14:** the clean measurement landed
+  before the reset; the 2026-09-14 amendment records it. The key held. The
+  five runs above were the spending cap retrying PR #2236's blocked opening
+  review, and the runbooks now cite the amendment rather than this tally.
 
 - **The closeout request is the vendor-documented path here, checked
   2026-09-02.** docs.coderabbit.ai/configuration/auto-review states that
@@ -272,8 +276,11 @@ and stay in place as history.
   names `@coderabbitai review` as that manual trigger.
   docs.coderabbit.ai/reference/review-commands lists "when automatic reviews
   are disabled" as a use case for the same command, describes it as triggering
-  "an incremental review of new changes only", and notes it spends one review
-  from the allowance. The "applicable only when automatic reviews are paused"
+  "an incremental review of new changes only". The "spends one review from the
+  allowance" fact is on docs.coderabbit.ai/management/rate-limits, whose
+  command table reads "`@coderabbitai review` or `@coderabbitai full review` |
+  1 each" (citation corrected 2026-09-14).
+  The "applicable only when automatic reviews are paused"
   line in PR #2236's refusal came attached to a rate-limited command, so it is
   not evidence against the documented path.
 - **Confirmed 2026-09-02: the closeout request works.** The head-bound request
@@ -289,10 +296,16 @@ and stay in place as history.
   review.
 - **Rejected here:** raising the cap keeps the per-push meter and buys more
   duplicate reviews; tightening `path_filters` saves little because the billed
-  unit is an already-small push delta. The $0 OSS tier stays the fallback if
+  unit is an already-small push delta. **Corrected 2026-09-14:** the filter
+  claim is wrong. About 79% of reviewed files sit in excludable classes, so the
+  saving would be large. The real reason to leave most of them in is that the
+  same exclusions drop about 80% of findings; only zero-finding classes are
+  excluded. The $0 OSS tier stays the fallback if
   spend must return to zero.
 - **Accepted residual:** the closeout request is now the final scheduled
-  request in the ready-state flow, and readiness never waits for it.
+  request in the ready-state flow (**corrected 2026-09-14:** the request binds
+  to a head SHA, so a later push earns another one; the budget is two per PR,
+  enforced by the ready-state oracle), and readiness never waits for it.
   `summarizeCodeRabbitReviewGate` returns `required: false`, `ready` is
   `required.ready` in `scripts/pr/pr-ready-state-core.mjs`, and
   `pr-ready-state.test.mjs` pins "never awaits a pending CodeRabbit check for
@@ -307,7 +320,154 @@ and stay in place as history.
 - **Revisit trigger:** closeout-only coverage missing defects that incremental
   reviews would have caught, heads merging with the closeout review still only
   `requested`, or spend still tracking toward the cap after the 2026-09-18
-  reset.
+  reset. Added 2026-09-14: the cap reached again after the 2026-09-18 reset, or
+  repeat-full re-reviews running above roughly six per month.
+
+## Amendment 2026-09-14 — census, closeout budget, path filters
+
+A per-PR review-event census answered the open question the 2026-09-02
+amendment left for the cap reset, measured the closeout request, and priced the
+path filters. Everything above stays as written; this amendment corrects the
+four passages named at its end.
+
+- **Census method.** 265 PRs created 2026-08-18 through 2026-09-14. CodeRabbit
+  keeps exactly one sticky comment per PR and edits it in place, so rate-limit,
+  pause and skip notices overwrite each other and current comment bodies
+  undercount runs by roughly 3x. The census reads the full edit history of
+  every CodeRabbit comment and extracts every `Run ID` ever displayed: **933
+  distinct runs** — 578 completed, 139 blocked by the cap, 216 skipped.
+- **The open question is answered: `auto_incremental_review: false` works.**
+  111 runs carry the reason "Auto incremental reviews are disabled on this
+  repository", the first 96 seconds after PR #2236 merged. Automatic
+  incremental completed runs went **264 to 0**; all 35 incremental runs that
+  completed after the change (29 of them on PRs opened after it) followed an
+  explicit `@coderabbitai review`. PRs #2260 and #2362
+  are the clean cases: the opening review completed, later pushes only drew
+  skip notices. PR #2236 misled because its own opening review never completed
+  — the spending cap kept refusing it, and CodeRabbit retried on every head
+  move. That retry, not an incremental review, is what the five-push table
+  above recorded.
+- **The cap confounds the spend comparison.** The cap was reached on
+  2026-09-02, one day before the config change, so every post-change run sat
+  inside the capped period. Reviewed files per day fell 225.0 to 71.6, a 68%
+  drop, but that figure double-counts the cap. Crediting every blocked run as
+  billed gives 274 to 162.9 per day, a **41% drop**, and that is the
+  config's own effect. Real spend under the current configuration is
+  measurable only after the 2026-09-18 reset.
+- **Two leaks remain.** A base merge or rebase moves the base off the last
+  reviewed head, so CodeRabbit classifies the next run as a **full** review
+  rather than an incremental one and bills the whole delta: PR #2237 (77 files,
+  3.5 hours after the config merged) and PR #2373 (21 files, after a rebase).
+  Ten such runs occurred in the window. Second, CodeRabbit resolves
+  `.coderabbit.yaml` from the PR's source branch, so a branch cut before
+  2026-09-03 kept incremental reviews until it merged main. The Global-override
+  follow-up in the 2026-09-02 amendment therefore stays open and indicated.
+- **Fair usage meters one identity on a rolling window.** The vendor's
+  rate-limit docs state that capacity follows the identity that **opens** the
+  pull request; `chapati23` opens 226 of the 265 PRs, so the whole org runs on
+  one developer's allowance. The window rolls; the billing-period counter reset
+  is Enterprise-only, so 2026-09-18 restores the spending cap but not the
+  refill rate. This org's observed schedule: 49 attempts/7 days buys 6
+  reviews/hour, 54-57 buys 5, 60-64 buys 4, 81-89 buys 2, and 90+ buys 1. On
+  2026-09-10 notices read 1/hour at only 70-71 attempts, matching the published
+  Team table, so the grandfathered schedule may already be gone. The plans
+  page's 8/hour was never observed. Blocked attempts do not raise the counter.
+- **The closeout request is head-bound, so it repeats.** 163 requests in the
+  window; 59% were posted less than an hour after the previous request anywhere
+  in the repo; 63% of PRs carrying a request pushed again afterwards, median 20
+  minutes later. After the config change 58 of 80 PRs got zero requests and 12
+  got more than one, up to 7 on a single PR. Requesting while a review is still
+  running supersedes it, and the vendor charges the superseded review and
+  discards it. GitHub's "Update branch" button and web-UI edits to files each
+  cost one review event.
+- **The closeout review is not the cheap one to cut.** 430 root findings across
+  the window, 85% fixed, 149 Major and 1 Critical. Opening reviews average 1.96
+  findings per report; the post-change manual closeouts average 1.4 findings
+  per report on 7-8 files — a higher rate per file. Documentation and prose
+  carry 30% of findings but only 22% of Major ones. Tests are 22% of reviewed
+  files and 4% of Major findings.
+- **Decision (a): the ready-state oracle enforces closeout hygiene.** The
+  `summarizeCodeRabbitReviewGate` projection in
+  `scripts/pr/pr-ready-state-review-signals.mjs` now reports
+  `requestCount` and `requestBudget` and one of six `fallbackAction` values, in
+  precedence: `merge_base_first` (merge the base before requesting, so the
+  request does not turn into a billed full re-review),
+  `wait_for_running_review` (a review is already running; a second request
+  would supersede and waste it), `wait_for_pending_request` (a trusted unmarked
+  request posted after the head update and less than an hour ago will run or be
+  rate-limited inside the refill hour; posting again supersedes it),
+  `wait_for_head_grace` (the head is under five minutes old and no run has
+  appeared; an automatic run may still start, including the full re-review a
+  base merge or rebase can draw; the gate fails closed into this wait when a
+  failed or empty timeline or status read leaves the head update time unknown),
+  `request_budget_exhausted` (budget 2 per PR),
+  and `request_review_once_for_head`. The two waits were added because the
+  closeout review on this PR found that a base merge followed by an immediate
+  request, or a bare maintainer request, could still draw a duplicate billed
+  review. The ready-state and tooling runbooks match:
+  merge the base first, batch a fix round into one push, and never use GitHub's
+  "Update branch" button or edit files in the web UI on an open PR.
+- **Decision (b): three path filters added** — `!.claude/skills/**`,
+  `!docs/metrics/**`, and `!scripts/repo-health/**`. Each class drew zero
+  findings across all 265 PRs, and each is billed again on every push that
+  touches it. `.claude/skills/**` is a byte-identical mirror of
+  `.agents/skills/**` enforced by `scripts/repo-health/check-skills-mirror.mjs`,
+  so reviewing it re-bills the canonical tree; the canonical tree stays
+  reviewed. `docs/metrics/**` holds machine-written measurement artifacts.
+  `scripts/repo-health/**` holds hygiene checkers with their own self-tests; 20
+  of its files were reviewed for zero findings. `package.json` also drew zero
+  findings and was considered, but `path_filters` drive CodeRabbit's sparse
+  checkout as well as its review scope, and scripts under review cite its
+  `pnpm` script names — excluding it would blind the reviewer to them. Tests
+  stay reviewed as a class, with no blanket test filter: they are 22% of
+  reviewed files for 4% of Major findings, which is a poor rate but not zero.
+  The self-tests inside `scripts/repo-health/**` go with their checkers.
+- **Decision (c): the usage add-on stays on** in Automatic mode with the
+  $500/month cap (operator decision 2026-09-14). The alternatives are below.
+
+### Considered and deferred
+
+- **Split the PR-opening identity.** The vendor's own remedy: "Adding seats
+  does not help ... Capacity follows the identity that opens the pull request."
+  Two or three PR-opening identities at 40-60 reviews/week each would sit at
+  4-8 included reviews/hour. This is the only lever that raises the included
+  rate. Deferred as operationally complex: it needs machine users with seats,
+  attribution for agent-opened PRs, and matching repo tooling.
+- **Add-on Off.** Holds spend at the $60 seat, but at 1 review/hour the
+  closeout queue has no margin: simulated median wait 1.4 hours, p90 5.5 hours,
+  and 19% of human PRs in the window already merged unreviewed at that floor.
+- **Add-on On demand.** Still bills $0.25 per file; it only moves the decision
+  to a per-commit consent step.
+- **The OSS tier.** The docs route an unsubscribed org to Free, described as
+  "PR summarization only". The OSS allowance is per repository at roughly 1
+  review/hour, which this repo's volume saturates, and it carries no add-on
+  valve.
+- **Essentials.** Saves $30/month and is 2-4x slower in the 40-89 attempts
+  band. The grandfathered schedule this org still partly enjoys is likely
+  one-way, so a downgrade may not be reversible.
+- **Draft-first PRs.** Cost-neutral. The one observation (PR #2218) shows the
+  review firing 8 seconds after `ready_for_review`, so drafting moves the
+  review rather than removing it.
+
+### Corrections to earlier text
+
+- The Consequences bullet's "the closeout request is the second and last one
+  per PR" and the Accepted-residual bullet's "final scheduled request" describe
+  a per-PR request. The request binds to a head SHA, so a PR that pushes again
+  earns another one. Both carry a `(corrected 2026-09-14)` note; the budget is
+  now two requests per PR, enforced by the ready-state oracle.
+- The 2026-09-02 "Measured on PR #2236" bullet said the repository file alone
+  did not suppress the attempt and deferred the clean measurement to the cap
+  reset. The measurement above closes it: the key held, and those runs were cap
+  retries of a blocked opening review. The bullet carries the correction.
+- The 2026-09-02 "Rejected here" bullet said tightening `path_filters` saves
+  little. It does not: about 79% of reviewed files sit in excludable classes.
+  The real reason to leave most of them in is that the same exclusions drop
+  about 80% of findings, which is why only zero-finding classes are excluded.
+- The "notes it spends one review from the allowance" citation belongs to
+  docs.coderabbit.ai/management/rate-limits, whose command table reads
+  "`@coderabbitai review` or `@coderabbitai full review` | 1 each", not to
+  reference/review-commands.
 
 ## Alternatives considered
 
@@ -369,7 +529,10 @@ and stay in place as history.
   preventing duplicate requests for the same head. **Amended 2026-09-02**:
   agent fix bursts now do neither — incremental auto-review is off, so they
   get no CodeRabbit review at all and the closeout request is the second and
-  last one per PR.
+  last one per PR. **Corrected 2026-09-14:** the request binds to a head SHA,
+  not to the PR, so a PR that pushes again earns another request — 12 of 80
+  post-change PRs got more than one, up to 7. The budget is now two requests
+  per PR, enforced by the ready-state oracle.
   `@coderabbitai rate limit` reports remaining capacity without consuming
   a review.
 - The 2026-08-31 open-PR sweep found one current-head Cursor finding, on PR
@@ -463,6 +626,15 @@ and stay in place as history.
   and Usage pages, read 2026-09-02 — add-on Automatic with a $500/month cap,
   cap reached that day, cycle reset 2026-09-18, and the 30-day Review usage
   figures (672 / 365 / 48 / 3.9 / ~5.5) in the amendment above.
+- Per-PR review-event census, run 2026-09-14 over the 265 PRs created
+  2026-08-18 through 2026-09-14: GitHub GraphQL `IssueComment.userContentEdits`
+  for every CodeRabbit sticky comment, plus the REST review-comment and
+  timeline endpoints. It yields 933 distinct `Run ID`s with per-run outcome,
+  reason, commit range and selected-file count, 297 submitted review reports,
+  and 430 root findings with dispositions. Vendor documentation was read as raw
+  markdown the same day by appending `.md` to the docs.coderabbit.ai URL:
+  management/rate-limits, management/usage-based-addon, management/plans,
+  configuration/auto-review, and guides/configuration-overview.
 - Post-rollout pause sample, queried from GitHub on 2026-08-21: 16 of the 29
   PRs created after `.coderabbit.yaml` merged carried CodeRabbit's generated
   pause marker. Six of those PRs had only 2-4 total commits. Two of the 29 PRs

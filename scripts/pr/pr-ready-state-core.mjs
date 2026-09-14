@@ -2,21 +2,34 @@ import {
   BOT_APPROVER,
   classifyCodeRabbitReviewSignal,
   classifyCodexReviewSignal,
+  countTrustedCodeRabbitReviewRequests,
   hasCodexApprovalReaction,
   hasCodexInFlightReaction,
+  hasPendingBareCodeRabbitReviewRequest,
   parseTimestamp,
   summarizeCodeRabbitReviewGate,
 } from "./pr-ready-state-review-signals.mjs";
+import {
+  CODEX_DESCRIPTION_APPROVAL_OVERRIDE_GATE,
+  HUMAN_OVERRIDE_ASSOCIATIONS,
+  findActiveReadinessOverrides,
+  isTrustedHumanAuthor,
+} from "./pr-ready-state-overrides.mjs";
 
 export {
   BOT_APPROVER,
   classifyCodeRabbitReviewSignal,
   classifyCodexReviewSignal,
+  countTrustedCodeRabbitReviewRequests,
   hasCodexApprovalReaction,
   hasCodexInFlightReaction,
   isCodeRabbitFinalHeadReviewRequestBody,
   isCodexReviewRequestBody,
 } from "./pr-ready-state-review-signals.mjs";
+export {
+  findActiveReadinessOverrides,
+  parseReadinessOverrideComment,
+} from "./pr-ready-state-overrides.mjs";
 const OPTIONAL_CHECK_NAMES = new Set([
   // CodeRabbit is advisory and reports SUCCESS when a rate-limited review never
   // ran. Report its lag, but read review evidence instead of its conclusion.
@@ -47,13 +60,6 @@ const PENDING_VALUES = new Set([
   "WAITING",
 ]);
 const SKIPPED_VALUES = new Set(["NEUTRAL", "SKIPPED"]);
-const HUMAN_OVERRIDE_ASSOCIATIONS = new Set([
-  "OWNER",
-  "MEMBER",
-  "COLLABORATOR",
-]);
-const READINESS_OVERRIDE_COMMAND = "/pr-ready-override";
-const CODEX_DESCRIPTION_APPROVAL_OVERRIDE_GATE = "codex-description-approval";
 
 function normalizeStatusValue(value) {
   return String(value ?? "")
@@ -158,6 +164,28 @@ export function groupStatusChecks(statusCheckRollup = []) {
   }
 
   return grouped;
+}
+
+const CODERABBIT_CHECK_NAME = "coderabbit";
+const CODERABBIT_RUNNING_VALUES = new Set([
+  "IN_PROGRESS",
+  "PENDING",
+  "QUEUED",
+  "REQUESTED",
+  "WAITING",
+]);
+
+export function isCodeRabbitReviewRunning(statusCheckRollup = []) {
+  return (statusCheckRollup ?? []).some((check) => {
+    if (checkDisplayName(check).toLowerCase() !== CODERABBIT_CHECK_NAME) {
+      return false;
+    }
+    // A conclusion means the run finished, whatever the reported status is.
+    if (normalizeStatusValue(check.conclusion)) return false;
+    return [check.status, check.state]
+      .map(normalizeStatusValue)
+      .some((value) => CODERABBIT_RUNNING_VALUES.has(value));
+  });
 }
 
 function requiredContextName(context) {
@@ -437,98 +465,6 @@ export function findTopLevelBotReviewComments(reviews = []) {
     }));
 }
 
-function issueCommentAuthorAssociation(comment) {
-  return String(
-    comment.author_association ?? comment.authorAssociation ?? "",
-  ).toUpperCase();
-}
-
-function isHumanOverrideAuthor(comment) {
-  return isTrustedHumanAuthor(comment, HUMAN_OVERRIDE_ASSOCIATIONS);
-}
-
-function isTrustedHumanAuthor(comment, allowedAssociations) {
-  if (allowedAssociations === null) return false;
-  const login = comment.user?.login ?? comment.author?.login ?? "";
-  const type = comment.user?.type ?? comment.author?.type ?? "";
-  return (
-    !String(login).endsWith("[bot]") &&
-    type !== "Bot" &&
-    allowedAssociations.has(issueCommentAuthorAssociation(comment))
-  );
-}
-
-function extractOverrideValue(body, key) {
-  const source = String(body ?? "");
-  const pattern = new RegExp(`(?:^|\\s)${key}=([^\\s]+)`, "i");
-  return source.match(pattern)?.[1] ?? null;
-}
-
-function extractOverrideReason(body) {
-  const match = String(body ?? "").match(/(?:^|\s)reason=(.+)$/im);
-  return match?.[1]?.trim() ?? "";
-}
-
-export function parseReadinessOverrideComment(comment, currentHeadOid = null) {
-  const body = String(comment.body ?? "");
-  if (
-    !body
-      .trimStart()
-      .match(new RegExp(`^${READINESS_OVERRIDE_COMMAND}\\b`, "i"))
-  ) {
-    return null;
-  }
-
-  const gate = extractOverrideValue(body, "gate")?.toLowerCase() ?? null;
-  const head = extractOverrideValue(body, "head");
-  const reason = extractOverrideReason(body);
-  const author = comment.user?.login ?? comment.author?.login ?? null;
-  const createdAt = comment.created_at ?? comment.createdAt ?? null;
-  const base = {
-    gate,
-    head,
-    reason,
-    author,
-    authorAssociation:
-      comment.author_association ?? comment.authorAssociation ?? null,
-    url: comment.html_url ?? comment.url ?? null,
-    createdAt,
-    state: "ignored",
-  };
-
-  if (!isHumanOverrideAuthor(comment)) {
-    return { ...base, reasonIgnored: "author_not_allowed" };
-  }
-  if (gate !== CODEX_DESCRIPTION_APPROVAL_OVERRIDE_GATE) {
-    return { ...base, reasonIgnored: "unsupported_gate" };
-  }
-  if (!head || !currentHeadOid || head !== currentHeadOid) {
-    return { ...base, reasonIgnored: "head_mismatch" };
-  }
-  if (!reason) {
-    return { ...base, reasonIgnored: "missing_reason" };
-  }
-
-  return {
-    ...base,
-    state: "active",
-  };
-}
-
-function findActiveReadinessOverrides(
-  issueComments = [],
-  currentHeadOid = null,
-) {
-  return issueComments
-    .map((comment) => parseReadinessOverrideComment(comment, currentHeadOid))
-    .filter((override) => override?.state === "active")
-    .sort((a, b) => {
-      const aTime = parseTimestamp(a.createdAt) ?? 0;
-      const bTime = parseTimestamp(b.createdAt) ?? 0;
-      return bTime - aTime;
-    });
-}
-
 function currentHeadUpdatedAt(pr) {
   return parseTimestamp(pr.headUpdatedAt ?? pr.headPushedAt);
 }
@@ -647,6 +583,9 @@ export function summarizeReadyState({
   requiredStatusContextsAvailable = requiredStatusContexts.length > 0,
   includeFeedbackDetails = false,
   codeRabbitPathFilterSkip = null,
+  // Wall-clock "now" for the closeout waits. Not the caller's `observedAt`
+  // floor from the status reads, which is the oldest check timestamp.
+  now = Date.now(),
 }) {
   const statusChecks = groupStatusChecks(pr.statusCheckRollup ?? []);
   const splitChecks = splitRequiredAndOptionalChecks(
@@ -827,6 +766,20 @@ export function summarizeReadyState({
     codeRabbitReviewSignal: summarizeCodeRabbitReviewGate(
       codeRabbitReviewSignal,
       codeRabbitPathFilterSkip,
+      {
+        mergeStateStatus: pr.mergeStateStatus ?? null,
+        reviewRunning: isCodeRabbitReviewRunning(pr.statusCheckRollup ?? []),
+        requestCount: countTrustedCodeRabbitReviewRequests(issueComments),
+        pendingRequest: hasPendingBareCodeRabbitReviewRequest({
+          issueComments,
+          currentHeadOid,
+          headUpdatedAt,
+          observedAt: now,
+        }),
+        headFreshnessKnown: headUpdatedAt !== null,
+        headUpdatedAt,
+        observedAt: now,
+      },
     ),
     reviewCommentReplies: {
       ready: unrepliedRootReviewComments.length === 0,
