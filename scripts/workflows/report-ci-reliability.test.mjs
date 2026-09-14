@@ -96,30 +96,35 @@ test("wallDurationPercentiles: p50/p90 minutes for one workflow+event, ignores o
     {
       workflow: "CI",
       event: "pull_request",
+      conclusion: "success",
       created_at: "2026-09-01T00:00:00Z",
       updated_at: "2026-09-01T00:05:00Z",
     },
     {
       workflow: "CI",
       event: "pull_request",
+      conclusion: "success",
       created_at: "2026-09-01T00:00:00Z",
       updated_at: "2026-09-01T00:10:00Z",
     },
     {
       workflow: "CI",
       event: "push",
+      conclusion: "success",
       created_at: "2026-09-01T00:00:00Z",
       updated_at: "2026-09-01T01:00:00Z",
     },
     {
       workflow: "Trunk",
       event: "pull_request",
+      conclusion: "success",
       created_at: "2026-09-01T00:00:00Z",
       updated_at: "2026-09-01T02:00:00Z",
     },
     {
       workflow: "CI",
       event: "pull_request",
+      conclusion: "success",
       created_at: "2026-09-01T00:00:00Z",
       updated_at: null,
     },
@@ -141,9 +146,44 @@ test("wallDurationPercentiles: uses run_started_at, not created_at, for a retrie
     {
       workflow: "CI",
       event: "pull_request",
+      conclusion: "success",
       created_at: "2026-09-01T00:00:00Z",
       run_started_at: "2026-09-01T12:00:00Z",
       updated_at: "2026-09-01T12:05:00Z",
+    },
+  ];
+  const result = wallDurationPercentiles(runs, {
+    workflow: "CI",
+    event: "pull_request",
+  });
+  assert.equal(result.samples, 1);
+  assert.equal(result.p50Minutes, 5);
+});
+
+test("wallDurationPercentiles: excludes cancelled and failed runs, so a busy force-push week can't skew the budget metric", () => {
+  const runs = [
+    {
+      workflow: "CI",
+      event: "pull_request",
+      conclusion: "success",
+      created_at: "2026-09-01T00:00:00Z",
+      updated_at: "2026-09-01T00:05:00Z",
+    },
+    {
+      // Superseded by a force-push: stopped almost immediately, far shorter
+      // than a real run — noise, not signal, for "how long did CI take".
+      workflow: "CI",
+      event: "pull_request",
+      conclusion: "cancelled",
+      created_at: "2026-09-01T00:00:00Z",
+      updated_at: "2026-09-01T00:00:20Z",
+    },
+    {
+      workflow: "CI",
+      event: "pull_request",
+      conclusion: "failure",
+      created_at: "2026-09-01T00:00:00Z",
+      updated_at: "2026-09-01T00:45:00Z",
     },
   ];
   const result = wallDurationPercentiles(runs, {

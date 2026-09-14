@@ -45,6 +45,9 @@ jobs:
       - name: Collect the report and synchronize its issue
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
+          # Deliberate, matching m6-canary.yml's identical step: an automatic
+          # retry after a partial run could re-issue the issues.create/update
+          # call and duplicate or corrupt the upserted report issue.
           retries: 0
           script: |
             const { collectCiHealthReport } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/workflows/report-ci-reliability.mjs`);

@@ -54,6 +54,8 @@ export const CAP_NEAR_RATIO = 0.8; // "within 20% of the cap"
 export const MAX_PER_JOB_ROWS = 40;
 export const MAX_NEAR_CAP_ROWS = 25;
 export const MAX_CAP_KILL_ROWS = 25;
+export const MAX_STEP_MINUTES_ROWS = 15;
+export const MAX_FAILING_STEP_ROWS = 10;
 
 const mins = (ms) => ms / 60000;
 
@@ -114,19 +116,27 @@ export function percentile(values, p) {
 
 /**
  * Whole-run wall-clock p50/p90 in minutes (`run_started_at` -> `updated_at`)
- * for one workflow's runs of one event, e.g. `CI` `pull_request` — the metric
- * the per-job duration table cannot answer, and the one the budget in
- * docs/pr-checklists/ci-workflow-gates.md compares month over month. Costs no
- * extra API call: both timestamps are already on every run-listing row. Uses
- * `run_started_at`, not `created_at`: for a re-run, `created_at` is the first
- * attempt's creation while `updated_at` is the last attempt's end, so a
- * `created_at` start folds the idle gap between attempts into the duration
- * and inflates exactly the retried runs that land in the p90 tail.
+ * for one workflow's SUCCESSFUL runs of one event, e.g. `CI` `pull_request` —
+ * the metric the per-job duration table cannot answer, and the one the
+ * budget in docs/pr-checklists/ci-workflow-gates.md compares month over
+ * month. Costs no extra API call: both timestamps are already on every
+ * run-listing row. Uses `run_started_at`, not `created_at`: for a re-run,
+ * `created_at` is the first attempt's creation while `updated_at` is the
+ * last attempt's end, so a `created_at` start folds the idle gap between
+ * attempts into the duration and inflates exactly the retried runs that
+ * land in the p90 tail. Restricted to `conclusion === "success"`: a
+ * cancelled/superseded run is stopped almost immediately when a new commit
+ * lands, and a failed run can exit early or late depending on where it
+ * failed, so both are noise relative to "how long did a real CI pass take" —
+ * `summarizeRunRates` below is the place that counts cancellations, on
+ * purpose. Mixing them into this distribution would let a month with an
+ * unusual mix of cancellations shift the reported p90 for reasons unrelated
+ * to CI performance, risking a false hit on the budget gate.
  */
 // prettier-ignore
 export function wallDurationPercentiles(runs, { workflow, event }) {
   const durations = runs
-    .filter((run) => run.workflow === workflow && run.event === event && (run.run_started_at ?? run.created_at) && run.updated_at)
+    .filter((run) => run.workflow === workflow && run.event === event && run.conclusion === "success" && (run.run_started_at ?? run.created_at) && run.updated_at)
     .map((run) => mins(Date.parse(run.updated_at) - Date.parse(run.run_started_at ?? run.created_at)));
   return { samples: durations.length, p50Minutes: percentile(durations, 50), p90Minutes: percentile(durations, 90) };
 }
@@ -294,9 +304,9 @@ export function formatMarkdownReport(report) {
       "No sampled jobs.",
     ),
     "",
-    "### CI step minutes across the sampled runs, ranked by total (top 15)",
+    `### CI step minutes across the sampled runs, ranked by total (top ${MAX_STEP_MINUTES_ROWS})`,
     "",
-    table(["| Job › step | Total minutes | Share | Executions | Median minutes |", "| --- | ---: | ---: | ---: | ---: |"], report.stepMinutes.slice(0, 15).map((r) => `| ${r.step} | ${r.totalMinutes.toFixed(1)} min | ${pct(r.share)} | ${r.executions} | ${durationText(r.medianMinutes)} |`), "No sampled CI steps."),
+    table(["| Job › step | Total minutes | Share | Executions | Median minutes |", "| --- | ---: | ---: | ---: | ---: |"], report.stepMinutes.slice(0, MAX_STEP_MINUTES_ROWS).map((r) => `| ${r.step} | ${r.totalMinutes.toFixed(1)} min | ${pct(r.share)} | ${r.executions} | ${durationText(r.medianMinutes)} |`), "No sampled CI steps."),
     "",
     `### Jobs finishing within ${Math.round((1 - CAP_NEAR_RATIO) * 100)}% of their timeout-minutes cap (sampled, successful jobs only, top ${MAX_NEAR_CAP_ROWS} by duration)`,
     "",
@@ -306,9 +316,9 @@ export function formatMarkdownReport(report) {
     "",
     table(["| Workflow | Job | Duration | Cap |", "| --- | --- | ---: | ---: |"], [...report.capKills].sort((a, b) => b.durationMinutes - a.durationMinutes).slice(0, MAX_CAP_KILL_ROWS).map((r) => `| ${r.workflow} | ${r.job} | ${durationText(r.durationMinutes)} | ${r.cap} min |`), "None in the sample."),
     "",
-    "### CI failing-step rate by distinct run (sampled, top 10)",
+    `### CI failing-step rate by distinct run (sampled, top ${MAX_FAILING_STEP_ROWS})`,
     "",
-    table(["| Job › step | Runs | Rate |", "| --- | ---: | ---: |"], report.failingSteps.slice(0, 10).map((r) => `| ${r.step} | ${r.runs} | ${pct(r.rate)} |`), "No failing steps in the sample."),
+    table(["| Job › step | Runs | Rate |", "| --- | ---: | ---: |"], report.failingSteps.slice(0, MAX_FAILING_STEP_ROWS).map((r) => `| ${r.step} | ${r.runs} | ${pct(r.rate)} |`), "No failing steps in the sample."),
     "",
   ].join("\n");
 }
