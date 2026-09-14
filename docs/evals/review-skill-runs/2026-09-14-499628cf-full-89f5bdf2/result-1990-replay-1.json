@@ -1,0 +1,107 @@
+{
+  "cell_id": "pr-1990-replay-draw1",
+  "fingerprint": {
+    "skill_digest": "89f5bdf20356c5515974ec1a6112fc4f9dfbf31cf1d60b667084f91dfbe6ec60",
+    "kind": "full",
+    "contract_digest": "59b82ee3e6d7ccf2cfbe75cb11aa40e6ec93b92a754a992adee4a1a69166a259",
+    "claude_cli": "2.1.270 (Claude Code)",
+    "codex_cli": "codex-cli 0.154.0",
+    "finder_argv_digest": "40099c93f78800efefbc46f57772ae2cbadc86b378bdd22f474945abfd7b450c",
+    "orchestrator_digest": "fee8d511d838ad137aea62f0e6be7b5115383c59d4447ba985efb3e3c3fe48b1"
+  },
+  "treatment": {
+    "skill_ref": "installed",
+    "dirty": false
+  },
+  "pr": 1990,
+  "condition": "replay",
+  "draw": 1,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": "gpt-5.6-sol@high",
+  "claims": [
+    "A clean CodeRabbit run may never count as `reviewed` (`scripts/pr/pr-ready-state-core.mjs:759-770`): the classifier only counts a PR review whose body contains `**Run ID**`, but the clean result appears in the walkthrough comment, so every clean PR shows `missing`/`stale` and the babysitter posts a manual request that spends review quota",
+    "The only `reviewed` test uses a body with \"Actionable comments posted: 1\". No test covers a clean run.",
+    "Anyone can post the request marker (`pr-ready-state-core.mjs:772-784`): there is no author or role check, unlike the override parser's `isTrustedHumanAuthor`, so a comment from any outside user with the current-head marker gives `requested` and stops the babysitter from posting its own request",
+    "The Codex request classifier (`:707`) has the same gap already (no author or role check)",
+    "\"Idempotent\" overstates what the marker does (`.agents/skills/babysit-pr/SKILL.md:311`, `.agents/skills/ship/SKILL.md:214`, `cloud-watch-loop.md:55`): two babysitters, or a push landing between reading the head and posting, can still produce two requests",
+    "The main JSON example in the doc is out of date (`docs/notes/pr-ready-state.md:276-305`): the example JSON leaves out both `gates.codeRabbitReviewSignal` and the top-level `codeRabbitReviewSignal`",
+    "The doc's step order contradicts the skill (`docs/notes/pr-ready-state.md:399-408`): the request is step 8, after the pair in step 5, and step 10 never says to run both projections again",
+    "The core file keeps growing (`pr-ready-state-core.mjs`): 961 counted lines, +84, \"near hard cap\", against `recurring-review-patterns.md:191`'s rule not to keep adding to a file over the 600-line soft cap",
+    "`requested` never expires: if CodeRabbit is rate-limited when the request arrives, the docs forbid asking again for that head, so its review just never comes",
+    "Pause threshold raised from 2 to 5 removes the old test's \"no usage add-on is enabled\" limit; it's a spending decision"
+  ],
+  "matched_ids": [
+    3829654081,
+    3829659544,
+    3829659546,
+    3830259678
+  ],
+  "judge_reasoning": {
+    "3829654081": "Finding 6 flags pr-ready-state-core.mjs growing to 961/1,077 lines past the 600-line cap and suggests splitting out the CodeRabbit helpers.",
+    "3829659544": "Finding 4 says the doc's example JSON omits gates.codeRabbitReviewSignal and the top-level field.",
+    "3829659546": "Finding 5 says the doc runs the closeout request after the final projection pair and should move it before the final pair.",
+    "3829659550": "The review raises the missing-head-SHA fallback but explicitly dismisses it as not a real defect.",
+    "3830259678": "Finding 2 says any outside user can post the request marker because there is no author or role check, which suppresses the babysitter's own request.",
+    "3830394205": "The review's authentication finding covers only the core classifier. It cites cloud-watch-loop.md only for the 'idempotent' wording, not for unauthenticated markers in the MCP fallback."
+  },
+  "novel": {
+    "claims": 10,
+    "novelReal": 3,
+    "novelWrong": 1,
+    "novelVague": 3,
+    "restatedKnown": 3,
+    "alreadyMatched": 4,
+    "verdicts": {
+      "1": {
+        "class": "real",
+        "why": "pr-ready-state-core.mjs:759-770 counts only CodeRabbit reviews matching the **Run ID** pattern, but the repo's own fixture (pr-feedback-state.test.mjs:3360-3372) puts the clean result, 'No actionable comments were generated', in the walkthrough issue comment, which this classifier never reads. So a clean run falls to missing/stale and triggers a manual request."
+      },
+      "2": {
+        "class": "vague",
+        "why": "True that the 'reviewed' tests (pr-ready-state.test.mjs:2224-2285) only use a body with 'Actionable comments posted: 1' or a bare Run ID, but this is a test-coverage note backing claim 1, not a separate defect."
+      },
+      "3": {
+        "class": "known",
+        "why": "The request loop at core.mjs:772-784 really has no author check, but this restates the known item 'scripts/pr/pr-ready-state-core.mjs:772 Trust only authorized closeout requests'."
+      },
+      "4": {
+        "class": "wrong",
+        "why": "classifyCodexReviewSignal (core.mjs:~707) was not touched by this diff, so the gap is older code and not a defect in this change."
+      },
+      "5": {
+        "class": "real",
+        "why": "SKILL.md, ship/SKILL.md and cloud-watch-loop.md call the marker idempotent, but it is only check-then-post: the classifier reads earlier comments, and nothing stops two posters or a push racing between the read and the post."
+      },
+      "6": {
+        "class": "real",
+        "why": "The JSON example in docs/notes/pr-ready-state.md (~276-305) lists gates codexDescriptionApproval, codexReviewSignal, reviewCommentReplies and reviewThreads, plus top-level codexReviewSignal, with no codeRabbitReviewSignal, even though the diff adds both fields to the output."
+      },
+      "7": {
+        "class": "known",
+        "why": "Doc steps 5/8/10 do put the request after the pair, and step 10 does not say to rerun both. This matches the known item 'docs/notes/pr-ready-state.md:408 Functional Correctness'."
+      },
+      "8": {
+        "class": "known",
+        "why": "The file is 1077 lines with +79 in this diff, but this restates the known item 'scripts/pr/pr-ready-state-core.mjs:750 Split the growing ready-state core'."
+      },
+      "9": {
+        "class": "vague",
+        "why": "A current-head marker does return 'requested' forever (core.mjs:776-786), but the docs deliberately treat pending or rate-limited CodeRabbit as optional advisory lag. This is a design preference, not a concrete break."
+      },
+      "10": {
+        "class": "vague",
+        "why": "The threshold change 2→5 and the removed '<=2 (no usage add-on)' assertion in coderabbit-config.test.mjs are deliberate, with rollout evidence recorded in ADR 0066. Calling it a spending decision is a policy opinion, not a defect."
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 250,
+  "usd": 1.3217189999999996,
+  "usd_metered": true,
+  "scoring_usd": 0.5368
+}

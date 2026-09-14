@@ -1,0 +1,93 @@
+{
+  "cell_id": "pr-2121-replay-draw1",
+  "fingerprint": {
+    "skill_digest": "89f5bdf20356c5515974ec1a6112fc4f9dfbf31cf1d60b667084f91dfbe6ec60",
+    "kind": "full",
+    "contract_digest": "59b82ee3e6d7ccf2cfbe75cb11aa40e6ec93b92a754a992adee4a1a69166a259",
+    "claude_cli": "2.1.270 (Claude Code)",
+    "codex_cli": "codex-cli 0.154.0",
+    "finder_argv_digest": "40099c93f78800efefbc46f57772ae2cbadc86b378bdd22f474945abfd7b450c",
+    "orchestrator_digest": "fee8d511d838ad137aea62f0e6be7b5115383c59d4447ba985efb3e3c3fe48b1"
+  },
+  "treatment": {
+    "skill_ref": "installed",
+    "dirty": false
+  },
+  "pr": 2121,
+  "condition": "replay",
+  "draw": 1,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": "gpt-5.6-sol@high",
+  "claims": [
+    "After more than 5 idle minutes, the preview shows \"unavailable\" even though the refresh works. `trove-og-data.ts:274` sees `fetchedAtMs` is older than 5 minutes and returns `null`; it never waits for a refetch",
+    "Test gap: the test at `trove-og-data.test.ts:227-239` only checks `troveOgDataIsFresh`; the mocked `unstable_cache` just calls the function directly, so no test ever returns an old cached value",
+    "The browser fixture server doesn't handle the new queries: `ui-dashboard/tests/browser/fixtures/hasura-fixture-server.mjs` has no case for `CdpTroveOgCollaterals` or `CdpTroveOgById` (requests from `trove-og-data.ts:195` and `:204`), so the card silently falls back",
+    "The existing `trove-history.test.ts` still passes because the failure happens on the server and the card falls back without error, making the fixture gap invisible",
+    "Failed background refreshes write whole error objects to server logs. `trove-og-data.ts:247`: `ClientError` stores full response body and request as enumerable fields, logged via `console.error`",
+    "The \"five minutes\" cache comment understates how old the data can be. `opengraph-image.tsx:49-54`: an image can show data about 11 minutes old",
+    "`trove-og-data.ts:184` has a JSDoc saying \"Exported for focused data-contract tests\" on a function that isn't exported",
+    "`shortTroveId` is copied in `page.tsx:48` and `trove-og-card.tsx:115`, and the two could drift apart"
+  ],
+  "matched_ids": [
+    3882119284
+  ],
+  "judge_reasoning": {
+    "3882085361": "The review looks at resolveMetadataBase host trust and clears it as harmless. It does not flag the missing allowlist as a defect.",
+    "3882086206": "The review never mentions that icrTone duplicates the icrTextClass threshold math. It only says the ICR tone matches icrTextClass.",
+    "3882090788": "The review does not mention IPv6 loopback [::1] handling.",
+    "3882119274": "The review does not flag event-time ICR being shown as a fresh health signal.",
+    "3882119284": "The review's 'five minutes' note says data up to 5 minutes old, cached 60s and then served stale for 300s, can be about 11 minutes old. That is the same combined cache-age problem."
+  },
+  "novel": {
+    "claims": 8,
+    "novelReal": 5,
+    "novelWrong": 0,
+    "novelVague": 2,
+    "restatedKnown": 1,
+    "alreadyMatched": 1,
+    "verdicts": {
+      "1": {
+        "class": "real",
+        "why": "cachedFetch uses unstable_cache with revalidate 60, which serves the stale value and refreshes in the background. After more than 5 idle minutes, the returned fetchedAtMs is old, so line 274 returns null on that request."
+      },
+      "2": {
+        "class": "real",
+        "why": "The test's next/cache mock returns fn unchanged. The freshness test at 227-239 only unit-tests troveOgDataIsFresh, so no test ever returns an old cached value through fetchTroveOgDataForMetadata."
+      },
+      "3": {
+        "class": "real",
+        "why": "The fixture server's switch has no CdpTroveOgCollaterals or CdpTroveOgById case, so default calls unhandledOperation and returns GraphQL errors. fetchTroveOgDataForMetadata catches them and returns null, so the card falls back."
+      },
+      "4": {
+        "class": "vague",
+        "why": "Only restates claim 3's consequence (the fixture gap stays invisible). It adds no separate defect, and nothing in trove-history.test.ts was checked for it."
+      },
+      "5": {
+        "class": "vague",
+        "why": "ClientError does store response and request, but graphql-fetch.ts shows no secret header, only a public query, variables and the Hasura body. The console.error comes from Next's background revalidation, which I could not check because node_modules is not installed. No concrete harm is named."
+      },
+      "6": {
+        "class": "known",
+        "why": "Same as the known item at opengraph-image.tsx:54, 'Bound the combined data and image cache age' (data up to 5 min old plus max-age 60 and swr 300)."
+      },
+      "7": {
+        "class": "real",
+        "why": "Line 184 has the JSDoc '@internal Exported for focused data-contract tests' on `async function fetchTroveOgData`, which is not exported. Only fetchTroveOgDataUncached is exported."
+      },
+      "8": {
+        "class": "real",
+        "why": "page.tsx:48 defines a private shortTroveId identical to the exported one at trove-og-card.tsx:115, which opengraph-image.tsx already imports. The page title and OG alt/card can drift apart."
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 211,
+  "usd": 1.329002,
+  "usd_metered": true,
+  "scoring_usd": 0.5261564999999999
+}

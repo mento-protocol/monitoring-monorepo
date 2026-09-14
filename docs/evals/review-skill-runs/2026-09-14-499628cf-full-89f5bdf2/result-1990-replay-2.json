@@ -1,0 +1,78 @@
+{
+  "cell_id": "pr-1990-replay-draw2",
+  "fingerprint": {
+    "skill_digest": "89f5bdf20356c5515974ec1a6112fc4f9dfbf31cf1d60b667084f91dfbe6ec60",
+    "kind": "full",
+    "contract_digest": "59b82ee3e6d7ccf2cfbe75cb11aa40e6ec93b92a754a992adee4a1a69166a259",
+    "claude_cli": "2.1.270 (Claude Code)",
+    "codex_cli": "codex-cli 0.154.0",
+    "finder_argv_digest": "40099c93f78800efefbc46f57772ae2cbadc86b378bdd22f474945abfd7b450c",
+    "orchestrator_digest": "fee8d511d838ad137aea62f0e6be7b5115383c59d4447ba985efb3e3c3fe48b1"
+  },
+  "treatment": {
+    "skill_ref": "installed",
+    "dirty": false
+  },
+  "pr": 1990,
+  "condition": "replay",
+  "draw": 2,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": "gpt-5.6-sol@high",
+  "claims": [
+    "A clean review for the current commit can still show as `stale`, which triggers one unneeded review request — `scripts/pr/pr-ready-state-core.mjs:759-785`: the comment loop (772-785) never checks whether a CodeRabbit comment reports a finished run, so a clean run that only updates the summary comment yields `stale` and the runbook says to post `@coderabbitai review`",
+    "After that extra request, the state becomes `requested` and stays there for that commit: the 'Already reviewed' reply (`CodeRabbit review command invocation` marker, `pr-feedback-state-core.mjs:48`) and rate-limit notices aren't read, and the runbook says '`requested` until a real run lands' (`docs/notes/pr-ready-state.md:355`), so an agent could wait on a review that never comes",
+    "Request comments aren't filtered by author: anyone could post the marker and suppress the closeout request",
+    "Run ID format unconfirmed: if real CodeRabbit review bodies put the colon inside the bold (`**Run ID:**`), nothing would ever count as `reviewed`",
+    "Paused reviews: if a paused commit has no `CodeRabbit` check at all, the skill's instruction to wait until that check finishes is ambiguous"
+  ],
+  "matched_ids": [
+    3830259678
+  ],
+  "judge_reasoning": {
+    "3829654081": "The review never mentions the file's line count or splitting pr-ready-state-core.mjs.",
+    "3829659544": "The review does not mention that the sample JSON gates object in the docs is missing codeRabbitReviewSignal.",
+    "3829659546": "The review does not discuss the ordering of the CodeRabbit closeout relative to the feedback-state/ready-state pair across the workflow docs.",
+    "3829659550": "The review discusses head-SHA matching and timestamps, but not the null currentHeadOid fallback that lets reviewed/requested be returned without an exact head match.",
+    "3830259678": "The review's 'Request comments aren't filtered by author' item says anyone can post the marker and suppress the closeout request. That is the same defect, even though the review calls it minor."
+  },
+  "novel": {
+    "claims": 5,
+    "novelReal": 2,
+    "novelWrong": 0,
+    "novelVague": 2,
+    "restatedKnown": 1,
+    "alreadyMatched": 1,
+    "verdicts": {
+      "1": {
+        "class": "real",
+        "why": "In pr-ready-state-core.mjs:759-785 only reviews containing the `**Run ID**` marker count as `reviewed`. The comment loop only checks for request markers, so a finished run that shows up only in a comment gives `stale`, and pr-ready-state.md step 8 then says to post a request."
+      },
+      "2": {
+        "class": "real",
+        "why": "Once a current-head request comment exists, the classifier returns `requested` unless a Run ID review for that head lands. No 'already reviewed', skip or rate-limit reply is read (those markers exist only in pr-feedback-state-core.mjs:48-53), and the docs say `requested` holds until a real run lands, so the state can stick."
+      },
+      "3": {
+        "class": "known",
+        "why": "The comment loop at core.mjs:772 has no author check, but this is the same point as known item 'Trust only authorized closeout requests' (core.mjs:772)."
+      },
+      "4": {
+        "class": "vague",
+        "why": "A guess about the real CodeRabbit body format. The regex matches the format in the test fixtures (`**Run ID**: `...``) and the reviewer shows no evidence the real format differs."
+      },
+      "5": {
+        "class": "vague",
+        "why": "Only says the skill's wording is 'ambiguous' when a paused commit has no check. It names no concrete wrong behavior in the code or docs."
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 240,
+  "usd": 1.431521,
+  "usd_metered": true,
+  "scoring_usd": 0.4044685
+}

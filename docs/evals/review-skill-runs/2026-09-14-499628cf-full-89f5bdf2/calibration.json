@@ -1,0 +1,330 @@
+{
+  "model": "claude-opus-5",
+  "agreement": 39,
+  "total": 40,
+  "fingerprint": {
+    "skill_digest": "89f5bdf20356c5515974ec1a6112fc4f9dfbf31cf1d60b667084f91dfbe6ec60",
+    "kind": "full",
+    "contract_digest": "59b82ee3e6d7ccf2cfbe75cb11aa40e6ec93b92a754a992adee4a1a69166a259",
+    "claude_cli": "2.1.270 (Claude Code)",
+    "codex_cli": "codex-cli 0.154.0",
+    "finder_argv_digest": "40099c93f78800efefbc46f57772ae2cbadc86b378bdd22f474945abfd7b450c",
+    "orchestrator_digest": "fee8d511d838ad137aea62f0e6be7b5115383c59d4447ba985efb3e3c3fe48b1"
+  },
+  "treatment": {
+    "skill_ref": "installed",
+    "dirty": false
+  },
+  "completed_cell_ids": [
+    "pr-1982-pipeline-draw1",
+    "pr-1984-pipeline-draw1",
+    "pr-1990-pipeline-draw1",
+    "pr-1995-pipeline-draw1",
+    "pr-1999-pipeline-draw1",
+    "pr-2001-pipeline-draw1",
+    "pr-2035-pipeline-draw1",
+    "pr-2039-pipeline-draw1",
+    "pr-2121-pipeline-draw1",
+    "pr-1990-replay-draw1",
+    "pr-1990-replay-draw2",
+    "pr-1995-replay-draw1",
+    "pr-1995-replay-draw2",
+    "pr-1999-replay-draw1",
+    "pr-1999-replay-draw2",
+    "pr-2035-replay-draw1",
+    "pr-2035-replay-draw2",
+    "pr-2039-replay-draw1",
+    "pr-2039-replay-draw2",
+    "pr-2121-replay-draw1",
+    "pr-2121-replay-draw2",
+    "pr-1990-control-draw1",
+    "pr-1995-control-draw1",
+    "pr-1999-control-draw1",
+    "pr-2035-control-draw1",
+    "pr-2039-control-draw1",
+    "pr-2121-control-draw1"
+  ],
+  "scoring_usd": 0.7670470000000003,
+  "outcomes": [
+    {
+      "record_id": "pr1982-3827636772-matched",
+      "defect_id": 3827636772,
+      "expected": "matched",
+      "actual": "matched",
+      "reasoning": "The review flags the same line (backfill.mjs:119). It says Branch: must be present to parse but is only optionally emitted, so claims without a branch can never be backfilled. That is the same underlying defect."
+    },
+    {
+      "record_id": "pr1982-3827647420-matched",
+      "defect_id": 3827647420,
+      "expected": "matched",
+      "actual": "unmatched",
+      "reasoning": "The review covers the same race, a competing claim arriving around the write, but calls the resulting verification failure a false alarm and suggests checking against the pre-write claim. The defect is that the stale claim gets written to Project fields without revalidation during the batch, which the review never identifies."
+    },
+    {
+      "record_id": "pr1982-3827647420-unmatched",
+      "defect_id": 3827647420,
+      "expected": "unmatched",
+      "actual": "unmatched",
+      "reasoning": "The review raises two unrelated points: C1 control characters are not rejected, and a one-line wrapper should be inlined. It never mentions the race where a newer claim arrives during the write batch."
+    },
+    {
+      "record_id": "pr1982-3827655676-unmatched",
+      "defect_id": 3827655676,
+      "expected": "unmatched",
+      "actual": "unmatched",
+      "reasoning": "The review cites the same doc lines, but its concern is that a multi-paragraph note silently kills the claim parsing. It says nothing about the Claim ID code span being broken mid-token or the lost list indentation."
+    },
+    {
+      "record_id": "pr1982-3827655684-unmatched",
+      "defect_id": 3827655684,
+      "expected": "unmatched",
+      "actual": "unmatched",
+      "reasoning": "The review describes a parse failure caused by a missing Branch: line when the branch is falsy. The defect is about trailing blank lines after the handoff text failing the bounded-handoff check. Both end in the same readSnapshot error, but the root causes differ."
+    },
+    {
+      "record_id": "pr1982-3827663924-matched",
+      "defect_id": 3827663924,
+      "expected": "unmatched",
+      "actual": "unmatched",
+      "reasoning": "The review flags a different parse failure: a claim comment with no Branch line is rejected. It does not mention a trailing newline or blank line after the handoff sentence that fails the non-empty line check."
+    },
+    {
+      "record_id": "pr1982-3827663924-unmatched",
+      "defect_id": 3827663924,
+      "expected": "unmatched",
+      "actual": "unmatched",
+      "reasoning": "The review is about a claim comment that has no Branch: line and a misleading error. Defect 1 is a trailing newline after the handoff footer being rejected by the non-empty-line check. The problems differ, even though both touch the same parser."
+    },
+    {
+      "record_id": "pr1984-3828303385-matched",
+      "defect_id": 3828303385,
+      "expected": "matched",
+      "actual": "matched",
+      "reasoning": "The review flags the same file and line, where the colon-bearing label `label:sentry:fix-refused` is left unquoted in the Search query. It cites the quoted convention at sentry-autofix-queue-io.mjs:278, as the defect does."
+    },
+    {
+      "record_id": "pr1984-3828303385-unmatched",
+      "defect_id": 3828303385,
+      "expected": "unmatched",
+      "actual": "unmatched",
+      "reasoning": "The review flags hardcoded label literals instead of shared constants at the same line. It never says the colon-bearing label is unquoted or that this breaks the Search API query, so it is a different underlying problem."
+    },
+    {
+      "record_id": "pr1984-3828313974-matched",
+      "defect_id": 3828313974,
+      "expected": "matched",
+      "actual": "matched",
+      "reasoning": "The review makes the same point as the defect. readFlag returns null rather than undefined, so the default repo parameter never applies even though the flag is documented as optional."
+    },
+    {
+      "record_id": "pr1990-3829654081-matched",
+      "defect_id": 3829654081,
+      "expected": "unmatched",
+      "actual": "unmatched",
+      "reasoning": "The review raises a functional bug in CodeRabbit completion detection. It says nothing about file size or splitting the growing core file."
+    },
+    {
+      "record_id": "pr1990-3829654081-unmatched",
+      "defect_id": 3829654081,
+      "expected": "unmatched",
+      "actual": "unmatched",
+      "reasoning": "The review raises a functional bug: CodeRabbit summary comments aren't recognized, which causes a false stale state. It never mentions file size or splitting the growing ready-state core file."
+    },
+    {
+      "record_id": "pr1990-3829659544-matched",
+      "defect_id": 3829659544,
+      "expected": "matched",
+      "actual": "matched",
+      "reasoning": "The review says the example JSON payload is missing codeRabbitReviewSignal in gates and at top level, even though the field list documents it. It asks for the field to be added to the example, which is the same defect."
+    },
+    {
+      "record_id": "pr1990-3829659546-matched",
+      "defect_id": 3829659546,
+      "expected": "matched",
+      "actual": "matched",
+      "reasoning": "The review flags the same ordering problem in pr-ready-state.md around lines 399-402. It says the projection pair runs before the CodeRabbit closeout request, and it asks for the request to come before the final pair."
+    },
+    {
+      "record_id": "pr1990-3829659550-matched",
+      "defect_id": 3829659550,
+      "expected": "matched",
+      "actual": "matched",
+      "reasoning": "Review's first item flags that isCodeRabbitFinalHeadReviewRequestBody fails open (returns true) when currentHeadOid is falsy. That is the same missing-head-SHA problem: any marked request gets accepted without an exact head match."
+    },
+    {
+      "record_id": "pr1990-3829659550-unmatched",
+      "defect_id": 3829659550,
+      "expected": "unmatched",
+      "actual": "unmatched",
+      "reasoning": "The review reports no issues. It never mentions the null currentHeadOid fallback that allows reviewed/requested states without an exact head SHA match."
+    },
+    {
+      "record_id": "pr1990-3830394205-matched",
+      "defect_id": 3830394205,
+      "expected": "unmatched",
+      "actual": "unmatched",
+      "reasoning": "The review covers counting CodeRabbit issue comments, meaning CodeRabbit runs that are missed. It does mention cloud-watch-loop.md, but it never raises that closeout markers from arbitrary commenters are accepted without a maintainer/agent authentication check."
+    },
+    {
+      "record_id": "pr1990-3830394205-unmatched",
+      "defect_id": 3830394205,
+      "expected": "unmatched",
+      "actual": "unmatched",
+      "reasoning": "The review says the cloud-watch-loop has a 'never-true' condition for reading the signal from get_reviews. It does not say the closeout marker is accepted from any commenter without a maintainer/agent authentication check."
+    },
+    {
+      "record_id": "pr1995-3829986403-matched",
+      "defect_id": 3829986403,
+      "expected": "matched",
+      "actual": "matched",
+      "reasoning": "The review flags that the validator also accepts duplicate dispatch_gate_test_families calls. It asks to count them and require exactly one, which is the same defect and the same fix."
+    },
+    {
+      "record_id": "pr1995-3829986403-unmatched",
+      "defect_id": 3829986403,
+      "expected": "unmatched",
+      "actual": "unmatched",
+      "reasoning": "The review covers focus refusal gating on the LOCK_HELD/GITHUB_ACTIONS env vars when locking is disabled. It does not mention the validator accepting multiple dispatch_gate_test_families calls."
+    },
+    {
+      "record_id": "pr1995-3830042123-matched",
+      "defect_id": 3830042123,
+      "expected": "matched",
+      "actual": "matched",
+      "reasoning": "The review describes the same problem: with --no-lock or AGENT_QUALITY_GATE_LOCK=0, lock acquisition returns early, so the focus guard never fires. GATE_TEST_FOCUS then lets a subset answer for the full gate."
+    },
+    {
+      "record_id": "pr1995-3830042128-unmatched",
+      "defect_id": 3830042128,
+      "expected": "unmatched",
+      "actual": "unmatched",
+      "reasoning": "The review covers focused tests that bypass the guard in lockless gate runs. It does not mention the hard-coded self-test path pin missing from the path-pin inventory."
+    },
+    {
+      "record_id": "pr1995-3830695396-matched",
+      "defect_id": 3830695396,
+      "expected": "matched",
+      "actual": "matched",
+      "reasoning": "Review flags that the doc says 'set' while the code rejects only non-empty values, and suggests 'non-empty' wording. That is the same core defect. The line numbers differ slightly and the review doesn't mention the 'reds' wording."
+    },
+    {
+      "record_id": "pr1995-3830695396-unmatched",
+      "defect_id": 3830695396,
+      "expected": "unmatched",
+      "actual": "unmatched",
+      "reasoning": "The review flags the prose near line 1143-1146, but its complaint is that the guard checks the wrong variable, so the claim about 'any command a real gate run spawns' is false. It never mentions the 'is set' vs 'is non-empty' mismatch or the 'reds the suite' wording."
+    },
+    {
+      "record_id": "pr1999-3830366243-matched",
+      "defect_id": 3830366243,
+      "expected": "matched",
+      "actual": "matched",
+      "reasoning": "Review flags that docs/notes/peg-monitoring.md still says Slack titles contain the summary while the change makes titles icon-only, and asks for the runbook to be updated. This is the same defect."
+    },
+    {
+      "record_id": "pr1999-3830366247-unmatched",
+      "defect_id": 3830366247,
+      "expected": "unmatched",
+      "actual": "unmatched",
+      "reasoning": "The review covers misleading 'Price source' copy for rules with an empty source label. It does not mention Error→Pending recoveries being ignored by the classifier or the history URL."
+    },
+    {
+      "record_id": "pr1999-3830366547-matched",
+      "defect_id": 3830366547,
+      "expected": "unmatched",
+      "actual": "unmatched",
+      "reasoning": "The review says it found 'one real bug' but never describes it. It does not identify error recovery leaving an earlier raised breach open."
+    },
+    {
+      "record_id": "pr1999-3830366556-unmatched",
+      "defect_id": 3830366556,
+      "expected": "unmatched",
+      "actual": "unmatched",
+      "reasoning": "The review discusses error-recovered-alerting not opening an alert cycle (missing duration). It does not raise Error→Pending→Alerting recovery leaving the error cycle unclosed, so it does not match the stuck 'monitoring failed' row."
+    },
+    {
+      "record_id": "pr1999-3830371307-matched",
+      "defect_id": 3830371307,
+      "expected": "unmatched",
+      "actual": "unmatched",
+      "reasoning": "The review only says alert-rules-lint.test.mjs passes. It does not mention unvalidated marker indexes, slice selecting unrelated text, or link checks searching the whole Terraform source."
+    },
+    {
+      "record_id": "pr1999-3830371315-matched",
+      "defect_id": 3830371315,
+      "expected": "matched",
+      "actual": "matched",
+      "reasoning": "The review flags the same problem at the same lines. The mocks share one consumable Response across the four companion fetches, so body reuse causes a 502 unrelated to the input under test."
+    },
+    {
+      "record_id": "pr1999-3830416461-unmatched",
+      "defect_id": 3830416461,
+      "expected": "unmatched",
+      "actual": "unmatched",
+      "reasoning": "The review discusses Alerting→Error→Normal cycle partitioning that leaves raised alerts open. It does not mention empty labels.source producing a mislabeled 'Price source' name for source-less rules."
+    },
+    {
+      "record_id": "pr2001-3830423746-matched",
+      "defect_id": 3830423746,
+      "expected": "unmatched",
+      "actual": "unmatched",
+      "reasoning": "The review flags only that the isZeroExposureStethSnapshot short-circuit at line 119 is duplicated, which is a structural concern. It never says that returning 0 combined with the previous-day baseline fallback produces a fabricated negative revenue spike."
+    },
+    {
+      "record_id": "pr2001-3830423746-unmatched",
+      "defect_id": 3830423746,
+      "expected": "unmatched",
+      "actual": "unmatched",
+      "reasoning": "The review covers isZeroWei crashing on non-string input. It does not mention that an unconditional 0 return, combined with the previous-snapshot baseline fallback, creates a false negative revenue spike."
+    },
+    {
+      "record_id": "pr2001-3830513980-unmatched",
+      "defect_id": 3830513980,
+      "expected": "unmatched",
+      "actual": "unmatched",
+      "reasoning": "The review is about isZeroWei crashing on non-string values. It does not mention that prior unrealized yield goes unsubtracted when a zero row follows a full transfer between tracked wallets."
+    },
+    {
+      "record_id": "pr1999-3830366234-matched",
+      "defect_id": 3830366234,
+      "expected": "matched",
+      "actual": "matched",
+      "reasoning": "Review states peg-rule-definitions.tftest.hcl:68-69 still asserts summary/resolved_summary in the Slack title but the new emoji-only template lacks both, causing terraform test failure."
+    },
+    {
+      "record_id": "pr1999-3830366247-matched",
+      "defect_id": 3830366247,
+      "expected": "matched",
+      "actual": "matched",
+      "reasoning": "Review identifies that Error→Pending recovery is ignored: errorStateHistoryUrl never requests current=Pending and transitionKind returns null for that pair, the same defect."
+    },
+    {
+      "record_id": "pr1999-3830416461-matched",
+      "defect_id": 3830416461,
+      "expected": "matched",
+      "actual": "matched",
+      "reasoning": "Review identifies the same issue at peg-alert-events.ts:230. When a rule has no source (Structural Saturation, Indexed Pool, Heartbeat, Policy Rollover), pegAlertSourceName(\"\") returns 'Price source', so the evaluation-failure copy is mislabeled."
+    },
+    {
+      "record_id": "pr1984-3828328194-matched",
+      "defect_id": 3828328194,
+      "expected": "matched",
+      "actual": "matched",
+      "reasoning": "The review names the same underlying problem. readFlag returns null when --refused-inventory-repo is omitted, and a JS default parameter only fires on undefined. The repo default is therefore bypassed and the links render as github.com/null."
+    },
+    {
+      "record_id": "pr1999-3830366547-replay-matched",
+      "defect_id": 3830366547,
+      "expected": "matched",
+      "actual": "matched",
+      "reasoning": "Review names the same Alerting → Error → Normal sequence in peg-alert-events.ts. It says only the error lane gets closed, so the alert cycle stays open and shows an active breach while Grafana is Normal."
+    },
+    {
+      "record_id": "pr1999-3830366556-pipeline-matched",
+      "defect_id": 3830366556,
+      "expected": "matched",
+      "actual": "matched",
+      "reasoning": "The review describes the same issue. An Error → Pending transition is neither fetched nor classified, so the error cycle never closes and a permanent 'Monitoring failed' event remains."
+    }
+  ]
+}

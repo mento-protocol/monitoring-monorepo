@@ -1,0 +1,100 @@
+{
+  "cell_id": "pr-2035-control-draw1",
+  "fingerprint": {
+    "skill_digest": "89f5bdf20356c5515974ec1a6112fc4f9dfbf31cf1d60b667084f91dfbe6ec60",
+    "kind": "full",
+    "contract_digest": "59b82ee3e6d7ccf2cfbe75cb11aa40e6ec93b92a754a992adee4a1a69166a259",
+    "claude_cli": "2.1.270 (Claude Code)",
+    "codex_cli": "codex-cli 0.154.0",
+    "finder_argv_digest": "40099c93f78800efefbc46f57772ae2cbadc86b378bdd22f474945abfd7b450c",
+    "orchestrator_digest": "fee8d511d838ad137aea62f0e6be7b5115383c59d4447ba985efb3e3c3fe48b1"
+  },
+  "treatment": {
+    "skill_ref": "installed",
+    "dirty": false
+  },
+  "pr": 2035,
+  "condition": "control",
+  "draw": 1,
+  "model": "claude-opus-5",
+  "effort": "high",
+  "finder": null,
+  "claims": [
+    "Resume permanently skips every address that errored, including the ones that trip the circuit breaker: tier1-bulk-enrich.mjs:809-813 puts every progress line with an `address` into `processed`, including `{address, error}` lines at :1036-1039 and :1043-1046, so they are never enriched despite the message at :966",
+    "The `--quota-floor` brake can miss by up to 499 lookups when the quota headers don't arrive: without `X-Intel-Datapoints-Remaining`, `quota.remaining` only updates every 500 addresses (:1058), and the check at :1000 compares against that stale number, which can use up the whole trial quota",
+    "Refreshes now drop the tags already stored on an entry: `buildWriteEntry` (tier1-bulk-enrich.mjs:726-729) and `mergeRefreshEntry` (src/lib/arkham.ts:374-376) put fresh tags first, and `sanitizeEntry` cuts to 20 before dedup, so existing (including human-added) tags are lost",
+    "The same ordering can push out `entity.type` in `toAddressEntry` (arkham.ts:241-242, tier1 :638-642): if the first chain has many tags and no entity, the type tag lands after position 20",
+    "Enriched results can be lost while still counting as done: the progress line is written at :1010 but the label is only saved to Upstash when a batch of 100 is flushed (:1012, :1052), so Ctrl-C, a crash, or an Upstash error loses up to ~100 paid lookups that resume treats as done",
+    "`flushWrites` removes the batch from the pending list (:921) before the write call, which can throw, losing the batch",
+    "Truncated discovery sources don't abort the run: a source hitting `HARD_PAGE_CAP` only logs a warning (:286), and the abort logic at :300 only counts sources that threw, so a partial set goes through as full coverage",
+    "Arkham key required for every stage: outside a dry run, `run.sh:76` treats a missing `ARKHAM_API_KEY` as fatal even for `verify`, `inspect`, `measure`, `mirror-to-blob` and `migrate-rename`, which never use it",
+    "Dry run can still die offline: with tfvars readable but no network, the Upstash management call (`run.sh:90-92`) fails its JSON parse and `set -e` kills the dry run, contradicting \"resolve credentials best-effort\""
+  ],
+  "matched_ids": [
+    3845594538,
+    3845596185,
+    3845618202
+  ],
+  "judge_reasoning": {
+    "3845594538": "Review #4 notes that flushWrites removes the batch from the pending list (:921) before the write call, which can throw, so already-paid results are lost on an Upstash error.",
+    "3845596185": "Review #5 says truncated HARD_PAGE_CAP sources only warn and are not counted by the abort logic, so a partial set passes as full coverage.",
+    "3845603922": "The review's run.sh points cover the Arkham key being required for every stage and the dry run dying offline. It never mentions tfvars key prefix matching.",
+    "3845603940": "Review #3 mentions slicing to 20 before dedup, but as part of refresh ordering dropping existing tags. It does not identify duplicates or blanks using up the cap and discarding later unique tags, so the underlying problem differs.",
+    "3845618202": "Review #3 says fresh Arkham tags come first and fill all 20 slots after the sanitize cap, so a refresh drops the existing tags."
+  },
+  "novel": {
+    "claims": 9,
+    "novelReal": 3,
+    "novelWrong": 1,
+    "novelVague": 1,
+    "restatedKnown": 4,
+    "alreadyMatched": 3,
+    "verdicts": {
+      "1": {
+        "class": "real",
+        "why": "Resume at tier1:809-813 adds every progress line with an address to processed, including the {address, error} lines at :1036-1039 and :1043-1046. So the addresses that tripped the new circuit breaker get skipped for good, even though :966 says the progress file resumes the queue."
+      },
+      "2": {
+        "class": "real",
+        "why": "With no Remaining header, quota.remaining only changes in logIntelUsage (:590-593), which runs every INTEL_USAGE_EVERY=500 (:103, :1058). The floor check at :1000 can therefore read a number up to 499 lookups old."
+      },
+      "3": {
+        "class": "known",
+        "why": "buildWriteEntry :726-729 puts fresh tags first, then sanitizeEntry cuts to 20, so existing tags are lost. This is the known 'Refresh wipes forensic tags' / 'Cap unique tags in both sanitizers' issue."
+      },
+      "4": {
+        "class": "vague",
+        "why": "The ordering at tier1:636-642 does add entity.type after earlier chains' tags. But the 20-tag cap is intentional, the same entity normally shows up on every EVM chain, and the ordering was already in arkham.ts. The claim names no real-world defect."
+      },
+      "5": {
+        "class": "known",
+        "why": "The progress line is written at :1010 before the batched flush at :1012/:1052. Losing a batch while resume counts it as done is the same as the known :997 'failed flush discards the pending batch and marks the addresses as processed'."
+      },
+      "6": {
+        "class": "known",
+        "why": "flushWrites splices at :921 before the pipeline call. This is the known :997 flushWrites batch-drop defect."
+      },
+      "7": {
+        "class": "known",
+        "why": "The cap only logs a warning at :286, and :300 only counts failed sources. This is the known HARD_PAGE_CAP / 'Abort when discovery reaches the hard page cap' defect."
+      },
+      "8": {
+        "class": "real",
+        "why": "run.sh:73-77 calls resolve ARKHAM_API_KEY without 'optional' for every stage that isn't a dry run. verify.mjs, inspect-hashes and measure-hash-bytes never read ARKHAM_API_KEY (grep), which goes against the header's 'a credential the stage needs' contract."
+      },
+      "9": {
+        "class": "wrong",
+        "why": "The dry run needs the network anyway: discoverAll fetches HASURA_URL (tier1:93, :200) before anything else. An offline dry run can't work whatever run.sh does, so there's no real contradiction."
+      }
+    }
+  },
+  "leak": {
+    "suspected": false,
+    "hard": [],
+    "advisory": []
+  },
+  "seconds": 197,
+  "usd": 1.4090340000000001,
+  "usd_metered": true,
+  "scoring_usd": 0.5384505
+}

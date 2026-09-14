@@ -52,6 +52,46 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+function durationSeconds(raw) {
+  const [, amount, unit] = raw.match(/^(\d+)([smh])$/) ?? [];
+  assert(amount, `unsupported duration: ${raw}`);
+  return Number(amount) * { s: 1, m: 60, h: 3600 }[unit];
+}
+
+function simulateRecoveryHold(samples, keepFiringFor, intervalSeconds = 60) {
+  let state = "Alerting";
+  let recoveringSince = null;
+  const transitions = [];
+  samples.forEach((isBreaching, index) => {
+    const at = index * intervalSeconds;
+    if (isBreaching) {
+      if (state === "Recovering") transitions.push([at, "Alerting"]);
+      state = "Alerting";
+      recoveringSince = null;
+      return;
+    }
+    if (state === "Alerting") {
+      state = "Recovering";
+      recoveringSince = at;
+      transitions.push([at, "Recovering"]);
+      return;
+    }
+    if (state === "Recovering" && at - recoveringSince >= keepFiringFor) {
+      state = "Normal";
+      transitions.push([at, "Normal"]);
+    }
+  });
+  return transitions;
+}
+
+function resolvesAsMissingSeries(samples, evaluationsToResolve) {
+  let consecutiveMissing = 0;
+  return samples.some((isPresent) => {
+    consecutiveMissing = isPresent ? 0 : consecutiveMissing + 1;
+    return consecutiveMissing >= evaluationsToResolve;
+  });
+}
+
 function extractBlockAt(source, startIndex) {
   const openBrace = source.indexOf("{", startIndex);
   assert(openBrace >= 0, "block opening brace not found");
@@ -1919,18 +1959,121 @@ test("flap-prone criticals keep incidents open across short recoveries", () => {
     "Oldest Report Expired should absorb relayer catch-up cycles for 30m",
   );
 
-  // The banded depletion tiers are the exception, and it is load-bearing. A
-  // hold on either band keeps it firing while a pool crosses into the other,
-  // which is exactly the double notification the partition exists to prevent.
-  for (const namePattern of [
+  const criticalRule = ruleBlockNamed(
+    fpmmRules,
     /\bname\s*=\s*"Pool Depletion Risk"/,
+  );
+  const pageRule = ruleBlockNamed(
+    fpmmRules,
     /\bname\s*=\s*"Pool Nearly One-Sided"/,
+  );
+  assert(
+    !/\bkeep_firing_for\s*=/.test(criticalRule),
+    "Pool Depletion Risk must resolve immediately when it crosses into the page band",
+  );
+  assert(
+    /\bkeep_firing_for\s*=\s*"2m"/.test(pageRule),
+    "Pool Nearly One-Sided must require two continuously healthy minutes before resolving",
+  );
+  assert(
+    /\bmissing_series_evals_to_resolve\s*=\s*2\b/.test(pageRule),
+    "Pool Nearly One-Sided must also require two missing-series evaluations before resolving",
+  );
+  for (const [annotation, copy] of [
+    [
+      "non_threshold_resolved_title",
+      "Pool Alert Stopped Without Recovery Confirmation",
+    ],
+    [
+      "non_threshold_resolved_summary",
+      "This does not confirm that the pool recovered.",
+    ],
   ]) {
     assert(
-      !/\bkeep_firing_for\s*=/.test(ruleBlockNamed(fpmmRules, namePattern)),
-      `${namePattern} must NOT hold its incident open — a held band double-notifies with its neighbour on every tier crossing`,
+      new RegExp(`\\b${annotation}\\s*=\\s*"[^"]*${copy}`).test(pageRule),
+      `Pool Nearly One-Sided must supply ${annotation} to the notification templates`,
     );
   }
+});
+
+test("one healthy depletion evaluation cannot resolve and reopen a 100/0 page", () => {
+  const fpmmRules = readFileSync(
+    path.resolve(repoRoot, "alerts/rules/rules-fpmms.tf"),
+    "utf8",
+  );
+  const mainRules = readFileSync(
+    path.resolve(repoRoot, "alerts/rules/main.tf"),
+    "utf8",
+  );
+  const pageRule = ruleBlockNamed(
+    fpmmRules,
+    /\bname\s*=\s*"Pool Nearly One-Sided"/,
+  );
+  const [, hold] = pageRule.match(/\bkeep_firing_for\s*=\s*"([^"]+)"/) ?? [];
+  assert(hold, "Pool Nearly One-Sided must declare a recovery hold");
+  const keepSeconds = durationSeconds(hold);
+
+  const transient = simulateRecoveryHold(
+    [0, 0.5, 0].map((share) => share < 0.1),
+    keepSeconds,
+  );
+  assert(
+    !transient.some(([, state]) => state === "Normal"),
+    `100/0 -> transient healthy -> 100/0 must not resolve: ${JSON.stringify(transient)}`,
+  );
+
+  const sustained = simulateRecoveryHold(
+    [0, 0.5, 0.5, 0.5].map((share) => share < 0.1),
+    keepSeconds,
+  );
+  assert(
+    JSON.stringify(sustained) ===
+      JSON.stringify([
+        [60, "Recovering"],
+        [180, "Normal"],
+      ]),
+    `recovery must require two full healthy minutes: ${JSON.stringify(sustained)}`,
+  );
+
+  const criticalPendingSeconds = durationSeconds(
+    ruleBlockNamed(fpmmRules, /\bname\s*=\s*"Pool Depletion Risk"/).match(
+      /\bfor\s*=\s*"([^"]+)"/,
+    )?.[1] ?? "",
+  );
+  assert(
+    keepSeconds < criticalPendingSeconds,
+    "the page recovery hold must expire before the adjacent critical tier can finish pending",
+  );
+  assert(
+    /pool_depletion_critical_active_promql\s*=\s*"[^"]*< 0\.1\) \* 0 \+ 1\)/.test(
+      mainRules,
+    ),
+    "known page-band samples must emit a non-breaching critical value instead of MissingSeries",
+  );
+  const oscillatingShares = Array.from({ length: 20 }, (_, index) =>
+    index % 2 === 0 ? 0.15 : 0.05,
+  );
+  let consecutiveCriticalSeconds = 0;
+  assert(
+    !oscillatingShares.some((share) => {
+      consecutiveCriticalSeconds =
+        share >= 0.1 && share < 0.2 ? consecutiveCriticalSeconds + 60 : 0;
+      return consecutiveCriticalSeconds >= criticalPendingSeconds;
+    }),
+    "alternating critical/page evaluations must reset critical Pending before it can fire",
+  );
+
+  const [, missingSeriesEvalsRaw] =
+    pageRule.match(/\bmissing_series_evals_to_resolve\s*=\s*(\d+)/) ?? [];
+  const missingSeriesEvals = Number(missingSeriesEvalsRaw);
+  assert(
+    !resolvesAsMissingSeries([false, true], missingSeriesEvals),
+    "one missing evaluation followed by the 100/0 series returning must not resolve",
+  );
+  assert(
+    resolvesAsMissingSeries([false, false], missingSeriesEvals),
+    "two continuously missing evaluations should resolve with neutral MissingSeries copy",
+  );
 });
 
 test("pool transition Slack titles render recovery events as resolved", () => {
@@ -2342,6 +2485,24 @@ test("pool pages deliver through one bundled contact point, never the policy tre
   assert(
     /\blocal\.notify_page_pool\b/.test(pageRule),
     "a page-severity fpmms rule still needs rule-level notification_settings",
+  );
+  assert(
+    [
+      ...fpmmRules.matchAll(
+        /\bcontact_point\s*=\s*local\.notify_page_pool\.contact_point\b/g,
+      ),
+    ].length === 1,
+    "Pool Nearly One-Sided must remain the sole rule on pool_page while its Slack title reads CommonAnnotations",
+  );
+  assert(
+    contactPoints.includes('eq .Labels.alertname "Pool Nearly One-Sided"'),
+    "the resolved-value suppression guard must stay coupled to the one-sided page rule name",
+  );
+  assert(
+    contactPoints.includes(
+      "$nonThresholdResolution := and $isResolved $isOneSidedPoolPage",
+    ),
+    "the shared Slack fallback must stay scoped to the one-sided page rule",
   );
 
   const stripped = stripComments(contactPoints);
