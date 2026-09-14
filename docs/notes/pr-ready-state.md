@@ -249,8 +249,7 @@ precedence:
 The gate also reports `requestCount` and `requestBudget`, which is 2. The grace
 wait reads the observation time and the head update time, so a probe run
 immediately after a push reports a wait rather than a request. A bare trusted
-request counts against the budget like a marked one; if someone already asked
-in the last hour, do not ask again.
+request counts against the budget like a marked one.
 
 **Then wait for the closeout attempt before the final sweep.** Once the request
 is posted, the signal sits at `requested` and readiness will not hold it —
