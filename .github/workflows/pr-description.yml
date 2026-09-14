@@ -13,9 +13,11 @@ name: PR Description
 # verdict is a function of `github.event.pull_request.body` plus a base-ref
 # copy of the validator, so it is head-independent and `synchronize` cannot
 # change it — dropped below. No workflow-level `paths:` filter is added:
-# the check reads the body, not the diff. A title-only or base-only `edited`
-# event skips the job via the `changes.body` guard below rather than
-# re-validating an unchanged body. Promoting this check to required needs
+# the check reads the body, not the diff. A title-only `edited` event skips
+# the job via the `changes.body`/`changes.base` guard below rather than
+# re-validating an unchanged body; a base-change `edited` event still runs,
+# since retargeting to `main` can be the only event a PR ever gets.
+# Promoting this check to required needs
 # `synchronize` restored in the same change. Draft PRs and Dependabot PRs
 # are skipped.
 
@@ -35,11 +37,12 @@ jobs:
   check:
     name: PR description format
     # Skip drafts (work-in-progress), Dependabot (auto-generated bodies), and
-    # an `edited` event that did not touch the body (title/base-only edits).
+    # a title-only `edited` event (body and base unchanged).
     if: >-
       github.event.pull_request.draft == false &&
       github.event.pull_request.user.login != 'dependabot[bot]' &&
-      (github.event.action != 'edited' || github.event.changes.body != null)
+      (github.event.action != 'edited' || github.event.changes.body != null ||
+        github.event.changes.base != null)
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     steps:
       - name: Checkout trusted validator
