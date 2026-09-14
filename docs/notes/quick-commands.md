@@ -66,7 +66,9 @@ pnpm docs:navigation-eval -- --validate <result.json>  # Recompute authority, ev
 pnpm ci:contract:test             # Test fixed CI, protected no-skip admission and drift, cache, base, and aggregate contracts
 bash scripts/bootstrap/agent-setup-contract.test.sh  # Test retained SessionEnd, setup-marker, and package-policy behavior
 node --test scripts/indexer-handler-invariant-contract.test.mjs  # Test retained indexer handler invariant owners and schema
-# M6 canary collection selects PRs after CI; see ADR 0088. No per-PR request is needed.
+# M6 automatic collection stays disabled during approved manual recovery.
+# ADR 0098 owns the finite merged-PR recovery commands and budget guards.
+# ADR 0088 owns normal automatic collection; do not run both lanes together.
 # Manual recovery only: disable/drain m6-canary.yml and reconcile its reservations/spend first.
 # For an approved manual #2128 proof, read the current immutable inputs:
 gh pr view <pr> --repo mento-protocol/monitoring-monorepo --json number,state,headRefOid,baseRefName,baseRefOid,headRepositoryOwner
