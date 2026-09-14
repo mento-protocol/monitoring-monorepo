@@ -9,8 +9,11 @@
  * Runs as a `github-script` step (ci-reliability-report.yml; same shape as
  * collect-m6-canary.mjs), so pagination/auth come from the injected Octokit
  * client. Per-run job/step data costs one call per run, so it is sampled at
- * random, at most SAMPLE_PER_STRATUM runs per event, for the two workflows in
- * JOB_FANOUT_WORKFLOWS; per-workflow run counts and rates cover every run.
+ * random, at most SAMPLE_PER_STRATUM `pull_request` runs, for the two
+ * workflows in JOB_FANOUT_WORKFLOWS — `push`/`workflow_call` runs are a small,
+ * uneven fraction of `CI`'s volume, so mixing them into one merged sample
+ * would weight the rare event as heavily as the dominant one; per-workflow
+ * run counts and rates still cover every event and every run.
  *
  * Caps are parsed from every workflow YAML file, keyed by workflow `name:` +
  * job `name:`. This does NOT import EXPECTED_TIMEOUTS from
@@ -182,7 +185,12 @@ function jobDuration(job) {
 /**
  * Cancelled/failed jobs whose wall duration is at/above their own cap — a job
  * cannot exceed `timeout-minutes` except by being killed at it, so this is an
- * exact classifier, not a heuristic band.
+ * exact classifier, not a heuristic band, GIVEN the cap it is compared
+ * against. `caps` is read from the current checkout, not from the workflow
+ * revision each sampled run actually executed under, so a `timeout-minutes`
+ * edit inside the 30-day window can misclassify the runs on the other side of
+ * that edit. Accepted for an advisory, human-reviewed report: resolving each
+ * run's own historical cap would cost one more API call per sampled run.
  */
 // prettier-ignore
 export function capKills(jobs, caps) {
@@ -234,7 +242,7 @@ const table = (header, rows, empty) =>
 // prettier-ignore
 export function formatMarkdownReport(report) {
   const sampleLine = report.sampleInfo.length
-    ? `Per-job duration, step minutes, cap comparisons, and failing-step rates sample at most ${SAMPLE_PER_STRATUM} runs per event for ${[...JOB_FANOUT_WORKFLOWS].join(" and ")}: ${report.sampleInfo.map((s) => `${s.workflow} ${s.sampledRuns} of ${s.totalRuns} runs`).join(", ")}.`
+    ? `Per-job duration, step minutes, cap comparisons, and failing-step rates sample at most ${SAMPLE_PER_STRATUM} \`pull_request\` runs for ${[...JOB_FANOUT_WORKFLOWS].join(" and ")}: ${report.sampleInfo.map((s) => `${s.workflow} ${s.sampledRuns} of ${s.totalRuns} pull_request runs`).join(", ")}.`
     : "No sampled workflow matched the job-fanout list.";
   return [
     "## CI health report",
@@ -320,27 +328,58 @@ export function runQueryWindows(sinceIso, nowIso = new Date().toISOString(), cou
   return Array.from({ length: count }, (_, i) => [new Date(start + i * step).toISOString(), i === count - 1 ? nowIso : new Date(start + (i + 1) * step).toISOString()]);
 }
 
+export const RUN_QUERY_SOFT_CAP = 900; // bisect a range that gets this close to the practical per-query result cap
+const RUN_QUERY_MIN_RANGE_MS = 3600000; // stop bisecting below one hour: below this, a real cap-hit is implausible
+const RUN_QUERY_MAX_DEPTH = 4; // bisection depth bound so a pathological case cannot fan out unbounded requests
+
+/**
+ * Fetch one `created:from..to` range and bisect it if the result count gets
+ * close enough to the practical per-query cap that older rows in that exact
+ * range could be silently missing — a fixed window count alone cannot rule
+ * this out during a burst (a dependency wave, a bot-driven spree) or future
+ * volume growth.
+ */
+// prettier-ignore
+async function fetchRunsForRange({ github, owner, repo, workflowId, from, to, depth = 0 }) {
+  const runs = await github.paginate(github.rest.actions.listWorkflowRuns, { owner, repo, workflow_id: workflowId, created: `${from}..${to}`, per_page: 100 });
+  if (runs.length < RUN_QUERY_SOFT_CAP || depth >= RUN_QUERY_MAX_DEPTH || Date.parse(to) - Date.parse(from) < RUN_QUERY_MIN_RANGE_MS) return runs;
+  const mid = new Date((Date.parse(from) + Date.parse(to)) / 2).toISOString();
+  const [head, tail] = await Promise.all([
+    fetchRunsForRange({ github, owner, repo, workflowId, from, to: mid, depth: depth + 1 }),
+    fetchRunsForRange({ github, owner, repo, workflowId, from: mid, to, depth: depth + 1 }),
+  ]);
+  return [...head, ...tail];
+}
+
 // prettier-ignore
 async function fetchRunsForWorkflow({ github, owner, repo, workflowId, workflowName, sinceIso, nowIso }) {
   const byId = new Map();
   for (const [from, to] of runQueryWindows(sinceIso, nowIso)) {
-    const runs = await github.paginate(github.rest.actions.listWorkflowRuns, { owner, repo, workflow_id: workflowId, created: `${from}..${to}`, per_page: 100 });
+    const runs = await fetchRunsForRange({ github, owner, repo, workflowId, from, to });
     for (const run of runs) byId.set(run.id, { workflow: workflowName, event: run.event, conclusion: run.conclusion, run_attempt: run.run_attempt, id: run.id, created_at: run.created_at, updated_at: run.updated_at });
   }
   return [...byId.values()];
 }
 
+/**
+ * Sample only `pull_request` runs, not every event mixed together: `CI` also
+ * runs on `push` and `workflow_call`, at a fraction of the volume, and
+ * independent per-event sampling (each stratum capped at `sampleSize`) would
+ * otherwise weight a rare event as heavily as the dominant one once merged.
+ * `filter: "all"` on the jobs call includes every attempt, not just the
+ * latest — the API defaults to latest-only, which would hide the failed
+ * first attempt of exactly the runs `run_attempt > 1` counts as retried.
+ */
 // prettier-ignore
 async function fetchSampledJobs({ github, owner, repo, workflowName, runs, sampleSize }) {
-  const byEvent = new Map();
-  for (const run of runs) byEvent.set(run.event, [...(byEvent.get(run.event) ?? []), run]);
-  const sampled = [...byEvent.values()].flatMap((list) => sampleRandom(list, sampleSize));
+  const pullRequestRuns = runs.filter((run) => run.event === "pull_request");
+  const sampled = sampleRandom(pullRequestRuns, sampleSize);
   const jobs = [];
   for (const run of sampled) {
-    const runJobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, { owner, repo, run_id: run.id, per_page: 100 });
+    const runJobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, { owner, repo, run_id: run.id, filter: "all", per_page: 100 });
     for (const job of runJobs) jobs.push({ ...job, workflow: workflowName, run_id: run.id });
   }
-  return { jobs, sampledRunCount: sampled.length };
+  return { jobs, sampledRunCount: sampled.length, totalEventRuns: pullRequestRuns.length };
 }
 
 /**
@@ -363,9 +402,9 @@ export async function collectCiHealthReport({ github, context, core, root = proc
     const runs = await fetchRunsForWorkflow({ github, owner, repo, workflowId: workflow.id, workflowName: workflow.name, sinceIso, nowIso });
     allRuns.push(...runs);
     if (JOB_FANOUT_WORKFLOWS.has(workflow.name)) {
-      const { jobs, sampledRunCount } = await fetchSampledJobs({ github, owner, repo, workflowName: workflow.name, runs, sampleSize: SAMPLE_PER_STRATUM });
+      const { jobs, sampledRunCount, totalEventRuns } = await fetchSampledJobs({ github, owner, repo, workflowName: workflow.name, runs, sampleSize: SAMPLE_PER_STRATUM });
       sampledJobs.push(...jobs);
-      sampleInfo.push({ workflow: workflow.name, sampledRuns: sampledRunCount, totalRuns: runs.length });
+      sampleInfo.push({ workflow: workflow.name, sampledRuns: sampledRunCount, totalRuns: totalEventRuns });
     }
   }
 

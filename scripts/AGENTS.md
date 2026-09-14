@@ -12,11 +12,11 @@ garden_lane: agent-entry-points
 
 # AGENTS.md — Scripts
 
-Read the relevant [ADR](../docs/adr/README.md) before changing script behavior.
+Read the relevant [ADR](../docs/adr/README.md) first.
 
 ## Scope
 
-`scripts/` holds repository tools.
+Repository tools.
 
 ## Layout
 
@@ -53,7 +53,7 @@ validators. Inventories, pinned hashes, and identities stay with their domain.
 
 ## Why Files Stay Flat
 
-Move each pin class with its files.
+Move each pin class together.
 
 - **Gate routing pins.** Stub-repo tests require
   `$script_source_dir == $repo_root/scripts`.
@@ -110,7 +110,8 @@ Move each pin class with its files.
   The CI test imports `workflows/collect-m6-canary.test.mjs` for temporary M6
   collection coverage. The no-skip admission excludes
   `workflows/collect-m6-canary.mjs`, its workflow, and the CI contract entry
-  points from candidate changes (ADR 0088).
+  points from candidate changes (ADR 0088). `ci.yml` also pins
+  `report-ci-reliability{,.test}.mjs` (ADR 0099).
 - **Terraform stack registry.** `terraform.stacks.json` `changedPathPatterns`
   pins exact `scripts/` paths per stack. The broad workflow admission boundary
   covers the directory; `pnpm tf:test` enforces subsumption.
@@ -132,18 +133,18 @@ Move each pin class with its files.
   EOL; `UPSTASH_MCP_LAUNCHER_SHA256` hashes it. Moves change both. See
   [`docs/notes/upstash-mcp-operator.md`](../docs/notes/upstash-mcp-operator.md).
 
-**List every new `scripts/` path pin here.**
+**List new `scripts/` path pins here.**
 
 ## Sweep Checklist for a Move
 
 Apply every item in
 [ADR 0064's move checklist](../docs/adr/0064-scripts-module-directories.md#sweep-checklist-for-a-move)
-in the same PR.
+in one PR.
 
 ## Operating Rules
 
 - Shell entrypoints use `set -euo pipefail`, or `set -Eeuo pipefail` when an
-  `ERR` trap needs inheritance. Source-only helpers leave shell options to their
+  `ERR` trap needs inheritance. Source-only helpers leave options to their
   caller.
 - Parse JSON with Node, jq, or structured tooling, never grep or sed.
 - Compact/watch scripts keep machine state and cadence metadata separate from
@@ -154,7 +155,7 @@ in the same PR.
   deployment; use it through the `deploy-indexer` skill after its clean-tree
   preflight, verification, and production approval.
 - Only `deploy-indexer.sh`'s isolated `envio` trigger-ref push may use
-  `--no-verify`. Never use it in developer Git commands.
+  `--no-verify`. Never use it in developer commands.
 - New deploy scripts print target, commit, and rollback/verification around
   mutation.
 - Run `pnpm lint:scripts` for new Node root scripts and `bash -n` for new shell

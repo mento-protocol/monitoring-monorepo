@@ -18,6 +18,7 @@ import {
   capFor,
   percentile,
   RUN_QUERY_WINDOWS,
+  RUN_QUERY_SOFT_CAP,
   runQueryWindows,
   wallDurationPercentiles,
   summarizeRunRates,
@@ -374,7 +375,7 @@ test("formatMarkdownReport: every section renders with units, and empty sections
   const body = formatMarkdownReport(report);
   assert.match(body, /## CI health report/);
   assert.match(body, /2026-08-15 to 2026-09-14/);
-  assert.match(body, /40 of 1084 runs/);
+  assert.match(body, /40 of 1084 pull_request runs/);
   assert.match(body, /p50 5\.7 min, p90 8\.4 min, over 854 runs/);
   assert.match(body, /5\.9%/);
   assert.match(body, /21\.3%/);
@@ -617,6 +618,73 @@ test("collectCiHealthReport samples only JOB_FANOUT_WORKFLOWS and covers every r
   );
 });
 
+test("collectCiHealthReport samples only pull_request runs within CI, and requests every job attempt", async () => {
+  await withFixtureRoot(
+    { "ci.yml": "name: CI\njobs:\n  scripts:\n" },
+    async (root) => {
+      const workflows = [{ id: 1, name: "CI" }];
+      const runsByWorkflow = {
+        1: [
+          {
+            id: 101,
+            event: "pull_request",
+            conclusion: "success",
+            run_attempt: 2,
+          },
+          { id: 102, event: "push", conclusion: "success", run_attempt: 1 },
+        ],
+      };
+      const jobsForRunParams = [];
+      const github = {
+        paginate: async (_method, params) => {
+          if (params.workflow_id !== undefined)
+            return runsByWorkflow[params.workflow_id] ?? [];
+          if (params.run_id !== undefined) {
+            jobsForRunParams.push(params);
+            // Only run 101 (pull_request) should ever be asked for.
+            return params.run_id === 101
+              ? [
+                  {
+                    name: "scripts",
+                    conclusion: "success",
+                    started_at: "2026-01-01T00:00:00Z",
+                    completed_at: "2026-01-01T00:05:00Z",
+                    steps: [],
+                  },
+                ]
+              : [];
+          }
+          return workflows;
+        },
+        rest: {
+          actions: {
+            listRepoWorkflows: "l",
+            listWorkflowRuns: "l",
+            listJobsForWorkflowRun: "l",
+          },
+          issues: {
+            listForRepo: "l",
+            create: async () => ({ data: { number: 1, html_url: "u" } }),
+          },
+        },
+      };
+      const context = { repo: { owner: "o", repo: "r" } };
+      const result = await collectCiHealthReport({
+        github,
+        context,
+        core: undefined,
+        root,
+      });
+      assert.equal(jobsForRunParams.length, 1);
+      assert.equal(jobsForRunParams[0].run_id, 101);
+      assert.equal(jobsForRunParams[0].filter, "all");
+      assert.equal(result.report.sampleInfo[0].sampledRuns, 1);
+      assert.equal(result.report.sampleInfo[0].totalRuns, 1);
+      assert.equal(result.report.perJobDuration.length, 1);
+    },
+  );
+});
+
 test("collectCiHealthReport queries runs in RUN_QUERY_WINDOWS ranges and deduplicates a run returned by more than one window", async () => {
   await withFixtureRoot(
     { "ci.yml": "name: CI\njobs:\n  scripts:\n" },
@@ -665,6 +733,72 @@ test("collectCiHealthReport queries runs in RUN_QUERY_WINDOWS ranges and dedupli
       assert.equal(
         result.report.perWorkflow.find((r) => r.workflow === "CI").runs,
         1,
+      );
+    },
+  );
+});
+
+test("collectCiHealthReport bisects a range that reaches RUN_QUERY_SOFT_CAP instead of trusting it as complete", async () => {
+  await withFixtureRoot(
+    { "ci.yml": "name: CI\njobs:\n  scripts:\n" },
+    async (root) => {
+      const workflows = [{ id: 1, name: "CI" }];
+      let queryCount = 0;
+      const github = {
+        paginate: async (_method, params) => {
+          if (params.workflow_id !== undefined) {
+            queryCount += 1;
+            const [from, to] = params.created.split("..");
+            const widthMs = Date.parse(to) - Date.parse(from);
+            // The 5 outer RUN_QUERY_WINDOWS ranges are 6 days wide; a
+            // bisected half is ~3 days. Only the wide, un-split range
+            // reports a suspiciously full page, forcing exactly one split.
+            if (widthMs > 4 * 86400000) {
+              return Array.from({ length: RUN_QUERY_SOFT_CAP }, (_, i) => ({
+                id: `${from}-full-${i}`,
+                event: "pull_request",
+                conclusion: "success",
+                run_attempt: 1,
+              }));
+            }
+            return [
+              {
+                id: `${from}-half`,
+                event: "pull_request",
+                conclusion: "success",
+                run_attempt: 1,
+              },
+            ];
+          }
+          if (params.run_id !== undefined) return [];
+          return workflows;
+        },
+        rest: {
+          actions: {
+            listRepoWorkflows: "l",
+            listWorkflowRuns: "l",
+            listJobsForWorkflowRun: "l",
+          },
+          issues: {
+            listForRepo: "l",
+            create: async () => ({ data: { number: 1, html_url: "u" } }),
+          },
+        },
+      };
+      const context = { repo: { owner: "o", repo: "r" } };
+      const result = await collectCiHealthReport({
+        github,
+        context,
+        core: undefined,
+        root,
+      });
+      // One outer-window query plus two bisected-half queries, per window —
+      // the full-width query's own 900 rows are discarded in favor of the
+      // two halves, which is why the final count is 2 per window, not 900+2.
+      assert.equal(queryCount, RUN_QUERY_WINDOWS * 3);
+      assert.equal(
+        result.report.perWorkflow.find((r) => r.workflow === "CI").runs,
+        RUN_QUERY_WINDOWS * 2,
       );
     },
   );
