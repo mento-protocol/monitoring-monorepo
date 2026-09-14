@@ -248,8 +248,8 @@ importers:
         specifier: ^11.2.1
         version: 11.2.1
       env-schema:
-        specifier: ^7.0.0
-        version: 7.0.0
+        specifier: ^8.0.0
+        version: 8.0.0
     devDependencies:
       '@eslint/js':
         specifier: ^9.39.1
@@ -6132,6 +6132,9 @@ packages:
 
   env-schema@7.0.0:
     resolution: {integrity: sha512-b8rdAwdFpekDxNAUNuT6KbV/QEX/pTBs0gjehEPmBUUteh9zBDm9zxFSQt55D29odo3rJt4feoWRqn4U/tzicw==}
+
+  env-schema@8.0.0:
+    resolution: {integrity: sha512-BBF/xWtTC9MeNfJONdC//oL5Gjl+rVN5lvrSVEltWjh5uJ/UXoSLN/ddn5k023yYC68mCqhGIuu5CXNTAF8CPA==}
 
   envio-cloud@1.0.0:
     resolution: {integrity: sha512-6oJ62ZeB2djKUN/2WuMyRZ18HWbp04jXKduMp37+CLycXKxcM1/P1V1wzgaea/UnyswwFc1BuYdO6gkQwU7YXg==}
@@ -16334,6 +16337,10 @@ snapshots:
   env-schema@7.0.0:
     dependencies:
       ajv: 8.18.0
+
+  env-schema@8.0.0:
+    dependencies:
+      ajv: 8.20.0
 
   envio-cloud@1.0.0:
     optionalDependencies:
