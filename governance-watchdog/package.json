@@ -49,7 +49,7 @@
     "@google-cloud/functions-framework": "5.0.5",
     "@google-cloud/secret-manager": "7.0.0",
     "@discordjs/builders": "1.14.1",
-    "env-schema": "7.0.0",
+    "env-schema": "8.0.0",
     "viem": "2.56.3"
   },
   "devDependencies": {
