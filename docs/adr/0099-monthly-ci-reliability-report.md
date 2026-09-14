@@ -38,7 +38,7 @@ not display name, and does not cover any other workflow.
 ## Decision
 
 `.github/workflows/ci-reliability-report.yml` runs monthly (and on manual
-dispatch), `read-only` (`permissions: {}` at the workflow level; the job
+dispatch), least-privilege (`permissions: {}` at the workflow level; the job
 grants itself `actions: read`, `contents: read`, `issues: write`), on
 `blacksmith-2vcpu-ubuntu-2404-arm`, following the `file-size-watchlist.yml`
 scheduling shape (ADR 0059) and the `m6-canary.yml` `github-script` shape for
@@ -97,8 +97,9 @@ than 1% of sampled runs by distinct run.
 
 ## Consequences
 
-- One new scheduled read-only job per month (~1 boot, single-digit
-  job-minutes); no change to `ci.yml` or any required check.
+- One new scheduled job/month (~1 boot). `ci.yml`'s `scripts` job gains one
+  `node --test` step for the reporter's tests, rotating `CI_GRAPH_HASH`; no
+  new required check.
 - The report is the first recurring measurement of CI retries, cancellations,
   and per-step time in this repository; a stale audit figure like the one
   that motivated this ADR should surface within a month instead of going

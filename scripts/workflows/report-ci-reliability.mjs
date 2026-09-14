@@ -48,6 +48,12 @@ export const DEFAULT_CAP_MINUTES = 360;
 export const JOB_FANOUT_WORKFLOWS = new Set(["CI", "PR Description"]);
 export const SAMPLE_PER_STRATUM = 60;
 export const CAP_NEAR_RATIO = 0.8; // "within 20% of the cap"
+// Row caps keep the issue body under GitHub's 65,536-character limit even
+// during a repo-wide slowdown, when many jobs cross the near-cap ratio at
+// once — the report must not fail its own upsert exactly when it matters most.
+export const MAX_PER_JOB_ROWS = 40;
+export const MAX_NEAR_CAP_ROWS = 25;
+export const MAX_CAP_KILL_ROWS = 25;
 
 const mins = (ms) => ms / 60000;
 
@@ -107,17 +113,21 @@ export function percentile(values, p) {
 }
 
 /**
- * Whole-run wall-clock p50/p90 in minutes (`created_at` -> `updated_at`) for
- * one workflow's runs of one event, e.g. `CI` `pull_request` — the metric the
- * per-job duration table cannot answer, and the one the budget in
+ * Whole-run wall-clock p50/p90 in minutes (`run_started_at` -> `updated_at`)
+ * for one workflow's runs of one event, e.g. `CI` `pull_request` — the metric
+ * the per-job duration table cannot answer, and the one the budget in
  * docs/pr-checklists/ci-workflow-gates.md compares month over month. Costs no
- * extra API call: both timestamps are already on every run-listing row.
+ * extra API call: both timestamps are already on every run-listing row. Uses
+ * `run_started_at`, not `created_at`: for a re-run, `created_at` is the first
+ * attempt's creation while `updated_at` is the last attempt's end, so a
+ * `created_at` start folds the idle gap between attempts into the duration
+ * and inflates exactly the retried runs that land in the p90 tail.
  */
 // prettier-ignore
 export function wallDurationPercentiles(runs, { workflow, event }) {
   const durations = runs
-    .filter((run) => run.workflow === workflow && run.event === event && run.created_at && run.updated_at)
-    .map((run) => mins(Date.parse(run.updated_at) - Date.parse(run.created_at)));
+    .filter((run) => run.workflow === workflow && run.event === event && (run.run_started_at ?? run.created_at) && run.updated_at)
+    .map((run) => mins(Date.parse(run.updated_at) - Date.parse(run.run_started_at ?? run.created_at)));
   return { samples: durations.length, p50Minutes: percentile(durations, 50), p90Minutes: percentile(durations, 90) };
 }
 
@@ -171,8 +181,10 @@ export function stepMinutesByTotal(jobs, { workflow }) {
       totals.set(key, list);
     }
   }
-  return [...totals.entries()]
-    .map(([step, durations]) => ({ step, totalMinutes: durations.reduce((a, b) => a + b, 0), executions: durations.length, medianMinutes: percentile(durations, 50) }))
+  const rows = [...totals.entries()].map(([step, durations]) => ({ step, totalMinutes: durations.reduce((a, b) => a + b, 0), executions: durations.length, medianMinutes: percentile(durations, 50) }));
+  const allMinutes = rows.reduce((a, r) => a + r.totalMinutes, 0);
+  return rows
+    .map((r) => ({ ...r, share: allMinutes > 0 ? r.totalMinutes / allMinutes : 0 }))
     .sort((a, b) => b.totalMinutes - a.totalMinutes);
 }
 
@@ -260,25 +272,25 @@ export function formatMarkdownReport(report) {
     "",
     table(["| Workflow | Runs | Attempt>1 rate | Cancellation rate |", "| --- | ---: | ---: | ---: |"], report.perWorkflow.map((r) => `| ${r.workflow} | ${r.runs} | ${pct(r.attemptGt1Rate)} | ${pct(r.cancelRate)} |`), "No runs in the window."),
     "",
-    "### Per-job duration and queue time in minutes (sampled)",
+    `### Per-job duration and queue time in minutes (sampled, top ${MAX_PER_JOB_ROWS} by p90 duration)`,
     "",
     table(
       ["| Workflow | Job | Samples | p50 duration | p90 duration | p50 queue | p90 queue |", "| --- | --- | ---: | ---: | ---: | ---: | ---: |"],
-      report.perJobDuration.map((r) => `| ${r.workflow} | ${r.job} | ${r.samples} | ${durationText(r.p50Minutes)} | ${durationText(r.p90Minutes)} | ${durationText(r.queueP50Minutes)} | ${durationText(r.queueP90Minutes)} |`),
+      [...report.perJobDuration].sort((a, b) => (b.p90Minutes ?? 0) - (a.p90Minutes ?? 0)).slice(0, MAX_PER_JOB_ROWS).map((r) => `| ${r.workflow} | ${r.job} | ${r.samples} | ${durationText(r.p50Minutes)} | ${durationText(r.p90Minutes)} | ${durationText(r.queueP50Minutes)} | ${durationText(r.queueP90Minutes)} |`),
       "No sampled jobs.",
     ),
     "",
-    "### CI step minutes, ranked by total (sampled, top 15)",
+    "### CI step minutes across the sampled runs, ranked by total (top 15)",
     "",
-    table(["| Job › step | Total minutes | Executions | Median minutes |", "| --- | ---: | ---: | ---: |"], report.stepMinutes.slice(0, 15).map((r) => `| ${r.step} | ${r.totalMinutes.toFixed(1)} min | ${r.executions} | ${durationText(r.medianMinutes)} |`), "No sampled CI steps."),
+    table(["| Job › step | Total minutes | Share | Executions | Median minutes |", "| --- | ---: | ---: | ---: | ---: |"], report.stepMinutes.slice(0, 15).map((r) => `| ${r.step} | ${r.totalMinutes.toFixed(1)} min | ${pct(r.share)} | ${r.executions} | ${durationText(r.medianMinutes)} |`), "No sampled CI steps."),
     "",
-    `### Jobs finishing within ${Math.round((1 - CAP_NEAR_RATIO) * 100)}% of their timeout-minutes cap (sampled, successful jobs only)`,
+    `### Jobs finishing within ${Math.round((1 - CAP_NEAR_RATIO) * 100)}% of their timeout-minutes cap (sampled, successful jobs only, top ${MAX_NEAR_CAP_ROWS} by duration)`,
     "",
-    table(["| Workflow | Job | Duration | Cap |", "| --- | --- | ---: | ---: |"], report.nearCap.map((r) => `| ${r.workflow} | ${r.job} | ${durationText(r.durationMinutes)} | ${r.cap} min |`), "None in the sample."),
+    table(["| Workflow | Job | Duration | Cap |", "| --- | --- | ---: | ---: |"], [...report.nearCap].sort((a, b) => b.durationMinutes - a.durationMinutes).slice(0, MAX_NEAR_CAP_ROWS).map((r) => `| ${r.workflow} | ${r.job} | ${durationText(r.durationMinutes)} | ${r.cap} min |`), "None in the sample."),
     "",
-    "### Cap-adjacent cancellations and failures (duration at or above the job's cap, sampled)",
+    `### Cap-adjacent cancellations and failures (duration at or above the job's cap, sampled, top ${MAX_CAP_KILL_ROWS} by duration)`,
     "",
-    table(["| Workflow | Job | Duration | Cap |", "| --- | --- | ---: | ---: |"], report.capKills.map((r) => `| ${r.workflow} | ${r.job} | ${durationText(r.durationMinutes)} | ${r.cap} min |`), "None in the sample."),
+    table(["| Workflow | Job | Duration | Cap |", "| --- | --- | ---: | ---: |"], [...report.capKills].sort((a, b) => b.durationMinutes - a.durationMinutes).slice(0, MAX_CAP_KILL_ROWS).map((r) => `| ${r.workflow} | ${r.job} | ${durationText(r.durationMinutes)} | ${r.cap} min |`), "None in the sample."),
     "",
     "### CI failing-step rate by distinct run (sampled, top 10)",
     "",
@@ -356,7 +368,7 @@ async function fetchRunsForWorkflow({ github, owner, repo, workflowId, workflowN
   const byId = new Map();
   for (const [from, to] of runQueryWindows(sinceIso, nowIso)) {
     const runs = await fetchRunsForRange({ github, owner, repo, workflowId, from, to });
-    for (const run of runs) byId.set(run.id, { workflow: workflowName, event: run.event, conclusion: run.conclusion, run_attempt: run.run_attempt, id: run.id, created_at: run.created_at, updated_at: run.updated_at });
+    for (const run of runs) byId.set(run.id, { workflow: workflowName, event: run.event, conclusion: run.conclusion, run_attempt: run.run_attempt, id: run.id, created_at: run.created_at, run_started_at: run.run_started_at, updated_at: run.updated_at });
   }
   return [...byId.values()];
 }

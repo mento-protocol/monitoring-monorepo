@@ -1,6 +1,6 @@
 name: CI Reliability Report
 
-# Monthly, read-only CI health report. Reads the Actions runs/jobs API for the
+# Monthly CI health report. Reads the Actions runs/jobs API for the
 # last 30 days and publishes per-workflow run/attempt/cancellation rates,
 # per-job duration and queue percentiles, CI per-step minutes ranked by
 # total, and jobs within 20% of their timeout-minutes cap — see ADR 0099.

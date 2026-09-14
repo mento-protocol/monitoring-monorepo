@@ -4,10 +4,19 @@
  * Run: `node --test scripts/workflows/report-ci-reliability.test.mjs`
  */
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import {
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
+import { load } from "js-yaml";
 import {
   MARKER_PREFIX,
   markerFor,
@@ -122,6 +131,27 @@ test("wallDurationPercentiles: p50/p90 minutes for one workflow+event, ignores o
   assert.equal(result.samples, 2);
   assert.equal(result.p50Minutes, 5);
   assert.equal(result.p90Minutes, 10);
+});
+
+test("wallDurationPercentiles: uses run_started_at, not created_at, for a retried run", () => {
+  // created_at predates run_started_at by 12 hours (the idle gap before a
+  // re-run); using created_at would report a ~12-hour duration instead of 5
+  // minutes and inflate exactly the retried runs that land in the p90 tail.
+  const runs = [
+    {
+      workflow: "CI",
+      event: "pull_request",
+      created_at: "2026-09-01T00:00:00Z",
+      run_started_at: "2026-09-01T12:00:00Z",
+      updated_at: "2026-09-01T12:05:00Z",
+    },
+  ];
+  const result = wallDurationPercentiles(runs, {
+    workflow: "CI",
+    event: "pull_request",
+  });
+  assert.equal(result.samples, 1);
+  assert.equal(result.p50Minutes, 5);
 });
 
 test("wallDurationPercentiles: zero samples when nothing matches", () => {
@@ -802,4 +832,29 @@ test("collectCiHealthReport bisects a range that reaches RUN_QUERY_SOFT_CAP inst
       );
     },
   );
+});
+
+test("workflowCaps matches a js-yaml parse of every real .github/workflows/*.yml file", () => {
+  // The line-scanner in parseWorkflowCaps deliberately avoids js-yaml so it
+  // can run unmodified inside actions/github-script (see the module-level
+  // doc comment). Cross-validating it against an actual YAML parser over
+  // every real workflow file is the guard against it silently degrading
+  // every cap to DEFAULT_CAP_MINUTES on a workflow shape it does not expect.
+  const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+  const workflowsDir = join(repoRoot, ".github", "workflows");
+  const expected = new Map();
+  for (const file of readdirSync(workflowsDir)) {
+    if (!/\.ya?ml$/u.test(file)) continue;
+    const doc = load(readFileSync(join(workflowsDir, file), "utf8"));
+    const workflowName = doc?.name ?? file;
+    for (const [jobId, job] of Object.entries(doc?.jobs ?? {})) {
+      const jobName = job?.name ?? jobId;
+      expected.set(
+        `${workflowName}::${jobName}`,
+        job?.["timeout-minutes"] ?? DEFAULT_CAP_MINUTES,
+      );
+    }
+  }
+  const actual = workflowCaps(repoRoot);
+  assert.deepEqual(Object.fromEntries(actual), Object.fromEntries(expected));
 });
