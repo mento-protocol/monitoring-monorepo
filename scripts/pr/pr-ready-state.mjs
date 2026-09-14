@@ -19,6 +19,7 @@ import {
   findCodeRabbitPathFilterSkipCandidate,
   headCommitTimestampFromTimeline,
   headUpdatedAtFromTimeline,
+  headUpdatedAtIsUpperBound as headUpdatedAtIsUpperBoundFor,
   readyForReviewAtFromTimeline,
   validateCodeRabbitPathFilterSkip,
 } from "./pr-ready-state-review-signals.mjs";
@@ -40,6 +41,7 @@ export {
   fetchHeadUpdatedAt,
   headCommitTimestampFromTimeline,
   headUpdatedAtFromTimeline,
+  headUpdatedAtIsUpperBoundFor as headUpdatedAtIsUpperBound,
   readyForReviewAtFromTimeline,
 };
 export { withGhAbortSignal } from "./pr-ready-state-gh.mjs";
@@ -742,13 +744,17 @@ export async function fetchReadyState({
     observedAt,
     openedAt: pr.createdAt ?? null,
   });
-  // Without the head commit's own timeline timestamp, the head time comes from
-  // a later timeline event or the first check on the head, both after the
-  // push: an upper bound. The pending-request wait then cannot use it as a
-  // lower bound for requests, and a marked request keeps counting.
+  // When the selected head time is not the head commit's own timestamp, it
+  // comes from a later timeline event or the first check on the head, both
+  // after the push: an upper bound. The pending-request wait then cannot use
+  // it as a lower bound for requests, and a marked request keeps counting.
   const headUpdatedAtIsUpperBound =
     headUpdatedAt !== null &&
-    headCommitTimestampFromTimeline(timelineItems, pr.headRefOid) === null;
+    headUpdatedAtIsUpperBoundFor({
+      headSha: pr.headRefOid,
+      timelineItems,
+      observedAt,
+    });
   const pathFilterCandidate = findCodeRabbitPathFilterSkipCandidate({
     issueComments,
     headUpdatedAt,

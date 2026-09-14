@@ -44,6 +44,7 @@ import {
   fetchHeadUpdatedAt,
   headCommitTimestampFromTimeline,
   headUpdatedAtFromTimeline,
+  headUpdatedAtIsUpperBound,
   parseArgs,
   readyForReviewAtFromTimeline,
   renderSummary,
@@ -2069,18 +2070,58 @@ test("distinguishes the head commit's own timestamp from a later surrogate", () 
     headUpdatedAtFromTimeline(withoutOwnTimestamp, "new-head"),
     "2026-05-21T13:23:00Z",
   );
+  const withOwnTimestamp = [
+    {
+      event: "committed",
+      sha: "new-head",
+      created_at: "2026-05-21T13:22:00Z",
+    },
+  ];
   assertEqual(
-    headCommitTimestampFromTimeline(
-      [
-        {
-          event: "committed",
-          sha: "new-head",
-          created_at: "2026-05-21T13:22:00Z",
-        },
-      ],
-      "new-head",
-    ),
+    headCommitTimestampFromTimeline(withOwnTimestamp, "new-head"),
     "2026-05-21T13:22:00Z",
+  );
+
+  // The flag follows the timestamp the probe actually selects.
+  assert(
+    headUpdatedAtIsUpperBound({
+      headSha: "new-head",
+      timelineItems: withoutOwnTimestamp,
+      observedAt: null,
+    }),
+    "a later-event surrogate is an upper bound",
+  );
+  assert(
+    headUpdatedAtIsUpperBound({
+      headSha: "new-head",
+      timelineItems: [],
+      observedAt: "2026-05-21T13:23:00Z",
+    }),
+    "a first-check time is an upper bound",
+  );
+  assert(
+    headUpdatedAtIsUpperBound({
+      headSha: "new-head",
+      timelineItems: withOwnTimestamp,
+      observedAt: "2026-05-21T13:21:00Z",
+    }),
+    "an earlier first-check time wins the selection and stays an upper bound",
+  );
+  assert(
+    !headUpdatedAtIsUpperBound({
+      headSha: "new-head",
+      timelineItems: withOwnTimestamp,
+      observedAt: "2026-05-21T13:23:00Z",
+    }),
+    "the commit's own timestamp is exact",
+  );
+  assert(
+    !headUpdatedAtIsUpperBound({
+      headSha: "new-head",
+      timelineItems: [],
+      observedAt: null,
+    }),
+    "no evidence at all is unknown, not an upper bound",
   );
 });
 

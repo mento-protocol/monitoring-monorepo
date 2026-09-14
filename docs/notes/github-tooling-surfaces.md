@@ -346,10 +346,11 @@ polled. Do not foreground-poll and never sleep-poll.
      is `OWNER`, `MEMBER`, or `COLLABORATOR`, or its author login is `claude`,
      `claude[bot]`, `chatgpt-codex-connector`, or
      `chatgpt-codex-connector[bot]`. When the head-update time is available,
-     require the request comment to be at or after it — a head time known only
-     from the first check on the head is not the head-update time, so accept
-     the exact-head marker on its own then — and recheck the current full head
-     immediately before the write. The marker detects completed
+     require the request comment to be at or after it — a head time taken from
+     a later timeline event or from the first check on the head, rather than
+     from the head commit's own timestamp, is not the head-update time, so
+     accept the exact-head marker on its own then — and recheck the current
+     full head immediately before the write. The marker detects completed
      requests and provides best-effort duplicate suppression; the issue-comment
      API has no atomic claim. After posting, wait for that closeout attempt to
      become terminal before the final feedback sweep, bounded by the babysit

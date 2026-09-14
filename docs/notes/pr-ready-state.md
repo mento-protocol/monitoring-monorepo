@@ -658,7 +658,9 @@ requests and returns `PENDING` when reached.
    waiting for one that cannot start. The one exception is an opening review
    that never completed, where a later push can still draw a full run, so wait
    the bounded time anyway. Merge the base before the request and never after
-   it, as a local merge of the fetched base. Then, if
+   it: an ordinary PR takes a local merge of the fetched base, a native stack
+   layer takes the history-change procedure in
+   [`stacked-pull-requests.md`](stacked-pull-requests.md). Then, if
    `gates.codeRabbitReviewSignal.state` is `missing` or `stale`, recheck the
    head and follow the gate's `fallbackAction`: post the one marked closeout
    request for that head only on `request_review_once_for_head`. Do not post

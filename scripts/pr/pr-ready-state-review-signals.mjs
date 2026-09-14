@@ -127,6 +127,31 @@ function latestIsoTimestamp(left, right) {
   return Date.parse(right) > Date.parse(left) ? right : left;
 }
 
+/**
+ * True when the head time `fetchHeadUpdatedAt` would select is not the head
+ * commit's own timeline timestamp: a later timeline event or the first check
+ * on the head both land after the push, so the selected time only bounds the
+ * push from above and cannot bound requests from below.
+ */
+export function headUpdatedAtIsUpperBound({
+  headSha,
+  timelineItems,
+  observedAt,
+}) {
+  const commitTimestamp = headCommitTimestampFromTimeline(
+    timelineItems,
+    headSha,
+  );
+  const evidence = earliestIsoTimestamp(
+    headUpdatedAtFromTimeline(timelineItems, headSha),
+    validIsoTimestamp(observedAt),
+  );
+  if (!evidence) return false;
+  return (
+    !commitTimestamp || Date.parse(evidence) !== Date.parse(commitTimestamp)
+  );
+}
+
 export function fetchHeadUpdatedAt({
   headSha,
   timelineItems,
