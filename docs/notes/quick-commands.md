@@ -66,14 +66,14 @@ pnpm docs:navigation-eval -- --validate <result.json>  # Recompute authority, ev
 pnpm ci:contract:test             # Test fixed CI, protected no-skip admission and drift, cache, base, and aggregate contracts
 bash scripts/bootstrap/agent-setup-contract.test.sh  # Test retained SessionEnd, setup-marker, and package-policy behavior
 node --test scripts/indexer-handler-invariant-contract.test.mjs  # Test retained indexer handler invariant owners and schema
-# Disable ADR 0088 collection for ADR 0098 recovery.
-# Manual recovery only: disable/drain m6-canary.yml and reconcile its reservations/spend first.
-# For an approved manual #2128 proof, read the current immutable inputs:
+# Ordinary open-PR audit: disable/drain m6-canary.yml; reconcile reservations/spend.
+# Read immutable inputs for approved #2128 proof:
 gh pr view <pr> --repo mento-protocol/monitoring-monorepo --json number,state,headRefOid,baseRefName,baseRefOid,headRepositoryOwner
 # Stale bases fail. Integrate current main, then read fresh inputs.
 # No-skip rejects package-execution/instrument drift. Only package drift permits ordinary-force-all evidence.
 # Stop above 45 runner-minutes per run. Approved M6 cumulative ceiling: 800 minutes.
 gh workflow run no-skip-audit.yml --repo mento-protocol/monitoring-monorepo --ref main -f pr_number=<pr> -f source_sha=<headRefOid> -f base_sha=<baseRefOid>
+# Merged #2399/#2408 recovery uses m6-audit-recovery.yml; see ADR 0098.
 pnpm verification:inventory:check  # Validate Phase 0 inventory schema, unique IDs, and complete dispositions
 pnpm verification:manifest:write   # Regenerate the terminal pre-M1 gate-rooted control-plane baseline manifest
 pnpm verification:manifest:check   # Recompute and compare the terminal pre-M1 baseline manifest
