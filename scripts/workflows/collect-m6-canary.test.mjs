@@ -469,7 +469,7 @@ test("workflow keeps trusted checkout, one writer, no candidate execution and ze
   const job = workflow.jobs.collect;
   assert.equal(
     job.if,
-    "github.repository == 'mento-protocol/monitoring-monorepo' && github.ref == 'refs/heads/main'",
+    "github.repository == 'mento-protocol/monitoring-monorepo' && github.ref == 'refs/heads/main' && (github.event_name != 'workflow_run' || github.event.workflow_run.name == 'No-skip audit' || github.event.workflow_run.conclusion == 'success')",
   );
   assert.deepEqual(job.permissions, {
     contents: "read",

@@ -98,7 +98,7 @@ the pull request, either SHA, repository identity, base branch, or live `main`
 has moved.
 
 During M6, `.github/workflows/m6-canary.yml` selects candidates after CI
-completion and dispatches this entry point. It writes pending evidence on
+succeeds and dispatches this entry point. It writes pending evidence on
 #2128. [ADR 0088](../adr/0088-temporary-m6-canary-collection.md) owns selection,
 serialization, spend stops, recovery, proof limits, and removal. Disable and
 drain collection before a manual audit. Keep its writer isolated from candidate
@@ -374,6 +374,8 @@ Decision framework for `runs-on` (applied in PR #822 — partial migration savin
 - [ ] `node scripts/workflows/check-notifier-coverage.mjs` must pass after the change — it runs in the `scripts` CI job and enforces this structurally. The `scripts` job's `rootScripts` path filter includes `.github/workflows/**`, so adding a workflow file alone is enough to fire the check (no script edit required)
 
 `workflow_run.workflows` does NOT support wildcards — every new workflow name must be listed explicitly.
+
+- [ ] `on.workflow_run` also filters `branches: [main]`, redundant with the job `if:` branch check — update both together if a watched workflow's failures must ever page from a non-main ref
 
 ## 10. Autofix CI trust boundary — machine-authored PRs are untrusted
 

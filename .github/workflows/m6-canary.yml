@@ -16,7 +16,17 @@ jobs:
   collect:
     # Upstream events are wake-ups only. No upstream code, output, artifact,
     # or cache enters this writer. Every decision re-reads GitHub API state.
-    if: github.repository == 'mento-protocol/monitoring-monorepo' && github.ref == 'refs/heads/main'
+    # A failed or cancelled CI completion can never be selected (the
+    # collector requires latest.conclusion === 'success'), so only successful
+    # CI completions and every No-skip audit completion (dispatch-only, and
+    # its fail-closed stop() path must post promptly) wake the collector.
+    # `workflow_dispatch` stays open for the ADR 0088 recovery path.
+    if: >-
+      github.repository == 'mento-protocol/monitoring-monorepo' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name != 'workflow_run' ||
+      github.event.workflow_run.name == 'No-skip audit' ||
+      github.event.workflow_run.conclusion == 'success')
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     timeout-minutes: 5
     permissions:

@@ -7735,21 +7735,19 @@ test("the cell reader emits nothing when the plan carries a forged field", () =>
   }
 });
 
-test("the freshness workflow watches the frozen input directories", () => {
+test("the freshness workflow runs on schedule and dispatch only, and its aliases stay real", () => {
   const workflow = readFileSync(
     path.join(repoRoot, ".github/workflows/review-eval-freshness.yml"),
     "utf8",
   );
-  // `*` stops at a path separator in a GitHub path filter, so the recursive
-  // form is what reaches docs/evals/review-skill-truth/ and its siblings.
-  assert.match(workflow, /- docs\/evals\/review-skill\*\*/);
-  assert.doesNotMatch(workflow, /- docs\/evals\/review-skill\*$/m);
-  // Every contract-job command runs a `review:eval*` alias, so a PR that
-  // renames or removes one has to run this workflow.
-  assert.match(workflow, /^ {6}- package\.json$/m);
-  // Publication relies on the root ignore rule to keep raw cells out of Git
-  // and out of any review input, so an ignore-only edit must run this suite too.
-  assert.match(workflow, /^ {6}- \.gitignore$/m);
+  // The contract job's three commands are byte-identical to steps of ci.yml's
+  // required `scripts` job, run there on a strict superset of this file's old
+  // PR paths (rootScripts), so a `pull_request` trigger here is pure
+  // duplicate coverage. This workflow stays schedule/dispatch-only.
+  assert.doesNotMatch(workflow, /^\s*pull_request:/m);
+  assert.match(workflow, /^\s*workflow_dispatch:/m);
+  // Every contract-job command runs a `review:eval*` alias, so a rename or
+  // removal must still red this workflow (weekly) even with no PR trigger.
   const aliases = [
     ...new Set(
       [...workflow.matchAll(/pnpm (review:eval[\w:]*)/g)].map((m) => m[1]),

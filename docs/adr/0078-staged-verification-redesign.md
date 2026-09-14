@@ -175,9 +175,9 @@ contract` job runs it on every pull request and `main` push.
 M3 adds the two confirmed gate-only gaps to existing required jobs. The
 `scripts` job runs the ADR reminder and its tests. The `ui` job runs the normal
 production build and bundle-size limit. The separate Infra validation and
-bundle-size workflows duplicate required coverage. Lighthouse, PR Description,
-duplication, and schema diff remain reviewed advisory exceptions with their
-current triggers.
+bundle-size workflows duplicate required coverage. Lighthouse, duplication,
+and schema diff remain advisory exceptions with current triggers; PR
+Description narrowed.
 
 ### Keep local checks bounded and non-authoritative
 

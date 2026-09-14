@@ -56,6 +56,11 @@ on:
       - File-size Watchlist
       - Review Skill Eval Freshness
     types: [completed]
+    # Redundant with the job `if:` below (head_branch == 'main'), and kept
+    # for that reason: it cuts the PR-event fan-in from the watched
+    # workflows' `pull_request` triggers to zero run records instead of
+    # skipping them at job level after a boot-free trigger delivery.
+    branches: [main]
   # workflow_dispatch (no inputs — checkov/CKV_GHA_7 forbids them) lets you
   # smoke-test the Slack wiring by manually running this workflow from the
   # Actions tab. Posts a fixed "🧪 wiring test" message to #ci-failures.

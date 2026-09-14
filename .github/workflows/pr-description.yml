@@ -8,16 +8,21 @@ name: PR Description
 # say "None" or link a GitHub issue per item (for everything knowingly deferred
 # from the PR).
 #
-# REQUIRED-STATUS SAFETY: no workflow-level `paths:` filter — this is meant to
-# run on every PR so it can be a required status (AGENTS.md: required-status
-# workflows MUST NOT use `paths:`). It re-runs on `edited` (so fixing the body
-# clears it) and on `synchronize` (so the status re-attaches to each new head
-# commit). Draft PRs and Dependabot PRs are skipped.
+# ADVISORY STATUS: this check is not in the branch ruleset's required set
+# (ci, Code Quality, Vercel, Vercel Preview Comments, Sentry suites). Its
+# verdict is a function of `github.event.pull_request.body` plus a base-ref
+# copy of the validator, so it is head-independent and `synchronize` cannot
+# change it — dropped below. No workflow-level `paths:` filter is added:
+# the check reads the body, not the diff. A title-only or base-only `edited`
+# event skips the job via the `changes.body` guard below rather than
+# re-validating an unchanged body. Promoting this check to required needs
+# `synchronize` restored in the same change. Draft PRs and Dependabot PRs
+# are skipped.
 
 on:
   pull_request:
     branches: [main]
-    types: [opened, edited, synchronize, reopened, ready_for_review]
+    types: [opened, edited, reopened, ready_for_review]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -29,10 +34,12 @@ permissions:
 jobs:
   check:
     name: PR description format
-    # Skip drafts (work-in-progress) and Dependabot (auto-generated bodies).
+    # Skip drafts (work-in-progress), Dependabot (auto-generated bodies), and
+    # an `edited` event that did not touch the body (title/base-only edits).
     if: >-
       github.event.pull_request.draft == false &&
-      github.event.pull_request.user.login != 'dependabot[bot]'
+      github.event.pull_request.user.login != 'dependabot[bot]' &&
+      (github.event.action != 'edited' || github.event.changes.body != null)
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     steps:
       - name: Checkout trusted validator
