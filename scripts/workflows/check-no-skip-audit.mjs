@@ -178,7 +178,7 @@ function checkRetainedBoundary(root, errors) {
   const retainedPins = allSteps.filter(([, step]) => step.run === "node scripts/check-agent-quality-gate-package-scripts.mjs");
   add(errors, retainedPins.length === 3 && retainedPins.every(([, step]) => step.if === undefined), "retained package-script validators must remain audit-executable");
   const auditUsers = readdirSync(join(root, ".github/workflows")).filter((name) => /\.ya?ml$/u.test(name) && /(?:no_skip_audit|audit_source_sha|audit_base_sha)/u.test(stable(yaml(root, `.github/workflows/${name}`)))).map((name) => `.github/workflows/${name}`).sort();
-  add(errors, stable(auditUsers) === stable([CI, DISPATCH].sort()), "only the protected dispatcher may call audit mode");
+  add(errors, stable(auditUsers) === stable([CI, DISPATCH, ".github/workflows/m6-audit-recovery.yml"].sort()), "only the protected dispatchers may call audit mode");
 }
 
 // prettier-ignore
