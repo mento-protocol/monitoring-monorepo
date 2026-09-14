@@ -1,10 +1,54 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 
 export const REPOSITORY = "mento-protocol/monitoring-monorepo";
 export const BASE = "c186a7e5ca0433c80d7588acb4ab38f24988ccc7";
 export const ANCHOR = 34836768852;
 export const BASELINE_SECONDS = 27587;
 export const WORKFLOW = "m6-audit-recovery.yml";
+export const REVIEWED_FAILURE = 34872200578;
+export function failureReceiptDigest(run, jobs) {
+  const runKeys = [
+    "id",
+    "event",
+    "head_branch",
+    "head_sha",
+    "path",
+    "workflow_id",
+    "display_title",
+    "status",
+    "conclusion",
+    "run_attempt",
+    "created_at",
+    "updated_at",
+    "run_started_at",
+  ];
+  const jobKeys = [
+    "id",
+    "run_id",
+    "run_attempt",
+    "head_sha",
+    "name",
+    "status",
+    "conclusion",
+    "started_at",
+    "completed_at",
+    "runner_id",
+  ];
+  return createHash("sha256")
+    .update(
+      JSON.stringify({
+        run: runKeys.map((key) => run[key]),
+        references: run.referenced_workflows
+          .map(({ path, sha, ref }) => [path, sha, ref])
+          .sort(),
+        jobs: [...jobs]
+          .sort((a, b) => a.id - b.id)
+          .map((job) => jobKeys.map((key) => job[key])),
+      }),
+    )
+    .digest("hex");
+}
 export const TUPLES = Object.freeze({
   2399: Object.freeze({
     source: "e771a3a4be4c32c98322e494412ae064f2a328a2",
@@ -201,12 +245,21 @@ export async function admitRecovery({ github, context, git }) {
     ),
     "Historical audit changed after budget reconciliation",
   );
+  requireFact(
+    ordinary.every((run) => run.id <= ANCHOR),
+    "New ordinary audit requires separate review",
+  );
   const collectors = await list("m6-canary.yml");
   requireFact(
     collectors.every((run) => run.status === "completed"),
     "Drain collection first",
   );
   const recovery = await list(WORKFLOW);
+  requireFact(
+    recovery.some((run) => run.id === REVIEWED_FAILURE),
+    "Reviewed failed run missing",
+  );
+  requireFact(recovery.length <= 3, "Finite recovery amendment exhausted");
   const current = recovery.find((run) => run.id === Number(context.runId));
   const title = `M6 recovery PR #${pr}`;
   requireFact(
@@ -217,7 +270,10 @@ export async function admitRecovery({ github, context, git }) {
   );
   requireFact(
     !recovery.some(
-      (run) => run.id !== current.id && run.display_title === title,
+      (run) =>
+        run.id !== current.id &&
+        run.id !== REVIEWED_FAILURE &&
+        run.display_title === title,
     ),
     "Tuple already attempted; no automatic retry",
   );
@@ -252,6 +308,30 @@ export async function admitRecovery({ github, context, git }) {
       !recovery.some((item) => item.id === run.id) || run.run_attempt === 1,
       "Prior recovery rerun requires separate review",
     );
+    if (run.id === REVIEWED_FAILURE) {
+      const { data: recorded } = await actions.getWorkflowRun({
+        ...repo,
+        run_id: REVIEWED_FAILURE,
+      });
+      requireFact(
+        run.run_attempt === recorded.run_attempt &&
+          run.updated_at === recorded.updated_at &&
+          used === 1396 &&
+          failureReceiptDigest(recorded, attempts[0]) ===
+            "679616ffaf626f6f6304e4227bfa0692cf08cee37b3f434f7bcc93f0919b1b2e",
+        "Reviewed failed run evidence changed",
+      );
+      continue;
+    }
+    requireFact(
+      run.display_title ===
+        `M6 recovery PR #${pr === "2399" ? "2408" : "2399"}` &&
+        run.event === "workflow_dispatch" &&
+        run.head_branch === "main" &&
+        run.path === `.github/workflows/${WORKFLOW}` &&
+        run.head_sha === context.sha,
+      "Unapproved prior recovery run",
+    );
     requireFact(
       run.conclusion === "success",
       "Prior audit failure requires classification and separate recovery review",
@@ -279,6 +359,7 @@ export async function admitRecovery({ github, context, git }) {
     ...proof,
     secondsBeforeRun: seconds,
     reservedSeconds: 2700,
+    reviewedFailure: REVIEWED_FAILURE,
     pr: Number(pr),
   };
 }
