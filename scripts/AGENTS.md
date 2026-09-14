@@ -111,6 +111,11 @@ Move each pin class with its files.
   collection coverage. The no-skip admission excludes
   `workflows/collect-m6-canary.mjs`, its workflow, and the CI contract entry
   points from candidate changes (ADR 0088).
+- **CI reliability report.** `workflows/report-ci-reliability{,.test}.mjs`
+  parses workflow YAML for timeout caps directly; it does not import
+  `check-ci-contract.mjs`'s `EXPECTED_TIMEOUTS` (job-id keyed, `ci.yml`-only).
+  [ADR 0097](../docs/adr/0097-monthly-ci-reliability-report.md) owns cadence
+  and the issue-upsert shape, shared with ADR 0059.
 - **Terraform stack registry.** `terraform.stacks.json` `changedPathPatterns`
   pins exact `scripts/` paths per stack. The broad workflow admission boundary
   covers the directory; `pnpm tf:test` enforces subsumption.

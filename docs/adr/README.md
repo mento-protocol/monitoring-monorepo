@@ -105,6 +105,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0093](0093-opt-in-native-stacked-pull-requests.md)         | Native stacks use separate diff and protection bases through an opt-in pilot         |
 | [0094](0094-grid-waiver.md)                                 | The control-drift waiver asks control for its share of the flips, not the headline's |
 | [0096](0096-finder-probe-non-ledger-kind.md)                | Non-ledger finder probes run in the canonical runner, narrowing ADR 0083             |
+| [0097](0097-monthly-ci-reliability-report.md)               | Monthly CI reliability report is a repository-owned, issue-only scheduler            |
 
 ### shared-config
 

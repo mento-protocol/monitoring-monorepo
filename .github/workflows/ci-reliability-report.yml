@@ -1,0 +1,52 @@
+name: CI Reliability Report
+
+# Monthly, read-only CI health report. Reads the Actions runs/jobs API for the
+# last 30 days and publishes per-workflow run/attempt/cancellation rates,
+# per-job duration and queue percentiles, CI per-step minutes ranked by
+# total, and jobs within 20% of their timeout-minutes cap — see ADR 0097.
+# Never edits repository content or opens pull requests. Same shape as
+# file-size-watchlist.yml (issue-only scheduler) and m6-canary.yml (Actions
+# API reader via github-script).
+
+on:
+  schedule:
+    # First day of each month, off the hour to avoid scheduler contention.
+    - cron: 27 7 1 * *
+  workflow_dispatch: {}
+
+permissions: {}
+
+concurrency:
+  group: ci-reliability-report
+  cancel-in-progress: false
+
+jobs:
+  report:
+    name: Generate the CI health report and synchronize its issue
+    if: github.repository == 'mento-protocol/monitoring-monorepo'
+    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+      issues: write
+    steps:
+      - name: Check out current main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Ensure the CI health report label exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh label create "ci-health-report" --repo "${{ github.repository }}"
+          --color "1d76db" --description "Monthly CI health report" --force
+      - name: Collect the report and synchronize its issue
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          retries: 0
+          script: |
+            const { collectCiHealthReport } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/workflows/report-ci-reliability.mjs`);
+            const result = await collectCiHealthReport({ github, context, core });
+            core.info(`Issue: ${result.issue ? result.issue.url : "none"}`);
