@@ -66,15 +66,13 @@ pnpm docs:navigation-eval -- --validate <result.json>  # Recompute authority, ev
 pnpm ci:contract:test             # Test fixed CI, protected no-skip admission and drift, cache, base, and aggregate contracts
 bash scripts/bootstrap/agent-setup-contract.test.sh  # Test retained SessionEnd, setup-marker, and package-policy behavior
 node --test scripts/indexer-handler-invariant-contract.test.mjs  # Test retained indexer handler invariant owners and schema
-# M6 automatic collection stays disabled during approved manual recovery.
-# ADR 0098 owns the finite merged-PR recovery commands and budget guards.
-# ADR 0088 owns normal automatic collection; do not run both lanes together.
+# Disable ADR 0088 collection for ADR 0098 recovery.
 # Manual recovery only: disable/drain m6-canary.yml and reconcile its reservations/spend first.
 # For an approved manual #2128 proof, read the current immutable inputs:
 gh pr view <pr> --repo mento-protocol/monitoring-monorepo --json number,state,headRefOid,baseRefName,baseRefOid,headRepositoryOwner
-# The audit refuses a stale baseRefOid. Update or rebase the PR branch, then read fresh inputs.
-# Do not dispatch no-skip for package-execution or evidence-instrument drift. Package drift can use ordinary-force-all evidence. Instrument drift cannot count.
-# Stop after any run exceeds 45 runner-minutes. Do not exceed 450 cumulative runner-minutes.
+# Stale bases fail. Integrate current main, then read fresh inputs.
+# No-skip rejects package-execution/instrument drift. Only package drift permits ordinary-force-all evidence.
+# Stop above 45 runner-minutes per run. Approved M6 cumulative ceiling: 800 minutes.
 gh workflow run no-skip-audit.yml --repo mento-protocol/monitoring-monorepo --ref main -f pr_number=<pr> -f source_sha=<headRefOid> -f base_sha=<baseRefOid>
 pnpm verification:inventory:check  # Validate Phase 0 inventory schema, unique IDs, and complete dispositions
 pnpm verification:manifest:write   # Regenerate the terminal pre-M1 gate-rooted control-plane baseline manifest

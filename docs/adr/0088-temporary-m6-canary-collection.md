@@ -93,8 +93,7 @@ reservations and spend are reconciled. Retain the old stop comments as evidence.
 
 Keep the collector non-required. It cannot delay a merge or certify a different
 head. A PR merged before selection can be missed.
-[ADR 0098](0098-m6-audit-recovery.md) authorizes a separate, finite recovery
-adapter for two named merged PRs; it does not change this collector. No automatic merge, branch
+[ADR 0098](0098-m6-audit-recovery.md) covers two approved recovery PRs. No automatic merge, branch
 update, rollback, or deletion is authorized. M6 retirement removes this workflow,
 collector, and focused tests with the obsolete diagnostic. Preserve its source
 run links in the final evidence receipt.
