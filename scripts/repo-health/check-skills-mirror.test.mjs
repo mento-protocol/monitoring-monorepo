@@ -298,6 +298,11 @@ test("normalizeProvenance rewrites only the two documented literals", () => {
     'a source: "__RUNTIME__" b source: "__RUNTIME__" c',
   );
   assert.equal(
+    normalizeProvenance("a source: 'Codex' b source: 'claude' c"),
+    'a source: "__RUNTIME__" b source: "__RUNTIME__" c',
+    "a single-quoted documented split normalizes the same way",
+  );
+  assert.equal(
     normalizeProvenance('source: "Gemini"'),
     'source: "Gemini"',
     "an undocumented runtime literal must stay a real difference",

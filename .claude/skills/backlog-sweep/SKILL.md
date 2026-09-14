@@ -84,9 +84,9 @@ per-push cost: `.github/workflows/claude.yml` fires on `opened` and
 `ready_for_review` only, so a Claude re-review is opt-in via `@claude review`.
 CodeRabbit is not a per-push cost either: `auto_incremental_review: false`
 works, and the ADR 0066 amendment of 2026-09-14 records the measurement. It
-reviews the opening push and the closeout head only. Budget at most two marked
-`@coderabbitai review` requests per PR, and merge the base before a request
-rather than after it. Two issues is
+reviews the opening push and the closeout head only. Budget at most two trusted
+`@coderabbitai review` or `full review` requests per PR, marked or bare, and
+merge the base before a request rather than after it. Two issues is
 the default because the cost is dominated by review rounds, not by the first
 implementation. **Refuse a batch size above 4.** Say that plainly and stop
 rather than clamping silently — an operator who asked for 6 needs to know they

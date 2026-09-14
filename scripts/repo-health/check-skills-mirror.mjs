@@ -44,8 +44,9 @@ Environment:
  * that documented difference, in forensic-report files only, is tolerated.
  */
 export function normalizeProvenance(contents) {
+  // Either quote style, matching the side check below.
   return contents.replace(
-    /source: "(?:Codex|claude)"/g,
+    /source:\s*(["'])(?:Codex|claude)\1/g,
     'source: "__RUNTIME__"',
   );
 }
