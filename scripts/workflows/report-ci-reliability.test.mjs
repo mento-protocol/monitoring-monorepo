@@ -412,6 +412,24 @@ test("failingStepRunRates: keys by job name plus step name, so same-named steps 
   assert.equal(rows.length, 2);
 });
 
+test("failingStepRunRates: an explicit totalRuns counts jobless sampled runs in the denominator", () => {
+  // One sampled run failed a step; nine more were sampled but produced no
+  // job rows at all (e.g. cancelled before job creation) and so never touch
+  // `jobs`. Without `totalRuns`, the denominator would be the 1 run that
+  // *has* job rows, reporting 100% instead of the true 10%.
+  const jobs = [
+    {
+      workflow: "CI",
+      name: "scripts",
+      run_id: 1,
+      steps: [{ name: "pnpm-install", conclusion: "failure" }],
+    },
+  ];
+  const rows = failingStepRunRates(jobs, { workflow: "CI", totalRuns: 10 });
+  assert.equal(rows[0].runs, 1);
+  assert.equal(rows[0].rate, 0.1);
+});
+
 test("formatMarkdownReport: every section renders with units, and empty sections say so", () => {
   const report = {
     windowStart: "2026-08-15T00:00:00Z",
@@ -753,6 +771,41 @@ test("collectCiHealthReport samples only pull_request runs within CI, and reques
       assert.equal(result.report.sampleInfo[0].sampledRuns, 1);
       assert.equal(result.report.sampleInfo[0].totalRuns, 1);
       assert.equal(result.report.perJobDuration.length, 1);
+    },
+  );
+});
+
+test("collectCiHealthReport requests only completed runs, excluding its own active run from the rate tables", async () => {
+  await withFixtureRoot(
+    { "ci.yml": "name: CI\njobs:\n  scripts:\n" },
+    async (root) => {
+      const workflows = [{ id: 1, name: "CI" }];
+      const statusParams = [];
+      const github = {
+        paginate: async (_method, params) => {
+          if (params.workflow_id !== undefined) {
+            statusParams.push(params.status);
+            return [];
+          }
+          if (params.run_id !== undefined) return [];
+          return workflows;
+        },
+        rest: {
+          actions: {
+            listRepoWorkflows: "l",
+            listWorkflowRuns: "l",
+            listJobsForWorkflowRun: "l",
+          },
+          issues: {
+            listForRepo: "l",
+            create: async () => ({ data: { number: 1, html_url: "u" } }),
+          },
+        },
+      };
+      const context = { repo: { owner: "o", repo: "r" } };
+      await collectCiHealthReport({ github, context, core: undefined, root });
+      assert.ok(statusParams.length > 0);
+      assert.ok(statusParams.every((s) => s === "completed"));
     },
   );
 });

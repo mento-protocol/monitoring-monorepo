@@ -232,9 +232,15 @@ export function nearCapJobs(jobs, caps, ratio = CAP_NEAR_RATIO) {
  * names such as "Lint" across several independently-owned jobs, and a
  * step-name-only key would merge their failures into one ambiguous row that
  * cannot name the owner the CI health budget requires.
+ *
+ * `totalRuns`, when given, overrides the denominator with the full sampled
+ * run count rather than only the runs that produced job records: a run
+ * cancelled before any job was created, or a startup failure, contributes no
+ * `jobs` rows at all, so counting job-bearing runs alone understates the
+ * sample and can turn "1 failing run of 10 sampled" into a false "1 of 1".
  */
 // prettier-ignore
-export function failingStepRunRates(jobs, { workflow }) {
+export function failingStepRunRates(jobs, { workflow, totalRuns }) {
   const runIds = new Set();
   const runFailingSteps = new Map();
   for (const job of jobs) {
@@ -247,10 +253,10 @@ export function failingStepRunRates(jobs, { workflow }) {
       runFailingSteps.set(job.run_id, set);
     }
   }
-  const totalRuns = runIds.size;
+  const denominator = totalRuns ?? runIds.size;
   const perStep = new Map();
   for (const set of runFailingSteps.values()) for (const name of set) perStep.set(name, (perStep.get(name) ?? 0) + 1);
-  return [...perStep.entries()].map(([step, count]) => ({ step, runs: count, rate: totalRuns ? count / totalRuns : 0 })).sort((a, b) => b.runs - a.runs);
+  return [...perStep.entries()].map(([step, count]) => ({ step, runs: count, rate: denominator ? count / denominator : 0 })).sort((a, b) => b.runs - a.runs);
 }
 
 const pct = (x) => `${(x * 100).toFixed(1)}%`;
@@ -357,11 +363,14 @@ const RUN_QUERY_MAX_DEPTH = 4; // bisection depth bound so a pathological case c
  * close enough to the practical per-query cap that older rows in that exact
  * range could be silently missing — a fixed window count alone cannot rule
  * this out during a burst (a dependency wave, a bot-driven spree) or future
- * volume growth.
+ * volume growth. `status: "completed"` excludes queued/in-progress runs,
+ * including the reporter's own active run: an unfinished run has no
+ * meaningful `conclusion` for the rate tables, and treating its `updated_at`
+ * as a finish time would fold live wall-clock time into the p90 budget.
  */
 // prettier-ignore
 async function fetchRunsForRange({ github, owner, repo, workflowId, from, to, depth = 0 }) {
-  const runs = await github.paginate(github.rest.actions.listWorkflowRuns, { owner, repo, workflow_id: workflowId, created: `${from}..${to}`, per_page: 100 });
+  const runs = await github.paginate(github.rest.actions.listWorkflowRuns, { owner, repo, workflow_id: workflowId, created: `${from}..${to}`, status: "completed", per_page: 100 });
   if (runs.length < RUN_QUERY_SOFT_CAP || depth >= RUN_QUERY_MAX_DEPTH || Date.parse(to) - Date.parse(from) < RUN_QUERY_MIN_RANGE_MS) return runs;
   const mid = new Date((Date.parse(from) + Date.parse(to)) / 2).toISOString();
   const [head, tail] = await Promise.all([
@@ -428,6 +437,8 @@ export async function collectCiHealthReport({ github, context, core, root = proc
     }
   }
 
+  const ciSampledRunCount = sampleInfo.find((sample) => sample.workflow === "CI")?.sampledRuns;
+
   const report = {
     windowStart: sinceIso,
     windowEnd: nowIso,
@@ -438,7 +449,9 @@ export async function collectCiHealthReport({ github, context, core, root = proc
     stepMinutes: stepMinutesByTotal(sampledJobs, { workflow: "CI" }),
     capKills: capKills(sampledJobs, caps),
     nearCap: nearCapJobs(sampledJobs, caps),
-    failingSteps: failingStepRunRates(sampledJobs, { workflow: "CI" }),
+    // `totalRuns` uses the full CI pull_request sample, not just runs that
+    // produced job rows — see failingStepRunRates' docstring.
+    failingSteps: failingStepRunRates(sampledJobs, { workflow: "CI", totalRuns: ciSampledRunCount }),
   };
 
   const body = formatMarkdownReport(report);
