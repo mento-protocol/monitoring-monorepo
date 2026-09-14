@@ -331,11 +331,12 @@ polled. Do not foreground-poll and never sleep-poll.
      the automatic attempt first.
      If the signal is missing or stale, the PR carries fewer than two requests,
      no CodeRabbit check is running on the current head, no trusted top-level
-     comment posted in the last hour asks for a review without the current
-     head's marker, the head is more than five minutes old, the head update
-     time is known, and no
-     trusted top-level comment contains both `@coderabbitai review` and
-     `<!-- coderabbit-final-head-review:<full-head-sha> -->`, use
+     comment posted at or after the head update and in the last hour asks for
+     a review without the current head's marker (an older request belongs to a
+     superseded head and is stale, not pending), the head is more than five
+     minutes old, the head update time is known, and no trusted top-level
+     comment contains `@coderabbitai review` or `@coderabbitai full review`
+     together with `<!-- coderabbit-final-head-review:<full-head-sha> -->`, use
      `add_issue_comment` to post `@coderabbitai review`, a blank line, and that
      exact marker. A marker comment is trusted only when its author association
      is `OWNER`, `MEMBER`, or `COLLABORATOR`, or its author login is `claude`,

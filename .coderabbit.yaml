@@ -99,8 +99,9 @@ reviews:
     # The three classes below drew zero findings across 265 PRs in the
     # 2026-08-18..09-14 census, and every push re-bills them.
     # Byte-identical mirror of `.agents/skills/**`, enforced by
-    # `scripts/repo-health/check-skills-mirror.mjs`; reviewing it re-bills the
-    # canonical tree, which stays reviewed.
+    # `scripts/repo-health/check-skills-mirror.mjs`, which also pins the one
+    # documented provenance literal to its side; reviewing the mirror re-bills
+    # the canonical tree, which stays reviewed.
     - "!.claude/skills/**"
     # Machine-written measurement artifacts.
     - "!docs/metrics/**"
