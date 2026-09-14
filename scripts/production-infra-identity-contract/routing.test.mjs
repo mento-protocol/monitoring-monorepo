@@ -31,7 +31,19 @@ const SHARED_PARSING_CORES = [
   "scripts/lib/hcl.mjs",
   "scripts/lib/workflow-yaml.mjs",
 ];
-const NESTED_ADMISSION_EXCEPTIONS = new Set([".github/workflows/**"]);
+// Documented nested admission entries. `.github/workflows/**` is a directory
+// the registry names file-by-file; the `scripts/` entries replace the former
+// `scripts/**` boundary, which admitted 76% of `main` merges to route 40%.
+// Each entry must appear in some stack's changedPathPatterns (issue #2406).
+const NESTED_ADMISSION_EXCEPTIONS = new Set([
+  ".github/workflows/**",
+  "scripts/alerts/**",
+  "scripts/lib/**",
+  "scripts/production-infra-identity-contract/**",
+  "scripts/terraform/**",
+  "scripts/tf-stacks.mjs",
+  "scripts/tf-stacks.test.mjs",
+]);
 
 function parseSimplePathPattern(pattern) {
   assert.equal(typeof pattern, "string", "path patterns must be strings");

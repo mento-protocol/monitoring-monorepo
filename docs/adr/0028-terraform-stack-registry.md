@@ -35,6 +35,11 @@ names. The registry also declares one coarse `workflowAdmissionPatterns`
 boundary. Workflows use that boundary to start, then use the stack-specific
 patterns for exact classification.
 
+Issue #2406 amends that one clause: the `scripts/**` entry is replaced by the
+six script paths the stacks name, and a nested admission entry is registered in
+`NESTED_ADMISSION_EXCEPTIONS` rather than refused outright. The list is still
+one boundary, still copied verbatim, and every other entry stays coarse.
+
 ## Alternatives considered
 
 - **One monolithic Terraform state** — rejected: couples daily alert-threshold edits
