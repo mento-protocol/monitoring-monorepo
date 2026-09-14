@@ -231,7 +231,7 @@ routing, not procedure.
    The three Terraform filters are the exception: `ci.yml` `terraform` plus
    `infra.yml` push and `pull_request` copy the `workflowAdmissionPatterns`
    boundary from `terraform.stacks.json`, whose `scripts/` entries are the six
-   subtrees the stacks name. `routing.test.mjs` asserts exact equality and
+   patterns the stacks name. `routing.test.mjs` asserts exact equality and
    proves it subsumes every stack pattern. A miss is silent without that
    contract — the job stops running while the required `ci` sentinel stays
    green. A module glob such as `supply-chain.yml`'s `scripts/supply-chain/**`
@@ -257,7 +257,7 @@ routing, not procedure.
    that supporting module even though the job's path filter is indexer-wide.
 4. `terraform.stacks.json` — each stack's `changedPathPatterns` enumerates
    exact `scripts/` paths. The `workflowAdmissionPatterns` boundary admits six
-   `scripts/` subtrees, not the tree; `tf-stacks.test.mjs` proves it subsumes
+   `scripts/` entries, not the tree; `tf-stacks.test.mjs` proves it subsumes
    every stack pattern. A stale stack entry still stops that stack reacting to
    its own tooling.
 5. `.trunk/trunk.yaml`, `.trunk/hooks/pre-commit`, and `.gitattributes`.

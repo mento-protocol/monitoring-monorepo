@@ -113,7 +113,7 @@ Move each pin class with its files.
   points from candidate changes (ADR 0088).
 - **Terraform stack registry.** `terraform.stacks.json` `changedPathPatterns`
   pins exact `scripts/` paths per stack. Admission lists six `scripts/`
-  subtrees, not the tree; `pnpm tf:test` enforces subsumption.
+  entries, not the tree; `pnpm tf:test` enforces subsumption.
 - **Trusted-validator probes.** `pr-description.yml` resolves the validator at
   the PR base tip. After a move, keep dual probes until the new path reaches
   the base (issue 1904; ADR 0064).
