@@ -3,9 +3,9 @@ name: CI
 # Aggregate workflow fanning out to package-scoped quality jobs gated on
 # path changes. The `ci` sentinel aggregates this package-scoped fan-out into
 # one required check (`CI / ci`) instead of one required check per package.
-# A PR that only touches ui-dashboard/ runs the `ui` job and the
-# unconditional production-infrastructure contract; other irrelevant jobs skip
-# cleanly (GitHub hides them from the checks list).
+# A PR that only touches ui-dashboard/ runs the `ui-static` and `ui` jobs and
+# the unconditional production-infrastructure contract; other irrelevant jobs
+# skip cleanly (GitHub hides them from the checks list).
 #
 # Third-party actions are pinned to commit SHAs per the policy in
 # .github/workflows/claude.yml — update via Dependabot
@@ -1640,6 +1640,9 @@ jobs:
       - name: Guardrail prose pin suite
         run: node scripts/repo-health/check-guardrail-prose.test.mjs
       - name: Terraform production infrastructure contract
+        # Guarded like the contract steps below it: a guardrail-prose failure
+        # above must not suppress a retained command in this required job.
+        if: ${{ !cancelled() }}
         run: pnpm tf:test
       - name: Issue board owner-mutation confinement contract
         if: ${{ !cancelled() }}
