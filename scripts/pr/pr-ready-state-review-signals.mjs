@@ -620,6 +620,7 @@ export function classifyCodeRabbitReviewSignal({
   reviews = [],
   currentHeadOid = null,
   headUpdatedAt = null,
+  headUpdatedAtIsUpperBound = false,
   pathFilterSkip = null,
 } = {}) {
   const currentHead = String(currentHeadOid ?? "").toLowerCase();
@@ -669,10 +670,13 @@ export function classifyCodeRabbitReviewSignal({
     const matchesCurrentHead =
       currentHead && requestedHead.toLowerCase() === currentHead;
 
-    if (
-      matchesCurrentHead &&
-      isCurrentSignal(comment.created_at ?? comment.createdAt, headUpdatedAt)
-    ) {
+    // A head time taken from the first check on the head lands after the
+    // push, so it cannot date a request posted in between; the exact-head
+    // marker already binds the request to this head.
+    const recent =
+      headUpdatedAtIsUpperBound ||
+      isCurrentSignal(comment.created_at ?? comment.createdAt, headUpdatedAt);
+    if (matchesCurrentHead && recent) {
       hasCurrentRequest = true;
     } else {
       hasHistoricalSignal = true;

@@ -3555,6 +3555,32 @@ test("binds one CodeRabbit closeout request to the full current head", () => {
     "requested",
     "a marked full review is the current-head request too",
   );
+  // A head time taken from the first check on the head lands after the push;
+  // a marked request posted in between is still this head's request.
+  const beforeStatusTime = {
+    body: request(currentHeadOid),
+    author_association: "MEMBER",
+    created_at: "2026-08-21T08:13:00Z",
+  };
+  assertEqual(
+    classifyCodeRabbitReviewSignal({
+      currentHeadOid,
+      headUpdatedAt: Date.parse("2026-08-21T08:13:33Z"),
+      issueComments: [beforeStatusTime],
+    }),
+    "stale",
+    "a timeline-dated head still bounds marked requests from below",
+  );
+  assertEqual(
+    classifyCodeRabbitReviewSignal({
+      currentHeadOid,
+      headUpdatedAt: Date.parse("2026-08-21T08:13:33Z"),
+      headUpdatedAtIsUpperBound: true,
+      issueComments: [beforeStatusTime],
+    }),
+    "requested",
+    "a status-dated head keeps the exact-head marker as the request",
+  );
   assertEqual(
     classifyCodeRabbitReviewSignal({
       currentHeadOid,

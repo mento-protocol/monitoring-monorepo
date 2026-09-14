@@ -152,8 +152,12 @@ export function provenanceSideDrift(contentsA, contentsB, relativePath) {
   // unsupported value such as `source: "codex"` on both sides normalizes clean
   // and would otherwise pass. Whether the skill writes a literal at all is the
   // canonical skill's own contract, which stays under review.
+  // Either quote style: a single-quoted `source: 'Codex'` on both sides is
+  // byte-identical and would otherwise carry no literal to check.
   const literals = (contents) =>
-    [...contents.matchAll(/source: "([^"]*)"/g)].map((match) => match[1]);
+    [...contents.matchAll(/source:\s*(["'])([^"']*)\1/g)].map(
+      (match) => match[2],
+    );
   if (literals(contentsA).some((value) => value !== "Codex")) {
     drift.push(
       `provenance literal in the canonical tree must be source: "Codex": ${relativePath}`,

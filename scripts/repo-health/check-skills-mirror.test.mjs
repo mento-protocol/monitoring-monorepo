@@ -216,6 +216,19 @@ test("a swapped forensic-report provenance literal fails even when both sides ma
   assert.notEqual(unsupported.status, 0);
   assert.match(unsupported.output, /canonical tree must be source: "Codex"/);
   assert.match(unsupported.output, /Claude mirror must be source: "claude"/);
+
+  // A single-quoted assignment on both sides is byte-identical too.
+  writeFileSync(
+    path.join(rootA, "forensic-report/SKILL.md"),
+    "writes source: 'Codex' records\n",
+  );
+  writeFileSync(
+    path.join(rootB, "forensic-report/SKILL.md"),
+    "writes source: 'Codex' records\n",
+  );
+  const singleQuoted = runChecker(rootA, rootB);
+  assert.notEqual(singleQuoted.status, 0);
+  assert.match(singleQuoted.output, /Claude mirror must be source: "claude"/);
 });
 
 test("provenanceSideDrift is silent for the documented split and outside forensic-report", () => {

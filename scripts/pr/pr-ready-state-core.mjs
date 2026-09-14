@@ -632,6 +632,7 @@ export function summarizeReadyState({
     issueComments,
     reviews: pr.reviews ?? [],
     headUpdatedAt,
+    headUpdatedAtIsUpperBound: Boolean(pr.headUpdatedAtIsUpperBound),
     currentHeadOid,
     pathFilterSkip: codeRabbitPathFilterSkip,
   });
