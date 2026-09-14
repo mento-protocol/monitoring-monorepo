@@ -18,43 +18,37 @@ mkdir -p "$SHIM/gh-empty"
 # token variables, points gh at an empty config directory, and takes git's
 # credential helper, terminal prompt, askpass and non-file protocols away, so a
 # cell cannot fetch the withheld fix commit with the operator's credentials.
-# This is defense in depth, not containment: the network stays open because the
-# model API must be reachable. Naming a withheld commit is a hard leak signal.
+# Defense in depth, not containment: the network stays open because the model
+# API must be reachable, and naming a withheld commit is a hard leak signal.
 #
-# `OLDPWD` goes with them, and it is the one that hands over a path rather than
-# a credential. Bash exports it, and `run_in_fixture` sets it by `cd`-ing from
-# the invocation directory — the repository root, per the runbook — into the
-# fixture, so the contestant inherits the source checkout's location. The answer
-# key lives there, frozen on main under docs/evals/review-skill-truth/, and a
-# cell that reads it copies out every defect while emitting no PR number,
-# reviewer login or withheld SHA for `leakSignals()` to catch: the run scores a
-# recall it never earned. A shell tool re-initializes `OLDPWD` for itself, but
-# `claude` and `codex` are not shells and carry the inherited value in their own
-# environment, so cut it at the boundary rather than lean on that.
-# `PWD` stays, because it is the fixture the cell is supposed to be reviewing.
+# `OLDPWD` goes with them, and it hands over a path rather than a credential:
+# Bash exports it, and `run_in_fixture` sets it by `cd`-ing from the invocation
+# directory — the repository root, per the runbook — into the fixture, so the
+# contestant inherits the source checkout's location. The answer key is frozen
+# there on main under docs/evals/review-skill-truth/, and a cell that reads it
+# copies out every defect while emitting no PR number, reviewer login or
+# withheld SHA for `leakSignals()` to catch. A shell tool re-initializes
+# `OLDPWD`, but `claude` and `codex` are not shells, so cut it at the boundary.
+# `PWD` stays: it is the fixture the cell is supposed to be reviewing.
 CELL_ENV=(env
   -u GH_TOKEN -u GITHUB_TOKEN -u GITHUB_PERSONAL_ACCESS_TOKEN
   -u GH_ENTERPRISE_TOKEN -u OLDPWD)
 # The documented invocation is `pnpm review:eval:run`, and pnpm exports its own
-# family of path-bearing variables into every script it runs — INIT_CWD,
-# PNPM_SCRIPT_SRC_DIR, npm_package_json, npm_config_local_prefix and more, each
-# carrying the checkout the answer key lives in. The family is open-ended, so
-# scrub it by name pattern from the live environment instead of enumerating.
+# open-ended family of path-bearing variables into every script it runs —
+# INIT_CWD, PNPM_SCRIPT_SRC_DIR, npm_package_json and more, each carrying the
+# checkout the answer key lives in. Scrub it by name pattern, not by list.
 while IFS= read -r cell_env_var; do
   CELL_ENV+=(-u "$cell_env_var")
 done < <(compgen -e | grep -E '^(npm_|PNPM_|INIT_CWD$|NODE_PATH$)' || true)
 
-# `PATH` is the last path-bearing variable, and it survives the scrub above
-# because a cell still needs node, git and the model CLIs. Under
-# `pnpm review:eval:run` pnpm prepends `<checkout>/node_modules/.bin` to it, so
-# passing the caller's `PATH` through verbatim hands every Bash-enabled
-# contestant the checkout root the INIT_CWD scrub just took away — and the
-# answer key sits in it, under docs/evals/review-skill-truth/, readable with no
-# PR number, reviewer login or withheld SHA for `leakSignals()` to catch.
-# Rebuild it instead: the shim first, then every inherited entry that does not
-# resolve inside the source checkout. Entries are compared canonically, because
-# a symlinked `node_modules/.bin` passes a string comparison and still lands in
-# the repository.
+# `PATH` survives the scrub above because a cell still needs node, git and the
+# model CLIs. Under `pnpm review:eval:run` pnpm prepends
+# `<checkout>/node_modules/.bin` to it, so passing the caller's `PATH` through
+# verbatim hands every Bash-enabled contestant the checkout root the INIT_CWD
+# scrub just took away — answer key included. Rebuild it instead: the shim
+# first, then every inherited entry that does not resolve inside the source
+# checkout, compared canonically because a symlinked `node_modules/.bin` passes
+# a string comparison and still lands in the repository.
 CELL_PATH="$SHIM"
 REPO_REAL="$(cd "$REPO" && pwd -P)"
 while IFS= read -r cell_path_entry; do
@@ -75,8 +69,7 @@ CELL_ENV+=(
 
 # A cell that cannot start its own tools is a failed run, not a safer one, and
 # dropping checkout entries is the only thing that can cause it. Check the tools
-# a cell actually needs against the rebuilt PATH, in a subshell so the
-# operator's own PATH is untouched.
+# a cell needs against the rebuilt PATH, in a subshell so the caller's is safe.
 for cell_path_tool in claude codex node git; do
   (
     PATH="$CELL_PATH"
@@ -86,7 +79,7 @@ done
 
 # One scrubbed model call inside one fixture. `run_bounded` needs a command it
 # can start in the background and signal, which a `(cd … && …)` subshell inside
-# a command substitution is not; the `cd` is confined to that background job.
+# a command substitution is not; the `cd` stays in that background job.
 # shellcheck disable=SC2329  # started by name from run_bounded
 run_in_fixture() {
   local fixture="$1"
@@ -98,8 +91,7 @@ run_in_fixture() {
 # The contestant stream ceiling, mirroring the 64 MiB `claudeExec` enforces on
 # the node path: `run_bounded` bounds time alone, and the cell writer reads the
 # whole stream back. Overridable for the tests that prove it, never off. Bash
-# counts `ulimit -f` in 1024-byte blocks, POSIX in 512 — half this, safe either
-# way. Round up.
+# counts `ulimit -f` in 1024-byte blocks, POSIX in 512 — half this either way.
 CELL_STREAM_MAX_BYTES="${REVIEW_EVAL_MAX_STREAM_BYTES:-67108864}"
 if [[ ! $CELL_STREAM_MAX_BYTES =~ ^[1-9][0-9]*$ ]]; then
   fail "REVIEW_EVAL_MAX_STREAM_BYTES must be a positive number of bytes"
@@ -107,8 +99,8 @@ fi
 CELL_STREAM_MAX_BLOCKS=$(((CELL_STREAM_MAX_BYTES + 1023) / 1024))
 
 # One capped model call inside one fixture. `run_bounded` starts it as a
-# background job, in a subshell of its own, so the limit binds the cell's
-# processes and not the operator's shell. Past the ceiling: SIGXFSZ, no cache.
+# background job in a subshell of its own, so the limit binds the cell and not
+# the operator's shell. Past the ceiling: SIGXFSZ, no cache.
 # shellcheck disable=SC2329  # started by name from run_bounded
 run_capped_in_fixture() {
   ulimit -f "$CELL_STREAM_MAX_BLOCKS" || return 1
@@ -121,12 +113,11 @@ SKILL_SRC="${SKILL_REF:-${REVIEW_EVAL_SKILL_DIR:-$HOME/.claude/skills/review}}"
 [[ -f "$SKILL_SRC/SKILL.md" ]] || fail "no SKILL.md under $SKILL_SRC"
 
 # The skill is the treatment under test, and the plan records its digest once
-# for the whole matrix — a cached cell's fingerprint carries that one digest
-# too. A full run takes about two hours, which is long enough for the operator
-# to keep editing the installed skill while it runs, so staging every cell from
-# the live directory would measure new content under the old digest and put two
-# treatments in one row. Snapshot the skill once, refuse the run if the
-# snapshot is not what was planned, and stage every cell from the snapshot.
+# for the whole matrix. A full run takes about two hours — long enough for the
+# operator to keep editing the installed skill — so staging every cell from the
+# live directory would measure new content under the old digest and put two
+# treatments in one row. Snapshot it once, refuse the run if the snapshot is not
+# what was planned, and stage every cell from the snapshot.
 SKILL_SNAPSHOT="$(mktemp -d "$TMPROOT/review-eval-skill.XXXXXX")"
 rm -rf "$SKILL_SNAPSHOT"
 cp -R "$SKILL_SRC" "$SKILL_SNAPSHOT" ||
@@ -175,10 +166,10 @@ skill_body_head() {
 #
 # The call site takes this on stdout inside a command substitution, so a failed
 # `cp -R` would be discarded twice over and the framing printfs alone would
-# still render a plausible, empty preamble. That cell would run, exit 0, cache,
-# and be folded in as the skill's score. Both halves are checked here instead:
-# a non-zero copy and a preamble that does not carry the snapshot's own first
-# instruction line each return non-zero, and the caller fails the cell.
+# render a plausible, empty preamble — a cell that runs, exits 0, caches, and is
+# folded in as the skill's score. Both halves are checked here instead: a
+# non-zero copy and a preamble missing the snapshot's own first instruction line
+# each return non-zero, and the caller fails the cell.
 stage_skill() {
   local fixture="$1"
   purge_skill "$fixture"
@@ -216,8 +207,7 @@ declare -a FIXTURE_HEADS=()
 # substitution would run it in a subshell, where the memo arrays below are a
 # discarded copy — every cell would then miss the memo and re-run the whole
 # `build-fixture.sh` leak verification for a fixture already on disk. The
-# per-cell `reset_fixture` lives at the call site, so a memo hit still gets a
-# clean tree at the pinned commit.
+# per-cell `reset_fixture` still gives a memo hit a clean tree.
 FIXTURE_PATH=""
 FIXTURE_HEAD=""
 
@@ -232,9 +222,9 @@ fixture_path() {
       return 0
     fi
   done
-  # The head comes back beside the path because the per-cell reset targets it
-  # explicitly. `materializeFixture` already refuses a build whose head is not
-  # the contract's `first_head`, so this is the pinned commit by construction.
+  # The head comes back beside the path because the per-cell reset names it.
+  # `materializeFixture` already refuses a build whose head is not the
+  # contract's `first_head`, so this is the pinned commit by construction.
   local built head
   # shellcheck disable=SC2016  # the single-quoted block is node source
   built="$(node --input-type=module -e '
@@ -270,11 +260,10 @@ fixture_path() {
 # tool, so the tree has to be restored between them. An argument-free
 # `git reset --hard` restores whatever `HEAD` names now, which is the one thing
 # a contestant can move: committing its own edits — or a prompt-injected commit
-# from the diff under review — makes that commit the fixture. Every later cell
-# for the PR then reviews the contestant's tree, and so does the novelty judge
-# and the pre-judge login snapshot, which is how a corrupted condition score
-# becomes the run of record. The reset names the pinned commit, and `HEAD` is
-# read back afterwards so a reset that did not land fails the cell instead.
+# from the diff under review — makes that commit the fixture, and every later
+# cell, the novelty judge and the pre-judge login snapshot then read the
+# contestant's tree. The reset names the pinned commit, and `HEAD` is read back
+# afterwards so a reset that did not land fails the cell instead.
 reset_fixture() {
   local fixture="$1" head="$2"
   git -C "$fixture" checkout --quiet --force --detach "$head" &&
@@ -286,8 +275,8 @@ reset_fixture() {
 # --- the finder argv and the cell fingerprint --------------------------------
 
 # The finder is spawned as an argument vector, never as a command string: the
-# contract validator pins every element to [A-Za-z0-9._="@/:-], so reading one
-# element per line reconstructs the array exactly and nothing is word-split.
+# contract validator pins every element to [A-Za-z0-9._="@/:-], so one element
+# per line reconstructs the array exactly and nothing is word-split.
 FINDER_ARGV=()
 while IFS= read -r finder_argv_element; do
   FINDER_ARGV+=("$finder_argv_element")
@@ -347,11 +336,9 @@ cell_reuse_refusal() {
 
 # Cells are what a run pays for, and the plan hands this execution its own
 # detail directory as soon as a ledger row records the previous one. That older
-# directory still holds paid cells, so they are copied in once — and then
+# directory still holds paid cells, so they are copied in once and then
 # re-checked one at a time against this run's fingerprint, exactly as a cell
-# found in place is, so a cell produced under an edited skill, contract,
-# orchestrator or CLI is refused and re-run. Nothing is copied over cells this
-# run already has.
+# found in place is. Nothing is copied over cells this run already has.
 RESUME_FROM="$(json_field "$PLAN_OUT" resume_from)"
 case "$RESUME_FROM" in
   "" | undefined | null) RESUME_FROM="" ;;
@@ -373,15 +360,19 @@ CLAUDE_TOOLS=(Read Write Edit Bash Grep Glob Agent TodoWrite)
 
 # The cell writer, and the stream parser it imports, are sealed beside the shell
 # in the private source snapshot and bound by the plan's orchestrator digest.
-# Loading either from `$SPEC` — live under a candidate run — let the parser
-# change between two cells with every cell fingerprint unchanged. The wrapper
-# sets that variable, so only the frozen equivalence harness reaches the
-# fallback.
+# Loading either live from `$SPEC` let the parser change between two cells with
+# every fingerprint unchanged. Only the frozen harness takes the fallback below.
 CELL_WRITER="${RUN_EVAL_SCRIPT_DIR:-$SPEC/scripts/review}/review-eval-cell-writer.mjs"
 
 run_cell() {
   local cell_id="$1" pr="$2" condition="$3" draw="$4" model="$5" effort="$6"
   local finder="$7" finder_report="$8" prompt_kind="$9"
+  local tool="${10:-claude}"
+  # Only a probe plans a tool; the `else` below would run claude for any other.
+  if [[ $tool != claude && $tool != codex ]]; then
+    log "  $cell_id FAILED — unknown cell tool $tool; not cached"
+    return 1
+  fi
   local out_dir="$RUN_DIR/cells/$cell_id"
 
   if [[ -f "$out_dir/result.json" ]]; then
@@ -395,8 +386,7 @@ run_cell() {
     fi
   fi
 
-  # Until this check, a writer that would not load was found after the paid
-  # call. `--preflight` imports it first, so that fault costs nothing.
+  # `--preflight` imports the writer before the paid call, so a load fault is free.
   if ! node "$CELL_WRITER" --preflight; then
     log "  $cell_id FAILED — harness fault before any cost; $CELL_WRITER did not load"
     return 1
@@ -429,10 +419,10 @@ run_cell() {
     # The finder writes to a file rather than into a pipeline so the run
     # deadline can bound it: a stalled finder inside a command substitution
     # never returns, and the between-cells deadline check never runs again.
-    # A finder that hits its session limit or dies mid-report still writes what
-    # it had, and that partial report is not a review: cached, it would score
-    # forever as a finder that simply missed those defects. Fail the cell on an
-    # unsuccessful exit, on the deadline, or on an empty report.
+    # A finder that hits its session limit or dies mid-report still writes a
+    # partial report, and that is not a review: cached, it would score forever as
+    # a finder that missed those defects. Fail the cell on an unsuccessful exit,
+    # the deadline, or an empty report.
     local finder_out finder_status=0
     finder_out="$(mktemp "$TMPROOT/review-eval-finder.XXXXXX")"
     run_bounded "$finder_out" "$(remaining_seconds "$MATRIX_DEADLINE")" \
@@ -459,10 +449,10 @@ run_cell() {
     rm -f "$finder_out" "$finder_out.err"
   elif [[ $condition == "replay" ]]; then
     # The frozen report is the whole treatment for this condition. Reading it
-    # is verified once by --check-fixtures, but the spec worktree is the live
-    # checkout under --skill-ref and a candidate run can outlive the branch it
-    # was planned on. An unreadable or empty report here would hand the model
-    # an empty handoff and score that as a review of the change.
+    # is verified once by --check-fixtures, but under --skill-ref the spec
+    # worktree is the live checkout and a candidate run can outlive the branch
+    # it was planned on. An unreadable or empty report here would hand the
+    # model an empty handoff and score that as a review of the change.
     if ! other_review="$(cat "$SPEC/$finder_report")" ||
       [[ -z ${other_review//[[:space:]]/} ]]; then
       log "  $cell_id FAILED — frozen finder report $finder_report is unreadable or empty; not cached"
@@ -488,41 +478,52 @@ run_cell() {
     prompt="$(cat "$SPEC/scripts/review/prompts/request.md")"
   fi
 
-  # `stream-json` because a cell is scored on the messages it wrote, not on the
-  # last alone: `--output-format json` reports that one, so a reviewer that
-  # filed its report and then posted an addendum was scored on the addendum.
-  local -a claude_args=(-p "$prompt" --model "$model" --effort "$effort"
-    --setting-sources "" --output-format stream-json --verbose
-    --permission-mode bypassPermissions
-    --allowed-tools "${CLAUDE_TOOLS[@]}" --max-turns 80)
-  if [[ $condition != "control" ]]; then
-    local preamble
-    if ! preamble="$(stage_skill "$fixture")"; then
-      log "  $cell_id FAILED — the skill did not stage into the fixture; not cached"
-      purge_skill "$fixture"
-      return 1
-    fi
-    claude_args+=(--append-system-prompt "$preamble")
-  fi
-
-  local raw other_file claude_status=0 envelope_status=0
+  local raw other_file last_message="" claude_status=0 envelope_status=0
   raw="$(mktemp "$TMPROOT/review-eval-cell.XXXXXX")"
   other_file="$(mktemp "$TMPROOT/review-eval-other.XXXXXX")"
   printf '%s' "$other_review" >"$other_file"
-  # Bounded by what is left of the matrix budget for the same reason the finder
-  # is: a contestant that stalls at a session limit would otherwise hold the
-  # whole run open past the deadline it advertises.
-  run_bounded "$raw" "$(remaining_seconds "$MATRIX_DEADLINE")" \
-    run_capped_in_fixture "$fixture" claude "${claude_args[@]}" || claude_status=$?
+  # Bounded by the rest of the matrix budget, as the finder is: a stalled
+  # contestant would hold the run past its advertised deadline.
+  if [[ $tool == codex ]]; then
+    # Codex verifier: bare model, same prompt, no skill or user config, read-only.
+    last_message="$(mktemp "$TMPROOT/review-eval-last.XXXXXX")"
+    run_bounded "$raw" "$(remaining_seconds "$MATRIX_DEADLINE")" \
+      run_stream_capped "$CELL_STREAM_MAX_BYTES" "$fixture" codex exec \
+      --sandbox read-only --skip-git-repo-check --ephemeral \
+      --ignore-user-config --ignore-rules -m "$model" \
+      -c "model_reasoning_effort=\"$effort\"" \
+      --json -o "$last_message" "$prompt" || claude_status=$?
+    if [[ $(wc -c <"$raw" | tr -d " ") -gt $CELL_STREAM_MAX_BYTES ]]; then
+      claude_status=25
+    fi
+  else
+    # `stream-json`: a cell is scored on every message it wrote, not the last.
+    local -a claude_args=(-p "$prompt" --model "$model" --effort "$effort"
+      --setting-sources "" --output-format stream-json --verbose
+      --permission-mode bypassPermissions
+      --allowed-tools "${CLAUDE_TOOLS[@]}" --max-turns 80)
+    if [[ $condition != "control" ]]; then
+      local preamble
+      if ! preamble="$(stage_skill "$fixture")"; then
+        log "  $cell_id FAILED — the skill did not stage into the fixture; not cached"
+        purge_skill "$fixture"
+        rm -f "$raw" "$other_file"
+        return 1
+      fi
+      claude_args+=(--append-system-prompt "$preamble")
+    fi
+    run_bounded "$raw" "$(remaining_seconds "$MATRIX_DEADLINE")" \
+      run_capped_in_fixture "$fixture" claude "${claude_args[@]}" || claude_status=$?
+  fi
   if [[ $claude_status -ne 0 ]]; then
     purge_skill "$fixture"
     if [[ $claude_status -eq 124 ]]; then
-      log "  $cell_id FAILED — claude hit the run deadline; not cached"
+      log "  $cell_id FAILED — $tool hit the run deadline; not cached"
     else
-      log "  $cell_id FAILED — claude exited $claude_status; not cached"
+      log "  $cell_id FAILED — $tool exited $claude_status; not cached"
     fi
     log_stderr_tail "$raw.err"
-    rm -f "$raw" "$raw.err" "$other_file"
+    rm -f "$raw" "$raw.err" "$other_file" ${last_message:+"$last_message"}
     return 1
   fi
   purge_skill "$fixture"
@@ -531,6 +532,7 @@ run_cell() {
   REVIEW_EVAL_CELL="$cell_id" REVIEW_EVAL_PR="$pr" \
     REVIEW_EVAL_CONDITION="$condition" REVIEW_EVAL_DRAW="$draw" \
     REVIEW_EVAL_MODEL="$model" REVIEW_EVAL_EFFORT="$effort" \
+    REVIEW_EVAL_TOOL="$tool" REVIEW_EVAL_LAST_MESSAGE="$last_message" \
     REVIEW_EVAL_FINDER="$finder" REVIEW_EVAL_FIXTURE="$fixture" \
     REVIEW_EVAL_SECONDS="$(($(date +%s) - started))" \
     REVIEW_EVAL_FINDER_CHARS="$codex_chars" \
@@ -548,12 +550,12 @@ run_cell() {
       log "  $cell_id FAILED — harness fault, cell kept with its stream; the stream parser did not load"
     else
       rm -rf "$out_dir"
-      log "  $cell_id FAILED — claude reported an error; not cached"
+      log "  $cell_id FAILED — $tool reported an error; not cached"
     fi
-    rm -f "$raw" "$raw.err" "$other_file"
+    rm -f "$raw" "$raw.err" "$other_file" ${last_message:+"$last_message"}
     return 1
   fi
-  rm -f "$raw" "$raw.err" "$other_file"
+  rm -f "$raw" "$raw.err" "$other_file" ${last_message:+"$last_message"}
   log "  $cell_id ok $(($(date +%s) - started))s"
   return 0
 }
@@ -565,9 +567,9 @@ run_cell() {
 # rows in the reader below: such a field aborts the run instead.
 #
 # The whole matrix is built before a single line is written. Writing as it goes
-# would emit every cell up to the offending one, and the reader below cannot
-# see that the writer died: the run would spend money on a truncated matrix and
-# then score it as merely partial, which is exactly what the check is for.
+# would emit every cell up to the offending one, and the reader below cannot see
+# that the writer died: the run would spend money on a truncated matrix and then
+# score it as merely partial.
 cell_rows() {
   # shellcheck disable=SC2016  # the single-quoted block is node source
   node -e '
@@ -578,15 +580,18 @@ cell_rows() {
         cell.cell_id, cell.pr, cell.condition, cell.draw, cell.model,
         cell.effort, cell.finder ?? "", cell.finder_report ?? "",
         cell.prompt,
+        // Only a probe plans a cell run as anything but `claude`; every other
+        // kind carries no tool and takes this default.
+        cell.tool ?? "claude",
       ].map(String);
       for (const [index, field] of fields.entries()) {
-        if (/[\t\r\n]/.test(field)) {
+        if (/[\x1f\r\n]/.test(field)) {
           throw new Error(
-            `cell ${cell.cell_id} field ${index} carries a tab or a newline: ${JSON.stringify(field)}`,
+            `cell ${cell.cell_id} field ${index} carries a unit separator or a newline: ${JSON.stringify(field)}`,
           );
         }
       }
-      lines.push(fields.join("\t") + "\n");
+      lines.push(fields.join("\x1f") + "\n"); // not tab: bash read collapses empties
     }
     process.stdout.write(lines.join(""));
   ' "$PLAN_JSON"
