@@ -204,7 +204,8 @@ nothing to notice it. Isolation is what makes a worker's branch its own.
 
 **Machine-wide author-check scheduling.** Rejected for normal workers. Direct
 checks run in isolated checkouts under the sweep's local resource bound. The
-legacy coordinator remains only for the diagnostic gate.
+legacy coordinator and diagnostic gate were retired by
+[ADR 0101](0101-legacy-gate-retirement.md).
 
 **Cron-triggered autonomy.** A sweep that starts itself needs answers this
 design does not have: what stops a run burning the usage window unattended, and
