@@ -19,8 +19,12 @@ name: PR Description
 # since retargeting to `main` can be the only event a PR ever gets.
 # One exception: the bootstrap fallback below runs the PR-head copy when the
 # base branch lacks the validator, so the PR that introduces or moves
-# scripts/pr/check-pr-description.mjs is head-dependent and must be
-# re-checked by an `edited` event or a manual re-run.
+# scripts/pr/check-pr-description.mjs is head-dependent. Recovery after a
+# later head-commit fix needs a new qualifying event — a body or base edit,
+# a reopen, or ready_for_review — because that refreshes
+# `github.event.pull_request.head.sha` to the current head. A manual re-run
+# of an existing job reuses the same cached event payload and SHA, so it
+# checks out the old head and cannot pick up the fix.
 # Promoting this check to required needs
 # `synchronize` restored in the same change. Draft PRs and Dependabot PRs
 # are skipped.
