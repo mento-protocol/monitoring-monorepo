@@ -22,8 +22,7 @@ mkdir -p "$SHIM/gh-empty"
 # API must be reachable, and naming a withheld commit is a hard leak signal.
 #
 # `OLDPWD` goes too: `run_in_fixture` `cd`s from the repository root into the
-# fixture, so a cell would inherit the checkout holding the answer key, and a
-# read of it leaves nothing for `leakSignals()`. `PWD` stays: it is the fixture.
+# fixture, so a cell would inherit the checkout holding the answer key. `PWD` stays.
 CELL_ENV=(env
   -u GH_TOKEN -u GITHUB_TOKEN -u GITHUB_PERSONAL_ACCESS_TOKEN
   -u GH_ENTERPRISE_TOKEN -u OLDPWD)
@@ -286,13 +285,14 @@ done < <(
 # spawn is re-homed onto its file login with no endpoint override; canary: none.
 CODEX_ENV=(env)
 if [[ ${#FINDER_ARGV[@]} -gt 0 ]]; then
-  CODEX_AUTH="${CODEX_HOME:-$HOME/.codex}/auth.json"
-  [[ $CODEX_AUTH == /* ]] || CODEX_AUTH="$PWD/$CODEX_AUTH"
+  CODEX_AUTH="${CODEX_HOME:-$HOME/.codex}/auth.json"; [[ $CODEX_AUTH == /* ]] || CODEX_AUTH="$PWD/$CODEX_AUTH"
   CODEX_ISO="$(mktemp -d "$TMPROOT/review-eval-codex-home.XXXXXX")" && mkdir -p "$CODEX_ISO/.codex"
   if [[ -f $CODEX_AUTH ]]; then
     ln -s "$CODEX_AUTH" "$CODEX_ISO/.codex/auth.json"
+    # shellcheck disable=SC2034  # read by the lifecycle cleanup's copy-back
+    CODEX_AUTH_SUM="$(shasum -a 256 "$CODEX_AUTH" | cut -c1-64)"
   else
-    log "no codex auth.json at $CODEX_AUTH; codex will use its keyring or environment login"
+    log "no codex auth.json at $CODEX_AUTH; codex must authenticate from the environment (a keyring store is not carried into the run-private home)"
   fi
   CODEX_ENV=(env -u OPENAI_BASE_URL HOME="$CODEX_ISO" CODEX_HOME="$CODEX_ISO/.codex")
 fi

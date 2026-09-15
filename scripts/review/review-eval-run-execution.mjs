@@ -1,12 +1,14 @@
 // Scoring-process execution, environment scrubbing, and fixture reset.
 
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   copyFileSync,
   existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   realpathSync,
   rmSync,
   symlinkSync,
@@ -198,11 +200,23 @@ export function codexIsolatedHome({
   const home = mkdtempSync(path.join(tmpRoot, "review-eval-codex-home."));
   const codexHome = path.join(home, ".codex");
   mkdirSync(codexHome);
-  // A file-store login is linked in. A keyring or environment login has no
-  // file and needs none; a cell that cannot authenticate fails as a cell.
+  // A file-store login is linked in. Codex's config stays out of the home, so
+  // a keyring store is not carried: without a file login codex can only
+  // authenticate from the environment, and a cell that cannot fails as a cell.
+  // The file's digest lets the release tell a concurrent operator refresh
+  // from the file it linked.
   const linked = exists(auth);
   if (linked) symlinkSync(auth, path.join(codexHome, "auth.json"));
-  return { home, codexHome, auth: linked ? auth : null };
+  return {
+    home,
+    codexHome,
+    auth: linked ? auth : null,
+    authDigest: linked ? fileDigest(auth) : null,
+  };
+}
+
+function fileDigest(file) {
+  return createHash("sha256").update(readFileSync(file)).digest("hex");
 }
 
 /**
@@ -218,11 +232,19 @@ export function codexEnv(env, { home, codexHome }) {
 /**
  * Remove the home. A token refresh that writes through the link has already
  * reached the operator's file; one that renamed a new file over the link
- * left it here, so copy it back before the directory goes.
+ * left it here, so copy it back before the directory goes — unless the
+ * operator's file changed meanwhile, in which case that newer login wins
+ * and the file here is stale.
  */
-export function releaseCodexHome({ home, codexHome, auth }) {
+export function releaseCodexHome({ home, codexHome, auth, authDigest }) {
   const linked = path.join(codexHome, "auth.json");
-  if (auth && existsSync(linked) && !lstatSync(linked).isSymbolicLink()) {
+  if (
+    auth &&
+    existsSync(linked) &&
+    !lstatSync(linked).isSymbolicLink() &&
+    existsSync(auth) &&
+    fileDigest(auth) === authDigest
+  ) {
     copyFileSync(linked, auth);
   }
   rmSync(home, { recursive: true, force: true });

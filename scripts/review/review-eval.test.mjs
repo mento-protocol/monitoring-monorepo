@@ -246,7 +246,7 @@ test("the shell split no longer reconstructs the pre-split cell runtime", () => 
   // so this pin still catches an unintended shell edit.
   assert.equal(
     reconstructed,
-    "e7fa4b487673a650471e6c891e5b1d50fad157bce09094e615869da5f2b7fd77",
+    "af03795ad2589933dab079ba91170a24d54ae0da416ecf9890304860caedc277",
   );
   // It is no longer the pre-split monolith. Capturing the whole session instead
   // of the CLI's last-message envelope changed what a cell records, so the 24
@@ -908,7 +908,7 @@ test("comparabilityKey moves with the contract, the prompts, and the scorer", ()
 
 test("orchestratorSourceDigest binds the shell and the cell modules", () => {
   const expected =
-    "e1d5f12ce4a1896cae739ce15188ab502a2ede0f06814b6fdc1863a3a62fdc64";
+    "4690f218cf55604bb20d4e7bd3ddd3ce6a96fa590af5bd0b239a7fb7ca50c647";
   assert.equal(orchestratorSourceDigest(), expected);
   // The cell writer and the stream parser are in the digest for the same
   // reason the shell is: the writer decides what a paid cell records and the
@@ -6002,6 +6002,18 @@ test("a codex spawn is re-homed onto a directory holding only the auth link", ()
   releaseCodexHome(home);
   assert.equal(existsSync(home.home), false);
   assert.equal(readFileSync(home.auth, "utf8"), '{"refreshed":true}');
+  // A refresh on the operator's side during the run is newer and wins; the
+  // renamed-over file in the home is stale and is discarded.
+  const raced = codexIsolatedHome({
+    env: { HOME: operatorHome },
+    tmpRoot: root,
+  });
+  writeFileSync(raced.auth, '{"operator":"newer"}');
+  rmSync(path.join(raced.codexHome, "auth.json"));
+  writeFileSync(path.join(raced.codexHome, "auth.json"), '{"stale":true}');
+  releaseCodexHome(raced);
+  assert.equal(existsSync(raced.home), false);
+  assert.equal(readFileSync(raced.auth, "utf8"), '{"operator":"newer"}');
   // CODEX_HOME names the auth file when the operator set it; an empty value
   // is unset, as the shell reads it; a relative store resolves to an absolute
   // link target so it holds from inside the new home.
@@ -6036,8 +6048,8 @@ test("a codex spawn is re-homed onto a directory holding only the auth link", ()
     true,
   );
   releaseCodexHome(relative);
-  // A keyring or environment login has no auth file: the home is made without
-  // a link and the spawn authenticates as codex does under the operator's home.
+  // Without a file login the home is made without a link; codex's config
+  // stays out, so only an environment login can authenticate there.
   const keyring = codexIsolatedHome({
     env: { HOME: path.join(root, "empty") },
     tmpRoot: root,
@@ -10724,20 +10736,20 @@ test("every codex spawn runs under a run-private home", () => {
   // run on a host with Claude credentials and no codex.
   assert.match(
     runtime,
-    /\nCODEX_ENV=\(env\)\nif \[\[ \$\{#FINDER_ARGV\[@\]\} -gt 0 \]\]; then\n\s+CODEX_AUTH="\$\{CODEX_HOME:-\$HOME\/\.codex\}\/auth\.json"\n\s+\[\[ \$CODEX_AUTH == \/\* \]\] \|\| CODEX_AUTH="\$PWD\/\$CODEX_AUTH"\n/,
+    /\nCODEX_ENV=\(env\)\nif \[\[ \$\{#FINDER_ARGV\[@\]\} -gt 0 \]\]; then\n\s+CODEX_AUTH="\$\{CODEX_HOME:-\$HOME\/\.codex\}\/auth\.json"; \[\[ \$CODEX_AUTH == \/\* \]\] \|\| CODEX_AUTH="\$PWD\/\$CODEX_AUTH"\n/,
   );
   // A file login is linked; a keyring or environment login has no file and
   // the run says so instead of refusing to start.
   assert.match(
     runtime,
-    /if \[\[ -f \$CODEX_AUTH \]\]; then\n\s+ln -s "\$CODEX_AUTH" "\$CODEX_ISO\/\.codex\/auth\.json"\n\s+else\n\s+log "no codex auth\.json at \$CODEX_AUTH; codex will use its keyring or environment login"\n\s+fi\n/,
+    /if \[\[ -f \$CODEX_AUTH \]\]; then\n\s+ln -s "\$CODEX_AUTH" "\$CODEX_ISO\/\.codex\/auth\.json"\n\s+# shellcheck disable=SC2034[^\n]*\n\s+CODEX_AUTH_SUM="\$\(shasum -a 256 "\$CODEX_AUTH" \| cut -c1-64\)"\n\s+else\n\s+log "no codex auth\.json at \$CODEX_AUTH; codex must authenticate from the environment/,
   );
   assert.equal(runtime.includes("codex auth $CODEX_AUTH is missing"), false);
   // The lifecycle copies a renamed-over refresh back before removing the home.
   const lifecycle = runEvalSource("lifecycle");
   assert.match(
     lifecycle,
-    /\[\[ -f \$CODEX_ISO\/\.codex\/auth\.json && ! -L \$CODEX_ISO\/\.codex\/auth\.json \]\] && cp "\$CODEX_ISO\/\.codex\/auth\.json" "\$CODEX_AUTH"\n\s+rm -rf "\$CODEX_ISO"/,
+    /\[\[ -f \$CODEX_ISO\/\.codex\/auth\.json && ! -L \$CODEX_ISO\/\.codex\/auth\.json && "\$\(shasum -a 256 "\$CODEX_AUTH" 2>\/dev\/null \| cut -c1-64\)" == "\$\{CODEX_AUTH_SUM:-\}" \]\] && cp "\$CODEX_ISO\/\.codex\/auth\.json" "\$CODEX_AUTH"\n\s+rm -rf "\$CODEX_ISO"/,
   );
   assert.ok(
     runtime.indexOf("FINDER_ARGV=()") < runtime.indexOf("CODEX_ENV=(env)"),

@@ -81,10 +81,13 @@ run's temp root, with `OPENAI_BASE_URL` unset: codex discovers skills under
 `$HOME/.agents/skills` and `$CODEX_HOME/skills` whatever `--ignore-user-config`
 says, so under the operator's home the finder would see the review skill under
 test and the operator's MCP servers and hooks, and it would write its sessions
-into `~/.codex`. A file-store login is linked into that directory (a keyring or
-environment login needs no file); a refresh that renamed a new `auth.json` over
-the link is copied back to the operator's file when the run removes the
-directory. A replay-only canary spawns no codex and makes no such directory.
+into `~/.codex`. A file-store login is linked into that directory; codex's
+config stays out, so a keyring login store is not carried and a host without a
+file login must hold an API key in the environment. A refresh that renamed a
+new `auth.json` over the link is copied back to the operator's file when the
+run removes the directory, unless that file changed meanwhile, in which case
+the operator's newer login wins. A replay-only canary spawns no codex and
+makes no such directory.
 The fixture is reset with `git reset --hard` and `git clean -xdff` before
 every cell, so no cell reviews the previous cell's edits. `--score`
 flags a transcript that names the PR number, one of its reviewers, or one of

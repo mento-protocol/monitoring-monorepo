@@ -39,8 +39,8 @@ cleanup() {
     rm -rf "$SKILL_SNAPSHOT"
   fi
   if [[ -n ${CODEX_ISO:-} ]]; then
-    # A refresh that renamed a new auth file over the link left it here.
-    [[ -f $CODEX_ISO/.codex/auth.json && ! -L $CODEX_ISO/.codex/auth.json ]] && cp "$CODEX_ISO/.codex/auth.json" "$CODEX_AUTH"
+    # A refresh renamed over the link is copied back unless the operator's file moved on.
+    [[ -f $CODEX_ISO/.codex/auth.json && ! -L $CODEX_ISO/.codex/auth.json && "$(shasum -a 256 "$CODEX_AUTH" 2>/dev/null | cut -c1-64)" == "${CODEX_AUTH_SUM:-}" ]] && cp "$CODEX_ISO/.codex/auth.json" "$CODEX_AUTH"
     rm -rf "$CODEX_ISO"
   fi
   if [[ -n $BASELINE_SNAPSHOT ]]; then
