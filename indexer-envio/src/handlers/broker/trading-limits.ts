@@ -7,7 +7,10 @@
 // the Broker caller.
 //
 // State has no event: `Broker.Swap` triggers an at-block RPC read, gated by a
-// freshness window so a full resync costs about 31k reads instead of 1-2M.
+// freshness window so a full resync costs 31k-53k reads instead of 1-2M. The
+// ceiling is one read per wrapped-exchange swap leg: preload batching lets every
+// swap whose leg is stale at batch start request its own block-pinned read.
+// ADR 0103 carries the measurement.
 // Config is authoritative from `Broker.TradingLimitConfigured`; the at-block
 // config read is a one-time bootstrap for limits configured before
 // `start_block`. That event also samples state once at its own block, because

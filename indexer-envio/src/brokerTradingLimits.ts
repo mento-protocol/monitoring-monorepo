@@ -15,7 +15,7 @@ export const LIMIT_FLAG_L1 = 2;
 export const LIMIT_FLAG_LG = 4;
 
 /** Minimum age of a stored state read before the next Broker.Swap re-reads it.
- * 300 s costs about 31k state reads for a full Celo resync. */
+ * 300 s costs 31k-53k state reads for a full Celo resync; see ADR 0103. */
 export const BROKER_LIMIT_REFRESH_SECONDS = 300n;
 
 /** At or above this pressure a leg is re-read on EVERY swap, not once per
