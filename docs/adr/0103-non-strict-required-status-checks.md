@@ -47,14 +47,19 @@ A PR may merge once its own head's required checks are green and it has no
 textual conflict with `main`. Being merely behind `main` no longer blocks.
 `mergeable: CONFLICTING` and `mergeStateStatus: DIRTY` still block, unchanged.
 
-The oracle (`pr-ready-state-core.mjs` and `pr-stack-ready-state.mjs`) mirrors
-this, but fails closed rather than assuming the ruleset change has landed: it
-reads `strict_required_status_checks_policy` straight off the branch
-protection or ruleset response it already fetches for required checks, and
-only demotes BEHIND from `required.blockers[]` to a non-blocking `notes[]`
-entry once that value is confirmed `false`. Unknown or confirmed `true`
-keeps BEHIND blocking, so the probe cannot report a PR ready before the
-operator's ruleset change actually takes effect. A real conflict always
+The oracle (`pr-ready-state-core.mjs`, `pr-ready-state-closeout.mjs`, and
+`pr-stack-ready-state.mjs`) mirrors this, but fails closed rather than
+assuming the ruleset change has landed: it reads
+`strict_required_status_checks_policy` straight off the branch protection or
+ruleset response it already fetches for required checks — aggregating every
+applicable `required_status_checks` rule, since a base can carry more than
+one, with any confirmed `true` winning — and only demotes BEHIND from
+`required.blockers[]` to a non-blocking `notes[]` entry once that value is
+confirmed `false`. Unknown or confirmed `true` keeps BEHIND blocking, so the
+probe cannot report a PR ready before the operator's ruleset change actually
+takes effect, and the CodeRabbit closeout gate keeps sending a still-blocked
+BEHIND PR to `merge_base_first` too, so babysitting does not spend a review
+request on a head it will still have to rewrite. A real conflict always
 stays a required blocker.
 
 Backstops replace the per-PR freshness check: the push-triggered `ci` run on

@@ -80,6 +80,7 @@ function codeRabbitCloseoutFallbackAction(
   state,
   {
     mergeStateStatus,
+    requiredStatusChecksStrict,
     reviewRunning,
     headUpdatedAt,
     observedAt,
@@ -88,15 +89,19 @@ function codeRabbitCloseoutFallbackAction(
   },
 ) {
   if (!["missing", "stale"].includes(state)) return "wait";
-  // A conflicted PR (DIRTY) needs the base merged before anything else can be
-  // reviewed. Non-strict policy (operator decision 2026-09-15, ADR 0103):
-  // merely being BEHIND no longer forces a base merge, so it no longer
-  // outranks the other waits either — forcing one here would reintroduce the
-  // re-integration churn the policy change removes.
+  // A conflicted PR (DIRTY) always needs the base merged before anything else
+  // can be reviewed. A BEHIND PR needs it too whenever BEHIND is still a
+  // required blocker in `pr-ready-state-core.mjs` — i.e. until the base's
+  // ruleset confirms `requiredStatusChecksStrict: false` (operator decision
+  // 2026-09-15, ADR 0103); a request now would still be wasted once the base
+  // merge that BEHIND requires eventually happens. Only once strict is
+  // confirmed off does BEHIND stop forcing a base merge here too.
+  const normalizedMergeState = String(mergeStateStatus ?? "")
+    .trim()
+    .toUpperCase();
   if (
-    String(mergeStateStatus ?? "")
-      .trim()
-      .toUpperCase() === "DIRTY"
+    normalizedMergeState === "DIRTY" ||
+    (normalizedMergeState === "BEHIND" && requiredStatusChecksStrict !== false)
   ) {
     return "merge_base_first";
   }
@@ -132,6 +137,7 @@ export function summarizeCodeRabbitReviewGate(
     state,
     fallbackAction: codeRabbitCloseoutFallbackAction(state, {
       mergeStateStatus: context?.mergeStateStatus ?? null,
+      requiredStatusChecksStrict: context?.requiredStatusChecksStrict ?? null,
       reviewRunning: Boolean(context?.reviewRunning),
       headUpdatedAt: normalizeEpochMs(context?.headUpdatedAt),
       observedAt: normalizeEpochMs(context?.observedAt) ?? Date.now(),

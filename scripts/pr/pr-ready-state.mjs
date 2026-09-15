@@ -249,16 +249,24 @@ export function requiredStatusContextsFromRules(
 }
 
 // Read straight off data `fetchRequiredStatusContexts` already fetched: no
-// extra call. `null` means unknown (no `required_status_checks` rule/field
-// found) and the caller must fail closed on it, the same as any other
-// branch-protection lookup gap.
+// extra call. A base can carry more than one applicable `required_status_checks`
+// rule (e.g. an org ruleset layered with a repo ruleset), and GitHub enforces
+// the most restrictive of them, so any confirmed `true` wins outright. `null`
+// means unknown — no matching rule, or a matching rule with no explicit
+// boolean — and the caller must fail closed on it, the same as any other
+// branch-protection lookup gap. Only return `false` when every matching rule
+// explicitly disables strict mode.
 export function strictRequiredStatusChecksPolicyFromRules(rules = []) {
+  let sawRule = false;
+  let sawUnknown = false;
   for (const rule of flattenRules(rules)) {
     if (rule.type !== "required_status_checks") continue;
+    sawRule = true;
     const value = rule.parameters?.strict_required_status_checks_policy;
-    if (typeof value === "boolean") return value;
+    if (value === true) return true;
+    if (typeof value !== "boolean") sawUnknown = true;
   }
-  return null;
+  return sawRule && !sawUnknown ? false : null;
 }
 
 export function requiredStatusContextsFromRulesResult(

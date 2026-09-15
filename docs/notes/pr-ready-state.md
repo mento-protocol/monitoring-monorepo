@@ -231,9 +231,11 @@ The closeout request follows one order, on every surface:
 For a missing or stale signal the gate reports `fallbackAction` in this
 precedence:
 
-- `merge_base_first` — the PR is DIRTY (merge conflicts). Merge the base
-  before any request. Merely BEHIND does not trigger this (operator decision
-  2026-09-15, ADR 0103): forcing a base merge for a non-conflicting PR would
+- `merge_base_first` — the PR is DIRTY (merge conflicts), or BEHIND while
+  `requiredStatusChecksStrict` is not confirmed `false` (unknown or `true`).
+  Merge the base before any request. Once strict is confirmed off (operator
+  decision 2026-09-15, ADR 0103), a merely BEHIND PR stops triggering this:
+  forcing a base merge for a non-conflicting, non-blocked PR would
   reintroduce the re-integration churn the policy change removes. For a
   native stack layer, bring the base in through the history-change procedure
   in [`stacked-pull-requests.md`](stacked-pull-requests.md), never as a local
@@ -531,9 +533,13 @@ Field expectations:
 - `requiredStatusChecksStrict`: tri-state read straight off the
   already-fetched classic branch protection (`strict`) or ruleset
   (`strict_required_status_checks_policy`) response — `true`, `false`, or
-  `null` when neither source states it. Only a confirmed `false` demotes
-  `mergeStateStatus: BEHIND`; `true` and `null` both fail closed, matching
-  every other branch-protection lookup gap in this probe.
+  `null` when no source states it. A base can carry more than one applicable
+  `required_status_checks` ruleset rule; any confirmed `true` wins, and the
+  result is `false` only when every matching rule explicitly disables strict
+  mode. Only a confirmed `false` demotes `mergeStateStatus: BEHIND`; `true`
+  and `null` both fail closed, matching every other branch-protection lookup
+  gap in this probe, and both keep `fallbackAction: merge_base_first` for a
+  BEHIND PR too.
 - `pr.autoMergeEnabledAt`: the observed pending auto-merge enable timestamp,
   or null. It records intent and never proves merge completion.
 - `pr.mergedAt` / `pr.closedAt`: terminal timestamps when GitHub provides them.

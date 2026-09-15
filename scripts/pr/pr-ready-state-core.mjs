@@ -778,6 +778,7 @@ export function summarizeReadyState({
       codeRabbitPathFilterSkip,
       {
         mergeStateStatus: pr.mergeStateStatus ?? null,
+        requiredStatusChecksStrict,
         // CodeRabbit registers a check run while it reviews; the pending group
         // already classifies status-only runs as pending.
         reviewRunning: statusChecks.pending.some(

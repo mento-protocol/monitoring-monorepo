@@ -302,6 +302,48 @@ test("reads strict_required_status_checks_policy off a required_status_checks ru
     null,
     "no required_status_checks rule is unknown",
   );
+
+  // A base can carry more than one applicable `required_status_checks` rule
+  // (e.g. an org ruleset layered with a repo ruleset). GitHub enforces the
+  // most restrictive, so any confirmed `true` wins regardless of order.
+  const strictRule = {
+    type: "required_status_checks",
+    parameters: {
+      required_status_checks: [{ context: "ci" }],
+      strict_required_status_checks_policy: true,
+    },
+  };
+  const nonStrictRule = {
+    type: "required_status_checks",
+    parameters: {
+      required_status_checks: [{ context: "Vercel" }],
+      strict_required_status_checks_policy: false,
+    },
+  };
+  const unstatedRule = {
+    type: "required_status_checks",
+    parameters: { required_status_checks: [{ context: "Sentry suites" }] },
+  };
+  assertEqual(
+    strictRequiredStatusChecksPolicyFromRules([nonStrictRule, strictRule]),
+    true,
+    "a stricter later rule must still win",
+  );
+  assertEqual(
+    strictRequiredStatusChecksPolicyFromRules([strictRule, nonStrictRule]),
+    true,
+    "a stricter earlier rule must win",
+  );
+  assertEqual(
+    strictRequiredStatusChecksPolicyFromRules([nonStrictRule, nonStrictRule]),
+    false,
+    "false only when every matching rule explicitly disables strict mode",
+  );
+  assertEqual(
+    strictRequiredStatusChecksPolicyFromRules([nonStrictRule, unstatedRule]),
+    null,
+    "an unstated rule keeps the aggregate unknown, never false",
+  );
 });
 
 test("extracts app-bound required status contexts from branch protection details", () => {
@@ -3136,7 +3178,9 @@ test("ranks the CodeRabbit closeout fallbacks by the review each one wastes", ()
   const oldHead = { headUpdatedAt: observedAt - 10 * 60 * 1000, observedAt };
 
   for (const state of ["missing", "stale"]) {
-    // Non-strict policy: BEHIND alone no longer outranks the other waits.
+    // Fail closed by default (requiredStatusChecksStrict unset): BEHIND still
+    // forces a base merge here, matching `pr-ready-state-core.mjs` treating
+    // BEHIND as a required blocker until strict is confirmed off.
     assertEqual(
       summarizeCodeRabbitReviewGate(state, null, {
         mergeStateStatus: "behind",
@@ -3144,18 +3188,32 @@ test("ranks the CodeRabbit closeout fallbacks by the review each one wastes", ()
         ...freshHead,
         ...exhausted,
       }).fallbackAction,
+      "merge_base_first",
+      `${state} behind the base fails closed and must merge the base first`,
+    );
+    // Non-strict policy (ADR 0103): once strict is confirmed off, BEHIND no
+    // longer outranks the other waits.
+    assertEqual(
+      summarizeCodeRabbitReviewGate(state, null, {
+        mergeStateStatus: "behind",
+        requiredStatusChecksStrict: false,
+        reviewRunning: true,
+        ...freshHead,
+        ...exhausted,
+      }).fallbackAction,
       "wait_for_running_review",
-      `${state} merely behind the base must not force a base merge`,
+      `${state} merely behind a confirmed-non-strict base must not force a base merge`,
     );
     assertEqual(
       summarizeCodeRabbitReviewGate(state, null, {
         mergeStateStatus: "DIRTY",
+        requiredStatusChecksStrict: false,
         reviewRunning: true,
         ...freshHead,
         ...exhausted,
       }).fallbackAction,
       "merge_base_first",
-      `${state} with merge conflicts must merge the base first`,
+      `${state} with merge conflicts must merge the base first regardless of strict`,
     );
     assertEqual(
       summarizeCodeRabbitReviewGate(state, null, {
@@ -3244,16 +3302,26 @@ test("waits out the head grace before asking CodeRabbit for a review", () => {
       pr: { ...prAt(2), mergeStateStatus: "BEHIND" },
       now: observedAt,
     }).gates.codeRabbitReviewSignal.fallbackAction,
+    "merge_base_first",
+    "fails closed by default: BEHIND with unconfirmed strict still outranks the grace wait",
+  );
+  assertEqual(
+    summarizeReadyState({
+      pr: { ...prAt(2), mergeStateStatus: "BEHIND" },
+      now: observedAt,
+      requiredStatusChecksStrict: false,
+    }).gates.codeRabbitReviewSignal.fallbackAction,
     "wait_for_head_grace",
-    "non-strict policy: merely BEHIND does not outrank the grace wait",
+    "non-strict policy: once strict is confirmed off, BEHIND does not outrank the grace wait",
   );
   assertEqual(
     summarizeReadyState({
       pr: { ...prAt(2), mergeStateStatus: "DIRTY" },
       now: observedAt,
+      requiredStatusChecksStrict: false,
     }).gates.codeRabbitReviewSignal.fallbackAction,
     "merge_base_first",
-    "a real conflict still outranks the grace wait",
+    "a real conflict still outranks the grace wait regardless of strict",
   );
 });
 
