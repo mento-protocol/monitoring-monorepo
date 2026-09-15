@@ -189,8 +189,12 @@ function driveHarness({ sourceRoot, fixture, markerFlavor }) {
   const summary = path.join(fixture.generated, "step-summary.md");
   const ghLog = path.join(fixture.generated, "gh.log");
   const gitLog = path.join(fixture.generated, "git.log");
+  // The fixture is the operator's home, login included; an ambient
+  // CODEX_HOME would point the runtime's auth guard somewhere else.
+  const ambient = { ...process.env };
+  delete ambient.CODEX_HOME;
   const env = {
-    ...process.env,
+    ...ambient,
     GITHUB_STEP_SUMMARY: summary,
     HOME: fixture.state,
     PATH: [
