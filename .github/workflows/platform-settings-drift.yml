@@ -45,7 +45,7 @@ concurrency:
 jobs:
   check:
     name: Assert read-only default workflow-token permission
-    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 5
     # workflow_dispatch can target any ref; without this a manual dispatch from a
     # feature branch would check out that branch and run its code with the

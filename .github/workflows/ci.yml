@@ -71,7 +71,7 @@ permissions:
 jobs:
   changes:
     name: Detect changes
-    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 2
     permissions:
       contents: read
@@ -498,7 +498,7 @@ jobs:
     name: Quality Checks (shared-config)
     needs: changes
     if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.shared == 'true'
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: read
@@ -549,7 +549,7 @@ jobs:
     # Byte-identical to `ui` below: the two jobs admit together, and the
     # forceAll prefix keeps both executable during a no-skip audit.
     if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.ui == 'true'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: read
@@ -635,7 +635,7 @@ jobs:
     name: Quality Checks (ui-dashboard)
     needs: changes
     if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.ui == 'true'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
       contents: read
@@ -728,7 +728,7 @@ jobs:
     needs: changes
     # Byte-identical to `indexer-checks` below: the two jobs admit together.
     if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.indexer == 'true'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
       contents: read
@@ -770,7 +770,7 @@ jobs:
     name: Quality Checks (indexer-envio)
     needs: changes
     if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.indexer == 'true'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: read
@@ -840,7 +840,7 @@ jobs:
     name: Quality Checks (metrics-bridge)
     needs: changes
     if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.bridge == 'true'
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: read
@@ -897,7 +897,7 @@ jobs:
     name: Quality Checks (integration-probes)
     needs: changes
     if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.integrationProbes == 'true'
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: read
@@ -944,7 +944,7 @@ jobs:
     name: Quality Checks (alerts Cloud Functions)
     needs: changes
     if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.alerts == 'true'
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: read
@@ -1043,7 +1043,7 @@ jobs:
     name: Quality Checks (governance-watchdog)
     needs: changes
     if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.govWatchdog == 'true'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 8
     permissions:
       contents: read
@@ -1112,7 +1112,7 @@ jobs:
     name: Terraform Validate (registry)
     needs: changes
     if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.terraform == 'true'
-    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 5
     permissions:
       contents: read
@@ -1220,7 +1220,7 @@ jobs:
     name: Quality Checks (aegis)
     needs: changes
     if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.aegis == 'true'
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: read
@@ -1282,7 +1282,7 @@ jobs:
     name: Lint + test root scripts
     needs: changes
     if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.rootScripts == 'true'
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     # Sized after PR #2296 removed the legacy gate regression suite: 135
     # post-removal runs are p90 3.08 min and max 3.73 min. 10 minutes also
     # covers the no-skip audit path, which re-enters this job with no cache
@@ -1564,7 +1564,7 @@ jobs:
     # them against the corpus. A mixed diff runs both jobs and pays for one
     # duplicate pass, which is the accepted cost of the split.
     if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.docs == 'true'
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: read
@@ -1638,7 +1638,7 @@ jobs:
     name: Production infrastructure contract
     # This required job is deliberately unconditional. It validates production
     # infrastructure and the repo-wide issue-board proof for every candidate.
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     # 8 is main's variance-sized cap (#2412), carried forward unmeasured for
     # this job's new folded command set; re-size after the first main run.
     timeout-minutes: 8

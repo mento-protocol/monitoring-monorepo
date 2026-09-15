@@ -109,7 +109,7 @@ jobs:
         && !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/'))
       || (github.ref == 'refs/heads/main'
         && (github.event_name == 'push' || github.event_name == 'workflow_dispatch'))
-    runs-on: blacksmith-4vcpu-ubuntu-2404-arm
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 15
     permissions:
       contents: read
@@ -334,7 +334,7 @@ jobs:
     environment:
       name: production-infra
       url: https://console.cloud.google.com/home/dashboard?project=mento-terraform-seed-ffac
-    runs-on: blacksmith-4vcpu-ubuntu-2404-arm
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
     permissions:
       contents: read

@@ -74,7 +74,7 @@ jobs:
     # workflow_dispatch on a non-main ref is refused before this job runs, even if
     # the `if:` main guard above is stripped on that branch.
     environment: sentry-pipeline
-    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - name: Check kill switch

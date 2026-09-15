@@ -1,11 +1,19 @@
 #!/usr/bin/env node
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // prettier-ignore
 import { envMutationBlockers, parseActionList, sentinelBlockers } from "../sentry/ci-wiring/check-sentry-suites-in-ci-core.mjs";
+import { isMapping } from "../lib/workflow-yaml.mjs";
+import yaml from "js-yaml";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+// Frozen: every runs-on label in .github/workflows/*.yml must be one of
+// these two free, unlimited GitHub-hosted labels (issue #2400).
+export const ALLOWED_RUNNER_LABELS = Object.freeze([
+  "ubuntu-latest",
+  "ubuntu-24.04-arm",
+]);
 const FORCE_ALL = "needs.changes.outputs.forceAll == 'true'";
 const DORNY_PIN = "dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d";
 const ALLS_GREEN_PIN =
@@ -34,7 +42,7 @@ const EXPECTED_CONDITIONS = Object.freeze({ shared: `${FORCE_ALL} || needs.chang
 // prettier-ignore
 const EXPECTED_TIMEOUTS = Object.freeze({ changes: 2, shared: 10, "ui-static": 10, ui: 25, "indexer-test": 20, "indexer-checks": 10, bridge: 10, "integration-probes": 10, alerts: 10, "gov-watchdog": 8, terraform: 5, aegis: 15, scripts: 10, "docs-checks": 10, "production-infra-contract": 8, "sentry-suites": 8, ci: 2 });
 // prettier-ignore
-const EXPECTED_RUNNERS = Object.freeze({ changes: "blacksmith-2vcpu-ubuntu-2404-arm", shared: "blacksmith-2vcpu-ubuntu-2404", "ui-static": "blacksmith-4vcpu-ubuntu-2404", ui: "blacksmith-4vcpu-ubuntu-2404", "indexer-test": "blacksmith-4vcpu-ubuntu-2404", "indexer-checks": "blacksmith-4vcpu-ubuntu-2404", bridge: "blacksmith-2vcpu-ubuntu-2404", "integration-probes": "blacksmith-2vcpu-ubuntu-2404", aegis: "blacksmith-2vcpu-ubuntu-2404", alerts: "blacksmith-2vcpu-ubuntu-2404", "gov-watchdog": "blacksmith-4vcpu-ubuntu-2404", terraform: "blacksmith-2vcpu-ubuntu-2404-arm", scripts: "blacksmith-2vcpu-ubuntu-2404", "docs-checks": "blacksmith-2vcpu-ubuntu-2404", "production-infra-contract": "blacksmith-2vcpu-ubuntu-2404", "sentry-suites": "ubuntu-latest", ci: "ubuntu-latest" });
+const EXPECTED_RUNNERS = Object.freeze({ changes: "ubuntu-24.04-arm", shared: "ubuntu-latest", "ui-static": "ubuntu-latest", ui: "ubuntu-latest", "indexer-test": "ubuntu-latest", "indexer-checks": "ubuntu-latest", bridge: "ubuntu-latest", "integration-probes": "ubuntu-latest", aegis: "ubuntu-latest", alerts: "ubuntu-latest", "gov-watchdog": "ubuntu-latest", terraform: "ubuntu-24.04-arm", scripts: "ubuntu-latest", "docs-checks": "ubuntu-latest", "production-infra-contract": "ubuntu-latest", "sentry-suites": "ubuntu-latest", ci: "ubuntu-latest" });
 // prettier-ignore
 const EXPECTED_JOB_ENV = Object.freeze({ "indexer-test": { ENVIO_STRICT_START_BLOCK: "true" }, "indexer-checks": { ENVIO_STRICT_START_BLOCK: "true" }, aegis: { FOUNDRY_PROFILE: "ci" } });
 // prettier-ignore
@@ -159,7 +167,7 @@ export function workflowViolations(workflow, filters) {
   for (const [name, timeout] of Object.entries(EXPECTED_TIMEOUTS)) if (jobs[name]?.["timeout-minutes"] !== timeout) errors.push(`${name} timeout-minutes must be ${timeout}`);
   const changes = jobs.changes ?? {};
   // prettier-ignore
-  if (Object.keys(changes).sort().join() !== "name,outputs,permissions,runs-on,steps,timeout-minutes" || changes["runs-on"] !== "blacksmith-2vcpu-ubuntu-2404-arm" || JSON.stringify(changes.permissions) !== '{"contents":"read","actions":"read","pull-requests":"read"}') errors.push("changes job runtime changed");
+  if (Object.keys(changes).sort().join() !== "name,outputs,permissions,runs-on,steps,timeout-minutes" || changes["runs-on"] !== "ubuntu-24.04-arm" || JSON.stringify(changes.permissions) !== '{"contents":"read","actions":"read","pull-requests":"read"}') errors.push("changes job runtime changed");
   errors.push(
     ...setErrors("changes outputs", Object.keys(changes.outputs ?? {}), [
       ...FILTER_NAMES,
@@ -280,9 +288,42 @@ export function workflowViolations(workflow, filters) {
   return [...new Set(errors)];
 }
 
+// Negative control: no workflow may name a runs-on label outside the frozen
+// allow-list, and the two actionlint self-hosted-runner allow-lists (which
+// exist only to acknowledge those same labels to actionlint) must agree.
+// prettier-ignore
+export function runnerLabelViolations(root = ROOT) {
+  const errors = [];
+  if (!readFileSync(join(root, ".github/actionlint.yaml")).equals(readFileSync(join(root, ".trunk/configs/actionlint.yaml")))) errors.push(".github/actionlint.yaml and .trunk/configs/actionlint.yaml must be byte-identical");
+  const dir = join(root, ".github/workflows");
+  for (const name of readdirSync(dir).filter((n) => /\.ya?ml$/u.test(n))) {
+    // Parsed locally (not via check-autofix-ci-trust.mjs's parseWorkflow) so
+    // this protected, admission-pinned file has no dependency edge onto an
+    // unpinned sibling a sampled candidate could rewrite underneath it.
+    let workflow;
+    try {
+      workflow = yaml.load(readFileSync(join(dir, name), "utf8"), { schema: yaml.CORE_SCHEMA });
+    } catch (error) { errors.push(`${name} could not be parsed as YAML: ${error.message}`); continue; }
+    if (!isMapping(workflow)) { errors.push(`${name} has no top-level workflow mapping`); continue; }
+    for (const [jobName, job] of Object.entries(workflow.jobs ?? {})) {
+      if (!isMapping(job) || job["runs-on"] === undefined) continue;
+      const runsOn = job["runs-on"];
+      // A reusable-workflow-call job (no runs-on) is skipped above. Every
+      // other job must name exactly one allowed string label — a sequence or
+      // {group, labels} form is a self-hosted selector, never a free hosted
+      // one, so it is rejected outright rather than inspected label-by-label.
+      if (typeof runsOn !== "string" || !ALLOWED_RUNNER_LABELS.includes(runsOn)) errors.push(`${name}:${jobName} runs-on ${JSON.stringify(runsOn)} is not in ALLOWED_RUNNER_LABELS`);
+    }
+  }
+  return errors;
+}
+
 async function main() {
   const { workflow, filters } = await loadCi();
-  const errors = workflowViolations(workflow, filters);
+  const errors = [
+    ...workflowViolations(workflow, filters),
+    ...runnerLabelViolations(),
+  ];
   if (errors.length > 0) {
     for (const error of errors) console.error(`- ${error}`);
     process.exitCode = 1;
