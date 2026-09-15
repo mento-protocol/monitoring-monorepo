@@ -53,11 +53,17 @@ config, state, derived pressures, and status.
   at or above 0.8 pressure, and suppressed for a block at or below the row's
   `stateBlock`.
 - **Config is event-sourced** from a newly indexed
-  `Broker.TradingLimitConfigured`, which also applies the contract's `reset()`.
-  The at-block config read is a one-time bootstrap for limits configured before
-  `start_block`. The `TradingLimitConfigured` fragment is appended to the
-  hand-vendored `abis/Broker.json` under the ABI exception rule of
-  [ADR 0015](0015-abi-vendoring-and-address-drift-gate.md).
+  `Broker.TradingLimitConfigured`. The contract's `reset()` runs in that same
+  block, so the handler reads state once pinned to the reconfigure block and
+  adopts it, rather than pricing a sampled netflow up to 300 s old against the
+  new limit. The read is bounded: governance reconfigures are rare, so it
+  carries a `preload-effect-exempt` annotation instead of joining the preload
+  pass. When it returns null the handler mirrors `reset()` locally, keeps
+  `stateKnown` as it was, and zeroes `stateTimestamp` so the next swap
+  re-reads. The at-block config read is a one-time bootstrap for limits
+  configured before `start_block`. The `TradingLimitConfigured` fragment is
+  appended to the hand-vendored `abis/Broker.json` under the ABI exception rule
+  of [ADR 0015](0015-abi-vendoring-and-address-drift-gate.md).
 - **Gating is at the exchange level.** Direct v2 swaps and VirtualPool-routed
   swaps move the same limit, so rows key on the exchange, never on the caller.
 - **The worst row is denormalized** onto the wrapping pool's existing
@@ -86,21 +92,33 @@ is greater than 0.
   prove row contiguity after a transient miss or during a full replay.
 - **Read state on every Broker swap, ungated** — rejected: 1–2M archive
   `eth_call`s per full resync.
+- **Key the read by refresh bucket instead of block** — rejected: a quantized
+  block returns state from the bucket boundary, not from the swap's block, so
+  the stored netflow would no longer match the event it is attributed to. It
+  would make preload dedupe perfectly; correctness of the pinned read wins.
 - **Point the dashboard at Grafana or Aegis** — rejected: it makes the pool page
   depend on the alert plane's availability and its hand-maintained limit-ID
   list, and gives the dashboard no historical rows.
 
 ## Consequences
 
-- A full resync costs about **31,026 state reads** plus at most 24 config
-  bootstrap reads. Only 26,705 of 524,004 indexed Celo `Broker.Swap` rows are on
-  VirtualPool-wrapped exchanges; distinct (exchange, leg token, refresh bucket)
-  triples number 31,026 at 300s, 21,512 at 900s, and 16,146 at 1800s. At
-  50–100 `eth_call`/s that is roughly 5–10 minutes. Re-measure before changing
+- A full resync costs between about **31,026 and 53,400 state reads**, plus at
+  most 24 config bootstrap reads. Only 26,705 of 524,004 indexed Celo
+  `Broker.Swap` rows are on VirtualPool-wrapped exchanges; distinct (exchange,
+  leg token, refresh bucket) triples number 31,026 at 300s, 21,512 at 900s, and
+  16,146 at 1800s. 31,026 is the perfect-gating floor. The ceiling is one read
+  per wrapped-exchange swap leg — 26,705 × 2 ≈ 53,400 — because under Envio's
+  preload batching every swap whose leg is already stale at batch start requests
+  its own block-pinned read; ordered processing then adopts the first result and
+  skips the rest, but those preload calls have gone out. At 50–100 `eth_call`/s
+  that range is roughly 10–18 minutes. The FPMM `poolTradingLimitsEffect` path
+  has the same property, and the bucket-keyed alternative that would collapse it
+  is rejected above. Re-measure before changing
   `BROKER_LIMIT_REFRESH_SECONDS`. The `brokerTradingLimit` effect carries that
   cost: `cache: false` (netflow is block-scoped state), rate-limited to 50 calls
   per second, one `tradingLimitsState` read per dispatch, plus one
-  `tradingLimitsConfig` read only while the row has no `configKnown`.
+  `tradingLimitsConfig` read only while the row has no `configKnown`, plus one
+  state read per `TradingLimitConfigured` event.
 - Displayed state can be up to 5 minutes stale below 0.8 pressure. The panel
   shows an "as of" time rather than implying live state. Aegis and Grafana keep
   the 10s polling path, and they remain the paging authority.

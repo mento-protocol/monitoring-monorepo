@@ -433,9 +433,13 @@ describe("Broker trading limits", () => {
     assert.equal(mockDb.entities.Pool.get(POOL_ID)?.limitStatus, "N/A");
   });
 
-  it("applies TradingLimitConfigured with no RPC and re-folds the pool", async () => {
+  it("applies TradingLimitConfigured with one state read and re-folds the pool", async () => {
     let mockDb = await fireSwap(seededDb());
     resetHttpRpcCallCounts();
+    // A post-reset netflow the local `reset()` mirror could not produce: it
+    // keeps an enabled window's stored netflow, so only an adopted read shows
+    // this value.
+    mockLeg(AUDM_LIMIT_ID, { netflowGlobal: -800n, limitGlobal: 4000n });
 
     mockDb = await fireConfigured(mockDb, {
       token: AUDM,
@@ -443,26 +447,32 @@ describe("Broker trading limits", () => {
       flags: LIMIT_FLAG_LG,
     });
 
-    assert.equal(stateCalls(), 0);
+    // Exactly one `tradingLimitsState` read, and no config read: config comes
+    // from the event params, so the effect runs with `readConfig: false`.
+    assert.equal(stateCalls(), 1);
     assert.equal(configCalls(), 0);
     const audm = legRow(mockDb, AUDM);
     assert.equal(audm?.limitGlobal, 4000n);
     assert.equal(audm?.configKnown, true);
-    // LG stays flagged, so reset() keeps its netflow.
-    assert.equal(audm?.netflowGlobal, -1596n);
-    assert.equal(audm?.lastUpdated0, 0n);
-    assert.equal(audm?.limitPressureGlobal, "0.3990");
-    assert.equal(audm?.stateTimestamp, 0n);
+    assert.equal(audm?.stateKnown, true);
+    assert.equal(audm?.netflowGlobal, -800n);
+    assert.equal(audm?.limitPressureGlobal, "0.2000");
+    // The row is pinned to the reconfigure block, not left stale at zero.
+    assert.equal(audm?.stateBlock, BigInt(START_BLOCK + 10));
+    assert.equal(audm?.stateTimestamp, BigInt(START_TS + 10));
 
     const pool = mockDb.entities.Pool.get(POOL_ID);
     // The other leg keeps its pressure through the re-fold.
     assert.equal(pool?.limitPressure0, "0.9956");
-    assert.equal(pool?.limitPressure1, "0.3990");
+    assert.equal(pool?.limitPressure1, "0.2000");
     assert.equal(pool?.limitStatus, "WARN");
   });
 
   it("zeroes the netflow of a window the reconfigure disables", async () => {
     let mockDb = await fireSwap(seededDb());
+    // `reset()` zeroes a disabled window's netflow on chain, so the read
+    // pinned to the reconfigure block returns zero.
+    mockLeg(AUDM_LIMIT_ID, { netflowGlobal: 0n, limitGlobal: 0n, flags: 0 });
 
     mockDb = await fireConfigured(mockDb, {
       token: AUDM,
@@ -475,16 +485,29 @@ describe("Broker trading limits", () => {
     assert.equal(audm?.limitStatus, "N/A");
   });
 
-  it("makes the next swap re-read after a reconfigure", async () => {
+  it("mirrors reset() and re-reads on the next swap when the read fails", async () => {
     let mockDb = await fireSwap(seededDb());
+    failLeg(AUDM_LIMIT_ID, "tradingLimitsState");
+
     mockDb = await fireConfigured(mockDb, {
       token: AUDM,
       limitGlobal: 4000n,
       flags: LIMIT_FLAG_LG,
     });
+
+    const configured = legRow(mockDb, AUDM);
+    // Local `reset()` mirror: LG stays flagged, so its netflow survives.
+    assert.equal(configured?.netflowGlobal, -1596n);
+    assert.equal(configured?.lastUpdated0, 0n);
+    assert.equal(configured?.limitGlobal, 4000n);
+    assert.equal(configured?.limitPressureGlobal, "0.3990");
+    // `stateKnown` is left as it was, and the zero timestamp is what forces
+    // the next swap to re-read.
+    assert.equal(configured?.stateKnown, true);
+    assert.equal(configured?.stateTimestamp, 0n);
+
     resetHttpRpcCallCounts();
     mockLeg(AUDM_LIMIT_ID, { netflowGlobal: -1700n, limitGlobal: 4000n });
-
     mockDb = await fireSwap(mockDb, {
       blockNumber: START_BLOCK + 20,
       blockTimestamp: START_TS + 30,

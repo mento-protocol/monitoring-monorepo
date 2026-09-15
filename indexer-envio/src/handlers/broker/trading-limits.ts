@@ -10,7 +10,8 @@
 // freshness window so a full resync costs about 31k reads instead of 1-2M.
 // Config is authoritative from `Broker.TradingLimitConfigured`; the at-block
 // config read is a one-time bootstrap for limits configured before
-// `start_block`.
+// `start_block`. That event also samples state once at its own block, because
+// the contract's `reset()` invalidates whatever the last gated read stored.
 // ---------------------------------------------------------------------------
 
 import type { BrokerTradingLimit, EvmOnEventContext, Pool } from "envio";
@@ -248,7 +249,8 @@ export async function applyBrokerTradingLimits(
 }
 
 // ---------------------------------------------------------------------------
-// Broker.TradingLimitConfigured — config, zero RPC.
+// Broker.TradingLimitConfigured — config from the event, plus one state read
+// pinned to the reconfigure block.
 // ---------------------------------------------------------------------------
 
 type ConfiguredParams = {
@@ -308,10 +310,30 @@ indexer.onEvent(
     }
 
     const config = configFromEvent(event.params.config);
-    const state = resetBrokerState(
-      existing ? brokerLimitStateFromRow(existing) : undefined,
-      config,
-    );
+    const blockNumber = asBigInt(event.block.number);
+    const blockTimestamp = asBigInt(event.block.timestamp);
+    const limitId = brokerLimitId(exchangeId, token);
+    // The chain ran `reset()` inside this block, so a read pinned to it returns
+    // the post-reset netflow. Sampling it here is what keeps the row from
+    // pricing stale netflow against the new limit until the next swap.
+    // preload-effect-exempt: TradingLimitConfigured fires once per governance
+    // reconfigure, so this processing-only read is bounded, not
+    // replay-traffic-scaled.
+    const read = await context.effect(brokerTradingLimitEffect, {
+      chainId: event.chainId,
+      brokerAddress: asAddress(event.srcAddress),
+      limitId,
+      blockNumber,
+      readConfig: false,
+    });
+    if (!read) {
+      context.log.warn(
+        `[BrokerTradingLimits] State read failed after TradingLimitConfigured ` +
+          `for limitId=${limitId} on chain ${event.chainId} at block ` +
+          `${blockNumber}; keeping the local reset mirror and re-reading on ` +
+          `the next Broker swap.`,
+      );
+    }
     const row = buildBrokerTradingLimitRow({
       chainId: event.chainId,
       exchangeId,
@@ -320,25 +342,27 @@ indexer.onEvent(
       token,
       config,
       configKnown: true,
-      state,
-      stateKnown: existing?.stateKnown ?? false,
-      stateBlock: existing?.stateBlock ?? 0n,
-      // `reset()` moved netflow on chain, so the stored read is stale by
-      // definition. A zero timestamp makes the next Broker.Swap re-read.
-      stateTimestamp: 0n,
-      blockNumber: asBigInt(event.block.number),
-      blockTimestamp: asBigInt(event.block.timestamp),
+      // A null read falls back to mirroring the contract's `reset()` locally,
+      // which leaves `stateKnown` as it was and a zero `stateTimestamp` so the
+      // next Broker.Swap re-reads.
+      state: read
+        ? read.state
+        : resetBrokerState(
+            existing ? brokerLimitStateFromRow(existing) : undefined,
+            config,
+          ),
+      stateKnown: read ? true : (existing?.stateKnown ?? false),
+      stateBlock: read ? blockNumber : (existing?.stateBlock ?? 0n),
+      stateTimestamp: read ? blockTimestamp : 0n,
+      blockNumber,
+      blockTimestamp,
     });
     context.BrokerTradingLimit.set(existing ? { ...existing, ...row } : row);
     await refoldPool(
       context,
       wrapped.poolId,
       await legRowsForPool(context, wrapped.poolId, row),
-      {
-        adopted: true,
-        blockNumber: asBigInt(event.block.number),
-        blockTimestamp: asBigInt(event.block.timestamp),
-      },
+      { adopted: true, blockNumber, blockTimestamp },
     );
   },
 );
