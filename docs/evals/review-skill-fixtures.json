@@ -18,6 +18,7 @@
         "codex",
         "exec",
         "review",
+        "--ephemeral",
         "--base",
         "base",
         "-m",
