@@ -6206,6 +6206,16 @@ export type PoolBreakerConfigQuery = {
   }>;
 };
 
+// queries/limit-lookup.BROKER_LIMIT_POOL
+export type BrokerLimitPoolQueryVariables = {
+  readonly limitId: string;
+};
+export type BrokerLimitPoolQuery = {
+  readonly BrokerTradingLimit: ReadonlyArray<{
+    readonly poolId: string;
+  }>;
+};
+
 // queries/liquity.CDP_TROVE_SCHEMA_FIELDS
 export type CdpSchemaFieldsQueryVariables = Record<string, never>;
 export type CdpSchemaFieldsQuery = {

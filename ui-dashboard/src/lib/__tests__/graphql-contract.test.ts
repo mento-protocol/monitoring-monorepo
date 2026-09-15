@@ -20,6 +20,7 @@ import {
 import * as broker from "@/lib/queries/broker";
 import * as config from "@/lib/queries/config";
 import * as liquity from "@/lib/queries/liquity";
+import * as limitLookup from "@/lib/queries/limit-lookup";
 import * as lp from "@/lib/queries/lp";
 import * as ols from "@/lib/queries/ols";
 import * as poolDetail from "@/lib/queries/pool-detail";
@@ -198,6 +199,7 @@ const QUERY_MODULES: Record<string, Record<string, unknown>> = {
   "queries/broker": broker,
   "queries/config": config,
   "queries/liquity": liquity,
+  "queries/limit-lookup": limitLookup,
   "queries/lp": lp,
   "queries/ols": ols,
   "queries/pool-detail": poolDetail,
