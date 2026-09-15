@@ -63,7 +63,13 @@ export function formatHuman(summary) {
     }`,
   );
   lines.push(`Codex review signal: ${summary.codexReviewSignal}`);
-  lines.push(`CodeRabbit review signal: ${summary.codeRabbitReviewSignal}`);
+  const codeRabbitFallback =
+    summary.gates?.codeRabbitReviewSignal?.fallbackAction ?? null;
+  lines.push(
+    `CodeRabbit review signal: ${summary.codeRabbitReviewSignal}${
+      codeRabbitFallback ? ` (fallback: ${codeRabbitFallback})` : ""
+    }`,
+  );
   lines.push(
     `Readiness overrides active: ${summary.readinessOverrides?.length ?? 0}`,
   );
@@ -157,6 +163,7 @@ export function formatCompact(summary) {
     `codex_approval=${summary.gates.codexDescriptionApproval.state}`,
     `codex_signal=${summary.codexReviewSignal}`,
     `coderabbit_signal=${summary.codeRabbitReviewSignal}`,
+    `coderabbit_fallback=${summary.gates?.codeRabbitReviewSignal?.fallbackAction ?? "unknown"}`,
     `overrides=${summary.readinessOverrides?.length ?? 0}`,
   ].join(" ");
 }

@@ -16,8 +16,10 @@ import {
 } from "./pr-ready-state-core.mjs";
 import {
   fetchHeadUpdatedAt,
-  findCodeRabbitPathFilterSkipCandidate,
   headUpdatedAtFromTimeline,
+} from "./pr-ready-state-closeout.mjs";
+import {
+  findCodeRabbitPathFilterSkipCandidate,
   validateCodeRabbitPathFilterSkip,
 } from "./pr-ready-state-review-signals.mjs";
 import { formatCompact, formatHuman } from "./pr-ready-state-format.mjs";

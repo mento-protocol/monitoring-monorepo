@@ -26,10 +26,14 @@ import {
   splitRequiredAndOptionalChecks,
 } from "./pr-ready-state-core.mjs";
 import {
+  countTrustedCodeRabbitReviewRequests,
   findCodeRabbitPathFilterSkipCandidate,
-  summarizeCodeRabbitReviewGate,
   validateCodeRabbitPathFilterSkip,
 } from "./pr-ready-state-review-signals.mjs";
+import {
+  summarizeCodeRabbitReviewGate,
+  CODERABBIT_HEAD_GRACE_MS,
+} from "./pr-ready-state-closeout.mjs";
 import { formatCompact, formatHuman } from "./pr-ready-state-format.mjs";
 import { verifyReadinessSnapshot } from "./pr-ready-state-stack.mjs";
 import {
@@ -2319,6 +2323,15 @@ test("summarizes merged pull requests as terminal ready", () => {
   assertEqual(summary.gates.codexReviewSignal.fallbackAction, "wait");
   assertEqual(summary.gates.codeRabbitReviewSignal.state, "not_applicable");
   assertEqual(summary.codeRabbitReviewSignal, "not_applicable");
+  // The terminal gate keeps the live gate's shape, counters included.
+  assertDeepEqual(summary.gates.codeRabbitReviewSignal, {
+    ready: true,
+    required: false,
+    state: "not_applicable",
+    fallbackAction: "wait",
+    requestCount: 0,
+    requestBudget: 2,
+  });
   assert(!formatCompact(summary).includes("undefined"));
   assert(!formatHuman(summary).includes("undefined"));
 });
@@ -2689,6 +2702,8 @@ test("projects an exact path-filter skip as optional not-applicable evidence", (
     required: false,
     state: "not_applicable",
     fallbackAction: "wait",
+    requestCount: 0,
+    requestBudget: 2,
     reason: "path_filters",
     sourceUrl:
       "https://github.com/mento-protocol/monitoring-monorepo/pull/2145#issuecomment-5467686069",
@@ -2913,11 +2928,18 @@ test("emits the closeout fallback action for missing and stale signals", () => {
   // `docs/notes/pr-ready-state.md` mirrors in prose. Nothing else pinned it
   // before, so a rename could silently desynchronise the probe from the
   // runbook.
+  const observedAt = Date.parse("2026-09-13T12:00:00Z");
+  const oldHead = { headUpdatedAt: observedAt - 10 * 60 * 1000, observedAt };
   for (const state of ["missing", "stale"]) {
     assertEqual(
-      summarizeCodeRabbitReviewGate(state).fallbackAction,
+      summarizeCodeRabbitReviewGate(state, null, oldHead).fallbackAction,
       "request_review_once_for_head",
       `${state} must instruct one closeout request for the head`,
+    );
+    assertEqual(
+      summarizeCodeRabbitReviewGate(state).fallbackAction,
+      "wait_for_head_grace",
+      `${state} without a head time must wait, not request`,
     );
   }
 
@@ -2928,6 +2950,270 @@ test("emits the closeout fallback action for missing and stale signals", () => {
       `${state} must not instruct another request`,
     );
   }
+});
+
+test("ranks the CodeRabbit closeout fallbacks by the review each one wastes", () => {
+  const exhausted = { requestCount: 2, requestBudget: 2 };
+  const observedAt = Date.parse("2026-09-13T12:00:00Z");
+  const freshHead = { headUpdatedAt: observedAt - 2 * 60 * 1000, observedAt };
+  const oldHead = { headUpdatedAt: observedAt - 10 * 60 * 1000, observedAt };
+
+  for (const state of ["missing", "stale"]) {
+    assertEqual(
+      summarizeCodeRabbitReviewGate(state, null, {
+        mergeStateStatus: "behind",
+        reviewRunning: true,
+        ...freshHead,
+        ...exhausted,
+      }).fallbackAction,
+      "merge_base_first",
+      `${state} behind the base must merge the base first`,
+    );
+    assertEqual(
+      summarizeCodeRabbitReviewGate(state, null, {
+        mergeStateStatus: "DIRTY",
+        reviewRunning: true,
+        ...freshHead,
+        ...exhausted,
+      }).fallbackAction,
+      "merge_base_first",
+      `${state} with merge conflicts must merge the base first`,
+    );
+    assertEqual(
+      summarizeCodeRabbitReviewGate(state, null, {
+        reviewRunning: true,
+        ...freshHead,
+        ...exhausted,
+      }).fallbackAction,
+      "wait_for_running_review",
+      `${state} with a running review must not supersede it`,
+    );
+    assertEqual(
+      summarizeCodeRabbitReviewGate(state, null, {
+        ...freshHead,
+        ...exhausted,
+      }).fallbackAction,
+      "wait_for_head_grace",
+      `${state} on a fresh head must wait for the automatic run`,
+    );
+    assertEqual(
+      summarizeCodeRabbitReviewGate(state, null, {
+        ...oldHead,
+        ...exhausted,
+      }).fallbackAction,
+      "request_budget_exhausted",
+      `${state} at the budget must stop requesting`,
+    );
+    assertEqual(
+      summarizeCodeRabbitReviewGate(state, null, {
+        ...oldHead,
+        requestCount: 1,
+        requestBudget: 2,
+      }).fallbackAction,
+      "request_review_once_for_head",
+      `${state} under the budget still earns one request`,
+    );
+  }
+
+  for (const state of ["reviewed", "requested", "not_applicable"]) {
+    assertEqual(
+      summarizeCodeRabbitReviewGate(state, null, {
+        mergeStateStatus: "BEHIND",
+        reviewRunning: true,
+        ...freshHead,
+        ...exhausted,
+      }).fallbackAction,
+      "wait",
+      `${state} keeps waiting whatever the closeout context says`,
+    );
+  }
+});
+
+const minutesMs = (minutes) => minutes * 60 * 1000;
+
+test("waits out the head grace before asking CodeRabbit for a review", () => {
+  assertEqual(CODERABBIT_HEAD_GRACE_MS, minutesMs(5));
+  const observedAt = Date.parse("2026-09-13T12:00:00Z");
+  const prAt = (ageMinutes, statusCheckRollup = []) => ({
+    ...basePr,
+    headRefOid: "b".repeat(40),
+    headUpdatedAt: new Date(observedAt - minutesMs(ageMinutes)).toISOString(),
+    statusCheckRollup,
+  });
+
+  assertEqual(
+    summarizeReadyState({ pr: prAt(2), now: observedAt }).gates
+      .codeRabbitReviewSignal.fallbackAction,
+    "wait_for_head_grace",
+    "a two-minute-old head may still draw its automatic run",
+  );
+  assertEqual(
+    summarizeReadyState({ pr: prAt(10), now: observedAt }).gates
+      .codeRabbitReviewSignal.fallbackAction,
+    "request_review_once_for_head",
+    "past the grace, no run has appeared and the head earns one request",
+  );
+  assertEqual(
+    summarizeReadyState({
+      pr: prAt(2, [{ name: "CodeRabbit", status: "IN_PROGRESS" }]),
+      now: observedAt,
+    }).gates.codeRabbitReviewSignal.fallbackAction,
+    "wait_for_running_review",
+    "a running review outranks the grace wait",
+  );
+  assertEqual(
+    summarizeReadyState({
+      pr: { ...prAt(2), mergeStateStatus: "BEHIND" },
+      now: observedAt,
+    }).gates.codeRabbitReviewSignal.fallbackAction,
+    "merge_base_first",
+    "the base merge outranks the grace wait",
+  );
+});
+
+test("waits when the head update time is unknown", () => {
+  // The timeline and status reads can both fail, or a brand-new head can have
+  // no event yet. Requesting then can duplicate the opening or post-merge
+  // review, so the gate fails closed on the cheaper wait.
+  const observedAt = Date.parse("2026-09-13T12:00:00Z");
+  const {
+    headUpdatedAt: _headUpdatedAt,
+    commits: _commits,
+    ...prWithoutHeadTime
+  } = basePr;
+  const unknown = summarizeReadyState({
+    pr: { ...prWithoutHeadTime, headRefOid: "b".repeat(40) },
+    now: observedAt,
+  });
+
+  assertEqual(unknown.pr.headUpdatedAt, null);
+  assertEqual(unknown.codeRabbitReviewSignal, "missing");
+  assertEqual(
+    unknown.gates.codeRabbitReviewSignal.fallbackAction,
+    "wait_for_head_grace",
+    "an unknown head age must not buy a review the vendor may run for free",
+  );
+
+  const known = summarizeReadyState({
+    pr: {
+      ...prWithoutHeadTime,
+      headRefOid: "b".repeat(40),
+      headUpdatedAt: new Date(observedAt - minutesMs(10)).toISOString(),
+    },
+    now: observedAt,
+  });
+  assertEqual(
+    known.gates.codeRabbitReviewSignal.fallbackAction,
+    "request_review_once_for_head",
+    "a known head past the grace still earns its one request",
+  );
+});
+
+test("counts trusted head-bound and bare CodeRabbit requests against the budget", () => {
+  const currentHeadOid = "b".repeat(40);
+  const oldHeadOid = "a".repeat(40);
+  const issueComments = [
+    {
+      body: "@coderabbitai review",
+      author_association: "MEMBER",
+      user: { login: "chapati23" },
+      created_at: "2026-09-13T08:00:00Z",
+    },
+    {
+      body: `@coderabbitai review\n\n<!-- coderabbit-final-head-review:${oldHeadOid} -->`,
+      author_association: "MEMBER",
+      user: { login: "chapati23" },
+      created_at: "2026-09-13T09:00:00Z",
+    },
+    {
+      body: "@coderabbitai full review",
+      author_association: "NONE",
+      user: { login: "outside-commenter" },
+      created_at: "2026-09-13T10:00:00Z",
+    },
+  ];
+
+  assertEqual(countTrustedCodeRabbitReviewRequests(issueComments), 2);
+  assertEqual(
+    countTrustedCodeRabbitReviewRequests([
+      {
+        body: "@coderabbitai full review",
+        author_association: "OWNER",
+        user: { login: "chapati23" },
+      },
+    ]),
+    1,
+    "a full review is also a billed request",
+  );
+
+  const summary = summarizeReadyState({
+    pr: {
+      ...basePr,
+      headRefOid: currentHeadOid,
+      statusCheckRollup: [],
+    },
+    issueComments,
+  });
+
+  assertEqual(summary.codeRabbitReviewSignal, "stale");
+  assertEqual(summary.gates.codeRabbitReviewSignal.requestCount, 2);
+  assertEqual(summary.gates.codeRabbitReviewSignal.requestBudget, 2);
+  assertEqual(
+    summary.gates.codeRabbitReviewSignal.fallbackAction,
+    "request_budget_exhausted",
+  );
+});
+
+test("waits while a CodeRabbit check run is in flight on the head", () => {
+  const running = summarizeReadyState({
+    pr: {
+      ...basePr,
+      headRefOid: "b".repeat(40),
+      statusCheckRollup: [
+        { name: "CodeRabbit", status: "IN_PROGRESS", conclusion: null },
+      ],
+    },
+  });
+  assertEqual(
+    running.gates.codeRabbitReviewSignal.fallbackAction,
+    "wait_for_running_review",
+  );
+  const finished = summarizeReadyState({
+    pr: {
+      ...basePr,
+      headRefOid: "b".repeat(40),
+      statusCheckRollup: [
+        { name: "CodeRabbit", status: "COMPLETED", conclusion: "SUCCESS" },
+      ],
+    },
+  });
+  assert(
+    finished.gates.codeRabbitReviewSignal.fallbackAction !==
+      "wait_for_running_review",
+    "a finished run is not running",
+  );
+});
+
+test("human and compact output name the CodeRabbit closeout fallback", () => {
+  const summary = summarizeReadyState({
+    pr: {
+      ...basePr,
+      headRefOid: "b".repeat(40),
+      mergeStateStatus: "BEHIND",
+      statusCheckRollup: [],
+    },
+  });
+
+  assert(
+    formatHuman(summary).includes(
+      "CodeRabbit review signal: missing (fallback: merge_base_first)",
+    ),
+    formatHuman(summary),
+  );
+  assert(
+    formatCompact(summary).includes("coderabbit_fallback=merge_base_first"),
+    formatCompact(summary),
+  );
 });
 
 test("binds one CodeRabbit closeout request to the full current head", () => {
@@ -2955,6 +3241,15 @@ test("binds one CodeRabbit closeout request to the full current head", () => {
       currentHeadOid,
     ),
   );
+  // A marked `full review` counts against the request budget, so the same
+  // matcher must also recognize it as the current-head request; otherwise the
+  // gate would ask for a second billed request on top of it.
+  assert(
+    isCodeRabbitFinalHeadReviewRequestBody(
+      `@coderabbitai full review\n\n<!-- coderabbit-final-head-review:${currentHeadOid} -->`,
+      currentHeadOid,
+    ),
+  );
   assertEqual(
     classifyCodeRabbitReviewSignal({
       currentHeadOid,
@@ -2968,6 +3263,37 @@ test("binds one CodeRabbit closeout request to the full current head", () => {
       ],
     }),
     "requested",
+  );
+  assertEqual(
+    classifyCodeRabbitReviewSignal({
+      currentHeadOid,
+      headUpdatedAt: Date.parse("2026-08-21T08:13:33Z"),
+      issueComments: [
+        {
+          body: `@coderabbitai full review\n\n<!-- coderabbit-final-head-review:${currentHeadOid} -->`,
+          author_association: "MEMBER",
+          created_at: "2026-08-21T08:14:00Z",
+        },
+      ],
+    }),
+    "requested",
+    "a marked full review is the current-head request too",
+  );
+  // A head time taken from the first check on the head lands after the push;
+  // a marked request posted in between is still this head's request.
+  const beforeStatusTime = {
+    body: request(currentHeadOid),
+    author_association: "MEMBER",
+    created_at: "2026-08-21T08:13:00Z",
+  };
+  assertEqual(
+    classifyCodeRabbitReviewSignal({
+      currentHeadOid,
+      headUpdatedAt: Date.parse("2026-08-21T08:13:33Z"),
+      issueComments: [beforeStatusTime],
+    }),
+    "requested",
+    "the exact-head marker is the request whatever its timestamp",
   );
   assertEqual(
     classifyCodeRabbitReviewSignal({

@@ -289,7 +289,7 @@ polled. Do not foreground-poll and never sleep-poll.
      free-tier replies never count. Before deciding whether to wait, read
      `reviews.auto_review.auto_incremental_review` from the PR head's
      `.coderabbit.yaml` — CodeRabbit reads that file from the source branch, so
-     a branch predating the 2026-09-02 change still has it `true`. When it is
+     a branch predating the 2026-09-03 change still has it `true`. When it is
      `true`, or the key or file is absent — which falls back to the provider
      default of enabled, so never read a missing value as `false` — **and** the
      org-level Global override does not set the key, wait for the automatic
@@ -298,22 +298,39 @@ polled. Do not foreground-poll and never sleep-poll.
      outranks the head's file and makes the head value ineffective — a push onto
      an already-open PR starts no automatic review, only the opening push does,
      so refresh once the head is stable and send the closeout request instead of
-     waiting for a run that cannot start. ADR 0066 records which keys that
-     override pins and when the operator applied it. One exception to that second branch: if this PR's opening review
-     never completed, coming back as a rate-limit or cap notice rather than a
-     review, CodeRabbit may still run and possibly retry it, so wait the
-     bounded time as in the `true` branch before posting (PR #2236 observed a
-     run on every push with `false` in force; ADR 0066 holds the dated tally).
-     If the signal is missing or stale and no
-     trusted top-level comment contains both `@coderabbitai review` and
-     `<!-- coderabbit-final-head-review:<full-head-sha> -->`, use
-     `add_issue_comment` to post `@coderabbitai review`, a blank line, and that
-     exact marker. A marker comment is trusted only when its author association
-     is `OWNER`, `MEMBER`, or `COLLABORATOR`, or its author login is `claude`,
+     waiting for a run that cannot start. The key works: the ADR 0066 amendment
+     of 2026-09-14 records the measurement. ADR 0066 also records which keys
+     that override pins and when the operator applied it. One exception to that
+     second branch: when this PR's opening review never completed, coming back
+     as a rate-limit or cap notice rather than a review, a later push can still
+     draw a full run, so wait the bounded time as in the `true` branch before
+     posting. Then apply the closeout order
+     [`pr-ready-state.md`](pr-ready-state.md) states in full, which governs
+     this surface too: merge the base before the request and never after it, as
+     a local merge of the fetched base — never through GitHub's "Update branch"
+     button or a web-UI edit, because each costs a review event, and a base
+     merge or rebase after the request can draw an unprompted full re-review of
+     the whole PR; batch every fix commit into one push; post at most one
+     marked request per head and at most two per PR, the opening closeout and
+     one after review fixes; and never post while a CodeRabbit check is running
+     on the current head, because the request supersedes that review and the
+     vendor charges the one it discards. The local probe publishes that
+     decision as `gates.codeRabbitReviewSignal.fallbackAction`; its precedence
+     is stated once, in [`pr-ready-state.md`](pr-ready-state.md). When the
+     probe cannot run here, derive the same answer by hand from that list —
+     do not restate or re-derive it on this surface — and post only when it
+     says `request_review_once_for_head`: use `add_issue_comment` to post
+     `@coderabbitai review`, a blank line, and
+     `<!-- coderabbit-final-head-review:<full-head-sha> -->`, after
+     re-resolving the full head immediately before the write. The stack rule
+     and the head-config rule still apply on top of it: a native stack layer
+     brings its base in through the stacked PR workflow, and a head that still
+     enables incremental review waits for the automatic attempt first. A
+     request comment counts only when its author association is `OWNER`,
+     `MEMBER`, or `COLLABORATOR`, or its author login is `claude`,
      `claude[bot]`, `chatgpt-codex-connector`, or
-     `chatgpt-codex-connector[bot]`. When the head-update time is available,
-     require the request comment to be at or after it, and recheck the current
-     full head immediately before the write. The marker detects completed
+     `chatgpt-codex-connector[bot]`; that trust rule bounds the two-per-PR
+     budget as well as the exact-head marker. The marker detects completed
      requests and provides best-effort duplicate suppression; the issue-comment
      API has no atomic claim. After posting, wait for that closeout attempt to
      become terminal before the final feedback sweep, bounded by the babysit
