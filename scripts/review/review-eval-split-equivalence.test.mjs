@@ -80,6 +80,10 @@ function makeFixture(root, contractBytes, sourceLedgerBytes) {
   mkdirSync(facadeFixture, { recursive: true });
   mkdirSync(facadePlanDir, { recursive: true });
   mkdirSync(tmp, { recursive: true });
+  // The runtime re-homes every codex spawn and refuses to start without the
+  // operator's login to carry; the fixture is that operator's home.
+  mkdirSync(path.join(state, ".codex"), { recursive: true });
+  writeFileSync(path.join(state, ".codex/auth.json"), "{}\n");
   writeFileSync(path.join(state, contractRelative), contractBytes);
   const [sourceRow] = String(sourceLedgerBytes)
     .split("\n")

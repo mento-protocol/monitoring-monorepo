@@ -42,6 +42,7 @@ cleanup() {
   if [[ -n $SKILL_SNAPSHOT ]]; then
     rm -rf "$SKILL_SNAPSHOT"
   fi
+  [[ -z ${CODEX_ISO:-} ]] || rm -rf "$CODEX_ISO"
   if [[ -n $BASELINE_SNAPSHOT ]]; then
     rm -f "$BASELINE_SNAPSHOT"
   fi

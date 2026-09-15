@@ -14,6 +14,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readlinkSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -67,6 +68,8 @@ import {
   scorePlan,
   skillDigest,
   SCRUBBED_ENV_VARS,
+  codexEnv,
+  codexIsolatedHome,
   scrubbedEnv,
   treatmentIdentity,
 } from "./review-eval-run.mjs";
@@ -242,7 +245,7 @@ test("the shell split no longer reconstructs the pre-split cell runtime", () => 
   // so this pin still catches an unintended shell edit.
   assert.equal(
     reconstructed,
-    "0b1aa3cec2ca46e02ecd420c46e7bef05c9e5a1b647cf02a2c385afa0f0e4d33",
+    "33b533d481af74e8eb2d1ede603cf8ad6e279d056931be6f1c3a7b8f2c557134",
   );
   // It is no longer the pre-split monolith. Capturing the whole session instead
   // of the CLI's last-message envelope changed what a cell records, so the 24
@@ -904,7 +907,7 @@ test("comparabilityKey moves with the contract, the prompts, and the scorer", ()
 
 test("orchestratorSourceDigest binds the shell and the cell modules", () => {
   const expected =
-    "fee8d511d838ad137aea62f0e6be7b5115383c59d4447ba985efb3e3c3fe48b1";
+    "9c1e3148fc94dcf69f84d8e40b81d82cc61119f96db6a578ee60d291a0afd0d5";
   assert.equal(orchestratorSourceDigest(), expected);
   // The cell writer and the stream parser are in the digest for the same
   // reason the shell is: the writer decides what a paid cell records and the
@@ -5971,6 +5974,50 @@ test("a scoring subprocess inherits no GitHub credential", () => {
   assert.equal(scrubbed.GIT_TERMINAL_PROMPT, "0");
 });
 
+test("a codex spawn is re-homed onto a directory holding only the auth link", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "review-eval-codex-iso-"));
+  const operatorHome = path.join(root, "operator");
+  mkdirSync(path.join(operatorHome, ".codex"), { recursive: true });
+  writeFileSync(path.join(operatorHome, ".codex", "auth.json"), "{}");
+  const env = { HOME: operatorHome, PATH: "/usr/bin" };
+  const home = codexIsolatedHome({ env, tmpRoot: root });
+  assert.notEqual(home.home, operatorHome);
+  assert.equal(home.codexHome, path.join(home.home, ".codex"));
+  // The login carries over as a link, not a copy, and nothing else does.
+  assert.equal(
+    readlinkSync(path.join(home.codexHome, "auth.json")),
+    path.join(operatorHome, ".codex", "auth.json"),
+  );
+  assert.deepEqual(readdirSync(home.codexHome), ["auth.json"]);
+  assert.deepEqual(readdirSync(home.home), [".codex"]);
+  const spawnEnv = codexEnv(env, home);
+  assert.equal(spawnEnv.HOME, home.home);
+  assert.equal(spawnEnv.CODEX_HOME, home.codexHome);
+  assert.equal(spawnEnv.PATH, "/usr/bin");
+  // CODEX_HOME names the auth file when the operator set it.
+  const custom = path.join(root, "custom-codex");
+  mkdirSync(custom);
+  writeFileSync(path.join(custom, "auth.json"), "{}");
+  const viaCodexHome = codexIsolatedHome({
+    env: { HOME: path.join(root, "nowhere"), CODEX_HOME: custom },
+    tmpRoot: root,
+  });
+  assert.equal(
+    readlinkSync(path.join(viaCodexHome.codexHome, "auth.json")),
+    path.join(custom, "auth.json"),
+  );
+  // No auth file means no login to carry, and a cell that cannot start is a
+  // failed run rather than a silently unauthenticated one.
+  assert.throws(
+    () =>
+      codexIsolatedHome({
+        env: { HOME: path.join(root, "empty") },
+        tmpRoot: root,
+      }),
+    /codex auth .*auth\.json is missing/,
+  );
+});
+
 test("a scoring judge inherits no path back to a source checkout", () => {
   // `classifyNovel` runs its judge with `Bash` inside the fixture, so the
   // checkout paths pnpm exports — INIT_CWD, npm_config_local_prefix and the
@@ -10638,6 +10685,32 @@ test("the estimate prices only the cells that bill", () => {
   assert.ok(claudeVerifier.estimate.claude_usd > 0);
 });
 
+test("every codex spawn runs under a run-private home", () => {
+  const runtime = runEvalSource("runtime");
+  // Codex reads skills from $HOME/.agents and $CODEX_HOME whatever
+  // --ignore-user-config says, so the finder and the codex verifier both get
+  // a temp home that carries only a link to the operator's auth file.
+  assert.match(
+    runtime,
+    /CODEX_AUTH="\$\{CODEX_HOME:-\$HOME\/\.codex\}\/auth\.json"\n\[\[ -f \$CODEX_AUTH \]\] \|\| fail /,
+  );
+  assert.match(
+    runtime,
+    /mktemp -d "\$TMPROOT\/review-eval-codex-home\.XXXXXX"/,
+  );
+  assert.match(
+    runtime,
+    /ln -s "\$CODEX_AUTH" "\$CODEX_ISO\/\.codex\/auth\.json"\nCODEX_ENV=\(env HOME="\$CODEX_ISO" CODEX_HOME="\$CODEX_ISO\/\.codex"\)/,
+  );
+  assert.match(
+    runtime,
+    /run_in_fixture "\$fixture" "\$\{CODEX_ENV\[@\]\}" "\$\{FINDER_ARGV\[@\]\}" \|\| finder_status=\$\?/,
+  );
+  // The claude contestant keeps the operator's home: its credentials and the
+  // skill under test live there.
+  assert.equal(runtime.includes('"${CODEX_ENV[@]}" claude'), false);
+});
+
 test("the matrix carries the tool and the runtime spawns codex bare", () => {
   const runtime = runEvalSource("runtime");
   // The TSV gains a column rather than reusing one, and it defaults, so a full
@@ -10649,7 +10722,7 @@ test("the matrix carries the tool and the runtime spawns codex bare", () => {
   const codex = runtime.slice(runtime.indexOf("if [[ $tool == codex ]]; then"));
   assert.match(
     codex,
-    /run_stream_capped "\$CELL_STREAM_MAX_BYTES" "\$fixture" codex exec \\\n\s+--sandbox read-only --skip-git-repo-check --ephemeral \\\n\s+--ignore-user-config --ignore-rules -m "\$model" \\\n\s+-c "model_reasoning_effort=\\"\$effort\\"" \\\n\s+--json -o "\$last_message" "\$prompt"/,
+    /run_stream_capped "\$CELL_STREAM_MAX_BYTES" "\$fixture" \\\n\s+"\$\{CODEX_ENV\[@\]\}" codex exec \\\n\s+--sandbox read-only --skip-git-repo-check --ephemeral \\\n\s+--ignore-user-config --ignore-rules -m "\$model" \\\n\s+-c "model_reasoning_effort=\\"\$effort\\"" \\\n\s+--json -o "\$last_message" "\$prompt"/,
   );
   const codexBranch = codex.slice(0, codex.indexOf("\n  else\n"));
   assert.equal(codexBranch.includes("stage_skill"), false);

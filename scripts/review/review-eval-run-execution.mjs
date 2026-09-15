@@ -1,7 +1,13 @@
 // Scoring-process execution, environment scrubbing, and fixture reset.
 
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, realpathSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  symlinkSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -167,6 +173,38 @@ export function scrubbedEnv({
     GIT_ALLOW_PROTOCOL: "file",
     GH_CONFIG_DIR: ghConfigDir,
   };
+}
+
+/**
+ * A run-private home for every codex spawn. Codex discovers skills under
+ * `$HOME/.agents/skills` and `$CODEX_HOME/skills` whatever
+ * `--ignore-user-config` says, reads its config from `$CODEX_HOME` and writes
+ * its sessions there; under the operator's home a finder sees the review
+ * skill under test. The new home holds only a link to the operator's auth
+ * file, so the login carries over and nothing else does.
+ */
+export function codexIsolatedHome({
+  env = process.env,
+  tmpRoot = tmpdir(),
+  exists = existsSync,
+} = {}) {
+  const auth = path.join(
+    env.CODEX_HOME ?? path.join(env.HOME ?? "", ".codex"),
+    "auth.json",
+  );
+  if (!exists(auth)) {
+    throw new Error(`codex auth ${auth} is missing; log in with codex first`);
+  }
+  const home = mkdtempSync(path.join(tmpRoot, "review-eval-codex-home."));
+  const codexHome = path.join(home, ".codex");
+  mkdirSync(codexHome);
+  symlinkSync(auth, path.join(codexHome, "auth.json"));
+  return { home, codexHome };
+}
+
+/** The env a codex spawn gets: the scrubbed env, re-homed. */
+export function codexEnv(env, { home, codexHome }) {
+  return { ...env, HOME: home, CODEX_HOME: codexHome };
 }
 
 /**

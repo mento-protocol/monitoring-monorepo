@@ -77,6 +77,10 @@
     }
   ],
   "files": {
+    ".codex/auth.json": {
+      "executable": false,
+      "sha256": "ca3d163bab055381827226140568f3bef7eaac187cebd76878e0b63e9e442356"
+    },
     "bin/claude": {
       "executable": true,
       "sha256": "94862798bf9da87e10a2abb45cd2647fd9c59dfcd15e106c5aee5e00de234976"
@@ -127,7 +131,7 @@
     },
     "generated/shell-harness.sh": {
       "executable": true,
-      "sha256": "3db3ecb0a508c50ff2ecec4446f31ad5d7b7b8fc599aeebd8dca22f1d8562422"
+      "sha256": "aa12f33c3c97a233a3343919a9213b0d85a5ceaca68086e2f556eff3d3dd7d69"
     },
     "generated/shell-run/keep.txt": {
       "executable": false,

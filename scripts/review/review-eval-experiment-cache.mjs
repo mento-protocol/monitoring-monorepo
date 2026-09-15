@@ -20,6 +20,8 @@ import { materializeFixture } from "./review-eval-fixtures.mjs";
 import {
   claudeArgv,
   claudeStreamEnvelope,
+  codexEnv,
+  codexIsolatedHome,
 } from "./review-eval-run-execution.mjs";
 import { expandHome, skillDigest } from "./review-eval-run-plan.mjs";
 import { scorerDigest } from "./review-eval-score.mjs";
@@ -240,8 +242,21 @@ async function execExperimentArgv({ argv, cwd, env, label }) {
   return experimentProviderText(stdout, label);
 }
 
+// One run-private codex home per scrubbed env, shared by every finder call of
+// the stage; see `codexIsolatedHome`.
+const codexHomes = new WeakMap();
 export function defaultExperimentFinderExec({ argv, cwd, env }) {
-  return execExperimentArgv({ argv, cwd, env, label: "live finder" });
+  let home = codexHomes.get(env);
+  if (!home) {
+    home = codexIsolatedHome({ env });
+    codexHomes.set(env, home);
+  }
+  return execExperimentArgv({
+    argv,
+    cwd,
+    env: codexEnv(env, home),
+    label: "live finder",
+  });
 }
 
 export function defaultExperimentContestantExec({ argv, fixturePath, env }) {

@@ -21,15 +21,11 @@ mkdir -p "$SHIM/gh-empty"
 # Defense in depth, not containment: the network stays open because the model
 # API must be reachable, and naming a withheld commit is a hard leak signal.
 #
-# `OLDPWD` goes with them, and it hands over a path rather than a credential:
-# Bash exports it, and `run_in_fixture` sets it by `cd`-ing from the invocation
-# directory — the repository root, per the runbook — into the fixture, so the
-# contestant inherits the source checkout's location. The answer key is frozen
-# there on main under docs/evals/review-skill-truth/, and a cell that reads it
-# copies out every defect while emitting no PR number, reviewer login or
-# withheld SHA for `leakSignals()` to catch. A shell tool re-initializes
-# `OLDPWD`, but `claude` and `codex` are not shells, so cut it at the boundary.
-# `PWD` stays: it is the fixture the cell is supposed to be reviewing.
+# `OLDPWD` goes too: Bash exports it, and `run_in_fixture` `cd`s from the
+# repository root into the fixture, so a cell would inherit the checkout that
+# holds the answer key (docs/evals/review-skill-truth/ on main), and a read of
+# it leaves nothing for `leakSignals()`. `claude` and `codex` are not shells
+# that reset it. `PWD` stays: it is the fixture under review.
 CELL_ENV=(env
   -u GH_TOKEN -u GITHUB_TOKEN -u GITHUB_PERSONAL_ACCESS_TOKEN
   -u GH_ENTERPRISE_TOKEN -u OLDPWD)
@@ -41,14 +37,11 @@ while IFS= read -r cell_env_var; do
   CELL_ENV+=(-u "$cell_env_var")
 done < <(compgen -e | grep -E '^(npm_|PNPM_|INIT_CWD$|NODE_PATH$)' || true)
 
-# `PATH` survives the scrub above because a cell still needs node, git and the
-# model CLIs. Under `pnpm review:eval:run` pnpm prepends
-# `<checkout>/node_modules/.bin` to it, so passing the caller's `PATH` through
-# verbatim hands every Bash-enabled contestant the checkout root the INIT_CWD
-# scrub just took away — answer key included. Rebuild it instead: the shim
-# first, then every inherited entry that does not resolve inside the source
-# checkout, compared canonically because a symlinked `node_modules/.bin` passes
-# a string comparison and still lands in the repository.
+# `PATH` survives the scrub because a cell needs node, git and the model CLIs,
+# but pnpm prepends `<checkout>/node_modules/.bin` to it, which hands a
+# Bash-enabled contestant the checkout the INIT_CWD scrub took away. Rebuild
+# it: the shim first, then every inherited entry outside the source checkout,
+# compared canonically (a symlinked `node_modules/.bin` passes a string test).
 CELL_PATH="$SHIM"
 REPO_REAL="$(cd "$REPO" && pwd -P)"
 while IFS= read -r cell_path_entry; do
@@ -66,6 +59,15 @@ CELL_ENV+=(
   GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=credential.helper GIT_CONFIG_VALUE_0=
   GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/bin/false GIT_ALLOW_PROTOCOL=file
   GH_CONFIG_DIR="$SHIM/gh-empty" PATH="$CELL_PATH")
+
+# Codex reads skills from $HOME/.agents and $CODEX_HOME whatever
+# --ignore-user-config says (the review skill under test included), so both
+# codex spawns get a run-private home holding only a link to the auth file.
+CODEX_AUTH="${CODEX_HOME:-$HOME/.codex}/auth.json"
+[[ -f $CODEX_AUTH ]] || fail "codex auth $CODEX_AUTH is missing; log in with codex before a run"
+CODEX_ISO="$(mktemp -d "$TMPROOT/review-eval-codex-home.XXXXXX")"
+mkdir -p "$CODEX_ISO/.codex" && ln -s "$CODEX_AUTH" "$CODEX_ISO/.codex/auth.json"
+CODEX_ENV=(env HOME="$CODEX_ISO" CODEX_HOME="$CODEX_ISO/.codex")
 
 # A cell that cannot start its own tools is a failed run, not a safer one, and
 # dropping checkout entries is the only thing that can cause it. Check the tools
@@ -89,9 +91,8 @@ run_in_fixture() {
 }
 
 # The contestant stream ceiling, mirroring the 64 MiB `claudeExec` enforces on
-# the node path: `run_bounded` bounds time alone, and the cell writer reads the
-# whole stream back. Overridable for the tests that prove it, never off. Bash
-# counts `ulimit -f` in 1024-byte blocks, POSIX in 512 — half this either way.
+# the node path (`run_bounded` bounds time alone). Overridable for the tests
+# that prove it, never off. Bash counts `ulimit -f` in 1024-byte blocks.
 CELL_STREAM_MAX_BYTES="${REVIEW_EVAL_MAX_STREAM_BYTES:-67108864}"
 if [[ ! $CELL_STREAM_MAX_BYTES =~ ^[1-9][0-9]*$ ]]; then
   fail "REVIEW_EVAL_MAX_STREAM_BYTES must be a positive number of bytes"
@@ -416,17 +417,14 @@ run_cell() {
       log "  $cell_id FAILED — the plan carries no finder argv"
       return 1
     fi
-    # The finder writes to a file rather than into a pipeline so the run
-    # deadline can bound it: a stalled finder inside a command substitution
-    # never returns, and the between-cells deadline check never runs again.
-    # A finder that hits its session limit or dies mid-report still writes a
-    # partial report, and that is not a review: cached, it would score forever as
-    # a finder that missed those defects. Fail the cell on an unsuccessful exit,
-    # the deadline, or an empty report.
+    # The finder writes to a file so the run deadline can bound it (a stalled
+    # finder inside a command substitution never returns). A finder that hits
+    # its session limit still writes a partial report, which is not a review:
+    # cached, it would score forever. Fail on a bad exit, the deadline, or empty.
     local finder_out finder_status=0
     finder_out="$(mktemp "$TMPROOT/review-eval-finder.XXXXXX")"
     run_bounded "$finder_out" "$(remaining_seconds "$MATRIX_DEADLINE")" \
-      run_in_fixture "$fixture" "${FINDER_ARGV[@]}" || finder_status=$?
+      run_in_fixture "$fixture" "${CODEX_ENV[@]}" "${FINDER_ARGV[@]}" || finder_status=$?
     other_review="$(tail -c 30000 "$finder_out")"
     if [[ $finder_status -eq 124 ]]; then
       log "  $cell_id FAILED — the finder hit the run deadline; not cached"
@@ -488,7 +486,8 @@ run_cell() {
     # Codex verifier: bare model, same prompt, no skill or user config, read-only.
     last_message="$(mktemp "$TMPROOT/review-eval-last.XXXXXX")"
     run_bounded "$raw" "$(remaining_seconds "$MATRIX_DEADLINE")" \
-      run_stream_capped "$CELL_STREAM_MAX_BYTES" "$fixture" codex exec \
+      run_stream_capped "$CELL_STREAM_MAX_BYTES" "$fixture" \
+      "${CODEX_ENV[@]}" codex exec \
       --sandbox read-only --skip-git-repo-check --ephemeral \
       --ignore-user-config --ignore-rules -m "$model" \
       -c "model_reasoning_effort=\"$effort\"" \
