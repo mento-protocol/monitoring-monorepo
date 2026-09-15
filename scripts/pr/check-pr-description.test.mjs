@@ -224,6 +224,21 @@ ${filler(60)}
   );
 });
 
+test("does not count punctuation entities as words", () => {
+  assertPass(
+    sizedBody({
+      tldrWords: 20,
+      problemWords: 100,
+      solutionWords: 274,
+      extra: `
+## Details
+
+<p>${"&mdash; &hellip; &rsquo; ".repeat(20)}</p>
+`,
+    }),
+  );
+});
+
 test("counts prose written as unlisted named character references", () => {
   const encoded = "&Aacute;&Aacute;&Aacute;&Aacute;";
   assertFail(
