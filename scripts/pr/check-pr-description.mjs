@@ -29,10 +29,11 @@ const HTML_ENTITY_RE =
   /&(?:#([0-9]+)|#[xX]([0-9A-Fa-f]+)|([A-Za-z][A-Za-z0-9]*));/g;
 // GitHub renders a character reference as a character, so the counter decodes
 // one rather than dropping it: prose encoded as `&#119;`-style references is
-// prose. Listed here are the names that render as nothing a word can be built
-// from; every other name decodes to a counting letter, so an unlisted name such
-// as `&Aacute;` adds a word instead of disappearing.
-const BLANK_ENTITIES = new Set([
+// prose. Every name outside the tables below decodes to a counting letter, so
+// an unlisted name such as `&Aacute;` adds a word instead of disappearing.
+//
+// Names that render as a space, and so separate two words.
+const SPACE_ENTITIES = new Set([
   "nbsp",
   "ensp",
   "emsp",
@@ -42,12 +43,11 @@ const BLANK_ENTITIES = new Set([
   "puncsp",
   "thinsp",
   "hairsp",
-  "zwnj",
-  "zwj",
-  "lrm",
-  "rlm",
-  "shy",
 ]);
+// Names that render as nothing at all. They must decode to the empty string,
+// not a space: `inter&shy;national` is one rendered word, and turning the soft
+// hyphen into a space would count it as two.
+const ZERO_WIDTH_ENTITIES = new Set(["zwnj", "zwj", "lrm", "rlm", "shy"]);
 // Names that render as punctuation or a symbol. They add no word, so listing
 // them keeps a body that writes `&mdash;` from being counted one word over.
 const PUNCTUATION_ENTITIES = new Map([
@@ -272,7 +272,8 @@ function decodeCharacterReference(match, decimal, hex, name) {
   }
   // Reference names are case-sensitive: `&Dagger;` is ‡ and `&dagger;` is †,
   // so the lookup keeps the case the body used.
-  if (BLANK_ENTITIES.has(name)) return " ";
+  if (ZERO_WIDTH_ENTITIES.has(name)) return "";
+  if (SPACE_ENTITIES.has(name)) return " ";
   return PUNCTUATION_ENTITIES.get(name) ?? ENTITY_PLACEHOLDER;
 }
 

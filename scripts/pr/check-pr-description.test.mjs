@@ -256,6 +256,36 @@ test("decodes capitalized punctuation entities on their own names", () => {
   );
 });
 
+// A zero-width reference renders as nothing, so it joins the letters around it.
+// This body is exactly at the ceiling: decoding `&shy;` to a space instead would
+// split each hyphenated word in two and push it to 402.
+test("does not break a word at a zero-width entity", () => {
+  assertPass(
+    sizedBody({
+      tldrWords: 20,
+      problemWords: 100,
+      solutionWords: 273,
+      extra: `
+<p>inter&shy;national inter&zwnj;national</p>
+`,
+    }),
+  );
+});
+
+test("still separates words at a rendered space entity", () => {
+  assertFail(
+    sizedBody({
+      tldrWords: 20,
+      problemWords: 100,
+      solutionWords: 273,
+      extra: `
+<p>inter&nbsp;national inter&thinsp;national</p>
+`,
+    }),
+    /authored PR description is 402 words; the ceiling is 400/,
+  );
+});
+
 test("counts prose written as unlisted named character references", () => {
   const encoded = "&Aacute;&Aacute;&Aacute;&Aacute;";
   assertFail(
