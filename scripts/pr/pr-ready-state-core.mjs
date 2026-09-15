@@ -14,6 +14,12 @@ import {
   findActiveReadinessOverrides,
   isTrustedHumanAuthor,
 } from "./pr-ready-state-overrides.mjs";
+import {
+  buildBaseRedFindings,
+  checkMatchesRequiredContext,
+  requiredContextIdentity,
+  requiredContextName,
+} from "./pr-ready-state-base-red.mjs";
 
 export {
   BOT_APPROVER,
@@ -54,42 +60,6 @@ function compactDiagnostic(value) {
   return collapsed.length > MAX_DIAGNOSTIC_LENGTH
     ? `${collapsed.slice(0, MAX_DIAGNOSTIC_LENGTH - 1)}…`
     : collapsed;
-}
-
-function requiredContextName(context) {
-  return typeof context === "string" ? context : context.context;
-}
-
-function requiredContextIntegrationId(context) {
-  const value =
-    typeof context === "string"
-      ? null
-      : (context.integrationId ?? context.integration_id ?? null);
-  return value === null || value === undefined ? null : Number(value);
-}
-
-function requiredContextIdentity(context) {
-  return `${requiredContextName(context)}\0${requiredContextIntegrationId(context) ?? ""}`;
-}
-
-function checkAppId(check) {
-  const value =
-    check.appId ??
-    check.app_id ??
-    check.app?.id ??
-    check.app?.databaseId ??
-    null;
-  return value === null || value === undefined ? null : Number(value);
-}
-
-function checkMatchesRequiredContext(check, context) {
-  if (checkDisplayName(check) !== requiredContextName(context)) return false;
-
-  const requiredIntegrationId = requiredContextIntegrationId(context);
-  if (requiredIntegrationId === null) return true;
-
-  const appId = checkAppId(check);
-  return appId !== null && appId === requiredIntegrationId;
 }
 
 function checkToItem(check, { required }) {
@@ -615,36 +585,30 @@ export function summarizeReadyState({
   // not. An unreadable base leaves its health unknown and blocks too. The
   // caller has already reduced the rollup to the latest run per check, so a
   // rerun that fixed the base does not keep blocking here.
-  if (baseHealthError !== null) {
-    requiredBlockers.push({
-      kind: "base-red",
-      // Stable name, diagnostic in `state`, like the branch-protection
-      // blocker. A transport error carries the whole GraphQL query and
-      // stderr, so collapse it: `formatCompact` emits one physical line per
-      // summary and callers quote that line verbatim (scripts/AGENTS.md
-      // "Compact/watch scripts keep machine state ... separate from display
-      // strings").
-      name: "Base branch health unavailable",
-      state: `unknown: ${compactDiagnostic(baseHealthError)}`,
-      required: true,
-      url: pr.url,
-    });
-  } else {
-    const redBaseChecks = splitRequiredAndOptionalChecks(
-      baseStatusCheckRollup,
-      requiredStatusContexts,
-      { requiredStatusContextsAvailable },
-    ).required.filter((check) => check.state === "fail");
-    for (const check of redBaseChecks) {
-      requiredBlockers.push({
-        kind: "base-red",
-        name: `Base check ${check.name} is red at ${baseHealthOid ?? "an unknown base commit"}`,
-        state: "red",
-        required: true,
-        url: check.url ?? pr.url,
-      });
-    }
-  }
+  // `base-red` stops any merge onto a red base, which would also stop the fix
+  // that turns it green; the operator override is the authorized way out.
+  // Policy and its bindings live in pr-ready-state-base-red.mjs.
+  const baseRed = buildBaseRedFindings({
+    redBaseChecks:
+      baseHealthError === null
+        ? splitRequiredAndOptionalChecks(
+            baseStatusCheckRollup,
+            requiredStatusContexts,
+            { requiredStatusContextsAvailable },
+          ).required.filter((check) => check.state === "fail")
+        : [],
+    baseHealthError:
+      baseHealthError === null ? null : compactDiagnostic(baseHealthError),
+    baseHealthOid,
+    baseStatusCheckRollup,
+    requiredStatusContexts,
+    requiredStatusContextsAvailable,
+    activeReadinessOverrides,
+    currentHeadOid,
+    prUrl: pr.url,
+  });
+  requiredBlockers.push(...baseRed.blockers);
+  notes.push(...baseRed.notes);
 
   if (reviewDecision === "CHANGES_REQUESTED") {
     requiredBlockers.push({
@@ -786,7 +750,13 @@ export function summarizeReadyState({
     unresolvedReviewThreads,
     unrepliedRootReviewComments,
     topLevelBotComments,
-    readinessOverrides: activeReadinessOverrides,
+    // The documented contract is that this array holds overrides that actually
+    // affected a gate. A base-red comment that retired nothing changed
+    // nothing, so it must not appear here claiming otherwise.
+    readinessOverrides: activeReadinessOverrides.filter(
+      (override) =>
+        override.gate !== "base-red" || override === baseRed.appliedOverride,
+    ),
     codexApprovalReaction,
     codexReviewSignal,
     codeRabbitReviewSignal,

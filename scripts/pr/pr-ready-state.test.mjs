@@ -3202,6 +3202,224 @@ test("reduces a base rollup to the latest settled run of each check", () => {
   );
 });
 
+test("an operator override clears base-red, and only base-red", () => {
+  // `base-red` deadlocks its own recovery: the fix or revert PR that turns
+  // `main` green is blocked by the red `main` it exists to repair. The break
+  // glass carries the same conditions as the Codex gate — operator author,
+  // stated reason, bound to this head.
+  const head = "c".repeat(40);
+  const redBase = "a".repeat(40);
+  const overrideComment = (overrides = {}) => ({
+    body: `/pr-ready-override gate=base-red head=${head} base=${redBase} reason=reverting the bad merge`,
+    author_association: "OWNER",
+    user: { login: "chapati23", type: "User" },
+    created_at: "2026-09-15T12:00:00Z",
+    ...overrides,
+  });
+  const summarize = (issueComments) =>
+    summarizeReadyState({
+      pr: {
+        ...basePr,
+        headRefOid: head,
+        statusCheckRollup: [
+          { name: "ci", conclusion: "SUCCESS", status: "COMPLETED" },
+        ],
+      },
+      issueComments,
+      reactions: [
+        {
+          content: "+1",
+          created_at: "2026-05-21T13:23:00Z",
+          user: { login: "chatgpt-codex-connector[bot]" },
+        },
+      ],
+      requiredStatusContexts: [{ context: "ci", integrationId: null }],
+      baseHealthOid: redBase,
+      baseStatusCheckRollup: [
+        {
+          name: "ci",
+          conclusion: "FAILURE",
+          status: "COMPLETED",
+          completedAt: "2026-09-15T09:00:00Z",
+        },
+      ],
+    });
+  const baseRedBlockers = (summary) =>
+    summary.required.blockers.filter((item) => item.kind === "base-red");
+
+  assertEqual(
+    baseRedBlockers(summarize([])).length,
+    1,
+    "a red base blocks without an override",
+  );
+
+  const overridden = summarize([overrideComment()]);
+  assertEqual(baseRedBlockers(overridden).length, 0);
+  const note = overridden.notes.find((item) => item.kind === "base-red");
+  assertEqual(note.state, "overridden");
+  assertEqual(note.override.author, "chapati23");
+  assertEqual(note.override.reason, "reverting the bad merge");
+  assert(
+    note.name.includes("@chapati23") &&
+      note.name.includes("reverting the bad merge"),
+    "human output must carry the operator and the reason",
+  );
+  assertEqual(overridden.ready, true, "the override clears the blocker");
+  assertEqual(
+    overridden.readinessOverrides.length,
+    1,
+    "an applied override is reported as active",
+  );
+
+  // Any push expires it.
+  assertEqual(
+    baseRedBlockers(
+      summarize([
+        overrideComment({
+          body: `/pr-ready-override gate=base-red head=${"d".repeat(40)} base=${redBase} reason=stale`,
+        }),
+      ]),
+    ).length,
+    1,
+    "an override bound to a superseded head must not apply",
+  );
+
+  // The operator judged one specific red base. `main` advancing to a different
+  // red commit, or an override that names no base at all, needs a new decision.
+  for (const [label, body] of [
+    [
+      "another base commit",
+      `/pr-ready-override gate=base-red head=${head} base=${"e".repeat(40)} reason=stale`,
+    ],
+    [
+      "no base at all",
+      `/pr-ready-override gate=base-red head=${head} reason=stale`,
+    ],
+  ]) {
+    assertEqual(
+      baseRedBlockers(summarize([overrideComment({ body })])).length,
+      1,
+      `an override naming ${label} must not apply`,
+    );
+  }
+
+  // A rerun that newly fails after the operator decided is a red result they
+  // never approved, even with the head and base commit unchanged.
+  const rerunAfterOverride = summarizeReadyState({
+    pr: {
+      ...basePr,
+      headRefOid: head,
+      statusCheckRollup: [
+        { name: "ci", conclusion: "SUCCESS", status: "COMPLETED" },
+      ],
+    },
+    issueComments: [overrideComment()],
+    reactions: [
+      {
+        content: "+1",
+        created_at: "2026-05-21T13:23:00Z",
+        user: { login: "chatgpt-codex-connector[bot]" },
+      },
+    ],
+    requiredStatusContexts: [{ context: "ci", integrationId: null }],
+    baseHealthOid: redBase,
+    baseStatusCheckRollup: [
+      {
+        name: "ci",
+        conclusion: "FAILURE",
+        status: "COMPLETED",
+        completedAt: "2026-09-15T18:00:00Z",
+      },
+    ],
+  });
+  assertEqual(
+    rerunAfterOverride.required.blockers.filter(
+      (item) => item.kind === "base-red",
+    ).length,
+    1,
+    "a base failure newer than the override must not be suppressed",
+  );
+  // GitHub timestamps are second-precision, so a tie is a result the operator
+  // could not have read. Require strictly newer.
+  assertEqual(
+    baseRedBlockers(
+      summarizeReadyState({
+        pr: { ...basePr, headRefOid: head },
+        issueComments: [overrideComment()],
+        requiredStatusContexts: [{ context: "ci", integrationId: null }],
+        baseHealthOid: redBase,
+        baseStatusCheckRollup: [
+          {
+            name: "ci",
+            conclusion: "FAILURE",
+            status: "COMPLETED",
+            completedAt: "2026-09-15T12:00:00Z",
+          },
+        ],
+      }),
+    ).length,
+    1,
+    "a failure tied with the override timestamp must not be suppressed",
+  );
+  assertDeepEqual(
+    rerunAfterOverride.readinessOverrides,
+    [],
+    "a declined base-red override must not be reported as active",
+  );
+
+  // An unreadable base is a state nobody observed: never overridable.
+  const unreadable = summarizeReadyState({
+    pr: { ...basePr, headRefOid: head },
+    issueComments: [overrideComment()],
+    requiredStatusContexts: [{ context: "ci", integrationId: null }],
+    baseHealthError: "gh: Bad credentials",
+  });
+  assertEqual(
+    unreadable.required.blockers.filter((item) => item.kind === "base-red")
+      .length,
+    1,
+    "an unknown base must stay blocking even with an override",
+  );
+
+  // Only an operator may post it.
+  for (const author of [
+    { author_association: "CONTRIBUTOR" },
+    { author_association: "NONE" },
+    { user: { login: "some-bot[bot]", type: "Bot" } },
+  ]) {
+    assertEqual(
+      baseRedBlockers(summarize([overrideComment(author)])).length,
+      1,
+      "a non-operator override must not apply",
+    );
+  }
+
+  // It covers base-red and nothing else: a failing required check on this PR
+  // still blocks with the same override in place.
+  const stillBlocked = summarizeReadyState({
+    pr: {
+      ...basePr,
+      headRefOid: head,
+      statusCheckRollup: [
+        { name: "ci", conclusion: "FAILURE", status: "COMPLETED" },
+      ],
+    },
+    issueComments: [overrideComment()],
+    requiredStatusContexts: [{ context: "ci", integrationId: null }],
+    baseHealthOid: redBase,
+    baseStatusCheckRollup: [
+      { name: "ci", conclusion: "FAILURE", status: "COMPLETED" },
+    ],
+  });
+  assertEqual(stillBlocked.ready, false);
+  assert(
+    stillBlocked.required.blockers.some(
+      (item) => item.kind === "check" && item.state === "fail",
+    ),
+    "the override must not reach this PR's own failing check",
+  );
+});
+
 test("a base rerun in flight keeps the base-red blocker", () => {
   const summary = summarizeReadyState({
     pr: {

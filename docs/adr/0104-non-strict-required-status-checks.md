@@ -74,6 +74,20 @@ main-failure notifier
 stale merge introduces after the fact, which is what turns the base red for
 the blocker to catch.
 
+A blocker that stops every merge onto a red `main` would also stop the fix or
+revert that turns it green, so the recovery path is authorized rather than left
+to improvisation. The operator opens that PR, gets it green on its own required
+checks, and posts
+`/pr-ready-override gate=base-red head=<full-head-sha> base=<base-oid>
+reason=<why>`. That reuses the existing Codex break-glass mechanism: a human
+`OWNER`/`MEMBER`/`COLLABORATOR` author, a stated reason, and binding to the
+current head, so any push expires it. It also names the base commit judged, so
+a base that moves to another red commit needs a fresh decision, and a base
+whose health could not be read is never overridable. The override clears only `base-red`;
+checks, conflicts, review state and the Codex gate stay independent, and the
+result is reported as `overridden` with the author and reason rather than as a
+silent pass.
+
 The unattended Dependabot auto-merge lane
 (`.github/workflows/dependabot-auto-merge.yml`) keeps current-base validation
 in its writer rather than relying on the base ruleset. It merges with the

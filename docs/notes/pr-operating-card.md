@@ -356,8 +356,8 @@ If root `package.json` changed, first run
      already exist locally, require that OID to be their ancestor and inspect
      the intervening range. Merge the base only when the oracle asks —
      `merge_base_first`, or a real conflict — never merely for being behind,
-     and never to clear `base-red`, which only a green base clears; rebase is
-     only acceptable before first publication. Merge it locally, never through
+     and never to clear `base-red`, which only a green base or the operator
+     override clears; rebase is only acceptable before first publication. Merge it locally, never through
      GitHub's "Update branch" button or a web-UI edit, because each costs a
      CodeRabbit review event; and merge it before the CodeRabbit closeout
      request rather than after, because a base merge after the request can draw
@@ -503,7 +503,13 @@ If root `package.json` changed, first run
    `chatgpt-codex-connector[bot]` PR-description approval, unless a documented
    human break-glass comment applies:
    `/pr-ready-override gate=codex-description-approval head=<full-head-sha>
-reason=<why this is safe>`. Do not block on slow optional bots that branch
+reason=<why this is safe>`. When `main` itself is red, the recovery order is:
+   open the fix or revert PR, get it green on its own checks, have an operator
+   post `/pr-ready-override gate=base-red head=<full-head-sha> base=<base-oid>
+reason=<why>`,
+   then drive it to ALL_CLEAR. The override waives `base-red` only; it is not
+   approval to merge, which still needs the user's explicit per-PR word.
+   Nothing else merges until `main` is green again. Do not block on slow optional bots that branch
    protection does not require, and do not post routine or duplicate `@codex
 review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
    lifecycle-triggered, and a direct tag produces a duplicate pass, not a

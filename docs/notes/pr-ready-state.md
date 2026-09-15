@@ -53,7 +53,10 @@ Required blockers:
   base commit it was read at. Pending, in-progress and skipped base checks are
   not red. A base whose health cannot be read blocks with `state: "unknown"`.
   With strict mode off, GitHub no longer reruns a PR's checks against the
-  current base, so this is what stops a merge onto a red `main`.
+  current base, so this is what stops a merge onto a red `main`. It blocks the
+  fix PR too, so the operator override below clears it, reported in `notes[]`
+  as `state: "overridden"` with the author and reason. An unknown base is
+  never overridable.
 
 - Closed-unmerged PRs. Merged PRs are terminal-ready and short-circuit the
   expensive readiness sweep because there is nothing left to fix or wait on.
@@ -90,20 +93,30 @@ enabled`, which proves absence on its own. Unproven (another 404 body,
   reaction must be created at or after the current-head update lower bound:
   the head commit's GitHub push timestamp when available, otherwise the first
   current-head check/status observation timestamp.
-- A human break-glass override for the Codex PR-description approval gate only,
-  when Codex review is externally blocked after the rest of the required
-  readiness surface is clean. The override must be a PR comment from a GitHub
-  `OWNER`, `MEMBER`, or `COLLABORATOR` human author:
+- A human break-glass override for two gates, each named explicitly. The
+  override must be a PR comment from a GitHub `OWNER`, `MEMBER`, or
+  `COLLABORATOR` human author:
 
   ```text
   /pr-ready-override gate=codex-description-approval head=<full-head-sha> reason=<why this is safe>
+  /pr-ready-override gate=base-red head=<full-head-sha> base=<base-oid> reason=<why this is safe>
   ```
 
-  The override is scoped to the exact current head SHA, so any new push expires
-  it. It is reported as gate state `overridden` with `readinessOverrides[]`
-  evidence; it is not hidden as a normal Codex approval. It never overrides
-  failing or pending required checks, merge conflicts, draft state, requested
-  changes, unresolved review threads, or unreplied review comments.
+  Use `codex-description-approval` when Codex review is externally blocked
+  after the rest of the required readiness surface is clean. Use `base-red` to
+  land the fix or revert that turns a red `main` green, which `base-red` would
+  otherwise block: get that PR green on its own checks first, then an operator
+  posts the override.
+
+  Either override is scoped to the exact current head SHA, so any new push
+  expires it, and a reason is required. `base-red` also names the base commit
+  the operator judged: a base that moves to another red commit needs a fresh
+  decision, and a base whose health could not be read is never overridable. Each is reported as `overridden` with
+  `readinessOverrides[]` evidence — the Codex one as a gate state, `base-red`
+  as a `notes[]` entry carrying the author and reason — never hidden as a
+  normal pass. Each covers only its own gate. Neither overrides failing or
+  pending required checks, merge conflicts, draft state, requested changes,
+  unresolved review threads, or unreplied review comments.
 
 Optional signals:
 
