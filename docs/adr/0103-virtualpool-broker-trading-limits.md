@@ -114,6 +114,8 @@ is greater than 0.
 
 ## Evidence
 
+- PR [#2446](https://github.com/mento-protocol/monitoring-monorepo/pull/2446),
+  which implements this decision.
 - `indexer-envio/schema.graphql` (`BrokerTradingLimit`, and the `Pool` trading
   limits comment), `indexer-envio/src/brokerTradingLimits.ts`,
   `indexer-envio/src/rpc/broker-trading-limits.ts`,
