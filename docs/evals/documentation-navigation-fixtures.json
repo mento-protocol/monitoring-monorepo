@@ -164,16 +164,15 @@
     {
       "id": "pr-hazard-package-script-refusal",
       "category": "pr-hazards",
-      "question": "Why does the agent quality gate refuse to run after package scripts or lockfiles change, and what explicit flag is required after reviewing that lifecycle surface?",
+      "question": "Which checks must run before installing or executing changed package scripts and lockfiles after legacy-gate retirement?",
       "accepted_routes": [
         ["docs/notes/quick-commands.md"],
-        ["docs/notes/agent-quality-gate-mechanics.md"],
         ["docs/notes/pr-operating-card.md"]
       ],
       "sources_requiring_verification": [
         {
           "path": "docs/PLAN-ai-review-process.md",
-          "verify_against": ["docs/notes/agent-quality-gate-mechanics.md"]
+          "verify_against": ["docs/notes/pr-operating-card.md"]
         }
       ]
     },

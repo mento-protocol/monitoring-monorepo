@@ -163,8 +163,7 @@ report contract live in [`backlog-sweep.md`](backlog-sweep.md).
 
 The `.agents/skills/` ↔ `.claude/skills/` mirror is enforced, not just
 documented: `scripts/repo-health/check-skills-mirror.mjs` byte-compares the two
-trees and fails on any drift. The optional legacy gate also selects it for
-those changes. Symlinking the trees was
+trees and fails on any drift. Required CI runs the mirror check. Symlinking the trees was
 rejected — repo files
 pushed via the GitHub Contents API and hosted/web checkouts are not guaranteed
 to preserve symlinks, so a check script is the safer default. Run

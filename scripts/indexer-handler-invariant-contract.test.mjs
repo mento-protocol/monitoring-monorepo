@@ -18,10 +18,10 @@ import { test } from "node:test";
 import {
   getIndexerHandlerInvariantChecklistDecisions,
   getIndexerHandlerInvariantRoutingFamilies,
-} from "./gate/routing-table/indexer-handler-invariant-contract.mjs";
+} from "./workflows/indexer-handler-invariant-contract.mjs";
 
 const REPO = resolve(fileURLToPath(new URL("../", import.meta.url)));
-const TABLE = `${REPO}/scripts/gate/routing-table`;
+const TABLE = `${REPO}/scripts/workflows`;
 const FAMILIES_SOURCE = readFileSync(
   `${TABLE}/indexer-handler-invariant-families.mjs`,
   "utf8",

@@ -11,7 +11,7 @@ review_interval_days: 90
 garden_lane: adrs-architecture
 ---
 
-# ADR 0101 — GitHub-hosted runners only; a frozen allow-list blocks other labels
+# ADR 0102 — GitHub-hosted runners only; a frozen allow-list blocks other labels
 
 **Status:** Accepted (Sep 2026), in force.
 **Scope:** ci/process

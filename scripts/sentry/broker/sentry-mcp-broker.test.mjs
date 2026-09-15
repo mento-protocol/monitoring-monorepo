@@ -14,6 +14,9 @@
  * allowlist on a version bump) is in `docs/notes/sentry-triage-pipeline.md`.
  */
 
+// Exercise the shared containment helper in the required broker suite.
+import "../../lib/mapped-command-process-identity.test.mjs";
+
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import { EventEmitter, once } from "node:events";
@@ -1665,7 +1668,7 @@ test("the probe runs the immutable staged copy, before the agent", () => {
     "the probe is not in the staging step's copy list",
   );
   assert.ok(
-    stagingBlock.includes('scripts/gate/mapped-command-process-identity.mjs"'),
+    stagingBlock.includes('scripts/lib/mapped-command-process-identity.mjs"'),
     "the probe's shared marker helper is not in the staging step's copy list",
   );
   assert.match(

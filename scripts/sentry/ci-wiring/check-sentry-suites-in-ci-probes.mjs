@@ -78,27 +78,6 @@ export const PROBES =
 /** The shared V8 import parser both this check and the gate ask for imports. */
 export const STATIC_IMPORTS = "scripts/lib/static-imports.mjs";
 
-/** The sibling module that asks the mapping engine how the gate classifies a manifest change. */
-export const GATE_PROBE =
-  "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-probe.mjs";
-
-/** The sibling test module holding that probe's own invariants. */
-export const GATE_PROBE_TESTS =
-  "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-probe.test.mjs";
-
-/** The module that lifts a bash function out of a script, and runs the shells. */
-export const GATE_EXTRACT =
-  "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-extract.mjs";
-
-// Re-exported here so the tests keep importing every probe from one façade.
-export { bashFunctionSource } from "./check-sentry-suites-in-ci-gate-extract.mjs";
-export {
-  GATE_CLASSIFIER,
-  GATE_CLASSIFIER_PATH,
-  gateClassifications,
-  GATE_ROOT_PACKAGE_JSON_CLASSES,
-} from "./check-sentry-suites-in-ci-gate-probe.mjs";
-
 // A throw here is the intended failure mode for a malformed workflow.
 export const CI = load(readFileSync(CI_PATH, "utf8"), { schema: CORE_SCHEMA });
 export const PKG = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));

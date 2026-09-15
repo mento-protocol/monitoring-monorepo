@@ -12,7 +12,7 @@ garden_lane: notes-plans-archive
 
 # File-size and lint-hygiene watch list
 
-This is passive guidance, not an active-work queue. Refresh it with
+The table below is a historical pre-retirement snapshot. Removed gate files are not current split candidates. This is passive guidance, not an active-work queue. Refresh it with
 `node scripts/repo-health/file-size-watchlist.mjs`; use `--format issue` when a
 concrete
 split is ready for GitHub Issues.
