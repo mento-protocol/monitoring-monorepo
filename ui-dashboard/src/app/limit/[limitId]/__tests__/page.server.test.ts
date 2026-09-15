@@ -26,28 +26,33 @@ vi.mock("@/lib/og-graphql-client", () => ({
   makeOgGraphQLClient: () => ({ request: requestMock }),
 }));
 
-// Two reachable virtual-pool networks, so the partial-failure cases are
-// reachable, plus one local network the route must skip.
+// Two reachable virtual-pool networks sharing one Hasura endpoint, so the
+// partial-failure cases are reachable and the per-chain scoping is observable,
+// plus one local network the route must skip.
 vi.mock("@/lib/networks", () => ({
   NETWORKS: {
     "celo-mainnet": {
       id: "celo-mainnet",
+      chainId: 42220,
       hasVirtualPools: true,
       hasuraUrl: "https://example.com/v1/graphql",
     },
     "celo-sepolia": {
       id: "celo-sepolia",
+      chainId: 11142220,
       hasVirtualPools: true,
       hasuraUrl: "https://example.com/v1/graphql",
     },
     "monad-mainnet": {
       id: "monad-mainnet",
+      chainId: 143,
       hasVirtualPools: false,
       hasuraUrl: "https://example.com/v1/graphql",
     },
     // Relative proxy path, which Node's `fetch` rejects on the server.
     "celo-mainnet-local": {
       id: "celo-mainnet-local",
+      chainId: 42220,
       hasVirtualPools: true,
       hasuraUrl: "/api/hasura/celo-mainnet-local",
     },
@@ -119,8 +124,21 @@ describe("LimitResolverPage — a wrapped exchange redirects to its pool", () =>
     expect(requestMock).toHaveBeenCalledTimes(2);
     expect(requestMock.mock.calls[0]?.[0]).toMatchObject({
       document: BROKER_LIMIT_POOL,
-      variables: { limitId: LIMIT_ID },
+      variables: { limitId: LIMIT_ID, chainId: 42220 },
     });
+  });
+
+  it("scopes each query to its own chain on a shared Hasura endpoint", async () => {
+    requestMock.mockResolvedValue({ BrokerTradingLimit: [] });
+
+    const markup = renderToStaticMarkup(
+      await LimitResolverPage({ params: makeParams(LIMIT_ID) }),
+    );
+
+    expect(markup).toContain(MISS_COPY);
+    expect(
+      requestMock.mock.calls.map((call) => call[0]?.variables?.chainId),
+    ).toEqual([42220, 11142220]);
   });
 
   it("redirects when one network fails and another holds the row", async () => {

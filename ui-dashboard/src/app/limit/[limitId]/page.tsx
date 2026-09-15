@@ -45,7 +45,8 @@ function decodeLimitId(raw: string): string {
 // `poolId` is chain-namespaced, so the redirect lands on that same network.
 // Local networks carry a relative `/api/hasura/...` proxy path that Node's
 // `fetch` rejects on the server, so they are skipped rather than queried and
-// counted as a failure.
+// counted as a failure. Networks can share one Hasura endpoint, so each query
+// carries its own chain id.
 const VIRTUAL_POOL_NETWORK_IDS = NETWORK_IDS.filter(
   (id) =>
     NETWORKS[id].hasVirtualPools &&
@@ -72,7 +73,7 @@ async function findPoolId(limitId: string): Promise<LimitLookup> {
           NETWORKS[networkId],
         ).request<unknown>({
           document: BROKER_LIMIT_POOL,
-          variables: { limitId },
+          variables: { limitId, chainId: NETWORKS[networkId].chainId },
           signal,
         });
         const parsed = BrokerLimitPoolSchema.safeParse(raw);

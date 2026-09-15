@@ -1717,7 +1717,11 @@ export function handleGraphQL(
     case "BrokerLimitPool":
       return {
         BrokerTradingLimit: brokerTradingLimits
-          .filter((limit) => limit.limitId === String(variables.limitId))
+          .filter(
+            (limit) =>
+              limit.limitId === String(variables.limitId) &&
+              limit.chainId === Number(variables.chainId),
+          )
           .slice(0, 1)
           .map(({ poolId }) => ({ poolId })),
       };
