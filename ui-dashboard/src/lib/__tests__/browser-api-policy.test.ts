@@ -56,6 +56,7 @@ type LintCase =
   | "clockClient"
   | "clockServer"
   | "clockNamespaceClient"
+  | "clockNamespaceEscapes"
   | "clockHookModule"
   | "clockSsrSafe";
 type BrowserApiMessage = { ruleId: string; message: string };
@@ -309,6 +310,17 @@ describe("SSR-safe clock policy", () => {
     const messages = await browserApiMessages("clockNamespaceClient");
 
     expect(messages).toHaveLength(2);
+    expect(messages.every(({ ruleId }) => ruleId === SSR_CLOCK_RULE_ID)).toBe(
+      true,
+    );
+  });
+
+  it("reports the computed and destructured namespace forms", async () => {
+    const messages = await browserApiMessages("clockNamespaceEscapes");
+
+    // Two computed reads plus the destructured alias. The same-named property
+    // destructured from `props` is not the namespace, so it stays silent.
+    expect(messages).toHaveLength(3);
     expect(messages.every(({ ruleId }) => ruleId === SSR_CLOCK_RULE_ID)).toBe(
       true,
     );

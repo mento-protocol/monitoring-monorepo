@@ -226,6 +226,25 @@ function ssrSafeClockMessage(name, { hook, pure }) {
   );
 }
 
+// A namespace property can be written `format.relativeTime`,
+// `format["relativeTime"]` or with a template key, and destructured with either
+// key form. Only a statically known name resolves; a key computed at runtime
+// does not, and the rule stays silent there.
+function staticClockPropertyName(node, computed) {
+  if (!computed && node.type === "Identifier") return node.name;
+  if (computed && node.type === "Literal" && typeof node.value === "string") {
+    return node.value;
+  }
+  if (
+    computed &&
+    node.type === "TemplateLiteral" &&
+    node.expressions.length === 0
+  ) {
+    return node.quasis[0]?.value.cooked ?? null;
+  }
+  return null;
+}
+
 function resolvedImportPath(source, filename) {
   if (source.startsWith("@/")) {
     return path.join(__dirname, "src", source.slice(2));
@@ -234,6 +253,13 @@ function resolvedImportPath(source, filename) {
     return path.resolve(path.dirname(filename), source);
   }
   return null;
+}
+
+function reportNamespaceProperty(context, node, computed) {
+  const name = staticClockPropertyName(node, computed);
+  const replacement = name ? SSR_SAFE_CLOCK_REPLACEMENTS[name] : undefined;
+  if (!replacement) return;
+  context.report({ node, message: ssrSafeClockMessage(name, replacement) });
 }
 
 // The directive decides, not a path glob: `"use client"` is what makes a module
@@ -290,16 +316,19 @@ const ssrSafeClockRule = {
         }
       },
       MemberExpression(node) {
-        if (!isClientModule || node.computed) return;
+        if (!isClientModule) return;
         if (node.object.type !== "Identifier") return;
         if (!namespaceLocals.has(node.object.name)) return;
-        if (node.property.type !== "Identifier") return;
-        const replacement = SSR_SAFE_CLOCK_REPLACEMENTS[node.property.name];
-        if (!replacement) return;
-        context.report({
-          node: node.property,
-          message: ssrSafeClockMessage(node.property.name, replacement),
-        });
+        reportNamespaceProperty(context, node.property, node.computed);
+      },
+      // `const { relativeTime } = format` reaches the same function without a
+      // member expression, so the destructuring is checked too.
+      Property(node) {
+        if (!isClientModule) return;
+        const source = destructuringSource(node);
+        if (source?.type !== "Identifier") return;
+        if (!namespaceLocals.has(source.name)) return;
+        reportNamespaceProperty(context, node.key, node.computed);
       },
     };
   },

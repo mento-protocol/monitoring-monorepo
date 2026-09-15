@@ -233,6 +233,21 @@ const cases = {
       }
     `,
   },
+  clockNamespaceEscapes: {
+    filePath: "src/components/breach-history/breach-row.tsx",
+    source: `
+      "use client";
+
+      import * as format from "@/lib/format";
+
+      const { formatTimestamp: stamp } = format;
+
+      export function label(ts: string, props: { relativeTime: string }): string {
+        const { relativeTime } = props;
+        return \`\${format["relativeTime"](ts)} \${format[\`relativeTime\`](ts)} \${stamp(ts)} \${relativeTime}\`;
+      }
+    `,
+  },
   clockSsrSafe: {
     filePath: "src/components/breach-history/breach-row.tsx",
     source: SSR_SAFE_CLOCK_SOURCE,
