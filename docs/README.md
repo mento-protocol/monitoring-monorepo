@@ -277,5 +277,5 @@ Authority: non-canonical
 - [`docs/notes/ui-dashboard-performance-plan.md`](notes/ui-dashboard-performance-plan.md) (archived)
 - [`docs/notes/verification-redesign-phase-0-evidence.md`](notes/verification-redesign-phase-0-evidence.md)
 - [`docs/PLAN-ai-review-process.md`](PLAN-ai-review-process.md) (archived)
-- [`docs/PLAN-progressive-verification-graph.md`](PLAN-progressive-verification-graph.md)
+- [`docs/PLAN-progressive-verification-graph.md`](PLAN-progressive-verification-graph.md) (archived)
 - [`docs/PLAN-trove-history-page.md`](PLAN-trove-history-page.md)
