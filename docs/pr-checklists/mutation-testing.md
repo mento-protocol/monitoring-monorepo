@@ -18,11 +18,6 @@ one of the current mutation targets.
 - Keep `mutate` narrowly scoped to proven pure logic. Do not add generated files,
   tests, GraphQL barrels, ABIs, config-only files, or runtime-heavy RPC/dev-server
   paths.
-- Run the affected baseline (`pnpm indexer:mutation`,
-  `pnpm dashboard:mutation`, and/or `pnpm bridge:mutation`) and record the
-  runtime plus mutation score in the PR.
-  In sandboxed agent sessions, Stryker may need command approval because it opens
-  a local logging socket.
 - Run the harness canary for the affected package first
   (`pnpm indexer:mutation:canary`, `pnpm dashboard:mutation:canary`,
   `pnpm bridge:mutation:canary`). It must score 100%. A failure means the
@@ -30,6 +25,11 @@ one of the current mutation targets.
   fix the harness, never the floor. `.github/workflows/mutation-testing.yml`
   runs the same canary before each baseline. `docs/mutation-testing.md` owns
   the canary's design and the current vitest pin it enforces.
+- Then run the affected baseline (`pnpm indexer:mutation`,
+  `pnpm dashboard:mutation`, and/or `pnpm bridge:mutation`) and record the
+  runtime plus mutation score in the PR.
+  In sandboxed agent sessions, Stryker may need command approval because it opens
+  a local logging socket.
 - Classify every survivor as a real test gap, equivalent mutant/noise, or tool
   limitation. Add tests only for real gaps. When every mutant survives, suspect
   the harness before the tests.
