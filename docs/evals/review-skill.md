@@ -75,8 +75,21 @@ GITHUB_TOKEN -u GITHUB_PERSONAL_ACCESS_TOKEN -u GH_ENTERPRISE_TOKEN`, with
 `GH_CONFIG_DIR` pointing at an empty directory, with a `gh` that refuses first
 on `PATH`, and with git stripped of its global and system config, its
 credential helper, its terminal prompt, its askpass and every protocol but
-`file`. The fixture is reset with `git reset --hard` and `git clean -xdff`
-before every cell, so no cell reviews the previous cell's edits. `--score`
+`file`. Every codex spawn, the contract finder and a probe's codex verifier,
+runs with `HOME` and `CODEX_HOME` pointed at a run-private directory under the
+run's temp root, with `OPENAI_BASE_URL` unset: codex discovers skills under
+`$HOME/.agents/skills` and `$CODEX_HOME/skills` whatever `--ignore-user-config`
+says, so under the operator's home the finder would see the review skill under
+test and the operator's MCP servers and hooks, and it would write its sessions
+into `~/.codex`. A file-store login is linked into that directory; codex's
+config stays out, so a keyring login store is not carried and a host without a
+file login must hold an API key in the environment. A refresh that renamed a
+new `auth.json` over the link is copied back to the operator's file when the
+run removes the directory, unless that file changed meanwhile, in which case
+the operator's newer login wins. A replay-only canary spawns no codex and
+makes no such directory.
+The fixture is reset with `git reset --hard` and `git clean -xdff` before
+every cell, so no cell reviews the previous cell's edits. `--score`
 flags a transcript that names the PR number, one of its reviewers, or one of
 the commits withheld from the fixture — the last is what a successful fetch of
 the answer key leaves behind. Reviewer logins that already appear in the
@@ -205,8 +218,8 @@ execution evidence that the pull request author cannot change.
 
 Schema, id coverage and
 append-only history all stay satisfied when a ledger PR edits its own row's
-verdict, counters or `per_defect` bits after the local `--validate --append`,
-and this is the only PR workflow there is. Like `--require-base` it refuses to
+verdict, counters or `per_defect` bits after the local `--validate --append`.
+Like `--require-base` it refuses to
 no-op: with no base it cannot tell which rows are new, and it says so instead
 of passing. It calls no model — the recompute reads the committed
 `result-*.json` and `calibration.json` files — so the workflow stays free of

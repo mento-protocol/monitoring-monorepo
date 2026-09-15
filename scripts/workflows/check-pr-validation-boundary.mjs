@@ -41,7 +41,6 @@ const AUTHORITY = [
   'lighthouse.yml|lighthouse|{"contents":"read","deployments":"read","pull-requests":"read","statuses":"read"}|["secrets.VERCEL_AUTOMATION_BYPASS_SECRET","secrets.VERCEL_AUTOMATION_BYPASS_SECRET"]|null|null|null',
   'peg-policy-publication.yml|apply|{"actions":"read","contents":"read","deployments":"read","id-token":"write"}|["github.token"]|{"name":"production-infra","url":"https://console.cloud.google.com/home/dashboard?project=mento-monitoring"}|null|null',
   'peg-policy-publication.yml|plan|{"contents":"read","id-token":"write"}|[]|null|null|null',
-  'review-eval-freshness.yml|freshness|{"contents":"read","issues":"write"}|["github.token"]|null|null|null',
   'supply-chain.yml|moderate-advisory-report|{"contents":"read","issues":"write"}|["github.token"]|null|null|null',
   'supply-chain.yml|override-prune-report|{"contents":"read","issues":"write"}|["github.token"]|null|null|null',
 ].sort();

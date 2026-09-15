@@ -199,7 +199,8 @@ runtime_status=0
 run_cell probe-control 1990 control 1 stub-model stub-effort '' '' request || \
   runtime_status=$?
 printf 'runtime-cell-status=%s\n' "$runtime_status"
-rm -rf "$SHIM" "$SKILL_SNAPSHOT"
+rm -rf "$SHIM" "$SKILL_SNAPSHOT" "\${CODEX_ISO:-}"
 SHIM=""
 SKILL_SNAPSHOT=""
+CODEX_ISO=""
 `;

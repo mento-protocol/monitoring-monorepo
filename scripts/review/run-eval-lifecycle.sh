@@ -23,24 +23,25 @@ TMPROOT="${TMPDIR:-/tmp}"
 # shellcheck disable=SC2329  # invoked by the EXIT trap below
 cleanup() {
   local code=$?
-  # The matrix scheduler is sourced last, so it may not exist yet. When it does,
-  # this is what takes its group workers down — before the spec worktree and the
-  # skill snapshot they are reading are removed.
+  # Take the matrix group workers down (when the scheduler was sourced) before
+  # the spec worktree and skill snapshot they read are removed.
   if declare -F matrix_cleanup >/dev/null 2>&1; then
     matrix_cleanup
   fi
   if [[ $SPEC_TEMP -eq 1 && -n $SPEC ]]; then
     git -C "$REPO" worktree remove --force "$SPEC" >/dev/null 2>&1 || true
-    # The spec lives under the git directory rather than under `$TMPDIR`, so no
-    # OS sweep ever collects what a failed removal leaves behind.
+    # The spec lives under the git dir, where no OS sweep collects leftovers.
     rm -rf "$SPEC"
     git -C "$REPO" worktree prune >/dev/null 2>&1 || true
   fi
-  if [[ -n $SHIM ]]; then
-    rm -rf "$SHIM"
-  fi
+  [[ -z $SHIM ]] || rm -rf "$SHIM"
   if [[ -n $SKILL_SNAPSHOT ]]; then
     rm -rf "$SKILL_SNAPSHOT"
+  fi
+  if [[ -n ${CODEX_ISO:-} ]]; then
+    # A refresh renamed over the link is copied back unless the operator's file moved on.
+    [[ -f $CODEX_ISO/.codex/auth.json && ! -L $CODEX_ISO/.codex/auth.json && "$(shasum -a 256 "$CODEX_AUTH" 2>/dev/null | cut -c1-64)" == "${CODEX_AUTH_SUM:-}" ]] && cp "$CODEX_ISO/.codex/auth.json" "$CODEX_AUTH"
+    rm -rf "$CODEX_ISO"
   fi
   if [[ -n $BASELINE_SNAPSHOT ]]; then
     rm -f "$BASELINE_SNAPSHOT"

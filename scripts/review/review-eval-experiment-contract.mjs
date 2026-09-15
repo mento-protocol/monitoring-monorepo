@@ -52,6 +52,9 @@ export const EXPERIMENT_SOURCE_FILES = Object.freeze([
   "scripts/review/review-eval-experiment-runtime.mjs",
   "scripts/review/review-eval-experiment-novelty.mjs",
   "scripts/review/review-eval-experiment-versions.mjs",
+  // The live finder's codex home comes from here; a change to it changes
+  // what every finder call runs under, so it moves the harness digest.
+  "scripts/review/review-eval-run-execution.mjs",
 ]);
 
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;

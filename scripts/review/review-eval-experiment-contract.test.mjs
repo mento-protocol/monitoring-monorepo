@@ -124,6 +124,7 @@ test("harness source identity binds every module path and its bytes", () => {
     "scripts/review/review-eval-experiment-runtime.mjs",
     "scripts/review/review-eval-experiment-novelty.mjs",
     "scripts/review/review-eval-experiment-versions.mjs",
+    "scripts/review/review-eval-run-execution.mjs",
   ]);
   const virtualRoot = "/virtual-review-experiment";
   const bytes = new Map([

@@ -14,27 +14,15 @@ name: Review Skill Eval Freshness
 # Advisory by design. The job is deliberately not a required check: an operator
 # vacation must not block unrelated merges. A red scheduled run plus an open
 # issue is the intended pressure.
+#
+# No `pull_request:` trigger: ci.yml's required `scripts` job runs these same
+# three commands on a strict superset of the paths this file used to watch.
 
 on:
   schedule:
     # Tuesday morning UTC, off the hour and away from the 08:47 documentation
     # garden slot, so the two issue synchronizers never contend.
     - cron: 23 9 * * 2
-  pull_request:
-    paths:
-      # `**`, not `*`: a single star stops at a path separator, so
-      # `review-skill*` alone matches `review-skill.md` but nothing inside
-      # `docs/evals/review-skill-truth/` or the other frozen input
-      # directories, and a PR touching only those would skip both checks.
-      - docs/evals/review-skill**
-      - scripts/review/**
-      # Publication relies on the scoped cells/ rule to keep raw model output
-      # out of Git and out of any review input.
-      - .gitignore
-      # Every contract-job command below runs a `review:eval*` alias. A PR that
-      # renames or removes one breaks this workflow while touching neither path
-      # above, and nothing would notice until the next scheduled run.
-      - package.json
   workflow_dispatch:
 
 permissions: read-all
@@ -103,8 +91,8 @@ jobs:
     # See scripts/workflows/check-autofix-ci-trust.mjs.
     name: Synchronize the staleness issue
     needs: contract
-    # Schedule only. A pull request checks the contract; it must not open or
-    # touch an issue.
+    # Schedule only; `workflow_dispatch` also runs the contract job above but
+    # must not open or touch an issue.
     if: github.event_name == 'schedule'
     runs-on: blacksmith-2vcpu-ubuntu-2404-arm
     timeout-minutes: 10
