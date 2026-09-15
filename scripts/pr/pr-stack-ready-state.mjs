@@ -43,9 +43,11 @@ export function classifyStackObservation(value, previous = null) {
       "SNAPSHOT_CHANGED",
       "Stack membership or another layer changed; repeat verification",
     );
-  // Non-strict policy (operator decision 2026-09-15): BEHIND alone is not a
-  // blocker here either. A real conflict still surfaces as a "mergeability"
-  // blocker below.
+  // Non-strict policy (operator decision 2026-09-15, ADR 0103): BEHIND alone
+  // stops being a required blocker only once `pr-ready-state-core.mjs`
+  // confirms the base's ruleset has strict off; until then (or on a real
+  // conflict) it still surfaces here as a "base-update"/"mergeability"
+  // blocker in `value.required.blockers` below.
   const blockers = value?.required?.blockers ?? [];
   const checks = blockers.filter((item) => item.kind === "check");
   if (checks.some((item) => item.state === "fail"))
