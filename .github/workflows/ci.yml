@@ -296,9 +296,12 @@ jobs:
               # PR editing only a frozen truth file left `rootScripts` false
               # and the required `ci` sentinel let the `scripts` job skip. The
               # `*/**` form is the one that reaches inside those directories.
-              # (review-eval-freshness.yml can write `review-skill**` because
-              # a workflow `paths:` trigger uses GitHub's own glob syntax,
-              # where `**` does cross separators. Different engine.)
+              # (review-eval-freshness.yml no longer carries a `pull_request`
+              # `paths:` trigger of its own — this required `scripts` job now
+              # covers those same paths on a superset of what it used to
+              # watch — so this filter is the only place `review-skill**`
+              # needs the `*/**` form to cross separators. dorny/paths-filter
+              # uses picomatch here, not GitHub's own trigger-glob engine.)
               - docs/evals/review-skill*
               - docs/evals/review-skill*/**
               # The review-eval suite pins the local-only raw cells/ boundary.
