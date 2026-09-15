@@ -38,9 +38,15 @@ them required for the current PR.
 
 Required blockers:
 
-- GitHub `mergeStateStatus: BEHIND`, even when `mergeable` is `MERGEABLE`.
-  Integrate the current protection base and require fresh checks; a pending
-  merge setting does not waive this blocker.
+- `mergeable: CONFLICTING` or `mergeStateStatus: DIRTY`: a textual conflict
+  with the base always blocks. `mergeStateStatus: BEHIND` alone blocks unless
+  the fetched branch protection or ruleset confirms
+  `strict_required_status_checks_policy: false` for the base
+  (operator decision 2026-09-15,
+  [ADR 0103](../adr/0103-non-strict-required-status-checks.md)); confirmed
+  off, it is reported in `notes[]` for visibility instead of
+  `required.blockers[]`. Unknown fails closed the same as any other
+  branch-protection lookup gap.
 
 - Closed-unmerged PRs. Merged PRs are terminal-ready and short-circuit the
   expensive readiness sweep because there is nothing left to fix or wait on.
@@ -225,10 +231,12 @@ The closeout request follows one order, on every surface:
 For a missing or stale signal the gate reports `fallbackAction` in this
 precedence:
 
-- `merge_base_first` — the PR is BEHIND its base or DIRTY (merge conflicts).
-  Merge the base before any request. For a native stack layer, bring the base in through the
-  history-change procedure in
-  [`stacked-pull-requests.md`](stacked-pull-requests.md), never as a local
+- `merge_base_first` — the PR is DIRTY (merge conflicts). Merge the base
+  before any request. Merely BEHIND does not trigger this (operator decision
+  2026-09-15, ADR 0103): forcing a base merge for a non-conflicting PR would
+  reintroduce the re-integration churn the policy change removes. For a
+  native stack layer, bring the base in through the history-change procedure
+  in [`stacked-pull-requests.md`](stacked-pull-requests.md), never as a local
   merge commit.
 - `wait_for_running_review` — the current head's CodeRabbit check is still
   running. A request now supersedes it and bills the discarded review.
@@ -445,6 +453,15 @@ Expected top-level fields:
       }
     ]
   },
+  "notes": [
+    {
+      "kind": "base-update",
+      "name": "Pull request is behind the current base",
+      "state": "BEHIND",
+      "required": false,
+      "url": "https://github.com/..."
+    }
+  ],
   "gates": {
     "codexDescriptionApproval": {
       "ready": false,
@@ -504,10 +521,19 @@ Field expectations:
   this before fetching comments, reactions, check sources, and branch
   protection so post-merge babysitting exits quickly and does not mistake
   GitHub's post-merge `mergeable: UNKNOWN` for a blocker.
-- `pr.mergeStateStatus`: GitHub's aggregate merge status. `BEHIND` is an
-  explicit base-update blocker, and `BEHIND` or `DIRTY` sends the CodeRabbit
-  closeout to `merge_base_first`; other aggregate states do not replace the
-  required-check and feedback projections.
+- `pr.mergeStateStatus`: GitHub's aggregate merge status. `DIRTY` is a
+  required blocker and also sends the CodeRabbit closeout to
+  `merge_base_first`. `BEHIND` alone is a required blocker too, unless the
+  probe's fetched `requiredStatusChecksStrict` confirms `false` for the base
+  (see below), in which case it is reported in `notes[]` instead and does
+  not send the closeout to `merge_base_first`. Other aggregate states do not
+  replace the required-check and feedback projections.
+- `requiredStatusChecksStrict`: tri-state read straight off the
+  already-fetched classic branch protection (`strict`) or ruleset
+  (`strict_required_status_checks_policy`) response — `true`, `false`, or
+  `null` when neither source states it. Only a confirmed `false` demotes
+  `mergeStateStatus: BEHIND`; `true` and `null` both fail closed, matching
+  every other branch-protection lookup gap in this probe.
 - `pr.autoMergeEnabledAt`: the observed pending auto-merge enable timestamp,
   or null. It records intent and never proves merge completion.
 - `pr.mergedAt` / `pr.closedAt`: terminal timestamps when GitHub provides them.
@@ -518,6 +544,8 @@ Field expectations:
   `name`, `state`, `required: true`, and a URL when GitHub provides one.
 - `optional.items[]`: advisory signals worth reporting separately. Every item
   needs `kind`, `name`, `state`, and `required: false`.
+- `notes[]`: non-blocking informational items, such as `mergeStateStatus:
+BEHIND`. Never treat a `notes[]` entry as a blocker.
 - `gates`: named repo-policy gates that are not obvious from raw check status.
   Each gate should say whether it is required for readiness.
 - `readinessOverrides[]`: active human break-glass overrides that affected a

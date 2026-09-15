@@ -108,6 +108,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0099](0099-retire-duplicate-bundle-size-workflow.md)       | Retire the duplicate bundle-size advisory workflow; required `ui-static` keeps it                     |
 | [0100](0100-monthly-ci-reliability-report.md)               | Monthly CI reliability report is an issue-only scheduler                                              |
 | [0101](0101-legacy-gate-retirement.md)                      | Retire the legacy local gate after accepted M6 evaluation; preserve retained CI and shared safeguards |
+| [0103](0103-non-strict-required-status-checks.md)           | `main` no longer requires a PR to be caught up; only a real conflict blocks merge                     |
 
 ### shared-config
 

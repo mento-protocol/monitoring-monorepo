@@ -48,6 +48,7 @@ import {
   requiredStatusContextsFromProtection,
   requiredStatusContextsFromRules,
   requiredStatusContextsFromRulesResult,
+  strictRequiredStatusChecksPolicyFromRules,
   splitRepo,
   watchLoopExitCode,
   workflowPathsFromRules,
@@ -271,6 +272,38 @@ test("extracts required status contexts from nested branch rulesets", () => {
   ]);
 });
 
+test("reads strict_required_status_checks_policy off a required_status_checks rule", () => {
+  for (const strict of [true, false]) {
+    assertEqual(
+      strictRequiredStatusChecksPolicyFromRules([
+        {
+          type: "required_status_checks",
+          parameters: {
+            required_status_checks: [{ context: "ci" }],
+            strict_required_status_checks_policy: strict,
+          },
+        },
+      ]),
+      strict,
+    );
+  }
+  assertEqual(
+    strictRequiredStatusChecksPolicyFromRules([
+      {
+        type: "required_status_checks",
+        parameters: { required_status_checks: [{ context: "ci" }] },
+      },
+    ]),
+    null,
+    "a rule with no strict field is unknown, not false",
+  );
+  assertEqual(
+    strictRequiredStatusChecksPolicyFromRules([{ type: "deletion" }]),
+    null,
+    "no required_status_checks rule is unknown",
+  );
+});
+
 test("extracts app-bound required status contexts from branch protection details", () => {
   assertDeepEqual(
     requiredStatusContextsFromProtection({
@@ -318,8 +351,28 @@ test("uses classic branch protection required status contexts when available", a
       { context: "Vercel", integrationId: null },
     ],
     error: null,
+    strict: null,
   });
   assertEqual(rulesCalls, 0, "rulesets must not be read when protection works");
+});
+
+test("reads the strict policy straight off the already-fetched protection response", async () => {
+  for (const strict of [true, false]) {
+    const result = await fetchRequiredStatusContexts({
+      repo: {
+        owner: "mento-protocol",
+        name: "monitoring-monorepo",
+        host: null,
+      },
+      baseRef: "main",
+      fetchProtection: async () => ({
+        ok: true,
+        value: { contexts: ["ci"], strict },
+      }),
+      fetchRules: async () => ({ ok: true, value: [] }),
+    });
+    assertEqual(result.strict, strict);
+  }
 });
 
 test("falls back to rulesets for the current gh branch-protection 404", async () => {
@@ -353,7 +406,33 @@ test("falls back to rulesets for the current gh branch-protection 404", async ()
       { context: "Code Quality", integrationId: null },
     ],
     error: null,
+    strict: null,
   });
+});
+
+test("reads the strict policy from a ruleset's required_status_checks rule", async () => {
+  const result = await fetchRequiredStatusContexts({
+    repo: { owner: "mento-protocol", name: "monitoring-monorepo", host: null },
+    baseRef: "main",
+    fetchProtection: async () => ({
+      ok: false,
+      error: "gh: Not Found (HTTP 404)",
+    }),
+    fetchRules: async () => ({
+      ok: true,
+      value: [
+        {
+          type: "required_status_checks",
+          parameters: {
+            required_status_checks: [{ context: "ci" }],
+            strict_required_status_checks_policy: false,
+          },
+        },
+      ],
+    }),
+  });
+
+  assertEqual(result.strict, false);
 });
 
 test("fails closed when branch protection is absent and rulesets are unavailable", async () => {
@@ -373,6 +452,7 @@ test("fails closed when branch protection is absent and rulesets are unavailable
   assertDeepEqual(result, {
     contexts: [],
     error: "gh: Resource not accessible by integration (HTTP 403)",
+    strict: null,
   });
 });
 
@@ -391,6 +471,7 @@ test("fails closed when a protection 404 yields no ruleset-required contexts", a
     contexts: [],
     error:
       "Required status contexts unavailable: classic branch protection returned HTTP 404 and branch rulesets did not define required status checks or workflows",
+    strict: null,
   });
 });
 
@@ -412,6 +493,7 @@ test("fails closed without reading rulesets for non-404 protection errors", asyn
   assertDeepEqual(result, {
     contexts: [],
     error: "gh: Resource not accessible by integration (HTTP 403)",
+    strict: null,
   });
   assertEqual(rulesCalls, 0, "non-404 errors must not trigger a fallback");
 });
@@ -2269,7 +2351,49 @@ test("summarizes ready state when all blocking surfaces are clean", () => {
   assertEqual(summary.statusChecks.skipped.length, 1);
 });
 
-test("blocks confirmed BEHIND even with mergeable head and green required checks", () => {
+test("reports confirmed BEHIND as an informational note only once strict is confirmed off", () => {
+  // Non-strict policy (operator decision 2026-09-15, ADR 0103): a merely
+  // BEHIND head is ready when everything else is clear, but only once the
+  // base's ruleset confirms `requiredStatusChecksStrict: false`. Unknown
+  // (`null`, the default) or confirmed strict (`true`) both fail closed and
+  // keep blocking, exactly like GitHub's own strict mode does.
+  for (const requiredStatusChecksStrict of [undefined, null, true]) {
+    for (const mergeStateStatus of [
+      "BEHIND",
+      "CLEAN",
+      "BLOCKED",
+      "UNKNOWN",
+      undefined,
+    ]) {
+      const summary = summarizeReadyState({
+        pr: {
+          ...basePr,
+          mergeStateStatus,
+          statusCheckRollup: [
+            { name: "lint", conclusion: "SUCCESS", status: "COMPLETED" },
+          ],
+        },
+        reactions: [
+          {
+            content: "+1",
+            created_at: "2026-05-21T13:23:00Z",
+            user: { login: "chatgpt-codex-connector[bot]" },
+          },
+        ],
+        requiredStatusChecksStrict,
+      });
+      assertEqual(summary.ready, mergeStateStatus !== "BEHIND");
+      assertEqual(
+        summary.required.blockers.some((item) => item.kind === "base-update"),
+        mergeStateStatus === "BEHIND",
+      );
+      assertEqual(
+        summary.notes.some((item) => item.kind === "base-update"),
+        false,
+      );
+    }
+  }
+
   for (const mergeStateStatus of [
     "BEHIND",
     "CLEAN",
@@ -2293,15 +2417,68 @@ test("blocks confirmed BEHIND even with mergeable head and green required checks
           user: { login: "chatgpt-codex-connector[bot]" },
         },
       ],
+      requiredStatusChecksStrict: false,
     });
-    assertEqual(summary.ready, mergeStateStatus !== "BEHIND");
+    assertEqual(summary.ready, true);
     assertEqual(summary.pr.mergeStateStatus, mergeStateStatus ?? null);
     assertEqual(summary.pr.autoMergeEnabledAt, "2026-05-21T13:24:00Z");
     assertEqual(
       summary.required.blockers.some((item) => item.kind === "base-update"),
+      false,
+    );
+    assertEqual(
+      summary.notes.some((item) => item.kind === "base-update"),
       mergeStateStatus === "BEHIND",
     );
   }
+});
+
+test("blocks a textual conflict (mergeable: CONFLICTING or mergeStateStatus: DIRTY)", () => {
+  const greenChecksPr = {
+    ...basePr,
+    autoMergeRequest: { enabledAt: "2026-05-21T13:24:00Z" },
+    statusCheckRollup: [
+      { name: "lint", conclusion: "SUCCESS", status: "COMPLETED" },
+    ],
+  };
+  const codexReaction = [
+    {
+      content: "+1",
+      created_at: "2026-05-21T13:23:00Z",
+      user: { login: "chatgpt-codex-connector[bot]" },
+    },
+  ];
+
+  const conflicting = summarizeReadyState({
+    pr: {
+      ...greenChecksPr,
+      mergeable: "CONFLICTING",
+      mergeStateStatus: "DIRTY",
+    },
+    reactions: codexReaction,
+  });
+  assertEqual(conflicting.ready, false);
+  assertEqual(
+    conflicting.required.blockers.some((item) => item.kind === "mergeability"),
+    true,
+  );
+  assertEqual(
+    conflicting.notes.some((item) => item.kind === "base-update"),
+    false,
+  );
+
+  // Defense in depth: DIRTY blocks even if `mergeable` reports stale.
+  const staleDirty = summarizeReadyState({
+    pr: { ...greenChecksPr, mergeable: "MERGEABLE", mergeStateStatus: "DIRTY" },
+    reactions: codexReaction,
+  });
+  assertEqual(staleDirty.ready, false);
+  assertEqual(
+    staleDirty.required.blockers.some(
+      (item) => item.kind === "mergeability" && item.state === "DIRTY",
+    ),
+    true,
+  );
 });
 
 test("summarizes merged pull requests as terminal ready", () => {
@@ -2959,6 +3136,7 @@ test("ranks the CodeRabbit closeout fallbacks by the review each one wastes", ()
   const oldHead = { headUpdatedAt: observedAt - 10 * 60 * 1000, observedAt };
 
   for (const state of ["missing", "stale"]) {
+    // Non-strict policy: BEHIND alone no longer outranks the other waits.
     assertEqual(
       summarizeCodeRabbitReviewGate(state, null, {
         mergeStateStatus: "behind",
@@ -2966,8 +3144,8 @@ test("ranks the CodeRabbit closeout fallbacks by the review each one wastes", ()
         ...freshHead,
         ...exhausted,
       }).fallbackAction,
-      "merge_base_first",
-      `${state} behind the base must merge the base first`,
+      "wait_for_running_review",
+      `${state} merely behind the base must not force a base merge`,
     );
     assertEqual(
       summarizeCodeRabbitReviewGate(state, null, {
@@ -3066,8 +3244,16 @@ test("waits out the head grace before asking CodeRabbit for a review", () => {
       pr: { ...prAt(2), mergeStateStatus: "BEHIND" },
       now: observedAt,
     }).gates.codeRabbitReviewSignal.fallbackAction,
+    "wait_for_head_grace",
+    "non-strict policy: merely BEHIND does not outrank the grace wait",
+  );
+  assertEqual(
+    summarizeReadyState({
+      pr: { ...prAt(2), mergeStateStatus: "DIRTY" },
+      now: observedAt,
+    }).gates.codeRabbitReviewSignal.fallbackAction,
     "merge_base_first",
-    "the base merge outranks the grace wait",
+    "a real conflict still outranks the grace wait",
   );
 });
 
@@ -3199,7 +3385,7 @@ test("human and compact output name the CodeRabbit closeout fallback", () => {
     pr: {
       ...basePr,
       headRefOid: "b".repeat(40),
-      mergeStateStatus: "BEHIND",
+      mergeStateStatus: "DIRTY",
       statusCheckRollup: [],
     },
   });

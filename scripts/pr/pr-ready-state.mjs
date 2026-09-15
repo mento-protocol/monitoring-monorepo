@@ -248,6 +248,19 @@ export function requiredStatusContextsFromRules(
   return [...byKey.values()].sort((a, b) => a.context.localeCompare(b.context));
 }
 
+// Read straight off data `fetchRequiredStatusContexts` already fetched: no
+// extra call. `null` means unknown (no `required_status_checks` rule/field
+// found) and the caller must fail closed on it, the same as any other
+// branch-protection lookup gap.
+export function strictRequiredStatusChecksPolicyFromRules(rules = []) {
+  for (const rule of flattenRules(rules)) {
+    if (rule.type !== "required_status_checks") continue;
+    const value = rule.parameters?.strict_required_status_checks_policy;
+    if (typeof value === "boolean") return value;
+  }
+  return null;
+}
+
 export function requiredStatusContextsFromRulesResult(
   rules = [],
   {
@@ -581,9 +594,13 @@ export async function fetchRequiredStatusContexts({
         return {
           contexts: [],
           error: rulesResult.error,
+          strict: null,
         };
       }
 
+      const strict = strictRequiredStatusChecksPolicyFromRules(
+        rulesResult.value ?? [],
+      );
       const workflowNameByPath = workflowPathsFromRules(rulesResult.value ?? [])
         .length
         ? await fetchWorkflowNames(repo, rulesResult.value ?? [])
@@ -603,21 +620,25 @@ export async function fetchRequiredStatusContexts({
           contexts: [],
           error:
             "Required status contexts unavailable: classic branch protection returned HTTP 404 and branch rulesets did not define required status checks or workflows",
+          strict,
         };
       }
 
-      return rulesContexts;
+      return { ...rulesContexts, strict };
     }
 
     return {
       contexts: [],
       error: result.error,
+      strict: null,
     };
   }
 
   return {
     contexts: requiredStatusContextsFromProtection(result.value),
     error: null,
+    strict:
+      typeof result.value?.strict === "boolean" ? result.value.strict : null,
   };
 }
 
@@ -783,6 +804,7 @@ export async function fetchReadyState({
     requiredStatusContexts: requiredStatusContexts.contexts,
     requiredStatusContextsError: requiredStatusContexts.error,
     requiredStatusContextsAvailable: requiredStatusContexts.error === null,
+    requiredStatusChecksStrict: requiredStatusContexts.strict ?? null,
     includeFeedbackDetails,
     codeRabbitPathFilterSkip,
   });

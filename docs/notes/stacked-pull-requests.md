@@ -232,13 +232,15 @@ use operating-card step 8 and ADR 0084.
 
 Do not infer progress from a GitHub “merging” spinner. Read the PR state,
 current head, protection branch, `mergeStateStatus`, required checks and pending
-merge setting. `BEHIND` requires a base update, even when mergeability says
-`MERGEABLE`. A pending merge setting records intent, not completion. Preserve
-an existing request during authorized repair and verify its state afterward;
-do not cancel or resubmit it merely to discover an operation UUID. A head update
-may invalidate the request. Report that result rather than silently replacing it.
-When strict freshness repeatedly blocks the final PR, pause other batch merges
-until it lands. Confirm completion from the PR merge record and merged tree.
+merge setting. `DIRTY` (a textual conflict) still requires resolution before
+merge; `BEHIND` alone does not (operator decision 2026-09-15,
+[ADR 0103](../adr/0103-non-strict-required-status-checks.md)). A pending merge
+setting records intent, not completion. Preserve an existing request during
+authorized repair and verify its state afterward; do not cancel or resubmit it
+merely to discover an operation UUID. A head update may invalidate the
+request. Report that result rather than silently replacing it. When a
+conflict repeatedly blocks the final PR, pause other batch merges until it
+lands. Confirm completion from the PR merge record and merged tree.
 
 Cancelled duplicate CI runs are not source failures by themselves. Inspect the
 exact head, workflow, run, attempt and job state, then identify any replacement

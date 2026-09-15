@@ -88,15 +88,15 @@ function codeRabbitCloseoutFallbackAction(
   },
 ) {
   if (!["missing", "stale"].includes(state)) return "wait";
-  // A base merge rewrites the head, so a request posted first is wasted and can
-  // itself draw an unprompted full re-review. A conflicted PR (DIRTY) needs
-  // the same merge before anything else.
+  // A conflicted PR (DIRTY) needs the base merged before anything else can be
+  // reviewed. Non-strict policy (operator decision 2026-09-15, ADR 0103):
+  // merely being BEHIND no longer forces a base merge, so it no longer
+  // outranks the other waits either — forcing one here would reintroduce the
+  // re-integration churn the policy change removes.
   if (
-    ["BEHIND", "DIRTY"].includes(
-      String(mergeStateStatus ?? "")
-        .trim()
-        .toUpperCase(),
-    )
+    String(mergeStateStatus ?? "")
+      .trim()
+      .toUpperCase() === "DIRTY"
   ) {
     return "merge_base_first";
   }

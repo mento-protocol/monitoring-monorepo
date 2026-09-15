@@ -43,11 +43,9 @@ export function classifyStackObservation(value, previous = null) {
       "SNAPSHOT_CHANGED",
       "Stack membership or another layer changed; repeat verification",
     );
-  if (pr.mergeStateStatus === "BEHIND")
-    return result(
-      "BASE_UPDATE_REQUIRED",
-      "Head is behind the base; integrate the current base and recheck",
-    );
+  // Non-strict policy (operator decision 2026-09-15): BEHIND alone is not a
+  // blocker here either. A real conflict still surfaces as a "mergeability"
+  // blocker below.
   const blockers = value?.required?.blockers ?? [];
   const checks = blockers.filter((item) => item.kind === "check");
   if (checks.some((item) => item.state === "fail"))

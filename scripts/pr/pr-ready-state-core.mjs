@@ -530,6 +530,7 @@ export function summarizeTerminalReadyState(pr) {
       ready: true,
       items: [],
     },
+    notes: [],
     gates: terminalGates({ merged }),
     summary: merged
       ? "Pull request is already merged."
@@ -555,6 +556,11 @@ export function summarizeReadyState({
   requiredStatusContexts = [],
   requiredStatusContextsError = null,
   requiredStatusContextsAvailable = requiredStatusContexts.length > 0,
+  // Tri-state: `true`/`false` when the fetched branch protection or ruleset
+  // confirms the policy; `null` when unknown. Fails closed like every other
+  // branch-protection lookup gap here: only a confirmed `false` demotes
+  // BEHIND to a note (operator decision 2026-09-15, ADR 0103).
+  requiredStatusChecksStrict = null,
   includeFeedbackDetails = false,
   codeRabbitPathFilterSkip = null,
   // Wall-clock "now" for the closeout waits. Not the caller's `observedAt`
@@ -632,6 +638,7 @@ export function summarizeReadyState({
     ["fail", "pending"].includes(check.state),
   );
   const requiredBlockers = [];
+  const notes = [];
 
   if (pr.isDraft) {
     requiredBlockers.push({
@@ -653,14 +660,43 @@ export function summarizeReadyState({
     });
   }
 
-  if (normalizeStatusValue(pr.mergeStateStatus) === "BEHIND") {
+  // `mergeable: CONFLICTING` normally implies `mergeStateStatus: DIRTY`, so
+  // the check above already blocks it. Check DIRTY independently so a
+  // conflict still blocks even if GitHub reports a stale `mergeable` value.
+  if (mergeable && normalizeStatusValue(pr.mergeStateStatus) === "DIRTY") {
     requiredBlockers.push({
-      kind: "base-update",
-      name: "Pull request must include the current base before merge",
-      state: "BEHIND",
+      kind: "mergeability",
+      name: "Pull request has a merge conflict with the base",
+      state: "DIRTY",
       required: true,
       url: pr.url,
     });
+  }
+
+  if (normalizeStatusValue(pr.mergeStateStatus) === "BEHIND") {
+    // Non-strict policy (operator decision 2026-09-15, ADR 0103): once the
+    // base's ruleset confirms `strict_required_status_checks_policy: false`,
+    // a PR merely behind the base is not a required blocker on its own. A
+    // textual conflict still blocks via the `mergeable` check above (kind
+    // "mergeability") or GitHub's `mergeStateStatus: DIRTY`. Until strict is
+    // confirmed off, fail closed and keep blocking, exactly as GitHub does.
+    if (requiredStatusChecksStrict === false) {
+      notes.push({
+        kind: "base-update",
+        name: "Pull request is behind the current base",
+        state: "BEHIND",
+        required: false,
+        url: pr.url,
+      });
+    } else {
+      requiredBlockers.push({
+        kind: "base-update",
+        name: "Pull request must include the current base before merge",
+        state: "BEHIND",
+        required: true,
+        url: pr.url,
+      });
+    }
   }
 
   if (reviewDecision === "CHANGES_REQUESTED") {
@@ -793,6 +829,7 @@ export function summarizeReadyState({
     ready,
     required,
     optional,
+    notes,
     gates,
     summary: summaryText,
     pr: summaryPr(pr, headUpdatedAt),

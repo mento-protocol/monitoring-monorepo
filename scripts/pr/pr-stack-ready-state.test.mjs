@@ -85,12 +85,13 @@ assert.equal(
   }).state,
   "UNKNOWN",
 );
+// Non-strict policy: BEHIND alone does not block a stack layer either.
 assert.equal(
   classifyStackObservation({
     ...observed,
     pr: { ...observed.pr, mergeStateStatus: "BEHIND" },
   }).state,
-  "BASE_UPDATE_REQUIRED",
+  "AWAITING_USER_MERGE",
 );
 for (const key of ["headRefOid", "baseRefOid", "headRefName", "baseRefName"])
   assert.equal(
@@ -111,6 +112,17 @@ for (const [checkState, expected] of [
   };
   assert.equal(classifyStackObservation(blocked).state, expected);
 }
+// A textual conflict (CONFLICTING/DIRTY) still blocks: it surfaces as a
+// non-check required blocker from pr-ready-state-core.mjs.
+const conflicting = {
+  ...observed,
+  ready: false,
+  pr: { ...observed.pr, mergeStateStatus: "DIRTY" },
+  required: {
+    blockers: [{ kind: "mergeability", name: "Pull request is not mergeable" }],
+  },
+};
+assert.equal(classifyStackObservation(conflicting).state, "READINESS_BLOCKED");
 const canceledWithReplacement = {
   ...observed,
   ready: false,
