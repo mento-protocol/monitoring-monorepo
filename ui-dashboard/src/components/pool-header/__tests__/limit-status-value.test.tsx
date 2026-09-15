@@ -81,4 +81,23 @@ describe("LimitStatusValue", () => {
       ),
     ).toContain("—");
   });
+
+  it("defers to the Broker tile for a VirtualPool identified only by its wrapped exchange", () => {
+    // `source` stays `fpmm_*` for a VP first seen through a Swap/Mint/Burn, so
+    // the substring check this tile used to run would have rendered FPMM
+    // trading limits on a pool that has none.
+    const html = renderToStaticMarkup(
+      <LimitStatusValue
+        pool={{
+          ...BASE_POOL,
+          wrappedExchangeId:
+            "0xd580d237231109e6a96d67d82450611c610a805a26660c90281bdc0cd04a95c7",
+        }}
+        tradingLimits={[limit()]}
+      />,
+    );
+
+    expect(html).toContain("—");
+    expect(html).not.toContain("progressbar");
+  });
 });

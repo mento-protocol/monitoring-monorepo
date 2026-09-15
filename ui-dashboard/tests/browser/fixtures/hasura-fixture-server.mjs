@@ -27,6 +27,7 @@ const ADDRESSES = {
   celoChfm: "0xb55a79f398e759e43c95b979163f30ec87ee131d",
   celoJpym: "0xc45ecf20f3cd864b32d9794d6f76814ae8892e20",
   celoBrlm: "0x0000000000000000000000000000000000000b71",
+  celoVirtualPool: "42220-0x1d013077b00b28038a3f1e7a29aba34e12e562e9",
   celoTroveManagerGbpm: "0xb38aef2bf4e34b997330d626ebcd7629de3885c9",
   celoStabilityPoolGbpm: "0x2d5d7e2767c5493610cae84e0ab7f9d2cce8c1a5",
   monadAusd: "0x00000000efe302beaa2b3e6e1b18d08d69a9012a",
@@ -139,7 +140,107 @@ const pools = [
   }),
 ];
 
-const poolsById = new Map(pools.map((pool) => [pool.id, pool]));
+// A VirtualPool wrapping a v2 BiPoolManager exchange, for the Broker
+// trading-limits surfaces. Deliberately NOT in `pools`: the homepage tables,
+// chain rollups, and visual snapshots keep their existing two rows, and only
+// the pool-detail lookups (which go through `poolsById`) can reach it.
+const virtualPoolExchangeId =
+  "0xd580d237231109e6a96d67d82450611c610a805a26660c90281bdc0cd04a95c7";
+
+const virtualPool = {
+  ...poolFixture({
+    id: ADDRESSES.celoVirtualPool,
+    chainId: 42220,
+    token0: ADDRESSES.celoGbpm,
+    token1: ADDRESSES.celoUsdm,
+    token0Decimals: 18,
+    token1Decimals: 18,
+    reserves0: "0",
+    reserves1: "0",
+    notionalVolume0: "0",
+    notionalVolume1: "0",
+  }),
+  source: "virtual_pool_factory",
+  wrappedExchangeId: virtualPoolExchangeId,
+  // Folded from the two BrokerTradingLimit legs below, per token.
+  limitStatus: "WARN",
+  limitPressure0: "0.9994",
+  limitPressure1: "0.9956",
+};
+
+const poolsById = new Map(
+  [...pools, virtualPool].map((pool) => [pool.id, pool]),
+);
+
+function brokerTradingLimitFixture(
+  token,
+  limitGlobal,
+  netflowGlobal,
+  pressure,
+) {
+  return {
+    id: `42220-${virtualPoolExchangeId}-${token}`,
+    chainId: 42220,
+    exchangeId: virtualPoolExchangeId,
+    exchangeProvider: "0x22d9db95e6ae61c104a7b6f6c78d7993b94ec901",
+    limitId: `0x${token.slice(2).padStart(64, "d")}`,
+    poolId: virtualPool.id,
+    token,
+    configKnown: true,
+    // Global limit only — the live AUD exchange runs with flags = 4.
+    flags: 4,
+    timestep0: "0",
+    timestep1: "0",
+    limit0: "0",
+    limit1: "0",
+    limitGlobal,
+    stateKnown: true,
+    netflow0: "0",
+    netflow1: "0",
+    netflowGlobal,
+    lastUpdated0: "0",
+    lastUpdated1: "0",
+    stateBlock: virtualPool.updatedAtBlock,
+    stateTimestamp: virtualPool.updatedAtTimestamp,
+    limitPressure0: "0.0000",
+    limitPressure1: "0.0000",
+    limitPressureGlobal: pressure,
+    limitStatus: "WARN",
+    updatedAtBlock: virtualPool.updatedAtBlock,
+    updatedAtTimestamp: virtualPool.updatedAtTimestamp,
+  };
+}
+
+const brokerTradingLimits = [
+  brokerTradingLimitFixture(ADDRESSES.celoGbpm, "1597", "-1596", "0.9994"),
+  brokerTradingLimitFixture(ADDRESSES.celoUsdm, "1144", "1139", "0.9956"),
+];
+
+const virtualPoolExchangeRow = {
+  id: `42220-${virtualPoolExchangeId}`,
+  chainId: 42220,
+  exchangeId: virtualPoolExchangeId,
+  exchangeProvider: "0x22d9db95e6ae61c104a7b6f6c78d7993b94ec901",
+  asset0: ADDRESSES.celoGbpm,
+  asset1: ADDRESSES.celoUsdm,
+  pricingModule: "0x1e9e0e0b7dba6d0bfd6a5b1b2b05a5d0a1d0f0a1",
+  pricingModuleName: "ConstantSum",
+  spread: "5000000000000000000000",
+  referenceRateFeedID: LIGHTHOUSE_POOL_REFERENCE_RATE_FEED_ID,
+  referenceRateResetFrequency: "300",
+  minimumReports: "5",
+  stablePoolResetSize: "1000000000000000000000",
+  bucket0: "1000000000000000000000",
+  bucket1: "1000000000000000000000",
+  // Zero sentinel on purpose: this row is SSR-prefetched, and `V2ExchangePanel`
+  // renders "Last Reset" through `relativeTime`, which reads the live clock.
+  // The Next server uses real wall time while the browser clock is pinned to
+  // WEEKDAY_FIXTURE_INSTANT, so any real timestamp renders two different
+  // strings and trips a hydration mismatch. "0" renders "—" on both sides.
+  lastBucketUpdate: "0",
+  isDeprecated: false,
+  wrappedByPoolId: virtualPool.id,
+};
 
 const lighthousePoolBreakerResponse = {
   BreakerConfig: [
@@ -1604,6 +1705,40 @@ export function handleGraphQL(
         TradingLimit: tradingLimits.filter(
           (limit) => limit.poolId === String(variables.poolId),
         ),
+      };
+    // VirtualPool-only operations. The FPMM fixture pools never fire these.
+    case "PoolBrokerLimits":
+      return {
+        BrokerTradingLimit: brokerTradingLimits.filter(
+          (limit) => limit.poolId === String(variables.poolId),
+        ),
+      };
+    case "PoolV2Exchange":
+      return {
+        BiPoolExchange:
+          String(variables.poolId) === virtualPool.id &&
+          Number(variables.chainId) === virtualPool.chainId
+            ? [virtualPoolExchangeRow]
+            : [],
+      };
+    case "BrokerExchangeDailySnapshots24h":
+      return { BrokerExchangeDailySnapshot: [] };
+    case "VirtualPoolLifecycle":
+      return {
+        VirtualPoolLifecycle:
+          String(variables.poolId) === virtualPool.id
+            ? [
+                {
+                  id: `${virtualPool.id}-DEPLOYED`,
+                  action: "DEPLOYED",
+                  factoryAddress: "0x7777777777777777777777777777777777777777",
+                  txHash:
+                    "0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+                  blockNumber: virtualPool.createdAtBlock,
+                  blockTimestamp: virtualPool.createdAtTimestamp,
+                },
+              ]
+            : [],
       };
     case "AllOlsPools":
     case "OlsPool":

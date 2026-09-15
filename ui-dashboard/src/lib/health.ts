@@ -480,9 +480,15 @@ function deviationTierStatus(
 }
 
 /**
- * Compute the trading limit status for a pool based on pressure values.
+ * Compute the trading limit status for a pool from its pressure values. This is
+ * the fallback for rows that pre-date the indexed `limitStatus` field — see
+ * `resolveLimitStatus`, which prefers the stored value.
  *
- * - "N/A":       VirtualPools (source-or-wrappedExchangeId-confirmed) — no limits
+ * - "N/A":       VirtualPools (source-or-wrappedExchangeId-confirmed). Their
+ *                limits live on the wrapped v2 exchange, so the indexer folds
+ *                the `BrokerTradingLimit` rows onto `limitStatus` /
+ *                `limitPressure0/1`. Without that stored status there is
+ *                nothing to derive here, and a computed OK would be false.
  * - "CRITICAL":  max pressure >= 1.0 (limit breached)
  * - "WARN":      max pressure >= 0.8
  * - "OK":        max pressure < 0.8

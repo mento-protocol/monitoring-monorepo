@@ -20,7 +20,7 @@ event list; the table highlights the main monitoring surfaces.
 
 | Contract              | Events                                                                                                                                                                                                                   |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Broker                | `Swap` (legacy v2 settlement layer; Celo only - no Broker on Monad or Polygon)                                                                                                                                           |
+| Broker                | `Swap`, `TradingLimitConfigured` (legacy v2 settlement layer; Celo only - no Broker on Monad or Polygon)                                                                                                                 |
 | FPMMFactory           | `FPMMDeployed`                                                                                                                                                                                                           |
 | FPMM (pool)           | `Swap`, `Mint`, `Burn`, `Transfer`, `UpdateReserves`, `Rebalanced`, `TradingLimitConfigured`, `LiquidityStrategyUpdated`, `LPFeeUpdated`, `ProtocolFeeUpdated`, `RebalanceIncentiveUpdated`, `RebalanceThresholdUpdated` |
 | VirtualPool           | `Swap`, `Mint`, `Burn`, `UpdateReserves`, `Rebalanced`                                                                                                                                                                   |
@@ -46,7 +46,7 @@ The schema is the source of truth for the complete entity list.
 | Pool activity           | `SwapEvent`, `LiquidityEvent`, `ReserveUpdate`, `RebalanceEvent`, `LiquidityPosition`, `FactoryDeployment`                                                                              |
 | Pool rollups            | `PoolSnapshot`, `PoolDailySnapshot`, `PoolDailyVolumeSnapshot`, `PoolDailyFeeSnapshot`                                                                                                  |
 | Protocol fees           | `ProtocolFeeTransfer`                                                                                                                                                                   |
-| Legacy v2 / Broker      | `BrokerSwapEvent`, `BrokerDailySnapshot`, `BrokerExchangeDailySnapshot`, `BrokerTraderDailySnapshot`                                                                                    |
+| Legacy v2 / Broker      | `BrokerSwapEvent`, `BrokerDailySnapshot`, `BrokerExchangeDailySnapshot`, `BrokerTraderDailySnapshot`, `BrokerTradingLimit`                                                              |
 | Broker aggregators      | `BrokerAggregatorDailySnapshot`, `BrokerAggregatorTraderDayMarker`, `BrokerVolumeWindowSnapshot`                                                                                        |
 | BiPoolManager           | `BiPoolExchange`, `BucketUpdate`                                                                                                                                                        |
 | VirtualPools            | `VirtualPoolLifecycle`                                                                                                                                                                  |
@@ -221,6 +221,14 @@ Key design decisions:
 
 - `PoolSnapshot` uses hourly buckets (forward-fill for charts is done in the dashboard)
 - `TradingLimit` has composite ID: `{poolId}-{tokenAddress}`
+- `BrokerTradingLimit` has composite ID: `{chainId}-{exchangeId}-{token}`, one
+  row per v2 Broker exchange token leg. Both id parts are lowercased, while the
+  `exchangeId` field keeps the raw `bytes32` hex. The contract key is a separate
+  field: `limitId = exchangeId XOR bytes32(uint160(token))`, 66 lowercase
+  characters. Its limit and netflow values are WHOLE
+  TOKEN UNITS, not the 15-decimal internal scale `TradingLimit` uses; never
+  route them through the same formatter. See
+  [ADR 0103](../docs/adr/0103-virtualpool-broker-trading-limits.md)
 - All BigInt fields use string representation in GraphQL responses
 
 ## Example Queries

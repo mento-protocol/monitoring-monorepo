@@ -19,7 +19,8 @@
  *
  *   - abis/BiPoolManager.json — currently hand-managed; byte-identical to the
  *     upstream ABI
- *   - abis/Broker.json — minimal Swap-only subset of the upstream ABI
+ *   - abis/Broker.json — minimal Swap + TradingLimitConfigured subset of the
+ *     upstream ABI
  *   - abis/ERC20.json — minimal Transfer-only ABI; no upstream counterpart
  *   - abis/Susds.json — no upstream counterpart
  *   - abis/wormhole/NttDeployHelper.json — minimal getter-only subset of the

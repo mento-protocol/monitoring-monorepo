@@ -1437,6 +1437,34 @@ describe("updateMetrics", () => {
     ).toBeCloseTo(0.005);
   });
 
+  // `mento_pool_limit_pressure` feeds the FPMM-scoped Grafana rules in
+  // `alerts/rules/rules-fpmms.tf`. A VirtualPool's `limitPressure0/1` carry the
+  // wrapped v2 Broker exchange's pressures, which Aegis already pages on, so
+  // publishing them here would page twice for one breach. See ADR 0103.
+  it("skips limit pressure for virtual pools", async () => {
+    updateMetrics([
+      makePool({
+        source: "virtual_pool_factory",
+        wrappedExchangeId:
+          "0xd580d237231109e6a96d67d82450611c610a805a26660c90281bdc0cd04a95c7",
+        limitPressure0: "0.9994",
+        limitPressure1: "0.9960",
+      }),
+    ]);
+    expect(
+      await getGaugeValue(register, "mento_pool_limit_pressure", {
+        ...poolLabels,
+        token_index: "0",
+      }),
+    ).toBeUndefined();
+    expect(
+      await getGaugeValue(register, "mento_pool_limit_pressure", {
+        ...poolLabels,
+        token_index: "1",
+      }),
+    ).toBeUndefined();
+  });
+
   it("computes reserve share for balanced 50/50 pool", async () => {
     updateMetrics([makePool()]);
     // Default fixture is GBPm/USDm on Celo — see fixtures.ts. token0 is

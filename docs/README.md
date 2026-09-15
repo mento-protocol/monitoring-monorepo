@@ -226,6 +226,7 @@ Authority: canonical
 - [`adr/0100-monthly-ci-reliability-report.md`](adr/0100-monthly-ci-reliability-report.md) — Monthly CI reliability report is an issue-only scheduler
 - [`adr/0101-legacy-gate-retirement.md`](adr/0101-legacy-gate-retirement.md) — Retire the legacy local quality gate
 - [`adr/0102-github-hosted-runners-only.md`](adr/0102-github-hosted-runners-only.md) — GitHub-hosted runners only; a frozen allow-list blocks other labels
+- [`adr/0103-virtualpool-broker-trading-limits.md`](adr/0103-virtualpool-broker-trading-limits.md) — VirtualPool trading limits come from block-pinned, freshness-gated Broker state reads
 
 Authority: non-canonical
 

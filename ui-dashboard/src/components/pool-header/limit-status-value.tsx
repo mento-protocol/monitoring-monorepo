@@ -1,14 +1,12 @@
 "use client";
 
-import type { Pool, TradingLimit } from "@/lib/types";
+import { isVirtualPool, type Pool, type TradingLimit } from "@/lib/types";
 import { parseWei, TRADING_LIMITS_INTERNAL_DECIMALS } from "@/lib/format";
-import { pressureColorClass } from "@/lib/health";
-
-type WindowSummary = {
-  pressure: number;
-  netflow: number;
-  limit: number;
-};
+import {
+  formatPair,
+  MiniBar,
+  type WindowSummary,
+} from "@/components/pool-header/limit-mini-bar";
 
 /** Picks the highest-pressure token in the window so the mini-bar surfaces the tightest constraint. Netflow is absolute — direction isn't meaningful for "how close to the cap". */
 function summarizeWindow(
@@ -33,54 +31,6 @@ function summarizeWindow(
   return best;
 }
 
-/** Compact form: 12K, 3.4M, 500. Omits decimals for values < 1000. */
-function formatShort(value: number): string {
-  if (!Number.isFinite(value)) return "—";
-  const abs = Math.abs(value);
-  if (abs >= 999_950) {
-    return `${(value / 1_000_000).toFixed(2).replace(/\.?0+$/, "")}M`;
-  }
-  if (abs >= 1_000) {
-    return `${(value / 1_000).toFixed(1).replace(/\.0$/, "")}K`;
-  }
-  return value.toFixed(0);
-}
-
-function MiniBar({
-  summary,
-  title,
-}: {
-  summary: WindowSummary | null;
-  title: string;
-}) {
-  const pct = summary ? Math.min(summary.pressure * 100, 100) : 0;
-  const color = summary ? pressureColorClass(summary.pressure) : "bg-slate-600";
-  const rawPct = summary ? Math.round(summary.pressure * 100) : 0;
-  // aria-valuenow must stay within [valuemin, valuemax] to be a valid ARIA
-  // progressbar, so the raw (uncapped) percentage goes into aria-valuetext
-  // with an explicit "over limit" suffix when breached — SRs still hear the
-  // overage magnitude, just through the valid-state channel.
-  const valueText = summary
-    ? summary.pressure > 1
-      ? `${rawPct}% (over limit)`
-      : `${rawPct}%`
-    : "no data";
-  return (
-    <div className="h-2 rounded-full bg-slate-700" title={title}>
-      <div
-        className={`h-2 rounded-full transition-all ${color}`}
-        style={{ width: `${pct}%` }}
-        role="progressbar"
-        aria-label={title}
-        aria-valuenow={Math.round(pct)}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuetext={valueText}
-      />
-    </div>
-  );
-}
-
 export function LimitStatusValue({
   pool,
   tradingLimits,
@@ -90,8 +40,9 @@ export function LimitStatusValue({
   tradingLimits: TradingLimit[];
   hasError?: boolean;
 }) {
-  const isVirtual = pool.source?.includes("virtual");
-  if (isVirtual) return <span className="text-slate-500">—</span>;
+  // VirtualPools have their own tile (`BrokerLimitStatusValue`) fed by the
+  // wrapped v2 exchange's Broker limits; this FPMM tile never renders for one.
+  if (isVirtualPool(pool)) return <span className="text-slate-500">—</span>;
 
   // An actual fetch failure leaves `tradingLimits` as `[]`, which would
   // otherwise render the same neutral em-dash as virtual pools and as
@@ -107,9 +58,6 @@ export function LimitStatusValue({
   if (!l0 && !l1) {
     return <span className="text-slate-500">—</span>;
   }
-
-  const formatPair = (s: WindowSummary | null) =>
-    s ? `${formatShort(s.netflow)}/${formatShort(s.limit)}` : "—";
 
   return (
     <span className="flex flex-col gap-0.5 w-52">

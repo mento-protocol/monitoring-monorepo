@@ -396,6 +396,51 @@ export type TradingLimit = {
   updatedAtTimestamp: string;
 };
 
+/**
+ * One v2 Broker trading-limit row for the BiPoolManager exchange a VirtualPool
+ * wraps — one row per (exchange, token leg), keyed on-chain by
+ * `limitId = exchangeId XOR bytes32(uint160(token))`.
+ *
+ * Every limit and netflow value is in WHOLE TOKEN UNITS (int48 on-chain), NOT
+ * the 15-decimal internal scale of the FPMM `TradingLimit` above. Never route
+ * these through `formatWei(..., TRADING_LIMITS_INTERNAL_DECIMALS)`.
+ *
+ * `configKnown` / `stateKnown` gate the derived fields: until both are true the
+ * pressures are "0.0000" and `limitStatus` is "N/A", so the UI shows no bars
+ * rather than a false OK.
+ */
+export type BrokerTradingLimitRow = {
+  id: string;
+  chainId: number;
+  exchangeId: string;
+  exchangeProvider: string;
+  limitId: string;
+  poolId: string;
+  token: string;
+  configKnown: boolean;
+  /** Bitmask: L0 = 1, L1 = 2, LG = 4. */
+  flags: number;
+  timestep0: string;
+  timestep1: string;
+  limit0: string;
+  limit1: string;
+  limitGlobal: string;
+  stateKnown: boolean;
+  netflow0: string;
+  netflow1: string;
+  netflowGlobal: string;
+  lastUpdated0: string;
+  lastUpdated1: string;
+  stateBlock: string;
+  stateTimestamp: string;
+  limitPressure0: string;
+  limitPressure1: string;
+  limitPressureGlobal: string;
+  limitStatus: string;
+  updatedAtBlock: string;
+  updatedAtTimestamp: string;
+};
+
 export type LiquidityPosition = {
   id: string;
   poolId: string;
