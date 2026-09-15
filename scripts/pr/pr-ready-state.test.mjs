@@ -422,13 +422,49 @@ test("reads the strict policy straight off classic protection when no ruleset ap
       },
     });
     assertEqual(result.strict, strict);
-    if (strict === true) {
-      assertEqual(
-        rulesCalls,
-        0,
-        "a confirmed classic true already wins outright; no need to check rulesets",
-      );
-    }
+    assertEqual(
+      rulesCalls,
+      1,
+      "rulesets are always consulted for ruleset-only required contexts, even once classic already confirms strict",
+    );
+  }
+});
+
+test("unions ruleset-only required contexts with classic protection's contexts", async () => {
+  for (const strict of [true, false]) {
+    const result = await fetchRequiredStatusContexts({
+      repo: {
+        owner: "mento-protocol",
+        name: "monitoring-monorepo",
+        host: null,
+      },
+      baseRef: "main",
+      fetchProtection: async () => ({
+        ok: true,
+        value: { contexts: ["ci"], strict },
+      }),
+      fetchRules: async () => ({
+        ok: true,
+        value: [
+          {
+            type: "required_status_checks",
+            parameters: {
+              required_status_checks: [{ context: "Ruleset Only Check" }],
+              strict_required_status_checks_policy: strict,
+            },
+          },
+        ],
+      }),
+    });
+
+    assertDeepEqual(
+      result.contexts,
+      [
+        { context: "ci", integrationId: null },
+        { context: "Ruleset Only Check", integrationId: null },
+      ],
+      "a ruleset-only required check must not be dropped when classic protection also applies",
+    );
   }
 });
 
@@ -458,6 +494,35 @@ test("aggregates a stricter ruleset over classic protection's confirmed non-stri
     result.strict,
     true,
     "a ruleset confirming strict must not be shadowed by classic protection's false",
+  );
+});
+
+test("fails closed when a ruleset reports false but classic protection's strict is unknown", async () => {
+  const result = await fetchRequiredStatusContexts({
+    repo: { owner: "mento-protocol", name: "monitoring-monorepo", host: null },
+    baseRef: "main",
+    fetchProtection: async () => ({
+      ok: true,
+      value: { contexts: ["ci"] },
+    }),
+    fetchRules: async () => ({
+      ok: true,
+      value: [
+        {
+          type: "required_status_checks",
+          parameters: {
+            required_status_checks: [{ context: "ci" }],
+            strict_required_status_checks_policy: false,
+          },
+        },
+      ],
+    }),
+  });
+
+  assertEqual(
+    result.strict,
+    null,
+    "an unknown classic reading could still mean strict mode is on; a ruleset's false alone cannot demote it",
   );
 });
 

@@ -28,6 +28,19 @@ function addRequiredContext(byKey, context, integrationId = null) {
   });
 }
 
+// Combine required-status-context lists from different sources (classic
+// branch protection, a ruleset) into one deduplicated, sorted list, keyed the
+// same way `addRequiredContext` keys a single source's contexts.
+function mergeRequiredStatusContexts(...contextLists) {
+  const byKey = new Map();
+  for (const contexts of contextLists) {
+    for (const context of contexts) {
+      addRequiredContext(byKey, context.context, context.integrationId);
+    }
+  }
+  return [...byKey.values()].sort((a, b) => a.context.localeCompare(b.context));
+}
+
 function workflowPath(workflow) {
   return (
     workflow.path ??
@@ -248,16 +261,18 @@ export function strictRequiredStatusChecksPolicyFromRules(rules = []) {
 // GitHub enforces the stricter of the two. Combine them the same way multiple
 // ruleset rules combine: any confirmed `true` wins outright. When no ruleset
 // `required_status_checks` rule matches at all, classic protection's reading
-// stands unopposed. Otherwise the ruleset's own tri-state (`false` only when
-// every matching rule explicitly disables strict, `null` when ambiguous)
-// governs, since it is the more specific/newer source layered over classic.
+// stands unopposed. Otherwise `false` requires both sources to explicitly
+// confirm non-strict: an unknown classic reading (no boolean `strict` field)
+// can still mean strict mode is on, so a ruleset's confirmed `false` alone
+// cannot be trusted to override it — fail closed with `null` instead.
 function combineStrictRequiredStatusChecksPolicy(classicStrict, rules = []) {
   const rulesetStrict = strictRequiredStatusChecksPolicyFromRules(rules);
   if (classicStrict === true || rulesetStrict === true) return true;
   const hasRulesetRequirement = flattenRules(rules).some(
     (rule) => rule.type === "required_status_checks",
   );
-  return hasRulesetRequirement ? rulesetStrict : classicStrict;
+  if (!hasRulesetRequirement) return classicStrict;
+  return classicStrict === false && rulesetStrict === false ? false : null;
 }
 
 export function requiredStatusContextsFromRulesResult(
@@ -437,27 +452,57 @@ export async function fetchRequiredStatusContexts({
 
   const classicStrict =
     typeof result.value?.strict === "boolean" ? result.value.strict : null;
+  const classicContexts = requiredStatusContextsFromProtection(result.value);
 
-  // A ruleset can also apply alongside classic protection and impose a
-  // stricter policy than classic protection alone reports. Only classic
-  // `true` is already the most restrictive outcome and needs no further
-  // lookup; otherwise consult rulesets too before trusting classic's value.
+  // A ruleset can also apply alongside classic protection: it can impose a
+  // stricter strict-mode policy than classic protection alone reports, and it
+  // can require status contexts classic protection does not know about.
+  // Always consult rulesets too, even once classic protection already
+  // confirms strict mode, so a ruleset-only required check is never dropped.
+  const rulesResult = await fetchRules(repo, [
+    `repos/${repoPath(repo)}/rules/branches/${encodedBaseRef}`,
+  ]);
+
+  if (!rulesResult.ok) {
+    return {
+      contexts: classicContexts,
+      error: null,
+      strict: classicStrict === true ? true : null,
+    };
+  }
+
   const strict =
     classicStrict === true
       ? true
-      : await (async () => {
-          const rulesResult = await fetchRules(repo, [
-            `repos/${repoPath(repo)}/rules/branches/${encodedBaseRef}`,
-          ]);
-          if (!rulesResult.ok) return null;
-          return combineStrictRequiredStatusChecksPolicy(
-            classicStrict,
-            rulesResult.value ?? [],
-          );
-        })();
+      : combineStrictRequiredStatusChecksPolicy(
+          classicStrict,
+          rulesResult.value ?? [],
+        );
+
+  const workflowNameByPath = workflowPathsFromRules(rulesResult.value ?? [])
+    .length
+    ? await fetchWorkflowNames(repo, rulesResult.value ?? [])
+    : { byPath: new Map(), error: null };
+
+  const rulesContexts = requiredStatusContextsFromRulesResult(
+    rulesResult.value ?? [],
+    {
+      workflowNameByPath: workflowNameByPath.byPath,
+      workflowNameLookupError: workflowNameByPath.error,
+      fallbackRepoPath: repoPath(repo),
+      statusCheckRollup,
+    },
+  );
+
+  if (rulesContexts.error !== null) {
+    return { ...rulesContexts, strict };
+  }
 
   return {
-    contexts: requiredStatusContextsFromProtection(result.value),
+    contexts: mergeRequiredStatusContexts(
+      classicContexts,
+      rulesContexts.contexts,
+    ),
     error: null,
     strict,
   };

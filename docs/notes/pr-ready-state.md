@@ -506,6 +506,7 @@ Expected top-level fields:
   ],
   "codexReviewSignal": "in_flight",
   "codeRabbitReviewSignal": "not_applicable",
+  "requiredStatusChecksStrict": false,
   "summary": "1 required blocker(s) remain."
 }
 ```
