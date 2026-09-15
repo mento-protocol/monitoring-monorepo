@@ -21,11 +21,9 @@ mkdir -p "$SHIM/gh-empty"
 # Defense in depth, not containment: the network stays open because the model
 # API must be reachable, and naming a withheld commit is a hard leak signal.
 #
-# `OLDPWD` goes too: Bash exports it, and `run_in_fixture` `cd`s from the
-# repository root into the fixture, so a cell would inherit the checkout that
-# holds the answer key (docs/evals/review-skill-truth/ on main), and a read of
-# it leaves nothing for `leakSignals()`. `claude` and `codex` are not shells
-# that reset it. `PWD` stays: it is the fixture under review.
+# `OLDPWD` goes too: `run_in_fixture` `cd`s from the repository root into the
+# fixture, so a cell would inherit the checkout holding the answer key, and a
+# read of it leaves nothing for `leakSignals()`. `PWD` stays: it is the fixture.
 CELL_ENV=(env
   -u GH_TOKEN -u GITHUB_TOKEN -u GITHUB_PERSONAL_ACCESS_TOKEN
   -u GH_ENTERPRISE_TOKEN -u OLDPWD)
@@ -60,8 +58,7 @@ CELL_ENV+=(
   GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/bin/false GIT_ALLOW_PROTOCOL=file
   GH_CONFIG_DIR="$SHIM/gh-empty" PATH="$CELL_PATH")
 
-# A cell that cannot start its own tools is a failed run, not a safer one, so
-# check the tools a cell needs against the rebuilt PATH, in a subshell.
+# A cell that cannot start its tools is a failed run, not a safer one: check.
 for cell_path_tool in claude codex node git; do
   (
     PATH="$CELL_PATH"
@@ -90,7 +87,7 @@ fi
 CELL_STREAM_MAX_BLOCKS=$(((CELL_STREAM_MAX_BYTES + 1023) / 1024))
 
 # One capped model call inside one fixture, started by `run_bounded` as a
-# background job in its own subshell so the limit binds the cell. Past the
+# background job in its own subshell so the limit binds the cell; past the
 # ceiling: SIGXFSZ, no cache.
 # shellcheck disable=SC2329  # started by name from run_bounded
 run_capped_in_fixture() {
@@ -265,9 +262,8 @@ reset_fixture() {
 
 # --- the finder argv and the cell fingerprint --------------------------------
 
-# The finder is spawned as an argument vector, never as a command string: the
-# validator pins every element to [A-Za-z0-9._="@/:-], so one element per line
-# reconstructs the array exactly and nothing is word-split.
+# The finder is spawned as an argument vector: the validator pins every element
+# to [A-Za-z0-9._="@/:-], so one element per line reconstructs it exactly.
 FINDER_ARGV=()
 while IFS= read -r finder_argv_element; do
   FINDER_ARGV+=("$finder_argv_element")
@@ -286,15 +282,19 @@ done < <(
 )
 
 # Codex reads skills from $HOME/.agents and $CODEX_HOME whatever
-# --ignore-user-config says (the review skill under test included): a run that
-# spawns codex re-homes it onto a link to the auth file; a canary spawns none.
+# --ignore-user-config says (the review skill under test included), so a codex
+# spawn is re-homed onto its file login with no endpoint override; canary: none.
 CODEX_ENV=(env)
 if [[ ${#FINDER_ARGV[@]} -gt 0 ]]; then
   CODEX_AUTH="${CODEX_HOME:-$HOME/.codex}/auth.json"
-  [[ -f $CODEX_AUTH ]] || fail "codex auth $CODEX_AUTH is missing; log in with codex before a run"
-  CODEX_ISO="$(mktemp -d "$TMPROOT/review-eval-codex-home.XXXXXX")"
-  mkdir -p "$CODEX_ISO/.codex" && ln -s "$CODEX_AUTH" "$CODEX_ISO/.codex/auth.json"
-  CODEX_ENV=(env HOME="$CODEX_ISO" CODEX_HOME="$CODEX_ISO/.codex")
+  [[ $CODEX_AUTH == /* ]] || CODEX_AUTH="$PWD/$CODEX_AUTH"
+  CODEX_ISO="$(mktemp -d "$TMPROOT/review-eval-codex-home.XXXXXX")" && mkdir -p "$CODEX_ISO/.codex"
+  if [[ -f $CODEX_AUTH ]]; then
+    ln -s "$CODEX_AUTH" "$CODEX_ISO/.codex/auth.json"
+  else
+    log "no codex auth.json at $CODEX_AUTH; codex will use its keyring or environment login"
+  fi
+  CODEX_ENV=(env -u OPENAI_BASE_URL HOME="$CODEX_ISO" CODEX_HOME="$CODEX_ISO/.codex")
 fi
 
 # The fingerprint a cached cell must carry: an aborted run leaves cells behind.

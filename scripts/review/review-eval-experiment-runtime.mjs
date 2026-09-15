@@ -1,11 +1,11 @@
 // Paid runtime for the small non-ledger review-skill experiment.
 
-import { rmSync } from "node:fs";
 import {
   claudeExec,
   resetFixture,
   codexEnv,
   codexIsolatedHome,
+  releaseCodexHome,
   scrubbedEnv,
 } from "./review-eval-run-execution.mjs";
 import {
@@ -421,7 +421,7 @@ export async function runExperimentRuntimeStage({
       armOptions,
     });
   } finally {
-    if (codexHome) rmSync(codexHome.home, { recursive: true, force: true });
+    if (codexHome) releaseCodexHome(codexHome);
   }
 }
 

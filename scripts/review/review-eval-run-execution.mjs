@@ -2,10 +2,13 @@
 
 import { spawn } from "node:child_process";
 import {
+  copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   realpathSync,
+  rmSync,
   symlinkSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -188,23 +191,41 @@ export function codexIsolatedHome({
   tmpRoot = tmpdir(),
   exists = existsSync,
 } = {}) {
-  const auth = path.join(
-    env.CODEX_HOME ?? path.join(env.HOME ?? "", ".codex"),
-    "auth.json",
-  );
-  if (!exists(auth)) {
-    throw new Error(`codex auth ${auth} is missing; log in with codex first`);
-  }
+  // An empty CODEX_HOME is unset, as the shell's `${CODEX_HOME:-…}` reads it,
+  // and the path is absolute so the link resolves from the new home.
+  const store = env.CODEX_HOME || path.join(env.HOME || "", ".codex");
+  const auth = path.resolve(store, "auth.json");
   const home = mkdtempSync(path.join(tmpRoot, "review-eval-codex-home."));
   const codexHome = path.join(home, ".codex");
   mkdirSync(codexHome);
-  symlinkSync(auth, path.join(codexHome, "auth.json"));
-  return { home, codexHome };
+  // A file-store login is linked in. A keyring or environment login has no
+  // file and needs none; a cell that cannot authenticate fails as a cell.
+  const linked = exists(auth);
+  if (linked) symlinkSync(auth, path.join(codexHome, "auth.json"));
+  return { home, codexHome, auth: linked ? auth : null };
 }
 
-/** The env a codex spawn gets: the scrubbed env, re-homed. */
+/**
+ * The env a codex spawn gets: the scrubbed env, re-homed, and with no
+ * endpoint override, so the linked login only ever reaches OpenAI.
+ */
 export function codexEnv(env, { home, codexHome }) {
-  return { ...env, HOME: home, CODEX_HOME: codexHome };
+  const spawnEnv = { ...env, HOME: home, CODEX_HOME: codexHome };
+  delete spawnEnv.OPENAI_BASE_URL;
+  return spawnEnv;
+}
+
+/**
+ * Remove the home. A token refresh that writes through the link has already
+ * reached the operator's file; one that renamed a new file over the link
+ * left it here, so copy it back before the directory goes.
+ */
+export function releaseCodexHome({ home, codexHome, auth }) {
+  const linked = path.join(codexHome, "auth.json");
+  if (auth && existsSync(linked) && !lstatSync(linked).isSymbolicLink()) {
+    copyFileSync(linked, auth);
+  }
+  rmSync(home, { recursive: true, force: true });
 }
 
 /**

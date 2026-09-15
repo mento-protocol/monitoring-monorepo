@@ -70,6 +70,7 @@ import {
   SCRUBBED_ENV_VARS,
   codexEnv,
   codexIsolatedHome,
+  releaseCodexHome,
   scrubbedEnv,
   treatmentIdentity,
 } from "./review-eval-run.mjs";
@@ -245,7 +246,7 @@ test("the shell split no longer reconstructs the pre-split cell runtime", () => 
   // so this pin still catches an unintended shell edit.
   assert.equal(
     reconstructed,
-    "15b8bd9f407d1e2c3175aadf1b158f95481b908293c0ae5ce8be74adbaff238d",
+    "e7fa4b487673a650471e6c891e5b1d50fad157bce09094e615869da5f2b7fd77",
   );
   // It is no longer the pre-split monolith. Capturing the whole session instead
   // of the CLI's last-message envelope changed what a cell records, so the 24
@@ -907,7 +908,7 @@ test("comparabilityKey moves with the contract, the prompts, and the scorer", ()
 
 test("orchestratorSourceDigest binds the shell and the cell modules", () => {
   const expected =
-    "4ab4912da35c3c80018695387b857c21c7af320eb7e4e38cfa0c22bc4285263a";
+    "e1d5f12ce4a1896cae739ce15188ab502a2ede0f06814b6fdc1863a3a62fdc64";
   assert.equal(orchestratorSourceDigest(), expected);
   // The cell writer and the stream parser are in the digest for the same
   // reason the shell is: the writer decides what a paid cell records and the
@@ -5979,22 +5980,31 @@ test("a codex spawn is re-homed onto a directory holding only the auth link", ()
   const operatorHome = path.join(root, "operator");
   mkdirSync(path.join(operatorHome, ".codex"), { recursive: true });
   writeFileSync(path.join(operatorHome, ".codex", "auth.json"), "{}");
-  const env = { HOME: operatorHome, PATH: "/usr/bin" };
+  const env = { HOME: operatorHome, PATH: "/usr/bin", OPENAI_BASE_URL: "x" };
   const home = codexIsolatedHome({ env, tmpRoot: root });
   assert.notEqual(home.home, operatorHome);
   assert.equal(home.codexHome, path.join(home.home, ".codex"));
+  assert.equal(home.auth, path.join(operatorHome, ".codex", "auth.json"));
   // The login carries over as a link, not a copy, and nothing else does.
-  assert.equal(
-    readlinkSync(path.join(home.codexHome, "auth.json")),
-    path.join(operatorHome, ".codex", "auth.json"),
-  );
+  assert.equal(readlinkSync(path.join(home.codexHome, "auth.json")), home.auth);
   assert.deepEqual(readdirSync(home.codexHome), ["auth.json"]);
   assert.deepEqual(readdirSync(home.home), [".codex"]);
   const spawnEnv = codexEnv(env, home);
   assert.equal(spawnEnv.HOME, home.home);
   assert.equal(spawnEnv.CODEX_HOME, home.codexHome);
   assert.equal(spawnEnv.PATH, "/usr/bin");
-  // CODEX_HOME names the auth file when the operator set it.
+  // The linked login only ever reaches OpenAI: no endpoint override rides along.
+  assert.equal("OPENAI_BASE_URL" in spawnEnv, false);
+  // A refresh that wrote through the link changed nothing here; one that
+  // renamed a new file over the link is copied back before the home goes.
+  rmSync(path.join(home.codexHome, "auth.json"));
+  writeFileSync(path.join(home.codexHome, "auth.json"), '{"refreshed":true}');
+  releaseCodexHome(home);
+  assert.equal(existsSync(home.home), false);
+  assert.equal(readFileSync(home.auth, "utf8"), '{"refreshed":true}');
+  // CODEX_HOME names the auth file when the operator set it; an empty value
+  // is unset, as the shell reads it; a relative store resolves to an absolute
+  // link target so it holds from inside the new home.
   const custom = path.join(root, "custom-codex");
   mkdirSync(custom);
   writeFileSync(path.join(custom, "auth.json"), "{}");
@@ -6006,16 +6016,36 @@ test("a codex spawn is re-homed onto a directory holding only the auth link", ()
     readlinkSync(path.join(viaCodexHome.codexHome, "auth.json")),
     path.join(custom, "auth.json"),
   );
-  // No auth file means no login to carry, and a cell that cannot start is a
-  // failed run rather than a silently unauthenticated one.
-  assert.throws(
-    () =>
-      codexIsolatedHome({
-        env: { HOME: path.join(root, "empty") },
-        tmpRoot: root,
-      }),
-    /codex auth .*auth\.json is missing/,
+  releaseCodexHome(viaCodexHome);
+  const emptyCodexHome = codexIsolatedHome({
+    env: { HOME: operatorHome, CODEX_HOME: "" },
+    tmpRoot: root,
+  });
+  assert.equal(
+    emptyCodexHome.auth,
+    path.join(operatorHome, ".codex/auth.json"),
   );
+  releaseCodexHome(emptyCodexHome);
+  const relative = codexIsolatedHome({
+    env: { HOME: path.relative(process.cwd(), operatorHome) },
+    tmpRoot: root,
+  });
+  assert.equal(relative.auth, path.join(operatorHome, ".codex/auth.json"));
+  assert.equal(
+    path.isAbsolute(readlinkSync(path.join(relative.codexHome, "auth.json"))),
+    true,
+  );
+  releaseCodexHome(relative);
+  // A keyring or environment login has no auth file: the home is made without
+  // a link and the spawn authenticates as codex does under the operator's home.
+  const keyring = codexIsolatedHome({
+    env: { HOME: path.join(root, "empty") },
+    tmpRoot: root,
+  });
+  assert.equal(keyring.auth, null);
+  assert.deepEqual(readdirSync(keyring.codexHome), []);
+  releaseCodexHome(keyring);
+  assert.equal(existsSync(keyring.home), false);
 });
 
 test("a scoring judge inherits no path back to a source checkout", () => {
@@ -10694,7 +10724,20 @@ test("every codex spawn runs under a run-private home", () => {
   // run on a host with Claude credentials and no codex.
   assert.match(
     runtime,
-    /\nCODEX_ENV=\(env\)\nif \[\[ \$\{#FINDER_ARGV\[@\]\} -gt 0 \]\]; then\n\s+CODEX_AUTH="\$\{CODEX_HOME:-\$HOME\/\.codex\}\/auth\.json"\n\s+\[\[ -f \$CODEX_AUTH \]\] \|\| fail /,
+    /\nCODEX_ENV=\(env\)\nif \[\[ \$\{#FINDER_ARGV\[@\]\} -gt 0 \]\]; then\n\s+CODEX_AUTH="\$\{CODEX_HOME:-\$HOME\/\.codex\}\/auth\.json"\n\s+\[\[ \$CODEX_AUTH == \/\* \]\] \|\| CODEX_AUTH="\$PWD\/\$CODEX_AUTH"\n/,
+  );
+  // A file login is linked; a keyring or environment login has no file and
+  // the run says so instead of refusing to start.
+  assert.match(
+    runtime,
+    /if \[\[ -f \$CODEX_AUTH \]\]; then\n\s+ln -s "\$CODEX_AUTH" "\$CODEX_ISO\/\.codex\/auth\.json"\n\s+else\n\s+log "no codex auth\.json at \$CODEX_AUTH; codex will use its keyring or environment login"\n\s+fi\n/,
+  );
+  assert.equal(runtime.includes("codex auth $CODEX_AUTH is missing"), false);
+  // The lifecycle copies a renamed-over refresh back before removing the home.
+  const lifecycle = runEvalSource("lifecycle");
+  assert.match(
+    lifecycle,
+    /\[\[ -f \$CODEX_ISO\/\.codex\/auth\.json && ! -L \$CODEX_ISO\/\.codex\/auth\.json \]\] && cp "\$CODEX_ISO\/\.codex\/auth\.json" "\$CODEX_AUTH"\n\s+rm -rf "\$CODEX_ISO"/,
   );
   assert.ok(
     runtime.indexOf("FINDER_ARGV=()") < runtime.indexOf("CODEX_ENV=(env)"),
@@ -10706,7 +10749,7 @@ test("every codex spawn runs under a run-private home", () => {
   );
   assert.match(
     runtime,
-    /ln -s "\$CODEX_AUTH" "\$CODEX_ISO\/\.codex\/auth\.json"\n\s+CODEX_ENV=\(env HOME="\$CODEX_ISO" CODEX_HOME="\$CODEX_ISO\/\.codex"\)\nfi\n/,
+    /\n\s+CODEX_ENV=\(env -u OPENAI_BASE_URL HOME="\$CODEX_ISO" CODEX_HOME="\$CODEX_ISO\/\.codex"\)\nfi\n/,
   );
   assert.match(
     runtime,

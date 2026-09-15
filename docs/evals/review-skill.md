@@ -77,12 +77,16 @@ on `PATH`, and with git stripped of its global and system config, its
 credential helper, its terminal prompt, its askpass and every protocol but
 `file`. Every codex spawn, the contract finder and a probe's codex verifier,
 runs with `HOME` and `CODEX_HOME` pointed at a run-private directory under the
-run's temp root that holds only a link to the operator's `auth.json`: codex
-discovers skills under `$HOME/.agents/skills` and `$CODEX_HOME/skills`
-whatever `--ignore-user-config` says, so under the operator's home the finder
-would see the review skill under test and the operator's MCP servers and
-hooks, and it would write its sessions into `~/.codex`. The fixture is reset with `git reset --hard` and `git clean -xdff`
-before every cell, so no cell reviews the previous cell's edits. `--score`
+run's temp root, with `OPENAI_BASE_URL` unset: codex discovers skills under
+`$HOME/.agents/skills` and `$CODEX_HOME/skills` whatever `--ignore-user-config`
+says, so under the operator's home the finder would see the review skill under
+test and the operator's MCP servers and hooks, and it would write its sessions
+into `~/.codex`. A file-store login is linked into that directory (a keyring or
+environment login needs no file); a refresh that renamed a new `auth.json` over
+the link is copied back to the operator's file when the run removes the
+directory. A replay-only canary spawns no codex and makes no such directory.
+The fixture is reset with `git reset --hard` and `git clean -xdff` before
+every cell, so no cell reviews the previous cell's edits. `--score`
 flags a transcript that names the PR number, one of its reviewers, or one of
 the commits withheld from the fixture — the last is what a successful fetch of
 the answer key leaves behind. Reviewer logins that already appear in the
