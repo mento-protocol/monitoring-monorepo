@@ -240,6 +240,10 @@ describe("Broker trading limits", () => {
     assert.equal(pool?.limitStatus, "WARN");
     assert.equal(pool?.limitPressure0, "0.9956");
     assert.equal(pool?.limitPressure1, "0.9994");
+    // The Pool cursor must advance with the fold: the dashboard's live/fleet
+    // merge reads an equal `updatedAtBlock` as the same indexed state.
+    assert.equal(pool?.updatedAtBlock, BigInt(START_BLOCK));
+    assert.equal(pool?.updatedAtTimestamp, BigInt(START_TS));
   });
 
   it("requests the same effect key in preload and processing", async () => {

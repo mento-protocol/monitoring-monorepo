@@ -201,7 +201,7 @@ async function refoldPool(
   context: EvmOnEventContext,
   poolId: string,
   rows: readonly BrokerTradingLimit[],
-  adopted: boolean,
+  args: { adopted: boolean; blockNumber: bigint; blockTimestamp: bigint },
 ): Promise<void> {
   const pool = await context.Pool.get(poolId);
   if (!pool) return;
@@ -210,8 +210,16 @@ async function refoldPool(
   // of date. The first fold can land before the pool mirrors its tokens, and
   // nothing else re-folds afterwards; skipping the no-op write keeps an RPC
   // blip from flapping a good homepage status.
-  if (!adopted && foldIsCurrent(pool, fields)) return;
-  context.Pool.set({ ...pool, ...fields });
+  if (!args.adopted && foldIsCurrent(pool, fields)) return;
+  // A Broker event is the only writer on this path, so the Pool cursor must
+  // advance with it. The dashboard's live/fleet merge reads an equal
+  // `updatedAtBlock` as the same indexed state and would keep the old fields.
+  context.Pool.set({
+    ...pool,
+    ...fields,
+    updatedAtBlock: args.blockNumber,
+    updatedAtTimestamp: args.blockTimestamp,
+  });
 }
 
 export async function applyBrokerTradingLimits(
@@ -231,7 +239,11 @@ export async function applyBrokerTradingLimits(
     args.context,
     wrapped.poolId,
     outcomes.map((outcome) => outcome.row),
-    outcomes.some((outcome) => outcome.adopted),
+    {
+      adopted: outcomes.some((outcome) => outcome.adopted),
+      blockNumber: args.blockNumber,
+      blockTimestamp: args.blockTimestamp,
+    },
   );
 }
 
@@ -322,7 +334,11 @@ indexer.onEvent(
       context,
       wrapped.poolId,
       await legRowsForPool(context, wrapped.poolId, row),
-      true,
+      {
+        adopted: true,
+        blockNumber: asBigInt(event.block.number),
+        blockTimestamp: asBigInt(event.block.timestamp),
+      },
     );
   },
 );

@@ -42,8 +42,12 @@ export type BrokerLimitsState = {
   hasError: boolean;
 };
 
+// A reconfigure zeroes a window's net flow only when it DISABLES that window,
+// so the global figure keeps accumulating across configuration changes that
+// leave LG enabled. Do not describe it as "since the limit was configured".
 const GLOBAL_HINT =
-  "Lifetime net flow since the limit was last configured; no time-based reset.";
+  "Net flow accumulated while the global window has been enabled; no " +
+  "time-based reset, and a reconfigure that keeps it enabled does not zero it.";
 const ROLLING_HINT =
   "Net flow inside the rolling window; the window resets on its own timestep.";
 
