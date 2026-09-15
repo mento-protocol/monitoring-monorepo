@@ -3,7 +3,7 @@ title: Mutation Testing Checklist
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-26
+last_verified: 2026-09-15
 doc_type: checklist
 scope: ci/process
 review_interval_days: 90
@@ -23,8 +23,16 @@ one of the current mutation targets.
   runtime plus mutation score in the PR.
   In sandboxed agent sessions, Stryker may need command approval because it opens
   a local logging socket.
+- Run the harness canary for the affected package first
+  (`pnpm indexer:mutation:canary`, `pnpm dashboard:mutation:canary`,
+  `pnpm bridge:mutation:canary`). It must score 100%. A failure means the
+  harness stopped activating mutants, so the baseline score is meaningless —
+  fix the harness, never the floor. `.github/workflows/mutation-testing.yml`
+  runs the same canary before each baseline. `docs/mutation-testing.md` owns
+  the canary's design and the current vitest pin it enforces.
 - Classify every survivor as a real test gap, equivalent mutant/noise, or tool
-  limitation. Add tests only for real gaps.
+  limitation. Add tests only for real gaps. When every mutant survives, suspect
+  the harness before the tests.
 - **Mutation runs weekly + on-demand, not per-PR.** Each `stryker.config.mjs`
   sets a `break` floor at "floor(measured mutation score) − 2" for measurement
   noise; a run whose score drops below the floor fails the job.

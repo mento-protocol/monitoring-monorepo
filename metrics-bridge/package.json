@@ -14,7 +14,8 @@
     "knip:report": "knip --config knip.json --no-exit-code --no-progress",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "test:mutation": "stryker run"
+    "test:mutation": "stryker run",
+    "test:mutation:canary": "node ../scripts/repo-health/mutation-harness-canary.mjs"
   },
   "dependencies": {
     "@mento-protocol/config": "workspace:*",
@@ -29,7 +30,7 @@
     "@stryker-mutator/core": "9.6.1",
     "@stryker-mutator/vitest-runner": "9.6.1",
     "@types/node": "^24.10.1",
-    "@vitest/coverage-v8": "^5.0.0",
+    "@vitest/coverage-v8": "^4.1.11",
     "eslint": "^10.0.2",
     "eslint-plugin-sonarjs": "4.0.3",
     "eslint-plugin-unused-imports": "^4.2.0",
@@ -39,7 +40,7 @@
     "tsx": "^4.19.0",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.56.1",
-    "vitest": "^5.0.0"
+    "vitest": "^4.1.11"
   },
   "engines": {
     "node": ">=24"

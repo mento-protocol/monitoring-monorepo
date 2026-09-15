@@ -25,6 +25,7 @@ pnpm indexer:codegen              # Generate schema types
 pnpm indexer:dev                  # Start mainnet indexer
 pnpm --filter @mento-protocol/indexer-envio indexer:reserve-yield:test    # Codegen mainnet config, test sUSDS/stETH, restore mainnet codegen
 pnpm indexer:mutation              # Targeted StrykerJS baseline for indexer pure logic
+pnpm indexer:mutation:canary       # Harness canary: 100% or the mutation harness is broken
 pnpm deploy:indexer                # Push HEAD to envio branch and trigger hosted reindex
 pnpm deploy:indexer:status <commit> --watch --compact  # Low-noise registration + sync wait
 pnpm deploy:indexer:logs <commit> --errors-only --since 2h  # Errors; narrow --since if 100 records fill the page
@@ -110,6 +111,8 @@ pnpm --filter @mento-protocol/ui-dashboard test:browser:production        # Same
 pnpm --filter @mento-protocol/ui-dashboard test:browser:update-snapshots # Rebaseline legitimate visual snapshot changes
 pnpm dashboard:mutation       # Targeted StrykerJS baseline for dashboard pure logic
 pnpm bridge:mutation          # Targeted StrykerJS baseline for metrics-bridge rebalance probe logic
+pnpm dashboard:mutation:canary  # Harness canary: 100% or the mutation harness is broken
+pnpm bridge:mutation:canary     # Harness canary: 100% or the mutation harness is broken
 
 # Aggregator integration probes
 pnpm integrations:probe        # Quote-only Mento v3 route coverage snapshot

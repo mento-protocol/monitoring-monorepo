@@ -8,6 +8,7 @@ export default defineConfig({
     include: [
       "src/lib/__tests__/pool-id.test.ts",
       "src/lib/__tests__/weekend.test.ts",
+      "tests/harness-canary/subject.test.ts",
     ],
     coverage: {
       provider: "v8",

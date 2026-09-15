@@ -401,6 +401,14 @@ describe("shouldRefreshBrokerState", () => {
       state: state({ netflowGlobal: 1278n }),
     });
     assert.equal(shouldRefreshBrokerState(hot, BLOCK, NOW), true);
+    // Pressure exactly at the threshold refreshes too: the gate is `>=`.
+    const atThreshold = row({
+      stateBlock: 90n,
+      stateTimestamp: NOW,
+      config: config({ flags: LIMIT_FLAG_LG, limitGlobal: 1000n }),
+      state: state({ netflowGlobal: 800n }),
+    });
+    assert.equal(shouldRefreshBrokerState(atThreshold, BLOCK, NOW), true);
     const warm = row({
       stateBlock: 90n,
       stateTimestamp: NOW,

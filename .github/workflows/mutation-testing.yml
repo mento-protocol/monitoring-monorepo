@@ -57,7 +57,9 @@ jobs:
             # capture script wiring + version drift.
             dashboard:
               - ui-dashboard/src/lib/**
+              - ui-dashboard/tests/harness-canary/**
               - ui-dashboard/stryker.config.mjs
+              - ui-dashboard/stryker.canary.config.mjs
               - ui-dashboard/vitest.mutation.config.ts
               - ui-dashboard/package.json
               - ui-dashboard/tsconfig.json
@@ -77,6 +79,8 @@ jobs:
               - .node-version
               - .github/workflows/mutation-testing.yml
               - .github/actions/pnpm-install/**
+              - scripts/repo-health/mutation-harness-canary.mjs
+              - scripts/repo-health/mutation-harness-canary.test.mjs
       - name: Decide whether to run mutation
         id: decide
         env:
@@ -99,6 +103,20 @@ jobs:
           fi
       - uses: ./.github/actions/pnpm-install
         if: steps.decide.outputs.run == 'true'
+      # Harness canary. It mutates a fixture whose every mutant its own test
+      # kills, so it fails only when Stryker stops activating mutants. That
+      # tells "harness broken" from "tests weak" before the real run reports a
+      # collapse (issue #2449).
+      - name: Run dashboard mutation harness canary
+        if: steps.decide.outputs.run == 'true'
+        run: pnpm dashboard:mutation:canary
+      # Negative control for the runner itself: a non-zero Stryker exit must
+      # print MUTATION HARNESS BROKEN with the installed versions and
+      # propagate the code. It stubs `stryker` on PATH, so it runs no
+      # mutation. One job covers the runner all three jobs call.
+      - name: Mutation harness canary runner suite
+        if: steps.decide.outputs.run == 'true'
+        run: node --test scripts/repo-health/mutation-harness-canary.test.mjs
       - name: Run dashboard mutation baseline
         if: steps.decide.outputs.run == 'true'
         run: pnpm dashboard:mutation
@@ -145,6 +163,7 @@ jobs:
               - indexer-envio/config/**
               - indexer-envio/schema.graphql
               - indexer-envio/stryker.config.mjs
+              - indexer-envio/stryker.canary.config.mjs
               - indexer-envio/vitest.mutation.config.ts
               - indexer-envio/package.json
               - indexer-envio/tsconfig.json
@@ -162,6 +181,8 @@ jobs:
               - .node-version
               - .github/workflows/mutation-testing.yml
               - .github/actions/pnpm-install/**
+              - scripts/repo-health/mutation-harness-canary.mjs
+              - scripts/repo-health/mutation-harness-canary.test.mjs
       - name: Decide whether to run mutation
         id: decide
         env:
@@ -184,6 +205,13 @@ jobs:
           fi
       - uses: ./.github/actions/pnpm-install
         if: steps.decide.outputs.run == 'true'
+      # Harness canary. It mutates a fixture whose every mutant its own test
+      # kills, so it fails only when Stryker stops activating mutants. That
+      # tells "harness broken" from "tests weak" before the real run reports a
+      # collapse (issue #2449).
+      - name: Run indexer mutation harness canary
+        if: steps.decide.outputs.run == 'true'
+        run: pnpm indexer:mutation:canary
       - name: Run indexer mutation baseline
         if: steps.decide.outputs.run == 'true'
         run: pnpm indexer:mutation
@@ -228,6 +256,7 @@ jobs:
               - metrics-bridge/src/**
               - metrics-bridge/test/**
               - metrics-bridge/stryker.config.mjs
+              - metrics-bridge/stryker.canary.config.mjs
               - metrics-bridge/vitest.mutation.config.ts
               - metrics-bridge/package.json
               - metrics-bridge/tsconfig.json
@@ -248,6 +277,8 @@ jobs:
               - .node-version
               - .github/workflows/mutation-testing.yml
               - .github/actions/pnpm-install/**
+              - scripts/repo-health/mutation-harness-canary.mjs
+              - scripts/repo-health/mutation-harness-canary.test.mjs
       - name: Decide whether to run mutation
         id: decide
         env:
@@ -270,6 +301,13 @@ jobs:
           fi
       - uses: ./.github/actions/pnpm-install
         if: steps.decide.outputs.run == 'true'
+      # Harness canary. It mutates a fixture whose every mutant its own test
+      # kills, so it fails only when Stryker stops activating mutants. That
+      # tells "harness broken" from "tests weak" before the real run reports a
+      # collapse (issue #2449).
+      - name: Run bridge mutation harness canary
+        if: steps.decide.outputs.run == 'true'
+        run: pnpm bridge:mutation:canary
       - name: Run bridge mutation baseline
         if: steps.decide.outputs.run == 'true'
         run: pnpm bridge:mutation

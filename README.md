@@ -210,13 +210,18 @@ Chromium. If a fresh checkout still lacks it, install it once with
 ### Targeted Mutation Baseline
 
 ```bash
+pnpm indexer:mutation:canary
 pnpm indexer:mutation
+pnpm dashboard:mutation:canary
 pnpm dashboard:mutation
+pnpm bridge:mutation:canary
 pnpm bridge:mutation
 ```
 
 These run the non-required StrykerJS baselines for targeted indexer, dashboard,
-and metrics-bridge pure logic. See
+and metrics-bridge pure logic. Each `:canary` command mutates a fixture whose
+every mutant its own test kills, so it fails only when the harness stops
+activating mutants — run it first to tell a broken harness from weak tests. See
 [`docs/mutation-testing.md`](./docs/mutation-testing.md) for scope, runtime,
 score, and survivor classification.
 

@@ -3,7 +3,7 @@ title: "Mutation Testing"
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-26
+last_verified: 2026-09-15
 doc_type: reference
 scope: repo-wide
 review_interval_days: 7
@@ -16,11 +16,44 @@ Mutation testing is intentionally scoped to proven pure-logic targets:
 
 - `indexer-envio/src/helpers.ts`
 - `indexer-envio/src/tradingLimits.ts`
+- `indexer-envio/src/brokerTradingLimits.ts`
 - `indexer-envio/src/handlers/stables/classifyKind.ts`
 - `indexer-envio/src/handlers/stables/dailyFlush.ts`
 - `ui-dashboard/src/lib/weekend.ts`
 - `ui-dashboard/src/lib/pool-id.ts`
 - `metrics-bridge/src/rebalance-probe.ts`
+
+## Harness Canary
+
+Each package also carries a harness canary: a fixture whose every mutant its
+own direct test kills, mutated by `stryker.canary.config.mjs` with
+`break: 100`. Run it from the repo root before the real run:
+
+```bash
+pnpm indexer:mutation:canary
+pnpm bridge:mutation:canary
+pnpm dashboard:mutation:canary
+```
+
+The canary answers one question the real run cannot: is a low score a weak
+test suite or a dead harness? It reuses the package's own
+`vitest.mutation.config.ts`, so it proves mutant activation for the exact
+runner and config the real run uses. Its test imports the fixture by a
+relative path, so it does not prove that a path alias such as the dashboard's
+`@` still resolves inside the sandbox. Point a canary fixture at the alias if
+a real target ever becomes reachable only through one. On failure
+`scripts/repo-health/mutation-harness-canary.mjs` prints
+`MUTATION HARNESS BROKEN` with the installed vitest and Stryker versions.
+`.github/workflows/mutation-testing.yml` runs it before each package's
+baseline. Never lower a `break` floor to clear a canary failure.
+
+Vitest stays on 4.x in the three mutation packages. Under vitest 5 the
+Stryker vitest runner's per-test name filter matches nothing, so every
+covered mutant survives while the tests pass
+(stryker-mutator/stryker-js#6210). `@stryker-mutator/vitest-runner` 10.0.0,
+the newest release, does not fix it; the fix PRs #6214 and #6220 are
+unreleased. `.github/dependabot.yml` ignores vitest major updates until a
+released runner passes all three canaries on the newer vitest.
 
 ## Current Baseline
 
@@ -28,17 +61,17 @@ This document is the canonical record for current mutation measurements,
 runtimes, and accepted survivor classifications. The package configs own only
 the enforced floors; the checklist owns the recurring workflow policy.
 
-The 2026-07-26 baseline ran the three commands serially from a clean checkout
-of [`e86c638d7feed52228afd658bf742ff5124a6da5`](https://github.com/mento-protocol/monitoring-monorepo/commit/e86c638d7feed52228afd658bf742ff5124a6da5)
-(`docs: finish notes and plans garden (#1612)`) on macOS 26.5.2, Node
-v24.13.1, and pnpm 11.9.0. Stryker's native JSON and HTML reports were emitted
-under each package's ignored `reports/mutation/` directory; the table below is
-the retained, reviewable extraction from those reports.
-Review then identified the bridge's `probeInProgress = true` and
-`reentryWarnedThisWindow = true` survivors as real first-cycle test gaps. The
-metrics-bridge row records the corrected rerun from this proposed tree after
-adding one first-window test that kills both; the other two rows retain the
-clean-checkout measurements.
+The 2026-09-15 baseline ran the three commands serially from a clone of
+[`a57133c21ea8ef4f998b848b80f64d52b14b75a9`](https://github.com/mento-protocol/monitoring-monorepo/commit/a57133c21ea8ef4f998b848b80f64d52b14b75a9)
+(`feat(indexer,dashboard): surface v2 Broker trading limits on VirtualPool pages (#2446)`)
+with the vitest 4.x pin of this PR applied, on macOS 26.5.2, Node v24.13.1,
+and pnpm 11.9.0. Stryker's native JSON and HTML reports were emitted under
+each package's ignored `reports/mutation/` directory; the table below is the
+retained, reviewable extraction from those reports.
+It replaces the 2026-07-26 baseline, which predated both
+`brokerTradingLimits.ts` (added to the indexer `mutate` list by #2446) and the
+vitest 5 harness break (#2449). The indexer row records a rerun after one
+added test that kills the `shouldRefreshBrokerState` threshold survivor.
 
 Run from the repo root:
 
@@ -56,22 +89,28 @@ parallel without scanning transient mutation files.
 
 | Target         | Native report                                                     | Runtime | Score (total / covered) | Mutants (killed / timed out / survived / no coverage / errors) | `break` / margin |
 | -------------- | ----------------------------------------------------------------- | ------: | ----------------------- | -------------------------------------------------------------- | ---------------- |
-| Metrics bridge | `metrics-bridge/reports/mutation/{mutation.json,html/index.html}` |      8s | 88.89% / 88.89%         | 140 / 4 / 18 / 0 / 0                                           | 86 / 2.89 points |
-| Dashboard      | `ui-dashboard/reports/mutation/{mutation.json,html/index.html}`   |     12s | 88.83% / 91.50%         | 172 / 11 / 17 / 6 / 0                                          | 86 / 2.83 points |
-| Indexer        | `indexer-envio/reports/mutation/{mutation.json,html/index.html}`  |     58s | 96.09% / 96.09%         | 161 / 11 / 7 / 0 / 0                                           | 94 / 2.09 points |
+| Metrics bridge | `metrics-bridge/reports/mutation/{mutation.json,html/index.html}` |     11s | 88.89% / 88.89%         | 141 / 3 / 18 / 0 / 0                                           | 86 / 2.89 points |
+| Dashboard      | `ui-dashboard/reports/mutation/{mutation.json,html/index.html}`   |     16s | 88.83% / 91.50%         | 172 / 11 / 17 / 6 / 0                                          | 86 / 2.83 points |
+| Indexer        | `indexer-envio/reports/mutation/{mutation.json,html/index.html}`  |   1m31s | 95.98% / 97.38%         | 305 / 29 / 9 / 5 / 0                                           | 94 / 1.98 points |
+
+The canary runs are a few seconds each: 7s indexer, 1s bridge, 2s dashboard.
 
 The floor is `floor(measured total score) - 2`. Stryker counts timed-out
 mutants as detected in its total score, while retaining their count separately
-in the reports. The corrected bridge floor moves from 85 to 86, and the indexer
-floor moves from 92 to 94, because these measured baselines support the existing
-two-point policy; no targets or schedule change.
+in the reports. No floor changes: the indexer measured 95.98%, whose policy
+floor of 93 is looser than the 94 already enforced, so 94 stands. The bridge
+and dashboard floors of 86 match their measurements. The indexer runtime grew
+from 58s to 1m31s because #2446 added `brokerTradingLimits.ts`, roughly
+doubling its mutant count.
 
 Per-file results:
 
 - Indexer: `helpers.ts` 92.98%, `tradingLimits.ts` 96.63%,
+  `brokerTradingLimits.ts` 95.86% total / 98.78% covered,
   `stables/classifyKind.ts` 100.00%, and `stables/dailyFlush.ts` 100.00%.
 - Dashboard: `weekend.ts` 87.71% total / 90.75% covered and `pool-id.ts`
   96.30% total / covered.
+- Metrics bridge: `rebalance-probe.ts` 88.89% total / covered.
 
 The indexer scope is limited to deterministic helpers with direct tests:
 chain/event/pool/snapshot ID helpers, trading-limit derivation, and stables
@@ -105,9 +144,10 @@ The metrics-bridge evaluation was mixed:
 
 ## Survivor Classification
 
-The 2026-07-26 survivors are accepted noise or equivalent mutants in the
+The 2026-09-15 survivors are accepted noise or equivalent mutants in the
 current target scope. Treat a new survivor as a test gap unless it fits one of
-these classifications.
+these classifications. A run in which every mutant survives is not a
+classification problem: run the canary first.
 
 **Dashboard (17 survived, 6 no coverage)**
 
@@ -185,15 +225,25 @@ timeoutMessage` and the fallback now returns
   zero iterations, and the function still reaches the same final
   `rebalanceProbeLastRun` gauge update at the end of the `try` block.
 
-**Indexer (7 survived)**
+**Indexer (9 survived, 5 no coverage)**
 
-- `extractAddressFromPoolId()` has three error-message/regex-shape survivors;
-  they do not change the currently asserted valid extraction, bare-address, or
-  double-namespacing behavior. The `addr === undefined` guard is unreachable
-  after the preceding capture-group match succeeds and remains defensive
-  against future regex edits.
-- The three trading-limit `<` to `<=` absolute-value mutants are equivalent for
-  zero because negating `0n` still yields `0n`.
+- `helpers.ts` (4 survived): `extractAddressFromPoolId()` has three
+  error-message/regex-shape survivors; they do not change the currently
+  asserted valid extraction, bare-address, or double-namespacing behavior. The
+  `addr === undefined` guard is unreachable after the preceding capture-group
+  match succeeds and remains defensive against future regex edits.
+- `tradingLimits.ts` (3 survived): the three `<` to `<=` absolute-value mutants
+  are equivalent for zero because negating `0n` still yields `0n`.
+- `brokerTradingLimits.ts` (2 survived): both are in `statusRank()` and are
+  equivalent because `foldPoolLimitFields()` reads the rank back through
+  `STATUS_BY_SEVERITY[worstRank] ?? "N/A"`. Dropping the `rank < 0` clamp
+  leaves `-1`, which indexes to `undefined` and falls back to the same `N/A`;
+  widening it to `rank <= 0` returns `0` for a rank that was already `0`.
+- `brokerTradingLimits.ts` (5 no coverage): `brokerLimitConfigFromRow()` and
+  `brokerLimitStateFromRow()` are row-to-struct projections exercised only by
+  `test/brokerTradingLimits.handler.test.ts`, which the mutation Vitest config
+  does not include; the `?? "N/A"` fallback literal is unreachable for the same
+  reason the two `statusRank()` survivors are.
 
 ## Expansion Guidance
 
