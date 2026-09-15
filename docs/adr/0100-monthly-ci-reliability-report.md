@@ -41,9 +41,8 @@ not display name, and does not cover any other workflow.
 dispatch), least-privilege (`permissions: {}` at the workflow level; the job
 grants itself `actions: read`, `contents: read`, `issues: write`), on
 `ubuntu-24.04-arm`, following the `file-size-watchlist.yml`
-scheduling shape (ADR 0059) and the `m6-canary.yml` `github-script` shape for
-reading the Actions API through the injected, auto-paginating Octokit client
-rather than a `gh api` shell-out.
+scheduling shape (ADR 0059). Its `github-script` step reads the Actions API
+through the injected Octokit client and its pagination helpers.
 
 `scripts/workflows/report-ci-reliability.mjs` does the work:
 
