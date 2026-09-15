@@ -555,8 +555,14 @@ review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
    non-empty passing required-only projection. The wait is an untrusted delay.
    The writer repeats the complete workflow, run, job, PR, head,
    maintainer-change body, close-history, commit, file, and queue proof after
-   it. It then calls the synchronous REST merge endpoint with the exact head
-   SHA and squash method.
+   it. It then proves the head contains the base tip (`behind_by == 0`), since
+   with strict off a stale head still reports `mergeable_state: clean`
+   ([ADR 0104](../adr/0104-non-strict-required-status-checks.md)). Only then
+   does it call the synchronous REST merge endpoint with the exact head SHA and
+   squash method. A stale head merges nothing and writes nothing: it emits a
+   `::warning::` and a job summary naming the PR and `behind_by`. Dependabot's
+   scheduled rebase recovers it while it is under 30 days old; after that a
+   human must comment `@dependabot rebase`.
    The endpoint cannot enqueue or leave a standing auto-merge request. A later
    push cannot satisfy the exact-head write. A recorded close remains a durable
    human veto after the same PR and head are reopened. Dependabot must open a

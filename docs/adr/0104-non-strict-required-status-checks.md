@@ -162,6 +162,9 @@ lane.
   required strict current-base checking. The first two are annotated as
   historical; the rollback now says to keep required CI and leave strict off,
   so running it cannot re-enable the policy.
+- **Amends** [ADR 0081](0081-narrow-dependabot-auto-merge-exception.md) step 5:
+  the writer proves `behind_by == 0` before the REST merge, and a stale head
+  stalls visibly instead of merging.
 
 ## Evidence
 
