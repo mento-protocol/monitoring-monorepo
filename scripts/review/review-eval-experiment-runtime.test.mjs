@@ -1356,6 +1356,8 @@ function stageRun(harness, { stage, probe, ...overrides }) {
       scorerDigestNow: () => harness.plan.inputs.scorer_digest,
       judgeExec: judgeExec(),
       contestantExec: async () => contestantStream(["file.js:1 has a defect"]),
+      // A live-paired stage makes a codex home; CI has no operator login.
+      createCodexHome: () => fakeCodexHome(harness.artifactRoot),
       ...overrides,
     },
   );
