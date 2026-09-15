@@ -1,4 +1,4 @@
-// The indexer handler-invariant routing families: the data the quality gate
+// The indexer handler-invariant families: the data the retained checklist
 // classifier reads. Keep this module free of imports so the contract module
 // can validate it, and a test fixture can mutate it, in isolation.
 export const INDEXER_HANDLER_INVARIANT_FAMILIES = [

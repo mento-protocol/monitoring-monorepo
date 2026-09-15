@@ -280,9 +280,6 @@ test("accepts every reviewed allowlist entry the settings file grants", () => {
   assertNoFailures(
     runContract({
       allow: [
-        "Bash(./scripts/agent-quality-gate.sh:*)",
-        "Bash(bash scripts/agent-quality-gate.test.sh:*)",
-        "Bash(bash ./scripts/agent-quality-gate.test.sh:*)",
         "Bash(bash scripts/bootstrap/agent-session-end-hook.sh:*)",
         "Bash(bash ./scripts/bootstrap/agent-session-end-hook.sh:*)",
         "Bash(node scripts/check-agent-quality-gate-package-scripts.mjs:*)",

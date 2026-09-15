@@ -240,11 +240,7 @@ validator_repo="$(mktemp -d)"
 {
   "name": "fixture",
   "scripts": {
-    "agent:quality-gate": "true",
-    "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh",
     "agent:context-check": "node scripts/context/check-agent-context.mjs",
-    "agent:prewarm": "node scripts/gate/agent-prewarm.mjs",
-    "agent:prewarm:test": "node scripts/gate/agent-prewarm.test.mjs",
     "agent:review-materiality": "node scripts/pr/review-materiality.mjs",
     "agent:review-materiality:test": "node scripts/pr/review-materiality.test.mjs",
     "docs:garden": "node scripts/docs/docs-garden-issue.mjs",
@@ -276,6 +272,6 @@ JSON
 )
 rm -rf "$validator_repo"
 validator_repo=""
-assert_contains 'package.json scripts.agent:quality-gate must be "./scripts/agent-quality-gate.sh"'
+assert_contains 'package.json scripts.sentry:ingest must be "node scripts/sentry/triage/sentry-triage-ingest.mjs"'
 
 echo "agent setup contract tests passed"

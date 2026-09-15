@@ -10,19 +10,6 @@ const expectedScripts = {
   // payload Codex 3754887736 describes — fails this validator; the hook-rejection
   // loop below rejects any OTHER lifecycle hook a package-only PR might add.
   postinstall: "pnpm --filter @mento-protocol/config build",
-  "agent:quality-gate": "./scripts/agent-quality-gate.sh",
-  "agent:quality-gate:test": "bash scripts/agent-quality-gate.test.sh",
-  // The routing table's own suite (ADR 0069). Since D5c retired the gate's bash
-  // `case` arms the table IS the routing, and this suite is the only thing
-  // proving that the pattern compiler agrees with bash, that no arm names a path
-  // that has gone, that the engine implements the closed verb set, and that
-  // `implementation_signature()` still lists every module the freshness stamp
-  // must hash. The gate schedules it and so does the required `ci` job, which
-  // makes it exactly the alias a PR weakening the routing would want to repoint.
-  "gate:routing-table:test":
-    'node --test "scripts/gate/routing-table/*.test.mjs"',
-  "agent:prewarm": "node scripts/gate/agent-prewarm.mjs",
-  "agent:prewarm:test": "node scripts/gate/agent-prewarm.test.mjs",
   "agent:review-materiality": "node scripts/pr/review-materiality.mjs",
   "agent:review-materiality:test":
     "node scripts/pr/review-materiality.test.mjs",

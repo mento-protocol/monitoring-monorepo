@@ -21,12 +21,7 @@
  *   2. The one suite the gate does not run — sentry-provider-contract, reached
  *      by import from tf-stacks.test.mjs — really is run by an unconditional
  *      job, and that job is trustworthy.
- *   3. The local gate's tooling allowlist in scripts/agent-quality-gate.sh
- *      lists every `sentry:*` script, and every listed script is pinned to an
- *      exact command by check-agent-quality-gate-package-scripts.mjs. The local
- *      gate runs the `pnpm sentry:*:test` aliases (developer convenience, with
- *      the CI gate as the backstop); the allowlist grants that trust and the
- *      pin is what makes it safe.
+ *   3. Every retained Sentry alias stays pinned by the pre-install validator.
  *
  * PR C of #1779 relocated this file from the path-gated `scripts` job into
  * `sentry-suites`, which never skips — a dashboard-only, indexer-only or
@@ -46,7 +41,6 @@
  *                        whole, never by prefix
  *   tf-stacks.test.mjs   V8's own parser (vm.SourceTextModule) reports the
  *                        static import list, with nothing executed
- *   the gate allowlist   bash evaluates its own `case` statement
  *   the validator pins   the validator reports them itself
  *
  * An unparsable ci.yml throws here, and that is correct.
@@ -104,8 +98,6 @@ import "./check-sentry-suites-in-ci-gate-job.test.mjs";
 import "./check-sentry-suites-in-ci-coverage.test.mjs";
 // The gate-routing probe's own invariants, split out for the same reason: how
 // the classifier is lifted out, and how it is re-run once lifted.
-import "./check-sentry-suites-in-ci-gate-extract.test.mjs";
-import "./check-sentry-suites-in-ci-gate-probe.test.mjs";
 import {
   CI,
   collectCompositeActions,
@@ -546,11 +538,6 @@ test("the checker's own files stay under the file-size hard cap", () => {
     SELF,
     "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-core-commands.mjs",
     "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-probes.mjs",
-    "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-probe.mjs",
-    "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-probe.test.mjs",
-    "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-extract.mjs",
-    "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-extract.test.mjs",
-    "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-fixtures.mjs",
     "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-lifecycle.test.mjs",
     "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-job.test.mjs",
     "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-coverage.test.mjs",

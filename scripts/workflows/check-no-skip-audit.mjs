@@ -30,7 +30,7 @@ const READ_SCOPES = Object.freeze({ actions: "read", contents: "read", "pull-req
 // prettier-ignore
 const ADMISSION_STEP_HASH = "18f1c3741064363a488462c96fd34772c3b66eeee4a3f4bd2fb2a86275c3a203", CHECKOUT_STEP_HASH = "2d39e2e5293845e1c63f0f2e95ab8eb7e3d65360955c5b2c54ea1bddff57c22d", PROTECTED_DRIFT_STEP_HASH = "019ce295d3b3b50fe6684a65a93a2387a8a29d7c6c62db83cdc00bf1e8cf7a04", SUMMARY_STEP_HASH = "b6def63e8f5ccb7e13a6460f546cb391bf0e86350876470a787f038ea7cebb10";
 const CI_GRAPH_HASH =
-    "0c3a1e27f2cb65d9ed48c211de8809c79cdd46c74485e47acea31aed2e230dbd",
+    "6c490140da7ab22bfc56383eff9befef063300051d1549cec6b3dd6b6e3b47b7",
   BASELINE_HASH =
     "467641beda8b2b45d49d0c62429d8e95f62b05c1db96f6665b106012a09cef12";
 // prettier-ignore
@@ -49,11 +49,7 @@ const CALL_INPUTS = {
   audit_base_sha: { description: "Admitted immutable protected-main SHA", required: false, default: "", type: "string" },
 };
 // prettier-ignore
-const LEGACY_GATE_STEPS = Object.freeze([
-  ["indexer-checks", "Legacy indexer routing parity suite", "node --test scripts/gate/routing-table/indexer-invariant-parity.test.mjs"],
-  ["scripts", "Gate routing-table suite", "pnpm gate:routing-table:test"],
-  ["docs-checks", "Gate routing-table suite", "pnpm gate:routing-table:test"],
-]);
+const LEGACY_GATE_STEPS = Object.freeze([]);
 // prettier-ignore
 const RETAINED_EXTRACTED_STEPS = Object.freeze([
   ["indexer-checks", "Indexer handler invariant contract", "node --test scripts/indexer-handler-invariant-contract.test.mjs"],
@@ -179,7 +175,7 @@ function checkRetainedBoundary(root, errors) {
   const retainedPins = allSteps.filter(([, step]) => step.run === "node scripts/check-agent-quality-gate-package-scripts.mjs");
   add(errors, retainedPins.length === 3 && retainedPins.every(([, step]) => step.if === undefined), "retained package-script validators must remain audit-executable");
   const auditUsers = readdirSync(join(root, ".github/workflows")).filter((name) => /\.ya?ml$/u.test(name) && /(?:no_skip_audit|audit_source_sha|audit_base_sha)/u.test(stable(yaml(root, `.github/workflows/${name}`)))).map((name) => `.github/workflows/${name}`).sort();
-  add(errors, stable(auditUsers) === stable([CI, DISPATCH, ".github/workflows/m6-audit-recovery.yml"].sort()), "only the protected dispatchers may call audit mode");
+  add(errors, stable(auditUsers) === stable([CI, DISPATCH].sort()), "only the protected dispatchers may call audit mode");
 }
 
 // prettier-ignore

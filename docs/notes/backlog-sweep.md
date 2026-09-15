@@ -325,7 +325,7 @@ Two `pkg:tooling` candidates are independent when all three hold:
   and two workers would edit one file;
 - neither names a shared root file or a control root: `package.json`,
   `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `.trunk/**`, `.github/workflows/**`,
-  `scripts/agent-quality-gate.sh`, or `scripts/gate/**`.
+  `scripts/workflows/**`.
 
 A candidate that carries the docs catalog above brings `docs/README.md` into
 this comparison as well, so it also conflicts with a candidate that names that

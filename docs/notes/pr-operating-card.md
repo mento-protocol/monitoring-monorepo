@@ -126,8 +126,7 @@ If root `package.json` changed, first run
    A failed author check blocks the ready handoff and cannot be relabeled.
    Record an unavailable tool as `not run`. Required CI remains merge authority
    and owns routine coverage and Knip, broad dependency and supply-chain audits,
-   and full-browser suites. The optional legacy diagnostic and its self-tests
-   are outside required CI during M6 observation. A table row or triggered
+   and full-browser suites. The legacy diagnostic and its self-tests are retired. A table row or triggered
    checklist can require a focused policy or configuration check.
 
    Apply only the rows affected by a material fix before publishing the new
@@ -493,7 +492,8 @@ If root `package.json` changed, first run
    [`pr-ready-state.md`](pr-ready-state.md), in its order: merge the base
    first, batch every fix commit into one push, never post while a CodeRabbit
    check is running on the current head, and post at most one marked request
-   per head and at most two per PR, following the gate's `fallbackAction`
+   per accepted head and at most two per PR (a refused request may be retried
+   once, per that note), following the gate's `fallbackAction`
    rather than re-deriving the decision (that note states the precedence),
    after the stack and head-config rules it cannot read. The subsequent
    current-head `pr:ready-state` must report ready, including the current-head

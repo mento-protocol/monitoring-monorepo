@@ -232,15 +232,34 @@ function countReferenceLines(path, content, replacementActive) {
   }
   return selected.size;
 }
-export function buildManifest({ repoRoot = DEFAULT_ROOT, source }) {
-  const sourceSha = git(repoRoot, ["rev-parse", `${source}^{commit}`]).trim();
+export function buildManifest({
+  repoRoot = DEFAULT_ROOT,
+  source,
+  retired = false,
+}) {
+  const sourceSha = git(repoRoot, [
+    "rev-parse",
+    `${source}^{${retired ? "tree" : "commit"}}`,
+  ]).trim();
   const paths = git(repoRoot, ["ls-tree", "-r", "-z", sourceSha])
     .split("\0")
     .map((entry) => entry.match(/^\d+ blob [0-9a-f]+\t(.+)$/u)?.[1])
     .filter(Boolean)
     .sort();
+  const retiredEntries = new Set([
+    "scripts/agent-quality-gate.sh",
+    "scripts/agent-quality-gate.test.sh",
+  ]);
+  if (
+    retired &&
+    paths.some(
+      (path) => retiredEntries.has(path) || path.startsWith("scripts/gate/"),
+    )
+  )
+    fail("Retirement manifest still contains legacy runtime.");
   for (const path of REQUIRED_WHOLE_FILE_PATHS)
-    if (!paths.includes(path)) fail(`Missing manifest path: ${path}`);
+    if (!(retired && retiredEntries.has(path)) && !paths.includes(path))
+      fail(`Missing manifest path: ${path}`);
   const hookPresent = paths.includes(".trunk/hooks/pre-push");
   const trunkConfig = paths.includes(".trunk/trunk.yaml")
     ? git(repoRoot, ["show", `${sourceSha}:.trunk/trunk.yaml`])
@@ -251,6 +270,8 @@ export function buildManifest({ repoRoot = DEFAULT_ROOT, source }) {
       "The pre-push hook and Trunk quality-gate action must be retained or removed together.",
     );
   const replacementActive = !hookPresent && !trunkActionPresent;
+  if (retired && !replacementActive)
+    fail("Retirement manifest still contains the legacy hook.");
   for (const path of replacementActive
     ? REQUIRED_REPLACEMENT_WHOLE_FILE_PATHS
     : [])
@@ -262,6 +283,10 @@ export function buildManifest({ repoRoot = DEFAULT_ROOT, source }) {
       OPTIONAL_WHOLE_FILE_PATHS.has(path) ||
       REQUIRED_WHOLE_FILE_PATHS.has(path) ||
       path.startsWith("scripts/gate/") ||
+      (retired &&
+        /scripts\/(?:lib\/mapped-command-process-identity(?:\.test)?|workflows\/indexer-handler-invariant-(?:contract|families))\.mjs$/u.test(
+          path,
+        )) ||
       (replacementActive && REQUIRED_REPLACEMENT_WHOLE_FILE_PATHS.has(path));
     const content = git(repoRoot, ["show", `${sourceSha}:${path}`]);
     if (content.includes("\0")) continue;
@@ -294,7 +319,7 @@ export function buildManifest({ repoRoot = DEFAULT_ROOT, source }) {
   );
   return {
     schema_version: 1,
-    source_sha: sourceSha,
+    ...(retired ? { source_tree: sourceSha } : { source_sha: sourceSha }),
     definitions: replacementActive
       ? {
           whole_file:

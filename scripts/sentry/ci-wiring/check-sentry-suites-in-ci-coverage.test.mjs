@@ -42,7 +42,6 @@ import {
 } from "./check-sentry-suites-in-ci-core.mjs";
 import {
   CI,
-  gateClassifications,
   PKG_SCRIPTS,
   RUN_BY_ANOTHER_JOB,
   SCRIPTS_DIR,
@@ -111,46 +110,7 @@ test("every sentry:*:test script resolves to an enumerated suite", () => {
   );
 });
 
-test("the local gate's tooling allowlist trusts every sentry:* script", () => {
-  const sentryScripts = Object.keys(PKG_SCRIPTS)
-    .filter((name) => name.startsWith("sentry:"))
-    .sort();
-
-  // Two controls prove the probe is live before its verdicts are believed. A
-  // silent probe would pass this test by classifying nothing.
-  const trustedControl = "/scripts/tf:test";
-  const untrustedControl = "/scripts/__not_an_allowlisted_alias__";
-  const verdicts = gateClassifications([
-    trustedControl,
-    untrustedControl,
-    ...sentryScripts.map((name) => `/scripts/${name}`),
-  ]);
-  assert.equal(
-    verdicts.get(trustedControl),
-    "root-tooling-scripts",
-    "the allowlist probe cannot reproduce a known-trusted alias — the probe is broken, not the allowlist",
-  );
-  assert.equal(
-    verdicts.get(untrustedControl),
-    "package-scripts",
-    "the allowlist probe trusts an alias that is not listed — it is matching the wrong `case` arm",
-  );
-
-  const missing = sentryScripts.filter(
-    (name) => verdicts.get(`/scripts/${name}`) !== "root-tooling-scripts",
-  );
-  assert.deepEqual(
-    missing,
-    [],
-    "the gate's root-manifest allowlist — TOOLING_SCRIPT_POINTERS in " +
-      "scripts/gate/mapping/facts.mjs — does " +
-      `not list: ${missing.join(", ")}. Without the entry, a package.json edit ` +
-      "touching only that script classifies as `package-scripts` instead of " +
-      "`root-tooling-scripts` — conservative, but drift.",
-  );
-});
-
-test("every sentry:* script the gate trusts is pinned to an exact command", () => {
+test("every retained sentry:* script is pinned to an exact command", () => {
   // Allowlisting an alias TRUSTS it: `agent:quality-gate --run` will execute it
   // without `--allow-package-script-changes`. That trust is only safe while
   // check-agent-quality-gate-package-scripts.mjs pins the alias to an exact

@@ -249,7 +249,7 @@ names, compared on whole path segments (`scripts/pr/` against
 `scripts/sentry/` is disjoint, `docs/` against `docs/notes/` is not); and
 neither names a shared root file or control root —
 `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `.trunk/**`,
-`.github/workflows/**`, `scripts/agent-quality-gate.sh`, or `scripts/gate/**`.
+`.github/workflows/**`, `scripts/workflows/**`.
 Normalize the mirrored skill trees first, by path segments rather than by text:
 a path whose first two segments are `.claude/skills` is read with those replaced
 by `.agents/skills`, whatever follows and whether or not it ends in a slash. The
@@ -550,8 +550,7 @@ Then spawn one worker subagent per issue. Give each a brief containing:
   `.node-version`, package manifest, lockfile, pnpm configuration, or patch
   change before the first package-manager command. Run the selected direct
   commands in the order that step defines. Record every result as `passed`,
-  `failed`, or `not run` with its reason. The legacy quality gate is diagnostic
-  and is not the normal worker path.
+  `failed`, or `not run` with its reason.
 
   Start a long author check with the runtime's background mechanism and poll it
   to completion inside the same turn. Judge the command by its exit status,

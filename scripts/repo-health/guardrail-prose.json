@@ -71,7 +71,7 @@
   ],
   "docs/notes/pr-ready-state.md": [
     "Use the resolved PR base, not a fixed `origin/main`, for every diff-based author check, including stacked PRs.",
-    "Bind `--repo` to the base repository — checkout inference can select the wrong same-number PR on fork PRs."
+    "Bind `--repo` to the base repository \u2014 checkout inference can select the wrong same-number PR on fork PRs."
   ],
   ".agents/skills/backlog-sweep/SKILL.md": [
     "git remote -v # origin fetch and push must serve mento-protocol/monitoring-monorepo git status --porcelain # must print nothing git fetch origin main # only after both origin URLs pass",
@@ -80,9 +80,5 @@
   ],
   ".claude/skills/backlog-sweep/SKILL.md": [
     "Run dashboard coverage or scoped related tests, browser work, production builds, and size-limit work without another command-heavy check set."
-  ],
-  "docs/notes/agent-quality-gate-mechanics.md": [
-    "This mapping describes the optional retained diagnostic. Normal author work follows the matching direct checks in step 3 of the [PR operating card](pr-operating-card.md) and does not invoke the gate.",
-    "The [PR operating card](pr-operating-card.md#the-loop) owns normal direct author checks and closeout sequencing."
   ]
 }
