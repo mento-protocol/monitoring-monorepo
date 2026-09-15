@@ -491,8 +491,8 @@ install_foundry() {
     cat >&2 <<'MSG'
 error: foundryup was not installed on PATH after running the Foundry installer.
 Codex Cloud must allow HTTPS egress to foundry.paradigm.xyz and GitHub release
-hosts, or the base image must preinstall Foundry. Without `forge`, the mapped
-agent quality gate cannot run Aegis Foundry checks.
+hosts, or the base image must preinstall Foundry. Aegis Foundry checks require
+`forge` on PATH.
 MSG
     return 1
   fi
@@ -521,8 +521,8 @@ check_osv_api_egress() {
   cat >&2 <<'MSG'
 error: Codex Cloud could not query https://api.osv.dev/v1/querybatch.
 Enable Agent internet access for this environment, allowlist api.osv.dev, and
-allow POST requests. Trunk's osv-scanner linter uses this API during full
-quality-gate scans.
+allow POST requests. Trunk's osv-scanner linter uses this API during
+`./tools/trunk check --ci --all`.
 MSG
   return 1
 }

@@ -311,15 +311,19 @@ polled. Do not foreground-poll and never sleep-poll.
      button or a web-UI edit, because each costs a review event, and a base
      merge or rebase after the request can draw an unprompted full re-review of
      the whole PR; batch every fix commit into one push; post at most one
-     marked request per head and at most two per PR, the opening closeout and
-     one after review fixes; and never post while a CodeRabbit check is running
+     marked request per accepted head and at most two per PR, the opening
+     closeout and one after review fixes (a refused request may be retried once,
+     per that note); and never post while a CodeRabbit check is running
      on the current head, because the request supersedes that review and the
      vendor charges the one it discards. The local probe publishes that
      decision as `gates.codeRabbitReviewSignal.fallbackAction`; its precedence
      is stated once, in [`pr-ready-state.md`](pr-ready-state.md). When the
      probe cannot run here, derive the same answer by hand from that list —
      do not restate or re-derive it on this surface — and post only when it
-     says `request_review_once_for_head`: use `add_issue_comment` to post
+     says `request_review_once_for_head`, or when the current head's own
+     request was refused with a rate-limit reply, the named window has passed,
+     and the budget still has room (the refusal rule in that note; a
+     `requested` signal otherwise waits): use `add_issue_comment` to post
      `@coderabbitai review`, a blank line, and
      `<!-- coderabbit-final-head-review:<full-head-sha> -->`, after
      re-resolving the full head immediately before the write. The stack rule
@@ -347,7 +351,7 @@ polled. Do not foreground-poll and never sleep-poll.
    steps 6 and 7 — using the MCP write tools named above in place of `gh`.
    Reply before resolving, always. **Checkout binding carries a cloud
    exception, and it applies to every adapter call the repo-identity preflight
-   governs on this surface — the quality gate and a hosted ship as much as a
+   governs on this surface — a hosted ship as much as a
    babysit blocker fix**: the canonical-`origin` requirement cannot hold here,
    because a Claude cloud `origin` is a credential-proxy URL, not a canonical
    GitHub URL. Bind by content instead — for a same-repository target,

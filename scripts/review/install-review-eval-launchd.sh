@@ -7,22 +7,11 @@ fail() {
   exit 1
 }
 
-# This installer is operator-run only. It is never a mapped gate command. The
-# Darwin broker preflight allowlists it on exactly that claim: a launchctl
-# client that cannot execute during a gate run cannot create a process that the
-# gate's Darwin lineage tracking would miss. Enforce the claim here, before any
-# launchctl call and before any file this installer would create.
+# This installer is operator-run only. Preserve the historical gate-execution
+# refusal before any launchctl call or file creation for old operator shells.
 #
-# AGENTQG_RUN is the right marker. scripts/agent-quality-gate.sh exports it on
-# every mapped command it dispatches, in every mode: run_with_timeout sets it on
-# the sanitized launcher that runs both the serial and the parallel branch, and
-# the parallel worker exports it again for its own child. It is set for
-# --no-lock runs too, which export no lock state at all, so
-# AGENT_QUALITY_GATE_LOCK_HELD would miss them. The gate's own suite refuses a
-# GATE_TEST_FOCUS inside a gate run on the same marker. AGENTQG_REQUEST is
-# exported beside AGENTQG_RUN at those same sites and is the second key on the
-# same door. Read the values, not the names: a marker exported empty must read
-# the same as one that was never exported.
+# Retain refusal of inherited legacy markers for old operator shells.
+# This installer never owns or clears another process's state.
 if [[ -n ${AGENTQG_RUN:-} || -n ${AGENTQG_REQUEST:-} ]]; then
   fail "the review-eval scheduler installer is operator-run only and refuses to run inside a quality-gate run; run it from your own shell"
 fi

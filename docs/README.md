@@ -78,7 +78,6 @@ Authority: canonical
 - [`docs/evals/documentation-navigation.md`](evals/documentation-navigation.md)
 - [`docs/evals/review-skill.md`](evals/review-skill.md)
 - [`docs/notes/agent-issue-workflow.md`](notes/agent-issue-workflow.md)
-- [`docs/notes/agent-quality-gate-mechanics.md`](notes/agent-quality-gate-mechanics.md)
 - [`docs/notes/backlog-ranking.md`](notes/backlog-ranking.md)
 - [`docs/notes/backlog-sweep.md`](notes/backlog-sweep.md)
 - [`docs/notes/bridge-transfer-alerting.md`](notes/bridge-transfer-alerting.md)
@@ -106,6 +105,10 @@ Authority: canonical
 - [`governance-watchdog/ADDING_EVENTS.md`](../governance-watchdog/ADDING_EVENTS.md)
 - [`governance-watchdog/DEPLOY_FROM_SCRATCH.md`](../governance-watchdog/DEPLOY_FROM_SCRATCH.md)
 - [`governance-watchdog/README.md`](../governance-watchdog/README.md)
+
+Authority: non-canonical
+
+- [`docs/notes/agent-quality-gate-mechanics.md`](notes/agent-quality-gate-mechanics.md) (archived)
 
 ## pr-checklists-process
 
@@ -138,7 +141,6 @@ Authority: canonical
 - [`adr/0004-two-alert-planes.md`](adr/0004-two-alert-planes.md) — Two alert planes — Grafana metric thresholds and event-driven delivery
 - [`adr/0005-context-as-product.md`](adr/0005-context-as-product.md) — Context is product — canonical authority model with a metadata contract
 - [`adr/0006-github-issues-backlog.md`](adr/0006-github-issues-backlog.md) — GitHub Issues are the canonical agent work queue, not BACKLOG.md
-- [`adr/0007-agent-quality-gate-and-merge-oracle.md`](adr/0007-agent-quality-gate-and-merge-oracle.md) — Local agent quality gate plus two-projection PR all-clear and Codex gate
 - [`adr/0008-mandatory-hazard-checklists.md`](adr/0008-mandatory-hazard-checklists.md) — Cross-layer and stateful changes must run dedicated PR checklists
 - [`adr/0009-supply-chain-hardening.md`](adr/0009-supply-chain-hardening.md) — Supply-chain hardening — release-age gate, lockfile-lint, SHA-pinned Actions
 - [`adr/0010-required-checks-no-paths-filters.md`](adr/0010-required-checks-no-paths-filters.md) — Required CI checks carry no paths filters; only advisory jobs may
@@ -197,16 +199,13 @@ Authority: canonical
 - [`adr/0064-scripts-module-directories.md`](adr/0064-scripts-module-directories.md) — scripts/ may use module subdirectories; basenames and pinned paths are the constraint
 - [`adr/0065-scripts-file-size-watchlist-scope.md`](adr/0065-scripts-file-size-watchlist-scope.md) — scripts/ is inside the file-size watchlist, with named-mechanism exemptions
 - [`adr/0066-coderabbit-replaces-bugbot-third-reviewer.md`](adr/0066-coderabbit-replaces-bugbot-third-reviewer.md) — CodeRabbit replaces Cursor BugBot as the third PR review bot
-- [`adr/0069-gate-routing-table-as-data.md`](adr/0069-gate-routing-table-as-data.md) — The quality gate's routing table is data, compiled by the repo's own bash-case translator
 - [`adr/0070-sentry-requeue-settlement-sentinel.md`](adr/0070-sentry-requeue-settlement-sentinel.md) — A withheld terminal label serializes the Sentry archive settlement against the triage re-queue
 - [`adr/0071-susds-launch-aligned-daily-sampler.md`](adr/0071-susds-launch-aligned-daily-sampler.md) — sUSDS actuals use a launch-aligned bounded daily sampler
 - [`adr/0072-md-only-docs-checks-job.md`](adr/0072-md-only-docs-checks-job.md) — The Markdown globs route to a small docs-checks CI job instead of the scripts job
 - [`adr/0073-guardrail-prose-pinned-in-ci.md`](adr/0073-guardrail-prose-pinned-in-ci.md) — Normative guardrail sentences are pinned in CI, and scripts are not
 - [`adr/0074-trove-ledger-parallel-append-only-entity.md`](adr/0074-trove-ledger-parallel-append-only-entity.md) — TroveLedgerEvent is a parallel append-only entity, not a widened TroveOperationEvent
-- [`adr/0076-fair-quality-gate-coordinator.md`](adr/0076-fair-quality-gate-coordinator.md) — Fair local quality-gate coordination across worktrees
 - [`adr/0077-operator-triggered-backlog-sweep.md`](adr/0077-operator-triggered-backlog-sweep.md) — Operator-triggered backlog sweep with isolated workers
 - [`adr/0078-staged-verification-redesign.md`](adr/0078-staged-verification-redesign.md) — Staged replacement of the mandatory local gate with existing CI
-- [`adr/0080-merge-base-freshness-stamp.md`](adr/0080-merge-base-freshness-stamp.md) — The gate's freshness stamp binds the merge-base
 - [`adr/0081-narrow-dependabot-auto-merge-exception.md`](adr/0081-narrow-dependabot-auto-merge-exception.md) — Narrow Dependabot auto-merge exception
 - [`adr/0082-persistent-issue-board-mutation-mutex.md`](adr/0082-persistent-issue-board-mutation-mutex.md) — Persistent Issue-Board Mutation Mutex
 - [`adr/0083-non-ledger-review-eval-experiments.md`](adr/0083-non-ledger-review-eval-experiments.md) — Review-skill experiments use a separate staged non-ledger lane
@@ -214,7 +213,6 @@ Authority: canonical
 - [`adr/0085-review-eval-cli-versions-bind-the-cell.md`](adr/0085-review-eval-cli-versions-bind-the-cell.md) — Provider CLI versions bind the review-eval cell, not the plan
 - [`adr/0086-review-eval-lane-any-grid-multi-draw.md`](adr/0086-review-eval-lane-any-grid-multi-draw.md) — The experiment lane runs any grid at N draws and decides on paired evidence
 - [`adr/0087-autoreview-removal-thin-two-model-review.md`](adr/0087-autoreview-removal-thin-two-model-review.md) — Remove the autoreview machinery; keep a thin two-model closeout review
-- [`adr/0088-temporary-m6-canary-collection.md`](adr/0088-temporary-m6-canary-collection.md) — Temporary event-driven M6 canary collection
 - [`adr/0089-review-eval-canonical-matrix-pr-groups.md`](adr/0089-review-eval-canonical-matrix-pr-groups.md) — The canonical review-eval matrix runs PR groups concurrently
 - [`adr/0090-canonical-eval-matrix-freshness-floor.md`](adr/0090-canonical-eval-matrix-freshness-floor.md) — The canonical review-eval matrix is a freshness floor
 - [`adr/0091-promote-needs-replay-corroboration.md`](adr/0091-promote-needs-replay-corroboration.md) — A PROMOTE needs replay corroboration before it re-anchors
@@ -224,17 +222,23 @@ Authority: canonical
 - [`adr/0095-isolated-bridge-transfer-observations.md`](adr/0095-isolated-bridge-transfer-observations.md) — Bridge transfers use isolated complete observations
 - [`adr/0096-finder-probe-non-ledger-kind.md`](adr/0096-finder-probe-non-ledger-kind.md) — Non-ledger finder probes
 - [`adr/0097-recovery.md`](adr/0097-recovery.md) — Pool recovery
-- [`adr/0098-m6-audit-recovery.md`](adr/0098-m6-audit-recovery.md) — M6 audit recovery
 - [`adr/0099-retire-duplicate-bundle-size-workflow.md`](adr/0099-retire-duplicate-bundle-size-workflow.md) — Retire the duplicate bundle-size advisory workflow
 - [`adr/0100-monthly-ci-reliability-report.md`](adr/0100-monthly-ci-reliability-report.md) — Monthly CI reliability report is an issue-only scheduler
+- [`adr/0101-legacy-gate-retirement.md`](adr/0101-legacy-gate-retirement.md) — Retire the legacy local quality gate
 
 Authority: non-canonical
 
+- [`adr/0007-agent-quality-gate-and-merge-oracle.md`](adr/0007-agent-quality-gate-and-merge-oracle.md) — Local agent quality gate plus two-projection PR all-clear and Codex gate (archived)
 - [`adr/0020-swr-polling-read-model.md`](adr/0020-swr-polling-read-model.md) — Read model is SWR polling plus bounded snapshot composition at current scale (archived)
 - [`adr/0067-depletion-alerts.md`](adr/0067-depletion-alerts.md) — Depletion alerts (archived)
 - [`adr/0068-sentry-fixture-authoring-policy.md`](adr/0068-sentry-fixture-authoring-policy.md) — Adversarial fixtures are authored to scan clean; no value or line registry (archived)
+- [`adr/0069-gate-routing-table-as-data.md`](adr/0069-gate-routing-table-as-data.md) — The quality gate's routing table is data, compiled by the repo's own bash-case translator (archived)
 - [`adr/0075-pr-merge.md`](adr/0075-pr-merge.md) — One sanctioned operator merge path (archived)
+- [`adr/0076-fair-quality-gate-coordinator.md`](adr/0076-fair-quality-gate-coordinator.md) — Fair local quality-gate coordination across worktrees (archived)
 - [`adr/0079-sealed-exact-file-patch-secret-suppression.md`](adr/0079-sealed-exact-file-patch-secret-suppression.md) — Autoreview permits only sealed exact-file-patch secret suppression (archived)
+- [`adr/0080-merge-base-freshness-stamp.md`](adr/0080-merge-base-freshness-stamp.md) — The gate's freshness stamp binds the merge-base (archived)
+- [`adr/0088-temporary-m6-canary-collection.md`](adr/0088-temporary-m6-canary-collection.md) — Temporary event-driven M6 canary collection (archived)
+- [`adr/0098-m6-audit-recovery.md`](adr/0098-m6-audit-recovery.md) — M6 audit recovery (archived)
 - [`docs/adr/README.md`](adr/README.md)
 
 ## package-readmes-reference

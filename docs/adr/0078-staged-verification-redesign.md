@@ -3,7 +3,7 @@ title: Staged replacement of the mandatory local gate with existing CI
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-04
+last_verified: 2026-09-14
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -13,24 +13,20 @@ garden_lane: adrs-architecture
 
 # ADR 0078 — staged replacement of the mandatory local gate with existing CI
 
-**Status:** Accepted (Aug 2026), amended 2026-09-04. The M5 early local cutover
-is in force. The operator approved it before the original pre-cutover sample.
-The legacy gate remains callable as a diagnostic. Its regression suite no
-longer runs in required CI because it tests machine-local lock and coordinator
-behavior that isolated CI runners do not use. Issue #2128 owns the post-cutover
-canary and retirement evidence.
-[ADR 0007](0007-agent-quality-gate-and-merge-oracle.md) remains active for the
-hosted two-projection all-clear and Codex approval gate. This ADR supersedes
-only its mandatory-local-gate target state. [ADR
-0084](0084-github-ui-operator-merge.md) supersedes this ADR's original
-operator merge-path assumption.
+**Status:** Accepted (Aug 2026), amended 2026-09-14. The local cutover and
+legacy source retirement are in force under [ADR 0101](0101-legacy-gate-retirement.md).
+Direct author checks, staged formatting, documentation checks, ADR reminders,
+required CI, and hosted review/readiness checks remain in force. The legacy
+diagnostic, its regression suites, and the temporary M6 adapters are removed.
+Issue #2128 owns merge and post-merge closeout. The [PR operating card](../notes/pr-operating-card.md)
+and [readiness contract](../notes/pr-ready-state.md) define current operation.
 
 **Scope:** ci/process
 
-[ADR 0088](0088-temporary-m6-canary-collection.md) supersedes the manual-only
-M6 collection procedure below. It adds temporary event-driven dispatch and
-pending evidence collection. It does not change the audit target, sample
-acceptance, spend limits, or separate legacy-deletion approval.
+The complete decision, migration, observation, and rollback text below records
+the historical staged plan. It does not require a callable legacy gate or new
+M6 collection after retirement. ADR 0101 owns current rollback; [ADR
+0084](0084-github-ui-operator-merge.md) owns the operator merge path.
 
 ## Context
 
@@ -429,7 +425,7 @@ baseline `b4bf201c3b87580771c55ec615fcc9a4e51ae267` in a separate phase-scoped
 complexity manifest. It is an additive implementation receipt. Operational
 shadow evidence stays in GitHub runs and the later Markdown evidence record.
 
-## Rollback
+## Historical rollback plan
 
 Before legacy deletion, keep required CI and strict current-base protection.
 Revert the cutover commit. The retained gate runtime then resumes the mandatory

@@ -22,13 +22,10 @@
  * Usage: node scripts/pr/check-adr-reminder.mjs [--base <ref>] [--head <ref>]
  *          [--strict] [--include-untracked] [--changed-paths-file <file>]
  *
- * The agent quality gate passes its own `--head`, `--include-untracked`, and
- * `--changed-paths-file` so the reminder evaluates exactly the gate's
- * changed-path set — including a precomputed set routed via
- * `agent-quality-gate --changed-paths-file`. A path from that set counts as a
- * new file when it does not exist at base. Standalone runs (no file) fall back
- * to `git diff` and default to committed/staged only, so an unrelated untracked
- * scratch file never nags.
+ * Callers can pass `--head`, `--include-untracked`, and
+ * `--changed-paths-file` to select an explicit changed-path set. A path from
+ * that set counts as new when it does not exist at base. Standalone runs
+ * use `git diff` and default to committed/staged files only.
  */
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -198,11 +195,9 @@ function existsAtBase(base, path) {
  * Collect the diff facts the pure detector needs.
  *
  * Added files come from the base→head diff (committed + staged additions). When
- * `includeUntracked` is set — which the quality gate passes so this checker sees
- * exactly the gate's changed-path set — untracked new files are added too, so a
- * not-yet-committed new package/workflow is not invisible during a local gate
- * run. Standalone runs leave it off, so an unrelated untracked scratch file
- * never nags.
+ * `includeUntracked` is set, untracked new files are added too. Callers can
+ * include a new package or workflow before committing it. Standalone runs
+ * leave it off, so unrelated untracked scratch files do not produce reminders.
  */
 export function collectGitState(
   base,
