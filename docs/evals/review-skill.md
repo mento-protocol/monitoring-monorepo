@@ -109,11 +109,11 @@ report recall over the smaller denominator.
 
 Three conditions, every one of them load-bearing:
 
-| condition  | what it runs                                          | how many cells                                  | why it exists                                                          |
-| ---------- | ----------------------------------------------------- | ----------------------------------------------- | ---------------------------------------------------------------------- |
-| `pipeline` | live `codex exec review` then `claude` with the skill | one draw of each of the nine fixtures           | the number of record; exactly what production does                     |
-| `replay`   | the frozen finder report then `claude` with the skill | both frozen reports of each of the six grid PRs | zero finder sampling variance; the verifier is still sampled fresh     |
-| `control`  | the bare pinned model, no skill, no codex             | one draw of each of the six grid PRs            | if control and pipeline fall together the model moved, not our tooling |
+| condition  | what it runs                                                      | how many cells                                  | why it exists                                                          |
+| ---------- | ----------------------------------------------------------------- | ----------------------------------------------- | ---------------------------------------------------------------------- |
+| `pipeline` | live `codex exec review --ephemeral` then `claude` with the skill | one draw of each of the nine fixtures           | the number of record; exactly what production does                     |
+| `replay`   | the frozen finder report then `claude` with the skill             | both frozen reports of each of the six grid PRs | zero finder sampling variance; the verifier is still sampled fresh     |
+| `control`  | the bare pinned model, no skill, no codex                         | one draw of each of the six grid PRs            | if control and pipeline fall together the model moved, not our tooling |
 
 `control` is the cheapest line item and carries the most interpretive weight.
 Cut it last.
