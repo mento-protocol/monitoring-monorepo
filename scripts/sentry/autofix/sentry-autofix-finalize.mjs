@@ -582,10 +582,21 @@ export function buildAnalysisComment(reason) {
 }
 
 // Repo-standard PR-description headings. The fix-PR body is FULLY deterministic
-// (the fix PR's own required PR-description check enforces `## The Problem` then
-// `## The Solution`); no agent free-text is ever included (see the note above).
+// (the fix PR's own required PR-description check enforces `## tl;dr` then
+// `## The Problem` then `## The Solution`); no agent free-text is ever included
+// (see the note above).
+const TLDR_HEADING = "## tl;dr";
 const PROBLEM_HEADING = "## The Problem";
 const SOLUTION_HEADING = "## The Solution";
+
+// The tl;dr must be plain words with no identifiers, and it may state only facts
+// this pipeline holds itself. The agent's write-up is untrusted and never
+// reaches it, so the summary is a fixed sentence set, not generated prose.
+const TLDR_SUMMARY = [
+  "An automated pipeline wrote a small code fix for one tracked production error.",
+  "A person still reviews it, the required checks still run, and merging it still needs an explicit approval.",
+  "Nothing changes for anyone until someone merges it.",
+].join(" ");
 
 function provenanceSection(shortId, queueIssue) {
   return [
@@ -604,8 +615,9 @@ function provenanceSection(shortId, queueIssue) {
 }
 
 /**
- * Assemble the fix-PR body. FULLY DETERMINISTIC: the `## The Problem` /
- * `## The Solution` template (the repo PR-description standard, enforced by the
+ * Assemble the fix-PR body. FULLY DETERMINISTIC: the `## tl;dr` /
+ * `## The Problem` / `## The Solution` template (the repo PR-description
+ * standard, enforced by the
  * fix PR's own required check) plus the provenance + `Fixes`/`Refs` footer. No
  * agent free-text is included — the reviewed diff is the authoritative artifact
  * (see the note above the analysis-comment builder for why free-text passthrough
@@ -625,6 +637,10 @@ export function buildPrBody({ shortId, queueIssue }) {
   }
 
   const parts = [
+    TLDR_HEADING,
+    "",
+    TLDR_SUMMARY,
+    "",
     PROBLEM_HEADING,
     "",
     `- Before this PR, the affected code path could still produce the failure tracked as Sentry issue \`${shortId}\`.`,

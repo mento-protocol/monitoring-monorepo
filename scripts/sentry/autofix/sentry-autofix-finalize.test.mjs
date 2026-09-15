@@ -433,10 +433,13 @@ await test("PR body is fully deterministic (no agent free-text accepted or publi
   // there is no channel for agent-authored text to reach the public PR body.
   const body = buildPrBody({ shortId: SHORT_ID, queueIssue: 1278 });
   assert(
-    body.startsWith("## The Problem"),
-    "body starts with repo-standard heading (required check)",
+    body.startsWith("## tl;dr"),
+    "body starts with the repo-standard tl;dr heading (required check)",
   );
-  assert(body.includes("## The Solution"), "deterministic Solution heading");
+  assert(
+    body.includes("## The Problem") && body.includes("## The Solution"),
+    "deterministic Problem and Solution headings",
+  );
   assert(
     body.includes("could still produce the failure") &&
       body.includes("changes the affected code path to prevent") &&
@@ -658,7 +661,7 @@ await test("CLI autofix-comment / branch / label-def / refused-label-def / run-r
     "1278",
   ]);
   assert(
-    body.startsWith("## The Problem") && body.includes(`Fixes ${SHORT_ID}`),
+    body.startsWith("## tl;dr") && body.includes(`Fixes ${SHORT_ID}`),
     "CLI pr-body assembles",
   );
 });
