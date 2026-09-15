@@ -491,7 +491,7 @@ jobs:
             "${tools_dir}/sentry-mcp-broker.mjs"
           install -m 0444 "scripts/sentry/broker/sentry-mcp-probe.mjs" \
             "${tools_dir}/sentry-mcp-probe.mjs"
-          install -m 0444 "scripts/gate/mapped-command-process-identity.mjs" \
+          install -m 0444 "scripts/lib/mapped-command-process-identity.mjs" \
             "${tools_dir}/mapped-command-process-identity.mjs"
           chmod 0555 "${tools_dir}"
 

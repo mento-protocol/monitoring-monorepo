@@ -1,4 +1,4 @@
-// One classifier owns handler-invariant routing for the quality gate data
+// One classifier owns the retained handler-invariant checklist data
 // model. Callers receive a detached, deeply frozen view so they can derive
 // their own representation without changing later decisions.
 //

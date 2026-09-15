@@ -86,7 +86,7 @@ The command checks these contracts without defining a second runtime router:
   zero skipped jobs, the retained-command boundary, cold cache policy, and
   normalized PR-only checks.
 
-### No-skip audit and temporary collection
+### No-skip audit
 
 `.github/workflows/no-skip-audit.yml` is the only no-skip entry point. It runs
 by dispatch from protected `main`. It accepts a pull request number,
@@ -94,12 +94,7 @@ full current head SHA, and full current protected-main SHA. Admission fails if
 the pull request, either SHA, repository identity, base branch, or live `main`
 has moved.
 
-During M6, `.github/workflows/m6-canary.yml` selects candidates after CI
-completion and dispatches this entry point. It writes pending evidence on
-#2128. [ADR 0088](../adr/0088-temporary-m6-canary-collection.md) owns selection,
-serialization, spend stops, recovery, proof limits, and removal. Disable and
-drain collection before a manual audit. Keep its writer isolated from candidate
-execution; do not add a required status or upstream artifact handoff.
+M6 collection and recovery are retired; historical evidence is linked from ADR 0101.
 
 After the exact checkout, protected inline admission code compares the admitted
 base and source Git trees. It rejects changes to package manifests, pnpm
@@ -122,9 +117,8 @@ inputs. Treat this refusal as fail-closed admission, not a workflow failure.
 The audit runs every retained deterministic CI job. It runs the focused agent
 setup and package-policy contract, indexer handler invariant contract, and
 dependency-cruiser root contract. Neither ordinary CI nor the audit executes
-the legacy local-gate Bash regression suite. The audit also excludes the
-routing-table suites and indexer route parity suite that ordinary CI retains
-during the post-cutover canary. The audit still runs the retained package-script
+the legacy local-gate Bash regression suite. The legacy routing-table and indexer route parity suites are retired in both
+ordinary CI and the audit. The audit still runs the retained package-script
 validator before dependency installation.
 
 - [ ] Keep the dispatcher read-only. Do not forward repository or environment
@@ -140,8 +134,7 @@ validator before dependency installation.
       selection, pnpm configuration, and tracked `node_modules` in the
       comparison path set. Do not add a content hash registry for data already
       bound by the two Git objects.
-- [ ] Keep the semantic retained `ci.yml` graph pin current. Treat any pin
-      update as an explicit target change during the evidence window.
+- [ ] Keep the semantic retained `ci.yml` graph pin current. Review each pin update against the changed CI graph.
 - [ ] Keep audit inputs limited to `ci.yml` and the protected dispatcher. Do not
       add a second workflow caller that can bypass admission.
 - [ ] In audit mode, skip checkout and `dorny/paths-filter` in `changes`. The
@@ -159,11 +152,10 @@ validator before dependency installation.
 - [ ] Skip Codecov, UI failure artifacts, and timeline actions in audit mode.
 - [ ] Use the separate audit aggregate with no `allowed-skips`. Keep the normal
       pull request aggregate and its reviewed conditional skips unchanged.
-- [ ] Keep the exact legacy selector steps conditional on
-      `!inputs.no_skip_audit`. Reject any reintroduction of the legacy Bash gate
+- [ ] Reject reintroduction of the legacy selector steps or Bash gate
       regression suite. Do not exclude a retained package, policy, trust,
       documentation, browser, build, generation, or test command.
-- [ ] Reject package-execution path drift during the evidence window. Ordinary
+- [ ] Reject package-execution path drift during admission. Ordinary
       CI remains the validation path for package, dependency, and toolchain PRs.
 - [ ] Reject evidence-instrument drift during admission. Protect `ci.yml`, the
       dispatcher, the CI contract source and test entry point, the no-skip
@@ -178,19 +170,16 @@ validator before dependency installation.
       mode.
 - [ ] Keep the audit step-skip allowlist closed. Every retained command must
       execute and remain blocking. Reject equivalent legacy entry points.
-- [ ] Keep both routing-table suite invocations outside the retained target.
-      Their assertions test the legacy selector. Fixed CI runs the retained
-      generated-output and workflow safeguards that the selector also routes.
 - [ ] Keep the same-repository candidate inside the accepted threat model. The
       audit controls workflow selection and package execution configuration. It
       does not sandbox deliberate process creation inside retained candidate
       product, test, or dependency code.
-- [ ] Do not add a schedule until the eligible cold proof passes. Stop after a
-      run exceeds 45 runner-minutes. Do not exceed 450 cumulative runner-minutes.
+- [ ] Keep dispatch manual. Obtain approval for any new audit run and its spend
+      limit. The completed M6 evaluation grants no further run authorization.
 
 Run `pnpm ci:contract:test` after any change to these facts. Do not dispatch the
-audit from an implementation pull request. The first eligible cold proof runs
-after the workflow reaches protected `main`.
+audit from an implementation pull request. Run the dispatcher from protected
+`main`.
 
 ## 2. Branch enforcement on `workflow_dispatch`
 

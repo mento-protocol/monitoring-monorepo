@@ -351,7 +351,7 @@ polled. Do not foreground-poll and never sleep-poll.
    steps 6 and 7 — using the MCP write tools named above in place of `gh`.
    Reply before resolving, always. **Checkout binding carries a cloud
    exception, and it applies to every adapter call the repo-identity preflight
-   governs on this surface — the quality gate and a hosted ship as much as a
+   governs on this surface — a hosted ship as much as a
    babysit blocker fix**: the canonical-`origin` requirement cannot hold here,
    because a Claude cloud `origin` is a credential-proxy URL, not a canonical
    GitHub URL. Bind by content instead — for a same-repository target,

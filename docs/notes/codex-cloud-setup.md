@@ -98,7 +98,7 @@ pipeline without a checksum.
 
 Setup POSTs to `https://api.osv.dev/v1/querybatch` to prove osv-scanner egress.
 Set `CODEX_CLOUD_CHECK_OSV_EGRESS=false` only when that check is intentionally
-unavailable and the resulting quality-gate limitation is accepted.
+unavailable and the resulting OSV scan limitation is accepted.
 
 ## Closeout review
 

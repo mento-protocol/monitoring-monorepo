@@ -195,7 +195,6 @@ const scopedAgentDirs = [
 
 const delegatedOperatingRuleNotes = [
   "docs/notes/agent-issue-workflow.md",
-  "docs/notes/agent-quality-gate-mechanics.md",
   "docs/notes/codex-agent-skills.md",
   "docs/notes/codex-cloud-setup.md",
   "docs/notes/cross-protocol-context.md",

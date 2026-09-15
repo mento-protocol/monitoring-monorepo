@@ -1,4 +1,4 @@
 export {
   closeReopenedGateMarkers,
   inheritGateMarkerStdio,
-} from "../../gate/mapped-command-process-identity.mjs";
+} from "../../lib/mapped-command-process-identity.mjs";

@@ -1,8 +1,8 @@
 ---
 title: Local agent quality gate plus two-projection PR all-clear and Codex gate
-status: active
+status: archived
 owner: eng
-canonical: true
+canonical: false
 last_verified: 2026-09-02
 scope: ci/process
 date: 2026-05
@@ -13,60 +13,6 @@ garden_lane: adrs-architecture
 
 # ADR 0007 — Local agent quality gate + two-projection PR all-clear + Codex approval gate
 
-**Status:** Accepted (Apr–Jun 2026), amended by the M5 cutover on 2026-09-02.
-[ADR 0078](0078-staged-verification-redesign.md) supersedes the mandatory local
-gate. The gate remains callable as a manual diagnostic. Its regression suite is
-also manual and no longer runs in required CI. The direct `/ship` author checks
-replace the gate in normal local delivery. The hosted two-projection all-clear
-and Codex approval gate remain in force.
-**Scope:** ci/process
+Superseded by [ADR 0101](0101-legacy-gate-retirement.md). The legacy diagnostic and temporary M6 collection/recovery controls are retired. Current author checks and merge readiness follow the [PR operating card](../notes/pr-operating-card.md).
 
-## Context
-
-Agent-authored PRs failed CI in slow, expensive loops, and "is this PR actually
-ready?" was answered by eyeballing a noisy checks UI where advisory bots lag the
-real status. We needed a cheap local pre-flight and a machine-readable
-definition of "ready to merge".
-
-## Decision
-
-The original decision had two layers:
-
-- **Local agent quality gate** (`pnpm agent:quality-gate`) maps changed paths to
-  the exact package checks + checklists and runs them locally before push. It is
-  local-only (never deploys) and refuses to run on package-manifest/lockfile
-  changes without explicit review.
-- **Hosted all-clear** uses two machine-readable projections in order:
-  `pnpm pr:feedback-state` must first report a clean feedback ledger, then
-  `pnpm pr:ready-state` is the final required-readiness oracle for current-head
-  CI, review gates, and the Codex PR-description gate. Advisory check or run
-  lag does not block unless branch protection requires it. Actionable feedback
-  blocks through the feedback ledger, and any aggregate `CHANGES_REQUESTED`
-  review verdict blocks readiness.
-
-The M5 amendment retires the first layer as a mandatory local control. Step 3
-of the [PR operating card](../notes/pr-operating-card.md) now owns bounded
-direct author checks. Pre-push runs no repository verification. Required CI
-remains merge authority.
-
-## Alternatives considered
-
-- **Trust the GitHub checks UI by eye** — rejected: advisory bots trail the status
-  rollup and produce false "not ready" / false "all clear" reads.
-- **CI-only, no local gate** — rejected: CI failures are far more expensive than the
-  same check run locally in seconds.
-
-## Consequences
-
-- A PR is not clean until `pr:feedback-state` is clean and the subsequent
-  current-head `pr:ready-state` result is ready.
-- The Codex description gate normally requires a current-head 👍. Only the
-  documented, exact-head human break-glass override can replace it; an older
-  review cannot.
-- Review is a batch-boundary verifier, not the inner edit loop.
-
-## Evidence
-
-- Aggregate CI PR #188; local gate PR #388; shared ready-state PR #508; gate
-  wiring PR #818; feedback ledger PR #1037; head-scoped override PR #1044.
-- Mechanics in [`docs/notes/agent-quality-gate-mechanics.md`](../notes/agent-quality-gate-mechanics.md) and [`docs/notes/pr-ready-state.md`](../notes/pr-ready-state.md).
+[Historical decision and implementation](https://github.com/mento-protocol/monitoring-monorepo/blob/7623f5282c166dbc2c397f16169835427b3c3575/docs/adr/0007-agent-quality-gate-and-merge-oracle.md) remain available at the pre-retirement revision.

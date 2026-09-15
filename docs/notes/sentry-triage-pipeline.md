@@ -587,7 +587,7 @@ source and fails if the staging list stops matching it, so the attack cannot
 move one file over. `scripts/sentry/broker/sentry-mcp-broker.mjs` and
 `scripts/sentry/broker/sentry-mcp-probe.mjs` are staged alongside it even though
 no grant names either. The probe's canonical
-`scripts/gate/mapped-command-process-identity.mjs` dependency is staged in the
+`scripts/lib/mapped-command-process-identity.mjs` dependency is staged in the
 same read-only directory. The rule for this job is that it executes nothing from
 the agent-writable checkout. The agent job's checkout also sets
 `persist-credentials: false`, matching the autofix agent job.
@@ -2053,8 +2053,8 @@ by path, e.g. `node scripts/sentry/triage/sentry-triage-ingest.test.mjs` or
 `node --test scripts/sentry/broker/sentry-mcp-broker.test.mjs`.
 
 The `pnpm sentry:*:test` aliases run these suites for direct author checks. The
-required CI Sentry suite gate is the backstop. The pin validator also keeps the
-aliases used by the optional legacy gate safe.
+required CI Sentry suite gate is the backstop. The package-script validator
+rejects changes to these trusted aliases before installation.
 
 ```bash
 # Read-only previews that require local credentials:
