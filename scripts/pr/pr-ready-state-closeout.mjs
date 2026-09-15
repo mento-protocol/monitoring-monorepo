@@ -93,7 +93,7 @@ function codeRabbitCloseoutFallbackAction(
   // can be reviewed. A BEHIND PR needs it too whenever BEHIND is still a
   // required blocker in `pr-ready-state-core.mjs` — i.e. until the base's
   // ruleset confirms `requiredStatusChecksStrict: false` (operator decision
-  // 2026-09-15, ADR 0103); a request now would still be wasted once the base
+  // 2026-09-15, ADR 0104); a request now would still be wasted once the base
   // merge that BEHIND requires eventually happens. Only once strict is
   // confirmed off does BEHIND stop forcing a base merge here too.
   const normalizedMergeState = String(mergeStateStatus ?? "")

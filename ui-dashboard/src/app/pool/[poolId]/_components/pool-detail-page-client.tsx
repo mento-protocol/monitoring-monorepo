@@ -18,9 +18,13 @@ import { hasErrorWithoutData, isLoadingWithoutData } from "@/lib/swr-state";
 import {
   OLS_POOL,
   ORACLE_RATES,
+  POOL_BROKER_LIMITS,
   POOL_DEPLOYMENT,
   TRADING_LIMITS,
+  type PoolBrokerLimitsResponse,
 } from "@/lib/queries";
+import { PoolBrokerLimitsSchema } from "@/lib/queries/pool-detail-schemas";
+import type { BrokerLimitsState } from "@/lib/broker-limits";
 import { buildPoolDetailUrl } from "@/lib/routing";
 import {
   buildOracleRateMap,
@@ -29,7 +33,12 @@ import {
   poolName,
   type OracleRateMap,
 } from "@/lib/tokens";
-import type { OlsPool, Pool, TradingLimit } from "@/lib/types";
+import {
+  isVirtualPool,
+  type OlsPool,
+  type Pool,
+  type TradingLimit,
+} from "@/lib/types";
 import { SNAPSHOT_REFRESH_MS } from "@/lib/volume";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -173,6 +182,7 @@ function usePoolDetailData(
       timeoutMs: HASURA_TIMEOUT_MS,
     },
   );
+  const brokerLimits = useBrokerLimits(pool, normalizedPoolId);
   const { data: deployData } = useGQL<{
     FactoryDeployment: { txHash: string }[];
   }>(POOL_DEPLOYMENT, { poolId: normalizedPoolId });
@@ -191,12 +201,37 @@ function usePoolDetailData(
     tradingLimits: limitsData?.TradingLimit ?? [],
     tradingLimitsError: limitsError !== undefined,
     tradingLimitsLoading: isLoadingWithoutData(limitsLoading, limitsData),
+    brokerLimits,
     deployTxHash: deployData?.FactoryDeployment?.[0]?.txHash,
     olsData,
     olsLoading,
     fpmmPool,
     ...usePoolRates(pool, network),
   };
+}
+
+/** v2 Broker limits for the exchange a VirtualPool wraps. FPMM pools read
+ *  `TRADING_LIMITS` instead, so the query is skipped for them entirely. Kept
+ *  isolated from the pool query: `BrokerTradingLimit` is a new indexer entity,
+ *  and during the deploy+resync window hosted Hasura rejects the type. */
+function useBrokerLimits(
+  pool: Pool | null,
+  normalizedPoolId: string,
+): BrokerLimitsState {
+  const { data, error, isLoading } = useGQL<PoolBrokerLimitsResponse>(
+    pool && isVirtualPool(pool) ? POOL_BROKER_LIMITS : null,
+    { poolId: normalizedPoolId },
+    { timeoutMs: HASURA_TIMEOUT_MS, schema: PoolBrokerLimitsSchema },
+  );
+  const rows = data?.BrokerTradingLimit;
+  return useMemo(
+    () => ({
+      rows: rows ?? [],
+      isLoading: isLoadingWithoutData(isLoading, data),
+      hasError: hasErrorWithoutData(error, data),
+    }),
+    [rows, data, isLoading, error],
+  );
 }
 
 function usePoolTabState({
@@ -306,6 +341,7 @@ function PoolDetail({ initialSearch, initialData }: PoolDetailProps) {
         deployTxHash={detail.deployTxHash}
         tradingLimits={detail.tradingLimits}
         tradingLimitsError={detail.tradingLimitsError}
+        brokerLimits={detail.brokerLimits}
         fpmmPool={detail.fpmmPool}
         network={network}
         poolNeedsRates={detail.poolNeedsRates}
@@ -337,6 +373,7 @@ function PoolDetail({ initialSearch, initialData }: PoolDetailProps) {
             tradingLimits={detail.tradingLimits}
             tradingLimitsError={detail.tradingLimitsError}
             tradingLimitsLoading={detail.tradingLimitsLoading}
+            brokerLimits={detail.brokerLimits}
             fpmmPool={detail.fpmmPool}
             network={network}
             thresholdsLoading={detail.thresholdsLoading}
@@ -408,6 +445,7 @@ function PoolOverview({
   deployTxHash,
   tradingLimits,
   tradingLimitsError,
+  brokerLimits,
   fpmmPool,
   network,
   poolNeedsRates,
@@ -426,6 +464,7 @@ function PoolOverview({
   deployTxHash: string | undefined;
   tradingLimits: TradingLimit[];
   tradingLimitsError: boolean;
+  brokerLimits: BrokerLimitsState;
   fpmmPool: boolean;
   network: ReturnType<typeof useNetwork>["network"];
   poolNeedsRates: boolean;
@@ -465,6 +504,7 @@ function PoolOverview({
         deployTxHash={deployTxHash}
         tradingLimits={tradingLimits}
         tradingLimitsError={tradingLimitsError}
+        brokerLimits={brokerLimits}
         initialV2Exchange={initialData?.v2Exchange}
         initialExchangeVolume={initialData?.brokerExchange24h}
         initialBreakerConfig={breakerFallbackForCurrentFeed(initialData, pool)}
@@ -551,6 +591,7 @@ function PoolTabPanel({
   tradingLimits,
   tradingLimitsError,
   tradingLimitsLoading,
+  brokerLimits,
   fpmmPool,
   network,
   thresholdsLoading,
@@ -565,6 +606,7 @@ function PoolTabPanel({
   tradingLimits: TradingLimit[];
   tradingLimitsError: boolean;
   tradingLimitsLoading: boolean;
+  brokerLimits: BrokerLimitsState;
   fpmmPool: boolean;
   network: ReturnType<typeof useNetwork>["network"];
   thresholdsLoading: boolean;
@@ -593,6 +635,7 @@ function PoolTabPanel({
           tradingLimits={tradingLimits}
           tradingLimitsError={tradingLimitsError}
           tradingLimitsLoading={tradingLimitsLoading}
+          brokerLimits={brokerLimits}
           fpmmPool={fpmmPool}
           network={network}
         />
@@ -611,6 +654,7 @@ type ActiveTabContentProps = {
   tradingLimits: TradingLimit[];
   tradingLimitsError: boolean;
   tradingLimitsLoading: boolean;
+  brokerLimits: BrokerLimitsState;
   fpmmPool: boolean;
   network: ReturnType<typeof useNetwork>["network"];
 };
@@ -629,6 +673,7 @@ function ActiveTabContent(props: ActiveTabContentProps) {
     tradingLimits,
     tradingLimitsError,
     tradingLimitsLoading,
+    brokerLimits,
     fpmmPool,
     network,
   } = props;
@@ -691,6 +736,7 @@ function ActiveTabContent(props: ActiveTabContentProps) {
         <LimitPanel
           pool={pool}
           tradingLimits={tradingLimits}
+          brokerLimits={brokerLimits}
           hasError={tradingLimitsError}
           isLoading={tradingLimitsLoading}
         />

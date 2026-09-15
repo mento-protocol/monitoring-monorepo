@@ -109,7 +109,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0100](0100-monthly-ci-reliability-report.md)               | Monthly CI reliability report is an issue-only scheduler                                                                                     |
 | [0101](0101-legacy-gate-retirement.md)                      | Retire the legacy local gate after accepted M6 evaluation; preserve retained CI and shared safeguards                                        |
 | [0102](0102-github-hosted-runners-only.md)                  | GitHub-hosted runners only; a frozen allow-list blocks other labels                                                                          |
-| [0103](0103-non-strict-required-status-checks.md)           | `main` no longer requires a PR to be caught up once aggregate strictness confirms off; checks must be green and a real conflict still blocks |
+| [0104](0104-non-strict-required-status-checks.md)           | `main` no longer requires a PR to be caught up once aggregate strictness confirms off; checks must be green and a real conflict still blocks |
 
 ### shared-config
 
@@ -136,6 +136,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0039](0039-multistrategy-pools-historical-fx-volume.md) | Pool strategies are many-to-many; same-currency swaps use historical FX crosses                                          |
 | [0046](0046-event-sourced-oracle-freshness.md)           | Oracle freshness is reconstructed from persisted report events                                                           |
 | [0074](0074-trove-ledger-parallel-append-only-entity.md) | Trove history is a parallel append-only `TroveLedgerEvent`, not a widened `TroveOperationEvent`                          |
+| [0103](0103-virtualpool-broker-trading-limits.md)        | VirtualPool trading limits are a separate entity fed by block-pinned, freshness-gated Broker state reads                 |
 
 ### ui-dashboard
 

@@ -249,6 +249,47 @@ export const PoolV2ExchangeSchema = z.object({
 });
 
 // ---------------------------------------------------------------------------
+// POOL_BROKER_LIMITS
+// ---------------------------------------------------------------------------
+
+// Every field is non-null in schema.graphql, so a missing one is real drift
+// and must fail the parse rather than render as an empty limit.
+const PoolBrokerLimitRowSchema = z.object({
+  id: z.string(),
+  chainId: z.number(),
+  exchangeId: z.string(),
+  exchangeProvider: z.string(),
+  limitId: z.string(),
+  poolId: z.string(),
+  token: z.string(),
+  configKnown: z.boolean(),
+  flags: z.number(),
+  timestep0: z.string(),
+  timestep1: z.string(),
+  limit0: z.string(),
+  limit1: z.string(),
+  limitGlobal: z.string(),
+  stateKnown: z.boolean(),
+  netflow0: z.string(),
+  netflow1: z.string(),
+  netflowGlobal: z.string(),
+  lastUpdated0: z.string(),
+  lastUpdated1: z.string(),
+  stateBlock: z.string(),
+  stateTimestamp: z.string(),
+  limitPressure0: z.string(),
+  limitPressure1: z.string(),
+  limitPressureGlobal: z.string(),
+  limitStatus: z.string(),
+  updatedAtBlock: z.string(),
+  updatedAtTimestamp: z.string(),
+});
+
+export const PoolBrokerLimitsSchema = z.object({
+  BrokerTradingLimit: z.array(PoolBrokerLimitRowSchema),
+});
+
+// ---------------------------------------------------------------------------
 // BROKER_EXCHANGE_DAILY_SNAPSHOTS_24H
 // ---------------------------------------------------------------------------
 

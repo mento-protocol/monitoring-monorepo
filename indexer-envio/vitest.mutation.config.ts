@@ -9,6 +9,7 @@ export default defineConfig({
       "test/code-quality-invariants.test.ts",
       "test/pool-helpers.test.ts",
       "test/tradingLimits.test.ts",
+      "test/brokerTradingLimits.test.ts",
       "test/stables.test.ts",
     ],
     env: {
@@ -23,6 +24,7 @@ export default defineConfig({
       include: [
         "src/helpers.ts",
         "src/tradingLimits.ts",
+        "src/brokerTradingLimits.ts",
         "src/handlers/stables/classifyKind.ts",
         "src/handlers/stables/dailyFlush.ts",
       ],

@@ -11,7 +11,7 @@ review_interval_days: 90
 garden_lane: adrs-architecture
 ---
 
-# ADR 0103 — Non-strict required status checks for main
+# ADR 0104 — Non-strict required status checks for main
 
 **Status:** Accepted (Sep 2026), in force.
 **Scope:** ci/process

@@ -170,7 +170,13 @@ type Pool {
   protocolFee: Int!
   rebalanceReward: Int!
 
-  # Trading limits (FPMM pools only; defaults to "N/A" for VirtualPools)
+  # Trading limits. FPMM pools carry their own TradingLimitsV2 state (see
+  # `TradingLimit`). VirtualPools carry the wrapped v2 Broker exchange's limits
+  # (see `BrokerTradingLimit`): `limitStatus` is the worst enabled-window status
+  # across the exchange's two token legs and stays "N/A" until a leg has both
+  # its config and an exact-block state read. In both cases `limitPressure0`
+  # is the worst enabled-window pressure for `token0` and `limitPressure1` the
+  # same for `token1` (per-token slots, not per-window).
   limitStatus: String! # "OK" | "WARN" | "CRITICAL" | "N/A"
   limitPressure0: String! # e.g. "0.1230"
   limitPressure1: String! # e.g. "0.0050"
@@ -860,6 +866,55 @@ type TradingLimit @index(fields: ["poolId"]) {
   limitPressure0: String! # stored as string e.g. "0.1230"
   limitPressure1: String!
   limitStatus: String! # "OK" | "WARN" | "CRITICAL"
+  updatedAtBlock: BigInt!
+  updatedAtTimestamp: BigInt!
+}
+
+# v2 Broker trading limits for the BiPoolManager exchange wrapped by a
+# VirtualPool (Celo only). One row per (exchange, token leg). The Broker keys
+# its `tradingLimitsConfig` / `tradingLimitsState` mappings by
+# `limitId = exchangeId XOR bytes32(uint160(token))`; direct v2 swaps and
+# VirtualPool-routed swaps move the same limit, so rows are per exchange, not
+# per caller. All limit/netflow values are WHOLE TOKEN UNITS (int48 on-chain,
+# `deltaFlow / 10^decimals`, minimum ±1) — NOT the 15-decimal internal scale of
+# the FPMM `TradingLimit` entity. State comes from an exact-block RPC read on
+# `Broker.Swap`, refreshed at most every `BROKER_LIMIT_REFRESH_SECONDS` per leg
+# (every swap while a leg is at or above 80% pressure); config comes from
+# `Broker.TradingLimitConfigured` params, with one exact-block bootstrap read
+# for limits configured before `start_block`.
+type BrokerTradingLimit @index(fields: ["poolId"]) {
+  id: ID! # "{chainId}-{exchangeId}-{token}", both lowercased; the exchangeId FIELD keeps the raw bytes32 hex
+  chainId: Int! @index
+  exchangeId: String! @index # raw bytes32 hex; joins BiPoolExchange.exchangeId
+  exchangeProvider: String! # BiPoolManager address (lowercased)
+  limitId: String! # bytes32 hex mapping key; the same value aegis/Grafana label
+  poolId: String! # wrapping VirtualPool poolId
+  token: String! # lowercased ERC20 address
+  # Config (TradingLimits.Config). `configKnown` is false until a bootstrap
+  # read or a TradingLimitConfigured event lands; config fields are 0 until then.
+  configKnown: Boolean!
+  flags: Int! # bitmask L0=1 L1=2 LG=4
+  timestep0: BigInt! # seconds; 0 when L0 is unused
+  timestep1: BigInt!
+  limit0: BigInt!
+  limit1: BigInt!
+  limitGlobal: BigInt!
+  # State (TradingLimits.State). `stateKnown` is false until an exact-block
+  # read succeeded; a `latest`-fallback read is never persisted.
+  stateKnown: Boolean!
+  netflow0: BigInt! # signed
+  netflow1: BigInt!
+  netflowGlobal: BigInt!
+  lastUpdated0: BigInt!
+  lastUpdated1: BigInt!
+  stateBlock: BigInt! # block the state read was pinned to
+  stateTimestamp: BigInt! # timestamp of that block; drives the refresh gate
+  # Derived. A window contributes only when its flag bit is set AND its limit
+  # is > 0; disabled windows carry "0.0000".
+  limitPressure0: String! # 4dp string, |netflow0| / limit0
+  limitPressure1: String!
+  limitPressureGlobal: String!
+  limitStatus: String! # "OK" | "WARN" | "CRITICAL" | "N/A" (N/A until configKnown && stateKnown with an enabled window)
   updatedAtBlock: BigInt!
   updatedAtTimestamp: BigInt!
 }

@@ -99,7 +99,10 @@ The declared class describes reachable independent evidence. For
 - Every positive enforced FPMM trading limit bounds the configured
   reference-size cap. A smaller on-chain bound wins.
 - The monitored FPMM resolves through Hasura, contains the monitored token,
-  and exposes its live TradingLimitsV2 state.
+  and exposes its live TradingLimitsV2 state. `BrokerTradingLimit` rows do not
+  satisfy this gate: they carry the v2 Broker exchange's limits for a
+  VirtualPool, not FPMM `TradingLimit` state, and they refresh on Broker swaps
+  rather than continuously.
 - The structural signal comes from that indexed FPMM and is distinct from
   every price source. A DEX-primary price from the same pool is circular and
   fails this class.

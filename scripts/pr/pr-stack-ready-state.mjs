@@ -43,7 +43,7 @@ export function classifyStackObservation(value, previous = null) {
       "SNAPSHOT_CHANGED",
       "Stack membership or another layer changed; repeat verification",
     );
-  // Non-strict policy (operator decision 2026-09-15, ADR 0103): BEHIND alone
+  // Non-strict policy (operator decision 2026-09-15, ADR 0104): BEHIND alone
   // stops being a required blocker only once `pr-ready-state-core.mjs`
   // confirms the base's ruleset has strict off; until then (or on a real
   // conflict) it still surfaces here as a "base-update"/"mergeability"

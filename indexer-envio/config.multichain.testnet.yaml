@@ -34,6 +34,7 @@ contracts:
     handler: src/EventHandlers.ts
     events:
       - event: Swap
+      - event: TradingLimitConfigured
 
   - name: FPMMFactory
     abi_file_path: abis/FPMMFactory.json

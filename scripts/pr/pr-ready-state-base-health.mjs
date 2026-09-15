@@ -1,10 +1,10 @@
 /**
  * Read the base branch head's own status rollup for the readiness probe.
  *
- * ADR 0103 turned off strict required status checks on `main`, so GitHub no
+ * ADR 0104 turned off strict required status checks on `main`, so GitHub no
  * longer reruns a PR's required checks against the current base. This read is
  * what lets the oracle refuse to call a PR ready while the base it would merge
- * into is red (docs/adr/0103-non-strict-required-status-checks.md).
+ * into is red (docs/adr/0104-non-strict-required-status-checks.md).
  *
  * Split out of pr-ready-state-status-contexts.mjs (docs/pr-checklists/
  * recurring-review-patterns.md "File-size budget").

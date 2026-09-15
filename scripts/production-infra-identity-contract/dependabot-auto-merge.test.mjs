@@ -504,7 +504,7 @@ assert.equal(
   "a clean head must merge without updating the branch",
 );
 
-// ADR 0103 took strict required status checks off main, so GitHub no longer
+// ADR 0104 took strict required status checks off main, so GitHub no longer
 // blocks a merge whose head has not seen the current base. This lane merges
 // with the repository GITHUB_TOKEN and emits no push-triggered workflows, so
 // a stale merge would land with no post-merge CI at all. The writer keeps

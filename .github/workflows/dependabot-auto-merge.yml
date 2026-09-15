@@ -14,7 +14,7 @@ name: Dependabot auto-merge
 # enqueue or leave a standing auto-merge request.
 #
 # Main's ruleset no longer requires a pull request to include the current base
-# (ADR 0103), so this writer carries that validation itself: it merges only a
+# (ADR 0104), so this writer carries that validation itself: it merges only a
 # clean head and never repairs a stale one.
 #
 # The repository GITHUB_TOKEN performs the evidence reads and the final write.
@@ -421,7 +421,7 @@ jobs:
           # cannot accept a later push or create queued state.
           verify_authoritative_state
 
-          # ADR 0103 turned off strict required status checks on main, so
+          # ADR 0104 turned off strict required status checks on main, so
           # GitHub no longer refuses a merge whose head has not seen the
           # current base. This lane is unattended and merges with the
           # repository GITHUB_TOKEN, whose merge commit emits no

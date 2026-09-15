@@ -2700,7 +2700,7 @@ test("summarizes ready state when all blocking surfaces are clean", () => {
 });
 
 test("reports confirmed BEHIND as an informational note only once strict is confirmed off", () => {
-  // Non-strict policy (operator decision 2026-09-15, ADR 0103): a merely
+  // Non-strict policy (operator decision 2026-09-15, ADR 0104): a merely
   // BEHIND head is ready when everything else is clear, but only once the
   // base's ruleset confirms `requiredStatusChecksStrict: false`. Unknown
   // (`null`, the default) or confirmed strict (`true`) both fail closed and
@@ -2790,7 +2790,7 @@ test("reports confirmed BEHIND as an informational note only once strict is conf
 });
 
 test("blocks on a red base and fails closed when base health is unreadable", () => {
-  // ADR 0103 stopped GitHub re-running a PR's required checks against the
+  // ADR 0104 stopped GitHub re-running a PR's required checks against the
   // current base, so "nobody merges while main is red" is enforced here
   // instead of left as a rule of thumb.
   const readyPr = {
@@ -3826,7 +3826,7 @@ test("ranks the CodeRabbit closeout fallbacks by the review each one wastes", ()
       "merge_base_first",
       `${state} behind the base fails closed and must merge the base first`,
     );
-    // Non-strict policy (ADR 0103): once strict is confirmed off, BEHIND no
+    // Non-strict policy (ADR 0104): once strict is confirmed off, BEHIND no
     // longer outranks the other waits.
     assertEqual(
       summarizeCodeRabbitReviewGate(state, null, {

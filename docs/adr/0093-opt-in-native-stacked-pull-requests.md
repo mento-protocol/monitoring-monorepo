@@ -61,7 +61,7 @@ an automatic sync-and-push tool because live membership and human edits can
 change while local replay runs. Before the 2026-09-15 amendment below, a
 confirmed GitHub `BEHIND` state blocked readiness even when Git reports no
 content conflict. **Amended 2026-09-15
-([ADR 0103](0103-non-strict-required-status-checks.md)):** `BEHIND` alone no
+([ADR 0104](0104-non-strict-required-status-checks.md)):** `BEHIND` alone no
 longer blocks once base protection and every applicable ruleset confirm
 strict required-status-checks policy is off; unknown or any confirmed-strict
 source still blocks.

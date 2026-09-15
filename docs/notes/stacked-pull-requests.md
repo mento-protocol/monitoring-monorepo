@@ -236,7 +236,7 @@ merge setting. `DIRTY` (a textual conflict) still requires resolution before
 merge; for the layer sitting on the protection base, `BEHIND` alone does not
 once base protection and every applicable ruleset confirm strict is off
 (operator decision 2026-09-15,
-[ADR 0103](../adr/0103-non-strict-required-status-checks.md); any one
+[ADR 0104](../adr/0104-non-strict-required-status-checks.md); any one
 still-strict or unknown source keeps the readiness probe failing closed). An
 upper layer is unaffected: the ancestry gate still requires it to contain its
 parent's current head, and rejects it before readiness is classified. A

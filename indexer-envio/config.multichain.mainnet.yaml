@@ -54,6 +54,9 @@ contracts:
     handler: src/EventHandlers.ts
     events:
       - event: Swap
+      # Authoritative source for the v2 trading-limit config the
+      # `BrokerTradingLimit` rows carry. State still needs an at-block read.
+      - event: TradingLimitConfigured
 
   - name: FPMMFactory
     abi_file_path: abis/FPMMFactory.json

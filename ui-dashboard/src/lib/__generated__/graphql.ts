@@ -996,6 +996,105 @@ export type BrokerTraderRouterDayMarkerBoolExp = {
   readonly txTo?: ComparisonExp<string>;
 };
 
+export type BrokerTradingLimitSelectColumn =
+  | "chainId"
+  | "configKnown"
+  | "exchangeId"
+  | "exchangeProvider"
+  | "flags"
+  | "id"
+  | "lastUpdated0"
+  | "lastUpdated1"
+  | "limit0"
+  | "limit1"
+  | "limitGlobal"
+  | "limitId"
+  | "limitPressure0"
+  | "limitPressure1"
+  | "limitPressureGlobal"
+  | "limitStatus"
+  | "netflow0"
+  | "netflow1"
+  | "netflowGlobal"
+  | "poolId"
+  | "stateBlock"
+  | "stateKnown"
+  | "stateTimestamp"
+  | "timestep0"
+  | "timestep1"
+  | "token"
+  | "updatedAtBlock"
+  | "updatedAtTimestamp";
+
+export type BrokerTradingLimitOrderBy = {
+  readonly chainId?: OrderBy;
+  readonly configKnown?: OrderBy;
+  readonly exchangeId?: OrderBy;
+  readonly exchangeProvider?: OrderBy;
+  readonly flags?: OrderBy;
+  readonly id?: OrderBy;
+  readonly lastUpdated0?: OrderBy;
+  readonly lastUpdated1?: OrderBy;
+  readonly limit0?: OrderBy;
+  readonly limit1?: OrderBy;
+  readonly limitGlobal?: OrderBy;
+  readonly limitId?: OrderBy;
+  readonly limitPressure0?: OrderBy;
+  readonly limitPressure1?: OrderBy;
+  readonly limitPressureGlobal?: OrderBy;
+  readonly limitStatus?: OrderBy;
+  readonly netflow0?: OrderBy;
+  readonly netflow1?: OrderBy;
+  readonly netflowGlobal?: OrderBy;
+  readonly poolId?: OrderBy;
+  readonly stateBlock?: OrderBy;
+  readonly stateKnown?: OrderBy;
+  readonly stateTimestamp?: OrderBy;
+  readonly timestep0?: OrderBy;
+  readonly timestep1?: OrderBy;
+  readonly token?: OrderBy;
+  readonly updatedAtBlock?: OrderBy;
+  readonly updatedAtTimestamp?: OrderBy;
+};
+
+export type BrokerTradingLimitBoolExp = {
+  readonly _and?:
+    | BrokerTradingLimitBoolExp
+    | ReadonlyArray<BrokerTradingLimitBoolExp>;
+  readonly _or?:
+    | BrokerTradingLimitBoolExp
+    | ReadonlyArray<BrokerTradingLimitBoolExp>;
+  readonly _not?: BrokerTradingLimitBoolExp;
+  readonly chainId?: ComparisonExp<number>;
+  readonly configKnown?: ComparisonExp<boolean>;
+  readonly exchangeId?: ComparisonExp<string>;
+  readonly exchangeProvider?: ComparisonExp<string>;
+  readonly flags?: ComparisonExp<number>;
+  readonly id?: ComparisonExp<string>;
+  readonly lastUpdated0?: ComparisonExp<string>;
+  readonly lastUpdated1?: ComparisonExp<string>;
+  readonly limit0?: ComparisonExp<string>;
+  readonly limit1?: ComparisonExp<string>;
+  readonly limitGlobal?: ComparisonExp<string>;
+  readonly limitId?: ComparisonExp<string>;
+  readonly limitPressure0?: ComparisonExp<string>;
+  readonly limitPressure1?: ComparisonExp<string>;
+  readonly limitPressureGlobal?: ComparisonExp<string>;
+  readonly limitStatus?: ComparisonExp<string>;
+  readonly netflow0?: ComparisonExp<string>;
+  readonly netflow1?: ComparisonExp<string>;
+  readonly netflowGlobal?: ComparisonExp<string>;
+  readonly poolId?: ComparisonExp<string>;
+  readonly stateBlock?: ComparisonExp<string>;
+  readonly stateKnown?: ComparisonExp<boolean>;
+  readonly stateTimestamp?: ComparisonExp<string>;
+  readonly timestep0?: ComparisonExp<string>;
+  readonly timestep1?: ComparisonExp<string>;
+  readonly token?: ComparisonExp<string>;
+  readonly updatedAtBlock?: ComparisonExp<string>;
+  readonly updatedAtTimestamp?: ComparisonExp<string>;
+};
+
 export type BrokerVolumeWindowSnapshotSelectColumn =
   | "blockNumber"
   | "chainId"
@@ -7511,6 +7610,43 @@ export type PoolV2ExchangeQuery = {
     readonly lastBucketUpdate: string;
     readonly isDeprecated: boolean;
     readonly wrappedByPoolId: string | null;
+  }>;
+};
+
+// queries/pool-detail.POOL_BROKER_LIMITS
+export type PoolBrokerLimitsQueryVariables = {
+  readonly poolId: string;
+};
+export type PoolBrokerLimitsQuery = {
+  readonly BrokerTradingLimit: ReadonlyArray<{
+    readonly id: string;
+    readonly chainId: number;
+    readonly exchangeId: string;
+    readonly exchangeProvider: string;
+    readonly limitId: string;
+    readonly poolId: string;
+    readonly token: string;
+    readonly configKnown: boolean;
+    readonly flags: number;
+    readonly timestep0: string;
+    readonly timestep1: string;
+    readonly limit0: string;
+    readonly limit1: string;
+    readonly limitGlobal: string;
+    readonly stateKnown: boolean;
+    readonly netflow0: string;
+    readonly netflow1: string;
+    readonly netflowGlobal: string;
+    readonly lastUpdated0: string;
+    readonly lastUpdated1: string;
+    readonly stateBlock: string;
+    readonly stateTimestamp: string;
+    readonly limitPressure0: string;
+    readonly limitPressure1: string;
+    readonly limitPressureGlobal: string;
+    readonly limitStatus: string;
+    readonly updatedAtBlock: string;
+    readonly updatedAtTimestamp: string;
   }>;
 };
 

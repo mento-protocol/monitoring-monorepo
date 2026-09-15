@@ -43,7 +43,7 @@ Required blockers:
   the fetched branch protection or ruleset confirms
   `strict_required_status_checks_policy: false` for the base
   (operator decision 2026-09-15,
-  [ADR 0103](../adr/0103-non-strict-required-status-checks.md)); confirmed
+  [ADR 0104](../adr/0104-non-strict-required-status-checks.md)); confirmed
   off, it is reported in `notes[]` for visibility instead of
   `required.blockers[]`. Unknown fails closed the same as any other
   branch-protection lookup gap.
@@ -247,7 +247,7 @@ precedence:
 - `merge_base_first` — the PR is DIRTY (merge conflicts), or BEHIND while
   `requiredStatusChecksStrict` is not confirmed `false` (unknown or `true`).
   Merge the base before any request. Once strict is confirmed off (operator
-  decision 2026-09-15, ADR 0103), a merely BEHIND PR stops triggering this:
+  decision 2026-09-15, ADR 0104), a merely BEHIND PR stops triggering this:
   forcing a base merge for a non-conflicting, non-blocked PR would
   reintroduce the re-integration churn the policy change removes. For a
   native stack layer, bring the base in through the history-change procedure

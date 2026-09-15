@@ -8,6 +8,7 @@ const config = {
   mutate: [
     "src/helpers.ts",
     "src/tradingLimits.ts",
+    "src/brokerTradingLimits.ts",
     "src/handlers/stables/classifyKind.ts",
     "src/handlers/stables/dailyFlush.ts",
   ],

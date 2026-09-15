@@ -2,6 +2,7 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 
 const CELO_POOL_ID = "42220-0x462fe04b4fd719cbd04c0310365d421d02aaa19e";
 const MONAD_POOL_ID = "143-0xb0a0264ce6847f101b76ba36a4a3083ba489f501";
+const CELO_VIRTUAL_POOL_ID = "42220-0x1d013077b00b28038a3f1e7a29aba34e12e562e9";
 const SWR_PERSISTED_CACHE_STORAGE_KEY = "mento-monitoring:swr-persisted-cache";
 
 function escapedPoolId(poolId: string): RegExp {
@@ -855,6 +856,55 @@ test.describe("dashboard browser flows", () => {
     await expect(
       page.getByText("Showing cached data", { exact: false }),
     ).toHaveCount(0);
+  });
+
+  test("shows the wrapped exchange's Broker limits on a VirtualPool", async ({
+    page,
+  }) => {
+    await page.goto(`/pool/${CELO_VIRTUAL_POOL_ID}?tab=limits`);
+
+    const panel = page.getByRole("tabpanel", { name: "limits" });
+    await expect(
+      panel.getByRole("heading", { name: "Trading Limits" }),
+    ).toBeVisible();
+
+    // The AUD-style exchange runs a global limit only, so each of the two
+    // token legs contributes exactly one bar — never a 0% bar for a disabled
+    // 5-minute or daily window.
+    const limitBars = panel.getByRole("progressbar");
+    await expect(limitBars).toHaveCount(2);
+    await expect(panel.getByText("Global limit (LG)")).toHaveCount(2);
+    await expect(panel.getByText("5-minute limit (L0)")).toHaveCount(0);
+    await expect(limitBars.first()).toHaveAttribute("aria-valuetext", "99.9%");
+
+    // Whole token units, not the FPMM 15-decimal internal scale.
+    await expect(panel.getByText("/ Limit: 1,597")).toBeVisible();
+    await expect(panel.getByText("not applicable")).toHaveCount(0);
+  });
+
+  test("contains the VirtualPool limits header tile on mobile", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(`/pool/${CELO_VIRTUAL_POOL_ID}?tab=limits`);
+
+    // The Trading Limits tile carries mini-bars, so it must yield to the
+    // two-column header grid rather than hold a fixed width. Scope to the
+    // header's own Stat cell: the Limits tab panel renders its own heading and
+    // progressbars, and the panel test already covers those.
+    const headerTile = page
+      .locator("dl > div")
+      .filter({ hasText: "Trading Limits" });
+    await expect(headerTile).toHaveCount(1);
+    // One bar per enabled window on the tightest leg; this fixture enables the
+    // global window only. The panel's two bars are a different assertion.
+    await expect(headerTile.getByRole("progressbar")).toHaveCount(1);
+    const hasDocumentOverflow = await page.evaluate(
+      () =>
+        document.documentElement.scrollWidth >
+        document.documentElement.clientWidth + 1,
+    );
+    expect(hasDocumentOverflow).toBe(false);
   });
 
   test("omits deviation threshold remnants on the Oracle tab", async ({

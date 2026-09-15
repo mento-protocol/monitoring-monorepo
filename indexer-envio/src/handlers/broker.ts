@@ -30,6 +30,11 @@ import { maybeHeartbeatFlushV2 } from "../volumeWindowFlush.js";
 import { buildSwapAddressFields } from "../swap.js";
 import { selfHealWrappedExchangeId } from "../pool.js";
 import { feeTokenMetaEffect } from "../rpc/effects.js";
+import {
+  applyBrokerTradingLimits,
+  preloadBrokerTradingLimits,
+  type BrokerTradingLimitArgs,
+} from "./broker/trading-limits.js";
 
 function v3RouterAddress(chainId: number): string | null {
   const addr = getContractAddress(chainId, "Routerv300");
@@ -83,10 +88,12 @@ async function preloadBrokerSwapInputs(args: {
   context: EvmOnEventContext;
   exchangeSnapshotId: string;
   brokerCallerPoolId: string;
+  tradingLimits: BrokerTradingLimitArgs;
 }): Promise<void> {
   await Promise.all([
     args.context.BrokerExchangeDailySnapshot.get(args.exchangeSnapshotId),
     args.context.Pool.get(args.brokerCallerPoolId),
+    preloadBrokerTradingLimits(args.tradingLimits),
   ]);
 }
 
@@ -521,13 +528,25 @@ indexer.onEvent(
     const exchangeSnapshotId = `${event.chainId}-${exchangeProvider}-${exchangeId}-${dayTs}`;
     const brokerCallerPoolId = makePoolId(event.chainId, brokerCaller);
 
-    // preload-handler-note: high-frequency caller-pool healing depends on ordered Pool state; see #1394.
-    // preload-effect-helpers: maybeHealBrokerCallerPool
+    const tradingLimits: BrokerTradingLimitArgs = {
+      context,
+      chainId: event.chainId,
+      brokerAddress: asAddress(event.srcAddress),
+      exchangeId,
+      exchangeProvider,
+      tokens: [tokenIn, tokenOut],
+      blockNumber,
+      blockTimestamp,
+    };
+
+    // preload-handler-note: high-frequency caller-pool healing depends on ordered Pool state; see #1394. A trading-limit leg that crosses 0.8 pressure mid-batch is only visible in the processing pass, so that swap pays one unbatched read. The same holds for `readConfig`: the second swap on an exchange first written earlier in the batch asks for a config read in preload and a state-only read in processing, so it pays one unbatched read too.
+    // preload-effect-helpers: maybeHealBrokerCallerPool, applyBrokerTradingLimits
     if (context.isPreload)
       return preloadBrokerSwapInputs({
         context,
         exchangeSnapshotId,
         brokerCallerPoolId,
+        tradingLimits,
       });
 
     // computeSwapUsdWei is built around the FPMM `(token0, token1,
@@ -603,6 +622,13 @@ indexer.onEvent(
       ? isVirtualPool(brokerCallerPool)
       : false;
     const routedViaV3Router = txToV3Router && brokerCallerIsVirtualPool;
+
+    // Trading limits are keyed by (exchange, token), so this runs for EVERY
+    // Broker.Swap on a VirtualPool-wrapped exchange — direct v2 swaps move the
+    // same limit the VirtualPool page shows. The re-fold reads the STORED Pool
+    // row — `maybeHealBrokerCallerPool` returns its healed pool in memory and
+    // never persists it. Runs before the legacy-v2 early-returns below.
+    await applyBrokerTradingLimits(tradingLimits);
 
     const swap: BrokerSwapEvent = {
       id,

@@ -80,7 +80,7 @@ manifests also include main integration `71bdfc7d5415ffbd5d5de43122945af66bbddc9
 
 1. Stop merges through the normal human repository process.
 2. Read ruleset `13494367`. Keep its required checks. **Amended 2026-09-15
-   ([ADR 0103](0103-non-strict-required-status-checks.md)):** do not re-enable
+   ([ADR 0104](0104-non-strict-required-status-checks.md)):** do not re-enable
    `strict_required_status_checks_policy` — that policy is off by separate
    operator decision, and this rollback must restore the recorded known-safe
    ruleset with it still off, not on. If protection drifted for any other

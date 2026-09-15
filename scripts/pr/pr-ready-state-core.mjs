@@ -460,7 +460,7 @@ export function summarizeReadyState({
   // Tri-state: `true`/`false` when the fetched branch protection or ruleset
   // confirms the policy; `null` when unknown. Fails closed like every other
   // branch-protection lookup gap here: only a confirmed `false` demotes
-  // BEHIND to a note (operator decision 2026-09-15, ADR 0103).
+  // BEHIND to a note (operator decision 2026-09-15, ADR 0104).
   requiredStatusChecksStrict = null,
   // The base branch head's own status rollup, plus the commit it was read at.
   // A non-null `baseHealthError` means the read failed and the base's health
@@ -581,7 +581,7 @@ export function summarizeReadyState({
   }
 
   if (normalizeStatusValue(pr.mergeStateStatus) === "BEHIND") {
-    // Non-strict policy (operator decision 2026-09-15, ADR 0103): once the
+    // Non-strict policy (operator decision 2026-09-15, ADR 0104): once the
     // base's ruleset confirms `strict_required_status_checks_policy: false`,
     // a PR merely behind the base is not a required blocker on its own. A
     // textual conflict still blocks via the `mergeable` check above (kind
@@ -606,7 +606,7 @@ export function summarizeReadyState({
     }
   }
 
-  // ADR 0103 stopped GitHub re-running a PR's required checks against the
+  // ADR 0104 stopped GitHub re-running a PR's required checks against the
   // current base, so "nobody merges while main is red" needs an enforced
   // blocker rather than a rule of thumb. Judge the base head by the same
   // required-contexts set and the same fail/pending/pass classification the
