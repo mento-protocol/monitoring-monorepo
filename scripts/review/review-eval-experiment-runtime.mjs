@@ -3,6 +3,9 @@
 import {
   claudeExec,
   resetFixture,
+  codexEnv,
+  codexIsolatedHome,
+  releaseCodexHome,
   scrubbedEnv,
 } from "./review-eval-run-execution.mjs";
 import {
@@ -376,6 +379,7 @@ export async function runExperimentRuntimeStage({
   prepareFixture = defaultExperimentPrepareFixture,
   finderExec = defaultExperimentFinderExec,
   reset = resetFixture,
+  createCodexHome = codexIsolatedHome,
   ...armOptions
 }) {
   assertExperimentConcurrency(concurrency);
@@ -389,6 +393,54 @@ export async function runExperimentRuntimeStage({
     throw new Error(`experiment stage ${stage} plans no fixture lane`);
   }
   const env = armOptions.env ?? scrubbedEnv({ roots: [repoRoot] });
+  // A live finder is codex, and codex under the operator's home sees every
+  // operator skill. The stage owns one run-private home for all its finder
+  // calls and removes it with the last group, so no session state or auth
+  // link outlives the stage. A frozen-report stage spawns no finder.
+  const codexHome = stagePlan.lanes.some(
+    (lane) => lane.source?.kind === "live-finder",
+  )
+    ? createCodexHome({ env })
+    : null;
+  const finderEnv = codexHome ? codexEnv(env, codexHome) : env;
+  try {
+    return await runStageGroups({
+      plan,
+      stage,
+      stagePlan,
+      contract,
+      artifactRoot,
+      repoRoot,
+      fixtureCacheDir,
+      concurrency,
+      prepareFixture,
+      finderExec,
+      reset,
+      env,
+      finderEnv,
+      armOptions,
+    });
+  } finally {
+    if (codexHome) releaseCodexHome(codexHome);
+  }
+}
+
+async function runStageGroups({
+  plan,
+  stage,
+  stagePlan,
+  contract,
+  artifactRoot,
+  repoRoot,
+  fixtureCacheDir,
+  concurrency,
+  prepareFixture,
+  finderExec,
+  reset,
+  env,
+  finderEnv,
+  armOptions,
+}) {
   const executeArm = createExperimentArmExecutor({
     plan,
     stage,
@@ -415,7 +467,7 @@ export async function runExperimentRuntimeStage({
         lane: group[0],
         fixture: await materialize(group[0]),
         repoRoot,
-        env,
+        env: finderEnv,
         reset,
         finderExec,
       });

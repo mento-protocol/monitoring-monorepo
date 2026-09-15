@@ -281,9 +281,61 @@ function baseOptions(harness, overrides = {}) {
     scorerDigestNow: () => harness.plan.inputs.scorer_digest,
     judgeExec: judgeExec(),
     contestantExec: async () => contestantStream(["file.js:1 has a defect"]),
+    // No operator login in a test: the stage gets a bare home it will remove.
+    createCodexHome: () => fakeCodexHome(harness.artifactRoot),
     ...overrides,
   };
 }
+
+function fakeCodexHome(root) {
+  mkdirSync(root, { recursive: true });
+  const home = mkdtempSync(path.join(root, "codex-home-"));
+  mkdirSync(path.join(home, ".codex"));
+  return { home, codexHome: path.join(home, ".codex") };
+}
+
+test("a live finder runs under a stage-owned codex home that the stage removes", async (t) => {
+  const harness = makeHarness({ laneCount: 2, draws: 1, live: true });
+  t.after(harness.cleanup);
+  const homes = [];
+  const finderEnvs = [];
+  await runExperimentRuntimeStage(
+    baseOptions(harness, {
+      createCodexHome: ({ env }) => {
+        assert.equal(env.PATH, process.env.PATH);
+        const home = fakeCodexHome(harness.artifactRoot);
+        homes.push(home);
+        return home;
+      },
+      finderExec: async ({ env }) => {
+        finderEnvs.push(env);
+        return "one live finder report";
+      },
+      env: { ...process.env },
+    }),
+  );
+  // One home for the stage, every finder call under it, gone afterwards.
+  assert.equal(homes.length, 1);
+  assert.equal(finderEnvs.length, 2);
+  for (const env of finderEnvs) {
+    assert.equal(env.HOME, homes[0].home);
+    assert.equal(env.CODEX_HOME, homes[0].codexHome);
+  }
+  assert.equal(existsSync(homes[0].home), false);
+  // A frozen-report stage spawns no finder and makes no home.
+  const frozen = makeHarness({ laneCount: 1 });
+  t.after(frozen.cleanup);
+  let created = 0;
+  await runExperimentRuntimeStage(
+    baseOptions(frozen, {
+      createCodexHome: () => {
+        created += 1;
+        return fakeCodexHome(frozen.artifactRoot);
+      },
+    }),
+  );
+  assert.equal(created, 0);
+});
 
 test("runtime bounds fixture lanes and preserves each recorded pair order", async (t) => {
   const harness = makeHarness();
@@ -1304,6 +1356,8 @@ function stageRun(harness, { stage, probe, ...overrides }) {
       scorerDigestNow: () => harness.plan.inputs.scorer_digest,
       judgeExec: judgeExec(),
       contestantExec: async () => contestantStream(["file.js:1 has a defect"]),
+      // A live-paired stage makes a codex home; CI has no operator login.
+      createCodexHome: () => fakeCodexHome(harness.artifactRoot),
       ...overrides,
     },
   );

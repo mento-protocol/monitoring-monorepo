@@ -5,8 +5,8 @@ name: CI Reliability Report
 # per-job duration and queue percentiles, CI per-step minutes ranked by
 # total, and jobs within 20% of their timeout-minutes cap — see ADR 0100.
 # Never edits repository content or opens pull requests. Same shape as
-# file-size-watchlist.yml (issue-only scheduler) and m6-canary.yml (Actions
-# API reader via github-script).
+# file-size-watchlist.yml (issue-only scheduler). Actions API reads use
+# github-script's injected Octokit client.
 
 on:
   schedule:
@@ -24,7 +24,7 @@ jobs:
   report:
     name: Generate the CI health report and synchronize its issue
     if: github.repository == 'mento-protocol/monitoring-monorepo'
-    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 15
     permissions:
       actions: read
@@ -45,9 +45,8 @@ jobs:
       - name: Collect the report and synchronize its issue
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
-          # Deliberate, matching m6-canary.yml's identical step: an automatic
-          # retry after a partial run could re-issue the issues.create/update
-          # call and duplicate or corrupt the upserted report issue.
+          # An automatic retry after a partial run could repeat issues.create/update,
+          # duplicating or corrupting the upserted report issue.
           retries: 0
           script: |
             const { collectCiHealthReport } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/workflows/report-ci-reliability.mjs`);

@@ -225,6 +225,7 @@ Authority: canonical
 - [`adr/0099-retire-duplicate-bundle-size-workflow.md`](adr/0099-retire-duplicate-bundle-size-workflow.md) — Retire the duplicate bundle-size advisory workflow
 - [`adr/0100-monthly-ci-reliability-report.md`](adr/0100-monthly-ci-reliability-report.md) — Monthly CI reliability report is an issue-only scheduler
 - [`adr/0101-legacy-gate-retirement.md`](adr/0101-legacy-gate-retirement.md) — Retire the legacy local quality gate
+- [`adr/0102-github-hosted-runners-only.md`](adr/0102-github-hosted-runners-only.md) — GitHub-hosted runners only; a frozen allow-list blocks other labels
 
 Authority: non-canonical
 
@@ -277,5 +278,5 @@ Authority: non-canonical
 - [`docs/notes/ui-dashboard-performance-plan.md`](notes/ui-dashboard-performance-plan.md) (archived)
 - [`docs/notes/verification-redesign-phase-0-evidence.md`](notes/verification-redesign-phase-0-evidence.md)
 - [`docs/PLAN-ai-review-process.md`](PLAN-ai-review-process.md) (archived)
-- [`docs/PLAN-progressive-verification-graph.md`](PLAN-progressive-verification-graph.md)
+- [`docs/PLAN-progressive-verification-graph.md`](PLAN-progressive-verification-graph.md) (archived)
 - [`docs/PLAN-trove-history-page.md`](PLAN-trove-history-page.md)
