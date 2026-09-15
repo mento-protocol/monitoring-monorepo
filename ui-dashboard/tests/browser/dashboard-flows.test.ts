@@ -3,6 +3,11 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 const CELO_POOL_ID = "42220-0x462fe04b4fd719cbd04c0310365d421d02aaa19e";
 const MONAD_POOL_ID = "143-0xb0a0264ce6847f101b76ba36a4a3083ba489f501";
 const CELO_VIRTUAL_POOL_ID = "42220-0x1d013077b00b28038a3f1e7a29aba34e12e562e9";
+// Fixture BrokerTradingLimit legs key on `0x` + 24 `d` + the token address,
+// so this is the USDm leg of the VirtualPool's wrapped exchange.
+const VIRTUAL_POOL_LIMIT_ID =
+  "0xdddddddddddddddddddddddd765de816845861e75a25fca122bb6898b8b1282a";
+const UNWRAPPED_LIMIT_ID = `0x${"9".repeat(64)}`;
 const SWR_PERSISTED_CACHE_STORAGE_KEY = "mento-monitoring:swr-persisted-cache";
 
 function escapedPoolId(poolId: string): RegExp {
@@ -880,6 +885,37 @@ test.describe("dashboard browser flows", () => {
     // Whole token units, not the FPMM 15-decimal internal scale.
     await expect(panel.getByText("/ Limit: 1,597")).toBeVisible();
     await expect(panel.getByText("not applicable")).toHaveCount(0);
+  });
+
+  test("resolves an alert's /limit/<id> link onto the pool's Limits tab", async ({
+    page,
+  }) => {
+    await page.goto(`/limit/${VIRTUAL_POOL_LIMIT_ID}`);
+
+    await expect(page).toHaveURL(
+      new RegExp(`${escapedPoolId(CELO_VIRTUAL_POOL_ID).source}\\?tab=limits$`),
+    );
+    const panel = page.getByRole("tabpanel", { name: "limits" });
+    await expect(
+      panel.getByRole("heading", { name: "Trading Limits" }),
+    ).toBeVisible();
+    await expect(panel.getByRole("progressbar")).toHaveCount(2);
+  });
+
+  test("explains a well-formed limit id that no VirtualPool wraps", async ({
+    page,
+  }) => {
+    await page.goto(`/limit/${UNWRAPPED_LIMIT_ID}`);
+
+    await expect(
+      page.getByRole("heading", {
+        name: "No pool page for this trading limit",
+      }),
+    ).toBeVisible();
+    await expect(page.getByText(UNWRAPPED_LIMIT_ID)).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: "Browse pools" }),
+    ).toBeVisible();
   });
 
   test("contains the VirtualPool limits header tile on mobile", async ({

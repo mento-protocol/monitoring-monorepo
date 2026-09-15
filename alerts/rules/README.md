@@ -159,6 +159,13 @@ and `rateFeed` labels. Aegis testnet-health rules route to `#alerts-testnet` via
 `service=aegis-testnet` and do not depend on a testnet metrics bridge or hosted
 testnet pool indexer.
 
+Each trading-limit rule also carries a `pool_url` annotation,
+`https://monitoring.mento.org/limit/{{ $labels.limitIdValue }}`. The dashboard
+route trades that bytes32 limit id for the wrapping VirtualPool and opens its
+Limits tab; a limit on an unwrapped v2 exchange gets a short explanation rather
+than a 404. The Slack and VictorOps trading-limit templates print the link only
+when the annotation is present.
+
 ## Bridge transfers
 
 The [bridge alert runbook](../../docs/notes/bridge-transfer-alerting.md) owns

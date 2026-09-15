@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import {
   mkdtempSync,
@@ -20,6 +21,19 @@ function heredocLocal(source, name) {
     new RegExp(`\\b${name}\\s*=\\s*<<-EOT\\n([\\s\\S]*?)\\n\\s*EOT`),
   );
   if (!match) throw new Error(`${name} heredoc should exist`);
+  return match[1];
+}
+
+// Body of one `grafana_message_template` resource's heredoc. The message
+// templates live in their own files, so this selects by resource name rather
+// than by the local name `heredocLocal` uses.
+function messageTemplate(source, resource) {
+  const match = source.match(
+    new RegExp(
+      `resource "grafana_message_template" "${resource}" \\{[\\s\\S]*?template\\s*=\\s*<<-EOT\\n([\\s\\S]*?)\\n\\s*EOT`,
+    ),
+  );
+  if (!match) throw new Error(`${resource} template should exist`);
   return match[1];
 }
 
@@ -351,6 +365,30 @@ test(
         "victorops_pool_page_message",
       );
       contract.pool_slack_title = poolPageSlackTitle(contactPoints);
+      const slackTemplates = readFileSync(
+        join(repo, "alerts/rules/message-templates-slack.tf"),
+        "utf8",
+      );
+      const victoropsTemplates = readFileSync(
+        join(repo, "alerts/rules/message-templates-victorops.tf"),
+        "utf8",
+      );
+      contract.trading_limits_slack = messageTemplate(
+        slackTemplates,
+        "slack_trading_limits_alert_message",
+      );
+      contract.trading_limits_victorops = messageTemplate(
+        victoropsTemplates,
+        "victorops_trading_limits_alert_message",
+      );
+      contract.aegis_slack = messageTemplate(
+        slackTemplates,
+        "slack_aegis_service_alert_message",
+      );
+      contract.aegis_victorops = messageTemplate(
+        victoropsTemplates,
+        "victorops_aegis_service_alert_message",
+      );
       writeFileSync(templates, JSON.stringify(contract));
       command(
         "go",
@@ -358,6 +396,7 @@ test(
           "test",
           join(repo, "alerts/rules/tests/bridge-notification_test.go"),
           join(repo, "alerts/rules/tests/pool-notification_test.go"),
+          join(repo, "alerts/rules/tests/trading-limit-notification_test.go"),
         ],
         {
           env: {
@@ -375,3 +414,28 @@ test(
     }
   },
 );
+
+// The `pool_url` annotation is rendered from an Aegis label, and Aegis derives
+// that label name from the ABI input name in `aegis/config.yaml`
+// (`acc[`${name}Value`]` in aegis/src/metric.ts). Renaming the ABI parameter
+// would leave every alert link pointing at `/limit/` with no id and break no
+// other check, so pin the two together here.
+test("every trading-limit rule links the pool with the label Aegis emits", () => {
+  const aegisConfig = readFileSync(join(repo, "aegis/config.yaml"), "utf8");
+  const signature = aegisConfig.match(
+    /Broker\.tradingLimitsState\(bytes32 (\w+)\)/,
+  );
+  if (!signature)
+    throw new Error("Broker.tradingLimitsState source should exist");
+  const expected = `https://monitoring.mento.org/limit/{{ $labels.${signature[1]}Value }}`;
+
+  const rules = readFileSync(
+    join(repo, "alerts/rules/rules-trading-limits.tf"),
+    "utf8",
+  );
+  const annotations = [...rules.matchAll(/^\s*pool_url\s*=\s*"(.*)"$/gm)].map(
+    (match) => match[1],
+  );
+  assert.equal(annotations.length, 3, "L0, L1 and LG each carry a pool_url");
+  for (const annotation of annotations) assert.equal(annotation, expected);
+});
