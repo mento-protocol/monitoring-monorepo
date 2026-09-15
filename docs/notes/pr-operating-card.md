@@ -280,12 +280,12 @@ If root `package.json` changed, first run
    hosted sessions — do not hand-roll PR creation. The description follows the
    repo template
    [`.github/PULL_REQUEST_TEMPLATE.md`](../../.github/PULL_REQUEST_TEMPLATE.md)
-   in full: `## tl;dr` (two to four plain sentences, about 60 words, no
-   identifiers), `## The Problem` (at most three bullets — old behavior, what
-   failed, concrete effect), `## The Solution` (new behavior, why it helps,
-   material limits), `## Details`, and `## Validation` (one line per check,
-   the head SHA once, the step-4 scope baseline). Keep the authored body under
-   400 words. Write the opening for an engineer who has not read the diff. `scripts/pr/check-pr-description.mjs`
+   in full: `## tl;dr` (two to four plain sentences, about 60 words, 80 at
+   most, no identifiers), `## The Problem` (at most three bullets — old
+   behavior, what failed, effect), `## The Solution` (new behavior, why it
+   helps, limits), `## Details`, and `## Validation` (one line per check, the
+   head SHA once, the step-4 scope baseline). Keep the authored body under 400
+   words. Write the opening for an engineer who has not read the diff. `scripts/pr/check-pr-description.mjs`
    enforces those three sections, their order, and the ceiling in CI; raw HTML
    other than comments and code blocks does not satisfy its opening-content
    check. PRs open **ready for

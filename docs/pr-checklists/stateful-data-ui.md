@@ -260,7 +260,7 @@ heading lines, in this order:
 ```
 
 - Two to four plain sentences, about 60 words, for a reader outside this
-  codebase. No paths, flags, or identifiers.
+  codebase. CI rejects more than 80. No paths, flags, or identifiers.
 
 ```markdown
 ## The Problem

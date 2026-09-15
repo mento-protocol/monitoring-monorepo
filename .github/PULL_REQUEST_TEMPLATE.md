@@ -7,7 +7,7 @@ Plain words for a reader outside this codebase: who had the problem, what this
 PR changes, what to expect after merge. No paths, flags, or identifiers.
 -->
 
-[Two to four plain sentences, about 60 words.]
+[Two to four plain sentences, about 60 words; CI rejects more than 80.]
 
 ## The Problem
 

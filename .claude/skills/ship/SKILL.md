@@ -58,7 +58,8 @@ bootstrap; setup has a separate [trust boundary](../../../docs/notes/worktree-an
 - **`scripts/pr/check-pr-description.mjs` enforces `## tl;dr` then
   `## The Problem` then `## The Solution` in CI**, in that order, ahead of all
   other content, and caps the authored body at 400 words. The tl;dr is two to
-  four plain sentences, about 60 words, with no paths, flags, or identifiers.
+  four plain sentences, about 60 words (CI rejects more than 80), with no
+  paths, flags, or identifiers.
   The full description shape is the repo template
   `.github/PULL_REQUEST_TEMPLATE.md`, bound by card step 5.
 - **Never post routine or duplicate `@codex review` requests**, and never tag
