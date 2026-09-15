@@ -97,7 +97,8 @@ threshold-derived history uses the threshold captured at event time.
 - A `"use client"` module formats a timestamp with `useSsrSafeRelative` /
   `useSsrSafeTimestamp` from `src/hooks/use-now-seconds.ts`, or with
   `useNowSeconds()` once plus `relativeTimeOrTimestamp(ts, now)` /
-  `timestampOrUtc(ts, now)` for rows inside a loop. The
+  `timestampOrUtc(ts, now)` inside a map callback, where a hook cannot run. A
+  row that is its own component uses the hooks. The
   `ssr-clock-policy/no-raw-clock-format-in-client` rule blocks a raw
   `relativeTime` or `formatTimestamp` import there, and sees only modules that
   carry the directive themselves.

@@ -45,7 +45,9 @@ function staticallyKnownPropertyName(node, computed, services, checker) {
     return node.quasis[0]?.value.cooked ?? null;
   }
 
-  if (!computed) return null;
+  // The last branch resolves a key held in a const, so it needs type services.
+  // A rule that runs without them keeps the literal forms above.
+  if (!computed || !services || !checker) return null;
   const propertyNode = services.esTreeNodeToTSNodeMap.get(node);
   const propertyType = checker.getTypeAtLocation(propertyNode);
   return propertyType.isStringLiteral() ? propertyType.value : null;
@@ -226,25 +228,6 @@ function ssrSafeClockMessage(name, { hook, pure }) {
   );
 }
 
-// A namespace property can be written `format.relativeTime`,
-// `format["relativeTime"]` or with a template key, and destructured with either
-// key form. Only a statically known name resolves; a key computed at runtime
-// does not, and the rule stays silent there.
-function staticClockPropertyName(node, computed) {
-  if (!computed && node.type === "Identifier") return node.name;
-  if (computed && node.type === "Literal" && typeof node.value === "string") {
-    return node.value;
-  }
-  if (
-    computed &&
-    node.type === "TemplateLiteral" &&
-    node.expressions.length === 0
-  ) {
-    return node.quasis[0]?.value.cooked ?? null;
-  }
-  return null;
-}
-
 function resolvedImportPath(source, filename) {
   if (source.startsWith("@/")) {
     return path.join(__dirname, "src", source.slice(2));
@@ -255,18 +238,12 @@ function resolvedImportPath(source, filename) {
   return null;
 }
 
-function reportNamespaceProperty(context, node, computed) {
-  const name = staticClockPropertyName(node, computed);
-  const replacement = name ? SSR_SAFE_CLOCK_REPLACEMENTS[name] : undefined;
-  if (!replacement) return;
-  context.report({ node, message: ssrSafeClockMessage(name, replacement) });
-}
-
 // The directive decides, not a path glob: `"use client"` is what makes a module
 // render in both places, and a glob over `src/components/**` would catch
 // server-rendered helpers and miss client modules elsewhere. The cost is that a
 // module reached only through a client parent, with no directive of its own, is
 // invisible here — give such a module the directive when it reads the clock.
+// The whole directive prologue counts, as it does in Next.
 const ssrSafeClockRule = {
   meta: {
     type: "problem",
@@ -281,14 +258,41 @@ const ssrSafeClockRule = {
     // Locals bound by `import * as format from "@/lib/format"`, so a namespace
     // import cannot walk around the named-specifier check.
     const namespaceLocals = new Set();
+    const services = context.sourceCode.parserServices;
+    const checker = services?.program?.getTypeChecker();
+
+    // A namespace property can be written `format.relativeTime`,
+    // `format["relativeTime"]`, with a template key, or with a key held in a
+    // const, and destructured with any of those key forms. A key only known at
+    // runtime does not resolve, and the rule stays silent there.
+    function reportNamespaceProperty(node, computed) {
+      const name = staticallyKnownPropertyName(
+        node,
+        computed,
+        services,
+        checker,
+      );
+      const replacement = name ? SSR_SAFE_CLOCK_REPLACEMENTS[name] : undefined;
+      if (!replacement) return;
+      context.report({ node, message: ssrSafeClockMessage(name, replacement) });
+    }
 
     return {
       Program(node) {
-        const [first] = node.body;
-        isClientModule =
-          first?.type === "ExpressionStatement" &&
-          first.expression.type === "Literal" &&
-          first.expression.value === "use client";
+        // Next scans the whole directive prologue, so `"use strict"` ahead of
+        // `"use client"` still makes a client module. Match that, or the rule
+        // goes silent on a file Next renders twice.
+        isClientModule = false;
+        for (const statement of node.body) {
+          if (statement.type !== "ExpressionStatement") break;
+          const { expression } = statement;
+          if (expression.type !== "Literal") break;
+          if (typeof expression.value !== "string") break;
+          if (expression.value === "use client") {
+            isClientModule = true;
+            break;
+          }
+        }
         namespaceLocals.clear();
       },
       ImportDeclaration(node) {
@@ -319,7 +323,7 @@ const ssrSafeClockRule = {
         if (!isClientModule) return;
         if (node.object.type !== "Identifier") return;
         if (!namespaceLocals.has(node.object.name)) return;
-        reportNamespaceProperty(context, node.property, node.computed);
+        reportNamespaceProperty(node.property, node.computed);
       },
       // `const { relativeTime } = format` reaches the same function without a
       // member expression, so the destructuring is checked too.
@@ -328,7 +332,7 @@ const ssrSafeClockRule = {
         const source = destructuringSource(node);
         if (source?.type !== "Identifier") return;
         if (!namespaceLocals.has(source.name)) return;
-        reportNamespaceProperty(context, node.key, node.computed);
+        reportNamespaceProperty(node.key, node.computed);
       },
     };
   },

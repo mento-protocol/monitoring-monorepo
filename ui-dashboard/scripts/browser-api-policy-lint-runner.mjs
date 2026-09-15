@@ -241,12 +241,19 @@ const cases = {
       import * as format from "@/lib/format";
 
       const { formatTimestamp: stamp } = format;
+      const key = "relativeTime" as const;
 
       export function label(ts: string, props: { relativeTime: string }): string {
         const { relativeTime } = props;
-        return \`\${format["relativeTime"](ts)} \${format[\`relativeTime\`](ts)} \${stamp(ts)} \${relativeTime}\`;
+        return \`\${format["relativeTime"](ts)} \${format[\`relativeTime\`](ts)} \${format[key](ts)} \${stamp(ts)} \${relativeTime}\`;
       }
     `,
+  },
+  // Next scans the whole directive prologue, so a rule that reads only the
+  // first statement would go silent on this file.
+  clockStrictPrologue: {
+    filePath: "src/components/breach-history/breach-row.tsx",
+    source: `"use strict";\n"use client";\n${RAW_CLOCK_IMPORT_SOURCE}`,
   },
   clockSsrSafe: {
     filePath: "src/components/breach-history/breach-row.tsx",
