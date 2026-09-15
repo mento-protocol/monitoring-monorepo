@@ -79,22 +79,37 @@ The unattended Dependabot auto-merge lane
 in its writer rather than relying on the base ruleset. It merges with the
 repository `GITHUB_TOKEN`, whose merge commit emits no push-triggered
 workflows, so a stale merge on that lane would land with no post-merge `ci`
-run at all. The writer merges only a `clean` `mergeable_state`. A `behind`
-head exits without merging and without repairing the branch: `update-branch`
-would write a merge commit authored by that token, and the writer's own commit
-proof accepts only commits authored by `dependabot[bot]`, so the repair would
-disqualify the pull request from the lane for good. Dependabot's own rebase
-pushes under its identity, starts a fresh classifier run, and brings the pull
-request back. Every other merge state fails closed.
+run at all. The writer proves ancestry directly: it reads the base branch tip,
+compares it against the verified head, and merges only when `behind_by == 0`.
+The guarantee rests on that comparison, not on GitHub's `mergeable_state`.
+`behind` only ever meant "a policy requires an up-to-date branch", so with the
+policy off a stale but conflict-free head reports `clean` and the merge state
+proves nothing about freshness. `behind_by == 0` also implies no conflict,
+since a head containing the base tip merges trivially. Every failed or
+malformed read of either endpoint fails closed.
 
-That check is an observation, not a server-enforced precondition: the merge
-endpoint's `sha` pins the pull request's head, not the base. Two writers on
-different branches could each read `clean` and the second could merge a base
-commit behind the first. The window is the sub-second gap between the final
-read and the merge request, and the lane only ever bumps pinned GitHub-owned
-action SHAs in workflow YAML. Closing it properly needs the merge queue this
-ADR defers, so the residual race is accepted and recorded here rather than
-papered over with repository-wide serialization of an unattended lane.
+A stale head exits without merging, and the stale path stays read-only.
+`update-branch` would write a merge commit authored by that token, and the
+writer's own commit proof accepts only commits authored by `dependabot[bot]`,
+so the repair would disqualify the pull request from the lane for good. Posting
+`@dependabot rebase` is no better: GitHub records a `GITHUB_TOKEN` comment as
+`github-actions[bot]`, whose commands Dependabot ignores, so the comment would
+add noise and a false audit trail without causing a rebase. Recovery needs
+nothing from this job. `.github/dependabot.yml` sets no `rebase-strategy`, so
+Dependabot keeps its default `auto` and rebases its own out-of-date pull
+requests; that push lands under its identity and starts a fresh classifier run,
+which brings the pull request back. Until then it stays unmerged, which is the
+safe outcome.
+
+The comparison is still an observation, not a server-enforced precondition: the
+merge endpoint's `sha` pins the pull request's head, not the base. Two writers
+on different branches could each read `behind_by == 0` and the second could
+merge after the first advanced `main`. The window is the sub-second gap between
+the comparison and the merge request, and the lane only ever bumps pinned
+GitHub-owned action SHAs in workflow YAML. Closing it properly needs the merge
+queue this ADR defers, so the residual race is accepted and recorded here
+rather than papered over with repository-wide serialization of an unattended
+lane.
 
 ## Alternatives considered
 
@@ -147,7 +162,8 @@ papered over with repository-wide serialization of an unattended lane.
   `scripts/production-infra-identity-contract/workflow-inventory.mjs` pins its
   reviewed semantic hash and
   `scripts/production-infra-identity-contract/dependabot-auto-merge.test.mjs`
-  proves a behind head exits without merging and without any write.
+  proves a stale head reaches no merge and makes no write of any kind, and that
+  every ancestry-read failure fails closed.
 - Probed 2026-09-15:
   `repos/mento-protocol/monitoring-monorepo/branches/main/protection/required_status_checks`
   answers `Branch not protected (HTTP 404)` while

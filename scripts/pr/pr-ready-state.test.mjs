@@ -36,7 +36,7 @@ import {
 } from "./pr-ready-state-closeout.mjs";
 import { formatCompact, formatHuman } from "./pr-ready-state-format.mjs";
 import { verifyReadinessSnapshot } from "./pr-ready-state-stack.mjs";
-import { latestChecksByIdentity } from "./pr-ready-state-base-health.mjs";
+import { latestSettledChecksByIdentity } from "./pr-ready-state-base-health.mjs";
 import {
   annotateStatusCheckSources,
   fetchBaseBranchHealth,
@@ -2918,7 +2918,7 @@ test("blocks on a red base and fails closed when base health is unreadable", () 
   );
 });
 
-test("reduces a base rollup to the latest run of each check", () => {
+test("reduces a base rollup to the latest settled run of each check", () => {
   // A rerun leaves the old FAILURE next to the new SUCCESS. Judging the whole
   // rollup would keep every open PR blocked on a base someone already fixed.
   const run = (conclusion, startedAt) => ({
@@ -2927,9 +2927,14 @@ test("reduces a base rollup to the latest run of each check", () => {
     conclusion,
     ...(startedAt ? { startedAt } : {}),
   });
+  const pendingRun = (status, startedAt) => ({
+    name: "ci",
+    status,
+    ...(startedAt ? { startedAt } : {}),
+  });
 
   assertDeepEqual(
-    latestChecksByIdentity([
+    latestSettledChecksByIdentity([
       run("FAILURE", "2026-09-15T10:00:00Z"),
       run("SUCCESS", "2026-09-15T11:00:00Z"),
     ]).map((check) => check.conclusion),
@@ -2937,7 +2942,7 @@ test("reduces a base rollup to the latest run of each check", () => {
     "a passing rerun must supersede the earlier failure",
   );
   assertDeepEqual(
-    latestChecksByIdentity([
+    latestSettledChecksByIdentity([
       run("SUCCESS", "2026-09-15T10:00:00Z"),
       run("FAILURE", "2026-09-15T11:00:00Z"),
     ]).map((check) => check.conclusion),
@@ -2961,19 +2966,92 @@ test("reduces a base rollup to the latest run of each check", () => {
     [run("FAILURE"), run("SUCCESS")],
   ]) {
     assertDeepEqual(
-      latestChecksByIdentity(pair).map((check) => check.conclusion),
+      latestSettledChecksByIdentity(pair).map((check) => check.conclusion),
       ["FAILURE"],
       "unorderable duplicate runs must keep the failure",
     );
   }
 
+  // A rerun in flight proves nothing yet. Dropping the known failure for it
+  // would clear `base-red` on a base that is still broken, because a pending
+  // base check does not block — every open PR would look mergeable again.
+  for (const status of ["IN_PROGRESS", "QUEUED"]) {
+    assertDeepEqual(
+      latestSettledChecksByIdentity([
+        run("FAILURE", "2026-09-15T10:00:00Z"),
+        pendingRun(status, "2026-09-15T11:00:00Z"),
+      ]).map((check) => check.conclusion),
+      ["FAILURE"],
+      `a ${status} rerun must not supersede a known base failure`,
+    );
+  }
+
+  // Only once the rerun settles green does the failure clear.
+  assertDeepEqual(
+    latestSettledChecksByIdentity([
+      run("FAILURE", "2026-09-15T10:00:00Z"),
+      pendingRun("IN_PROGRESS", "2026-09-15T11:00:00Z"),
+      run("SUCCESS", "2026-09-15T12:00:00Z"),
+    ]).map((check) => check.conclusion),
+    ["SUCCESS"],
+    "a settled passing rerun must supersede the failure",
+  );
+
+  // A check that has never settled is unproven, not red, and must still be
+  // reported so the required context does not vanish from the split.
+  const onlyPending = latestSettledChecksByIdentity([
+    pendingRun("QUEUED", "2026-09-15T10:00:00Z"),
+  ]);
+  assertEqual(onlyPending.length, 1);
+  assertEqual(onlyPending[0].status, "QUEUED");
+
   // Different checks are different identities and must all survive.
   assertEqual(
-    latestChecksByIdentity([
+    latestSettledChecksByIdentity([
       { name: "ci", conclusion: "SUCCESS" },
       { name: "Code Quality", conclusion: "SUCCESS" },
     ]).length,
     2,
+  );
+});
+
+test("a base rerun in flight keeps the base-red blocker", () => {
+  const summary = summarizeReadyState({
+    pr: {
+      ...basePr,
+      statusCheckRollup: [
+        { name: "ci", conclusion: "SUCCESS", status: "COMPLETED" },
+      ],
+    },
+    reactions: [
+      {
+        content: "+1",
+        created_at: "2026-05-21T13:23:00Z",
+        user: { login: "chatgpt-codex-connector[bot]" },
+      },
+    ],
+    requiredStatusContexts: [{ context: "ci", integrationId: null }],
+    baseHealthOid: "a".repeat(40),
+    // What `fetchBaseBranchHealth` hands over once the rerun is in flight: the
+    // failure is still the latest settled run.
+    baseStatusCheckRollup: [
+      {
+        name: "ci",
+        conclusion: "FAILURE",
+        status: "COMPLETED",
+        startedAt: "2026-09-15T10:00:00Z",
+      },
+    ],
+  });
+
+  assertEqual(
+    summary.ready,
+    false,
+    "a rerun in flight must not clear a red base",
+  );
+  assertEqual(
+    summary.required.blockers.filter((item) => item.kind === "base-red").length,
+    1,
   );
 });
 

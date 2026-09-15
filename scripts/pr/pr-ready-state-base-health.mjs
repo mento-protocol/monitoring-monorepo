@@ -17,30 +17,51 @@ import {
   classifyCheck,
 } from "./pr-ready-state-check-state.mjs";
 
-// A base commit's rollup can carry several runs of the same check: a rerun
-// after a failure leaves the old FAILURE alongside the new SUCCESS. Reduce to
-// the latest run per identity here, at the read, so a base someone already
-// fixed by rerunning stops blocking every open PR.
-export function latestChecksByIdentity(rollup = []) {
-  const latest = new Map();
+// `classifyCheck` returns "pending" for every non-terminal state (queued,
+// in progress, expected, waiting) and for anything it cannot read, so a run is
+// settled exactly when it classifies as something else.
+function isSettledRun(check) {
+  return classifyCheck(check) !== "pending";
+}
+
+function laterSettledRun(current, candidate) {
+  if (current === null) return candidate;
+  const currentMs = checkRunOrderTimestampMs(current);
+  const candidateMs = checkRunOrderTimestampMs(candidate);
+  if (currentMs !== null && candidateMs !== null && currentMs !== candidateMs) {
+    return candidateMs > currentMs ? candidate : current;
+  }
+  // Equal or missing timestamps cannot order the runs, so fail closed: keep a
+  // failure rather than guess that the passing run is the newer one.
+  return classifyCheck(candidate) === "fail" ? candidate : current;
+}
+
+// A base commit's rollup can carry several runs of the same check. Reduce each
+// identity to its latest *settled* run, at the read.
+//
+// Settled, not merely latest: when someone reruns a failed check on the base,
+// the rollup holds the old FAILURE next to a new QUEUED or IN_PROGRESS run.
+// Taking the newest run would drop the failure, and a pending base check does
+// not block — so every open PR would look mergeable again while the base is
+// still known-broken and the rerun has proven nothing. A known failure keeps
+// blocking until a newer settled run supersedes it. An identity with no
+// settled run yet is genuinely unproven rather than red, and is reported as
+// its pending run so the required context still shows up.
+export function latestSettledChecksByIdentity(rollup = []) {
+  const byIdentity = new Map();
   for (const check of rollup) {
     const identity = checkIdentity(check);
-    const previous = latest.get(identity);
-    if (previous === undefined) {
-      latest.set(identity, check);
-      continue;
+    const entry = byIdentity.get(identity) ?? { settled: null, pending: null };
+    if (isSettledRun(check)) {
+      entry.settled = laterSettledRun(entry.settled, check);
+    } else if (entry.pending === null) {
+      entry.pending = check;
     }
-    const previousMs = checkRunOrderTimestampMs(previous);
-    const currentMs = checkRunOrderTimestampMs(check);
-    if (previousMs !== null && currentMs !== null && currentMs !== previousMs) {
-      if (currentMs > previousMs) latest.set(identity, check);
-      continue;
-    }
-    // Equal or missing timestamps cannot order the runs, so fail closed: keep
-    // a failure rather than guess that the passing run is the newer one.
-    if (classifyCheck(check) === "fail") latest.set(identity, check);
+    byIdentity.set(identity, entry);
   }
-  return [...latest.values()];
+  return [...byIdentity.values()]
+    .map((entry) => entry.settled ?? entry.pending)
+    .filter((check) => check != null);
 }
 
 // One read, both surfaces. This repo's required contexts span check runs
@@ -158,7 +179,7 @@ export async function fetchBaseBranchHealth({
 
   return {
     oid: commit.oid,
-    rollup: latestChecksByIdentity(
+    rollup: latestSettledChecksByIdentity(
       (contexts?.nodes ?? []).map(baseHealthCheck),
     ),
     error: null,

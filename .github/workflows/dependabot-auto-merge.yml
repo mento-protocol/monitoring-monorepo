@@ -14,8 +14,9 @@ name: Dependabot auto-merge
 # enqueue or leave a standing auto-merge request.
 #
 # Main's ruleset no longer requires a pull request to include the current base
-# (ADR 0104), so this writer carries that validation itself: it merges only a
-# clean head and never repairs a stale one.
+# (ADR 0104), so this writer carries that validation itself: it compares the
+# base tip against the verified head and merges only when the head contains it.
+# A stale head is left alone for Dependabot's own rebase to recover.
 #
 # The repository GITHUB_TOKEN performs the evidence reads and the final write.
 # Separate environment variables keep the read path and final-write seam
@@ -86,6 +87,7 @@ jobs:
           EXPECTED_HEAD=''
           EXPECTED_HEAD_REF=''
           PR_NUMBER=''
+          OBSERVED_BEHIND_BY=''
 
           if [[ "$GITHUB_REPOSITORY" != "$EXPECTED_REPOSITORY" ]]; then
             echo '::error::The writer is outside the expected repository.'
@@ -282,15 +284,6 @@ jobs:
               exit 1
             fi
 
-            # Capture the base-freshness reading from the read this function
-            # already performs. The final caller below acts on it; taking it
-            # here costs no extra request and keeps it as current as every
-            # other proof this function repeats.
-            if ! OBSERVED_MERGE_STATE=$(jq -er '.mergeable_state' <<< "$pr_json"); then
-              echo '::error::The pull request merge state is unreadable.'
-              exit 1
-            fi
-
             if ! expected_commit_count=$(jq -er '.commits' <<< "$pr_json"); then
               echo '::error::The pull request commit count is invalid.'
               exit 1
@@ -389,6 +382,54 @@ jobs:
             fi
           }
 
+          # Read the base branch tip, then require the verified head to contain
+          # it. Every failure path leaves OBSERVED_BEHIND_BY unset and exits
+          # non-zero, so an unreadable comparison can never look like ancestry.
+          verify_base_ancestry() {
+            local base_json
+            local base_sha
+            local compare_json
+
+            if ! base_json=$(GH_TOKEN="$GH_READ_TOKEN" gh api --method GET \
+              "repos/$EXPECTED_REPOSITORY/branches/$EXPECTED_BASE"); then
+              echo '::error::The base branch tip is unreadable.'
+              exit 1
+            fi
+            if ! base_sha=$(jq -er '.commit.sha' <<< "$base_json"); then
+              echo '::error::The base branch tip is invalid.'
+              exit 1
+            fi
+            if [[ ! "$base_sha" =~ ^[0-9a-f]{40}$ ]]; then
+              echo '::error::The base branch tip is invalid.'
+              exit 1
+            fi
+
+            if ! compare_json=$(GH_TOKEN="$GH_READ_TOKEN" gh api --method GET \
+              "repos/$EXPECTED_REPOSITORY/compare/$base_sha...$EXPECTED_HEAD"); then
+              echo '::error::The base ancestry comparison is unreadable.'
+              exit 1
+            fi
+            if ! jq -e \
+              --arg base "$base_sha" \
+              --arg head "$EXPECTED_HEAD" \
+              '(.behind_by | type) == "number" and
+               .behind_by >= 0 and
+               .base_commit.sha == $base and
+               .merge_base_commit.sha != null' \
+              <<< "$compare_json" >/dev/null; then
+              echo '::error::The base ancestry comparison does not have the expected shape.'
+              exit 1
+            fi
+            if ! OBSERVED_BEHIND_BY=$(jq -er '.behind_by' <<< "$compare_json"); then
+              echo '::error::The base ancestry count is invalid.'
+              exit 1
+            fi
+            if [[ ! "$OBSERVED_BEHIND_BY" =~ ^[0-9]+$ ]]; then
+              echo '::error::The base ancestry count is invalid.'
+              exit 1
+            fi
+          }
+
           verify_authoritative_state
           readonly EXPECTED_HEAD EXPECTED_HEAD_REF PR_NUMBER
 
@@ -426,24 +467,35 @@ jobs:
           # current base. This lane is unattended and merges with the
           # repository GITHUB_TOKEN, whose merge commit emits no
           # push-triggered workflows, so a stale merge would land with no
-          # post-merge CI run at all. Keep current-base validation in the
-          # writer: merge only a CLEAN head.
+          # post-merge CI run at all. Current-base validation therefore lives
+          # in this writer.
           #
-          # This lane deliberately does not repair a behind branch itself.
-          # `update-branch` would write a merge commit authored by this token,
-          # and the commit proof above accepts only commits authored by
-          # dependabot[bot], so the repair would disqualify the pull request
-          # from this lane for good. A token-authored push also starts no
-          # workflow run, so nothing would revalidate it. Leaving the branch
-          # alone lets Dependabot rebase it under its own identity, which does
-          # start a fresh classifier run and brings the pull request back here.
-          if [[ "$OBSERVED_MERGE_STATE" == 'behind' ]]; then
-            echo '::notice::The base moved during the required-check wait. Leaving the merge to a later Dependabot-triggered run.'
+          # Prove ancestry, do not read `mergeable_state`. Once the strict
+          # policy is off, a stale but conflict-free head reports `clean`
+          # rather than `behind` — `behind` only ever meant "a policy requires
+          # an up-to-date branch", so it is not an ancestry proof here. Compare
+          # the base tip against the verified head and require the head to
+          # contain it. `behind_by == 0` also implies no conflict, since a head
+          # containing the base tip merges trivially.
+          verify_base_ancestry
+
+          # The stale path is read-only. `update-branch` would write a merge
+          # commit authored by this token, and the commit proof above accepts
+          # only commits authored by dependabot[bot], so the repair would
+          # disqualify the pull request from this lane for good; a
+          # token-authored push also starts no workflow run, so nothing would
+          # revalidate it. Posting `@dependabot rebase` is no better: the
+          # comment would be recorded as github-actions[bot], whose commands
+          # Dependabot ignores, so it would add noise and a false audit trail
+          # without causing a rebase. Recovery needs no help from this job.
+          # `.github/dependabot.yml` sets no `rebase-strategy`, so Dependabot
+          # keeps its default `auto` and rebases its own out-of-date pull
+          # requests. That push lands under its identity and starts a fresh
+          # classifier run, which brings the pull request back here. Until then
+          # it stays unmerged, which is the safe outcome.
+          if [[ "$OBSERVED_BEHIND_BY" != '0' ]]; then
+            echo "::notice::The verified head is $OBSERVED_BEHIND_BY commit(s) behind $EXPECTED_BASE. Leaving the pull request unmerged."
             exit 0
-          fi
-          if [[ "$OBSERVED_MERGE_STATE" != 'clean' ]]; then
-            echo "::error::The pull request merge state must be clean: $OBSERVED_MERGE_STATE"
-            exit 1
           fi
 
           if ! MERGE_JSON=$(GH_TOKEN="$FINAL_MERGE_TOKEN" gh api --method PUT \
