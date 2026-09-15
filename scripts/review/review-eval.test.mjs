@@ -245,7 +245,7 @@ test("the shell split no longer reconstructs the pre-split cell runtime", () => 
   // so this pin still catches an unintended shell edit.
   assert.equal(
     reconstructed,
-    "33b533d481af74e8eb2d1ede603cf8ad6e279d056931be6f1c3a7b8f2c557134",
+    "15b8bd9f407d1e2c3175aadf1b158f95481b908293c0ae5ce8be74adbaff238d",
   );
   // It is no longer the pre-split monolith. Capturing the whole session instead
   // of the CLI's last-message envelope changed what a cell records, so the 24
@@ -907,7 +907,7 @@ test("comparabilityKey moves with the contract, the prompts, and the scorer", ()
 
 test("orchestratorSourceDigest binds the shell and the cell modules", () => {
   const expected =
-    "9c1e3148fc94dcf69f84d8e40b81d82cc61119f96db6a578ee60d291a0afd0d5";
+    "4ab4912da35c3c80018695387b857c21c7af320eb7e4e38cfa0c22bc4285263a";
   assert.equal(orchestratorSourceDigest(), expected);
   // The cell writer and the stream parser are in the digest for the same
   // reason the shell is: the writer decides what a paid cell records and the
@@ -10690,9 +10690,15 @@ test("every codex spawn runs under a run-private home", () => {
   // Codex reads skills from $HOME/.agents and $CODEX_HOME whatever
   // --ignore-user-config says, so the finder and the codex verifier both get
   // a temp home that carries only a link to the operator's auth file.
+  // Only a plan that spawns codex needs the login: a replay-only canary must
+  // run on a host with Claude credentials and no codex.
   assert.match(
     runtime,
-    /CODEX_AUTH="\$\{CODEX_HOME:-\$HOME\/\.codex\}\/auth\.json"\n\[\[ -f \$CODEX_AUTH \]\] \|\| fail /,
+    /\nCODEX_ENV=\(env\)\nif \[\[ \$\{#FINDER_ARGV\[@\]\} -gt 0 \]\]; then\n\s+CODEX_AUTH="\$\{CODEX_HOME:-\$HOME\/\.codex\}\/auth\.json"\n\s+\[\[ -f \$CODEX_AUTH \]\] \|\| fail /,
+  );
+  assert.ok(
+    runtime.indexOf("FINDER_ARGV=()") < runtime.indexOf("CODEX_ENV=(env)"),
+    "the codex home is decided after the finder argv is read",
   );
   assert.match(
     runtime,
@@ -10700,7 +10706,7 @@ test("every codex spawn runs under a run-private home", () => {
   );
   assert.match(
     runtime,
-    /ln -s "\$CODEX_AUTH" "\$CODEX_ISO\/\.codex\/auth\.json"\nCODEX_ENV=\(env HOME="\$CODEX_ISO" CODEX_HOME="\$CODEX_ISO\/\.codex"\)/,
+    /ln -s "\$CODEX_AUTH" "\$CODEX_ISO\/\.codex\/auth\.json"\n\s+CODEX_ENV=\(env HOME="\$CODEX_ISO" CODEX_HOME="\$CODEX_ISO\/\.codex"\)\nfi\n/,
   );
   assert.match(
     runtime,

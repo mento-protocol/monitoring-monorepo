@@ -60,18 +60,8 @@ CELL_ENV+=(
   GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/bin/false GIT_ALLOW_PROTOCOL=file
   GH_CONFIG_DIR="$SHIM/gh-empty" PATH="$CELL_PATH")
 
-# Codex reads skills from $HOME/.agents and $CODEX_HOME whatever
-# --ignore-user-config says (the review skill under test included), so both
-# codex spawns get a run-private home holding only a link to the auth file.
-CODEX_AUTH="${CODEX_HOME:-$HOME/.codex}/auth.json"
-[[ -f $CODEX_AUTH ]] || fail "codex auth $CODEX_AUTH is missing; log in with codex before a run"
-CODEX_ISO="$(mktemp -d "$TMPROOT/review-eval-codex-home.XXXXXX")"
-mkdir -p "$CODEX_ISO/.codex" && ln -s "$CODEX_AUTH" "$CODEX_ISO/.codex/auth.json"
-CODEX_ENV=(env HOME="$CODEX_ISO" CODEX_HOME="$CODEX_ISO/.codex")
-
-# A cell that cannot start its own tools is a failed run, not a safer one, and
-# dropping checkout entries is the only thing that can cause it. Check the tools
-# a cell needs against the rebuilt PATH, in a subshell so the caller's is safe.
+# A cell that cannot start its own tools is a failed run, not a safer one, so
+# check the tools a cell needs against the rebuilt PATH, in a subshell.
 for cell_path_tool in claude codex node git; do
   (
     PATH="$CELL_PATH"
@@ -99,9 +89,9 @@ if [[ ! $CELL_STREAM_MAX_BYTES =~ ^[1-9][0-9]*$ ]]; then
 fi
 CELL_STREAM_MAX_BLOCKS=$(((CELL_STREAM_MAX_BYTES + 1023) / 1024))
 
-# One capped model call inside one fixture. `run_bounded` starts it as a
-# background job in a subshell of its own, so the limit binds the cell and not
-# the operator's shell. Past the ceiling: SIGXFSZ, no cache.
+# One capped model call inside one fixture, started by `run_bounded` as a
+# background job in its own subshell so the limit binds the cell. Past the
+# ceiling: SIGXFSZ, no cache.
 # shellcheck disable=SC2329  # started by name from run_bounded
 run_capped_in_fixture() {
   ulimit -f "$CELL_STREAM_MAX_BLOCKS" || return 1
@@ -276,8 +266,8 @@ reset_fixture() {
 # --- the finder argv and the cell fingerprint --------------------------------
 
 # The finder is spawned as an argument vector, never as a command string: the
-# contract validator pins every element to [A-Za-z0-9._="@/:-], so one element
-# per line reconstructs the array exactly and nothing is word-split.
+# validator pins every element to [A-Za-z0-9._="@/:-], so one element per line
+# reconstructs the array exactly and nothing is word-split.
 FINDER_ARGV=()
 while IFS= read -r finder_argv_element; do
   FINDER_ARGV+=("$finder_argv_element")
@@ -295,8 +285,19 @@ done < <(
   ' "$PLAN_JSON"
 )
 
-# What a cached cell must have been produced under. An aborted run leaves cells
-# behind, and the next run may carry an edited skill into the same directory.
+# Codex reads skills from $HOME/.agents and $CODEX_HOME whatever
+# --ignore-user-config says (the review skill under test included): a run that
+# spawns codex re-homes it onto a link to the auth file; a canary spawns none.
+CODEX_ENV=(env)
+if [[ ${#FINDER_ARGV[@]} -gt 0 ]]; then
+  CODEX_AUTH="${CODEX_HOME:-$HOME/.codex}/auth.json"
+  [[ -f $CODEX_AUTH ]] || fail "codex auth $CODEX_AUTH is missing; log in with codex before a run"
+  CODEX_ISO="$(mktemp -d "$TMPROOT/review-eval-codex-home.XXXXXX")"
+  mkdir -p "$CODEX_ISO/.codex" && ln -s "$CODEX_AUTH" "$CODEX_ISO/.codex/auth.json"
+  CODEX_ENV=(env HOME="$CODEX_ISO" CODEX_HOME="$CODEX_ISO/.codex")
+fi
+
+# The fingerprint a cached cell must carry: an aborted run leaves cells behind.
 # shellcheck disable=SC2016  # the single-quoted block is node source
 FINGERPRINT_JSON="$(node --input-type=module -e '
   const [spec, planPath] = process.argv.slice(1);

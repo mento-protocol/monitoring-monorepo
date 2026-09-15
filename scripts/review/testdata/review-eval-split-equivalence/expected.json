@@ -131,7 +131,7 @@
     },
     "generated/shell-harness.sh": {
       "executable": true,
-      "sha256": "aa12f33c3c97a233a3343919a9213b0d85a5ceaca68086e2f556eff3d3dd7d69"
+      "sha256": "afadb3e82a5ae94f52775152863c3d5b54817f150a36055734d3ca62d95b5ade"
     },
     "generated/shell-run/keep.txt": {
       "executable": false,
