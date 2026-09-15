@@ -13,8 +13,10 @@ import { buildPoolDetailUrl } from "@/lib/routing";
 // Resolver route for Broker trading-limit alerts. A firing L0/L1/LG alert links
 // here with the bytes32 `limitIdValue` label; the route trades it for the
 // wrapping VirtualPool and sends the responder to that pool's Limits tab.
-// A limit on an unwrapped v2 exchange has no pool page, so it gets a short
-// explanation instead of a 404 (issue #2447).
+// A limit no VirtualPool indexes has no pool page, so it gets a short
+// explanation instead of a 404 (issue #2447). That covers an unwrapped v2
+// exchange and, per ADR 0103, a wrapped exchange whose row has not bootstrapped
+// on its first indexed swap, so the copy claims neither.
 
 // The lookup is an uncached POST, so the route always renders dynamically. That
 // is deliberate: a cached miss would pin a stale "no pool page" answer while a
@@ -41,8 +43,14 @@ function decodeLimitId(raw: string): string {
 // rather than a hard-coded chain id so a second virtual-pool chain resolves
 // without touching this route. The first network holding the row wins, and
 // `poolId` is chain-namespaced, so the redirect lands on that same network.
+// Local networks carry a relative `/api/hasura/...` proxy path that Node's
+// `fetch` rejects on the server, so they are skipped rather than queried and
+// counted as a failure.
 const VIRTUAL_POOL_NETWORK_IDS = NETWORK_IDS.filter(
-  (id) => NETWORKS[id].hasVirtualPools && isConfiguredNetworkId(id),
+  (id) =>
+    NETWORKS[id].hasVirtualPools &&
+    isConfiguredNetworkId(id) &&
+    /^https?:\/\//.test(NETWORKS[id].hasuraUrl),
 );
 
 type LimitLookup =
@@ -112,7 +120,7 @@ export default async function LimitResolverPage({
         <p className="mb-4 text-sm text-slate-400">
           {unavailable
             ? "The indexer did not answer, so this limit's pool page is unknown. Retry in a moment, or read its netflow and limits in Grafana."
-            : "This limit belongs to a v2 exchange that no VirtualPool wraps, so it has no pool page. Read its netflow and limits in Grafana instead."}
+            : "No VirtualPool indexes this limit. It usually belongs to a v2 exchange that no VirtualPool wraps, but a wrapped exchange lands here too until its first indexed swap records the limit. Read its netflow and limits in Grafana."}
         </p>
         <p className="mb-6 break-all font-mono text-xs text-slate-300">
           {limitId}

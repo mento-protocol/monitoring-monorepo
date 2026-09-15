@@ -902,7 +902,7 @@ test.describe("dashboard browser flows", () => {
     await expect(panel.getByRole("progressbar")).toHaveCount(2);
   });
 
-  test("explains a well-formed limit id that no VirtualPool wraps", async ({
+  test("explains a well-formed limit id that no VirtualPool indexes", async ({
     page,
   }) => {
     await page.goto(`/limit/${UNWRAPPED_LIMIT_ID}`);
@@ -912,6 +912,8 @@ test.describe("dashboard browser flows", () => {
         name: "No pool page for this trading limit",
       }),
     ).toBeVisible();
+    // The copy must cover the not-yet-bootstrapped row too (ADR 0103).
+    await expect(page.getByText(/until its first indexed swap/)).toBeVisible();
     await expect(page.getByText(UNWRAPPED_LIMIT_ID)).toBeVisible();
     await expect(
       page.getByRole("link", { name: "Browse pools" }),

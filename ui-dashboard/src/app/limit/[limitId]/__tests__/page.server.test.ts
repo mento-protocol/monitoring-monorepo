@@ -2,8 +2,8 @@
  * Server-shell tests for `app/limit/[limitId]/page.tsx` — mirrors
  * `address-book/[address]/__tests__/page.server.test.ts`. The route resolves a
  * Broker trading-limit id from an alert into the wrapping VirtualPool's Limits
- * tab, separates an unwrapped v2 exchange from an unreachable indexer, and
- * refuses a malformed id before any fetch runs.
+ * tab, separates a limit no VirtualPool indexes from an unreachable indexer,
+ * and refuses a malformed id before any fetch runs.
  */
 
 import { describe, expect, it, vi, beforeEach } from "vitest";
@@ -26,7 +26,8 @@ vi.mock("@/lib/og-graphql-client", () => ({
   makeOgGraphQLClient: () => ({ request: requestMock }),
 }));
 
-// Two virtual-pool networks, so the partial-failure cases are reachable.
+// Two reachable virtual-pool networks, so the partial-failure cases are
+// reachable, plus one local network the route must skip.
 vi.mock("@/lib/networks", () => ({
   NETWORKS: {
     "celo-mainnet": {
@@ -44,8 +45,19 @@ vi.mock("@/lib/networks", () => ({
       hasVirtualPools: false,
       hasuraUrl: "https://example.com/v1/graphql",
     },
+    // Relative proxy path, which Node's `fetch` rejects on the server.
+    "celo-mainnet-local": {
+      id: "celo-mainnet-local",
+      hasVirtualPools: true,
+      hasuraUrl: "/api/hasura/celo-mainnet-local",
+    },
   },
-  NETWORK_IDS: ["celo-mainnet", "celo-sepolia", "monad-mainnet"],
+  NETWORK_IDS: [
+    "celo-mainnet",
+    "celo-sepolia",
+    "monad-mainnet",
+    "celo-mainnet-local",
+  ],
   isConfiguredNetworkId: () => true,
 }));
 
@@ -96,7 +108,7 @@ describe("LimitResolverPage — a wrapped exchange redirects to its pool", () =>
     ]);
   });
 
-  it("queries only the virtual-pool networks, lowercasing the id", async () => {
+  it("queries only the reachable virtual-pool networks, lowercasing the id", async () => {
     requestMock.mockResolvedValue({
       BrokerTradingLimit: [{ poolId: POOL_ID }],
     });
@@ -125,7 +137,7 @@ describe("LimitResolverPage — a wrapped exchange redirects to its pool", () =>
   });
 });
 
-describe("LimitResolverPage — an unwrapped exchange explains the miss", () => {
+describe("LimitResolverPage — a limit no VirtualPool indexes explains the miss", () => {
   it("renders the explanation and the id instead of redirecting", async () => {
     requestMock.mockResolvedValue({ BrokerTradingLimit: [] });
 
@@ -134,6 +146,9 @@ describe("LimitResolverPage — an unwrapped exchange explains the miss", () => 
     );
     expect(redirectCalls).toEqual([]);
     expect(html).toContain(MISS_COPY);
+    // A row that has not bootstrapped on its first indexed swap looks the same
+    // as an unwrapped exchange (ADR 0103), so the copy must not assert either.
+    expect(html).toContain("until its first indexed swap");
     expect(html).toContain(LIMIT_ID);
     expect(html).toContain('href="/pools"');
   });
