@@ -8,7 +8,7 @@ export default defineConfig({
   test: {
     globals: true,
     // V8 coverage instrumentation can push a few generated-handler integration
-    // tests past 60s under the repo quality-gate wrapper. Keep normal tests
+    // tests past 60s during coverage runs. Keep normal tests
     // strict while giving coverage-only runs enough room to report assertions.
     testTimeout: isCoverageRun
       ? COVERAGE_TEST_TIMEOUT_MS

@@ -1,6 +1,7 @@
 ---
 title: Simple Verification System Plan
-status: active
+status: archived
+superseded_by: ADR-0101
 owner: eng
 canonical: false
 last_verified: 2026-09-03
@@ -11,6 +12,12 @@ garden_lane: notes-plans-archive
 ---
 
 # Simple Verification System Plan
+
+**Archived — completed 2026-09-15.** PR #2428 retired the legacy gate after
+the accepted M6 observation. This document preserves the migration design and
+historical measurements; it does not prescribe current commands. Current
+authority is [ADR 0101](adr/0101-legacy-gate-retirement.md) and the
+[PR operating card](notes/pr-operating-card.md).
 
 Replace the mandatory local quality gate with a small verification system.
 Keep bounded local feedback for the affected packages. Local work must not wait

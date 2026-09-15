@@ -13,7 +13,7 @@ garden_lane: adrs-architecture
 
 # ADR 0077 — Operator-triggered backlog sweep with isolated workers
 
-**Status:** Accepted (Aug 2026), amended by M5 in 2026-09.
+**Status:** Accepted (Aug 2026), amended by M5 and retirement in 2026-09.
 **Scope:** process
 
 ## Context
@@ -34,7 +34,8 @@ Subagents cannot wait across turns. A worker polls each author check in-turn.
 The orchestrator re-invokes a worker that goes quiet.
 
 M5 replaced worker gates. Each worker uses the direct author checks in step 3 of
-the operating card. The legacy coordinator now serves only the diagnostic gate.
+the operating card. [ADR 0101](0101-legacy-gate-retirement.md) retired the
+legacy coordinator and diagnostic gate after the accepted M6 observation.
 The sweep schedules direct checks by local CPU and memory use.
 
 Review rounds dominate cost. One shipped PR costs roughly 3% of the weekly
@@ -203,7 +204,8 @@ nothing to notice it. Isolation is what makes a worker's branch its own.
 
 **Machine-wide author-check scheduling.** Rejected for normal workers. Direct
 checks run in isolated checkouts under the sweep's local resource bound. The
-legacy coordinator remains only for the diagnostic gate.
+legacy coordinator and diagnostic gate were retired by
+[ADR 0101](0101-legacy-gate-retirement.md).
 
 **Cron-triggered autonomy.** A sweep that starts itself needs answers this
 design does not have: what stops a run burning the usage window unattended, and
