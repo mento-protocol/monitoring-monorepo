@@ -105,7 +105,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0093](0093-opt-in-native-stacked-pull-requests.md)         | Native stacks use separate diff and protection bases through an opt-in pilot                          |
 | [0094](0094-grid-waiver.md)                                 | The control-drift waiver asks control for its share of the flips, not the headline's                  |
 | [0096](0096-finder-probe-non-ledger-kind.md)                | Non-ledger finder probes run in the canonical runner, narrowing ADR 0083                              |
-| [0099](0099-retire-duplicate-bundle-size-workflow.md)       | Retire the duplicate bundle-size advisory workflow; the required `ui` job keeps it                    |
+| [0099](0099-retire-duplicate-bundle-size-workflow.md)       | Retire the duplicate bundle-size advisory workflow; required `ui-static` keeps it                     |
 | [0100](0100-monthly-ci-reliability-report.md)               | Monthly CI reliability report is an issue-only scheduler                                              |
 | [0101](0101-legacy-gate-retirement.md)                      | Retire the legacy local gate after accepted M6 evaluation; preserve retained CI and shared safeguards |
 | [0102](0102-github-hosted-runners-only.md)                  | GitHub-hosted runners only; a frozen allow-list blocks other labels                                   |

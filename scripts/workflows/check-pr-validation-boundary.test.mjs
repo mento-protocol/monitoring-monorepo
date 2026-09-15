@@ -265,8 +265,8 @@ test("structural mutations fail closed at each M2 boundary", () => {
   mutateOnce(
     root,
     ".github/workflows/ci.yml",
-    "  guardrail-prose:\n    name: Guardrail prose pins",
-    "  guardrail-prose:\n    name: Guardrail prose pins\n    env:\n      EXPANDED: ${{ secrets.EXPANDED_CREDENTIAL }}",
+    "  sentry-suites:\n    name: Sentry suites",
+    "  sentry-suites:\n    name: Sentry suites\n    env:\n      EXPANDED: ${{ secrets.EXPANDED_CREDENTIAL }}",
     /approved PR authority/u,
   );
   mutateOnce(

@@ -169,9 +169,9 @@ M2 permission and cache boundary. The unconditional `Production infrastructure
 contract` job runs it on every pull request and `main` push.
 
 M3 adds the two confirmed gate-only gaps to existing required jobs. The
-`scripts` job runs the ADR reminder and its tests. The `ui` job runs the normal
-production build and bundle-size limit. The bundle-size workflow duplicates
-required coverage (Infra's twin is gone). Lighthouse, PR Description,
+`scripts` job runs the ADR reminder and its tests. The `ui-static` job runs the
+normal production build and bundle-size limit. The bundle-size workflow
+duplicates required coverage (Infra's twin is gone). Lighthouse, PR Description,
 duplication, and schema diff remain reviewed advisory exceptions with their
 current triggers. **Amended 2026-09-14**: duplication's trigger narrowed from
 `paths-ignore` to a positive `paths:` allow-list mirroring `.jscpd.json`'s
@@ -229,7 +229,7 @@ The audit excludes legacy local-gate self-tests from the replacement target.
 The repair extracts retained SessionEnd, setup-marker, package-policy,
 autoreview owner, and autoreview schema assertions into two focused suites.
 Both moves are done. `ci.yml` runs the two suites — `node --test
-scripts/indexer-handler-invariant-contract.test.mjs` in the `indexer` job and
+scripts/indexer-handler-invariant-contract.test.mjs` in `indexer-checks` and
 `bash scripts/bootstrap/agent-setup-contract.test.sh` in the `scripts` job — and
 `RETAINED_EXTRACTED_STEPS` in `scripts/workflows/check-no-skip-audit.mjs` pins
 both steps so neither can leave CI unnoticed. Changing a registration is a
