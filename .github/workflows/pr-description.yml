@@ -57,7 +57,7 @@ jobs:
       cancel-in-progress: >-
         ${{ github.event.action != 'edited' || github.event.changes.body !=
         null || github.event.changes.base != null }}
-    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout trusted validator
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

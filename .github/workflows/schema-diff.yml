@@ -18,7 +18,7 @@ jobs:
     # Advisory only. Fork and Dependabot PRs report a skip reason. A failed
     # path filter runs the schema diff fail-closed.
     name: GraphQL schema diff
-    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       contents: read

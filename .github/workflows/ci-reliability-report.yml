@@ -24,7 +24,7 @@ jobs:
   report:
     name: Generate the CI health report and synchronize its issue
     if: github.repository == 'mento-protocol/monitoring-monorepo'
-    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 15
     permissions:
       actions: read

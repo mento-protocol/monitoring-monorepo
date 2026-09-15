@@ -35,7 +35,7 @@ concurrency:
 jobs:
   discover:
     name: Discover drift-checked stacks
-    runs-on: blacksmith-2vcpu-ubuntu-2404-arm
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 5
     permissions:
       contents: read
@@ -81,7 +81,7 @@ jobs:
     name: Drift Plan (${{ matrix.id }})
     needs: discover
     if: github.ref == 'refs/heads/main' && needs.discover.outputs.has-stacks == 'true'
-    runs-on: blacksmith-4vcpu-ubuntu-2404-arm
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 15
     strategy:
       fail-fast: false

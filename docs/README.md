@@ -225,6 +225,7 @@ Authority: canonical
 - [`adr/0099-retire-duplicate-bundle-size-workflow.md`](adr/0099-retire-duplicate-bundle-size-workflow.md) — Retire the duplicate bundle-size advisory workflow
 - [`adr/0100-monthly-ci-reliability-report.md`](adr/0100-monthly-ci-reliability-report.md) — Monthly CI reliability report is an issue-only scheduler
 - [`adr/0101-legacy-gate-retirement.md`](adr/0101-legacy-gate-retirement.md) — Retire the legacy local quality gate
+- [`adr/0102-github-hosted-runners-only.md`](adr/0102-github-hosted-runners-only.md) — GitHub-hosted runners only; a frozen allow-list blocks other labels
 
 Authority: non-canonical
 
