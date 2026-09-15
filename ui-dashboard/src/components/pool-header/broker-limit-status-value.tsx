@@ -44,6 +44,17 @@ export function BrokerLimitStatusValue({
 }: {
   state: BrokerLimitsState;
 }) {
+  // One stable live region wraps every branch. The branches replace each other
+  // as the query resolves, so a role on each would be torn down before a
+  // screen reader could announce it.
+  return (
+    <span role="status" aria-live="polite" className="block">
+      <BrokerLimitStatusBody state={state} />
+    </span>
+  );
+}
+
+function BrokerLimitStatusBody({ state }: { state: BrokerLimitsState }) {
   if (state.hasError) {
     return <span className="text-xs text-amber-400">Query failed</span>;
   }
