@@ -131,6 +131,13 @@ no-op. Keep every throw in the pure transitions.
   token. The token is a warning, so `--errors-only` will not show it.
 - Expected tokens cluster right after a restart. Tokens with no preceding
   restart in the same deployment are the signal worth investigating.
+- The feed row proves the batch committed, not that every pool in the fan-out
+  wrote. `OracleReported` catches `OracleReportedPreWriteFailure` per pool and
+  logs it, so a transient RPC failure can leave one pool unwritten in a batch
+  that otherwise committed; a replay then skips that pool's repair. The next
+  report for the feed repairs it, and the pre-write failure already logs its
+  own warning, so no state is permanently incomplete. Proving per-pool
+  completion needs persisted evidence the row does not carry today.
 - A re-delivery inside a feed's own bootstrap block stays undetected. That
   branch returns the persisted row for every log in the block without
   recording which logs it has seen, so a first delivery and a re-delivery are
