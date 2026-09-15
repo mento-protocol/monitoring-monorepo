@@ -167,7 +167,7 @@ scheduled document, for context an agent gets from the directory map in
   module. P6 did this for `supply-chain.yml`, whose seven enumerated basenames
   became `scripts/supply-chain/**` plus two entries for a shared `lib/` module
   that sits outside the directory. Keep the enumeration where the filter is
-  deliberately narrower than a module — `ci.yml`'s `versionSkew` runs one
+  deliberately narrower than a module — `ci.yml`'s `versionSkew` pins one
   checker, and a module glob would fire it on every unrelated edit in that
   directory.
 - A workflow that runs a script from the PR's base ref degrades rather than

@@ -23,35 +23,22 @@ export const FORCE_ALL_OUTPUT =
 // prettier-ignore
 export const FILTER_NAMES = Object.freeze("shared|ui|indexer|bridge|integrationProbes|aegis|terraform|alerts|govWatchdog|codeHealth|rootScripts|docs|versionSkew".split("|"));
 // prettier-ignore
-export const CONDITIONAL_JOBS = Object.freeze("shared|ui|indexer|bridge|integration-probes|aegis|alerts|gov-watchdog|terraform|deps|scripts|docs-checks|version-skew".split("|"));
+export const CONDITIONAL_JOBS = Object.freeze("shared|ui-static|ui|indexer-test|indexer-checks|bridge|integration-probes|aegis|alerts|gov-watchdog|terraform|scripts|docs-checks".split("|"));
 
 // prettier-ignore
-export const FIXED_JOBS = Object.freeze(["changes", ...CONDITIONAL_JOBS, "guardrail-prose", "production-infra-contract", "sentry-suites"]);
-
-const EXPECTED_CONDITIONS = Object.freeze({
-  shared: `${FORCE_ALL} || needs.changes.outputs.shared == 'true'`,
-  ui: `${FORCE_ALL} || needs.changes.outputs.ui == 'true'`,
-  indexer: `${FORCE_ALL} || needs.changes.outputs.indexer == 'true'`,
-  bridge: `${FORCE_ALL} || needs.changes.outputs.bridge == 'true'`,
-  "integration-probes": `${FORCE_ALL} || needs.changes.outputs.integrationProbes == 'true'`,
-  aegis: `${FORCE_ALL} || needs.changes.outputs.aegis == 'true'`,
-  alerts: `${FORCE_ALL} || needs.changes.outputs.alerts == 'true'`,
-  "gov-watchdog": `${FORCE_ALL} || needs.changes.outputs.govWatchdog == 'true'`,
-  terraform: `${FORCE_ALL} || needs.changes.outputs.terraform == 'true'`,
-  deps: `${FORCE_ALL} || needs.changes.outputs.shared == 'true' || needs.changes.outputs.ui == 'true' || needs.changes.outputs.indexer == 'true' || needs.changes.outputs.bridge == 'true' || needs.changes.outputs.integrationProbes == 'true' || needs.changes.outputs.aegis == 'true' || needs.changes.outputs.codeHealth == 'true'`,
-  scripts: `${FORCE_ALL} || needs.changes.outputs.rootScripts == 'true'`,
-  "docs-checks": `${FORCE_ALL} || needs.changes.outputs.docs == 'true'`,
-  "version-skew": `${FORCE_ALL} || needs.changes.outputs.versionSkew == 'true'`,
-});
+export const FIXED_JOBS = Object.freeze(["changes", ...CONDITIONAL_JOBS, "production-infra-contract", "sentry-suites"]);
 
 // prettier-ignore
-const EXPECTED_TIMEOUTS = Object.freeze({ changes: 2, shared: 10, ui: 25, indexer: 20, bridge: 10, "integration-probes": 10, alerts: 10, "gov-watchdog": 8, terraform: 5, aegis: 15, scripts: 10, "guardrail-prose": 5, "docs-checks": 10, "production-infra-contract": 8, "sentry-suites": 8, "version-skew": 8, deps: 8, ci: 2 });
+const EXPECTED_CONDITIONS = Object.freeze({ shared: `${FORCE_ALL} || needs.changes.outputs.shared == 'true'`, "ui-static": `${FORCE_ALL} || needs.changes.outputs.ui == 'true'`, ui: `${FORCE_ALL} || needs.changes.outputs.ui == 'true'`, "indexer-test": `${FORCE_ALL} || needs.changes.outputs.indexer == 'true'`, "indexer-checks": `${FORCE_ALL} || needs.changes.outputs.indexer == 'true'`, bridge: `${FORCE_ALL} || needs.changes.outputs.bridge == 'true'`, "integration-probes": `${FORCE_ALL} || needs.changes.outputs.integrationProbes == 'true'`, aegis: `${FORCE_ALL} || needs.changes.outputs.aegis == 'true'`, alerts: `${FORCE_ALL} || needs.changes.outputs.alerts == 'true'`, "gov-watchdog": `${FORCE_ALL} || needs.changes.outputs.govWatchdog == 'true'`, terraform: `${FORCE_ALL} || needs.changes.outputs.terraform == 'true'`, scripts: `${FORCE_ALL} || needs.changes.outputs.rootScripts == 'true'`, "docs-checks": `${FORCE_ALL} || needs.changes.outputs.docs == 'true'` });
+
 // prettier-ignore
-const EXPECTED_RUNNERS = Object.freeze({ changes: "blacksmith-2vcpu-ubuntu-2404-arm", shared: "blacksmith-2vcpu-ubuntu-2404", ui: "blacksmith-4vcpu-ubuntu-2404", indexer: "blacksmith-4vcpu-ubuntu-2404", bridge: "blacksmith-2vcpu-ubuntu-2404", "integration-probes": "blacksmith-2vcpu-ubuntu-2404", aegis: "blacksmith-2vcpu-ubuntu-2404", alerts: "blacksmith-2vcpu-ubuntu-2404", "gov-watchdog": "blacksmith-4vcpu-ubuntu-2404", terraform: "blacksmith-2vcpu-ubuntu-2404-arm", deps: "blacksmith-2vcpu-ubuntu-2404", scripts: "blacksmith-2vcpu-ubuntu-2404", "docs-checks": "blacksmith-2vcpu-ubuntu-2404", "version-skew": "blacksmith-2vcpu-ubuntu-2404", "guardrail-prose": "ubuntu-latest", "production-infra-contract": "blacksmith-2vcpu-ubuntu-2404", "sentry-suites": "ubuntu-latest", ci: "ubuntu-latest" });
+const EXPECTED_TIMEOUTS = Object.freeze({ changes: 2, shared: 10, "ui-static": 10, ui: 25, "indexer-test": 20, "indexer-checks": 10, bridge: 10, "integration-probes": 10, alerts: 10, "gov-watchdog": 8, terraform: 5, aegis: 15, scripts: 10, "docs-checks": 10, "production-infra-contract": 8, "sentry-suites": 8, ci: 2 });
 // prettier-ignore
-const EXPECTED_JOB_ENV = Object.freeze({ indexer: { ENVIO_STRICT_START_BLOCK: "true" }, aegis: { FOUNDRY_PROFILE: "ci" } });
+const EXPECTED_RUNNERS = Object.freeze({ changes: "blacksmith-2vcpu-ubuntu-2404-arm", shared: "blacksmith-2vcpu-ubuntu-2404", "ui-static": "blacksmith-4vcpu-ubuntu-2404", ui: "blacksmith-4vcpu-ubuntu-2404", "indexer-test": "blacksmith-4vcpu-ubuntu-2404", "indexer-checks": "blacksmith-4vcpu-ubuntu-2404", bridge: "blacksmith-2vcpu-ubuntu-2404", "integration-probes": "blacksmith-2vcpu-ubuntu-2404", aegis: "blacksmith-2vcpu-ubuntu-2404", alerts: "blacksmith-2vcpu-ubuntu-2404", "gov-watchdog": "blacksmith-4vcpu-ubuntu-2404", terraform: "blacksmith-2vcpu-ubuntu-2404-arm", scripts: "blacksmith-2vcpu-ubuntu-2404", "docs-checks": "blacksmith-2vcpu-ubuntu-2404", "production-infra-contract": "blacksmith-2vcpu-ubuntu-2404", "sentry-suites": "ubuntu-latest", ci: "ubuntu-latest" });
 // prettier-ignore
-const REQUIRED_COMMANDS = Object.freeze({ ui: [["VERCEL_DEPLOYMENT_ID=ci pnpm exec turbo run size-limit --filter=@mento-protocol/ui-dashboard --cache=\"$TURBO_CACHE_POLICY\"", null, { TURBO_CACHE_POLICY: "${{ inputs.no_skip_audit && 'local:,remote:' || 'local:rw' }}" }]], scripts: [["node scripts/workflows/check-ci-contract.mjs", null], ["pnpm pr:ready-state:test", null], ["pnpm pr:feedback-state:test", null], ["pnpm adr:check", null, { AGENT_QUALITY_BASE: "${{ inputs.no_skip_audit && inputs.audit_base_sha || 'origin/main' }}" }], ["pnpm adr:check:test", null]], "production-infra-contract": [["pnpm ci:contract:test", "${{ !cancelled() }}"]] });
+const EXPECTED_JOB_ENV = Object.freeze({ "indexer-test": { ENVIO_STRICT_START_BLOCK: "true" }, "indexer-checks": { ENVIO_STRICT_START_BLOCK: "true" }, aegis: { FOUNDRY_PROFILE: "ci" } });
+// prettier-ignore
+const REQUIRED_COMMANDS = Object.freeze({ "ui-static": [["VERCEL_DEPLOYMENT_ID=ci pnpm exec turbo run size-limit --filter=@mento-protocol/ui-dashboard --cache=\"$TURBO_CACHE_POLICY\"", null, { TURBO_CACHE_POLICY: "${{ inputs.no_skip_audit && 'local:,remote:' || 'local:rw' }}" }]], scripts: [["node scripts/workflows/check-ci-contract.mjs", null], ["pnpm pr:ready-state:test", null], ["pnpm pr:feedback-state:test", null], ["pnpm adr:check", null, { AGENT_QUALITY_BASE: "${{ inputs.no_skip_audit && inputs.audit_base_sha || 'origin/main' }}" }], ["pnpm adr:check:test", null]], "production-infra-contract": [["pnpm ci:contract:test", "${{ !cancelled() }}"], ["pnpm code-health:deps", "${{ !cancelled() }}"], ["pnpm skew:check", "${{ !cancelled() }}"], ["pnpm skew:check:test", "${{ !cancelled() }}"], ["node scripts/repo-health/check-guardrail-prose.mjs", null], ["node scripts/repo-health/check-guardrail-prose.test.mjs", null]] });
 
 function list(value) {
   if (value === undefined) return [];
@@ -240,6 +227,19 @@ export function workflowViolations(workflow, filters) {
       // prettier-ignore
       if (!step || (step.if ?? null) !== condition || JSON.stringify(step.env ?? null) !== JSON.stringify(environment ?? null) || Object.keys(step).sort().join() !== [condition == null ? null : "if", environment == null ? null : "env", "name", "run"].filter(Boolean).sort().join()) errors.push(`${name} no longer enforces ${command}`);
     }
+  }
+  // ADR 0072 splits ten corpus checks across `docs-checks` and `scripts` so a
+  // Markdown-only diff still runs them. Every `run:` command in `docs-checks`
+  // must also run in `scripts`, under the same `if:` and without
+  // `continue-on-error`: otherwise a mixed diff checks less than a
+  // Markdown-only one, or the twin runs but stays silent on failure.
+  // prettier-ignore
+  const twin = (step) => `${step.if ?? ""}\u0000${step.run}`;
+  // prettier-ignore
+  const scriptRuns = new Set(list(jobs.scripts?.steps).filter((step) => typeof step.run === "string" && step["continue-on-error"] == null).map(twin));
+  for (const step of list(jobs["docs-checks"]?.steps)) {
+    // prettier-ignore
+    if (typeof step.run === "string" && (step["continue-on-error"] != null || !scriptRuns.has(twin(step)))) errors.push(step["continue-on-error"] != null ? `docs-checks command ${step.run} must not be continue-on-error` : `scripts no longer runs the docs-checks command ${step.run}`);
   }
   const ci = jobs.ci ?? {};
   // prettier-ignore

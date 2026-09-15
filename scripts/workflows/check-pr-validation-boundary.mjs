@@ -11,7 +11,7 @@ import { validateWorkflowInventory } from "../production-infra-identity-contract
 const CODECOV = [
   "shared|config|shared-config/coverage",
   "ui|ui-dashboard|ui-dashboard/coverage",
-  "indexer|indexer-envio|indexer-envio/coverage",
+  "indexer-test|indexer-envio|indexer-envio/coverage",
   "bridge|metrics-bridge|metrics-bridge/coverage",
   "integration-probes|integration-probes|integration-probes/coverage",
   "alerts|alerts-onchain-event-handler|alerts/infra/onchain-event-handler/coverage",
@@ -30,7 +30,7 @@ const AUTHORITY = [
   'ci.yml|alerts|{"actions":"read","contents":"read"}|["secrets.CODECOV_TOKEN","secrets.CODECOV_TOKEN"]|null|null|null',
   'ci.yml|bridge|{"actions":"read","contents":"read"}|["secrets.CODECOV_TOKEN"]|null|null|null',
   'ci.yml|gov-watchdog|{"actions":"read","contents":"read"}|["secrets.CODECOV_TOKEN"]|null|null|null',
-  'ci.yml|indexer|{"actions":"read","contents":"read"}|["secrets.CODECOV_TOKEN"]|null|null|null',
+  'ci.yml|indexer-test|{"actions":"read","contents":"read"}|["secrets.CODECOV_TOKEN"]|null|null|null',
   'ci.yml|integration-probes|{"actions":"read","contents":"read"}|["secrets.CODECOV_TOKEN"]|null|null|null',
   'ci.yml|shared|{"actions":"read","contents":"read"}|["secrets.CODECOV_TOKEN"]|null|null|null',
   'ci.yml|ui|{"actions":"read","contents":"read"}|["secrets.CODECOV_TOKEN"]|null|null|null',
@@ -166,7 +166,7 @@ function checkCi(root, violations) {
   const writers = listYaml(root, ".github/workflows").flatMap((path) => Object.entries(load(root, path).jobs ?? {}).flatMap(([job, value]) => workflowJobSteps(value).filter((step) => isPnpmInstall(step) && step.with?.["write-cache"] != null && !bool(step.with["write-cache"], false)).map((step) => `${path}|${job}|${expr(step.with["write-cache"])}|${step.if == null && step["continue-on-error"] == null}`)));
   const writerJob = ci.jobs?.["production-infra-contract"]; const writerSteps = workflowJobSteps(writerJob); const writerIndex = writerSteps.findIndex(isPnpmInstall); const writerValidator = writerSteps[1]; const writerValidators = writerSteps.filter((step) => step?.run === "node scripts/check-agent-quality-gate-package-scripts.mjs");
   add(violations, stable(ci.on?.push) === stable({ branches: ["main"] }) && stable(ci.concurrency) === stable({ group: "${{ inputs.no_skip_audit && format('ci-no-skip-{0}', github.run_id) || format('{0}-{1}', github.workflow, github.event_name == 'pull_request' && github.ref || github.sha) }}", "cancel-in-progress": "${{ !inputs.no_skip_audit }}" }) && writers.join() === ".github/workflows/ci.yml|production-infra-contract|!inputs.no_skip_audit && github.event_name == 'push' && github.ref == 'refs/heads/main'|true" && stable(Object.keys(writerJob ?? {}).sort()) === stable(["name", "permissions", "runs-on", "steps", "timeout-minutes"]) && stable(writerJob?.permissions) === stable({ contents: "read", actions: "read" }) && writerJob?.["runs-on"] === "blacksmith-2vcpu-ubuntu-2404" && writerJob?.["timeout-minutes"] === 8 && writerIndex === 2 && writerValidators.length === 1 && String(writerSteps[0]?.uses ?? "").startsWith("actions/checkout@") && stable(Object.keys(writerSteps[0] ?? {}).sort()) === stable(["uses", "with"]) && stable(writerSteps[0]?.with) === stable({ ref: "${{ inputs.no_skip_audit && inputs.audit_source_sha || github.sha }}", "fetch-depth": "${{ inputs.no_skip_audit && '0' || '1' }}", "persist-credentials": false }) && stable(Object.keys(writerValidator ?? {}).sort()) === stable(["name", "run"]) && writerValidator?.name === "Validate trusted package-script pins" && writerValidator?.run === "node scripts/check-agent-quality-gate-package-scripts.mjs" && isPnpmInstall(writerSteps[2]) && stable(Object.keys(writerSteps[2] ?? {}).sort()) === stable(["uses", "with"]) && stable(writerSteps[2]?.with) === stable({ "restore-cache": "${{ !inputs.no_skip_audit }}", "write-cache": "${{ !inputs.no_skip_audit && github.event_name == 'push' && github.ref == 'refs/heads/main' }}" }), "exactly one dependency-free package-script validator (trusted package-script pin check) and one direct dependency-free x64 pnpm cache writer must remain reachable in order on every protected-main push in production-infra-contract");
-  const codegen = workflowJobSteps(ci.jobs?.indexer).filter((step) => typeof step.run === "string" && step.run.includes("codegen --config config.multichain.testnet.yaml") && step.run.includes("codegen --config config.multichain.mainnet.yaml"));
+  const codegen = workflowJobSteps(ci.jobs?.["indexer-checks"]).filter((step) => typeof step.run === "string" && step.run.includes("codegen --config config.multichain.testnet.yaml") && step.run.includes("codegen --config config.multichain.mainnet.yaml"));
   add(violations, codegen.length === 1 && codegen[0].if == null, "both Envio codegen commands must run unconditionally");
   const uploads = [];
   let uploadsSafe = true;
