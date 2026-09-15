@@ -16,7 +16,7 @@ garden_lane: adrs-architecture
 **Status:** Accepted (Aug 2026), in force.
 **Scope:** ci/process
 
-Retirement amendment: [ADR 0100](0100-legacy-gate-retirement.md) removes local gate routing and its pins. Retained Sentry supervision, package policy, CI wiring and indexer contracts remain; their current paths are listed in `scripts/AGENTS.md`. Gate-only path lists below are historical.
+Retirement amendment: [ADR 0101](0101-legacy-gate-retirement.md) removes local gate routing and its pins. Retained Sentry supervision, package policy, CI wiring and indexer contracts remain; their current paths are listed in `scripts/AGENTS.md`. Gate-only path lists below are historical.
 
 ## Context
 
@@ -226,19 +226,19 @@ routing, not procedure.
 
 1. Root `package.json` — 74 entries reference `scripts/`.
 2. `check-agent-quality-gate-package-scripts.mjs` — pinned alias map.
-3. `.github/workflows/` — 22 of 32 files pin a `scripts/` path. `ci.yml`
-   (`versionSkew`; `rootScripts` is the recursive `scripts/**`), `infra.yml`,
+3. `.github/workflows/` — 25 of 35 files pin a `scripts/` path. `ci.yml`
+   (`versionSkew`; `rootScripts` is the recursive `scripts/**`),
    `alerts-rules.yml`, `peg-policy-publication.yml`, and `schema-diff.yml` list
    individual files.
-   The three Terraform filters are the exception: `ci.yml` `terraform` plus
-   `infra.yml` push and `pull_request` copy the `workflowAdmissionPatterns`
-   boundary from `terraform.stacks.json`, whose `scripts/` entries are the six
-   patterns the stacks name. `routing.test.mjs` asserts exact equality and
-   proves it subsumes every stack pattern. A miss is silent without that
-   contract — the job stops running while the required `ci` sentinel stays
-   green. A module glob such as `supply-chain.yml`'s `scripts/supply-chain/**`
-   is the safer pin where the job's subject really is the whole module; a
-   filter deliberately narrower than a module, like `versionSkew`, is not.
+   `ci.yml`'s `terraform` filter is the exception: it copies the
+   `workflowAdmissionPatterns` boundary from `terraform.stacks.json`, whose
+   `scripts/` entries are the six patterns the stacks name. `routing.test.mjs`
+   asserts exact equality and proves it subsumes every stack pattern. A miss is
+   silent without that contract — the job stops running while the required `ci`
+   sentinel stays green. A module glob such as `supply-chain.yml`'s
+   `scripts/supply-chain/**` is the safer pin where the job's subject really is
+   the whole module; a filter deliberately narrower than a module, like
+   `versionSkew`, is not.
    A workflow that runs a script from the PR's **base** ref must probe the new
    path and the pre-move path; see the trusted-validator consequence above.
    A `paths:` filter is not the only shape. `sentry-triage-agent.yml` also

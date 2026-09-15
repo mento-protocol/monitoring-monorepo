@@ -14,7 +14,7 @@ garden_lane: adrs-architecture
 # ADR 0078 — staged replacement of the mandatory local gate with existing CI
 
 **Status:** Accepted (Aug 2026), amended 2026-09-14. The local cutover and
-legacy source retirement are in force under [ADR 0100](0100-legacy-gate-retirement.md).
+legacy source retirement are in force under [ADR 0101](0101-legacy-gate-retirement.md).
 Direct author checks, staged formatting, documentation checks, ADR reminders,
 required CI, and hosted review/readiness checks remain in force. The legacy
 diagnostic, its regression suites, and the temporary M6 adapters are removed.
@@ -25,7 +25,7 @@ and [readiness contract](../notes/pr-ready-state.md) define current operation.
 
 The complete decision, migration, observation, and rollback text below records
 the historical staged plan. It does not require a callable legacy gate or new
-M6 collection after retirement. ADR 0100 owns current rollback; [ADR
+M6 collection after retirement. ADR 0101 owns current rollback; [ADR
 0084](0084-github-ui-operator-merge.md) owns the operator merge path.
 
 ## Context
@@ -170,8 +170,8 @@ contract` job runs it on every pull request and `main` push.
 
 M3 adds the two confirmed gate-only gaps to existing required jobs. The
 `scripts` job runs the ADR reminder and its tests. The `ui` job runs the normal
-production build and bundle-size limit. The separate Infra validation and
-bundle-size workflows duplicate required coverage. Lighthouse, PR Description,
+production build and bundle-size limit. The bundle-size workflow duplicates
+required coverage (Infra's twin is gone). Lighthouse, PR Description,
 duplication, and schema diff remain reviewed advisory exceptions with their
 current triggers. **Amended 2026-09-14**: duplication's trigger narrowed from
 `paths-ignore` to a positive `paths:` allow-list mirroring `.jscpd.json`'s

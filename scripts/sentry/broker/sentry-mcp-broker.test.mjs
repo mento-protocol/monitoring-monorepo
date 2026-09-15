@@ -14,6 +14,9 @@
  * allowlist on a version bump) is in `docs/notes/sentry-triage-pipeline.md`.
  */
 
+// Exercise the shared containment helper in the required broker suite.
+import "../../lib/mapped-command-process-identity.test.mjs";
+
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import { EventEmitter, once } from "node:events";

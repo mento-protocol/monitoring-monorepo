@@ -17,7 +17,7 @@
     "scripts/sentry/broker/sentry-mcp-broker.test.mjs": {
       "reporter": "node-test",
       "nodeArgs": ["--test"],
-      "floor": 40,
+      "floor": 96,
       "reads": [".github/workflows/sentry-triage-agent.yml"]
     },
     "scripts/sentry/gate/sentry-provider-contract.test.mjs": {

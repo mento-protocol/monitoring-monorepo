@@ -355,7 +355,12 @@ If root `package.json` changed, first run
      already exist locally, require that OID to be their ancestor and inspect
      the intervening range. If an ordinary PR branch is missing current base
      commits, merge the base in — rebase is only acceptable before first
-     publication. For native stacks, use the history-change procedure in
+     publication. Merge it locally from the fetched base, never through
+     GitHub's "Update branch" button or a web-UI edit, because each costs a
+     CodeRabbit review event; and merge it before the CodeRabbit closeout
+     request rather than after, because a base merge after the request can draw
+     an unprompted full re-review of the whole PR. For native stacks, use the
+     history-change procedure in
      [the stacked PR workflow](stacked-pull-requests.md).
    - **No PR yet**: a fork checkout stops here rather than first-publishing —
      step 6 refuses every fork head, so pushing to the fork's `origin` and
@@ -484,7 +489,12 @@ If root `package.json` changed, first run
    Run them in that order and preserve the two-projection contract. The
    feedback ledger must be clean **first**. Before the final pair, apply the
    CodeRabbit exact-head closeout in
-   [`pr-ready-state.md`](pr-ready-state.md). The subsequent
+   [`pr-ready-state.md`](pr-ready-state.md), in its order: merge the base
+   first, batch every fix commit into one push, never post while a CodeRabbit
+   check is running on the current head, and post at most one marked request
+   per head and at most two per PR, following the gate's `fallbackAction`
+   rather than re-deriving the decision (that note states the precedence),
+   after the stack and head-config rules it cannot read. The subsequent
    current-head `pr:ready-state` must report ready, including the current-head
    `chatgpt-codex-connector[bot]` PR-description approval, unless a documented
    human break-glass comment applies:

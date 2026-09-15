@@ -98,7 +98,6 @@ import "./check-sentry-suites-in-ci-gate-job.test.mjs";
 import "./check-sentry-suites-in-ci-coverage.test.mjs";
 // The gate-routing probe's own invariants, split out for the same reason: how
 // the classifier is lifted out, and how it is re-run once lifted.
-import "./check-sentry-suites-in-ci-gate-extract.test.mjs";
 import {
   CI,
   collectCompositeActions,
@@ -539,9 +538,6 @@ test("the checker's own files stay under the file-size hard cap", () => {
     SELF,
     "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-core-commands.mjs",
     "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-probes.mjs",
-    "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-extract.mjs",
-    "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-extract.test.mjs",
-    "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-fixtures.mjs",
     "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-lifecycle.test.mjs",
     "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-gate-job.test.mjs",
     "scripts/sentry/ci-wiring/check-sentry-suites-in-ci-coverage.test.mjs",

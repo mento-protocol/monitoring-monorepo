@@ -16,7 +16,7 @@ garden_lane: adrs-architecture
 **Status:** Accepted (Aug 2026), amended 2026-09-14, in force.
 **Scope:** ci/process
 
-The `docs-checks` job remains in force. [ADR 0100](0100-legacy-gate-retirement.md)
+The `docs-checks` job remains in force. [ADR 0101](0101-legacy-gate-retirement.md)
 retires the local gate and removes `gate:routing-table:test` from CI. The
 retained documentation, checklist, context, and navigation checks still run.
 The rationale and implementation evidence below describe the original split;

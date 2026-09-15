@@ -50,9 +50,9 @@ validators. Inventories, pinned hashes, and identities stay with their domain.
 
 ## Path Pins
 
-Move each pin class with its files.
+Move each pin class together.
 
-- **Retained process-marker helper.** `lib/mapped-command-process-identity.mjs` is used by the Sentry probe and staged triage broker. Keep its tests and staging pins aligned.
+- **Retained process-marker helper.** `lib/mapped-command-process-identity.mjs` is used by the Sentry probe and staged triage broker. The required broker suite imports its tests; keep that import, the manifest floor and staging pins aligned.
 - **Indexer invariant ownership.** `workflows/indexer-handler-invariant-{contract,families}.mjs` supplies the retained checklist contract; root indexer contract tests and CI filters pin these paths.
 - **Review-eval pins.** Runbook: `run-eval*`,
   `install-review-eval-launchd*`, `review-eval-*publication*`,
@@ -74,6 +74,7 @@ Move each pin class with its files.
   `check-no-skip-audit{,.test}.mjs` pins admission, SHAs, caches, skips,
   `repo-health/dependency-cruiser-root-contract.test.mjs`, and the retained
   graph. Moves update ADR 0064 and all pins.
+  `ci.yml` pins `report-ci-reliability{,.test}.mjs` (ADR 0100).
 - **Terraform stack registry.** `terraform.stacks.json` `changedPathPatterns`
   pins exact `scripts/` paths per stack. Admission lists six `scripts/`
   entries, not the tree; `pnpm tf:test` enforces subsumption.
@@ -82,7 +83,7 @@ Move each pin class with its files.
   the base (issue 1904; ADR 0064).
 - **PR validation boundary pins.** Move
   `workflows/check-pr-validation-boundary{,.test}.mjs` with `ci.yml` and
-  `trunk.yml`. ADR 0078 defines the boundary.
+  `trunk.yml`. ADR 0078 defines it.
 - **Production identity pins.** In `production-infra-identity-contract/`, align
   `workflow-inventory.mjs`, `workflow.test.mjs`,
   `dependabot-auto-merge.test.mjs`, and `index.test.mjs` with their
@@ -95,18 +96,18 @@ Move each pin class with its files.
   EOL; `UPSTASH_MCP_LAUNCHER_SHA256` hashes it. Moves change both. See
   [`docs/notes/upstash-mcp-operator.md`](../docs/notes/upstash-mcp-operator.md).
 
-**List every new `scripts/` path pin here.**
+**List new `scripts/` path pins here.**
 
 ## Sweep Checklist for a Move
 
 Apply
 [ADR 0064's move checklist](../docs/adr/0064-scripts-module-directories.md#sweep-checklist-for-a-move)
-in the same PR.
+in one PR.
 
 ## Operating Rules
 
 - Shell entrypoints use `set -euo pipefail`, or `set -Eeuo pipefail` when an
-  `ERR` trap needs inheritance. Source-only helpers leave shell options to their
+  `ERR` trap needs inheritance. Source-only helpers leave options to their
   caller.
 - Parse JSON with Node, jq, or structured tooling, never grep or sed.
 - Compact/watch scripts keep machine state and cadence metadata separate from
@@ -117,12 +118,12 @@ in the same PR.
   deployment; use it through the `deploy-indexer` skill after its clean-tree
   preflight, verification, and production approval.
 - Only `deploy-indexer.sh`'s isolated `envio` trigger-ref push may use
-  `--no-verify`. Never use it in developer Git commands.
+  `--no-verify`. Never use it in developer commands.
 - New deploy scripts print target, commit, and rollback/verification around
   mutation.
 - Run `pnpm lint:scripts` for new Node root scripts and `bash -n` for new shell
   scripts. Add focused tests beyond lint and syntax. Add required CI wiring if
-  no fixed job owns them.
+  unowned.
 - The file-size watchlist replaces ESLint `max-lines` here, excluding tests.
   No exemptions remain:
   [ADR 0065](../docs/adr/0065-scripts-file-size-watchlist-scope.md).

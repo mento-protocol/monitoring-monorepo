@@ -78,6 +78,9 @@ const EXPECTED_CONFIG = {
       "!docs/evals/review-skill-finder-reports/**",
       "!docs/evals/review-skill-ledger.jsonl",
       "!docs/evals/review-skill-judge-calibration.json",
+      "!.claude/skills/**",
+      "!docs/metrics/**",
+      "!scripts/repo-health/**",
     ],
     auto_review: {
       enabled: true,
@@ -148,11 +151,12 @@ test("pins auto-review on, incremental off, and the burst guard at five", () => 
   const { auto_review: autoReview } = EXPECTED_CONFIG.reviews;
   assert.equal(autoReview.enabled, true);
   // This asserts the committed configuration, not the provider's runtime
-  // behaviour: PR #2236 observed a run on every push with this key `false`,
-  // and ADR 0066 holds that open question. Off since 2026-09-02 because
-  // CodeRabbit bills per push delta, so incremental reviews re-bill the same
-  // files on every agent fix round. The head-bound closeout request covers
-  // the final head instead.
+  // behaviour. Off since 2026-09-02 because CodeRabbit bills per push delta,
+  // so incremental reviews re-bill the same files on every agent fix round.
+  // The head-bound closeout request covers the final head instead. The
+  // 2026-09-14 census confirmed the key works (264 automatic incremental
+  // reviews -> 0); ADR 0066 holds the measurement and the one residual, a
+  // full re-review after a base merge or rebase.
   assert.equal(autoReview.auto_incremental_review, false);
   assert.equal(autoReview.auto_pause_after_reviewed_commits, 5);
 });

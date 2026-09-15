@@ -35,7 +35,6 @@ on:
       # Push-to-main workflows (on.push.branches: [main]):
       - Alerts Infra
       - Metrics Bridge
-      - Infra
       - Aegis App Engine
       - CI
       - Trunk
@@ -55,6 +54,7 @@ on:
       - Documentation Garden
       - File-size Watchlist
       - Review Skill Eval Freshness
+      - CI Reliability Report
     types: [completed]
   # workflow_dispatch (no inputs — checkov/CKV_GHA_7 forbids them) lets you
   # smoke-test the Slack wiring by manually running this workflow from the

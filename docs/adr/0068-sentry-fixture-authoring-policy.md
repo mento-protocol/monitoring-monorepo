@@ -28,7 +28,7 @@ literals in tracked fixtures.
 [ADR 0079](0079-sealed-exact-file-patch-secret-suppression.md), the refinement
 this ADR carried, is archived with it.
 
-Retirement amendment: [ADR 0100](0100-legacy-gate-retirement.md) removes local gate routing and its pins. Retained Sentry supervision, package policy, CI wiring and indexer contracts remain; their current paths are listed in `scripts/AGENTS.md`. Gate-only path lists below are historical.
+Retirement amendment: [ADR 0101](0101-legacy-gate-retirement.md) removes local gate routing and its pins. Retained Sentry supervision, package policy, CI wiring and indexer contracts remain; their current paths are listed in `scripts/AGENTS.md`. Gate-only path lists below are historical.
 
 ## Context
 

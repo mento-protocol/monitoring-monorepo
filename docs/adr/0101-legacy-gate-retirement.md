@@ -11,7 +11,7 @@ review_interval_days: 90
 garden_lane: adrs-architecture
 ---
 
-# ADR 0100 — Retire the legacy local quality gate
+# ADR 0101 — Retire the legacy local quality gate
 
 ## Decision
 
@@ -43,16 +43,17 @@ consumers were the deleted local gate and its tests. Restore them on rollback.
 Retain these independent controls:
 
 - `scripts/lib/mapped-command-process-identity.mjs` and its tests preserve
-  marker descriptor authentication for Sentry's probe supervisor and the
-  staged triage broker. Its workflow staging path and broker shim move with it.
+  marker descriptor authentication for the staged Sentry triage broker. The
+  required broker suite imports the helper tests. Its workflow staging path
+  and broker shim move with it.
 - `scripts/workflows/indexer-handler-invariant-{contract,families}.mjs`
   preserve checklist ownership and completeness. The existing root indexer
   contract suite remains in CI.
 - `scripts/check-agent-quality-gate-package-scripts.mjs` retains its stable
   name and pre-install entry points. It rejects changed trusted aliases and
   unsanctioned lifecycle hooks. Only aliases for deleted commands are removed.
-- Sentry's independent self-run gate, CI wiring, broker and shell supervisor
-  settlement tests remain. Only local-selector classification probes disappear.
+- Sentry's independent self-run gate, CI wiring and broker remain. The unused
+  local-selector extractor, probe supervisor and their synthetic tests are removed.
 - Documentation index/link checks, mandatory checklist contracts, dependency
   architecture checks, setup hooks and process-state refusal checks remain.
 
@@ -75,7 +76,7 @@ Cutover is `d4d7e15eb5bc2b6d858ed2a788d7fa04bd2c21fd` (#2237).
 The retirement PR and its merge record bind the retirement commit; record that
 exact merge SHA in #2128 before closing it. The rollback rehearsal used
 pre-retirement source `7623f5282c166dbc2c397f16169835427b3c3575`. The final
-manifests also include main integration `e95372d0ef9542db7147497cbf1952e543dd9380`.
+manifests also include main integration `71bdfc7d5415ffbd5d5de43122945af66bbddc98`.
 
 1. Stop merges through the normal human repository process.
 2. Read ruleset `13494367`. Keep its strict current-base required checks. If

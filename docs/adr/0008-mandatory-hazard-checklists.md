@@ -16,7 +16,7 @@ garden_lane: adrs-architecture
 **Status:** Accepted (May 2026), in force.
 **Scope:** ci/process
 
-[ADR 0100](0100-legacy-gate-retirement.md) retires the local gate. Mandatory hazard checklists remain direct author and review obligations.
+[ADR 0101](0101-legacy-gate-retirement.md) retires the local gate. Mandatory hazard checklists remain direct author and review obligations.
 
 ## Context
 
