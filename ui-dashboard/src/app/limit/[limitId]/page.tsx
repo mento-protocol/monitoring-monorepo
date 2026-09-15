@@ -61,6 +61,9 @@ type LimitLookup =
 const UNAVAILABLE = Symbol("unavailable");
 
 async function findPoolId(limitId: string): Promise<LimitLookup> {
+  // One shared deadline for the whole render, not one per network: a slow
+  // endpoint aborts every in-flight request so the page still answers inside
+  // the same budget.
   const signal = AbortSignal.timeout(HASURA_TIMEOUT_MS);
   const results = await Promise.all(
     VIRTUAL_POOL_NETWORK_IDS.map(async (networkId) => {
