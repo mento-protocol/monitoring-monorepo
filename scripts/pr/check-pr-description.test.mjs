@@ -239,6 +239,23 @@ test("does not count punctuation entities as words", () => {
   );
 });
 
+// Reference names are case-sensitive, so the capitalized pair must resolve on
+// its own key instead of falling through to the counting placeholder.
+test("decodes capitalized punctuation entities on their own names", () => {
+  assertPass(
+    sizedBody({
+      tldrWords: 20,
+      problemWords: 100,
+      solutionWords: 274,
+      extra: `
+## Details
+
+<p>${"&Dagger; &Prime; &dagger; &prime; ".repeat(20)}</p>
+`,
+    }),
+  );
+});
+
 test("counts prose written as unlisted named character references", () => {
   const encoded = "&Aacute;&Aacute;&Aacute;&Aacute;";
   assertFail(

@@ -270,9 +270,10 @@ function decodeCharacterReference(match, decimal, hex, name) {
     if (code >= 0xd800 && code <= 0xdfff) return " ";
     return String.fromCodePoint(code);
   }
-  const lowered = name.toLowerCase();
-  if (BLANK_ENTITIES.has(lowered)) return " ";
-  return PUNCTUATION_ENTITIES.get(lowered) ?? ENTITY_PLACEHOLDER;
+  // Reference names are case-sensitive: `&Dagger;` is ‡ and `&dagger;` is †,
+  // so the lookup keeps the case the body used.
+  if (BLANK_ENTITIES.has(name)) return " ";
+  return PUNCTUATION_ENTITIES.get(name) ?? ENTITY_PLACEHOLDER;
 }
 
 function htmlWordCount(value) {
