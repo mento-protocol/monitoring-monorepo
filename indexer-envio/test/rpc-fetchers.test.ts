@@ -22,6 +22,7 @@ import {
   _setMockStableTotalSupply,
   fetchStableTotalSupply,
 } from "../src/rpc/stable-fetchers.ts";
+import { fetchBrokerTradingLimit } from "../src/rpc/broker-trading-limits.ts";
 import { fetchBlockTimestamp } from "../src/rpc.ts";
 
 const CHAIN_ID = 42220;
@@ -29,6 +30,9 @@ const POOL = "0x00000000000000000000000000000000000000aa";
 const TOKEN = "0x00000000000000000000000000000000000000bb";
 const BREAKER = "0x00000000000000000000000000000000000000cc";
 const FEED = "0x000000000000000000000000000000000000beef";
+const BROKER = "0x777a8255ca72412f0d706dc03c9d1987306b4cad";
+const LIMIT_ID =
+  "0xd580d237231109e6a96d67d855253150245af6ab7a62ae692295e92e51be073e";
 const BLOCK = 60_700_000n;
 
 type ReadContractArgs = {
@@ -145,6 +149,148 @@ describe("RPC fetchers reject non-historical latest fallbacks", () => {
     );
 
     assert.equal(result, null);
+  });
+
+  it("fetchBrokerTradingLimit decodes the flat state and config getters", async () => {
+    const calls: ReadContractArgs[] = [];
+    _setRpcClientForTests(CHAIN_ID, {
+      readContract: async (args) => {
+        const call = args as ReadContractArgs;
+        calls.push(call);
+        assert.equal(call.blockNumber, BLOCK);
+        // Auto-generated mapping getters return FLAT tuples, and viem decodes
+        // int48 / uint32 / uint8 to JS numbers.
+        return call.functionName === "tradingLimitsState"
+          ? [1_757_000_000, 0, 0, 0, -1596]
+          : [0, 0, 0, 0, 1597, 4];
+      },
+    });
+
+    const result = await fetchBrokerTradingLimit({
+      chainId: CHAIN_ID,
+      brokerAddress: BROKER,
+      limitId: LIMIT_ID,
+      blockNumber: BLOCK,
+      readConfig: true,
+      log: noopLogger,
+    });
+
+    assert.deepEqual(result, {
+      config: {
+        timestep0: 0n,
+        timestep1: 0n,
+        limit0: 0n,
+        limit1: 0n,
+        limitGlobal: 1597n,
+        flags: 4,
+      },
+      state: {
+        lastUpdated0: 1_757_000_000n,
+        lastUpdated1: 0n,
+        netflow0: 0n,
+        netflow1: 0n,
+        netflowGlobal: -1596n,
+      },
+    });
+    assert.deepEqual(
+      calls.map((call) => call.functionName),
+      ["tradingLimitsState", "tradingLimitsConfig"],
+    );
+  });
+
+  it("fetchBrokerTradingLimit skips the config read when the caller has it", async () => {
+    const calls: ReadContractArgs[] = [];
+    _setRpcClientForTests(CHAIN_ID, {
+      readContract: async (args) => {
+        calls.push(args as ReadContractArgs);
+        return [0, 0, 0, 0, -1596];
+      },
+    });
+
+    const result = await fetchBrokerTradingLimit({
+      chainId: CHAIN_ID,
+      brokerAddress: BROKER,
+      limitId: LIMIT_ID,
+      blockNumber: BLOCK,
+      readConfig: false,
+      log: noopLogger,
+    });
+
+    assert.equal(result?.config, null);
+    assert.equal(result?.state.netflowGlobal, -1596n);
+    assert.equal(calls.length, 1);
+  });
+
+  it("fetchBrokerTradingLimit returns null for a latest-fallback state read", async () => {
+    _setRpcClientForTests(CHAIN_ID, {
+      readContract: async (args) => {
+        const call = args as ReadContractArgs;
+        if (call.blockNumber !== undefined) throw new Error("header not found");
+        return [0, 0, 0, 0, -1596];
+      },
+    });
+
+    const result = await fetchBrokerTradingLimit({
+      chainId: CHAIN_ID,
+      brokerAddress: BROKER,
+      limitId: LIMIT_ID,
+      blockNumber: BLOCK,
+      readConfig: false,
+      log: noopLogger,
+    });
+
+    assert.equal(result, null);
+  });
+
+  it("fetchBrokerTradingLimit returns null for a latest-fallback config read", async () => {
+    _setRpcClientForTests(CHAIN_ID, {
+      readContract: async (args) => {
+        const call = args as ReadContractArgs;
+        if (call.functionName === "tradingLimitsState") {
+          return [0, 0, 0, 0, -1596];
+        }
+        if (call.blockNumber !== undefined) throw new Error("header not found");
+        return [0, 0, 0, 0, 1597, 4];
+      },
+    });
+
+    const result = await fetchBrokerTradingLimit({
+      chainId: CHAIN_ID,
+      brokerAddress: BROKER,
+      limitId: LIMIT_ID,
+      blockNumber: BLOCK,
+      readConfig: true,
+      log: noopLogger,
+    });
+
+    assert.equal(result, null);
+  });
+
+  it("fetchBrokerTradingLimit logs one failure and returns null when a read throws", async () => {
+    const warnings: string[] = [];
+    const logger = {
+      ...noopLogger,
+      warn: (msg: string) => warnings.push(msg),
+    };
+    _setRpcClientForTests(CHAIN_ID, {
+      readContract: async () => {
+        throw new Error("execution reverted");
+      },
+    });
+
+    const result = await fetchBrokerTradingLimit({
+      chainId: CHAIN_ID,
+      brokerAddress: BROKER,
+      limitId: LIMIT_ID,
+      blockNumber: BLOCK,
+      readConfig: true,
+      log: logger,
+    });
+
+    assert.equal(result, null);
+    const failures = warnings.filter((line) => line.includes("[RPC_FAILURE]"));
+    assert.equal(failures.length, 1);
+    assert.ok(failures[0]?.includes("fn=tradingLimitsState"));
   });
 
   it("fetchRateFeedOracles returns null instead of current oracle membership", async () => {

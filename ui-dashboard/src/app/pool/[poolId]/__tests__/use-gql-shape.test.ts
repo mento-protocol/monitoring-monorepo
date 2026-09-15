@@ -6,7 +6,10 @@ import {
   BREAKER_CONFIG_TIMEOUT_MS,
   HASURA_TIMEOUT_MS,
 } from "@/lib/hasura-timeout";
-import { PoolBreakerConfigSchema } from "@/lib/queries/pool-detail-schemas";
+import {
+  PoolBreakerConfigSchema,
+  PoolBrokerLimitsSchema,
+} from "@/lib/queries/pool-detail-schemas";
 
 // Characterization test for the upcoming pool-page extraction refactor.
 //
@@ -200,8 +203,10 @@ describe("useGQL call shape across pool detail tabs", () => {
         if (!query) return gqlResult(undefined);
         if (query.includes("PoolDetailWithHealth"))
           return gqlResult({ Pool: [BASE_POOL] });
-        if (query.includes("TradingLimits"))
+        if (query.includes("query TradingLimits"))
           return gqlResult({ TradingLimit: [] });
+        if (query.includes("query PoolBrokerLimits"))
+          return gqlResult({ BrokerTradingLimit: [] });
         if (query.includes("PoolDeployment"))
           return gqlResult({ FactoryDeployment: [] });
         if (query.includes("OlsPool")) {
@@ -275,7 +280,7 @@ describe("useGQL call shape across pool detail tabs", () => {
       if (query.includes("PoolDetailWithHealth")) {
         return gqlResult({ Pool: [BASE_POOL] });
       }
-      if (query.includes("TradingLimits")) {
+      if (query.includes("query TradingLimits")) {
         return gqlResult({ TradingLimit: [] });
       }
       return gqlResult(undefined);
@@ -291,6 +296,42 @@ describe("useGQL call shape across pool detail tabs", () => {
     expect(tradingLimitsCalls[0]?.[2]).toMatchObject({
       timeoutMs: HASURA_TIMEOUT_MS,
     });
+  });
+
+  it("fires PoolBrokerLimits once for a VirtualPool and never for an FPMM pool", () => {
+    const virtualPool: Pool = {
+      ...BASE_POOL,
+      source: "virtual_pool_factory",
+      wrappedExchangeId:
+        "0xd580d237231109e6a96d67d82450611c610a805a26660c90281bdc0cd04a95c7",
+    };
+    const brokerLimitCalls = (pool: Pool) => {
+      vi.clearAllMocks();
+      mockUseGQL.mockImplementation((query: string | null) => {
+        if (!query) return gqlResult(undefined);
+        if (query.includes("PoolDetailWithHealth")) {
+          return gqlResult({ Pool: [pool] });
+        }
+        if (query.includes("query PoolBrokerLimits")) {
+          return gqlResult({ BrokerTradingLimit: [] });
+        }
+        return gqlResult(undefined);
+      });
+      renderToStaticMarkup(React.createElement(PoolDetailPage));
+      return mockUseGQL.mock.calls.filter(
+        ([query]) =>
+          typeof query === "string" && query.includes("query PoolBrokerLimits"),
+      );
+    };
+
+    const virtualCalls = brokerLimitCalls(virtualPool);
+    expect(virtualCalls).toHaveLength(1);
+    expect(virtualCalls[0]?.[2]).toMatchObject({
+      timeoutMs: HASURA_TIMEOUT_MS,
+      schema: PoolBrokerLimitsSchema,
+    });
+
+    expect(brokerLimitCalls(BASE_POOL)).toHaveLength(0);
   });
 
   it("bounds the shared POOL_BREAKER_CONFIG fetch with a timeout in the oracle tab — every subscriber must, or SWR dedup can run an unbounded fetcher (Codex P1, issue #1257)", () => {

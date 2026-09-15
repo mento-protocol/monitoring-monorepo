@@ -28,7 +28,10 @@ function exchangeRowId(chainId: number, exchangeId: string): string {
   return `${chainId}-${exchangeId.toLowerCase()}`;
 }
 
-async function findWrappedPool(
+/** poolId of the VirtualPool wrapping `exchangeId`, if one is indexed.
+ * Shared with the Broker trading-limit handler, which gates on the EXCHANGE
+ * rather than on the Broker caller. */
+export async function findWrappedPool(
   context: EvmOnEventContext,
   chainId: number,
   exchangeId: string,

@@ -372,6 +372,12 @@ const poolSnapshots: PoolSnapshot[] = [
   },
 ];
 
+const emptyBrokerLimits = {
+  rows: [],
+  isLoading: false,
+  hasError: false,
+};
+
 const exchangeId =
   "0x1111111111111111111111111111111111111111111111111111111111111111";
 const v2ExchangeRow = {
@@ -1176,6 +1182,7 @@ describe("Pool detail tab search", () => {
           wrappedExchangeId: exchangeId,
         }}
         tradingLimits={[]}
+        brokerLimits={emptyBrokerLimits}
       />,
     );
     expect(html).toContain("24h Volume");
@@ -1234,6 +1241,7 @@ describe("Pool detail tab search", () => {
             wrappedExchangeId: exchangeId,
           }}
           tradingLimits={[]}
+          brokerLimits={emptyBrokerLimits}
         />,
       );
     });
@@ -1275,6 +1283,7 @@ describe("Pool detail tab search", () => {
           wrappedExchangeId: exchangeId,
         }}
         tradingLimits={[]}
+        brokerLimits={emptyBrokerLimits}
       />,
     );
     expect(html).toContain("24h Volume");

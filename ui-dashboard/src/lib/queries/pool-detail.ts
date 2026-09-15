@@ -2,7 +2,11 @@
 // queries. Re-exported from `../queries.ts` so existing
 // `from "@/lib/queries"` imports stay stable.
 
-import type { BiPoolExchangeRow, Pool } from "@/lib/types";
+import type {
+  BiPoolExchangeRow,
+  BrokerTradingLimitRow,
+  Pool,
+} from "@/lib/types";
 
 /** Response shape of `POOL_DETAIL_WITH_HEALTH`. Shared by the client `useGQL`
  *  read and the server SSR-prefetch fallback so their types can't drift.
@@ -279,6 +283,38 @@ export const POOL_V2_EXCHANGE = `
       lastBucketUpdate
       isDeprecated
       wrappedByPoolId
+    }
+  }
+`;
+
+export type PoolBrokerLimitsResponse = {
+  BrokerTradingLimit: BrokerTradingLimitRow[];
+};
+
+// v2 Broker trading limits for the exchange a VirtualPool wraps. Fired only
+// for VirtualPools — FPMM pools read TRADING_LIMITS instead. Isolated from
+// POOL_DETAIL_WITH_HEALTH for the usual reason: `BrokerTradingLimit` is a new
+// indexer entity, so hosted Hasura rejects the type during the deploy+resync
+// window and only the limits surfaces degrade.
+//
+// The operation name must not start with "TradingLimits": the pool-page query
+// tests route and count the FPMM query on the `query TradingLimits` substring.
+//
+// An exchange has at most two token legs, so `limit: 10` is a safety cap, not
+// pagination.
+export const POOL_BROKER_LIMITS = `
+  query PoolBrokerLimits($poolId: String!) {
+    BrokerTradingLimit(where: { poolId: { _eq: $poolId } }, limit: 10) {
+      id chainId exchangeId exchangeProvider limitId poolId token
+      configKnown flags
+      timestep0 timestep1
+      limit0 limit1 limitGlobal
+      stateKnown
+      netflow0 netflow1 netflowGlobal
+      lastUpdated0 lastUpdated1
+      stateBlock stateTimestamp
+      limitPressure0 limitPressure1 limitPressureGlobal
+      limitStatus updatedAtBlock updatedAtTimestamp
     }
   }
 `;

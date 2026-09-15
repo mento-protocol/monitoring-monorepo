@@ -1,0 +1,310 @@
+// ---------------------------------------------------------------------------
+// v2 Broker trading limits for VirtualPool-wrapped exchanges.
+//
+// The Broker enforces limits per (exchange, token leg), so a direct v2 swap
+// and a VirtualPool-routed swap move the SAME limit. Gating is therefore at
+// the EXCHANGE level — "does a VirtualPool wrap this exchangeId" — never on
+// the Broker caller.
+//
+// State has no event: `Broker.Swap` triggers an at-block RPC read, gated by a
+// freshness window so a full resync costs about 31k reads instead of 1-2M.
+// Config is authoritative from `Broker.TradingLimitConfigured`; the at-block
+// config read is a one-time bootstrap for limits configured before
+// `start_block`.
+// ---------------------------------------------------------------------------
+
+import type { BrokerTradingLimit, EvmOnEventContext } from "envio";
+import { indexer } from "../../indexer.js";
+import { asAddress, asBigInt } from "../../helpers.js";
+import {
+  EMPTY_BROKER_LIMIT_CONFIG,
+  EMPTY_BROKER_LIMIT_STATE,
+  brokerLimitConfigFromRow,
+  brokerLimitId,
+  brokerLimitStateFromRow,
+  brokerTradingLimitRowId,
+  buildBrokerTradingLimitRow,
+  foldPoolLimitFields,
+  resetBrokerState,
+  shouldRefreshBrokerState,
+  type BrokerLimitConfig,
+} from "../../brokerTradingLimits.js";
+import { brokerTradingLimitEffect } from "../../rpc/effects.js";
+import { findWrappedPool } from "../biPoolManager.js";
+
+export type BrokerTradingLimitArgs = {
+  context: EvmOnEventContext;
+  chainId: number;
+  /** Broker proxy that emitted the event; the contract holding the mappings. */
+  brokerAddress: string;
+  exchangeId: string;
+  exchangeProvider: string;
+  /** The swap's two token legs, in event order. */
+  tokens: readonly string[];
+  blockNumber: bigint;
+  blockTimestamp: bigint;
+};
+
+type WrappedExchange = { poolId: string; exchangeProvider: string };
+
+function exchangeRowId(chainId: number, exchangeId: string): string {
+  return `${chainId}-${exchangeId.toLowerCase()}`;
+}
+
+/** Both passes call this, so preload warms exactly the reads processing makes.
+ * Pure entity reads — no RPC. */
+async function resolveWrappedExchange(
+  context: EvmOnEventContext,
+  chainId: number,
+  exchangeId: string,
+): Promise<WrappedExchange | undefined> {
+  const exchange = await context.BiPoolExchange.get(
+    exchangeRowId(chainId, exchangeId),
+  );
+  // A checked exchange with no wrapper stays unwrapped until a VP-side
+  // self-heal writes `wrappedByPoolId` here, so skip the `getWhere`. Most
+  // Broker swaps are on the unwrapped deprecated exchanges.
+  if (
+    exchange &&
+    !exchange.wrappedByPoolId &&
+    exchange.wrappedByPoolIdChecked
+  ) {
+    return undefined;
+  }
+  const poolId =
+    exchange?.wrappedByPoolId ??
+    (await findWrappedPool(context, chainId, exchangeId));
+  if (!poolId) return undefined;
+  return { poolId, exchangeProvider: exchange?.exchangeProvider ?? "" };
+}
+
+/** Effect key. Derived from event params and the stored row only, so preload
+ * and processing present byte-identical inputs and Envio dedupes them. */
+function effectInput(
+  args: BrokerTradingLimitArgs,
+  token: string,
+  row: BrokerTradingLimit | undefined,
+) {
+  return {
+    chainId: args.chainId,
+    brokerAddress: args.brokerAddress,
+    limitId: brokerLimitId(args.exchangeId, token),
+    blockNumber: args.blockNumber,
+    readConfig: !(row?.configKnown ?? false),
+  };
+}
+
+function legRowId(args: BrokerTradingLimitArgs, token: string): string {
+  return brokerTradingLimitRowId(args.chainId, args.exchangeId, token);
+}
+
+export async function preloadBrokerTradingLimits(
+  args: BrokerTradingLimitArgs,
+): Promise<void> {
+  const wrapped = await resolveWrappedExchange(
+    args.context,
+    args.chainId,
+    args.exchangeId,
+  );
+  if (!wrapped) return;
+  await args.context.Pool.get(wrapped.poolId);
+  for (const token of args.tokens) {
+    const row = await args.context.BrokerTradingLimit.get(
+      legRowId(args, token),
+    );
+    if (!shouldRefreshBrokerState(row, args.blockNumber, args.blockTimestamp)) {
+      continue;
+    }
+    await args.context.effect(
+      brokerTradingLimitEffect,
+      effectInput(args, token, row),
+    );
+  }
+}
+
+type LegOutcome = { row: BrokerTradingLimit; adopted: boolean };
+
+async function applyLeg(
+  args: BrokerTradingLimitArgs,
+  poolId: string,
+  token: string,
+): Promise<LegOutcome> {
+  const existing = await args.context.BrokerTradingLimit.get(
+    legRowId(args, token),
+  );
+  if (
+    existing &&
+    !shouldRefreshBrokerState(existing, args.blockNumber, args.blockTimestamp)
+  ) {
+    return { row: existing, adopted: false };
+  }
+  const read = await args.context.effect(
+    brokerTradingLimitEffect,
+    effectInput(args, token, existing),
+  );
+  const base = {
+    chainId: args.chainId,
+    exchangeId: args.exchangeId,
+    exchangeProvider: args.exchangeProvider,
+    poolId,
+    token,
+    blockNumber: args.blockNumber,
+    blockTimestamp: args.blockTimestamp,
+  };
+  if (!read) {
+    // Null-read rule: a discarded read never overwrites a good row. A leg with
+    // no row yet gets a placeholder so the next swap retries and the dashboard
+    // can say "state pending" instead of "not applicable".
+    if (existing) return { row: existing, adopted: false };
+    const placeholder = buildBrokerTradingLimitRow({
+      ...base,
+      config: EMPTY_BROKER_LIMIT_CONFIG,
+      configKnown: false,
+      state: EMPTY_BROKER_LIMIT_STATE,
+      stateKnown: false,
+      stateBlock: 0n,
+      stateTimestamp: 0n,
+    });
+    args.context.BrokerTradingLimit.set(placeholder);
+    return { row: placeholder, adopted: false };
+  }
+  const row = buildBrokerTradingLimitRow({
+    ...base,
+    config:
+      read.config ??
+      (existing
+        ? brokerLimitConfigFromRow(existing)
+        : EMPTY_BROKER_LIMIT_CONFIG),
+    configKnown: read.config !== null || (existing?.configKnown ?? false),
+    state: read.state,
+    stateKnown: true,
+    stateBlock: args.blockNumber,
+    stateTimestamp: args.blockTimestamp,
+  });
+  args.context.BrokerTradingLimit.set(row);
+  return { row, adopted: true };
+}
+
+async function refoldPool(
+  context: EvmOnEventContext,
+  poolId: string,
+  rows: readonly BrokerTradingLimit[],
+): Promise<void> {
+  const pool = await context.Pool.get(poolId);
+  if (!pool) return;
+  context.Pool.set({ ...pool, ...foldPoolLimitFields(rows, pool) });
+}
+
+export async function applyBrokerTradingLimits(
+  args: BrokerTradingLimitArgs,
+): Promise<void> {
+  const wrapped = await resolveWrappedExchange(
+    args.context,
+    args.chainId,
+    args.exchangeId,
+  );
+  if (!wrapped) return;
+  const outcomes: LegOutcome[] = [];
+  for (const token of args.tokens) {
+    outcomes.push(await applyLeg(args, wrapped.poolId, token));
+  }
+  // Only re-fold when a leg adopted fresh data. An RPC blip must never flap a
+  // good homepage status back to "N/A".
+  if (!outcomes.some((outcome) => outcome.adopted)) return;
+  await refoldPool(
+    args.context,
+    wrapped.poolId,
+    outcomes.map((outcome) => outcome.row),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Broker.TradingLimitConfigured — config, zero RPC.
+// ---------------------------------------------------------------------------
+
+type ConfiguredParams = {
+  timestep0: bigint | number;
+  timestep1: bigint | number;
+  limit0: bigint | number;
+  limit1: bigint | number;
+  limitGlobal: bigint | number;
+  flags: bigint | number;
+};
+
+function configFromEvent(params: ConfiguredParams): BrokerLimitConfig {
+  return {
+    timestep0: BigInt(params.timestep0),
+    timestep1: BigInt(params.timestep1),
+    limit0: BigInt(params.limit0),
+    limit1: BigInt(params.limit1),
+    limitGlobal: BigInt(params.limitGlobal),
+    flags: Number(params.flags),
+  };
+}
+
+/** Both legs of the wrapped exchange, with `updated` overriding its stored
+ * twin, so the re-fold keeps the other leg's pressure instead of zeroing it. */
+async function legRowsForPool(
+  context: EvmOnEventContext,
+  poolId: string,
+  updated: BrokerTradingLimit,
+): Promise<BrokerTradingLimit[]> {
+  const stored = await context.BrokerTradingLimit.getWhere({
+    poolId: { _eq: poolId },
+  });
+  return [updated, ...stored.filter((row) => row.id !== updated.id)];
+}
+
+indexer.onEvent(
+  { contract: "Broker", event: "TradingLimitConfigured" },
+  async ({ event, context }) => {
+    const exchangeId = event.params.exchangeId.toLowerCase();
+    const token = asAddress(event.params.token);
+    const rowId = brokerTradingLimitRowId(event.chainId, exchangeId, token);
+    const wrapped = await resolveWrappedExchange(
+      context,
+      event.chainId,
+      exchangeId,
+    );
+    if (!wrapped) return;
+    const existing = await context.BrokerTradingLimit.get(rowId);
+    if (context.isPreload) {
+      await Promise.all([
+        context.Pool.get(wrapped.poolId),
+        context.BrokerTradingLimit.getWhere({
+          poolId: { _eq: wrapped.poolId },
+        }),
+      ]);
+      return;
+    }
+
+    const config = configFromEvent(event.params.config);
+    const state = resetBrokerState(
+      existing ? brokerLimitStateFromRow(existing) : undefined,
+      config,
+    );
+    const row = buildBrokerTradingLimitRow({
+      chainId: event.chainId,
+      exchangeId,
+      exchangeProvider: existing?.exchangeProvider ?? wrapped.exchangeProvider,
+      poolId: wrapped.poolId,
+      token,
+      config,
+      configKnown: true,
+      state,
+      stateKnown: existing?.stateKnown ?? false,
+      stateBlock: existing?.stateBlock ?? 0n,
+      // `reset()` moved netflow on chain, so the stored read is stale by
+      // definition. A zero timestamp makes the next Broker.Swap re-read.
+      stateTimestamp: 0n,
+      blockNumber: asBigInt(event.block.number),
+      blockTimestamp: asBigInt(event.block.timestamp),
+    });
+    context.BrokerTradingLimit.set(row);
+    await refoldPool(
+      context,
+      wrapped.poolId,
+      await legRowsForPool(context, wrapped.poolId, row),
+    );
+  },
+);

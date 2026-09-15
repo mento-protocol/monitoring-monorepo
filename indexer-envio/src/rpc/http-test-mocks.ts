@@ -17,6 +17,7 @@ import { env } from "../env.js";
 import {
   BI_POOL_MANAGER_GET_POOL_EXCHANGE_ABI,
   BREAKER_BOX_ABI,
+  BROKER_TRADING_LIMITS_ABI,
   ERC20_DECIMALS_ABI,
   FPMM_FEE_ABI,
   FPMM_MINIMAL_ABI,
@@ -90,6 +91,7 @@ const TEST_RPC_ABI = [
   ...ERC20_DECIMALS_ABI,
   ...BI_POOL_MANAGER_GET_POOL_EXCHANGE_ABI,
   ...BREAKER_BOX_ABI,
+  ...BROKER_TRADING_LIMITS_ABI,
   ...MEDIAN_DELTA_BREAKER_ABI,
   ...VALUE_DELTA_BREAKER_ABI,
   ...GET_BREAKERS_ABI,
@@ -238,6 +240,7 @@ function handleRpcCall(chainId: number, request: JsonRpcRequest): object {
   }
 
   const functionName = String(decoded.functionName);
+  recordCall(chainId, to, functionName);
   const exact = callKey(chainId, to, functionName, decoded.args);
   const mock = callMocks.get(exact);
   if (!mock) {
@@ -254,6 +257,25 @@ function handleRpcCall(chainId: number, request: JsonRpcRequest): object {
     result: mock.result as never,
   });
   return jsonResponse(id, result);
+}
+
+/** Per-(chain, address, function) `eth_call` tally. Tests that assert a handler
+ * skipped an RPC read need to count calls, not just compare results: a re-read
+ * that returns the same value is indistinguishable from no read. Declared after
+ * `handleRpcCall` so adding it does not shift that function's baselined line. */
+const callCounts = new Map<string, number>();
+
+function countCallKey(
+  chainId: number,
+  address: string,
+  functionName: string,
+): string {
+  return `${chainId}:${address.toLowerCase()}:${functionName}`;
+}
+
+function recordCall(chainId: number, to: string, functionName: string): void {
+  const key = countCallKey(chainId, to, functionName);
+  callCounts.set(key, (callCounts.get(key) ?? 0) + 1);
 }
 
 async function handleRequest(
@@ -402,6 +424,21 @@ export function setHttpGetCodeErrorMock(args: {
     kind: "error",
     message: args.message ?? "Mock getCode RPC failure",
   });
+}
+
+/** @internal Test-only: how many `eth_call`s hit this function since the last
+ * `resetHttpRpcCallCounts()`. Counts unmocked calls too. */
+export function httpRpcCallCount(
+  chainId: number,
+  address: string,
+  functionName: string,
+): number {
+  return callCounts.get(countCallKey(chainId, address, functionName)) ?? 0;
+}
+
+/** @internal Test-only: zero the `eth_call` tally. */
+export function resetHttpRpcCallCounts(): void {
+  callCounts.clear();
 }
 
 export function clearHttpRpcMockGroup(group: string): void {

@@ -47,5 +47,62 @@
       }
     ],
     "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "TradingLimitConfigured",
+    "inputs": [
+      {
+        "name": "exchangeId",
+        "type": "bytes32",
+        "indexed": false,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "token",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      },
+      {
+        "name": "config",
+        "type": "tuple",
+        "indexed": false,
+        "internalType": "struct TradingLimits.Config",
+        "components": [
+          {
+            "name": "timestep0",
+            "type": "uint32",
+            "internalType": "uint32"
+          },
+          {
+            "name": "timestep1",
+            "type": "uint32",
+            "internalType": "uint32"
+          },
+          {
+            "name": "limit0",
+            "type": "int48",
+            "internalType": "int48"
+          },
+          {
+            "name": "limit1",
+            "type": "int48",
+            "internalType": "int48"
+          },
+          {
+            "name": "limitGlobal",
+            "type": "int48",
+            "internalType": "int48"
+          },
+          {
+            "name": "flags",
+            "type": "uint8",
+            "internalType": "uint8"
+          }
+        ]
+      }
+    ],
+    "anonymous": false
   }
 ]

@@ -19,6 +19,7 @@ import "./rpc/effects.js";
 
 // Handler registrations (side-effect imports)
 import "./handlers/broker.js";
+import "./handlers/broker/trading-limits.js";
 import "./handlers/fpmm.js";
 import "./handlers/fpmm/factory.js";
 import "./handlers/fpmm/liquidity.js";

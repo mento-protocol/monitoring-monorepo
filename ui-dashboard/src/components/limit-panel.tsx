@@ -1,73 +1,26 @@
 "use client";
 
 import { isVirtualPool, type Pool, type TradingLimit } from "@/lib/types";
+import { BrokerLimitPanel } from "@/components/broker-limit-panel";
 import { LimitBadge } from "@/components/badges";
-import { computeLimitStatus, pressureColorClass } from "@/lib/health";
+import { PressureBar } from "@/components/pressure-bar";
+import { computeLimitStatus } from "@/lib/health";
 import { tokenSymbol } from "@/lib/tokens";
 import { formatWei, TRADING_LIMITS_INTERNAL_DECIMALS } from "@/lib/format";
+import type { BrokerLimitsState } from "@/lib/broker-limits";
 import { useNetwork } from "@/components/network-provider";
 
-interface PressureBarProps {
-  pressure: string;
-  label: string;
-  netflow: string;
-  limit: string;
-  decimals: number;
-  /** Token symbol for screen-reader context — avoids repeating unnamed
-   * "5-minute limit (L0)" / "Daily limit (L1)" bars on two-token pools. */
-  tokenSymbol: string;
-}
-
-/** L0 = 5-minute rolling window, L1 = 24-hour rolling window (hardcoded in TradingLimitsV2.sol).
- * Both track absolute netflow of the given token against a configured ceiling. */
-function PressureBar({
-  pressure,
-  label,
-  netflow,
-  limit,
-  decimals,
-  tokenSymbol,
-}: PressureBarProps) {
-  const ratio = Number(pressure);
-  const pct = Math.min(ratio * 100, 100);
-  const displayPct = (ratio * 100).toFixed(1);
-  const color = pressureColorClass(ratio);
-
-  const netflowHuman = formatWei(netflow.replace(/^-/, ""), decimals, 2);
-  const limitHuman = formatWei(limit, decimals, 2);
-  const sign = netflow.startsWith("-") ? "-" : "+";
-
-  return (
-    <div className="flex flex-col gap-1">
-      <div className="flex items-center justify-between">
-        <span className="text-sm text-slate-200">{label}</span>
-        <span className="text-sm text-slate-200 font-mono">{displayPct}%</span>
-      </div>
-      <div className="h-2 w-full rounded-full bg-slate-700">
-        <div
-          className={`h-2 rounded-full transition-all ${color}`}
-          style={{ width: `${pct}%` }}
-          role="progressbar"
-          aria-label={`${label} for ${tokenSymbol}`}
-          aria-valuenow={Math.round(pct)}
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-valuetext={
-            ratio > 1 ? `${displayPct}% (over limit)` : `${displayPct}%`
-          }
-        />
-      </div>
-      <div className="text-xs text-slate-400">
-        Netflow: {sign}
-        {netflowHuman} / Limit: {limitHuman}
-      </div>
-    </div>
-  );
-}
+/** FPMM TradingLimitsV2 stores limits and netflow at 15-decimal internal
+ * precision. Module scope keeps the prop identity stable across renders. */
+const formatFpmmAmount = (raw: string) =>
+  formatWei(raw, TRADING_LIMITS_INTERNAL_DECIMALS, 2);
 
 interface LimitPanelProps {
   pool: Pool;
   tradingLimits: TradingLimit[];
+  /** v2 Broker limits for the exchange a VirtualPool wraps. Ignored on FPMM
+   * pools, which carry their own `TradingLimit` rows. */
+  brokerLimits: BrokerLimitsState;
   hasError?: boolean;
   /** True while the trading-limits query is genuinely in flight and hasn't
    * resolved data yet. Distinguishes "still loading" from "confirmed no
@@ -80,25 +33,44 @@ interface LimitPanelProps {
 export function LimitPanel({
   pool,
   tradingLimits,
+  brokerLimits,
   hasError = false,
   isLoading = false,
 }: LimitPanelProps) {
+  if (isVirtualPool(pool)) {
+    return <BrokerLimitPanel pool={pool} state={brokerLimits} />;
+  }
+  return (
+    <FpmmLimitPanel
+      pool={pool}
+      tradingLimits={tradingLimits}
+      hasError={hasError}
+      isLoading={isLoading}
+    />
+  );
+}
+
+function FpmmLimitPanel({
+  pool,
+  tradingLimits,
+  hasError,
+  isLoading,
+}: {
+  pool: Pool;
+  tradingLimits: TradingLimit[];
+  hasError: boolean;
+  isLoading: boolean;
+}) {
   const { network } = useNetwork();
-  const isVirtual = isVirtualPool(pool);
-  const status = isVirtual ? "N/A" : computeLimitStatus(pool);
 
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-5">
       <div className="flex items-center gap-3 mb-4">
         <h2 className="text-base font-semibold text-white">Trading Limits</h2>
-        <LimitBadge status={status} />
+        <LimitBadge status={computeLimitStatus(pool)} />
       </div>
 
-      {isVirtual ? (
-        <p className="text-sm text-slate-400">
-          VirtualPool — trading limits not applicable.
-        </p>
-      ) : hasError ? (
+      {hasError ? (
         <p className="text-sm text-red-400">
           Unable to load trading limits — try again later.
         </p>
@@ -122,7 +94,7 @@ export function LimitPanel({
                   label="5-minute limit (L0)"
                   netflow={tl.netflow0}
                   limit={tl.limit0}
-                  decimals={TRADING_LIMITS_INTERNAL_DECIMALS}
+                  formatValue={formatFpmmAmount}
                   tokenSymbol={sym}
                 />
                 <PressureBar
@@ -130,7 +102,7 @@ export function LimitPanel({
                   label="Daily limit (L1)"
                   netflow={tl.netflow1}
                   limit={tl.limit1}
-                  decimals={TRADING_LIMITS_INTERNAL_DECIMALS}
+                  formatValue={formatFpmmAmount}
                   tokenSymbol={sym}
                 />
               </div>

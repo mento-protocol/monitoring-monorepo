@@ -42,6 +42,40 @@ export const FPMM_TRADING_LIMITS_ABI = [
   },
 ] as const;
 
+// Mento v2 Broker trading limits. Both are auto-generated mapping getters, so
+// their outputs are FLAT (six / five separate values), not the `TradingLimits
+// .Config` / `.State` tuples the library uses internally. Values are whole
+// token units (int48), unlike FPMM's 15-decimal internal scale.
+export const BROKER_TRADING_LIMITS_ABI = [
+  {
+    type: "function",
+    name: "tradingLimitsConfig",
+    inputs: [{ name: "limitId", type: "bytes32" }],
+    outputs: [
+      { name: "timestep0", type: "uint32" },
+      { name: "timestep1", type: "uint32" },
+      { name: "limit0", type: "int48" },
+      { name: "limit1", type: "int48" },
+      { name: "limitGlobal", type: "int48" },
+      { name: "flags", type: "uint8" },
+    ],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "tradingLimitsState",
+    inputs: [{ name: "limitId", type: "bytes32" }],
+    outputs: [
+      { name: "lastUpdated0", type: "uint32" },
+      { name: "lastUpdated1", type: "uint32" },
+      { name: "netflow0", type: "int48" },
+      { name: "netflow1", type: "int48" },
+      { name: "netflowGlobal", type: "int48" },
+    ],
+    stateMutability: "view",
+  },
+] as const;
+
 export const FPMM_FEE_ABI = [
   {
     type: "function",

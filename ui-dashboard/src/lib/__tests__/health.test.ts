@@ -1512,12 +1512,51 @@ describe("computeEffectiveStatus", () => {
     ).toBe("OK");
   });
 
-  it("returns N/A for VirtualPools regardless of limit pressure", () => {
+  it("returns N/A for a VirtualPool with no indexed limit status", () => {
+    // Pressure alone proves nothing for a VP: the indexer owns the fold from
+    // the wrapped exchange's BrokerTradingLimit rows, and it writes "N/A"
+    // until a leg has both its config and an exact-block state read.
     expect(
       computeEffectiveStatus({
         source: "virtual_pool_factory",
         limitPressure0: "1.5",
         limitPressure1: "1.5",
+      }),
+    ).toBe("N/A");
+  });
+
+  it("escalates a VirtualPool on its indexed Broker limit status", () => {
+    // `resolveLimitStatus` prefers the stored value, so the homepage Health
+    // badge follows the wrapped v2 exchange's Broker limits with no extra
+    // query and no change to this module's logic.
+    expect(
+      computeEffectiveStatus({
+        source: "virtual_pool_factory",
+        limitStatus: "WARN",
+        limitPressure0: "0.9994",
+        limitPressure1: "0.9956",
+      }),
+    ).toBe("WARN");
+
+    expect(
+      computeEffectiveStatus({
+        source: "virtual_pool_factory",
+        wrappedExchangeId:
+          "0xd580d237231109e6a96d67d82450611c610a805a26660c90281bdc0cd04a95c7",
+        limitStatus: "CRITICAL",
+        limitPressure0: "1.0000",
+        limitPressure1: "0.2000",
+      }),
+    ).toBe("CRITICAL");
+  });
+
+  it("keeps a VirtualPool at N/A when the indexed status is OK but health is unknown", () => {
+    expect(
+      computeEffectiveStatus({
+        source: "virtual_pool_factory",
+        limitStatus: "OK",
+        limitPressure0: "0.1000",
+        limitPressure1: "0.1000",
       }),
     ).toBe("N/A");
   });

@@ -121,6 +121,10 @@ Keep RPC reads in focused effect modules and test value-returning heal stages
 with hermetic effect doubles; see
 [ADR 0016](../docs/adr/0016-effect-rpc-split-and-heal-stages.md).
 
+VirtualPool trading limits live in `BrokerTradingLimit`, read from the Broker at
+the swap's block behind a freshness gate; see
+[ADR 0103](../docs/adr/0103-virtualpool-broker-trading-limits.md).
+
 Also apply the shared recurring-review rules for file-size limits, multichain
 enumeration, Hasura row caps, and effect-layer boundaries:
 [`../docs/pr-checklists/recurring-review-patterns.md`](../docs/pr-checklists/recurring-review-patterns.md).

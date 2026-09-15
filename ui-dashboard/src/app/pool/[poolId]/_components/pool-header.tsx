@@ -8,6 +8,7 @@ import { Tooltip } from "@/components/tooltip";
 import { MarketHoursPill } from "@/components/market-hours-pill";
 import { useNetwork } from "@/components/network-provider";
 import { PoolConfigPanel } from "@/components/pool-config-panel";
+import { BrokerLimitStatusValue } from "@/components/pool-header/broker-limit-status-value";
 import { DeviationCell } from "@/components/pool-header/deviation-cell";
 import { LimitStatusValue } from "@/components/pool-header/limit-status-value";
 import { OraclePriceValue } from "@/components/pool-header/oracle-price-value";
@@ -39,6 +40,7 @@ import {
   BrokerExchangeDailySnapshots24hSchema,
   PoolV2ExchangeSchema,
 } from "@/lib/queries/pool-detail-schemas";
+import type { BrokerLimitsState } from "@/lib/broker-limits";
 import { SECONDS_PER_DAY } from "@/lib/time-series";
 import { explorerAddressUrl, tokenSymbol, USDM_SYMBOLS } from "@/lib/tokens";
 import {
@@ -62,6 +64,7 @@ export function PoolHeader({
   deployTxHash,
   tradingLimits,
   tradingLimitsError = false,
+  brokerLimits,
   initialV2Exchange,
   initialExchangeVolume,
   initialBreakerConfig,
@@ -70,6 +73,8 @@ export function PoolHeader({
   deployTxHash?: string | undefined;
   tradingLimits: TradingLimit[];
   tradingLimitsError?: boolean | undefined;
+  /** v2 Broker limits for the exchange a VirtualPool wraps. */
+  brokerLimits: BrokerLimitsState;
   initialV2Exchange?: PoolV2ExchangeResponse | undefined;
   initialExchangeVolume?: BrokerExchangeDailySnapshots24hResponse | undefined;
   initialBreakerConfig?: PoolBreakerConfigResponse | undefined;
@@ -211,6 +216,7 @@ export function PoolHeader({
           <VirtualPoolHeaderTiles
             pool={pool}
             network={network}
+            brokerLimits={brokerLimits}
             v2Config={v2Config}
             hasError={v2HasError}
             exchangeVolumeRows={exchangeVolumeRows}
@@ -356,15 +362,18 @@ function statusKey(
 }
 
 /**
- * Header KPIs for VirtualPools. The v3 metrics (uptime, oracle, deviation,
- * trading limits, rebalance) are FPMM-only — virtual pools wrap a v2
- * BiPoolManager exchange where those concepts don't apply. Show pair
- * activity instead: lifetime swap count via the wrapper, age, and the
- * underlying exchange status (active/deprecated/error).
+ * Header KPIs for VirtualPools. Uptime, deviation and rebalance stay FPMM-only
+ * — a virtual pool wraps a v2 BiPoolManager exchange where those concepts
+ * don't apply. Show pair activity instead: lifetime swap count via the
+ * wrapper, 24h exchange volume, the underlying exchange status
+ * (active/deprecated/error), and the v2 Broker trading limits that DO bind
+ * this pair. The Broker enforces those per exchange, so direct v2 swaps and
+ * wrapper-routed swaps move the same limits.
  */
 function VirtualPoolHeaderTiles({
   pool,
   network,
+  brokerLimits,
   v2Config,
   hasError,
   exchangeVolumeRows,
@@ -374,6 +383,7 @@ function VirtualPoolHeaderTiles({
 }: {
   pool: Pool;
   network: Network;
+  brokerLimits: BrokerLimitsState;
   v2Config: BiPoolExchangeRow | null;
   hasError: boolean;
   exchangeVolumeRows: BrokerExchangeDailySnapshotRow[];
@@ -439,6 +449,18 @@ function VirtualPoolHeaderTiles({
           />
         }
         mono
+      />
+      <Stat
+        label={
+          <span className="inline-flex items-center gap-1">
+            Trading Limits
+            <Tooltip
+              label="Trading Limits"
+              content="v2 Broker limits for the wrapped BiPoolManager exchange, one row per token leg. Net flow is in whole tokens and counts direct v2 swaps as well as VirtualPool-routed ones. The bars show the tightest leg's enabled windows."
+            />
+          </span>
+        }
+        value={<BrokerLimitStatusValue state={brokerLimits} />}
       />
       {hasOracleFeed ? (
         <Stat
