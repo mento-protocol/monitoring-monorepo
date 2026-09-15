@@ -253,7 +253,14 @@ If the risky behavior is interactive, a static markup assertion is not enough.
 ## 6. PR description requirements
 
 Before opening the PR, start with the repo-wide description standard's exact
-heading lines:
+heading lines, in this order:
+
+```markdown
+## tl;dr
+```
+
+- Two to four plain sentences, about 60 words, for a reader outside this
+  codebase. No paths, flags, or identifiers.
 
 ```markdown
 ## The Problem

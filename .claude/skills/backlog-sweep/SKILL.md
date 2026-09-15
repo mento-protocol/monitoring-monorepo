@@ -563,7 +563,8 @@ Then spawn one worker subagent per issue. Give each a brief containing:
   report to the `review` skill. For a base integration, use both axes from card
   step 4. That step owns exit handling, fallback, findings, and validation
   claims.
-- **The ship:** full repo PR template, all four sections, **ready for review,
+- **The ship:** full repo PR template, every section with `## tl;dr` first,
+  **ready for review,
   never a draft**. A draft disables CodeRabbit auto-review and the PR
   description check, so it is skipping review rather than staging it. Then
   `pnpm issue:review --pr <pr> --issue <n>`.

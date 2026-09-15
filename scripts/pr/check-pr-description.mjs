@@ -5,14 +5,38 @@ import { fileURLToPath } from "node:url";
 import { fromMarkdown } from "mdast-util-from-markdown";
 
 const PLACEHOLDER_RE =
-  /\[Plain-English problem|\[Simple explanation of how|\[Implementation details, invariants|\[Commands and results/;
+  /\[Two to four plain sentences|\[Plain-English problem|\[Simple explanation of how|\[Implementation details, invariants|\[Commands and results/;
+const TLDR_HEADING_RE = /^##\s+tl;dr\s*$/;
 const PROBLEM_HEADING_RE = /^##\s+The Problem\s*$/;
 const SOLUTION_HEADING_RE = /^##\s+The Solution\s*$/;
 const H2_HEADING_RE = /^ {0,3}##(?:[\t ]+|$)/;
+const CHECKLIST_HEADING_RE = /^ {0,3}##[\t ]+Checklist\s*$/;
+// Only the review bot's own appended section is exempt. A prefix match would
+// also exempt an authored heading such as '## Summary by network', and with it
+// every word under that heading.
+const BOT_SUMMARY_HEADING_RE = /^ {0,3}##[\t ]+Summary by CodeRabbit\s*$/i;
+// Tag matching steps over quoted attribute values, so a '>' inside one does not
+// end the tag early and leave the rest of the attribute counted as prose.
+const HTML_COMMENT_RE = /<!--[\s\S]*?-->/g;
+const HTML_ATTRIBUTES = "[^>\"']*(?:(?:\"[^\"]*\"|'[^']*')[^>\"']*)*";
+const HTML_HIDDEN_RE = new RegExp(
+  `<(script|style|template)\\b${HTML_ATTRIBUTES}>[\\s\\S]*?</\\1\\s*>`,
+  "gi",
+);
+const HTML_TAG_RE = new RegExp(`<${HTML_ATTRIBUTES}>`, "g");
+const HTML_ENTITY_RE = /&(?:#[0-9]+|#[xX][0-9A-Fa-f]+|[A-Za-z][A-Za-z0-9]*);/g;
 const DEFERRALS_HEADING_RE = /^##\s+Deferrals\s*$/;
 const DEFERRALS_STYLE_RE = /^ {0,3}#{1,6}\s*Deferrals([^A-Za-z0-9_]|$)/i;
 const NONE_RE = /^\s*(?:[-*]\s+)?none\s*\.?\s*$/i;
 const ISSUE_RE = /#[0-9]+|github\.com\/[^\s]+\/issues\/[0-9]+/;
+
+// The tl;dr is two to four plain sentences, about 60 words. The hard stop sits
+// above that so a slightly long summary is a nudge, not a build break.
+const TLDR_MAX_WORDS = 80;
+// A reviewer reads the authored body in about two minutes. 250 words is typical;
+// 400 is the ceiling. The template's own checklist, HTML comments, code blocks,
+// and the review bot's appended summary section are not authored body.
+const BODY_MAX_WORDS = 400;
 
 function linesOf(body) {
   return body.split(/\r?\n/);
@@ -153,6 +177,91 @@ function sectionContent(body, headingPattern) {
   return "";
 }
 
+function countWords(text) {
+  return text.split(/\s+/).filter((token) => /[\p{L}\p{N}]/u.test(token))
+    .length;
+}
+
+/**
+ * Words inside raw HTML. A reader sees prose wrapped in `<p>` or a
+ * `<details>` block, so it counts against the budget even though the opening
+ * sections do not accept it as their explanation. Tags, attributes, and
+ * non-rendering elements contribute nothing.
+ */
+function htmlWordCount(value) {
+  return countWords(
+    value
+      .replace(HTML_COMMENT_RE, " ")
+      .replace(HTML_HIDDEN_RE, " ")
+      .replace(HTML_TAG_RE, " ")
+      // An entity is punctuation, a space, or one letter inside a word the
+      // surrounding text already counts, so none of them add a word.
+      .replace(HTML_ENTITY_RE, " "),
+  );
+}
+
+/**
+ * Words a reader sees, counted from the Markdown tree rather than from raw
+ * lines. An indented continuation of a list item is visible prose, not code, so
+ * only real code is skipped.
+ */
+function visibleWordCount(markdown) {
+  let words = 0;
+
+  const walk = (node) => {
+    if (node.type === "code" || node.type === "definition") return;
+    if (node.type === "html") {
+      words += htmlWordCount(node.value);
+      return;
+    }
+    if (node.type === "text" || node.type === "inlineCode") {
+      words += countWords(node.value);
+      return;
+    }
+    if (Array.isArray(node.children)) node.children.forEach(walk);
+  };
+
+  walk(fromMarkdown(markdown));
+  return words;
+}
+
+/** Lines under an exact H2 heading, up to the next H2. */
+function sectionLines(body, headingPattern) {
+  const section = [];
+  let inSection = false;
+
+  for (const line of linesOf(body)) {
+    if (headingPattern.test(line)) {
+      inSection = true;
+      continue;
+    }
+    if (inSection && H2_HEADING_RE.test(line)) break;
+    if (inSection) section.push(line);
+  }
+
+  return section;
+}
+
+/**
+ * Words the author wrote. Drops the template's own checklist and the review
+ * bot's appended summary section, then counts what is left. HTML comments and
+ * fenced code are already gone from the body this receives.
+ */
+function authoredWordCount(body) {
+  const kept = [];
+  let excluded = false;
+
+  for (const line of linesOf(body)) {
+    if (H2_HEADING_RE.test(line)) {
+      excluded =
+        CHECKLIST_HEADING_RE.test(line) || BOT_SUMMARY_HEADING_RE.test(line);
+    }
+    if (!excluded) kept.push(line);
+  }
+
+  return visibleWordCount(kept.join("\n"));
+}
+
 function deferralsSection(body) {
   const section = [];
   let inSection = false;
@@ -177,7 +286,7 @@ export function validatePrDescription(body) {
     return {
       ok: false,
       message:
-        "PR description is empty. It must start with '## The Problem' then '## The Solution' (AGENTS.md 'PR description standard').",
+        "PR description is empty. It must start with '## tl;dr' then '## The Problem' then '## The Solution' (AGENTS.md 'PR description standard').",
     };
   }
 
@@ -203,17 +312,38 @@ export function validatePrDescription(body) {
   }
 
   // Keep the opening check stricter than the later section scan: a leading code
-  // fence is real content before '## The Problem' and must stay rejected.
-  const secondHeading = h2Headings(fenceStripped)[1] ?? "";
+  // fence is real content before '## tl;dr' and must stay rejected.
+  const headings = h2Headings(fenceStripped);
+  const secondHeading = headings[1] ?? "";
+  const thirdHeading = headings[2] ?? "";
 
   if (
-    !PROBLEM_HEADING_RE.test(firstLine) ||
-    !SOLUTION_HEADING_RE.test(secondHeading)
+    !TLDR_HEADING_RE.test(firstLine) ||
+    !PROBLEM_HEADING_RE.test(secondHeading) ||
+    !SOLUTION_HEADING_RE.test(thirdHeading)
   ) {
     return {
       ok: false,
       message:
-        "PR description must START with '## The Problem' then '## The Solution' as its first two sections — exact title-case, exact heading lines, in order, with no content before (only HTML comments may precede '## The Problem'). See AGENTS.md 'PR description standard' / .github/PULL_REQUEST_TEMPLATE.md.",
+        "PR description must START with '## tl;dr' then '## The Problem' then '## The Solution' as its first three sections — exact heading lines (the tl;dr heading is lowercase), in order, with no content before (only HTML comments may precede '## tl;dr'). See AGENTS.md 'PR description standard' / .github/PULL_REQUEST_TEMPLATE.md.",
+    };
+  }
+
+  if (sectionContent(fenceStripped, TLDR_HEADING_RE) === "") {
+    return {
+      ok: false,
+      message:
+        "The '## tl;dr' section must contain visible content in Markdown: two to four plain sentences, about 60 words, that say who had the problem, what this PR changes, and what the reader should expect. Raw HTML other than comments, paragraphs that contain it, template comments by themselves, and code blocks do not count.",
+    };
+  }
+
+  const tldrWords = visibleWordCount(
+    sectionLines(fenceStripped, TLDR_HEADING_RE).join("\n"),
+  );
+  if (tldrWords > TLDR_MAX_WORDS) {
+    return {
+      ok: false,
+      message: `The '## tl;dr' section is ${tldrWords} words; the limit is ${TLDR_MAX_WORDS}. Write two to four plain sentences, about 60 words, and move the detail into '## Details'.`,
     };
   }
 
@@ -230,6 +360,14 @@ export function validatePrDescription(body) {
       ok: false,
       message:
         "The '## The Solution' section must contain visible content in Markdown that explains the change. Raw HTML other than comments, paragraphs that contain it, template comments by themselves, and code blocks do not count.",
+    };
+  }
+
+  const bodyWords = authoredWordCount(fenceStripped);
+  if (bodyWords > BODY_MAX_WORDS) {
+    return {
+      ok: false,
+      message: `The authored PR description is ${bodyWords} words; the ceiling is ${BODY_MAX_WORDS} and about 250 is typical. The template checklist, HTML comments, code blocks, and the '## Summary by CodeRabbit' section do not count. Cut until it fits — move long reasoning to the commit message, an ADR, the linked issue, or a review comment.`,
     };
   }
 
@@ -250,7 +388,7 @@ export function validatePrDescription(body) {
     return {
       ok: true,
       message:
-        "PR description OK — opens with '## The Problem' then '## The Solution', no placeholders, no Deferrals section (nothing deferred).",
+        "PR description OK — opens with '## tl;dr' then '## The Problem' then '## The Solution', within the word budget, no placeholders, no Deferrals section (nothing deferred).",
     };
   }
 
@@ -279,7 +417,7 @@ export function validatePrDescription(body) {
   return {
     ok: true,
     message:
-      "PR description OK — opens with '## The Problem' then '## The Solution', no placeholders, deferrals declared.",
+      "PR description OK — opens with '## tl;dr' then '## The Problem' then '## The Solution', within the word budget, no placeholders, deferrals declared.",
   };
 }
 

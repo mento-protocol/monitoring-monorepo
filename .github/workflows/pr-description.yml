@@ -2,7 +2,8 @@ name: PR Description
 
 # Enforces the repo PR-description standard (AGENTS.md "PR description standard"
 # + .github/PULL_REQUEST_TEMPLATE.md): every PR body must lead with
-# `## The Problem` and `## The Solution`, include visible explanatory Markdown content in both, and
+# `## tl;dr`, `## The Problem`, and `## The Solution`, include visible explanatory Markdown content in
+# the opening sections, stay within the authored-body word ceiling, and
 # not still contain the unfilled template placeholders. The `## Deferrals`
 # section is OPTIONAL — omit it when nothing is deferred; when present it must
 # say "None" or link a GitHub issue per item (for everything knowingly deferred

@@ -172,10 +172,11 @@ If root `package.json` changed, first run
    pass there is no PR yet, so apply the same test to the claims you are about
    to write. Either way every claim names the evidence behind it and the
    nearest stronger claim that evidence does not support, and an unexplained
-   strengthening of a claim is a finding. **This is the running agent's job,
-   not the reviewer's**: the reviewer sees the diff, not the PR body or the
-   command output behind a claim, so it cannot see the claims to test. Do it
-   where the claims and their evidence are both in hand.
+   strengthening of a claim is a finding. One `Not proven:` line per
+   `## Validation` section meets that, or one per gate when a gate's claim
+   differs; never prose. **This is the running agent's job, not the
+   reviewer's**: it sees the diff, not the PR body or the command output
+   behind a claim, so it cannot see the claims to test.
 
    Without a base integration, run the second model over the branch diff:
 
@@ -279,19 +280,19 @@ If root `package.json` changed, first run
    hosted sessions — do not hand-roll PR creation. The description follows the
    repo template
    [`.github/PULL_REQUEST_TEMPLATE.md`](../../.github/PULL_REQUEST_TEMPLATE.md)
-   in full, all four sections: `## The Problem` (maximum three bullets — old
-   behavior, what failed, concrete effect), `## The Solution` (new behavior,
-   why it improves the situation, material limits), then `## Details`
-   (implementation specifics) and `## Validation` (commands, results, and the
-   step-4 scope baseline).
-   Write the opening for an engineer who has not read the diff.
-   `scripts/pr/check-pr-description.mjs` enforces the first two sections and
-   their order in CI; raw HTML other than comments and code blocks do not
-   satisfy its opening-content check. PRs open **ready for
+   in full: `## tl;dr` (two to four plain sentences, about 60 words, no
+   identifiers), `## The Problem` (at most three bullets — old behavior, what
+   failed, concrete effect), `## The Solution` (new behavior, why it helps,
+   material limits), `## Details`, and `## Validation` (one line per check,
+   the head SHA once, the step-4 scope baseline). Keep the authored body under
+   400 words. Write the opening for an engineer who has not read the diff. `scripts/pr/check-pr-description.mjs`
+   enforces those three sections, their order, and the ceiling in CI; raw HTML
+   other than comments and code blocks does not satisfy its opening-content
+   check. PRs open **ready for
    review, never as drafts** — a draft silently disables CodeRabbit
    auto-review (`.coderabbit.yaml` keeps `reviews.auto_review.drafts` false)
-   and the `pr-description.yml` CI check, which skips draft PRs; drafting is
-   skipping review, not a staging step. A ship that updates an **existing draft** converts it to ready once
+   and the `pr-description.yml` CI check, which skips draft PRs. A ship that
+   updates an **existing draft** converts it to ready once
    the author checks and closeout review pass — `pr:ready-state` holds draft state as a required blocker,
    so an unconverted draft never reaches all-clear. Use or keep draft only
    when the user asks or required validation is intentionally pending, and

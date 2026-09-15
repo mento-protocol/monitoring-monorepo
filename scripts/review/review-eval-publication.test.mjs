@@ -76,6 +76,7 @@ test("normalizes plan_dir and renders the four required top-level sections", () 
     assert.equal(prepared.detailDir, run.detailDir);
 
     assert.deepEqual(publicationTopLevelSections(prepared.body), [
+      "tl;dr",
       "The Problem",
       "The Solution",
       "Details",
@@ -107,6 +108,7 @@ test("uses a fence longer than report backticks without changing the report", ()
   const fence = "`".repeat(5);
   assert.ok(body.includes(`${fence}markdown\n${report}${fence}`));
   assert.deepEqual(publicationTopLevelSections(body), [
+    "tl;dr",
     "The Problem",
     "The Solution",
     "Details",

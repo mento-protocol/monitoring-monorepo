@@ -55,9 +55,11 @@ bootstrap; setup has a separate [trust boundary](../../../docs/notes/worktree-an
   binding, registration checks and coordinated recovery live in [stacked-pull-requests.md](../../../docs/notes/stacked-pull-requests.md).
 - **PRs open ready for review.** Drafts suppress the automated AI reviews this
   workflow depends on.
-- **`scripts/pr/check-pr-description.mjs` enforces `## The Problem` then
-  `## The Solution` in CI**, in that order, ahead of all other content. The
-  full four-section description shape is the repo template
+- **`scripts/pr/check-pr-description.mjs` enforces `## tl;dr` then
+  `## The Problem` then `## The Solution` in CI**, in that order, ahead of all
+  other content, and caps the authored body at 400 words. The tl;dr is two to
+  four plain sentences, about 60 words, with no paths, flags, or identifiers.
+  The full description shape is the repo template
   `.github/PULL_REQUEST_TEMPLATE.md`, bound by card step 5.
 - **Never post routine or duplicate `@codex review` requests**, and never tag
   `chatgpt-codex-connector` directly.

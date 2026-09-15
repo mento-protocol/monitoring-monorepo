@@ -166,7 +166,13 @@ export function publicationTopLevelSections(body) {
 }
 
 function assertPublicationSections(body) {
-  const expected = ["The Problem", "The Solution", "Details", "Validation"];
+  const expected = [
+    "tl;dr",
+    "The Problem",
+    "The Solution",
+    "Details",
+    "Validation",
+  ];
   const actual = publicationTopLevelSections(body);
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
     throw new Error(
@@ -184,10 +190,14 @@ export function renderPublicationBody({ detailDir, report }) {
   const quotedDetail = JSON.stringify(detailDir);
 
   const body = [
+    "## tl;dr",
+    "",
+    "A review run is being published as a pull request. This prepares the files for it, rewrites a path that only exists on one machine, and puts the run's own report into the description the repository expects. It runs no model, adds no ledger row, and opens nothing.",
+    "",
     "## The Problem",
     "",
     "- The review-eval runner records `plan_dir` as an absolute checkout path. Publishing that value exposes a machine-specific path and makes the artifact non-portable.",
-    "- The generated report does not contain the four opening sections required for pull requests in this repository. Using it directly as the PR body fails the description contract.",
+    "- The generated report does not contain the opening sections required for pull requests in this repository. Using it directly as the PR body fails the description contract.",
     "",
     "## The Solution",
     "",

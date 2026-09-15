@@ -16,7 +16,11 @@ const relativeScriptPath = relative(
 );
 
 function body(extra = "") {
-  return `## The Problem
+  return `## tl;dr
+
+The check that reads pull request descriptions now wants a plain summary first.
+
+## The Problem
 
 - Reviewers need a clear problem statement.
 
@@ -40,6 +44,339 @@ function assertFail(text, expected) {
 
 test("passes when Deferrals is omitted", () => {
   assertPass(body(), /no Deferrals section/);
+});
+
+function filler(words) {
+  return Array.from({ length: words }, () => "word").join(" ");
+}
+
+// The three headings contribute five counted words: "tl;dr", "The", "Problem",
+// "The", "Solution". Everything else in this body is filler, so the total is
+// exact.
+function sizedBody({ tldrWords, problemWords, solutionWords, extra = "" }) {
+  return `## tl;dr
+
+${filler(tldrWords)}
+
+## The Problem
+
+${filler(problemWords)}
+
+## The Solution
+
+${filler(solutionWords)}
+${extra}`;
+}
+
+test("fails a body with no tl;dr section", () => {
+  assertFail(
+    `## The Problem
+
+- Reviewers need a clear problem statement.
+
+## The Solution
+
+- This explains the approach.
+`,
+    /must START with '## tl;dr'/,
+  );
+});
+
+test("fails a tl;dr that is not the first section", () => {
+  assertFail(
+    `## The Problem
+
+- Reviewers need a clear problem statement.
+
+## tl;dr
+
+The check now wants a plain summary first.
+
+## The Solution
+
+- This explains the approach.
+`,
+    /must START with '## tl;dr'/,
+  );
+});
+
+test("rejects an H3 tl;dr near-miss as the opening heading", () => {
+  assertFail(
+    `### tl;dr
+
+The check now wants a plain summary first.
+
+## The Problem
+
+- Reviewers need a clear problem statement.
+
+## The Solution
+
+- This explains the approach.
+`,
+    /must START with '## tl;dr'/,
+  );
+});
+
+test("fails the unfilled tl;dr placeholder", () => {
+  assertFail(
+    `## tl;dr
+
+[Two to four plain sentences, about 60 words.]
+
+## The Problem
+
+- Reviewers need a clear problem statement.
+
+## The Solution
+
+- This explains the approach.
+`,
+    /unfilled template placeholders/,
+  );
+});
+
+test("fails a tl;dr section left as a template comment", () => {
+  assertFail(
+    `## tl;dr
+
+<!-- Summarize the change in plain words. -->
+
+## The Problem
+
+- Reviewers need a clear problem statement.
+
+## The Solution
+
+- This explains the approach.
+`,
+    /'## tl;dr' section must contain visible content/,
+  );
+});
+
+test("fails a tl;dr over the word limit", () => {
+  assertFail(
+    sizedBody({ tldrWords: 81, problemWords: 5, solutionWords: 5 }),
+    /'## tl;dr' section is 81 words; the limit is 80/,
+  );
+});
+
+test("passes a tl;dr at the word limit", () => {
+  assertPass(sizedBody({ tldrWords: 80, problemWords: 5, solutionWords: 5 }));
+});
+
+test("passes an authored body at the word ceiling", () => {
+  assertPass(
+    sizedBody({ tldrWords: 20, problemWords: 100, solutionWords: 275 }),
+  );
+});
+
+test("fails an authored body over the word ceiling", () => {
+  assertFail(
+    sizedBody({ tldrWords: 20, problemWords: 100, solutionWords: 276 }),
+    /authored PR description is 401 words; the ceiling is 400/,
+  );
+});
+
+test("excludes the template checklist from the word count", () => {
+  assertPass(
+    sizedBody({
+      tldrWords: 20,
+      problemWords: 100,
+      solutionWords: 275,
+      extra: `
+## Checklist
+
+- [x] ${filler(60)}
+`,
+    }),
+  );
+});
+
+test("excludes a bot-appended Summary by section from the word count", () => {
+  assertPass(
+    sizedBody({
+      tldrWords: 20,
+      problemWords: 100,
+      solutionWords: 275,
+      extra: `
+## Summary by CodeRabbit
+
+- ${filler(60)}
+`,
+    }),
+  );
+});
+
+test("counts an authored section whose heading only looks like the bot's", () => {
+  assertFail(
+    sizedBody({
+      tldrWords: 20,
+      problemWords: 100,
+      solutionWords: 275,
+      extra: `
+## Summary by network
+
+- ${filler(60)}
+`,
+    }),
+    /authored PR description is 463 words; the ceiling is 400/,
+  );
+});
+
+// The two bodies below differ only by the ten-word indented continuation, and
+// the shorter one sits exactly at the ceiling. A counter that reads a four-space
+// list continuation as code would pass both.
+function bodyWithIndentedTail(continuation) {
+  return sizedBody({
+    tldrWords: 20,
+    problemWords: 100,
+    solutionWords: 273,
+    extra: `
+## Details
+
+- Bullet.
+${continuation}`,
+  });
+}
+
+test("passes at the ceiling without an indented continuation", () => {
+  assertPass(bodyWithIndentedTail(""));
+});
+
+test("counts an indented list continuation toward the word ceiling", () => {
+  assertFail(
+    bodyWithIndentedTail(`
+    ${filler(10)}
+`),
+    /authored PR description is 410 words; the ceiling is 400/,
+  );
+});
+
+test("does not count a fenced code block toward the word ceiling", () => {
+  assertPass(
+    sizedBody({
+      tldrWords: 20,
+      problemWords: 100,
+      solutionWords: 274,
+      extra: `
+## Details
+
+\`\`\`text
+${filler(60)}
+\`\`\`
+`,
+    }),
+  );
+});
+
+test("counts prose wrapped in raw HTML toward the word ceiling", () => {
+  assertFail(
+    sizedBody({
+      tldrWords: 20,
+      problemWords: 100,
+      solutionWords: 274,
+      extra: `
+## Details
+
+<details><summary>Overflow</summary>
+
+<p>${filler(50)}</p>
+
+</details>
+`,
+    }),
+    /authored PR description is 451 words; the ceiling is 400/,
+  );
+});
+
+test("does not count an attribute holding an angle bracket as prose", () => {
+  assertPass(
+    sizedBody({
+      tldrWords: 20,
+      problemWords: 100,
+      solutionWords: 273,
+      extra: `
+## Details
+
+<div title="${filler(30)} > ${filler(30)}">
+<p>Visible.</p>
+</div>
+`,
+    }),
+  );
+});
+
+test("does not count invisible HTML entities as words", () => {
+  assertPass(
+    sizedBody({
+      tldrWords: 20,
+      problemWords: 100,
+      solutionWords: 274,
+      extra: `
+## Details
+
+<p>${"&nbsp;".repeat(60)}</p>
+`,
+    }),
+  );
+});
+
+test("does not count HTML tags or non-rendering elements as words", () => {
+  assertPass(
+    sizedBody({
+      tldrWords: 20,
+      problemWords: 100,
+      solutionWords: 274,
+      extra: `
+## Details
+
+<div class="one two three" data-note="four five six">
+<script>${filler(50)}</script>
+</div>
+`,
+    }),
+  );
+});
+
+test("counts HTML-wrapped prose in the tl;dr toward its limit", () => {
+  assertFail(
+    `## tl;dr
+
+Visible summary sentence.
+
+<p>${filler(80)}</p>
+
+## The Problem
+
+- Reviewers need a clear problem statement.
+
+## The Solution
+
+- This explains the approach.
+`,
+    /'## tl;dr' section is 83 words; the limit is 80/,
+  );
+});
+
+test("counts a section that follows the excluded checklist", () => {
+  assertFail(
+    sizedBody({
+      tldrWords: 20,
+      problemWords: 100,
+      solutionWords: 275,
+      extra: `
+## Checklist
+
+- [x] ${filler(60)}
+
+## Details
+
+${filler(1)}
+`,
+    }),
+    /authored PR description is 402 words; the ceiling is 400/,
+  );
 });
 
 test("accepts the deterministic Sentry autofix PR body", () => {
@@ -133,7 +470,7 @@ test("fails when the first sections are not The Problem then The Solution", () =
     `# Summary
 
 ${body()}`,
-    /must START with '## The Problem' then '## The Solution'/,
+    /must START with '## tl;dr' then '## The Problem'/,
   );
 });
 
@@ -145,7 +482,11 @@ ${body()}`);
 
 test("fails a comment-only Problem section", () => {
   assertFail(
-    `## The Problem
+    `## tl;dr
+
+The check that reads pull request descriptions now wants a plain summary first.
+
+## The Problem
 
 <!-- Explain the old behavior and effect. -->
 
@@ -159,7 +500,11 @@ test("fails a comment-only Problem section", () => {
 
 test("fails a blank Solution section", () => {
   assertFail(
-    `## The Problem
+    `## tl;dr
+
+The check that reads pull request descriptions now wants a plain summary first.
+
+## The Problem
 
 - Reviewers need a clear problem statement.
 
@@ -175,7 +520,11 @@ test("fails a blank Solution section", () => {
 
 test("fails opening sections left as template comments", () => {
   assertFail(
-    `## The Problem
+    `## tl;dr
+
+The check that reads pull request descriptions now wants a plain summary first.
+
+## The Problem
 
 <!--
 Explain what the system did before and its concrete effect.
@@ -196,7 +545,11 @@ Explain the new behavior and why it helps.
 });
 
 test("allows inline HTML comments beside visible Markdown", () => {
-  assertPass(`## The Problem
+  assertPass(`## tl;dr
+
+The check that reads pull request descriptions now wants a plain summary first.
+
+## The Problem
 
 Visible problem prose. <!-- template note -->
 
@@ -208,7 +561,11 @@ Visible problem prose. <!-- template note -->
 
 test("does not count visible text inside raw HTML", () => {
   assertFail(
-    `## The Problem
+    `## tl;dr
+
+The check that reads pull request descriptions now wants a plain summary first.
+
+## The Problem
 
 <p>The old behavior failed.</p>
 
@@ -222,7 +579,11 @@ test("does not count visible text inside raw HTML", () => {
 
 test("does not count a Markdown paragraph that contains raw HTML", () => {
   assertFail(
-    `## The Problem
+    `## tl;dr
+
+The check that reads pull request descriptions now wants a plain summary first.
+
+## The Problem
 
 The old path failed for operators.<br>
 
@@ -236,7 +597,11 @@ The old path failed for operators.<br>
 
 test("does not count a paragraph with raw HTML nested in Markdown", () => {
   assertFail(
-    `## The Problem
+    `## tl;dr
+
+The check that reads pull request descriptions now wants a plain summary first.
+
+## The Problem
 
 Visible text *<span>raw</span>*
 
@@ -250,7 +615,11 @@ Visible text *<span>raw</span>*
 
 test("does not count tag-only raw HTML as explanatory content", () => {
   assertFail(
-    `## The Problem
+    `## tl;dr
+
+The check that reads pull request descriptions now wants a plain summary first.
+
+## The Problem
 
 - Reviewers need a clear problem statement.
 
@@ -264,7 +633,11 @@ test("does not count tag-only raw HTML as explanatory content", () => {
 
 test("does not count an HTML attribute delimiter as visible text", () => {
   assertFail(
-    `## The Problem
+    `## tl;dr
+
+The check that reads pull request descriptions now wants a plain summary first.
+
+## The Problem
 
 - Reviewers need a clear problem statement.
 
@@ -283,7 +656,11 @@ test("does not count text inside non-rendering HTML elements", () => {
     "<template><p>hidden text</p></template>",
   ]) {
     assertFail(
-      `## The Problem
+      `## tl;dr
+
+The check that reads pull request descriptions now wants a plain summary first.
+
+## The Problem
 
 - Reviewers need a clear problem statement.
 
@@ -298,7 +675,11 @@ ${html}
 
 test("does not count default-ignorable Unicode as explanatory content", () => {
   assertFail(
-    `## The Problem
+    `## tl;dr
+
+The check that reads pull request descriptions now wants a plain summary first.
+
+## The Problem
 
 - Reviewers need a clear problem statement.
 
@@ -313,7 +694,11 @@ ${"\u200B"}
 test("does not count invisible HTML character references", () => {
   for (const html of ["<p>&nbsp;</p>", "<p>&#8203;</p>"]) {
     assertFail(
-      `## The Problem
+      `## tl;dr
+
+The check that reads pull request descriptions now wants a plain summary first.
+
+## The Problem
 
 - Reviewers need a clear problem statement.
 
@@ -328,7 +713,11 @@ ${html}
 
 test("fails a Problem section containing only a link-reference definition", () => {
   assertFail(
-    `## The Problem
+    `## tl;dr
+
+The check that reads pull request descriptions now wants a plain summary first.
+
+## The Problem
 
 [comment]: # (placeholder)
 
@@ -342,7 +731,11 @@ test("fails a Problem section containing only a link-reference definition", () =
 
 test("fails a Solution section containing only a link-reference definition", () => {
   assertFail(
-    `## The Problem
+    `## tl;dr
+
+The check that reads pull request descriptions now wants a plain summary first.
+
+## The Problem
 
 - Reviewers need a clear problem statement.
 
@@ -360,7 +753,11 @@ test("fails a Solution section containing only a link-reference definition", () 
 
 test("fails a Problem section containing only a multiline link-reference definition", () => {
   assertFail(
-    `## The Problem
+    `## tl;dr
+
+The check that reads pull request descriptions now wants a plain summary first.
+
+## The Problem
 
 [comment]:
   /placeholder
@@ -376,7 +773,11 @@ test("fails a Problem section containing only a multiline link-reference definit
 
 test("fails an escaped-label link-reference definition in Solution", () => {
   assertFail(
-    `## The Problem
+    `## tl;dr
+
+The check that reads pull request descriptions now wants a plain summary first.
+
+## The Problem
 
 - Reviewers need a clear problem statement.
 
@@ -394,7 +795,11 @@ test("fails an escaped-label link-reference definition in Solution", () => {
 
 test("fails a multiline link-reference label in Solution", () => {
   assertFail(
-    `## The Problem
+    `## tl;dr
+
+The check that reads pull request descriptions now wants a plain summary first.
+
+## The Problem
 
 - Reviewers need a clear problem statement.
 
@@ -413,7 +818,11 @@ note]: /placeholder
 
 test("fails a blockquote containing only a link-reference definition", () => {
   assertFail(
-    `## The Problem
+    `## tl;dr
+
+The check that reads pull request descriptions now wants a plain summary first.
+
+## The Problem
 
 - Reviewers need a clear problem statement.
 
@@ -427,7 +836,11 @@ test("fails a blockquote containing only a link-reference definition", () => {
 
 test("accepts the CommonMark maximum label length as a hidden definition", () => {
   assertFail(
-    `## The Problem
+    `## tl;dr
+
+The check that reads pull request descriptions now wants a plain summary first.
+
+## The Problem
 
 - Reviewers need a clear problem statement.
 
@@ -440,7 +853,11 @@ test("accepts the CommonMark maximum label length as a hidden definition", () =>
 });
 
 test("keeps an over-limit link-reference label as visible content", () => {
-  assertPass(`## The Problem
+  assertPass(`## tl;dr
+
+The check that reads pull request descriptions now wants a plain summary first.
+
+## The Problem
 
 - Reviewers need a clear problem statement.
 
@@ -452,7 +869,11 @@ test("keeps an over-limit link-reference label as visible content", () => {
 
 test("counts a backslash as visible link-label content", () => {
   assertFail(
-    `## The Problem
+    `## tl;dr
+
+The check that reads pull request descriptions now wants a plain summary first.
+
+## The Problem
 
 - Reviewers need a clear problem statement.
 
@@ -466,7 +887,11 @@ test("counts a backslash as visible link-label content", () => {
 
 test("fails a link-reference definition with its title on the next line", () => {
   assertFail(
-    `## The Problem
+    `## tl;dr
+
+The check that reads pull request descriptions now wants a plain summary first.
+
+## The Problem
 
 - Reviewers need a clear problem statement.
 
@@ -485,7 +910,11 @@ test("fails a link-reference definition with its title on the next line", () => 
 
 test("fails a link-reference definition with a multiline inline title", () => {
   assertFail(
-    `## The Problem
+    `## tl;dr
+
+The check that reads pull request descriptions now wants a plain summary first.
+
+## The Problem
 
 - Reviewers need a clear problem statement.
 
@@ -504,7 +933,11 @@ test("fails a link-reference definition with a multiline inline title", () => {
 
 test("fails a link-reference definition with a multiline title on the next line", () => {
   assertFail(
-    `## The Problem
+    `## tl;dr
+
+The check that reads pull request descriptions now wants a plain summary first.
+
+## The Problem
 
 [comment]: /placeholder
   "template
@@ -520,7 +953,11 @@ test("fails a link-reference definition with a multiline title on the next line"
 
 test("resets title escaping at a physical line boundary", () => {
   assertFail(
-    `## The Problem
+    `## tl;dr
+
+The check that reads pull request descriptions now wants a plain summary first.
+
+## The Problem
 
 - Reviewers need a clear problem statement.
 
@@ -538,7 +975,11 @@ test("resets title escaping at a physical line boundary", () => {
 });
 
 test("keeps a malformed raw link destination as visible content", () => {
-  assertPass(`## The Problem
+  assertPass(`## tl;dr
+
+The check that reads pull request descriptions now wants a plain summary first.
+
+## The Problem
 
 - Reviewers need a clear problem statement.
 
@@ -550,7 +991,11 @@ test("keeps a malformed raw link destination as visible content", () => {
 
 test("strips a balanced raw link destination", () => {
   assertFail(
-    `## The Problem
+    `## tl;dr
+
+The check that reads pull request descriptions now wants a plain summary first.
+
+## The Problem
 
 - Reviewers need a clear problem statement.
 
@@ -564,7 +1009,11 @@ test("strips a balanced raw link destination", () => {
 
 test("does not count a malformed definition that contains raw HTML", () => {
   assertFail(
-    `## The Problem
+    `## tl;dr
+
+The check that reads pull request descriptions now wants a plain summary first.
+
+## The Problem
 
 - Reviewers need a clear problem statement.
 
@@ -578,7 +1027,11 @@ test("does not count a malformed definition that contains raw HTML", () => {
 
 test("strips an angle destination with whitespace before its title", () => {
   assertFail(
-    `## The Problem
+    `## tl;dr
+
+The check that reads pull request descriptions now wants a plain summary first.
+
+## The Problem
 
 - Reviewers need a clear problem statement.
 
@@ -592,7 +1045,11 @@ test("strips an angle destination with whitespace before its title", () => {
 
 test("does not count tab-indented code as explanatory content", () => {
   assertFail(
-    `## The Problem
+    `## tl;dr
+
+The check that reads pull request descriptions now wants a plain summary first.
+
+## The Problem
 
 - Reviewers need a clear problem statement.
 
@@ -606,7 +1063,11 @@ test("does not count tab-indented code as explanatory content", () => {
 
 test("does not count an indented H2 section as Solution content", () => {
   assertFail(
-    `## The Problem
+    `## tl;dr
+
+The check that reads pull request descriptions now wants a plain summary first.
+
+## The Problem
 
 - Reviewers need a clear problem statement.
 
@@ -623,7 +1084,11 @@ test("does not count an indented H2 section as Solution content", () => {
 test("preserves content after a closing HTML comment marker", () => {
   assertPass(`<!--
 template comment
--->## The Problem
+-->## tl;dr
+
+The check that reads pull request descriptions now wants a plain summary first.
+
+## The Problem
 
 - Reviewers need a clear problem statement.
 
@@ -640,7 +1105,7 @@ example
 \`\`\`
 
 ${body()}`,
-    /must START with '## The Problem' then '## The Solution'/,
+    /must START with '## tl;dr' then '## The Problem'/,
   );
 });
 
@@ -811,7 +1276,7 @@ test("CLI guard runs validation when invoked with a relative script path", () =>
     error = caught;
   }
   assert.ok(error instanceof Error, "expected CLI validation to fail");
-  assert.match(error.stdout, /must START with '## The Problem'/);
+  assert.match(error.stdout, /must START with '## tl;dr'/);
 });
 
 test("CLI guard prints success when invoked with a relative script path", () => {
