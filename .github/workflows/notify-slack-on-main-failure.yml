@@ -35,7 +35,6 @@ on:
       # Push-to-main workflows (on.push.branches: [main]):
       - Alerts Infra
       - Metrics Bridge
-      - Infra
       - Aegis App Engine
       - CI
       - Trunk
