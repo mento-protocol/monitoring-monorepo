@@ -68,7 +68,7 @@ Move each pin class together.
 - `pr:ready-state:test`: `pr/pr-ready-state*.mjs` and
   `pr/pr-stack-{ready-state,recover}*.mjs`; `pr:feedback-state:test`:
   `pr/pr-feedback-state*.mjs`.
-- **Workflow pins.** `check-ci-contract{,.test}.mjs` pins CI (ADR 0101).
+- **Workflow pins.** `check-ci-contract{,.test}.mjs` pins CI (ADR 0102).
   `check-no-skip-audit{,.test}.mjs` pins admission, SHAs, caches, skips,
   `repo-health/dependency-cruiser-root-contract.test.mjs`, and the retained
   graph. Moves update ADR 0064 and all pins.
