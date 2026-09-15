@@ -423,6 +423,25 @@ describe("buildBrokerTradingLimitRow", () => {
     assert.equal(built.poolId, POOL_ID);
   });
 
+  it("keeps the serialized pressure and the status on the same side of a threshold", () => {
+    // 799_960/1_000_000 is 0.79996 exactly: it rounds up to "0.8000" at the
+    // stored 4dp, so the status must read WARN too. An unrounded status would
+    // pair an amber bar with an OK badge here, and a red bar with WARN at 1.0.
+    const rounded = row({
+      config: config({ flags: LIMIT_FLAG_LG, limitGlobal: 1_000_000n }),
+      state: state({ netflowGlobal: 799_960n }),
+    });
+    assert.equal(rounded.limitPressureGlobal, "0.8000");
+    assert.equal(rounded.limitStatus, "WARN");
+
+    const breaching = row({
+      config: config({ flags: LIMIT_FLAG_LG, limitGlobal: 1_000_000n }),
+      state: state({ netflowGlobal: 999_960n }),
+    });
+    assert.equal(breaching.limitPressureGlobal, "1.0000");
+    assert.equal(breaching.limitStatus, "CRITICAL");
+  });
+
   it("writes an N/A placeholder when neither half is known", () => {
     const placeholder = row({
       config: EMPTY_BROKER_LIMIT_CONFIG,
@@ -456,7 +475,7 @@ describe("foldPoolLimitFields", () => {
   });
 
   it("matches tokens case-insensitively", () => {
-    const folded = foldPoolLimitFields([usdmRow], {
+    const folded = foldPoolLimitFields([usdmRow, audmRow], {
       token0: USDM.toUpperCase(),
       token1: AUDM,
     });
@@ -514,16 +533,30 @@ describe("foldPoolLimitFields", () => {
     }
   });
 
-  it("ignores a leg that is not one of the pool's tokens", () => {
+  it("reports N/A when a leg is not one of the pool's tokens", () => {
     const folded = foldPoolLimitFields([audmRow], {
       token0: USDM,
       token1: CKES,
     });
     assert.deepEqual(folded, {
-      limitStatus: "WARN",
+      limitStatus: "N/A",
       limitPressure0: "0.0000",
       limitPressure1: "0.0000",
     });
+  });
+
+  it("reports N/A while only one pool leg is known", () => {
+    // A per-leg RPC read can succeed for token0 and fail for token1. Folding
+    // the readable leg alone would publish OK/WARN next to a 0.00% slot that
+    // is really "unread", so neither may reach the pool until both land.
+    const pendingAudm = row({ token: AUDM, stateKnown: false });
+    for (const rows of [[usdmRow], [usdmRow, pendingAudm]]) {
+      assert.deepEqual(foldPoolLimitFields(rows, pool), {
+        limitStatus: "N/A",
+        limitPressure0: "0.0000",
+        limitPressure1: "0.0000",
+      });
+    }
   });
 
   it("folds a known leg with no enabled window to N/A", () => {

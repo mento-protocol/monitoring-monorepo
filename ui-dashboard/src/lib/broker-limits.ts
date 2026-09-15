@@ -22,7 +22,7 @@ export const LIMIT_FLAG_LG = 4;
  *  the exchange simply has not traded — worth flagging, not an error. */
 export const BROKER_STATE_STALE_SECONDS = 1_800;
 
-export type BrokerLimitWindowKey = "global" | "l0" | "l1";
+type BrokerLimitWindowKey = "global" | "l0" | "l1";
 
 export type BrokerLimitWindow = {
   key: BrokerLimitWindowKey;

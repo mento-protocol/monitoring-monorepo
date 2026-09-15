@@ -10,7 +10,7 @@ export type WindowSummary = {
 };
 
 /** Compact form: 12K, 3.4M, 500. Omits decimals for values < 1000. */
-export function formatShort(value: number): string {
+function formatShort(value: number): string {
   if (!Number.isFinite(value)) return "—";
   const abs = Math.abs(value);
   if (abs >= 999_950) {

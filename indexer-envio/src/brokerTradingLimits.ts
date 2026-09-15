@@ -23,6 +23,9 @@ export const BROKER_LIMIT_REFRESH_SECONDS = 300n;
 export const BROKER_LIMIT_HOT_PRESSURE = 0.8;
 
 const PRESSURE_SCALE = 100_000_000n;
+/** Stored/rendered precision for every pressure. `toFixed(4)` rounds, so the
+ * status must read the rounded value or the two disagree at a threshold. */
+const PRESSURE_DP = 10_000;
 const LIMIT_ID_HEX_DIGITS = 64;
 
 export type BrokerLimitConfig = {
@@ -103,7 +106,11 @@ export type BrokerPressures = {
 function pressure(enabled: boolean, netflow: bigint, limit: bigint): number {
   if (!enabled || limit <= 0n) return 0;
   const abs = netflow < 0n ? -netflow : netflow;
-  return Number((abs * PRESSURE_SCALE) / limit) / Number(PRESSURE_SCALE);
+  const exact = Number((abs * PRESSURE_SCALE) / limit) / Number(PRESSURE_SCALE);
+  // Quantize to the 4dp the row serializes and the dashboard renders. Status
+  // thresholds read the same number, so a value that rounds up across a
+  // threshold cannot colour the bar amber while the badge still reads OK.
+  return Math.round(exact * PRESSURE_DP) / PRESSURE_DP;
 }
 
 /** Pressure per window as |netflow| / limit. Disabled windows read 0, never
@@ -294,23 +301,27 @@ export function foldPoolLimitFields(
   // with two 0.00% pressures, so stay `N/A` until the tokens arrive.
   if (!pool.token0 || !pool.token1) return NO_POOL_LIMIT_FIELDS;
   const known = rows.filter((row) => row.configKnown && row.stateKnown);
-  if (known.length === 0) return NO_POOL_LIMIT_FIELDS;
+  const rowFor = (token: string): BrokerTradingLimit | undefined =>
+    known.find((row) => row.token.toLowerCase() === token.toLowerCase());
+  // One leg's RPC read can succeed while the other fails. Folding a status from
+  // the readable leg alone would publish OK while the unread leg already sits
+  // at its cap, and the missing leg's slot would render a real-looking 0.00%.
+  // Both legs must be known before any pool-level status is published.
+  const row0 = rowFor(pool.token0);
+  const row1 = rowFor(pool.token1);
+  if (!row0 || !row1) return NO_POOL_LIMIT_FIELDS;
 
-  const pressureFor = (token: string | undefined): string => {
-    const match = known.find(
-      (row) => row.token.toLowerCase() === (token ?? "").toLowerCase(),
-    );
-    return match ? storedWorstPressure(match).toFixed(4) : "0.0000";
-  };
+  const pressureFor = (row: BrokerTradingLimit): string =>
+    storedWorstPressure(row).toFixed(4);
 
-  const worstRank = known.reduce(
-    (worst, row) => Math.max(worst, statusRank(row.limitStatus)),
-    0,
+  const worstRank = Math.max(
+    statusRank(row0.limitStatus),
+    statusRank(row1.limitStatus),
   );
 
   return {
     limitStatus: STATUS_BY_SEVERITY[worstRank] ?? "N/A",
-    limitPressure0: pressureFor(pool.token0),
-    limitPressure1: pressureFor(pool.token1),
+    limitPressure0: pressureFor(row0),
+    limitPressure1: pressureFor(row1),
   };
 }
