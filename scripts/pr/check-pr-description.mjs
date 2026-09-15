@@ -291,56 +291,31 @@ function sectionLines(body, headingPattern) {
 }
 
 /**
- * Whether a run of lines is the template's checklist rather than prose parked
- * under its heading. Every line must be blank or a task-list item, so an
- * author cannot exempt a section by naming it `## Checklist`.
- */
-function isTaskListSection(lines) {
-  return lines.every(
-    (line) => line.trim() === "" || TASK_LIST_ITEM_RE.test(line),
-  );
-}
-
-/**
- * Words the author wrote. Drops the template's own checklist and the review
- * bot's appended summary section, then counts what is left. HTML comments and
- * fenced code are already gone from the body this receives.
+ * Words the author wrote. The template's ticked boxes and the review bot's
+ * appended summary section do not count; prose parked under `## Checklist` does,
+ * because only the task-list items themselves are template content. HTML
+ * comments and fenced code are already gone from the body this receives.
  */
 function authoredWordCount(body) {
-  const lines = linesOf(body);
   const kept = [];
-  let pending = null;
+  let section = "body";
 
-  const flush = () => {
-    if (pending === null) return;
-    // A checklist keeps its exemption only while it still looks like one; the
-    // bot's own section is exempt whatever it holds.
-    const isExempt = pending.checklist
-      ? isTaskListSection(pending.lines)
-      : true;
-    if (!isExempt) kept.push(pending.heading, ...pending.lines);
-    pending = null;
-  };
-
-  for (const line of lines) {
+  for (const line of linesOf(body)) {
     if (H2_HEADING_RE.test(line)) {
-      flush();
       if (CHECKLIST_HEADING_RE.test(line)) {
-        pending = { heading: line, lines: [], checklist: true };
+        section = "checklist";
         continue;
       }
       if (BOT_SUMMARY_HEADING_RE.test(line)) {
-        pending = { heading: line, lines: [], checklist: false };
+        section = "bot";
         continue;
       }
+      section = "body";
     }
-    if (pending !== null) {
-      pending.lines.push(line);
-      continue;
-    }
+    if (section === "bot") continue;
+    if (section === "checklist" && TASK_LIST_ITEM_RE.test(line)) continue;
     kept.push(line);
   }
-  flush();
 
   return visibleWordCount(kept.join("\n"));
 }

@@ -220,7 +220,7 @@ test("counts prose parked under a Checklist heading", () => {
 ${filler(60)}
 `,
     }),
-    /authored PR description is 461 words; the ceiling is 400/,
+    /authored PR description is 460 words; the ceiling is 400/,
   );
 });
 
