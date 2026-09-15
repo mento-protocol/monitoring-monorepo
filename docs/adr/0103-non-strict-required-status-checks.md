@@ -62,11 +62,39 @@ BEHIND PR to `merge_base_first` too, so babysitting does not spend a review
 request on a head it will still have to rewrite. A real conflict always
 stays a required blocker.
 
-Backstops replace the per-PR freshness check: the push-triggered `ci` run on
-`main` and the Slack main-failure notifier
-(`.github/workflows/notify-slack-on-main-failure.yml`) catch what a stale
-merge introduces. Rule of thumb: when `main` is red, nobody merges until it
-is green again.
+Two enforced backstops replace the per-PR freshness check. First, the oracle
+reads the base branch head's own status rollup in one GraphQL query and emits
+a required `base-red` blocker when a required context there ended in
+`failure`, `cancelled`, `timed_out` or `action_required`; a base it cannot
+read blocks the same way. Pending, in-progress and skipped base checks are not
+red. "Nobody merges while `main` is red" is therefore a blocker, not a rule of
+thumb. Second, the push-triggered `ci` run on `main` and the Slack
+main-failure notifier
+(`.github/workflows/notify-slack-on-main-failure.yml`) still report what a
+stale merge introduces after the fact, which is what turns the base red for
+the blocker to catch.
+
+The unattended Dependabot auto-merge lane
+(`.github/workflows/dependabot-auto-merge.yml`) keeps current-base validation
+in its writer rather than relying on the base ruleset. It merges with the
+repository `GITHUB_TOKEN`, whose merge commit emits no push-triggered
+workflows, so a stale merge on that lane would land with no post-merge `ci`
+run at all. The writer merges only a `clean` `mergeable_state`. A `behind`
+head exits without merging and without repairing the branch: `update-branch`
+would write a merge commit authored by that token, and the writer's own commit
+proof accepts only commits authored by `dependabot[bot]`, so the repair would
+disqualify the pull request from the lane for good. Dependabot's own rebase
+pushes under its identity, starts a fresh classifier run, and brings the pull
+request back. Every other merge state fails closed.
+
+That check is an observation, not a server-enforced precondition: the merge
+endpoint's `sha` pins the pull request's head, not the base. Two writers on
+different branches could each read `clean` and the second could merge a base
+commit behind the first. The window is the sub-second gap between the final
+read and the merge request, and the lane only ever bumps pinned GitHub-owned
+action SHAs in workflow YAML. Closing it properly needs the merge queue this
+ADR defers, so the residual race is accepted and recorded here rather than
+papered over with repository-wide serialization of an unattended lane.
 
 ## Alternatives considered
 
@@ -89,7 +117,9 @@ is green again.
 - A semantic conflict — two merged PRs that are each individually fine but
   break together — is caught by `main`'s own post-merge `ci` run and the
   Slack notifier, not before merge. Fixing that after the fact costs a
-  revert or a follow-up PR, not a blocked merge.
+  revert or a follow-up PR, not a blocked merge. Every other open PR is then
+  blocked by `base-red` until `main` is green, so one semantic conflict stops
+  the queue instead of compounding.
 - Re-integrating the base is still required when a PR is actually
   CONFLICTING/DIRTY, or when the operator asks for it; it is no longer
   required merely for being BEHIND.
@@ -106,10 +136,25 @@ is green again.
 - `docs/notes/pr-ready-state.md` and `docs/notes/stacked-pull-requests.md`
   document the current oracle behavior.
 - `scripts/pr/pr-ready-state-core.mjs`, `scripts/pr/pr-ready-state.mjs`,
+  `scripts/pr/pr-ready-state-status-contexts.mjs`,
   `scripts/pr/pr-ready-state-closeout.mjs`,
   `scripts/pr/pr-ready-state.test.mjs`, `scripts/pr/pr-stack-ready-state.mjs`,
   and `scripts/pr/pr-stack-ready-state.test.mjs` implement and test the
-  change, including the fail-closed live strict-policy read.
+  change, including the fail-closed live strict-policy read and the
+  `base-red` blocker.
+- `.github/workflows/dependabot-auto-merge.yml` carries the unattended lane's
+  own current-base validation;
+  `scripts/production-infra-identity-contract/workflow-inventory.mjs` pins its
+  reviewed semantic hash and
+  `scripts/production-infra-identity-contract/dependabot-auto-merge.test.mjs`
+  proves a behind head exits without merging and without any write.
+- Probed 2026-09-15:
+  `repos/mento-protocol/monitoring-monorepo/branches/main/protection/required_status_checks`
+  answers `Branch not protected (HTTP 404)` while
+  `repos/mento-protocol/monitoring-monorepo/branches/main` answers
+  `protected: true` with `protection.enabled: false`. A ruleset-only base sets
+  `protected`, so only the 404 message plus `protection.enabled: false`
+  establishes that classic protection is absent.
 - `gh api repos/mento-protocol/monitoring-monorepo/rulesets/13494367` shows
   the current `bypass_actors` and (until the operator flips it)
   `strict_required_status_checks_policy: true`.

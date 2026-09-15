@@ -38,6 +38,7 @@ import {
   repoPath,
 } from "./pr-ready-state-gh.mjs";
 import { fetchRequiredStatusContexts } from "./pr-ready-state-status-contexts.mjs";
+import { fetchBaseBranchHealth } from "./pr-ready-state-base-health.mjs";
 
 export { fetchHeadUpdatedAt, headUpdatedAtFromTimeline };
 export { withGhAbortSignal } from "./pr-ready-state-gh.mjs";
@@ -50,6 +51,7 @@ export {
   strictRequiredStatusChecksPolicyFromRules,
   workflowPathsFromRules,
 } from "./pr-ready-state-status-contexts.mjs";
+export { fetchBaseBranchHealth } from "./pr-ready-state-base-health.mjs";
 
 export function repoFromPullRequestUrl(url) {
   try {
@@ -234,14 +236,21 @@ export async function fetchReadinessBases({
   pr,
   fetchJson = ghApiJsonResult,
   fetchContexts = fetchRequiredStatusContexts,
+  fetchBaseHealth = fetchBaseBranchHealth,
 }) {
   const stack = await fetchStackContext({ repo, pr, fetchJson });
-  const requiredStatusContexts = await fetchContexts({
-    repo,
-    baseRef: stack?.protectionBaseRef ?? pr.baseRefName,
-    statusCheckRollup: pr.statusCheckRollup ?? [],
-  });
-  return { stack, requiredStatusContexts };
+  const baseRef = stack?.protectionBaseRef ?? pr.baseRefName;
+  const [requiredStatusContexts, baseHealth] = await Promise.all([
+    fetchContexts({
+      repo,
+      baseRef,
+      statusCheckRollup: pr.statusCheckRollup ?? [],
+    }),
+    // Thread the injected transport through, or an offline fixture would fall
+    // back to the default and spawn a real `gh api graphql`.
+    fetchBaseHealth({ repo, baseRef, fetchJson }),
+  ]);
+  return { stack, requiredStatusContexts, baseHealth };
 }
 
 export async function fetchReadyState({
@@ -326,7 +335,7 @@ export async function fetchReadyState({
     reactions,
     reviewComments,
     reviewThreads,
-    { stack, requiredStatusContexts },
+    { stack, requiredStatusContexts, baseHealth },
     timelineResult,
   ] = await Promise.all([
     statusSourcePromise,
@@ -392,6 +401,9 @@ export async function fetchReadyState({
     requiredStatusContextsError: requiredStatusContexts.error,
     requiredStatusContextsAvailable: requiredStatusContexts.error === null,
     requiredStatusChecksStrict: requiredStatusContexts.strict ?? null,
+    baseStatusCheckRollup: baseHealth?.rollup ?? [],
+    baseHealthOid: baseHealth?.oid ?? null,
+    baseHealthError: baseHealth?.error ?? null,
     includeFeedbackDetails,
     codeRabbitPathFilterSkip,
   });

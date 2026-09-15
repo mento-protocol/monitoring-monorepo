@@ -387,6 +387,37 @@ function isHttpNotFoundError(error) {
   return /\bHTTP 404\b/i.test(String(error));
 }
 
+// GitHub renders three different 404s on the classic-protection endpoint, and
+// only one of them proves classic protection is absent: "Branch not protected"
+// (no classic protection), "Branch not found" (no such base), and "Not Found"
+// (the token may not read protection). Only the first can license trusting a
+// ruleset's `false` in place of an unread classic `strict`.
+function isBranchNotProtectedError(error) {
+  return /\bBranch not protected\b/i.test(String(error));
+}
+
+// Prove classic protection is absent from two independent signals before the
+// 404 path trusts a ruleset's non-strict value: the 404 must be the API's
+// "Branch not protected" message, and the branch object must report
+// `protection.enabled: false`. The branch object's top-level `protected` flag
+// cannot serve here — a ruleset-protected branch with no classic protection
+// still reports `protected: true` (observed on this repo's `main`). Anything
+// else — another 404 message, `protection.enabled` true or absent, or a failed
+// branch read — leaves strictness unknown so BEHIND keeps blocking.
+async function classicProtectionConfirmedAbsent({
+  repo,
+  encodedBaseRef,
+  error,
+  fetchBranch,
+}) {
+  if (!isBranchNotProtectedError(error)) return false;
+  const branchResult = await fetchBranch(repo, [
+    `repos/${repoPath(repo)}/branches/${encodedBaseRef}`,
+  ]);
+  if (!branchResult.ok) return false;
+  return branchResult.value?.protection?.enabled === false;
+}
+
 export async function fetchRequiredStatusContexts({
   repo,
   baseRef,
@@ -394,6 +425,7 @@ export async function fetchRequiredStatusContexts({
   fetchProtection = ghApiJsonResult,
   fetchRules = ghApiJsonPagesResult,
   fetchWorkflowNames = fetchWorkflowNamesForRules,
+  fetchBranch = ghApiJsonResult,
 }) {
   const encodedBaseRef = encodeURIComponent(baseRef);
   const result = await fetchProtection(repo, [
@@ -414,9 +446,22 @@ export async function fetchRequiredStatusContexts({
         };
       }
 
-      const strict = strictRequiredStatusChecksPolicyFromRules(
+      // A ruleset's confirmed `false` only stands once classic protection is
+      // independently proven absent; unknown and `true` need no branch read
+      // because neither can be demoted by classic's absence anyway.
+      const rulesetStrict = strictRequiredStatusChecksPolicyFromRules(
         rulesResult.value ?? [],
       );
+      const strict =
+        rulesetStrict === false &&
+        !(await classicProtectionConfirmedAbsent({
+          repo,
+          encodedBaseRef,
+          error: result.error,
+          fetchBranch,
+        }))
+          ? null
+          : rulesetStrict;
       const workflowNameByPath = workflowPathsFromRules(rulesResult.value ?? [])
         .length
         ? await fetchWorkflowNames(repo, rulesResult.value ?? [])

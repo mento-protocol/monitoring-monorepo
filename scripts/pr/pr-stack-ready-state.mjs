@@ -49,6 +49,17 @@ export function classifyStackObservation(value, previous = null) {
   // conflict) it still surfaces here as a "base-update"/"mergeability"
   // blocker in `value.required.blockers` below.
   const blockers = value?.required?.blockers ?? [];
+  // Classify from the oracle's own `base-update` blocker, not from the raw
+  // `mergeStateStatus`, so this stays one decision made in one place. Read it
+  // before the check states: a BEHIND layer's stale required check is a
+  // symptom of the moved base, and re-integrating the base is what clears
+  // both. Reporting CHECKS_FAILED there would send the operator to chase a
+  // check that will be rerun anyway.
+  if (blockers.some((item) => item.kind === "base-update"))
+    return result(
+      "BASE_UPDATE_REQUIRED",
+      "Head is behind the base; integrate the current base and recheck",
+    );
   const checks = blockers.filter((item) => item.kind === "check");
   if (checks.some((item) => item.state === "fail"))
     return result(

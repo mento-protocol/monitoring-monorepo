@@ -354,9 +354,10 @@ If root `package.json` changed, first run
    - **An existing PR** is the push target. Before creating the ship commit,
      require local `HEAD` to equal its `headRefOid`; if intended commits
      already exist locally, require that OID to be their ancestor and inspect
-     the intervening range. If an ordinary PR branch is missing current base
-     commits, merge the base in — rebase is only acceptable before first
-     publication. Merge it locally from the fetched base, never through
+     the intervening range. Merge the base only when the oracle asks —
+     `merge_base_first`, or a real conflict — never merely for being behind,
+     and never to clear `base-red`, which only a green base clears; rebase is
+     only acceptable before first publication. Merge it locally, never through
      GitHub's "Update branch" button or a web-UI edit, because each costs a
      CodeRabbit review event; and merge it before the CodeRabbit closeout
      request rather than after, because a base merge after the request can draw

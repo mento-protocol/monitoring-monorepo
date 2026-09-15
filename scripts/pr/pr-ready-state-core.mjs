@@ -29,140 +29,31 @@ export {
   findActiveReadinessOverrides,
   parseReadinessOverrideComment,
 } from "./pr-ready-state-overrides.mjs";
-const OPTIONAL_CHECK_NAMES = new Set([
-  // CodeRabbit is advisory and reports SUCCESS when a rate-limited review never
-  // ran. Report its lag, but read review evidence instead of its conclusion.
-  "CodeRabbit",
-  "Core Web Vitals + accessibility (ui-dashboard)",
-  "GraphQL schema diff",
-  "jscpd",
-]);
+import {
+  checkDisplayName,
+  classifyCheck,
+  groupStatusChecks,
+  isOptionalCheckName,
+  normalizeStatusValue,
+  suppressSupersededCancelledChecks,
+} from "./pr-ready-state-check-state.mjs";
+export {
+  checkDisplayName,
+  classifyCheck,
+  groupStatusChecks,
+} from "./pr-ready-state-check-state.mjs";
 
-const PASS_VALUES = new Set(["SUCCESS", "PASSED", "PASS"]);
-const FAIL_VALUES = new Set([
-  "ACTION_REQUIRED",
-  "CANCELLED",
-  "ERROR",
-  "FAIL",
-  "FAILED",
-  "FAILURE",
-  "STALE",
-  "STARTUP_FAILURE",
-  "TIMED_OUT",
-]);
-const PENDING_VALUES = new Set([
-  "EXPECTED",
-  "IN_PROGRESS",
-  "PENDING",
-  "QUEUED",
-  "REQUESTED",
-  "WAITING",
-]);
-const SKIPPED_VALUES = new Set(["NEUTRAL", "SKIPPED"]);
+const MAX_DIAGNOSTIC_LENGTH = 200;
 
-function normalizeStatusValue(value) {
-  return String(value ?? "")
-    .trim()
-    .toUpperCase();
-}
-
-export function checkDisplayName(check) {
-  return (
-    check.name ??
-    check.context ??
-    check.workflowName ??
-    check.app?.name ??
-    check.__typename ??
-    "unknown check"
-  );
-}
-
-function isOptionalCheckName(name) {
-  return OPTIONAL_CHECK_NAMES.has(name);
-}
-
-export function classifyCheck(check) {
-  const values = [
-    check.conclusion,
-    check.state,
-    check.status,
-    check.rollupStatus,
-  ].map(normalizeStatusValue);
-
-  if (values.some((value) => FAIL_VALUES.has(value))) return "fail";
-  if (values.some((value) => PENDING_VALUES.has(value))) return "pending";
-  if (values.some((value) => SKIPPED_VALUES.has(value))) return "skipped";
-  if (values.some((value) => PASS_VALUES.has(value))) return "pass";
-
-  return "pending";
-}
-
-function checkRunOrderTimestampMs(check) {
-  // Use startedAt so delayed cancellation completion does not make a stale
-  // run appear newer than the passing run that superseded it.
-  const timestamp = check.startedAt ?? check.completedAt ?? null;
-  const parsed = Date.parse(timestamp ?? "");
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function checkIdentity(check) {
-  const appId =
-    check.appId ?? check.app_id ?? check.app?.id ?? check.app?.databaseId ?? "";
-  return [
-    checkDisplayName(check),
-    check.workflowName ?? check.workflow_name ?? "",
-    appId,
-  ].join("\0");
-}
-
-function suppressSupersededCancelledChecks(statusCheckRollup = []) {
-  const latestPassingTimeByIdentity = new Map();
-
-  for (const check of statusCheckRollup) {
-    if (classifyCheck(check) !== "pass") continue;
-    const timestampMs = checkRunOrderTimestampMs(check);
-    if (timestampMs === null) continue;
-    const identity = checkIdentity(check);
-    const previous = latestPassingTimeByIdentity.get(identity) ?? -Infinity;
-    if (timestampMs > previous) {
-      latestPassingTimeByIdentity.set(identity, timestampMs);
-    }
-  }
-
-  return statusCheckRollup.filter((check) => {
-    if (normalizeStatusValue(check.conclusion) !== "CANCELLED") return true;
-    const timestampMs = checkRunOrderTimestampMs(check);
-    if (timestampMs === null) return true;
-    const newerPassingTime = latestPassingTimeByIdentity.get(
-      checkIdentity(check),
-    );
-    return newerPassingTime === undefined || newerPassingTime <= timestampMs;
-  });
-}
-
-export function groupStatusChecks(statusCheckRollup = []) {
-  const grouped = {
-    pass: [],
-    fail: [],
-    pending: [],
-    skipped: [],
-  };
-
-  for (const check of suppressSupersededCancelledChecks(statusCheckRollup)) {
-    const group = classifyCheck(check);
-    grouped[group].push({
-      name: checkDisplayName(check),
-      status: check.status ?? check.state ?? null,
-      conclusion: check.conclusion ?? null,
-      detailsUrl: check.detailsUrl ?? check.targetUrl ?? null,
-    });
-  }
-
-  for (const checks of Object.values(grouped)) {
-    checks.sort((a, b) => a.name.localeCompare(b.name));
-  }
-
-  return grouped;
+// Fold a multiline transport error into one bounded line so a blocker carrying
+// it cannot break the single-line compact/watch stream.
+function compactDiagnostic(value) {
+  const collapsed = String(value ?? "")
+    .replace(/\s+/gu, " ")
+    .trim();
+  return collapsed.length > MAX_DIAGNOSTIC_LENGTH
+    ? `${collapsed.slice(0, MAX_DIAGNOSTIC_LENGTH - 1)}…`
+    : collapsed;
 }
 
 function requiredContextName(context) {
@@ -571,6 +462,12 @@ export function summarizeReadyState({
   // branch-protection lookup gap here: only a confirmed `false` demotes
   // BEHIND to a note (operator decision 2026-09-15, ADR 0103).
   requiredStatusChecksStrict = null,
+  // The base branch head's own status rollup, plus the commit it was read at.
+  // A non-null `baseHealthError` means the read failed and the base's health
+  // is unknown; both feed the `base-red` blocker below.
+  baseStatusCheckRollup = [],
+  baseHealthOid = null,
+  baseHealthError = null,
   includeFeedbackDetails = false,
   codeRabbitPathFilterSkip = null,
   // Wall-clock "now" for the closeout waits. Not the caller's `observedAt`
@@ -705,6 +602,46 @@ export function summarizeReadyState({
         state: "BEHIND",
         required: true,
         url: pr.url,
+      });
+    }
+  }
+
+  // ADR 0103 stopped GitHub re-running a PR's required checks against the
+  // current base, so "nobody merges while main is red" needs an enforced
+  // blocker rather than a rule of thumb. Judge the base head by the same
+  // required-contexts set and the same fail/pending/pass classification the
+  // PR's own checks get: only a failed, cancelled, timed-out or
+  // action-required conclusion is red; pending, in-progress and skipped are
+  // not. An unreadable base leaves its health unknown and blocks too. The
+  // caller has already reduced the rollup to the latest run per check, so a
+  // rerun that fixed the base does not keep blocking here.
+  if (baseHealthError !== null) {
+    requiredBlockers.push({
+      kind: "base-red",
+      // Stable name, diagnostic in `state`, like the branch-protection
+      // blocker. A transport error carries the whole GraphQL query and
+      // stderr, so collapse it: `formatCompact` emits one physical line per
+      // summary and callers quote that line verbatim (scripts/AGENTS.md
+      // "Compact/watch scripts keep machine state ... separate from display
+      // strings").
+      name: "Base branch health unavailable",
+      state: `unknown: ${compactDiagnostic(baseHealthError)}`,
+      required: true,
+      url: pr.url,
+    });
+  } else {
+    const redBaseChecks = splitRequiredAndOptionalChecks(
+      baseStatusCheckRollup,
+      requiredStatusContexts,
+      { requiredStatusContextsAvailable },
+    ).required.filter((check) => check.state === "fail");
+    for (const check of redBaseChecks) {
+      requiredBlockers.push({
+        kind: "base-red",
+        name: `Base check ${check.name} is red at ${baseHealthOid ?? "an unknown base commit"}`,
+        state: "red",
+        required: true,
+        url: check.url ?? pr.url,
       });
     }
   }

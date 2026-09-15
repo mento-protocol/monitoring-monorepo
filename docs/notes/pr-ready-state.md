@@ -48,6 +48,13 @@ Required blockers:
   `required.blockers[]`. Unknown fails closed the same as any other
   branch-protection lookup gap.
 
+- `base-red`: a required context on the base branch head that ended in
+  `failure`, `cancelled`, `timed_out` or `action_required`, named with the
+  base commit it was read at. Pending, in-progress and skipped base checks are
+  not red. A base whose health cannot be read blocks with `state: "unknown"`.
+  With strict mode off, GitHub no longer reruns a PR's checks against the
+  current base, so this is what stops a merge onto a red `main`.
+
 - Closed-unmerged PRs. Merged PRs are terminal-ready and short-circuit the
   expensive readiness sweep because there is nothing left to fix or wait on.
   Closed-unmerged PRs report only the terminal `state` blocker; review gates are
@@ -62,7 +69,13 @@ Required blockers:
   `required_status_checks` and named `workflows` rule before using the fallback
   split. A ruleset result that is empty or defines no required status checks or
   workflows stays unavailable and blocking because the 404 may mask missing
-  permission to read classic protection rather than prove its absence.
+  permission to read classic protection rather than prove its absence. For the
+  same reason a ruleset's `strict_required_status_checks_policy: false` is
+  trusted on the 404 path only once classic absence is established
+  independently: the 404 body must say `Branch not protected`, and
+  `repos/{owner}/{repo}/branches/{base}` must report
+  `protection.enabled: false`. That object's top-level `protected` flag proves
+  nothing here — a ruleset-only base still reports `protected: true`.
 - Required GitHub review state, including requested changes or required review
   still pending.
 - Unreplied review comments that repo policy requires agents to answer. A
@@ -698,9 +711,9 @@ requests and returns `PENDING` when reached.
    no automatic run follows the push: refresh once the head is stable instead of
    waiting for one that cannot start. The one exception is an opening review
    that never completed, where a later push can still draw a full run, so wait
-   the bounded time anyway. Merge the base before the request and never after
-   it: an ordinary PR takes a local merge of the fetched base, a native stack
-   layer takes the history-change procedure in
+   the bounded time anyway. On `merge_base_first` only, merge the base before
+   the request, never after: an ordinary PR by local merge of the fetched base,
+   a native stack layer by the history-change procedure in
    [`stacked-pull-requests.md`](stacked-pull-requests.md). Then, if
    `gates.codeRabbitReviewSignal.state` is `missing` or `stale`, recheck the
    head and follow the gate's `fallbackAction`: post the one marked closeout

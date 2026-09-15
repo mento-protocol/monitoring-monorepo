@@ -13,6 +13,10 @@ name: Dependabot auto-merge
 # a durable human veto after the same head is reopened. The endpoint cannot
 # enqueue or leave a standing auto-merge request.
 #
+# Main's ruleset no longer requires a pull request to include the current base
+# (ADR 0103), so this writer carries that validation itself: it merges only a
+# clean head and never repairs a stale one.
+#
 # The repository GITHUB_TOKEN performs the evidence reads and the final write.
 # Separate environment variables keep the read path and final-write seam
 # testable, although both values resolve to the same job token by design. This
@@ -278,6 +282,15 @@ jobs:
               exit 1
             fi
 
+            # Capture the base-freshness reading from the read this function
+            # already performs. The final caller below acts on it; taking it
+            # here costs no extra request and keeps it as current as every
+            # other proof this function repeats.
+            if ! OBSERVED_MERGE_STATE=$(jq -er '.mergeable_state' <<< "$pr_json"); then
+              echo '::error::The pull request merge state is unreadable.'
+              exit 1
+            fi
+
             if ! expected_commit_count=$(jq -er '.commits' <<< "$pr_json"); then
               echo '::error::The pull request commit count is invalid.'
               exit 1
@@ -407,6 +420,31 @@ jobs:
           # file, and queue proof after it. The exact-head REST request below
           # cannot accept a later push or create queued state.
           verify_authoritative_state
+
+          # ADR 0103 turned off strict required status checks on main, so
+          # GitHub no longer refuses a merge whose head has not seen the
+          # current base. This lane is unattended and merges with the
+          # repository GITHUB_TOKEN, whose merge commit emits no
+          # push-triggered workflows, so a stale merge would land with no
+          # post-merge CI run at all. Keep current-base validation in the
+          # writer: merge only a CLEAN head.
+          #
+          # This lane deliberately does not repair a behind branch itself.
+          # `update-branch` would write a merge commit authored by this token,
+          # and the commit proof above accepts only commits authored by
+          # dependabot[bot], so the repair would disqualify the pull request
+          # from this lane for good. A token-authored push also starts no
+          # workflow run, so nothing would revalidate it. Leaving the branch
+          # alone lets Dependabot rebase it under its own identity, which does
+          # start a fresh classifier run and brings the pull request back here.
+          if [[ "$OBSERVED_MERGE_STATE" == 'behind' ]]; then
+            echo '::notice::The base moved during the required-check wait. Leaving the merge to a later Dependabot-triggered run.'
+            exit 0
+          fi
+          if [[ "$OBSERVED_MERGE_STATE" != 'clean' ]]; then
+            echo "::error::The pull request merge state must be clean: $OBSERVED_MERGE_STATE"
+            exit 1
+          fi
 
           if ! MERGE_JSON=$(GH_TOKEN="$FINAL_MERGE_TOKEN" gh api --method PUT \
             "repos/$EXPECTED_REPOSITORY/pulls/$PR_NUMBER/merge" \

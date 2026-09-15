@@ -149,11 +149,19 @@ function successfulJob(runId, headSha) {
   };
 }
 
-function pullRequest(number, headRef, headSha, changedFiles, commitCount) {
+function pullRequest(
+  number,
+  headRef,
+  headSha,
+  changedFiles,
+  commitCount,
+  mergeableState = "clean",
+) {
   return {
     number,
     state: "open",
     draft: false,
+    mergeable_state: mergeableState,
     body: "Bumps the routine GitHub Actions dependency group.",
     user: { login: "dependabot[bot]" },
     base: { ref: "main", repo: { full_name: expectedRepository } },
@@ -187,8 +195,16 @@ function scenario({
   commits,
   files,
   reportedCommitCount = commits.length,
+  mergeableState = "clean",
 }) {
-  const pr = pullRequest(number, headRef, headSha, files, reportedCommitCount);
+  const pr = pullRequest(
+    number,
+    headRef,
+    headSha,
+    files,
+    reportedCommitCount,
+    mergeableState,
+  );
   return {
     workflow: workflowIdentity,
     run: {
@@ -482,6 +498,79 @@ assert(
     requiredCheckCalls[1].args.includes("--required"),
   "the second required-check call must prove the terminal required-only state",
 );
+assert.equal(
+  routeCalls(pr1872Result, "/pulls/1872/update-branch").length,
+  0,
+  "a clean head must merge without updating the branch",
+);
+
+// ADR 0103 took strict required status checks off main, so GitHub no longer
+// blocks a merge whose head has not seen the current base. This lane merges
+// with the repository GITHUB_TOKEN and emits no push-triggered workflows, so
+// a stale merge would land with no post-merge CI at all. The writer keeps
+// that validation itself.
+const behindBaseFixture = scenario({
+  number: 1872,
+  runId: 31995129967,
+  headRef: pr1872HeadRef,
+  headSha: pr1872Head,
+  commits: [commit(pr1872Head)],
+  files: pr1872Files,
+  mergeableState: "behind",
+});
+const behindBaseResult = runWriter(behindBaseFixture);
+assert.equal(
+  behindBaseResult.status,
+  0,
+  `a behind head must exit without failing the lane:\n${behindBaseResult.stdout}\n${behindBaseResult.stderr}`,
+);
+assert(
+  !behindBaseResult.merged,
+  "a behind head must never reach the merge command",
+);
+// The lane must not repair the branch itself. `update-branch` writes a merge
+// commit authored by this token, and the commit proof accepts only commits
+// authored by dependabot[bot], so the repair would disqualify the pull
+// request from this lane permanently. Dependabot's own rebase is what brings
+// it back.
+assert.equal(
+  routeCalls(behindBaseResult, "/pulls/1872/update-branch").length,
+  0,
+  "the writer must never update the Dependabot branch itself",
+);
+assert.equal(
+  callsMatching(behindBaseResult, (args) => args.includes("PUT")).length,
+  0,
+  "a behind head must make no write of any kind",
+);
+
+for (const mergeableState of ["dirty", "blocked", "unstable", "unknown"]) {
+  const uncleanResult = runWriter(
+    scenario({
+      number: 1872,
+      runId: 31995129967,
+      headRef: pr1872HeadRef,
+      headSha: pr1872Head,
+      commits: [commit(pr1872Head)],
+      files: pr1872Files,
+      mergeableState,
+    }),
+  );
+  assert.notEqual(
+    uncleanResult.status,
+    0,
+    `merge state ${mergeableState} must fail closed`,
+  );
+  assert(
+    !uncleanResult.merged,
+    `merge state ${mergeableState} must never reach the merge command`,
+  );
+  assert.equal(
+    routeCalls(uncleanResult, "/pulls/1872/update-branch").length,
+    0,
+    `merge state ${mergeableState} must not be repaired by a branch update`,
+  );
+}
 
 for (const [label, count] of [
   [
