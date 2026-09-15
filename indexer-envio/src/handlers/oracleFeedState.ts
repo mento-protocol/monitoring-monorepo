@@ -8,6 +8,7 @@ import {
   applyOracleReportRemoval,
   bootstrapOracleFeedState,
   isEventAlreadyApplied,
+  isEventAtOrBehindWatermark,
   isEventBehindWatermark,
   oracleFeedStateId,
 } from "../oracleFeedState.js";
@@ -264,9 +265,61 @@ export async function updateOracleFeedStateExpiryIfPresent(args: {
     );
     return;
   }
-  args.context.OracleFeedState.set(
-    applyOracleFeedExpiry(state, args.reportExpiry, eventPosition),
+  // Same exact-watermark case as `resolveOracleFeedState`: the transition
+  // returns its input unchanged only for an identical expiry at `position ===
+  // 0` (a conflicting one throws, and the caller above has already excluded a
+  // non-positive `reportExpiry`), so reference equality is the whole test.
+  const updated = applyOracleFeedExpiry(
+    state,
+    args.reportExpiry,
+    eventPosition,
   );
+  if (updated === state) {
+    logReplayedEventIgnored(
+      args.context,
+      args.event,
+      state,
+      "updateOracleFeedStateExpiryIfPresent",
+    );
+    return;
+  }
+  args.context.OracleFeedState.set(updated);
+}
+
+/** Claim one `MedianUpdated` log against the feed watermark, so its downstream
+ * writes run exactly once. Unlike the report transitions, `MedianUpdated`
+ * changes no feed-state field of its own — it advances the watermark alone, so
+ * that a re-delivery lands on it and is recognised. Returns true when the row
+ * already reflects this log, in which case the caller writes nothing: the
+ * batch that first applied it committed its `OracleSnapshot` (keyed by this
+ * event, so no later event repairs it), its `Pool` rows and its breaker EMA
+ * blend. See ADR 0105. */
+export function claimMedianUpdate(args: {
+  context: EvmOnEventContext;
+  event: FeedEvent;
+  state: OracleFeedState;
+}): boolean {
+  const eventPosition = {
+    blockNumber: args.event.blockNumber,
+    blockTimestamp: args.event.blockTimestamp,
+    logIndex: args.event.logIndex,
+  };
+  if (isEventAtOrBehindWatermark(args.state, eventPosition)) {
+    logReplayedEventIgnored(
+      args.context,
+      args.event,
+      args.state,
+      "claimMedianUpdate",
+    );
+    return true;
+  }
+  args.context.OracleFeedState.set({
+    ...args.state,
+    updatedAtBlock: args.event.blockNumber,
+    updatedAtLogIndex: args.event.logIndex,
+    updatedAtTimestamp: args.event.blockTimestamp,
+  });
+  return false;
 }
 
 async function updatePoolsAfterReportRemoval(args: {

@@ -38,6 +38,7 @@ export const REPLAYED_EVENT_IGNORED = "sortedOracles.replayedEventIgnored";
 export type ReplayedEventSite =
   | "resolveOracleFeedState"
   | "resolveOracleExpiryState"
+  | "claimMedianUpdate"
   | "updateOracleFeedStateExpiryIfPresent";
 
 /** Record one already-applied event and move on. Envio re-delivers the tail
@@ -162,6 +163,20 @@ export async function resolveOracleExpiryState(args: {
           args.mutation.reportExpiry,
           eventPosition,
         );
+  // The re-delivered tail of a cut batch lands exactly on the watermark, which
+  // the predicate above cannot see. Both expiry transitions return their input
+  // unchanged only at `position === 0` with an identical payload — a
+  // conflicting payload still throws, and every applying path rebuilds the row
+  // — so reference equality is the whole test. See ADR 0105.
+  if (updated === base) {
+    logReplayedEventIgnored(
+      args.context,
+      args.event,
+      base,
+      "resolveOracleExpiryState",
+    );
+    return base;
+  }
   if (updated !== existing) args.context.OracleExpiryState.set(updated);
   return updated;
 }

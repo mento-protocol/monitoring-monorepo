@@ -95,6 +95,21 @@ export function isEventBehindWatermark(
   return eventPosition(state, event) < 0;
 }
 
+/** True when the persisted row already reflects this event's position for a
+ * caller that advances the watermark itself. `MedianUpdated` is that caller:
+ * the feed-state-writing log it follows always sits at a strictly lower
+ * logIndex in the same block, so a first delivery is always strictly ahead and
+ * only a re-delivery can land at or behind the watermark. The bootstrap-
+ * boundary clause is deliberately absent — a median log inside that block is a
+ * first delivery for the pool rows, which the feed bootstrap does not cover.
+ * See ADR 0105. */
+export function isEventAtOrBehindWatermark(
+  state: OracleFeedState,
+  event: FeedStateEvent,
+): boolean {
+  return eventPosition(state, event) <= 0;
+}
+
 /** True when the persisted row already reflects this event's position, so
  * re-applying it would double-count. Envio delivers each event at least once:
  * a batch that ends mid-block commits that block's entity writes with

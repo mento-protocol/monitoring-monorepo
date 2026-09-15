@@ -22,8 +22,9 @@ garden_lane: adrs-architecture
 [ADR 0046](0046-event-sourced-oracle-freshness.md) made SortedOracles freshness
 event-sourced: `OracleFeedState` and `OracleExpiryState` carry a
 `(updatedAtBlock, updatedAtLogIndex)` watermark, and the pure transitions throw
-when an event arrives at or behind it. That fail-closed rule assumes each event
-reaches a handler exactly once.
+when an event arrives behind it, or at it carrying a payload that conflicts with
+the persisted one. An identical payload at the watermark returns the original
+state. That fail-closed rule assumes each event reaches a handler exactly once.
 
 Envio does not deliver exactly once. Two runtime facts, read in
 `envio@3.10.0`, set the delivery contract:
@@ -84,11 +85,14 @@ no-op. Keep every throw in the pure transitions.
   sound: an invalid value throws on first delivery, so the watermark can never
   be past one.
 - The re-delivered tail of an interrupted batch lands exactly on the
-  watermark, where `eventPosition` is 0 and the predicate is false. Both feed
-  transitions return their input unchanged there and throw on a conflicting
-  payload, and every applying path rebuilds the row, so
-  `resolveOracleFeedState` reads that case off reference equality and reports
-  it as a replay too.
+  watermark, where `eventPosition` is 0 and the predicate is false. Every
+  transition returns its input unchanged there and throws on a conflicting
+  payload, and every applying path rebuilds the row, so the three guarded
+  helpers — `resolveOracleFeedState`, `resolveOracleExpiryState` and
+  `updateOracleFeedStateExpiryIfPresent` — read that case off reference
+  equality and report it as a replay too. Without it the commonest replay
+  position of all goes undetected: the last committed log of an interrupted
+  block sits on the watermark.
 - `resolveOracleFeedState` returns `{ state, replayed }`, and the
   `OracleReported` and `OracleReportRemoved` handlers return on `replayed`
   before their downstream pool path. A replay means the batch that first
@@ -97,6 +101,19 @@ no-op. Keep every throw in the pure transitions.
   Redoing them would rewrite the event-keyed `OracleSnapshot` row from
   post-window pool and median state, and no later event repairs an
   event-keyed row.
+- `MedianUpdated` carries the same exposure and needs its own watermark to see
+  it. It writes no feed-state field, so the report log it follows leaves the
+  watermark at a strictly lower logIndex in the same block whether this is a
+  first delivery or a re-delivery. `claimMedianUpdate` therefore advances the
+  watermark to the median log's own position when it applies, and treats a
+  later arrival at or behind that position as a replay. The row is already
+  loaded and, in the common case, already written by the preceding report in
+  the same batch, so the claim costs no extra row. Two writes make the guard
+  necessary rather than tidy: the breaker EMA blends `oraclePrice` into
+  `BreakerConfig.medianRatesEMA` read fresh at handler start, so a second pass
+  blends an already-blended value and the skip-if-unchanged guard cannot fire;
+  and the `oracle_median_updated` `OracleSnapshot` is keyed by the event, so a
+  second pass rewrites it from post-application pool and breaker state.
 - The transitions keep throwing. A caller that reaches one with an
   out-of-order event still fails the batch, so the guard cannot be bypassed by
   a future call site that forgets the predicate.
@@ -135,9 +152,16 @@ no-op. Keep every throw in the pure transitions.
   wrote. `OracleReported` catches `OracleReportedPreWriteFailure` per pool and
   logs it, so a transient RPC failure can leave one pool unwritten in a batch
   that otherwise committed; a replay then skips that pool's repair. The next
-  report for the feed repairs it, and the pre-write failure already logs its
-  own warning, so no state is permanently incomplete. Proving per-pool
-  completion needs persisted evidence the row does not carry today.
+  report for the feed restores that pool's current state, and the pre-write
+  failure logs its own warning, but the `OracleSnapshot` for the original
+  event is never written: the id is keyed by that event, so a later report
+  creates its own row instead. Raw snapshots are already sampled by
+  `shouldPersistRawOracleSnapshot`, so a missing row is not an integrity
+  invariant, and their presence cannot serve as the completion marker either.
+  Aborting the batch instead would undo the per-pool isolation that keeps one
+  malformed pool id from failing the whole event, and reinstate the dead
+  indexer this ADR removes. Proving per-pool completion needs persisted
+  evidence the row does not carry today.
 - A re-delivery inside a feed's own bootstrap block stays undetected. That
   branch returns the persisted row for every log in the block without
   recording which logs it has seen, so a first delivery and a re-delivery are
@@ -145,6 +169,14 @@ no-op. Keep every throw in the pure transitions.
   and the exposure is one block per feed. Closing it needs a persisted per-log
   frontier on `OracleFeedState`, which is a schema change with its own resync,
   so it is not done here.
+- `claimMedianUpdate` guards a `MedianUpdated` only for a feed that has at
+  least one indexed pool. `OracleFeedState` exists only for such feeds — the
+  `OracleReported` handler returns before bootstrapping the row when the feed
+  has none — so a feed carrying a `MEDIAN_DELTA` breaker and no indexed pool
+  keeps an unguarded EMA blend. Its snapshot and pool writes do not run at all
+  there, so only the EMA drifts, and only for feeds the dashboard does not
+  chart. Closing it needs a watermark for a feed with no feed row, which is a
+  schema change with its own resync.
 - The two expiry handlers still run their downstream path on a replay:
   `updatePoolsOracleExpiry` rewrites `Pool.oracleExpiry` with the same value
   and restamps `Pool.updatedAtBlock` and `updatedAtTimestamp` from the
@@ -171,14 +203,19 @@ no-op. Keep every throw in the pure transitions.
   `OracleReported is out of order block=60779445 logIndex=4`.
 - Enforced by `indexer-envio/src/oracleFeedState.ts`,
   `indexer-envio/src/oracleExpiryState.ts`,
-  `indexer-envio/src/handlers/oracleFeedState.ts`, and
-  `indexer-envio/src/handlers/oracleExpiryState.ts`.
+  `indexer-envio/src/handlers/oracleFeedState.ts`,
+  `indexer-envio/src/handlers/oracleExpiryState.ts`, and the `MedianUpdated`
+  claim in `indexer-envio/src/handlers/sortedOracles.ts`.
 - Covered by `indexer-envio/test/oracleFeedStateHandlers.test.ts`: replayed
   `OracleReported`, `OracleReportRemoved`, `TokenReportExpirySet` and
   `ReportExpirySet` logs, the last over two feeds; a same-position conflict
   that still throws; an above-watermark event that still applies; and an expiry
   log at the feed row's bootstrap boundary that still propagates; an identical
-  `OracleReported` re-delivered exactly at the watermark. The replayed
+  `OracleReported` re-delivered exactly at the watermark; an identical
+  `TokenReportExpirySet` at the watermark, which both expiry sites must report;
+  and a `MedianUpdated` at the watermark, whose negative control is a
+  first-delivery `MedianUpdated` that still applies and moves the watermark to
+  its own log index. The replayed
   `OracleReported` case also asserts the pool row is untouched and no
   `OracleSnapshot` row exists, which fails when the handler's early return is
   removed. The token assertions match on `site=`, so a count is attributable to

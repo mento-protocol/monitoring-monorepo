@@ -130,8 +130,13 @@ propagation, also apply [`stateful-data-ui.md`](stateful-data-ui.md).
   rows already, and nothing repairs an event-keyed row. Match the predicate to
   the orderings the transition behind that call site actually rejects: a wider
   one suppresses live state changes, so the expiry mirror uses
-  `isEventBehindWatermark`. The pure transitions keep throwing, so a call site
-  that skips the predicate still fails closed. See
+  `isEventBehindWatermark`. No predicate sees the re-delivered log that lands
+  exactly on the watermark, so also treat a transition returning its input
+  unchanged as a replay. A handler that mutates no field of the ordered row —
+  `MedianUpdated` — has no watermark of its own to compare against: it advances
+  the watermark to its own position when it applies, and a later arrival at or
+  behind that position is the replay. The pure transitions keep throwing, so a
+  call site that skips the predicate still fails closed. See
   [ADR 0105](../adr/0105-replayed-events-are-handler-layer-no-ops.md).
 - Do not restore traffic-scaled `medianTimestamp` or `reportExpiry` effects to
   `OracleReported`, `OracleReportRemoved`, or `MedianUpdated`. A change to this
