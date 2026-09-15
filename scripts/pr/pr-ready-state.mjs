@@ -248,10 +248,9 @@ export function requiredStatusContextsFromRules(
   return [...byKey.values()].sort((a, b) => a.context.localeCompare(b.context));
 }
 
-// Read straight off data `fetchRequiredStatusContexts` already fetched: no
-// extra call. A base can carry more than one applicable `required_status_checks`
-// rule (e.g. an org ruleset layered with a repo ruleset), and GitHub enforces
-// the most restrictive of them, so any confirmed `true` wins outright. `null`
+// A base can carry more than one applicable `required_status_checks` rule
+// (e.g. an org ruleset layered with a repo ruleset), and GitHub enforces the
+// most restrictive of them, so any confirmed `true` wins outright. `null`
 // means unknown — no matching rule, or a matching rule with no explicit
 // boolean — and the caller must fail closed on it, the same as any other
 // branch-protection lookup gap. Only return `false` when every matching rule
@@ -267,6 +266,22 @@ export function strictRequiredStatusChecksPolicyFromRules(rules = []) {
     if (typeof value !== "boolean") sawUnknown = true;
   }
   return sawRule && !sawUnknown ? false : null;
+}
+
+// Classic branch protection and a ruleset can both apply to the same base;
+// GitHub enforces the stricter of the two. Combine them the same way multiple
+// ruleset rules combine: any confirmed `true` wins outright. When no ruleset
+// `required_status_checks` rule matches at all, classic protection's reading
+// stands unopposed. Otherwise the ruleset's own tri-state (`false` only when
+// every matching rule explicitly disables strict, `null` when ambiguous)
+// governs, since it is the more specific/newer source layered over classic.
+function combineStrictRequiredStatusChecksPolicy(classicStrict, rules = []) {
+  const rulesetStrict = strictRequiredStatusChecksPolicyFromRules(rules);
+  if (classicStrict === true || rulesetStrict === true) return true;
+  const hasRulesetRequirement = flattenRules(rules).some(
+    (rule) => rule.type === "required_status_checks",
+  );
+  return hasRulesetRequirement ? rulesetStrict : classicStrict;
 }
 
 export function requiredStatusContextsFromRulesResult(
@@ -642,11 +657,31 @@ export async function fetchRequiredStatusContexts({
     };
   }
 
+  const classicStrict =
+    typeof result.value?.strict === "boolean" ? result.value.strict : null;
+
+  // A ruleset can also apply alongside classic protection and impose a
+  // stricter policy than classic protection alone reports. Only classic
+  // `true` is already the most restrictive outcome and needs no further
+  // lookup; otherwise consult rulesets too before trusting classic's value.
+  const strict =
+    classicStrict === true
+      ? true
+      : await (async () => {
+          const rulesResult = await fetchRules(repo, [
+            `repos/${repoPath(repo)}/rules/branches/${encodedBaseRef}`,
+          ]);
+          if (!rulesResult.ok) return null;
+          return combineStrictRequiredStatusChecksPolicy(
+            classicStrict,
+            rulesResult.value ?? [],
+          );
+        })();
+
   return {
     contexts: requiredStatusContextsFromProtection(result.value),
     error: null,
-    strict:
-      typeof result.value?.strict === "boolean" ? result.value.strict : null,
+    strict,
   };
 }
 

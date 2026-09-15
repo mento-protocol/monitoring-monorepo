@@ -395,11 +395,16 @@ test("uses classic branch protection required status contexts when available", a
     error: null,
     strict: null,
   });
-  assertEqual(rulesCalls, 0, "rulesets must not be read when protection works");
+  assertEqual(
+    rulesCalls,
+    1,
+    "an unconfirmed classic strict reading must also consult rulesets",
+  );
 });
 
-test("reads the strict policy straight off the already-fetched protection response", async () => {
+test("reads the strict policy straight off classic protection when no ruleset applies", async () => {
   for (const strict of [true, false]) {
+    let rulesCalls = 0;
     const result = await fetchRequiredStatusContexts({
       repo: {
         owner: "mento-protocol",
@@ -411,10 +416,70 @@ test("reads the strict policy straight off the already-fetched protection respon
         ok: true,
         value: { contexts: ["ci"], strict },
       }),
-      fetchRules: async () => ({ ok: true, value: [] }),
+      fetchRules: async () => {
+        rulesCalls += 1;
+        return { ok: true, value: [] };
+      },
     });
     assertEqual(result.strict, strict);
+    if (strict === true) {
+      assertEqual(
+        rulesCalls,
+        0,
+        "a confirmed classic true already wins outright; no need to check rulesets",
+      );
+    }
   }
+});
+
+test("aggregates a stricter ruleset over classic protection's confirmed non-strict flag", async () => {
+  const result = await fetchRequiredStatusContexts({
+    repo: { owner: "mento-protocol", name: "monitoring-monorepo", host: null },
+    baseRef: "main",
+    fetchProtection: async () => ({
+      ok: true,
+      value: { contexts: ["ci"], strict: false },
+    }),
+    fetchRules: async () => ({
+      ok: true,
+      value: [
+        {
+          type: "required_status_checks",
+          parameters: {
+            required_status_checks: [{ context: "ci" }],
+            strict_required_status_checks_policy: true,
+          },
+        },
+      ],
+    }),
+  });
+
+  assertEqual(
+    result.strict,
+    true,
+    "a ruleset confirming strict must not be shadowed by classic protection's false",
+  );
+});
+
+test("fails closed when rulesets cannot be read after classic protection reports non-strict", async () => {
+  const result = await fetchRequiredStatusContexts({
+    repo: { owner: "mento-protocol", name: "monitoring-monorepo", host: null },
+    baseRef: "main",
+    fetchProtection: async () => ({
+      ok: true,
+      value: { contexts: ["ci"], strict: false },
+    }),
+    fetchRules: async () => ({
+      ok: false,
+      error: "gh: Resource not accessible by integration (HTTP 403)",
+    }),
+  });
+
+  assertEqual(
+    result.strict,
+    null,
+    "an unreadable ruleset means a stricter override cannot be ruled out",
+  );
 });
 
 test("falls back to rulesets for the current gh branch-protection 404", async () => {
@@ -2433,6 +2498,13 @@ test("reports confirmed BEHIND as an informational note only once strict is conf
         summary.notes.some((item) => item.kind === "base-update"),
         false,
       );
+      // The documented contract field (docs/notes/pr-ready-state.md) must be
+      // on the summary itself, not just steer the internal note/blocker
+      // decision.
+      assertEqual(
+        summary.requiredStatusChecksStrict,
+        requiredStatusChecksStrict ?? null,
+      );
     }
   }
 
@@ -2472,6 +2544,7 @@ test("reports confirmed BEHIND as an informational note only once strict is conf
       summary.notes.some((item) => item.kind === "base-update"),
       mergeStateStatus === "BEHIND",
     );
+    assertEqual(summary.requiredStatusChecksStrict, false);
   }
 });
 
@@ -2542,6 +2615,7 @@ test("summarizes merged pull requests as terminal ready", () => {
   assertEqual(summary.gates.codexReviewSignal.fallbackAction, "wait");
   assertEqual(summary.gates.codeRabbitReviewSignal.state, "not_applicable");
   assertEqual(summary.codeRabbitReviewSignal, "not_applicable");
+  assertEqual(summary.requiredStatusChecksStrict, null);
   // The terminal gate keeps the live gate's shape, counters included.
   assertDeepEqual(summary.gates.codeRabbitReviewSignal, {
     ready: true,

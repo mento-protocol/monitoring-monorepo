@@ -544,6 +544,7 @@ export function summarizeTerminalReadyState(pr) {
     codexApprovalReaction: merged,
     codexReviewSignal: merged ? "approved" : "missing",
     codeRabbitReviewSignal: "not_applicable",
+    requiredStatusChecksStrict: null,
   };
 }
 
@@ -843,6 +844,7 @@ export function summarizeReadyState({
     codexApprovalReaction,
     codexReviewSignal,
     codeRabbitReviewSignal,
+    requiredStatusChecksStrict,
   };
 
   if (includeFeedbackDetails) {
