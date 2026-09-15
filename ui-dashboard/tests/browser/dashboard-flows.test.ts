@@ -889,10 +889,16 @@ test.describe("dashboard browser flows", () => {
     await page.goto(`/pool/${CELO_VIRTUAL_POOL_ID}?tab=limits`);
 
     // The Trading Limits tile carries mini-bars, so it must yield to the
-    // two-column header grid rather than hold a fixed width.
-    await expect(
-      page.getByRole("tabpanel", { name: "limits" }).getByRole("progressbar"),
-    ).toHaveCount(2);
+    // two-column header grid rather than hold a fixed width. Scope to the
+    // header's own Stat cell: the Limits tab panel renders its own heading and
+    // progressbars, and the panel test already covers those.
+    const headerTile = page
+      .locator("dl > div")
+      .filter({ hasText: "Trading Limits" });
+    await expect(headerTile).toHaveCount(1);
+    // One bar per enabled window on the tightest leg; this fixture enables the
+    // global window only. The panel's two bars are a different assertion.
+    await expect(headerTile.getByRole("progressbar")).toHaveCount(1);
     const hasDocumentOverflow = await page.evaluate(
       () =>
         document.documentElement.scrollWidth >
