@@ -41,6 +41,8 @@ export const TOOLING_MODULE_ARMS = [
       "scripts/pr/pr-ready-state.mjs",
       "scripts/pr/pr-ready-state-core.mjs",
       "scripts/pr/pr-ready-state-format.mjs",
+      "scripts/pr/pr-ready-state-closeout.mjs",
+      "scripts/pr/pr-ready-state-overrides.mjs",
       "scripts/pr/pr-ready-state-review-signals.mjs",
       "scripts/pr/pr-ready-state.test.mjs",
     ],

@@ -18,6 +18,7 @@ import {
   compareMirrors,
   isForensicReportPath,
   normalizeProvenance,
+  provenanceSideDrift,
 } from "./check-skills-mirror.mjs";
 
 const CHECKER = fileURLToPath(
@@ -163,6 +164,63 @@ test("any other difference in a forensic-report file still fails", () => {
   const { status, output } = runChecker(rootA, rootB);
   assert.notEqual(status, 0);
   assert.match(output, /beyond documented provenance/);
+});
+
+test("a swapped forensic-report provenance literal fails even when both sides match", () => {
+  // Byte-identical files pass the content comparison, so a mirror that copied
+  // the canonical literal (or the reverse) needs its own check: nothing else
+  // reviews `.claude/skills` once CodeRabbit's path filter excludes it.
+  const { rootA, rootB } = newFixture();
+  mkdirSync(path.join(rootA, "forensic-report"));
+  mkdirSync(path.join(rootB, "forensic-report"));
+  writeFileSync(
+    path.join(rootA, "forensic-report/SKILL.md"),
+    'writes source: "Codex" records\n',
+  );
+  writeFileSync(
+    path.join(rootB, "forensic-report/SKILL.md"),
+    'writes source: "Codex" records\n',
+  );
+  const mirrorSwap = runChecker(rootA, rootB);
+  assert.notEqual(mirrorSwap.status, 0);
+  assert.match(
+    mirrorSwap.output,
+    /Claude mirror must be source: "claude": forensic-report\/SKILL\.md/,
+  );
+
+  writeFileSync(
+    path.join(rootA, "forensic-report/SKILL.md"),
+    'writes source: "claude" records\n',
+  );
+  writeFileSync(
+    path.join(rootB, "forensic-report/SKILL.md"),
+    'writes source: "claude" records\n',
+  );
+  const canonicalSwap = runChecker(rootA, rootB);
+  assert.notEqual(canonicalSwap.status, 0);
+  assert.match(
+    canonicalSwap.output,
+    /canonical tree must be source: "Codex": forensic-report\/SKILL\.md/,
+  );
+});
+
+test("provenanceSideDrift is silent for the documented split and outside forensic-report", () => {
+  assert.deepEqual(
+    provenanceSideDrift(
+      'source: "Codex"',
+      'source: "claude"',
+      "forensic-report/SKILL.md",
+    ),
+    [],
+  );
+  assert.deepEqual(
+    provenanceSideDrift(
+      'source: "claude"',
+      'source: "Codex"',
+      "example-skill/SKILL.md",
+    ),
+    [],
+  );
 });
 
 test("the provenance literal outside forensic-report is not exempt", () => {

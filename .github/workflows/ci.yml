@@ -1442,6 +1442,14 @@ jobs:
         # secrets are unreachable from PR-head code. Issue #1388 — an
         # activation gate for the autofix leg.
         run: node scripts/workflows/check-autofix-ci-trust.mjs
+      - name: CI reliability report unit tests
+        # Behavioral coverage of scripts/workflows/report-ci-reliability.mjs:
+        # the dependency-free workflow-YAML cap scanner, percentile math, run
+        # and job summarizers, the exact cap-kill classifier, the
+        # calendar-month-keyed issue upsert, and the end-to-end orchestrator.
+        # The report itself only runs monthly via ci-reliability-report.yml;
+        # this required job is its only regression coverage (ADR 0100).
+        run: node --test scripts/workflows/report-ci-reliability.test.mjs
       - name: PR validation boundary suite
         # Pins the M2 read-only permission, secret ordering, restore-only cache,
         # main-only save, required-command, schema-summary, and Dependabot

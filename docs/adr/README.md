@@ -106,6 +106,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0094](0094-grid-waiver.md)                                 | The control-drift waiver asks control for its share of the flips, not the headline's |
 | [0096](0096-finder-probe-non-ledger-kind.md)                | Non-ledger finder probes run in the canonical runner, narrowing ADR 0083             |
 | [0099](0099-retire-duplicate-bundle-size-workflow.md)       | Retire the duplicate bundle-size advisory workflow; the required `ui` job keeps it   |
+| [0100](0100-monthly-ci-reliability-report.md)               | Monthly CI reliability report is an issue-only scheduler                             |
 
 ### shared-config
 

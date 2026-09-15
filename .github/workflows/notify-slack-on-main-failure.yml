@@ -54,6 +54,7 @@ on:
       - Documentation Garden
       - File-size Watchlist
       - Review Skill Eval Freshness
+      - CI Reliability Report
     types: [completed]
     # Redundant with the job `if:` below (head_branch == 'main'), and kept
     # for that reason: it cuts the PR-event fan-in from the watched
