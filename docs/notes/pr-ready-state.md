@@ -263,9 +263,7 @@ signal suppresses another post: when the refusal reply answers the current head'
 own request, the window the rate-limit notice names has passed, and
 `requestCount` is still below `requestBudget`, post the one remaining marked
 request for that head. Never beyond that — the budget of 2 is unchanged, and a
-second refusal is optional lag, not a reason to keep posting. (PR #2410,
-2026-09-14: refused at 19:54 UTC with "Next included review available in 16
-minutes", accepted at 20:14 UTC, finished in three minutes.)
+second refusal is optional lag, not a reason to keep posting.
 
 **Then wait for the closeout attempt before the final sweep.** Once the request
 is posted, the signal sits at `requested` and readiness will not hold it —
@@ -289,10 +287,9 @@ that identity opened. That metering runs on a rolling window, and outside
 Enterprise there is no billing-period reset, so a new billing cycle does not
 restore the refill rate. At this repo's volume the seat has been observed
 between 1 and 3 included reviews/hour, metered on the PR-opening identity's
-attempts over the rolling 7-day window — 1/hour on 2026-09-10 and 3/hour on
-2026-09-14 at 75 attempts, so the schedule is not stable enough to predict:
-read the allowance from the current rate-limit notice — and every review past
-the refill bills $0.25 per reviewed file
+attempts over the rolling 7-day window, and the schedule is not stable enough
+to predict: read the allowance from the current rate-limit notice. Every
+review past the refill bills $0.25 per reviewed file
 through the usage add-on. Past the add-on's monthly spending cap, the included
 refill is the whole allowance and every other attempt is refused outright,
 which is the state observed on 2026-09-02.
