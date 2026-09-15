@@ -141,12 +141,15 @@ function BrokerLimitFooter({ row }: { row: BrokerTradingLimitRow }) {
     hasState &&
     nowSeconds !== null &&
     nowSeconds - stateSeconds >= BROKER_STATE_STALE_SECONDS;
+  // Built from the row's own timestamp, never the clock, and hoisted out of
+  // the JSX so the hydration-mismatch lint reads it as static.
+  const dateTime = new Date(stateSeconds * 1000).toISOString();
 
   return (
     <div className="flex flex-col gap-1 text-xs text-slate-500">
       {hasState ? (
         <time
-          dateTime={new Date(stateSeconds * 1000).toISOString()}
+          dateTime={dateTime}
           title={`${absolute} — ${FRESHNESS_NOTE}`}
           className={isStale ? "text-amber-400" : undefined}
         >
