@@ -41,14 +41,6 @@ reviews:
   # instruction if the package line budgets, effective-line calculation,
   # merge-base drift rule, or exemptions change.
   #
-  # Evidence for gate lifecycle guidance:
-  # - PR #2075 inferred execution order from mapper insertion order.
-  # - PR #2131 inferred settlement order from the deferred release site.
-  # CodeRabbit withdrew both after tracing the executor and focused tests.
-  # Canonical source: `docs/notes/agent-quality-gate-mechanics.md`. Revalidate
-  # this instruction if execution phases, command classification, or settlement
-  # ownership change.
-  #
   # Canary after a human-approved merge: observe at least 40 eligible PRs and
   # five applicable findings per instruction. Remove an instruction immediately
   # if independent evidence shows that it suppressed a valid defect.
@@ -61,12 +53,6 @@ reviews:
         Do not apply these thresholds to `ui-dashboard/src/lib/__generated__/**`, `**/__tests__/**`, `**/*.test.{ts,tsx}`, or `ui-dashboard/src/lib/types.ts`.
         Compare the effective count with the merge base. Do not request a split when the change reduces an already-over-threshold file.
         Do not request a split only from the physical line count. Report threshold drift only when the change grows a file that remains above policy; report a separate cohesion defect independently.
-    - path: "scripts/{agent-quality-gate.sh,agent-quality-gate.test.sh,gate/**/*.{c,mjs,sh}}"
-      instructions: |
-        Apply the execution and settlement model in `docs/notes/agent-quality-gate-mechanics.md`.
-        Before reporting an ordering or lifecycle defect, trace route mapping through executor phases, command classification, settlement ownership, and the focused regression tests.
-        Mapper insertion order and the location of a deferred cleanup call do not prove runtime order.
-        Report an ordering or lifecycle finding when the trace shows a documented lifecycle invariant violation, such as a bypassed prerequisite, duplicate execution, deadlock, incorrect ownership, or missed settlement, or when focused coverage no longer reaches the changed path.
 
   # Generated, vendored, and machine-written trees. Reviewing them spends
   # billable reviewed files (the usage-based add-on is enabled, so over-limit
@@ -96,29 +82,40 @@ reviews:
     - "!docs/evals/review-skill-finder-reports/**"
     - "!docs/evals/review-skill-ledger.jsonl"
     - "!docs/evals/review-skill-judge-calibration.json"
+    # The three classes below drew zero findings across 265 PRs in the
+    # 2026-08-18..09-14 census, and every push re-bills them.
+    # Byte-identical mirror of `.agents/skills/**`, enforced by
+    # `scripts/repo-health/check-skills-mirror.mjs`, which also pins the one
+    # documented provenance literal to its side; reviewing the mirror re-bills
+    # the canonical tree, which stays reviewed.
+    - "!.claude/skills/**"
+    # Machine-written measurement artifacts.
+    - "!docs/metrics/**"
+    # Repository hygiene checkers that carry their own self-tests; 0 findings
+    # on 20 reviewed files.
+    - "!scripts/repo-health/**"
 
   auto_review:
     enabled: true
     # Empty means the default branch flow only.
     base_branches: []
     drafts: false
-    # Off since 2026-09-02 (ADR 0066). The usage-based add-on is enabled
-    # (Automatic mode, $500/month cap) and the cap was reached on 2026-09-02
-    # with 16 days left in the cycle. The 30-day team view read that day: 672
-    # review events, 365 billed, 3.9 review events per PR, ~5.5 billed files
-    # per billed push. CodeRabbit bills per push delta, so every agent fix
-    # round re-bills the same files. With this off, CodeRabbit should review a
-    # PR once when it opens, and the head-bound `@coderabbitai review` request
-    # in `docs/notes/pr-ready-state.md` buys the final head one more review.
-    # Observed on PR #2236, though: every push still started a run. Until
-    # that is explained, treat "no run on an intermediate push" as the intent
-    # rather than the measured behaviour; ADR 0066 holds the dated tally, the
-    # evidence, and the organization-level override that follows from it.
-    # Intermediate pushes lose CodeRabbit's review. Codex still reviews every
-    # push automatically; Claude is opt-in via `@claude review`, because
-    # `.github/workflows/claude.yml` triggers only on `opened` and
-    # `ready_for_review`. No required gate changes, because CodeRabbit's check
-    # was already advisory; ADR 0066 records the residual this does cost.
+    # Off since 2026-09-02 (ADR 0066), because CodeRabbit bills per push delta
+    # through the usage-based add-on, so every agent fix round re-bills the
+    # same files. Measured 2026-09-14 on 265 PRs: the key works. Pushes post
+    # "Review skipped: Auto incremental reviews are disabled" (111 notices)
+    # and automatic incremental reviews went 264 -> 0; PRs #2260 and #2362 are
+    # the clean cases. PR #2236's contrary reading is explained — the spending
+    # cap kept retrying its blocked opening review. Residual: a base merge or
+    # rebase can still draw a full re-review (ADR 0066 holds the tally).
+    # CodeRabbit reviews a PR once when it opens; the head-bound
+    # `@coderabbitai review` request in `docs/notes/pr-ready-state.md` buys the
+    # final head one more review. Intermediate pushes lose CodeRabbit's review.
+    # Codex still reviews every push automatically; Claude is opt-in via
+    # `@claude review`, because `.github/workflows/claude.yml` triggers only on
+    # `opened` and `ready_for_review`. No required gate changes, because
+    # CodeRabbit's check was already advisory; ADR 0066 records the residual
+    # this does cost.
     auto_incremental_review: false
     # The vendor default of 5, kept. It now only matters if incremental
     # reviews are re-enabled; the org-level global override pins it too.

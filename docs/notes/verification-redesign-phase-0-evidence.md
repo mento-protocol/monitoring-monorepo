@@ -362,10 +362,9 @@ The required contexts are exactly:
 - `ci`, app 15368.
 - `Sentry suites`, app 15368.
 
-The existing `ci` aggregate names 19 prerequisite jobs. Its conditional-job set
-equals its `allowed-skips` set. `changes`, `guardrail-prose`,
-`production-infra-contract`, and `sentry-suites` cannot skip. This issue does
-not alter that contract.
+The existing `ci` aggregate names 16 prerequisite jobs. Its conditional-job set
+equals its `allowed-skips` set. `changes`, `production-infra-contract`, and
+`sentry-suites` cannot skip. This issue does not alter that contract.
 
 Current pull request authority exceptions remain in place for Phase 0:
 
@@ -388,8 +387,8 @@ Current pull request authority exceptions remain in place for Phase 0:
   `pull-requests: write`, and receives a Vercel bypass secret. Its fixture lane
   is secretless.
 
-The platform `infra.yml` pull request lane is secretless and read-only. It does
-not use id-token authority, but it is not a required context. Issue #2124 must
+The platform `infra.yml` pull request lane was removed in PR #2425 (issue
+#2404); ci.yml's `terraform` job now carries that validation. Issue #2124 must
 narrow or explicitly accept the listed exceptions before CI becomes the sole
 source-validation authority. It must split schema validation from the narrow
 trusted sticky-comment mutation and make the schema-diff cache restore-only.

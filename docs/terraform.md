@@ -53,7 +53,7 @@ create, replace, or revoke those keys.
 Without a stack, `pnpm tf validate` validates every registered stack. It formats
 tracked and non-ignored untracked Terraform, then runs backend-free init and
 validate. On Darwin, it applies the [immutable provider trust and cache
-rules](notes/agent-quality-gate-mechanics.md). Land trust updates through
+rules](notes/pr-operating-card.md). Land trust updates through
 reviewed `main` and CI. Then refresh `origin/main` and rerun
 `pnpm tf validate <stack>`. Gitignored operator `*.tfvars` stay outside the
 source check.
@@ -107,16 +107,15 @@ separately reviewed runtime rollover.
 ## CI Model
 
 `terraform.stacks.json` owns the `workflowAdmissionPatterns` boundary. The
-required `.github/workflows/ci.yml` workflow runs on every PR and applies that
-boundary only to its internal Terraform job. The advisory
-`.github/workflows/infra.yml` copies it for push and pull-request admission.
-After either route starts, `scripts/tf-stacks.mjs` classifies the exact changed
-stacks from `changedPathPatterns`. `pnpm tf:test` requires all three filters to
-equal the registry boundary and to subsume every stack pattern. Add a new stack
-input under an existing entry. If it needs a new one, extend the registry
-boundary and all three workflow copies in the same change. Prefer a top-level
-boundary; register a nested entry in `NESTED_ADMISSION_EXCEPTIONS`.
-`.github/**` stays banned: it would admit unrelated metadata and actions.
+required `.github/workflows/ci.yml` workflow runs on every PR and push to main
+and applies that boundary to its internal Terraform job. After the job starts,
+`scripts/tf-stacks.mjs` classifies the exact changed stacks from
+`changedPathPatterns`. `pnpm tf:test` requires the ci.yml filter to equal the
+registry boundary and to subsume every stack pattern. Add a new stack input
+under an existing entry. If it needs a new one, extend the registry boundary
+and the ci.yml filter in the same change. Prefer a top-level boundary; register
+a nested entry in `NESTED_ADMISSION_EXCEPTIONS`. `.github/**` stays banned: it
+would admit unrelated metadata and actions.
 
 `alerts-rules`, `alerts-delivery`, `aegis`, and `governance-watchdog` have CI
 apply behavior on `main`, gated by the `production-infra` GitHub Environment.

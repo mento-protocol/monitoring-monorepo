@@ -21,6 +21,8 @@ const CODERABBIT_REVIEW_COMMIT_RANGE =
   /\bbetween\s+[0-9a-f]{40}\s+and\s+([0-9a-f]{40})(?![0-9a-f])/gi;
 const CODERABBIT_FINAL_HEAD_REQUEST_MARKER =
   /<!--\s*coderabbit-final-head-review:([0-9a-f]{40})\s*-->/i;
+const CODERABBIT_REVIEW_REQUEST_COMMAND =
+  /(^|\s)@coderabbitai\s+(?:full\s+)?review\b/i;
 const CODERABBIT_SUMMARY_MARKER =
   /<!--\s*This is an auto-generated comment:\s*summarize by coderabbit\.ai\s*-->/gi;
 const CODERABBIT_SKIP_REVIEW_MARKER =
@@ -37,54 +39,6 @@ const CODERABBIT_IGNORED_FILE =
 export function parseTimestamp(value) {
   const timestamp = Date.parse(value ?? "");
   return Number.isNaN(timestamp) ? null : timestamp;
-}
-
-function validIsoTimestamp(value) {
-  return Number.isFinite(Date.parse(value ?? "")) ? value : null;
-}
-
-function timelineEventTimestamp(item) {
-  return (
-    validIsoTimestamp(item?.created_at) ??
-    validIsoTimestamp(item?.submitted_at) ??
-    validIsoTimestamp(item?.updated_at) ??
-    null
-  );
-}
-
-export function headUpdatedAtFromTimeline(timelineItems = [], headSha) {
-  const normalizedHeadSha = String(headSha ?? "").toLowerCase();
-  if (!normalizedHeadSha) return null;
-
-  let headCommitIndex = -1;
-  let headCommitTimestamp = null;
-  for (const [index, item] of timelineItems.entries()) {
-    if (
-      item?.event === "committed" &&
-      String(item.sha ?? "").toLowerCase() === normalizedHeadSha
-    ) {
-      headCommitIndex = index;
-      headCommitTimestamp = timelineEventTimestamp(item);
-    }
-  }
-  if (headCommitIndex < 0) return null;
-  if (headCommitTimestamp) return headCommitTimestamp;
-
-  for (const item of timelineItems.slice(headCommitIndex + 1)) {
-    const timestamp = timelineEventTimestamp(item);
-    if (timestamp) return timestamp;
-  }
-  return null;
-}
-
-export function fetchHeadUpdatedAt({ headSha, timelineItems, observedAt }) {
-  const timelineTimestamp = headUpdatedAtFromTimeline(timelineItems, headSha);
-  const statusTimestamp = validIsoTimestamp(observedAt);
-  if (!timelineTimestamp) return statusTimestamp;
-  if (!statusTimestamp) return timelineTimestamp;
-  return Date.parse(statusTimestamp) < Date.parse(timelineTimestamp)
-    ? statusTimestamp
-    : timelineTimestamp;
 }
 
 function isAtOrAfter(timestamp, lowerBound) {
@@ -126,8 +80,17 @@ export function isCodexReviewRequestBody(body) {
 
 function codeRabbitFinalHeadReviewRequestHead(body) {
   const text = String(body ?? "");
-  if (!/(^|\s)@coderabbitai\s+review\b/i.test(text)) return null;
+  if (!CODERABBIT_REVIEW_REQUEST_COMMAND.test(text)) return null;
   return text.match(CODERABBIT_FINAL_HEAD_REQUEST_MARKER)?.[1] ?? null;
+}
+
+/** Trusted request comments, marked or bare, counted against the budget. */
+export function countTrustedCodeRabbitReviewRequests(issueComments = []) {
+  return issueComments.filter(
+    (comment) =>
+      isTrustedCodeRabbitReviewRequestComment(comment) &&
+      CODERABBIT_REVIEW_REQUEST_COMMAND.test(String(comment?.body ?? "")),
+  ).length;
 }
 
 function isTrustedCodeRabbitReviewRequestComment(comment) {
@@ -315,18 +278,6 @@ export function validateCodeRabbitPathFilterSkip({
   };
 }
 
-export function summarizeCodeRabbitReviewGate(state, pathFilterSkip = null) {
-  return {
-    ready: ["reviewed", "not_applicable"].includes(state),
-    required: false,
-    state,
-    fallbackAction: ["missing", "stale"].includes(state)
-      ? "request_review_once_for_head"
-      : "wait",
-    ...(state === "not_applicable" ? pathFilterSkip : {}),
-  };
-}
-
 export function isCodeRabbitFinalHeadReviewRequestBody(
   body,
   currentHeadOid = null,
@@ -506,10 +457,9 @@ export function classifyCodeRabbitReviewSignal({
     const matchesCurrentHead =
       currentHead && requestedHead.toLowerCase() === currentHead;
 
-    if (
-      matchesCurrentHead &&
-      isCurrentSignal(comment.created_at ?? comment.createdAt, headUpdatedAt)
-    ) {
+    // The marker names the full head SHA, so the request cannot predate the
+    // head it binds to; no timestamp test is needed.
+    if (matchesCurrentHead) {
       hasCurrentRequest = true;
     } else {
       hasHistoricalSignal = true;

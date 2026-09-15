@@ -3,7 +3,7 @@ title: The Markdown globs route to a small docs-checks CI job instead of the scr
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-04
+last_verified: 2026-09-14
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -13,13 +13,14 @@ garden_lane: adrs-architecture
 
 # ADR 0072 — the Markdown globs route to `docs-checks`, not the long-running `scripts` job
 
-**Status:** Accepted (Aug 2026), amended 2026-09-04, in force.
+**Status:** Accepted (Aug 2026), amended 2026-09-14, in force.
 **Scope:** ci/process
 
-The 2026-09-04 M6 amendment removed `agent:quality-gate:test` from required CI.
-The `docs-checks` split and its `gate:routing-table:test` coverage remain in
-force. References below to keeping the legacy gate suite in `scripts` describe
-the original decision and no longer define current CI behavior.
+The `docs-checks` job remains in force. [ADR 0101](0101-legacy-gate-retirement.md)
+retires the local gate and removes `gate:routing-table:test` from CI. The
+retained documentation, checklist, context, and navigation checks still run.
+The rationale and implementation evidence below describe the original split;
+references to local gate suites are historical, not current commands.
 
 ## Context
 
@@ -233,9 +234,9 @@ costs a duplicate run on mixed diffs and nothing else.
   reasoning must be written down where the exclusion is made. This is the
   constraint this ADR imposes.
 - **The nine checks now exist in two jobs and must move together.** A step
-  added to one and forgotten in the other silently narrows coverage for one
-  class of diff. Nothing machine-checks that pairing today; the `run:` strings
-  are kept byte-identical so a diff of the two step lists shows the drift.
+  added to one and not the other silently narrows coverage for one class of
+  diff. `check-ci-contract.mjs` asserts one direction: every `docs-checks`
+  `run:` string must also run in `scripts`. The reverse stays a review duty.
 - **Membership rests on reading each suite, and that reading is fallible.**
   Four of the eleven corpus readers — `agent:context-budget:test`,
   `docs:navigation-eval:test`, `docs:index:test` and `agent:quality-gate:test` —

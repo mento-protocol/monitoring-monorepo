@@ -118,7 +118,7 @@ lint:
   enabled:
     - checkov@3.2.506
     # eslint is run per-package via `pnpm --filter X lint`, wired into the
-    # agent quality gate. Each package's lint script invokes
+    # direct author checks and required CI. Each package's lint script invokes
     # `scripts/eslint-baseline-diff.mjs` against its `eslint-baseline.json`
     # (prune-only diff check; fails on any new or stale tuple). Root-level
     # build scripts under `scripts/` are linted by the standalone

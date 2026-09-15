@@ -198,10 +198,10 @@ pnpm review:eval:test
 
 The append-only comparison runs against `git merge-base origin/main HEAD`, and
 falls back to the `origin/main` tip when no merge base resolves. CI and the
-gate add `--require-base`, which fails the check when the base ref does not
+advisory freshness workflow add `--require-base`, which fails the check when the base ref does not
 resolve at all, so the guard can never turn itself into a silent no-op.
 
-Required CI, the advisory freshness workflow, and the local quality gate add
+Required CI and the advisory freshness workflow add
 `--revalidate-appended`.
 It recomputes every row the branch adds from the detail the same branch commits.
 This check verifies consistency, not authenticity. It rejects missing evidence
@@ -616,8 +616,8 @@ current `PATH` after the installer verifies `node`, `git`, `codex`, and
 The installed job uses fixed `/bin/zsh` and `/bin/bash` interpreters. The login
 shell loads model credentials, then the command restores the captured path
 before it invokes the runner. Run this from the root of your checkout, in your
-own shell. The installer refuses to start inside a quality-gate run, because the
-Darwin broker preflight allowlists it only on that condition.
+own shell. The installer retains its refusal of inherited legacy gate markers
+for compatibility with old operator shells.
 
 ```bash
 ./scripts/review/install-review-eval-launchd.sh

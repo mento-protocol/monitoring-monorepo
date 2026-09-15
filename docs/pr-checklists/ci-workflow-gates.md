@@ -3,7 +3,7 @@ title: CI Workflow Gates Checklist
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-04
+last_verified: 2026-09-14
 doc_type: checklist
 scope: ci/process
 review_interval_days: 90
@@ -44,20 +44,19 @@ gh api repos/mento-protocol/monitoring-monorepo/rulesets \
   -q '.rules[] | select(.type=="required_status_checks").parameters.required_status_checks[].context'
 ```
 
-After changing a required-status workflow or replacing the tool that reports its
-checks, verify the live PR status rollup with
-`pnpm pr:ready-state --pr <number> --json`. Confirm the intended required
-context is the only tool-owned check GitHub surfaces. PR #1008/#1010: an
-action-created `Trunk Check` run appeared beside `Code Quality`, and GitHub
-grouped the failure under the advisory schema-diff workflow.
+After changing a required-status workflow or its reporting tool, verify the
+live PR status rollup with `pnpm pr:ready-state --pr <number> --json` and
+confirm GitHub surfaces only the intended check. PR #1008/#1010: an
+action-created `Trunk Check` run appeared beside `Code Quality`, grouped under
+the advisory schema-diff workflow.
 
 - [ ] **Ruleset-required** workflows MUST NOT use `paths:` / `paths-ignore:` filters — they must run on every PR. If you want path-conditional work, run every PR but skip the expensive job inside via `if:` checks (or `paths-filter`-style gating that reports a green check on no-op).
-- [ ] Registry-backed Terraform routing uses the `workflowAdmissionPatterns` list in `terraform.stacks.json`. Keep the required CI workflow unfiltered at workflow level. Its internal `terraform` filter and the Infra push/pull-request filters copy that list. Prefer a top-level boundary; register a nested entry in `NESTED_ADMISSION_EXCEPTIONS`. `pnpm tf:test` enforces exact equality and subsumption of every registry pattern.
+- [ ] Registry-backed Terraform routing uses the `workflowAdmissionPatterns` list in `terraform.stacks.json`. Keep the required CI workflow unfiltered at workflow level. Its internal `terraform` filter copies that list. Prefer a top-level boundary; register a nested entry in `NESTED_ADMISSION_EXCEPTIONS`. `pnpm tf:test` enforces exact equality and subsumption of every registry pattern.
 - [ ] **Advisory** workflows (everything _not_ in the ruleset list above) SHOULD use a workflow-level `paths:` filter so they don't boot a runner on irrelevant PRs. A skipped advisory check is simply absent — it cannot leave a _required_ check pending. This is a deliberate CI-cost control; see `lighthouse.yml`, `size-limit.yml`, and `supply-chain.yml` for the pattern. `schema-diff.yml` is a reviewed exception. It keeps its every-PR trigger so every pull request gets a visible job summary. Its in-job classifier skips irrelevant work and runs the schema diff when path detection fails.
 - [ ] **Scheduled advisory** workflows SHOULD state the detection/rebuild SLO they serve and use the slowest cadence that satisfies it. Backstop monitors for multi-hour/day failure modes should prefer daily or similarly low cadence unless there is an explicit operator page-time requirement; do not default to every 15 minutes just because the check is cheap.
 - [ ] If you make an advisory workflow required, add it to the ruleset **and** remove its `paths:` filter in the same change.
 
-> ⚠️ The ruleset and these docs have drifted before: several advisory gates were written as if required (run-on-every-PR, no `paths:`) when the ruleset never enforced them. When you add or "promote" a check, update both the ruleset and this list.
+> ⚠️ The ruleset and these docs have drifted before: advisory gates were written as if required (run-on-every-PR, no `paths:`) when the ruleset never enforced them. Update both the ruleset and this list when you add or "promote" a check.
 
 ### Fixed fan-out contract
 
@@ -87,7 +86,7 @@ The command checks these contracts without defining a second runtime router:
   zero skipped jobs, the retained-command boundary, cold cache policy, and
   normalized PR-only checks.
 
-### No-skip audit and temporary collection
+### No-skip audit
 
 `.github/workflows/no-skip-audit.yml` is the only no-skip entry point. It runs
 by dispatch from protected `main`. It accepts a pull request number,
@@ -95,12 +94,7 @@ full current head SHA, and full current protected-main SHA. Admission fails if
 the pull request, either SHA, repository identity, base branch, or live `main`
 has moved.
 
-During M6, `.github/workflows/m6-canary.yml` selects candidates after CI
-completion and dispatches this entry point. It writes pending evidence on
-#2128. [ADR 0088](../adr/0088-temporary-m6-canary-collection.md) owns selection,
-serialization, spend stops, recovery, proof limits, and removal. Disable and
-drain collection before a manual audit. Keep its writer isolated from candidate
-execution; do not add a required status or upstream artifact handoff.
+M6 collection and recovery are retired; historical evidence is linked from ADR 0101.
 
 After the exact checkout, protected inline admission code compares the admitted
 base and source Git trees. It rejects changes to package manifests, pnpm
@@ -123,9 +117,8 @@ inputs. Treat this refusal as fail-closed admission, not a workflow failure.
 The audit runs every retained deterministic CI job. It runs the focused agent
 setup and package-policy contract, indexer handler invariant contract, and
 dependency-cruiser root contract. Neither ordinary CI nor the audit executes
-the legacy local-gate Bash regression suite. The audit also excludes the
-routing-table suites and indexer route parity suite that ordinary CI retains
-during the post-cutover canary. The audit still runs the retained package-script
+the legacy local-gate Bash regression suite. The legacy routing-table and indexer route parity suites are retired in both
+ordinary CI and the audit. The audit still runs the retained package-script
 validator before dependency installation.
 
 - [ ] Keep the dispatcher read-only. Do not forward repository or environment
@@ -141,8 +134,7 @@ validator before dependency installation.
       selection, pnpm configuration, and tracked `node_modules` in the
       comparison path set. Do not add a content hash registry for data already
       bound by the two Git objects.
-- [ ] Keep the semantic retained `ci.yml` graph pin current. Treat any pin
-      update as an explicit target change during the evidence window.
+- [ ] Keep the semantic retained `ci.yml` graph pin current. Review each pin update against the changed CI graph.
 - [ ] Keep audit inputs limited to `ci.yml` and the protected dispatcher. Do not
       add a second workflow caller that can bypass admission.
 - [ ] In audit mode, skip checkout and `dorny/paths-filter` in `changes`. The
@@ -160,11 +152,10 @@ validator before dependency installation.
 - [ ] Skip Codecov, UI failure artifacts, and timeline actions in audit mode.
 - [ ] Use the separate audit aggregate with no `allowed-skips`. Keep the normal
       pull request aggregate and its reviewed conditional skips unchanged.
-- [ ] Keep the exact legacy selector steps conditional on
-      `!inputs.no_skip_audit`. Reject any reintroduction of the legacy Bash gate
+- [ ] Reject reintroduction of the legacy selector steps or Bash gate
       regression suite. Do not exclude a retained package, policy, trust,
       documentation, browser, build, generation, or test command.
-- [ ] Reject package-execution path drift during the evidence window. Ordinary
+- [ ] Reject package-execution path drift during admission. Ordinary
       CI remains the validation path for package, dependency, and toolchain PRs.
 - [ ] Reject evidence-instrument drift during admission. Protect `ci.yml`, the
       dispatcher, the CI contract source and test entry point, the no-skip
@@ -179,19 +170,16 @@ validator before dependency installation.
       mode.
 - [ ] Keep the audit step-skip allowlist closed. Every retained command must
       execute and remain blocking. Reject equivalent legacy entry points.
-- [ ] Keep both routing-table suite invocations outside the retained target.
-      Their assertions test the legacy selector. Fixed CI runs the retained
-      generated-output and workflow safeguards that the selector also routes.
 - [ ] Keep the same-repository candidate inside the accepted threat model. The
       audit controls workflow selection and package execution configuration. It
       does not sandbox deliberate process creation inside retained candidate
       product, test, or dependency code.
-- [ ] Do not add a schedule until the eligible cold proof passes. Stop after a
-      run exceeds 45 runner-minutes. Do not exceed 450 cumulative runner-minutes.
+- [ ] Keep dispatch manual. Obtain approval for any new audit run and its spend
+      limit. The completed M6 evaluation grants no further run authorization.
 
 Run `pnpm ci:contract:test` after any change to these facts. Do not dispatch the
-audit from an implementation pull request. The first eligible cold proof runs
-after the workflow reaches protected `main`.
+audit from an implementation pull request. Run the dispatcher from protected
+`main`.
 
 ## 2. Branch enforcement on `workflow_dispatch`
 
@@ -200,8 +188,7 @@ after the workflow reaches protected `main`.
 - [ ] Every deploy job MUST include `if: github.ref == 'refs/heads/main'` (or equivalent environment guard) at the job level
 - [ ] Don't rely on the `push.branches: [main]` filter alone — `workflow_dispatch` doesn't honor it
 
-Canonical good example: the `deploy` job guard in
-`.github/workflows/metrics-bridge.yml`.
+Example: the `deploy` job guard in `metrics-bridge.yml`.
 
 ## 3. Pinning third-party actions
 
@@ -211,16 +198,14 @@ A `uses: org/action@v4` line trusts whoever owns that tag to never re-point it a
 - [ ] Self-repository actions such as `uses: $/.github/actions/pnpm-install` and local relative actions such as `uses: ./.github/actions/pnpm-install` are allowed. Use `$` when the action must come from the running protected commit. Use `./` when the checked-out source intentionally owns the action. The scanner follows either target and checks nested third-party `uses:` entries too.
 - [ ] Run `node scripts/workflows/check-github-action-pins.mjs` locally when editing `.github/workflows/**`, `.github/actions/**`, or `.trunk/setup-ci/**`; the required `Code Quality` workflow runs the same check on every PR.
 
-Canonical good example: `.github/workflows/metrics-bridge.yml` — every external
-action is SHA-pinned.
+Example: every external action in `metrics-bridge.yml` is SHA-pinned.
 
 ## 4. Concurrency and serialization
 
 - [ ] Deploy workflows MUST set a concurrency group that serializes ALL invocations against the same target (e.g. `group: ${{ github.workflow }}`, with `cancel-in-progress: false`). Two close main-merges racing on `gcloud run services update` can otherwise stomp each other
 - [ ] Non-deploy workflows MAY use a per-ref concurrency group with `cancel-in-progress: true` to drop stale runs on force-push
 
-Canonical good example: the workflow-level `concurrency` block in
-`.github/workflows/metrics-bridge.yml`.
+Example: the workflow-level `concurrency` block in `metrics-bridge.yml`.
 
 ## 5. Cache trust and keys
 
@@ -365,11 +350,11 @@ Decision framework for `runs-on` (applied in PR #822 — partial migration savin
 
 ## 9. Notifier coverage — keeping Slack alerts wired
 
-`notify-slack-on-main-failure.yml` fires for every workflow whose failure would otherwise be silent. It must be kept in sync whenever a new workflow is added.
+`notify-slack-on-main-failure.yml` fires for every workflow whose failure would otherwise be silent. Keep it in sync when adding a workflow.
 
 - [ ] If the new workflow runs on push to `main` (`on.push.branches: [main]`, OR a branchless `on.push:` with no `branches:`/`branches-ignore:` key, which runs on every branch) OR has `on.schedule`, add its `name:` value to the `workflow_run.workflows` list in `notify-slack-on-main-failure.yml`
 - [ ] If it's intentionally advisory/non-blocking and you don't want Slack noise on flakes, add its `name:` value to the `EXCLUDED_NAMES` set in `scripts/workflows/check-notifier-coverage.mjs` with a comment explaining why
-- [ ] `node scripts/workflows/check-notifier-coverage.mjs` must pass after the change — it runs in the `scripts` CI job and enforces this structurally. The `scripts` job's `rootScripts` path filter includes `.github/workflows/**`, so adding a workflow file alone is enough to fire the check (no script edit required)
+- [ ] `node scripts/workflows/check-notifier-coverage.mjs` must pass after the change — it runs in the `scripts` CI job. That job's `rootScripts` path filter includes `.github/workflows/**`, so adding a workflow file alone fires the check; no script edit is required
 
 `workflow_run.workflows` does NOT support wildcards — every new workflow name must be listed explicitly.
 
@@ -413,8 +398,15 @@ closed.
 ## 11. Lessons already paid for
 
 - PR #188 — consolidating per-package CI workflows nearly removed the push-to-main guard on the metrics-bridge deploy and the workflow_dispatch branch check
-- PR #191 — `paths:` filter on the supply-chain workflow would have made the required check skip on PRs that don't touch deps, blocking unrelated merges
-- PR #191 — third-party actions weren't all SHA-pinned, leaving a supply-chain trust gap
-- PR #188 — caching key for indexer codegen missed the codegen scripts; cached output went stale on script-only changes
-- PR #186 — workflow path filter for "bridge changes" missed the workflow file itself, so workflow edits didn't re-run
-- PR #821/#822 — "ARM is 37.5% cheaper" was falsified for CPU-bound jobs: ~2–3.4× slower runtime + round-up billing made them MORE expensive on ARM; only network-bound and sub-minute jobs migrated. Also: Trunk's `~/.cache/trunk` stores architecture-specific binaries — cross-arch restore caused `execve failed: Text file busy`, so the Code Quality cache key includes `${{ runner.arch }}`
+- PR #191 — supply-chain `paths:` filter would have skipped the required check on PRs that don't touch deps, blocking unrelated merges
+- PR #191 — third-party actions weren't all SHA-pinned, a supply-chain trust gap
+- PR #188 — indexer codegen cache key missed the codegen scripts; output went stale on script-only changes
+- PR #186 — "bridge changes" path filter missed the workflow file itself, so workflow edits didn't re-run
+- PR #821/#822 — "ARM is 37.5% cheaper" was falsified for CPU-bound jobs: ~2–3.4× slower + round-up billing made them costlier on ARM, so only network-bound/sub-minute jobs migrated. Trunk's `~/.cache/trunk` binaries are architecture-specific, so its cache key includes `${{ runner.arch }}`
+
+## 12. CI health budget
+
+ADR 0100's report is context, not a gate, except:
+
+- [ ] `CI` `pull_request` wall p90 <= last month's p90 + 1 min.
+- [ ] No `CI` step fails in >1% of sampled runs (distinct); else file a deflake issue (step + owner).

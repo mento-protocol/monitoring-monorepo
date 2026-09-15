@@ -2077,12 +2077,7 @@ await test("live script comments describe the brief as a comment, not a body wri
   // The routing guidance and the digest note are live script entry points; a
   // stale "writes the stub BODY" / "issue-body brief" description would lead a
   // later change to reason about a body-write dependency that no longer exists.
-  const gate = readRepoFile("scripts/agent-quality-gate.sh");
   const digest = readRepoFile("scripts/sentry/triage/sentry-triage-digest.mjs");
-  assert(
-    !/brief writes the stub BODY/i.test(gate),
-    "the gate routing comment must not say the brief writes the stub body",
-  );
   assert(
     !/issue-body brief/i.test(digest),
     "the digest comment must not call the brief an issue-body brief",

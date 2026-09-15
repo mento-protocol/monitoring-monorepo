@@ -319,7 +319,7 @@ function withGitFixture(run) {
       "scripts/review/review-eval.test.mjs":
         'const unrelatedLock = "run.lock";\n',
       "scripts/sentry/broker/gate-consumer.mjs": [
-        'import "../../gate/mapped-command-process-identity.mjs";',
+        'import "../../lib/mapped-command-process-identity.mjs";',
         'const variablePath = "$source_scripts_dir/gate/mapping.mjs";',
         'const variableDirectory = "$source_scripts_dir/gate: unavailable";',
         'const splitPath = ["gate", "mapped-command-process-identity.mjs"];',
@@ -618,5 +618,29 @@ test("checkManifest rejects a source that differs from the inventory", () => {
       () => checkManifest(manifest, manifest, "b".repeat(40)),
       /manifest is stale/u,
     );
+  });
+});
+
+test("retirement manifest requires atomic runtime and hook removal", () => {
+  withGitFixture((repoRoot) => {
+    const build = () =>
+      buildManifest({ repoRoot, source: "HEAD", retired: true });
+    assert.throws(build, /still contains legacy runtime/u);
+    for (const path of [
+      "scripts/agent-quality-gate.sh",
+      "scripts/agent-quality-gate.test.sh",
+      "scripts/gate",
+    ])
+      fs.rmSync(join(repoRoot, path), { recursive: true });
+    commitAll(repoRoot, "remove runtime");
+    assert.throws(build, /still contains the legacy hook/u);
+    fs.rmSync(join(repoRoot, ".trunk/hooks/pre-push"));
+    fs.writeFileSync(
+      join(repoRoot, ".trunk/trunk.yaml"),
+      "actions:\n  enabled: [trunk-fmt-pre-commit]\n",
+    );
+    commitAll(repoRoot, "remove hook");
+    assert.ok(build().entries.length > 0);
+    assertManifestThrows(repoRoot, /Missing manifest path/u);
   });
 });

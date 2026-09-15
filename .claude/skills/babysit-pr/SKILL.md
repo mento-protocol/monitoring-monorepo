@@ -28,12 +28,12 @@ first repo-local command rather than assuming step 5 already ran. The card
 steps own the feedback sweep, the reply-before-resolve forms, the scope
 baseline, and the two-projection readiness contract.
 
-| Decision                                                                      | Authority                                                                                |
-| ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| Readiness and feedback projections, Codex approval, break-glass               | [`pr-ready-state.md`](../../../docs/notes/pr-ready-state.md)                             |
-| Repository trust preflight, merge-conflict review axes, bundle verification   | [`agent-quality-gate-mechanics.md`](../../../docs/notes/agent-quality-gate-mechanics.md) |
-| Surface detection, gh capability gate, gh→MCP mapping, MCP-emulated labelling | [`github-tooling-surfaces.md`](../../../docs/notes/github-tooling-surfaces.md)           |
-| Deferrals and issue lifecycle                                                 | [`agent-issue-workflow.md`](../../../docs/notes/agent-issue-workflow.md)                 |
+| Decision                                                                      | Authority                                                                      |
+| ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Readiness and feedback projections, Codex approval, break-glass               | [`pr-ready-state.md`](../../../docs/notes/pr-ready-state.md)                   |
+| Repository trust preflight, merge-conflict review axes, bundle verification   | [`pr-operating-card.md`](../../../docs/notes/pr-operating-card.md)             |
+| Surface detection, gh capability gate, gh→MCP mapping, MCP-emulated labelling | [`github-tooling-surfaces.md`](../../../docs/notes/github-tooling-surfaces.md) |
+| Deferrals and issue lifecycle                                                 | [`agent-issue-workflow.md`](../../../docs/notes/agent-issue-workflow.md)       |
 
 ## What this repo adds
 

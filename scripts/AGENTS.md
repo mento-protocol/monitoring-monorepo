@@ -32,7 +32,6 @@ subdirectories.
 - `alerts/`: alert-rule lint, peg-policy checks
 - `repo-health/`: code-health, file-size, lint
 - `terraform/`: movable Terraform guards/helpers
-- `gate/`: routing engine + coordinator
 - `sentry/`: triage/autofix/gate/broker/ci-wiring
 
 `lib/` and `production-infra-identity-contract/` predate the reorg.
@@ -51,40 +50,10 @@ validators. Inventories, pinned hashes, and identities stay with their domain.
 
 ## Path Pins
 
-Move each pin class with its files.
+Move each pin class together.
 
-- **Gate routing pins.** Stub-repo tests require
-  `$script_source_dir == $repo_root/scripts`.
-  `bootstrap/codex-cloud-setup.{sh,test.sh}` pair offline.
-  `sentry/autofix/sentry-autofix-refused-inventory.mjs` routes
-  `pnpm sentry:autofix:{run-record,finalize}:test`. Exact
-  `sentry/triage/sentry-triage-project-route.mjs` routes
-  `pnpm sentry:project:test`.
-  `deploy/deploy-indexer-verify{,-analysis}{,.test}.mjs` and
-  `deploy/deploy-indexer-verify-status-identity.mjs` share an any-depth arm;
-  both run. `pr/agent-issue-board{,.test}.mjs` and
-  `pr/issue-board-{backfill,cli,commands,groom,lock,ownership,projects,release,state,sync{,-lock},transactions,transport}.mjs`
-  route `pnpm issue:board:test`; CI reruns failures (ADR 0082).
-  `pr/closeout-review{,-exec,-git,.test}.mjs` route
-  `pnpm agent:closeout-review:test`.
-  `repo-health/check-guardrail-prose{,.test}.mjs` and
-  `repo-health/guardrail-prose.json` route the guardrail suite. `ci.yml`,
-  quick-commands, and the manifest pin it (ADR 0073).
-- **Gate runtime pins.** Before `cd`, the gate resolves
-  `gate/run-handles.sh`, coordinator files,
-  `docs/docs-navigation-eval-helpers.mjs`, and `gate/lockfile-scope.mjs` from
-  `$script_source_dir`; tests hash them from `$repo_root`. Move these paths with
-  signatures, fixtures, literals, and `.coderabbit.yaml` review scope together
-  (ADRs 0064 and 0076).
-- **Gate mapping pins.** Signatures and Turbo inputs pin
-  `gate/routing-table/**` and `gate/mapping*`. Runtime hashes use
-  `$script_source_dir`; suites use `$repo_root`. Family and inventory edits
-  route the parity suites.
-  Setup, marker, SessionEnd, and package-policy edits route focused setup
-  suite. Missing pins freeze the stamp (ADR 0069). Three exact pins:
-  `.dependency-cruiser.cjs` and root `package.json` both name
-  `gate/mapping/engine.test.mjs` (scanned roots);
-  `gate/mapping/post-passes.mjs` schedules `code-health:deps` itself.
+- **Retained process-marker helper.** `lib/mapped-command-process-identity.mjs` is used by the Sentry probe and staged triage broker. The required broker suite imports its tests; keep that import, the manifest floor and staging pins aligned.
+- **Indexer invariant ownership.** `workflows/indexer-handler-invariant-{contract,families}.mjs` supplies the retained checklist contract; root indexer contract tests and CI filters pin these paths.
 - **Review-eval pins.** Runbook: `run-eval*`,
   `install-review-eval-launchd*`, `review-eval-*publication*`,
   `ORCHESTRATOR_FILES` cells, `SCORING_MODULES` and
@@ -105,12 +74,7 @@ Move each pin class with its files.
   `check-no-skip-audit{,.test}.mjs` pins admission, SHAs, caches, skips,
   `repo-health/dependency-cruiser-root-contract.test.mjs`, and the retained
   graph. Moves update ADR 0064 and all pins.
-  The CI test imports `workflows/collect-m6-canary.test.mjs` for temporary M6
-  collection coverage. The no-skip admission excludes
-  `workflows/collect-m6-canary.mjs`, its workflow, and the CI contract entry
-  points from candidate changes (ADR 0088).
-  `workflows/m6-audit-recovery.test.mjs` pins `m6-audit-recovery.yml`; the CI
-  contract imports it for ADR 0098's two tuples.
+  `ci.yml` pins `report-ci-reliability{,.test}.mjs` (ADR 0100).
 - **Terraform stack registry.** `terraform.stacks.json` `changedPathPatterns`
   pins exact `scripts/` paths per stack. Admission lists six `scripts/`
   entries, not the tree; `pnpm tf:test` enforces subsumption.
@@ -119,7 +83,7 @@ Move each pin class with its files.
   the base (issue 1904; ADR 0064).
 - **PR validation boundary pins.** Move
   `workflows/check-pr-validation-boundary{,.test}.mjs` with `ci.yml` and
-  `trunk.yml`. ADR 0078 defines the boundary.
+  `trunk.yml`. ADR 0078 defines it.
 - **Production identity pins.** In `production-infra-identity-contract/`, align
   `workflow-inventory.mjs`, `workflow.test.mjs`,
   `dependabot-auto-merge.test.mjs`, and `index.test.mjs` with their
@@ -132,18 +96,18 @@ Move each pin class with its files.
   EOL; `UPSTASH_MCP_LAUNCHER_SHA256` hashes it. Moves change both. See
   [`docs/notes/upstash-mcp-operator.md`](../docs/notes/upstash-mcp-operator.md).
 
-**List every new `scripts/` path pin here.**
+**List new `scripts/` path pins here.**
 
 ## Sweep Checklist for a Move
 
 Apply
 [ADR 0064's move checklist](../docs/adr/0064-scripts-module-directories.md#sweep-checklist-for-a-move)
-in the same PR.
+in one PR.
 
 ## Operating Rules
 
 - Shell entrypoints use `set -euo pipefail`, or `set -Eeuo pipefail` when an
-  `ERR` trap needs inheritance. Source-only helpers leave shell options to their
+  `ERR` trap needs inheritance. Source-only helpers leave options to their
   caller.
 - Parse JSON with Node, jq, or structured tooling, never grep or sed.
 - Compact/watch scripts keep machine state and cadence metadata separate from
@@ -154,12 +118,12 @@ in the same PR.
   deployment; use it through the `deploy-indexer` skill after its clean-tree
   preflight, verification, and production approval.
 - Only `deploy-indexer.sh`'s isolated `envio` trigger-ref push may use
-  `--no-verify`. Never use it in developer Git commands.
+  `--no-verify`. Never use it in developer commands.
 - New deploy scripts print target, commit, and rollback/verification around
   mutation.
 - Run `pnpm lint:scripts` for new Node root scripts and `bash -n` for new shell
   scripts. Add focused tests beyond lint and syntax. Add required CI wiring if
-  no fixed job owns them.
+  unowned.
 - The file-size watchlist replaces ESLint `max-lines` here, excluding tests.
   No exemptions remain:
   [ADR 0065](../docs/adr/0065-scripts-file-size-watchlist-scope.md).
@@ -177,7 +141,6 @@ in the same PR.
 
 Apply [PR operating card step 3](../docs/notes/pr-operating-card.md) to each
 changed root tool: `bash -n <changed-shell-script>`, `pnpm lint:scripts`, and
-its focused test. Required CI does not run the optional legacy gate self-test.
-Run it only when a change affects that diagnostic before retirement. Deploy wrappers also run
+its focused test. The legacy diagnostic and its self-tests are retired. Deploy wrappers also run
 `node scripts/check-deploy-root-anchors.test.mjs`. After a move, run
 `pnpm agent:context-check` and `pnpm docs:index --check`.

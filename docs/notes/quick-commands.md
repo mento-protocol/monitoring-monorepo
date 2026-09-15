@@ -46,8 +46,9 @@ pnpm code-health:duplication       # jscpd duplication → reports/jscpd/; advis
 pnpm code-health:schema-diff       # GraphQL breaking-change diff vs origin/main; advisory, never blocks
 pnpm code-health                   # Run knip + deps; exclude history + duplication
 # Normal delivery uses the direct author checks in pr-operating-card step 3.
-pnpm agent:quality-gate            # Optional legacy diagnostic: inspect its retained mapping
-pnpm agent:quality-gate --run      # Optional legacy diagnostic: execute its retained mapping
+# Review lifecycle/install effects before changed package scripts or lockfiles run.
+node scripts/check-agent-quality-gate-package-scripts.mjs  # Validate root scripts before installation
+CI=true pnpm install --frozen-lockfile  # After that review and validation
 pnpm agent:context-check           # Validate repo-visible agent instructions, links, and routing
 pnpm agent:review-materiality      # Classify review depth + context-update signals for current diff
 pnpm agent:closeout-review --base "$BASE_REMOTE/$baseRefName"  # Requires the preflight-bound variables; prints `report: <path>`; exit 1 = findings, 2 = closeout failed
@@ -66,14 +67,13 @@ pnpm docs:navigation-eval -- --validate <result.json>  # Recompute authority, ev
 pnpm ci:contract:test             # Test fixed CI, protected no-skip admission and drift, cache, base, and aggregate contracts
 bash scripts/bootstrap/agent-setup-contract.test.sh  # Test retained SessionEnd, setup-marker, and package-policy behavior
 node --test scripts/indexer-handler-invariant-contract.test.mjs  # Test retained indexer handler invariant owners and schema
-# Ordinary open-PR audit: disable/drain m6-canary.yml; reconcile reservations/spend.
+# Manual open-PR audit: requires separate execution approval and reconciled spend.
 # Read immutable inputs for approved #2128 proof:
 gh pr view <pr> --repo mento-protocol/monitoring-monorepo --json number,state,headRefOid,baseRefName,baseRefOid,headRepositoryOwner
 # Stale bases fail. Integrate current main, then read fresh inputs.
 # No-skip rejects package-execution/instrument drift. Only package drift permits ordinary-force-all evidence.
 # Stop above 45 runner-minutes per run. Approved M6 cumulative ceiling: 800 minutes.
 gh workflow run no-skip-audit.yml --repo mento-protocol/monitoring-monorepo --ref main -f pr_number=<pr> -f source_sha=<headRefOid> -f base_sha=<baseRefOid>
-# Merged #2399/#2408: m6-audit-recovery.yml; finite amendment rules in ADR 0098.
 pnpm verification:inventory:check  # Validate Phase 0 inventory schema, unique IDs, and complete dispositions
 pnpm verification:manifest:write   # Regenerate the terminal pre-M1 gate-rooted control-plane baseline manifest
 pnpm verification:manifest:check   # Recompute and compare the terminal pre-M1 baseline manifest

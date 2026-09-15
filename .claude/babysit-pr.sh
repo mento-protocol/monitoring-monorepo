@@ -35,7 +35,7 @@ babysit_repo_gate() {
   # session, and a fork head must refuse on every surface rather than depend on
   # which one is running. `pr:ready-state` and `pr:feedback-state` both assume
   # the head commit is reachable through a trusted `origin` serving the base repo
-  # (docs/notes/agent-quality-gate-mechanics.md); a fork head breaks that, so
+  # (docs/notes/pr-operating-card.md); a fork head breaks that, so
   # the gate refuses rather than reporting a readiness it cannot prove. This
   # lives in the hook, not a skill file, because the hook runs whichever babysit
   # skill won the name collision (docs/notes/codex-agent-skills.md). The MCP
@@ -55,7 +55,7 @@ babysit_repo_gate() {
     return 0
   fi
   if [[ "$cross" == "true" ]]; then
-    printf 'FAIL #%s has a fork head; repo gates cannot prove trust roots for fork-controlled source (docs/notes/agent-quality-gate-mechanics.md)' "$pr"
+    printf 'FAIL #%s has a fork head; repo gates cannot prove trust roots for fork-controlled source (docs/notes/pr-operating-card.md)' "$pr"
     return 0
   fi
   # Continue only on an explicit "false". A null, empty, or unexpected value

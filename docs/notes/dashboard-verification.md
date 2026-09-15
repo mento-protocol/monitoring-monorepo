@@ -175,10 +175,7 @@ For `pnpm build` plus `pnpm start`:
   mirror directly.
 - The persisted SWR build salt is derived from
   `VERCEL_DEPLOYMENT_ID ?? VERCEL_GIT_COMMIT_SHA ?? "dev"` and inlined as
-  `NEXT_PUBLIC_SWR_CACHE_BUILD_SALT`. Do not configure the public mirror. The
-  optional legacy gate supplies its own stable local deployment identity for
-  its build-backed size check, so operator-local Vercel placeholders are
-  ignored on that diagnostic path.
+  `NEXT_PUBLIC_SWR_CACHE_BUILD_SALT`. Do not configure the public mirror.
 - `.next/cache/fetch-cache` survives `next start` restarts; remove it before a
   true cold-cache measurement.
 
@@ -348,7 +345,7 @@ are not production proof.
 - Test an explicit record in each public and private metadata state. Require
   the safe private fallback and no restricted label, tag, or source.
 - Verify `Cache-Control` and `Age` on document and image against the route's
-  source header: Vercel strips `s-maxage` and `stale-while-revalidate` from
+  source header: Vercel can strip `s-maxage` and `stale-while-revalidate` from
   client responses. For metadata that can become private, prevent stale
   shared caching or test public-to-private revocation.
 - If hydration affects metadata, compare raw tags with the DOM. The DOM alone

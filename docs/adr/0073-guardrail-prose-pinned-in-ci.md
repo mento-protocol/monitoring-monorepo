@@ -16,6 +16,8 @@ garden_lane: adrs-architecture
 **Status:** Accepted (Aug 2026), in force.
 **Scope:** ci/process
 
+Retirement amendment: [ADR 0101](0101-legacy-gate-retirement.md) removes local gate routing and its pins. Retained Sentry supervision, package policy, CI wiring and indexer contracts remain; their current paths are listed in `scripts/AGENTS.md`. Gate-only path lists below are historical.
+
 ## Context
 
 The strongest rules this repository has are prose. "Never merge without the
@@ -66,30 +68,31 @@ the earlier block's pins with no deletion anywhere in the diff. A reviver cannot
 see it either — the reviver walks the already-collapsed result. The check reads
 the raw text for duplicate keys instead.
 
-**The job that runs it is unconditional.** `guardrail-prose` in
+**The job that runs it is unconditional.** `production-infra-contract` in
 `.github/workflows/ci.yml` carries no `if:`, sits in the `ci` sentinel's
-`needs`, and is deliberately absent from its `allowed-skips`. This follows
+`needs`, and is absent from its `allowed-skips`. This follows
 [ADR 0010](0010-required-checks-no-paths-filters.md): a skipped required check
-counts as satisfied. The first implementation of this decision put the two
-commands in the path-gated `scripts` job, which admits on `scripts/**` and is
-allowed to skip — so a PR editing only `AGENTS.md` and dropping a pinned
-sentence skipped the check entirely while `ci` stayed green. The Sentry suites
-were moved out of that same job for the same reason. The suite pins its own
-wiring: the job id, both `run:` strings, the sentinel's `needs`, and the absence
-of an allowed-skip, each with a negative control that mutates the real workflow.
+counts as satisfied. The first implementation put both commands in the
+path-gated `scripts` job, which may skip — so a PR editing only `AGENTS.md` and
+dropping a pinned sentence skipped the check while `ci` stayed green. The Sentry
+suites left it for the same reason. A dedicated job came next; the commands now
+run in the host above, after its pnpm-install step so a prose failure cannot
+abort the pnpm cache write. The suite pins its own wiring: the host job id, both `run:` strings, the
+sentinel's `needs`, and the absence of an allowed-skip, each with a negative
+control that mutates the real workflow.
 
 **The wiring assertion runs from two jobs, so neither is its own only witness.**
-Read alone, the paragraph above is circular: the assertion that `guardrail-prose`
-still exists lived only inside `guardrail-prose`, so the single edit deleting
-that job and its sentinel entry deleted the assertion too and left `ci` green
-over nothing. The suite therefore also runs as a step of the path-gated
-`scripts` job. That job's `rootScripts` filter includes `.github/workflows/**`,
-so any edit able to remove the unconditional job admits `scripts` and reds
-there; and the suite asserts that second host as well, so dropping the extra
-step reds in the unconditional job. Each is the other's witness. Deleting both
-in one commit still passes — no check can outlive its own removal — but that
-edit is visible in a single diff, which is the property being bought throughout
-this record. The cost is one duplicate sub-second run on `scripts/**` diffs.
+Read alone, the paragraph above is circular: the assertion that the host runs
+both commands lives only inside it, so one edit dropping the steps and its
+sentinel entry deleted the assertion too and left `ci` green over nothing.
+The suite therefore also runs as a step of the path-gated `scripts` job. That
+job's `rootScripts` filter includes `.github/workflows/**`, so any edit able to
+unwire the host admits `scripts` and reds there; the suite asserts that second
+host too, so dropping the extra step reds in the first. Each is the other's
+witness. Removing both in one commit still passes — no check outlives its own
+removal — but that edit is visible in a single diff, which is the property
+bought throughout this record. The cost is one duplicate
+sub-second run on `scripts/**` diffs.
 
 **Present is not the same as enforcing.** A `run:` line proves the command is
 written down, not that its failure stops the job. A step-level `if:` makes the
@@ -156,9 +159,8 @@ the binding route.
 - Adding a new normative sentence does not pin it. Coverage grows only when
   someone adds the pin, so the list will trail the prose. The 90-day
   re-verification on this record is where that gap is reviewed.
-- CI gains one job boot per PR: a checkout, a Node, and two sub-second commands
-  with no `pnpm install`, since the checker and its suite import only `node:`
-  builtins.
+- CI adds no job boot: the two sub-second commands run as steps of the
+  unconditional `production-infra-contract` job, after its pnpm install.
 - Moving `AGENTS.md`, `CLAUDE.md`, or the operating card means editing the pin
   keys in the same PR. `scripts/AGENTS.md` records this pin class under the
   move-sweep inventory ADR 0064 requires.
