@@ -6,9 +6,9 @@
  * within 20% of their `timeout-minutes` cap. Publishes the job summary and
  * upserts one labeled issue, like file-size-watchlist-issue.mjs does.
  *
- * Runs as a `github-script` step (ci-reliability-report.yml; same shape as
- * collect-m6-canary.mjs), so pagination/auth come from the injected Octokit
- * client. Per-run job/step data costs one call per run, so it is sampled at
+ * Runs as a `github-script` step (ci-reliability-report.yml), so
+ * pagination/auth come from the injected Octokit client. Per-run job/step
+ * data costs one call per run, so it is sampled at
  * random, at most SAMPLE_PER_STRATUM `pull_request` runs, for the two
  * workflows in JOB_FANOUT_WORKFLOWS — `push`/`workflow_call` runs are a small,
  * uneven fraction of `CI`'s volume, so mixing them into one merged sample
@@ -21,8 +21,8 @@
  * display-name mapping, and does not cover other workflows. It also does not
  * use `js-yaml`, a devDependency: this module runs unmodified inside
  * `actions/github-script`, which never runs an install step, the same
- * constraint that keeps collect-m6-canary.mjs and
- * file-size-watchlist-issue.mjs dependency-free. Instead it scans the
+ * constraint that keeps file-size-watchlist-issue.mjs dependency-free.
+ * Instead it scans the
  * two-space-indented shape every workflow in this repository uses: a
  * top-level `name:`, then `jobs:` with one job id per two-space level and a
  * flat field body one level deeper. A `name:` or `timeout-minutes:` elsewhere

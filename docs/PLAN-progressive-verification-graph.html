@@ -9,7 +9,7 @@
     />
     <meta name="color-scheme" content="light dark" />
     <link rel="icon" href="data:," />
-    <title>Simple Verification System Plan</title>
+    <title>Archived: Simple Verification System Plan</title>
     <style>
       :root {
         color-scheme: light;
@@ -575,14 +575,23 @@
     </nav>
     <main id="main">
       <header id="top" class="shell">
-        <p class="eyebrow">Monitoring monorepo · M5 early local cutover</p>
+        <p class="eyebrow">
+          Archived migration plan · completed September 15, 2026
+        </p>
         <h1>Remove the queue. Keep the quality bar.</h1>
+        <p class="lede">
+          <strong>Historical record.</strong> PR #2428 retired the legacy gate.
+          The design and measurements below describe the completed migration.
+          For current instructions, read
+          <a href="adr/0101-legacy-gate-retirement.md">ADR 0101</a> and the
+          <a href="notes/pr-operating-card.md">PR operating card</a>.
+        </p>
         <p class="lede">
           M5 removes the mandatory local gate from the push path. Direct package
           feedback and hardened existing CI keep the quality bar. The design
           adds no app, cloud project, scheduler, task graph, or verdict store.
         </p>
-        <div class="facts" aria-label="Current baseline">
+        <div class="facts" aria-label="Historical baseline">
           <div class="fact">
             <strong>101,595</strong><span>raw counted control-plane lines</span>
           </div>
