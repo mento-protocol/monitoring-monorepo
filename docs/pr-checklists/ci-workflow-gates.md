@@ -328,25 +328,14 @@ Environment, or controlled lifecycle ruleset.
 
 ## 8. Runner architecture (ARM vs x64)
 
-Blacksmith ARM runners (`blacksmith-{2,4}vcpu-ubuntu-2404-arm`) bill at 0.625× the x64 per-minute rate — but they are **not** automatically cheaper. Measured on this repo (compat PR #821, two full sweeps cold + warm, June 2026):
+Every job runs on a free, unlimited GitHub-hosted label — `ubuntu-latest` (x64) or `ubuntu-24.04-arm`. This is a public repo, so there is no per-minute rate to trade off; the only costs left are cache correctness and tool availability.
 
-- **CPU-bound node jobs run ~2–3.4× slower on ARM** (ui browser tests 7m34s vs 2m13s, indexer vitest 4m09s vs 2m00s, shared 1m08s vs 0m33s). This is per-core throughput, not a cold-cache artifact.
-- **Network-bound jobs run at parity** (terraform init/plan/apply, gcloud deploys, RPC-driven probes: 1m03s vs 1m02s).
-- With per-job **round-up billing**, the break-even runtime ratio is **1.6×** (price ratio 0.625). A job that crosses one extra billed-minute boundary on ARM costs _more_ despite the cheaper rate.
+Decision framework for `runs-on`:
 
-Decision framework for `runs-on` (applied in PR #822 — partial migration saving ≈$10/mo; the blanket migration would have _added_ ≈$36/mo):
-
-- [ ] **Network/IO-bound job** (terraform, gcloud, curl-driven, external-API polling) → ARM. Runtime is parity; the 37.5% rate cut is pure savings.
-- [ ] **Sub-minute on both architectures** (paths-filter `changes` detectors, format checks, lockfile lint) → ARM. Both bill 1 minute; rate cut is pure savings.
-- [ ] **CPU-bound hot-path job** (vitest/typecheck/lint suites, Next builds,
-      browser tests) → **x64** when the measured ARM slowdown crosses billing
-      boundaries or materially delays PR feedback. The weekly, bounded Stryker
-      jobs are a measured exception and currently run on ARM; remeasure before
-      changing that workflow.
+- [ ] **Default to `ubuntu-latest`.** Use `ubuntu-24.04-arm` only for a job that writes no persistent cache and runs no pnpm install. The pnpm-store cache key embeds `runner.arch`, and the sole writer (`production-infra-contract`) is x64 — an ARM install is always a cold miss.
 - [ ] **Anything launching Chrome via chrome-launcher/puppeteer/lhci** → x64, hard requirement: Google publishes no Chrome for linux-arm64. (Playwright's own Chromium DOES ship arm64 — only Chrome-dependent tooling is blocked.)
 - [ ] Jobs that generate artifacts consumed by another job (`update-snapshots.yml` baselines ↔ ci.yml `ui` snapshot assertions) MUST stay on the same architecture as their consumer.
-- [ ] Before migrating any job class, **measure** warm runtime on the target arch (throwaway PR with two pushes — cold then warm caches; `workflow_dispatch` for cron workflows) and compare the ratio against 1.6×. Don't extrapolate from the price sheet.
-- [ ] New ARM labels go into BOTH actionlint allow-lists (`.github/actionlint.yaml` + `.trunk/configs/actionlint.yaml`), and binary caches get arch-keyed (see §5).
+- [ ] Every `runs-on` label must be in the frozen `ALLOWED_RUNNER_LABELS` set in `scripts/workflows/check-ci-contract.mjs`, which also asserts `.github/actionlint.yaml` and `.trunk/configs/actionlint.yaml` stay byte-identical. Binary caches get arch-keyed (see §5).
 
 ## 9. Notifier coverage — keeping Slack alerts wired
 

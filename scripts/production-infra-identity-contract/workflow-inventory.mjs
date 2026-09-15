@@ -357,7 +357,7 @@ function pegPolicyPublicationPlanJobInventory() {
     name: "Read-only Peg policy publication plan",
     needs: "validate",
     if: "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'",
-    "runs-on": "blacksmith-4vcpu-ubuntu-2404-arm",
+    "runs-on": "ubuntu-24.04-arm",
     "timeout-minutes": 15,
     permissions: {
       contents: "read",
@@ -429,7 +429,7 @@ function pegPolicyPublicationApplyJobInventory() {
       name: "production-infra",
       url: PEG_POLICY_PUBLICATION_CONSOLE_URL,
     },
-    "runs-on": "blacksmith-4vcpu-ubuntu-2404-arm",
+    "runs-on": "ubuntu-24.04-arm",
     "timeout-minutes": 20,
     permissions: {
       contents: "read",
@@ -535,7 +535,7 @@ function pegPolicyPublicationWorkflowInventory() {
     jobs: {
       validate: {
         name: "Terraform Validate (Peg policy publication)",
-        "runs-on": "blacksmith-4vcpu-ubuntu-2404-arm",
+        "runs-on": "ubuntu-latest",
         "timeout-minutes": 10,
         defaults: {
           run: {
@@ -600,7 +600,7 @@ export function protectedApplyJobInventory(workflowPath) {
       name: "production-infra",
       url: PRODUCTION_CONSOLE_URL,
     },
-    "runs-on": "blacksmith-4vcpu-ubuntu-2404-arm",
+    "runs-on": "ubuntu-24.04-arm",
     "timeout-minutes": 30,
     permissions: {
       contents: "read",

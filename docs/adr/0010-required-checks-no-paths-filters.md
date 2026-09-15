@@ -42,7 +42,7 @@ stays unfiltered and performs its run/skip decision inside the job.
 
 - Required package and Terraform-validation routing lives inside the CI sentinel,
   with stack classification backed by `terraform.stacks.json` (ADR 0028).
-- Advisory cost is controlled with path filters and Blacksmith runner tuning;
+- Advisory cost is controlled with path filters (runners are free);
   workflows with cleanup semantics route inside the job instead.
 
 ## Evidence
