@@ -24,7 +24,20 @@ const HTML_HIDDEN_RE = new RegExp(
   "gi",
 );
 const HTML_TAG_RE = new RegExp(`<${HTML_ATTRIBUTES}>`, "g");
-const HTML_ENTITY_RE = /&(?:#[0-9]+|#[xX][0-9A-Fa-f]+|[A-Za-z][A-Za-z0-9]*);/g;
+const HTML_ENTITY_RE =
+  /&(?:#([0-9]+)|#[xX]([0-9A-Fa-f]+)|([A-Za-z][A-Za-z0-9]*));/g;
+// GitHub renders a character reference as a character, so the counter decodes
+// one rather than dropping it: prose encoded as `&#119;`-style references is
+// prose. Named references outside this set become a space, which at worst drops
+// one letter from a word the surrounding text already counts.
+const NAMED_ENTITIES = new Map([
+  ["amp", "&"],
+  ["lt", "<"],
+  ["gt", ">"],
+  ["quot", '"'],
+  ["apos", "'"],
+  ["nbsp", " "],
+]);
 const DEFERRALS_HEADING_RE = /^##\s+Deferrals\s*$/;
 const DEFERRALS_STYLE_RE = /^ {0,3}#{1,6}\s*Deferrals([^A-Za-z0-9_]|$)/i;
 const NONE_RE = /^\s*(?:[-*]\s+)?none\s*\.?\s*$/i;
@@ -188,15 +201,29 @@ function countWords(text) {
  * sections do not accept it as their explanation. Tags, attributes, and
  * non-rendering elements contribute nothing.
  */
+function decodeCharacterReference(match, decimal, hex, name) {
+  if (decimal !== undefined || hex !== undefined) {
+    const code = Number.parseInt(
+      decimal ?? hex,
+      decimal === undefined ? 16 : 10,
+    );
+    if (!Number.isInteger(code) || code < 0 || code > 0x10ffff) return " ";
+    // A surrogate half is not a character GitHub renders on its own.
+    if (code >= 0xd800 && code <= 0xdfff) return " ";
+    return String.fromCodePoint(code);
+  }
+  return NAMED_ENTITIES.get(name.toLowerCase()) ?? " ";
+}
+
 function htmlWordCount(value) {
   return countWords(
     value
       .replace(HTML_COMMENT_RE, " ")
       .replace(HTML_HIDDEN_RE, " ")
+      // Tags go before decoding, so a `&lt;p&gt;` the reader sees as text is
+      // never mistaken for markup.
       .replace(HTML_TAG_RE, " ")
-      // An entity is punctuation, a space, or one letter inside a word the
-      // surrounding text already counts, so none of them add a word.
-      .replace(HTML_ENTITY_RE, " "),
+      .replace(HTML_ENTITY_RE, decodeCharacterReference),
   );
 }
 

@@ -307,6 +307,24 @@ test("does not count an attribute holding an angle bracket as prose", () => {
   );
 });
 
+test("counts prose written as numeric character references", () => {
+  // "word" as decimal references; GitHub renders it as the word.
+  const encoded = "&#119;&#111;&#114;&#100;";
+  assertFail(
+    sizedBody({
+      tldrWords: 20,
+      problemWords: 100,
+      solutionWords: 274,
+      extra: `
+## Details
+
+<p>${Array.from({ length: 50 }, () => encoded).join(" ")}</p>
+`,
+    }),
+    /authored PR description is 450 words; the ceiling is 400/,
+  );
+});
+
 test("does not count invisible HTML entities as words", () => {
   assertPass(
     sizedBody({
