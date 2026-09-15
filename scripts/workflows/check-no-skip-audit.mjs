@@ -30,7 +30,7 @@ const READ_SCOPES = Object.freeze({ actions: "read", contents: "read", "pull-req
 // prettier-ignore
 const ADMISSION_STEP_HASH = "18f1c3741064363a488462c96fd34772c3b66eeee4a3f4bd2fb2a86275c3a203", CHECKOUT_STEP_HASH = "2d39e2e5293845e1c63f0f2e95ab8eb7e3d65360955c5b2c54ea1bddff57c22d", PROTECTED_DRIFT_STEP_HASH = "019ce295d3b3b50fe6684a65a93a2387a8a29d7c6c62db83cdc00bf1e8cf7a04", SUMMARY_STEP_HASH = "b6def63e8f5ccb7e13a6460f546cb391bf0e86350876470a787f038ea7cebb10";
 const CI_GRAPH_HASH =
-    "c1d417430df961ff10db9f31bace89730868d5843d1acaeca006878aa57349b5",
+    "fe7237e2b90b2276922fc3d593674728fd2a098012caabc57a584128588b25e5",
   BASELINE_HASH =
     "467641beda8b2b45d49d0c62429d8e95f62b05c1db96f6665b106012a09cef12";
 // prettier-ignore
@@ -52,7 +52,7 @@ const CALL_INPUTS = {
 const LEGACY_GATE_STEPS = Object.freeze([]);
 // prettier-ignore
 const RETAINED_EXTRACTED_STEPS = Object.freeze([
-  ["indexer", "Indexer handler invariant contract", "node --test scripts/indexer-handler-invariant-contract.test.mjs"],
+  ["indexer-checks", "Indexer handler invariant contract", "node --test scripts/indexer-handler-invariant-contract.test.mjs"],
   ["scripts", "Agent setup and package-policy contracts", "bash scripts/bootstrap/agent-setup-contract.test.sh"],
   ["scripts", "Dependency-cruiser root contract", "node --test scripts/repo-health/dependency-cruiser-root-contract.test.mjs"],
 ]);
@@ -204,7 +204,7 @@ function checkColdAuthority(root, errors) {
   const codecov = allSteps.filter(([, step]) => String(step.uses ?? "").startsWith("codecov/codecov-action@"));
   add(errors, codecov.length === 9 && codecov.every(([, step]) => step.if === CODECOV_IF && step.with?.token === "${{ secrets.CODECOV_TOKEN }}"), "Codecov must remain unavailable to audit calls");
   const timeline = allSteps.filter(([, step]) => String(step.uses ?? "").startsWith("Kesin11/actions-timeline@"));
-  add(errors, timeline.length === 17 && timeline.every(([, step]) => step.if === "always() && !inputs.no_skip_audit"), "post-candidate timeline actions must not run in audit mode");
+  add(errors, timeline.length === 16 && timeline.every(([, step]) => step.if === "always() && !inputs.no_skip_audit"), "post-candidate timeline actions must not run in audit mode");
   const artifacts = allSteps.filter(([, step]) => String(step.uses ?? "").startsWith("actions/upload-artifact@"));
   add(errors, artifacts.length === 1 && artifacts[0][1].if === "failure() && !inputs.no_skip_audit", "UI failure artifacts must not run in audit mode");
   const restores = allSteps.filter(([, step]) => String(step.uses ?? "").startsWith("actions/cache/restore@"));

@@ -160,9 +160,9 @@ const STATIC_MUTATIONS = [
   // prettier-ignore
   ["package predecessor env writer", /GITHUB_ENV/u, ({ workflow }) => { workflow.jobs.ui.steps.unshift({ run: "echo NODE_OPTIONS=--require=./hook.cjs >> $GITHUB_ENV" }); }],
   // prettier-ignore
-  ["conditional job extra dependency", /ui job runtime/u, ({ workflow }) => { workflow.jobs.ui.needs = ["changes", "indexer"]; }],
+  ["conditional job extra dependency", /ui job runtime/u, ({ workflow }) => { workflow.jobs.ui.needs = ["changes", "indexer-test"]; }],
   // prettier-ignore
-  ["allowed package job env changed", /indexer job runtime/u, ({ workflow }) => { workflow.jobs.indexer.env.ENVIO_STRICT_START_BLOCK = "false"; }],
+  ["allowed package job env changed", /indexer-test job runtime/u, ({ workflow }) => { workflow.jobs["indexer-test"].env.ENVIO_STRICT_START_BLOCK = "false"; }],
   // prettier-ignore
   ["changes checkout identity", /changes steps/u, ({ workflow }) => { workflow.jobs.changes.steps[0].uses = "actions/checkout@unreviewed"; }],
   // prettier-ignore
@@ -237,20 +237,10 @@ const STATIC_MUTATIONS = [
   ["ci timeline identity", /ci steps/u, ({ workflow }) => { workflow.jobs.ci.steps[2].uses = "Kesin11/actions-timeline@unreviewed"; }],
   // prettier-ignore
   ["missing allowed skip", /allowed-skips misses ui/u, ({ workflow }) => { const gate = aggregateStep(workflow); gate.with["allowed-skips"] = gate.with["allowed-skips"].split(",").filter((name) => name !== "ui").join(","); }],
-  [
-    "unexpected allowed skip",
-    /allowed-skips has unexpected changes/u,
-    ({ workflow }) => {
-      aggregateStep(workflow).with["allowed-skips"] += ",changes";
-    },
-  ],
-  [
-    "allowed failure",
-    /allowed-failures/u,
-    ({ workflow }) => {
-      aggregateStep(workflow).with["allowed-failures"] = "scripts";
-    },
-  ],
+  // prettier-ignore
+  ["unexpected allowed skip", /allowed-skips has unexpected changes/u, ({ workflow }) => { aggregateStep(workflow).with["allowed-skips"] += ",changes"; }],
+  // prettier-ignore
+  ["allowed failure", /allowed-failures/u, ({ workflow }) => { aggregateStep(workflow).with["allowed-failures"] = "scripts"; }],
   [
     "changed aggregate jobs input",
     /reads.*instead of every job/u,
@@ -265,13 +255,23 @@ const STATIC_MUTATIONS = [
   // prettier-ignore
   ["changed timeout", /ui timeout-minutes must be 25/u, ({ workflow }) => { workflow.jobs.ui["timeout-minutes"] = 1; }],
   // prettier-ignore
-  ["nonblocking required command", /ui no longer enforces VERCEL_DEPLOYMENT_ID/u, ({ workflow }) => { workflow.jobs.ui.steps.find((step) => step.name?.startsWith("Production build"))["continue-on-error"] = true; }],
+  ["nonblocking required command", /ui-static no longer enforces VERCEL_DEPLOYMENT_ID/u, ({ workflow }) => { workflow.jobs["ui-static"].steps.find((step) => step.name?.startsWith("Production build"))["continue-on-error"] = true; }],
   // prettier-ignore
-  ["required command runtime env", /ui no longer enforces VERCEL_DEPLOYMENT_ID/u, ({ workflow }) => { workflow.jobs.ui.steps.find((step) => step.name?.startsWith("Production build")).env = { NODE_OPTIONS: "--require=./hook.cjs" }; }],
+  ["required command runtime env", /ui-static no longer enforces VERCEL_DEPLOYMENT_ID/u, ({ workflow }) => { workflow.jobs["ui-static"].steps.find((step) => step.name?.startsWith("Production build")).env = { NODE_OPTIONS: "--require=./hook.cjs" }; }],
   // prettier-ignore
-  ["required command shell", /ui no longer enforces VERCEL_DEPLOYMENT_ID/u, ({ workflow }) => { workflow.jobs.ui.steps.find((step) => step.name?.startsWith("Production build")).shell = "bash {0}"; }],
+  ["required command shell", /ui-static no longer enforces VERCEL_DEPLOYMENT_ID/u, ({ workflow }) => { workflow.jobs["ui-static"].steps.find((step) => step.name?.startsWith("Production build")).shell = "bash {0}"; }],
   // prettier-ignore
-  ["required command working directory", /ui no longer enforces VERCEL_DEPLOYMENT_ID/u, ({ workflow }) => { workflow.jobs.ui.steps.find((step) => step.name?.startsWith("Production build"))["working-directory"] = "ui-dashboard"; }],
+  ["required command working directory", /ui-static no longer enforces VERCEL_DEPLOYMENT_ID/u, ({ workflow }) => { workflow.jobs["ui-static"].steps.find((step) => step.name?.startsWith("Production build"))["working-directory"] = "ui-dashboard"; }],
+  // prettier-ignore
+  ["docs-checks command dropped from scripts", /scripts no longer runs the docs-checks command pnpm docs:index --check/u, ({ workflow }) => { workflow.jobs.scripts.steps = workflow.jobs.scripts.steps.filter((step) => step.run !== "pnpm docs:index --check"); }],
+  // prettier-ignore
+  ["docs-checks command added without a scripts twin", /scripts no longer runs the docs-checks command pnpm docs:new-corpus-check/u, ({ workflow }) => { workflow.jobs["docs-checks"].steps.push({ name: "New corpus check", run: "pnpm docs:new-corpus-check" }); }],
+  // prettier-ignore
+  ["scripts twin gated off", /scripts no longer runs the docs-checks command pnpm docs:index --check/u, ({ workflow }) => { workflow.jobs.scripts.steps.find((step) => step.run === "pnpm docs:index --check").if = false; }],
+  // prettier-ignore
+  ["scripts twin made advisory", /scripts no longer runs the docs-checks command pnpm docs:index --check/u, ({ workflow }) => { workflow.jobs.scripts.steps.find((step) => step.run === "pnpm docs:index --check")["continue-on-error"] = true; }],
+  // prettier-ignore
+  ["docs-checks source step made advisory", /docs-checks command pnpm docs:index --check must not be continue-on-error/u, ({ workflow }) => { workflow.jobs["docs-checks"].steps.find((step) => step.run === "pnpm docs:index --check")["continue-on-error"] = true; }],
   [
     "cross-cancelling main concurrency",
     /workflow concurrency/u,

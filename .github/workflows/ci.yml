@@ -3,9 +3,9 @@ name: CI
 # Aggregate workflow fanning out to package-scoped quality jobs gated on
 # path changes. The `ci` sentinel aggregates this package-scoped fan-out into
 # one required check (`CI / ci`) instead of one required check per package.
-# A PR that only touches ui-dashboard/ runs the `ui` job and the
-# unconditional production-infrastructure contract; other irrelevant jobs skip
-# cleanly (GitHub hides them from the checks list).
+# A PR that only touches ui-dashboard/ runs the `ui-static` and `ui` jobs and
+# the unconditional production-infrastructure contract; other irrelevant jobs
+# skip cleanly (GitHub hides them from the checks list).
 #
 # Third-party actions are pinned to commit SHAs per the policy in
 # .github/workflows/claude.yml — update via Dependabot
@@ -256,11 +256,11 @@ jobs:
               - .node-version
               - .github/workflows/ci.yml
               - .github/actions/pnpm-install/**
-            # Code-health policy files. A PR that touches ONLY the dep-cruiser
-            # rules or a package's knip config would otherwise leave all four
-            # package filters false → the cross-package `deps` job would skip
-            # → blocking architecture rule changes ship unvalidated. This
-            # filter fires the `deps` job whenever the policy itself moves.
+            # Code-health policy files. `pnpm code-health:deps` now runs in the
+            # unconditional `production-infra-contract` job, so this filter no
+            # longer gates it. Keep it in `routed`: dropping it would leave a
+            # policy-only PR outside the routed set, and `all_count !=
+            # routed_count` would force the whole fan-out instead.
             codeHealth: &codeHealth
               - .dependency-cruiser.cjs
               - "*/knip.json"
@@ -393,19 +393,20 @@ jobs:
               - .github/workflows/ci.yml
               - .github/actions/pnpm-install/**
             # Dependency manifest and pnpm catalog/lifecycle policy drift.
-            # This runs independently of package quality jobs so a manifest-only
-            # PR cannot satisfy the required `ci` sentinel while bypassing the
-            # catalog-vs-literal version invariant.
+            # `pnpm skew:check` now runs in the unconditional
+            # `production-infra-contract` job, so no manifest-only PR can
+            # satisfy the `ci` sentinel while bypassing the catalog-vs-literal
+            # version invariant. This filter is kept for `routed` accounting.
             versionSkew: &versionSkew
               - package.json
               - "**/package.json"
               - pnpm-workspace.yaml
               - "**/pnpm-workspace.yaml"
               - patches/**
-              # Enumerated on purpose: this job runs one checker, and widening
-              # to scripts/supply-chain/** would fire it on every lockfile-lint
-              # or audit-gate edit. An enumerated filter goes silent when a file
-              # moves, so both paths move with the checker in the same PR.
+              # Enumerated on purpose: this filter pins one checker, and
+              # widening to scripts/supply-chain/** would match every
+              # lockfile-lint or audit-gate edit. An enumerated filter goes
+              # silent when a file moves, so both paths move with it.
               - scripts/supply-chain/version-skew-check.mjs
               - scripts/supply-chain/version-skew-check.test.mjs
               - .github/workflows/ci.yml
@@ -542,12 +543,14 @@ jobs:
       - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
         if: always() && !inputs.no_skip_audit
 
-  ui:
-    name: Quality Checks (ui-dashboard)
+  ui-static:
+    name: Static Checks (ui-dashboard)
     needs: changes
+    # Byte-identical to `ui` below: the two jobs admit together, and the
+    # forceAll prefix keeps both executable during a no-skip audit.
     if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.ui == 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 25
+    timeout-minutes: 10
     permissions:
       contents: read
       actions: read
@@ -616,14 +619,42 @@ jobs:
             echo "Expected ui-dashboard react-doctor score 100, got ${score}" >&2
             exit 1
           fi
-      - name: Test with coverage
-        run: pnpm --filter @mento-protocol/ui-dashboard test:coverage
       - name: Production build and bundle-size budget
-        # The browser suite builds `.next-fixture`. This target builds the
-        # production `.next` output and then checks the committed size budget.
+        # The browser suite in `ui` builds `.next-fixture` from different env
+        # (turbo.json gives `fixture-build` its own NEXT_DIST_DIR and fixture
+        # flags), so the two builds cannot be merged and this one measures the
+        # production bundle. Nothing here depends on the vitest or Playwright
+        # steps, which is why the two halves run as sibling jobs.
         env:
           TURBO_CACHE_POLICY: ${{ inputs.no_skip_audit && 'local:,remote:' || 'local:rw' }}
         run: VERCEL_DEPLOYMENT_ID=ci pnpm exec turbo run size-limit --filter=@mento-protocol/ui-dashboard --cache="$TURBO_CACHE_POLICY"
+      - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
+        if: always() && !inputs.no_skip_audit
+
+  ui:
+    name: Quality Checks (ui-dashboard)
+    needs: changes
+    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.ui == 'true'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.no_skip_audit && inputs.audit_source_sha || github.sha }}
+          persist-credentials: false
+          # Nothing left in this job compares against the base ref; the
+          # react-doctor diff that needed full history runs in `ui-static`.
+          fetch-depth: ${{ inputs.no_skip_audit && '0' || '1' }}
+      # GitHub resolves $/ from the running commit; actionlint lacks support.
+      # trunk-ignore(actionlint/action)
+      - uses: $/.github/actions/pnpm-install
+        with:
+          restore-cache: ${{ !inputs.no_skip_audit }}
+      - name: Test with coverage
+        run: pnpm --filter @mento-protocol/ui-dashboard test:coverage
       - name: Restore Playwright Chromium
         id: playwright-cache
         if: ${{ !inputs.no_skip_audit }}
@@ -692,20 +723,61 @@ jobs:
       - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
         if: always() && !inputs.no_skip_audit
 
-  indexer:
-    name: Quality Checks (indexer-envio)
+  indexer-test:
+    name: Tests (indexer-envio)
     needs: changes
+    # Byte-identical to `indexer-checks` below: the two jobs admit together.
     if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.indexer == 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
     permissions:
       contents: read
       actions: read
-    # Job-level env so it's visible to both typecheck and tests. Tests import
-    # EventHandlers.ts, which triggers runStartupChecks() at module load — with
-    # strict=true, a start-block misconfiguration throws and fails CI before
-    # reaching deploy. Codegen doesn't import EventHandlers, so the var is
-    # inert there; scoping it to the job keeps the intent in one place.
+    # Tests import EventHandlers.ts, which triggers runStartupChecks() at module
+    # load — with strict=true, a start-block misconfiguration throws and fails
+    # CI before reaching deploy.
+    env:
+      ENVIO_STRICT_START_BLOCK: "true"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.no_skip_audit && inputs.audit_source_sha || github.sha }}
+          fetch-depth: ${{ inputs.no_skip_audit && '0' || '1' }}
+          persist-credentials: false
+      # GitHub resolves $/ from the running commit; actionlint lacks support.
+      # trunk-ignore(actionlint/action)
+      - uses: $/.github/actions/pnpm-install
+        with:
+          restore-cache: ${{ !inputs.no_skip_audit }}
+      - name: Envio mainnet codegen
+        # Only the mainnet config, whose output the coverage run imports. The
+        # drift check that runs codegen against every config file stays in
+        # `indexer-checks`, where check-pr-validation-boundary.mjs pins it.
+        run: pnpm --filter @mento-protocol/indexer-envio codegen --config config.multichain.mainnet.yaml
+      - name: Test with coverage
+        run: pnpm --filter @mento-protocol/indexer-envio test:coverage
+      - uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        if: ${{ !inputs.no_skip_audit && !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') }}
+        with:
+          fail_ci_if_error: false
+          flags: indexer-envio
+          directory: indexer-envio/coverage
+          token: ${{ secrets.CODECOV_TOKEN }}
+      - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
+        if: always() && !inputs.no_skip_audit
+
+  indexer-checks:
+    name: Quality Checks (indexer-envio)
+    needs: changes
+    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.indexer == 'true'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    # Job-level env so it's visible to typecheck as well as the reserve-yield
+    # wrapper. Codegen doesn't import EventHandlers, so the var is inert there;
+    # scoping it to the job keeps the intent in one place.
     env:
       ENVIO_STRICT_START_BLOCK: "true"
     steps:
@@ -731,7 +803,7 @@ jobs:
       - name: Validate all Envio configs (codegen)
         # Run codegen against every config file to catch schema/config drift
         # early. config.multichain.mainnet.yaml is run last — its output is
-        # used by typecheck + tests below.
+        # used by typecheck + the reserve-yield wrapper below.
         run: |
           pnpm --filter @mento-protocol/indexer-envio codegen --config config.multichain.testnet.yaml
           pnpm --filter @mento-protocol/indexer-envio codegen --config config.multichain.mainnet.yaml
@@ -761,15 +833,6 @@ jobs:
         # Retained owner inventory and fail-closed schema checks. Keep this
         # independent of the retired local routing table.
         run: node --test scripts/indexer-handler-invariant-contract.test.mjs
-      - name: Test with coverage
-        run: pnpm --filter @mento-protocol/indexer-envio test:coverage
-      - uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
-        if: ${{ !inputs.no_skip_audit && !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') }}
-        with:
-          fail_ci_if_error: false
-          flags: indexer-envio
-          directory: indexer-envio/coverage
-          token: ${{ secrets.CODECOV_TOKEN }}
       - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
         if: always() && !inputs.no_skip_audit
 
@@ -1311,14 +1374,15 @@ jobs:
         run: node scripts/repo-health/check-hermetic-vitest-setup.mjs
       - name: Hermetic Vitest setup consistency suite
         run: node scripts/repo-health/check-hermetic-vitest-setup.test.mjs
-      # The prose check itself moved to the unconditional `guardrail-prose` job
-      # above: this job is path-gated on `rootScripts` and allowed to skip, so a
-      # PR editing only AGENTS.md or the operating card never reached it.
+      # The prose check itself runs in the unconditional
+      # `production-infra-contract` job below: this job is path-gated on
+      # `rootScripts` and allowed to skip, so a PR editing only AGENTS.md or the
+      # operating card never reached it.
       # The suite stays here as well, and only the suite. It carries the
-      # assertion that pins `guardrail-prose`'s own CI wiring, which would be
-      # deleted by the same edit that deletes that job if the job were its only
-      # host. `rootScripts` includes `.github/workflows/**`, so any edit able to
-      # remove that job admits this one and reds here. Each job is the other's
+      # assertion that pins that host's own CI wiring, which would be deleted by
+      # the same edit that unwires the host if the host were its only witness.
+      # `rootScripts` includes `.github/workflows/**`, so any edit able to
+      # unwire it admits this job and reds here. Each job is the other's
       # witness; the duplicate sub-second run is what that costs.
       - name: Guardrail prose pin suite
         run: node scripts/repo-health/check-guardrail-prose.test.mjs
@@ -1469,48 +1533,6 @@ jobs:
       - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
         if: always() && !inputs.no_skip_audit
 
-  guardrail-prose:
-    name: Guardrail prose pins
-    # Unconditional by design (no `if:`), like production-infra-contract and
-    # sentry-suites below. These two commands ran as steps of the path-gated
-    # `scripts` job until review found the hole: that job admits on
-    # `rootScripts` (`scripts/**`) and sits in the `ci` sentinel's
-    # `allowed-skips`, so the exact diff this check exists to catch — one that
-    # edits only AGENTS.md, CLAUDE.md or the operating card and drops a pinned
-    # sentence — skipped the job while the required sentinel stayed green. A
-    # guardrail absent precisely when it is needed is worse than none, and the
-    # Sentry suites were moved out of that same job for the same reason.
-    #
-    # The checker and its suite import only `node:` builtins, so this job is a
-    # checkout, a Node, and two sub-second commands — no `pnpm install`.
-    # `check-guardrail-prose.test.mjs` also asserts this job's own wiring: that
-    # it exists, carries no `if:`, runs both commands, and reaches `ci` without
-    # an allowed-skip. Move or rename it and that suite reds. That assertion
-    # would vanish with the job it protects if this were its only host, so the
-    # path-gated `scripts` job runs the suite a second time: `rootScripts`
-    # includes `.github/workflows/**`, so the very edit that deletes this job
-    # admits that job and reds there instead. The two hosts pin each other.
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ inputs.no_skip_audit && inputs.audit_source_sha || github.sha }}
-          fetch-depth: ${{ inputs.no_skip_audit && '0' || '1' }}
-          persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version-file: .node-version
-          package-manager-cache: false
-      - name: Guardrail prose pins
-        run: node scripts/repo-health/check-guardrail-prose.mjs
-      - name: Guardrail prose pin suite
-        run: node scripts/repo-health/check-guardrail-prose.test.mjs
-      - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
-        if: always() && !inputs.no_skip_audit
-
   docs-checks:
     name: Documentation corpus checks
     needs: changes
@@ -1617,6 +1639,8 @@ jobs:
     # This required job is deliberately unconditional. It validates production
     # infrastructure and the repo-wide issue-board proof for every candidate.
     runs-on: blacksmith-2vcpu-ubuntu-2404
+    # 8 is main's variance-sized cap (#2412), carried forward unmeasured for
+    # this job's new folded command set; re-size after the first main run.
     timeout-minutes: 8
     permissions:
       contents: read
@@ -1639,13 +1663,54 @@ jobs:
           restore-cache: ${{ !inputs.no_skip_audit }}
           write-cache: ${{ !inputs.no_skip_audit && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
       - name: Terraform production infrastructure contract
+        # Deliberately unconditional, and deliberately the first command here.
+        # check-sentry-suites-in-ci-coverage.test.mjs exempts
+        # sentry-provider-contract.test.mjs only while an unconditional step of
+        # this job runs tf-stacks.test.mjs, so this step may never carry an
+        # `if:` — and anything ahead of it that can fail would skip it.
         run: pnpm tf:test
+      # Moved here from the deleted unconditional `guardrail-prose` job, which
+      # paid a whole runner boot for two sub-second commands. This job is the
+      # same kind of host: it carries no `if:`, sits in the `ci` sentinel's
+      # `needs`, and is absent from `allowed-skips`, so the diff these pins
+      # exist to catch — one that edits only AGENTS.md, CLAUDE.md or the
+      # operating card and drops a pinned sentence — still cannot skip them.
+      # `check-guardrail-prose.test.mjs` asserts that wiring by name, and the
+      # path-gated `scripts` job runs the same suite a second time: its
+      # `rootScripts` filter includes `.github/workflows/**`, so the very edit
+      # that unwires this host admits that job and reds there instead.
+      #
+      # That same suite forbids a step-level `if:` on these two, so they sit
+      # between `pnpm tf:test` and the guarded steps below: a prose failure
+      # cannot suppress a retained command, and only a Terraform-contract
+      # failure — which reds this job anyway — defers the prose result to the
+      # next run. They also run after the pnpm-install composite, which owns the
+      # sole pnpm-store cache write and the `.node-version` pin.
+      - name: Guardrail prose pins
+        run: node scripts/repo-health/check-guardrail-prose.mjs
+      - name: Guardrail prose pin suite
+        run: node scripts/repo-health/check-guardrail-prose.test.mjs
       - name: Issue board owner-mutation confinement contract
         if: ${{ !cancelled() }}
         run: pnpm issue:board:test
       - name: Fixed CI contract
         if: ${{ !cancelled() }}
         run: pnpm ci:contract:test
+      # Moved here from the deleted `deps` and `version-skew` jobs. Each was a
+      # separate boot paying checkout plus a full frozen-lockfile install to
+      # run one or two short commands, and each sat in the `ci` sentinel's
+      # `allowed-skips`. Here they are unconditional, so they also stop being
+      # skippable. The package-script pin validator above pins all three
+      # aliases before this job trusts them.
+      - name: dependency-cruiser (cross-package boundaries, blocking)
+        if: ${{ !cancelled() }}
+        run: pnpm code-health:deps
+      - name: Version skew check
+        if: ${{ !cancelled() }}
+        run: pnpm skew:check
+      - name: Version skew checker tests
+        if: ${{ !cancelled() }}
+        run: pnpm skew:check:test
       - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
         if: always() && !inputs.no_skip_audit
 
@@ -1704,87 +1769,26 @@ jobs:
         # non-Markdown doc-asset diff skipped it entirely.
         run: node scripts/sentry/ci-wiring/check-sentry-suites-in-ci.test.mjs
 
-  version-skew:
-    name: Version skew
-    needs: changes
-    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.versionSkew == 'true'
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    timeout-minutes: 8
-    permissions:
-      contents: read
-      actions: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ inputs.no_skip_audit && inputs.audit_source_sha || github.sha }}
-          fetch-depth: ${{ inputs.no_skip_audit && '0' || '1' }}
-          persist-credentials: false
-      # GitHub resolves $/ from the running commit; actionlint lacks support.
-      # trunk-ignore(actionlint/action)
-      - uses: $/.github/actions/pnpm-install
-        with:
-          restore-cache: ${{ !inputs.no_skip_audit }}
-      - name: Version skew check
-        # Required via the `ci` sentinel. Prevents catalog/literal package drift
-        # in both agent and non-agent PRs that touch manifests or pnpm config.
-        run: pnpm skew:check
-      - name: Version skew checker tests
-        run: pnpm skew:check:test
-      - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
-        if: always() && !inputs.no_skip_audit
-
-  deps:
-    name: Code Health (cross-package)
-    needs: changes
-    # Run on any workspace change. dep-cruiser is monorepo-wide — the rules
-    # for "shared-config must stay a leaf" and "indexer-envio is isolated"
-    # only fire when there's a path between packages, so we want every
-    # workspace edit to recheck the architecture. Also fires on `codeHealth`
-    # (dep-cruiser config + knip configs) so a PR that only edits the
-    # rule file is validated against the codebase before merge.
-    if: needs.changes.outputs.forceAll == 'true' || needs.changes.outputs.shared == 'true' || needs.changes.outputs.ui == 'true' || needs.changes.outputs.indexer == 'true' || needs.changes.outputs.bridge == 'true' || needs.changes.outputs.integrationProbes == 'true' || needs.changes.outputs.aegis == 'true' || needs.changes.outputs.codeHealth == 'true'
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    timeout-minutes: 8
-    permissions:
-      contents: read
-      actions: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ inputs.no_skip_audit && inputs.audit_source_sha || github.sha }}
-          fetch-depth: ${{ inputs.no_skip_audit && '0' || '1' }}
-          persist-credentials: false
-      # GitHub resolves $/ from the running commit; actionlint lacks support.
-      # trunk-ignore(actionlint/action)
-      - uses: $/.github/actions/pnpm-install
-        with:
-          restore-cache: ${{ !inputs.no_skip_audit }}
-      - name: dependency-cruiser (cross-package boundaries, blocking)
-        run: pnpm code-health:deps
-      - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
-        if: always() && !inputs.no_skip_audit
-
   ci:
     name: ci
     needs:
       [
         changes,
         shared,
+        ui-static,
         ui,
-        indexer,
+        indexer-test,
+        indexer-checks,
         bridge,
         integration-probes,
         aegis,
         alerts,
         gov-watchdog,
         terraform,
-        deps,
         scripts,
         docs-checks,
-        guardrail-prose,
         production-infra-contract,
         sentry-suites,
-        version-skew,
       ]
     if: always()
     runs-on: ubuntu-latest
@@ -1797,7 +1801,7 @@ jobs:
         if: ${{ !inputs.no_skip_audit }}
         with:
           jobs: ${{ toJSON(needs) }}
-          allowed-skips: shared,ui,indexer,bridge,integration-probes,aegis,alerts,gov-watchdog,terraform,deps,scripts,docs-checks,version-skew
+          allowed-skips: shared,ui-static,ui,indexer-test,indexer-checks,bridge,integration-probes,aegis,alerts,gov-watchdog,terraform,scripts,docs-checks
       - name: Require every no-skip job to pass
         if: ${{ inputs.no_skip_audit }}
         uses: re-actors/alls-green@b5b5b37504aa4183270bd3d855c52a67f212be35 # v1.3.0

@@ -362,10 +362,9 @@ The required contexts are exactly:
 - `ci`, app 15368.
 - `Sentry suites`, app 15368.
 
-The existing `ci` aggregate names 19 prerequisite jobs. Its conditional-job set
-equals its `allowed-skips` set. `changes`, `guardrail-prose`,
-`production-infra-contract`, and `sentry-suites` cannot skip. This issue does
-not alter that contract.
+The existing `ci` aggregate names 16 prerequisite jobs. Its conditional-job set
+equals its `allowed-skips` set. `changes`, `production-infra-contract`, and
+`sentry-suites` cannot skip. This issue does not alter that contract.
 
 Current pull request authority exceptions remain in place for Phase 0:
 
