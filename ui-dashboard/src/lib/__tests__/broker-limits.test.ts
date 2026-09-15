@@ -178,6 +178,15 @@ describe("worstBrokerRow", () => {
     expect(worstBrokerRow([looser, tighter])?.token).toBe(AUDM);
   });
 
+  it("skips a config-known leg whose state is still unread", () => {
+    // Both legs read 0.0000, so the first one wins on a `>` comparison. The
+    // unread leg renders as "—" downstream, hiding the leg that has a reading.
+    const unread = row({ token: AUDM, stateKnown: false });
+    const read = row({ token: USDM, id: "usdm" });
+    expect(worstBrokerRow([unread, read])?.token).toBe(USDM);
+    expect(worstBrokerRow([unread])).toBeNull();
+  });
+
   it("skips legs with no enabled window", () => {
     const unconfigured = row({ token: AUDM, configKnown: false });
     const configured = row({

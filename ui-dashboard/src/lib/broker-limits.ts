@@ -177,6 +177,10 @@ export function worstBrokerRow(
   let worst: BrokerTradingLimitRow | null = null;
   let worstPressure = -1;
   for (const row of rows) {
+    // A config-known row whose state is still unread carries zero pressure.
+    // Picking it would pin the tile to a row the consumers then render as "—",
+    // hiding a later row that has a real reading at the same pressure.
+    if (!row.stateKnown) continue;
     const windows = enabledWindows(row);
     if (windows.length === 0) continue;
     const pressure = Math.max(

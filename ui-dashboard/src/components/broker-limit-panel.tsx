@@ -20,8 +20,9 @@ import { tokenSymbol } from "@/lib/tokens";
 import type { BrokerTradingLimitRow, Pool } from "@/lib/types";
 
 const FRESHNESS_NOTE =
-  "Re-read from the Broker on swaps for this exchange, at most every 5 minutes " +
-  "per token. Grafana and Aegis poll the same on-chain state every 10 seconds.";
+  "Re-read from the Broker on swaps for this exchange: on the first swap once " +
+  "the stored state is 5 minutes old, and on every swap while pressure is at " +
+  "least 80%. Grafana and Aegis poll the same on-chain state every 10 seconds.";
 
 /**
  * Trading Limits panel for a VirtualPool. The wrapper itself has no limits —

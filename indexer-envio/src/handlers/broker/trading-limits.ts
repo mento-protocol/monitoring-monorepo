@@ -182,7 +182,7 @@ async function applyLeg(
     stateBlock: args.blockNumber,
     stateTimestamp: args.blockTimestamp,
   });
-  args.context.BrokerTradingLimit.set(row);
+  args.context.BrokerTradingLimit.set(existing ? { ...existing, ...row } : row);
   return { row, adopted: true };
 }
 
@@ -329,7 +329,7 @@ indexer.onEvent(
       blockNumber: asBigInt(event.block.number),
       blockTimestamp: asBigInt(event.block.timestamp),
     });
-    context.BrokerTradingLimit.set(row);
+    context.BrokerTradingLimit.set(existing ? { ...existing, ...row } : row);
     await refoldPool(
       context,
       wrapped.poolId,
