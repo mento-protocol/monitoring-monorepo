@@ -14,8 +14,11 @@ const config = {
   plugins: ["@stryker-mutator/vitest-runner"],
   testRunner: "vitest",
   mutate: ["test/harness-canary/subject.ts"],
-  // No file reporters: the canary must not overwrite the real run's report.
-  reporters: ["clear-text"],
+  // The runner reads this JSON report to reject a run with no mutants, which
+  // scores NaN and clears every threshold. Its own file name keeps it away
+  // from the real run's `reports/mutation/mutation.json`.
+  reporters: ["clear-text", "json"],
+  jsonReporter: { fileName: "reports/mutation/harness-canary.json" },
   tempDirName: ".stryker-tmp-canary",
   cleanTempDir: "always",
   thresholds: { high: 100, low: 100, break: 100 },

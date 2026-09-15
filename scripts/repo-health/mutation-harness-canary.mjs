@@ -11,14 +11,23 @@
  * while every test passed, and each package's real run read as a test-strength
  * collapse.
  *
+ * Stryker's exit code alone is not enough. A run that generates no valid
+ * mutants scores NaN, and `NaN < break` is false, so Stryker exits 0. This
+ * runner therefore reads the canary's JSON report and requires at least one
+ * mutant with every mutant detected.
+ *
  * Run it from a package root, before that package's real mutation run.
  */
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 
 const packageRoot = process.cwd();
 const packageName = path.basename(packageRoot);
+// `stryker.canary.config.mjs` writes this. The real run writes
+// `reports/mutation/mutation.json`, so the two never collide.
+const reportFile = path.join("reports", "mutation", "harness-canary.json");
+const reportPath = path.join(packageRoot, reportFile);
 
 function installedVersion(dependency) {
   try {
@@ -34,32 +43,79 @@ function installedVersion(dependency) {
   }
 }
 
+/**
+ * Print the diagnostic and exit. `status` carries Stryker's own exit code when
+ * it has one.
+ */
+function reportBroken(reason, status) {
+  console.error(
+    [
+      "",
+      "MUTATION HARNESS BROKEN",
+      `package: ${packageName}`,
+      `reason: ${reason}`,
+      `vitest: ${installedVersion("vitest")}`,
+      `@stryker-mutator/vitest-runner: ${installedVersion("@stryker-mutator/vitest-runner")}`,
+      `@stryker-mutator/core: ${installedVersion("@stryker-mutator/core")}`,
+      "",
+      "Every canary mutant is killed by its own test, so the canary fails only",
+      "when Stryker stops generating or activating mutants — most often a",
+      "vitest major the installed Stryker vitest runner does not support. Fix",
+      "the runner or the vitest version. Never lower a break floor to clear",
+      "this.",
+      "See docs/mutation-testing.md.",
+      "",
+    ].join("\n"),
+  );
+  process.exit(status);
+}
+
+/** Every mutant the canary report recorded. */
+function reportedMutants() {
+  const report = JSON.parse(readFileSync(reportPath, "utf8"));
+  return Object.values(report.files ?? {}).flatMap(
+    (file) => file.mutants ?? [],
+  );
+}
+
+// A stale report from an earlier run must never stand in for this one.
+rmSync(reportPath, { force: true });
+
 const result = spawnSync("stryker", ["run", "stryker.canary.config.mjs"], {
   cwd: packageRoot,
   stdio: "inherit",
 });
 
-if (result.status === 0) {
-  console.log(`Mutation harness canary passed for ${packageName}.`);
-  process.exit(0);
+if (result.status !== 0) {
+  reportBroken("Stryker exited non-zero.", result.status ?? 1);
 }
 
-console.error(
-  [
-    "",
-    "MUTATION HARNESS BROKEN",
-    `package: ${packageName}`,
-    `vitest: ${installedVersion("vitest")}`,
-    `@stryker-mutator/vitest-runner: ${installedVersion("@stryker-mutator/vitest-runner")}`,
-    `@stryker-mutator/core: ${installedVersion("@stryker-mutator/core")}`,
-    "",
-    "Every canary mutant is killed by its own test, so Stryker scored below",
-    "100% because it stopped activating mutants — most often a vitest major",
-    "the installed Stryker vitest runner does not support. Fix the runner or",
-    "the vitest version. Never lower a break floor to clear this.",
-    "See docs/mutation-testing.md.",
-    "",
-  ].join("\n"),
+let mutants = [];
+try {
+  mutants = reportedMutants();
+} catch {
+  reportBroken(`Stryker wrote no readable report at ${reportFile}.`, 1);
+}
+
+if (mutants.length === 0) {
+  reportBroken(
+    "Stryker generated no mutants, so it scored NaN and cleared the break threshold.",
+    1,
+  );
+}
+
+const undetected = mutants.filter(
+  (mutant) => mutant.status !== "Killed" && mutant.status !== "Timeout",
 );
 
-process.exit(result.status ?? 1);
+if (undetected.length > 0) {
+  reportBroken(
+    `Stryker left ${undetected.length} of ${mutants.length} canary mutants undetected.`,
+    1,
+  );
+}
+
+console.log(
+  `Mutation harness canary passed for ${packageName}: ${mutants.length} mutants, all detected.`,
+);
+process.exit(0);

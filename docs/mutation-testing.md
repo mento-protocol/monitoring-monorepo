@@ -41,9 +41,12 @@ test suite or a dead harness? It reuses the package's own
 runner and config the real run uses. Its test imports the fixture by a
 relative path, so it does not prove that a path alias such as the dashboard's
 `@` still resolves inside the sandbox. Point a canary fixture at the alias if
-a real target ever becomes reachable only through one. On failure
-`scripts/repo-health/mutation-harness-canary.mjs` prints
-`MUTATION HARNESS BROKEN` with the installed vitest and Stryker versions.
+a real target ever becomes reachable only through one.
+`scripts/repo-health/mutation-harness-canary.mjs` runs Stryker and then reads
+the canary's own JSON report, because a run that generates no mutants scores
+`NaN`, clears every `break` floor and exits 0. It requires at least one mutant
+and every mutant detected. On failure it prints `MUTATION HARNESS BROKEN` with
+the reason and the installed vitest and Stryker versions.
 `.github/workflows/mutation-testing.yml` runs it before each package's
 baseline. Never lower a `break` floor to clear a canary failure.
 
