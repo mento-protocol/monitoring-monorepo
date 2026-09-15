@@ -11,6 +11,7 @@ const PROBLEM_HEADING_RE = /^##\s+The Problem\s*$/;
 const SOLUTION_HEADING_RE = /^##\s+The Solution\s*$/;
 const H2_HEADING_RE = /^ {0,3}##(?:[\t ]+|$)/;
 const CHECKLIST_HEADING_RE = /^ {0,3}##[\t ]+Checklist\s*$/;
+const TASK_LIST_ITEM_RE = /^ {0,3}[-*+][\t ]+\[[ xX]\][\t ]/;
 // Only the review bot's own appended section is exempt. A prefix match would
 // also exempt an authored heading such as '## Summary by network', and with it
 // every word under that heading.
@@ -28,16 +29,34 @@ const HTML_ENTITY_RE =
   /&(?:#([0-9]+)|#[xX]([0-9A-Fa-f]+)|([A-Za-z][A-Za-z0-9]*));/g;
 // GitHub renders a character reference as a character, so the counter decodes
 // one rather than dropping it: prose encoded as `&#119;`-style references is
-// prose. Named references outside this set become a space, which at worst drops
-// one letter from a word the surrounding text already counts.
-const NAMED_ENTITIES = new Map([
+// prose. Listed here are the names that render as nothing a word can be built
+// from; every other name decodes to a counting letter, so an unlisted name such
+// as `&Aacute;` adds a word instead of disappearing.
+const BLANK_ENTITIES = new Set([
+  "nbsp",
+  "ensp",
+  "emsp",
+  "emsp13",
+  "emsp14",
+  "numsp",
+  "puncsp",
+  "thinsp",
+  "hairsp",
+  "zwnj",
+  "zwj",
+  "lrm",
+  "rlm",
+  "shy",
+]);
+const PUNCTUATION_ENTITIES = new Map([
   ["amp", "&"],
   ["lt", "<"],
   ["gt", ">"],
   ["quot", '"'],
   ["apos", "'"],
-  ["nbsp", " "],
 ]);
+// Any other name renders as at least one visible character, so it counts.
+const ENTITY_PLACEHOLDER = "x";
 const DEFERRALS_HEADING_RE = /^##\s+Deferrals\s*$/;
 const DEFERRALS_STYLE_RE = /^ {0,3}#{1,6}\s*Deferrals([^A-Za-z0-9_]|$)/i;
 const NONE_RE = /^\s*(?:[-*]\s+)?none\s*\.?\s*$/i;
@@ -212,7 +231,9 @@ function decodeCharacterReference(match, decimal, hex, name) {
     if (code >= 0xd800 && code <= 0xdfff) return " ";
     return String.fromCodePoint(code);
   }
-  return NAMED_ENTITIES.get(name.toLowerCase()) ?? " ";
+  const lowered = name.toLowerCase();
+  if (BLANK_ENTITIES.has(lowered)) return " ";
+  return PUNCTUATION_ENTITIES.get(lowered) ?? ENTITY_PLACEHOLDER;
 }
 
 function htmlWordCount(value) {
@@ -270,21 +291,56 @@ function sectionLines(body, headingPattern) {
 }
 
 /**
+ * Whether a run of lines is the template's checklist rather than prose parked
+ * under its heading. Every line must be blank or a task-list item, so an
+ * author cannot exempt a section by naming it `## Checklist`.
+ */
+function isTaskListSection(lines) {
+  return lines.every(
+    (line) => line.trim() === "" || TASK_LIST_ITEM_RE.test(line),
+  );
+}
+
+/**
  * Words the author wrote. Drops the template's own checklist and the review
  * bot's appended summary section, then counts what is left. HTML comments and
  * fenced code are already gone from the body this receives.
  */
 function authoredWordCount(body) {
+  const lines = linesOf(body);
   const kept = [];
-  let excluded = false;
+  let pending = null;
 
-  for (const line of linesOf(body)) {
+  const flush = () => {
+    if (pending === null) return;
+    // A checklist keeps its exemption only while it still looks like one; the
+    // bot's own section is exempt whatever it holds.
+    const isExempt = pending.checklist
+      ? isTaskListSection(pending.lines)
+      : true;
+    if (!isExempt) kept.push(pending.heading, ...pending.lines);
+    pending = null;
+  };
+
+  for (const line of lines) {
     if (H2_HEADING_RE.test(line)) {
-      excluded =
-        CHECKLIST_HEADING_RE.test(line) || BOT_SUMMARY_HEADING_RE.test(line);
+      flush();
+      if (CHECKLIST_HEADING_RE.test(line)) {
+        pending = { heading: line, lines: [], checklist: true };
+        continue;
+      }
+      if (BOT_SUMMARY_HEADING_RE.test(line)) {
+        pending = { heading: line, lines: [], checklist: false };
+        continue;
+      }
     }
-    if (!excluded) kept.push(line);
+    if (pending !== null) {
+      pending.lines.push(line);
+      continue;
+    }
+    kept.push(line);
   }
+  flush();
 
   return visibleWordCount(kept.join("\n"));
 }

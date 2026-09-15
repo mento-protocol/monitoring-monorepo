@@ -208,6 +208,39 @@ test("excludes a bot-appended Summary by section from the word count", () => {
   );
 });
 
+test("counts prose parked under a Checklist heading", () => {
+  assertFail(
+    sizedBody({
+      tldrWords: 20,
+      problemWords: 100,
+      solutionWords: 275,
+      extra: `
+## Checklist
+
+${filler(60)}
+`,
+    }),
+    /authored PR description is 461 words; the ceiling is 400/,
+  );
+});
+
+test("counts prose written as unlisted named character references", () => {
+  const encoded = "&Aacute;&Aacute;&Aacute;&Aacute;";
+  assertFail(
+    sizedBody({
+      tldrWords: 20,
+      problemWords: 100,
+      solutionWords: 274,
+      extra: `
+## Details
+
+<p>${Array.from({ length: 50 }, () => encoded).join(" ")}</p>
+`,
+    }),
+    /authored PR description is 450 words; the ceiling is 400/,
+  );
+});
+
 test("counts an authored section whose heading only looks like the bot's", () => {
   assertFail(
     sizedBody({
