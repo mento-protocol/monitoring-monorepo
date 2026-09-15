@@ -311,8 +311,9 @@ polled. Do not foreground-poll and never sleep-poll.
      button or a web-UI edit, because each costs a review event, and a base
      merge or rebase after the request can draw an unprompted full re-review of
      the whole PR; batch every fix commit into one push; post at most one
-     marked request per head and at most two per PR, the opening closeout and
-     one after review fixes; and never post while a CodeRabbit check is running
+     marked request per accepted head and at most two per PR, the opening
+     closeout and one after review fixes (a refused request may be retried once,
+     per that note); and never post while a CodeRabbit check is running
      on the current head, because the request supersedes that review and the
      vendor charges the one it discards. The local probe publishes that
      decision as `gates.codeRabbitReviewSignal.fallbackAction`; its precedence
