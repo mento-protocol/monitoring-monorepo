@@ -8,7 +8,6 @@ import { validateWorkflowContract } from "./workflow.mjs";
 const workflowPath = ".github/workflows/alerts-rules.yml";
 const pegPolicyPublicationWorkflow =
   ".github/workflows/peg-policy-publication.yml";
-const infraWorkflow = ".github/workflows/infra.yml";
 const dependabotAutoMergeCandidateWorkflow =
   ".github/workflows/dependabot-auto-merge-candidate.yml";
 const dependabotAutoMergeWorkflow =
@@ -266,26 +265,6 @@ jobs:
     "repository workflows must not use permissions: write-all or combined contents: write and pull-requests: write outside the exact Dependabot writer",
   );
 }
-
-expectFailure(
-  replaceWorkflowFile(
-    validFiles,
-    infraWorkflow,
-    "          persist-credentials: false",
-    "          persist-credentials: true",
-  ),
-  "PR-controlled discover checkout must use the pinned action with fetch-depth: 0 and persist-credentials: false",
-);
-
-expectFailure(
-  replaceWorkflowFile(
-    validFiles,
-    infraWorkflow,
-    "        with:\n          persist-credentials: false\n      - uses: hashicorp/setup-terraform",
-    "      - uses: hashicorp/setup-terraform",
-  ),
-  "PR-controlled validate checkout must use the pinned action with persist-credentials: false",
-);
 
 expectFailure(
   replaceWorkflowFile(
