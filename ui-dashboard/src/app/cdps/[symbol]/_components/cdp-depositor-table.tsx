@@ -1,7 +1,10 @@
+"use client";
+
 import { AddressLink } from "@/components/address-link";
 import { EmptyBox } from "@/components/feedback";
 import { Table, Row, Th, Td } from "@/components/table";
-import { relativeTime } from "@/lib/format";
+import { relativeTimeOrTimestamp } from "@/lib/format";
+import { useNowSeconds } from "@/hooks/use-now-seconds";
 import {
   CDP_STABILITY_POOL_DEPOSITORS_DETAIL_LIMIT,
   type CdpDepositor,
@@ -24,6 +27,7 @@ export function DepositorTable({
   chainId: number;
   sourceSplitWarning: string | null;
 }) {
+  const nowSeconds = useNowSeconds();
   const hasSourceSplitData = depositors.some(
     (depositor) =>
       depositor.cumulativeRebalanceUsed !== undefined &&
@@ -80,7 +84,7 @@ export function DepositorTable({
                   {formatTokenAmount(depositor.stashedColl, "USDm")}
                 </Td>
                 <Td align="right" className={compactDepositorCellClassName}>
-                  {relativeTime(depositor.lastUpdatedAt)}
+                  {relativeTimeOrTimestamp(depositor.lastUpdatedAt, nowSeconds)}
                 </Td>
               </Row>
             ))}

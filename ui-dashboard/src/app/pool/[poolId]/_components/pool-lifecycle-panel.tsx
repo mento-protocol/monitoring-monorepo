@@ -4,7 +4,12 @@ import { Stat } from "@/components/stat";
 import { useNetwork } from "@/components/network-provider";
 import { useGQL } from "@/lib/graphql";
 import { hasErrorWithoutData, isLoadingWithoutData } from "@/lib/swr-state";
-import { formatTimestamp, relativeTime, truncateAddress } from "@/lib/format";
+import {
+  relativeTimeOrTimestamp,
+  timestampOrUtc,
+  truncateAddress,
+} from "@/lib/format";
+import { useNowSeconds } from "@/hooks/use-now-seconds";
 import { VIRTUAL_POOL_LIFECYCLE } from "@/lib/queries";
 import type { Pool, VirtualPoolLifecycle } from "@/lib/types";
 
@@ -15,6 +20,7 @@ import type { Pool, VirtualPoolLifecycle } from "@/lib/types";
  */
 export function PoolLifecyclePanel({ pool }: { pool: Pool }) {
   const { network } = useNetwork();
+  const nowSeconds = useNowSeconds();
   const { data, isLoading, error } = useGQL<{
     VirtualPoolLifecycle: VirtualPoolLifecycle[];
   }>(VIRTUAL_POOL_LIFECYCLE, { poolId: pool.id });
@@ -55,9 +61,9 @@ export function PoolLifecyclePanel({ pool }: { pool: Pool }) {
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-indigo-300 hover:text-indigo-400 transition-colors"
-                title={formatTimestamp(deployed.blockTimestamp)}
+                title={timestampOrUtc(deployed.blockTimestamp, nowSeconds)}
               >
-                {relativeTime(deployed.blockTimestamp)}
+                {relativeTimeOrTimestamp(deployed.blockTimestamp, nowSeconds)}
               </a>
             }
           />
@@ -85,9 +91,9 @@ export function PoolLifecyclePanel({ pool }: { pool: Pool }) {
               target="_blank"
               rel="noopener noreferrer"
               className="text-amber-300 hover:text-amber-200 transition-colors"
-              title={formatTimestamp(deprecated.blockTimestamp)}
+              title={timestampOrUtc(deprecated.blockTimestamp, nowSeconds)}
             >
-              {relativeTime(deprecated.blockTimestamp)}
+              {relativeTimeOrTimestamp(deprecated.blockTimestamp, nowSeconds)}
             </a>
           }
         />

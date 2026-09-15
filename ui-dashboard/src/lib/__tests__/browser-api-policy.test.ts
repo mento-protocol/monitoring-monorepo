@@ -15,6 +15,7 @@ const OG_FIXTURE_PATH = "src/lib/homepage-og.ts";
 const TEST_FIXTURE_PATH = "src/lib/__tests__/browser-api-policy.test.ts";
 const SYMBOL_AWARE_RULE_ID =
   "browser-api-policy/no-unsupported-receiver-property";
+const SSR_CLOCK_RULE_ID = "ssr-clock-policy/no-raw-clock-format-in-client";
 // One ESLint program load lints every fixture below, in a subprocess shared by
 // the whole file. Its cost is CPU-bound and near-constant (~17s of user time on
 // a 12-core mac); what varies is how much of a core it gets. Measured while the
@@ -51,7 +52,12 @@ type LintCase =
   | "api"
   | "og"
   | "test"
-  | "rootServer";
+  | "rootServer"
+  | "clockClient"
+  | "clockServer"
+  | "clockNamespaceClient"
+  | "clockHookModule"
+  | "clockSsrSafe";
 type BrowserApiMessage = { ruleId: string; message: string };
 const lintResultsPromise = execFileAsync(
   process.execPath,
@@ -265,6 +271,85 @@ describe("browser runtime API policy", () => {
       expect(rules.property).toBeUndefined();
       expect(rules.symbolAware).toBeUndefined();
       expect(messages).toEqual([]);
+    },
+    CONFIG_LOOKUP_TIMEOUT_MS,
+  );
+});
+
+// Negative control for the SSR-safe clock policy: the same `@/lib/format`
+// import is an error in a `"use client"` module and fine in a server one, so a
+// pass here cannot come from the rule simply never running.
+describe("SSR-safe clock policy", () => {
+  beforeAll(async () => {
+    lintResults = await lintResultsPromise;
+  }, LINT_RUNNER_TIMEOUT_MS);
+
+  it("names the replacement hook for each raw formatter in a client module", async () => {
+    const messages = await browserApiMessages("clockClient");
+
+    expect(messages).toHaveLength(2);
+    // Index by the formatter name the message opens with, so the loop below is
+    // a lookup rather than a scan per iteration.
+    const byFormatter = new Map(
+      messages.map((entry) => [entry.message.split(" ")[0], entry]),
+    );
+    for (const [formatter, hook, pure] of [
+      ["relativeTime", "useSsrSafeRelative", "relativeTimeOrTimestamp"],
+      ["formatTimestamp", "useSsrSafeTimestamp", "timestampOrUtc"],
+    ] as const) {
+      const message = byFormatter.get(formatter);
+      expect(message?.ruleId).toBe(SSR_CLOCK_RULE_ID);
+      expect(message?.message).toContain(hook);
+      expect(message?.message).toContain(`${pure}(ts, now)`);
+      expect(message?.message).toContain("useNowSeconds()");
+    }
+  });
+
+  it("reports the formatters reached through a namespace import", async () => {
+    const messages = await browserApiMessages("clockNamespaceClient");
+
+    expect(messages).toHaveLength(2);
+    expect(messages.every(({ ruleId }) => ruleId === SSR_CLOCK_RULE_ID)).toBe(
+      true,
+    );
+  });
+
+  it("allows the same import in a server module", async () => {
+    const messages = await browserApiMessages("clockServer");
+
+    expect(messages).toEqual([]);
+  });
+
+  it("allows the hook module that wraps the raw formatters", async () => {
+    const messages = await browserApiMessages("clockHookModule");
+
+    expect(messages).toEqual([]);
+  });
+
+  it("allows the SSR-safe helpers in a client module", async () => {
+    const messages = await browserApiMessages("clockSsrSafe");
+
+    expect(messages).toEqual([]);
+  });
+
+  it(
+    "configures the rule for client files and not for server or test files",
+    async () => {
+      const [client, server, test] = await Promise.all([
+        eslint.calculateConfigForFile(
+          fileURLToPath(new URL(CLIENT_FIXTURE_PATH, DASHBOARD_ROOT_URL)),
+        ),
+        eslint.calculateConfigForFile(
+          fileURLToPath(new URL(SERVER_FIXTURE_PATH, DASHBOARD_ROOT_URL)),
+        ),
+        eslint.calculateConfigForFile(
+          fileURLToPath(new URL(TEST_FIXTURE_PATH, DASHBOARD_ROOT_URL)),
+        ),
+      ]);
+
+      expect(client?.rules?.[SSR_CLOCK_RULE_ID]).toEqual([2]);
+      expect(server?.rules?.[SSR_CLOCK_RULE_ID]).toBeUndefined();
+      expect(test?.rules?.[SSR_CLOCK_RULE_ID]).toBeUndefined();
     },
     CONFIG_LOOKUP_TIMEOUT_MS,
   );

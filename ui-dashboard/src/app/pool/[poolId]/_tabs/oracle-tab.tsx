@@ -19,11 +19,12 @@ import {
   SEARCH_BOOTSTRAP_LIMIT,
   SEARCH_MAX_LIMIT,
 } from "@/lib/constants";
+import { parseOraclePriceToNumber, timestampOrUtc } from "@/lib/format";
 import {
-  formatTimestamp,
-  parseOraclePriceToNumber,
-  relativeTime,
-} from "@/lib/format";
+  useNowSeconds,
+  useSsrSafeRelative,
+  useSsrSafeTimestamp,
+} from "@/hooks/use-now-seconds";
 import { useGQL } from "@/lib/graphql";
 import { useWindowedHistory } from "@/lib/use-windowed-history";
 import {
@@ -432,6 +433,7 @@ function OracleChartScrollbackStatus({
   reachedStart: boolean;
   oldestLoadedTs: number;
 }) {
+  const nowSeconds = useNowSeconds();
   // Head-poll failure with nothing rendered yet: the chart area is blank, so
   // tell the operator it's a fetch failure (not "no oracle data"). SWR retries
   // the head automatically. When history IS already rendered we stay quiet —
@@ -453,7 +455,7 @@ function OracleChartScrollbackStatus({
   if (olderError) {
     const back =
       Number.isFinite(oldestLoadedTs) && oldestLoadedTs > 0
-        ? ` back to ${formatTimestamp(String(oldestLoadedTs))}`
+        ? ` back to ${timestampOrUtc(String(oldestLoadedTs), nowSeconds)}`
         : "";
     return (
       <p className="px-1 -mt-3 mb-4 text-xs text-amber-400" role="status">
@@ -646,6 +648,8 @@ function OracleSnapshotRow({
   const txUrl = row.txHash
     ? `${network.explorerBaseUrl}/tx/${row.txHash}`
     : null;
+  const timestampTitle = useSsrSafeTimestamp(row.timestamp);
+  const timestampRelative = useSsrSafeRelative(row.timestamp);
 
   return (
     <Row>
@@ -673,7 +677,7 @@ function OracleSnapshotRow({
       <Td mono small align="right">
         {parseOraclePriceToNumber(row.oraclePrice, sym0).toFixed(6)}
       </Td>
-      <Td small muted title={formatTimestamp(row.timestamp)}>
+      <Td small muted title={timestampTitle}>
         {txUrl ? (
           <a
             href={txUrl}
@@ -681,10 +685,10 @@ function OracleSnapshotRow({
             rel="noopener noreferrer"
             className="hover:text-indigo-400 transition-colors"
           >
-            {relativeTime(row.timestamp)}
+            {timestampRelative}
           </a>
         ) : (
-          relativeTime(row.timestamp)
+          timestampRelative
         )}
       </Td>
     </Row>

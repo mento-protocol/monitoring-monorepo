@@ -1,6 +1,9 @@
+"use client";
+
 import { AddressLink } from "@/components/address-link";
 import { ChainIcon } from "@/components/chain-icon";
-import { formatUSD, relativeTime } from "@/lib/format";
+import { formatUSD } from "@/lib/format";
+import { useSsrSafeRelative } from "@/hooks/use-now-seconds";
 import {
   weiToUsd,
   type TraderWindowRow,
@@ -376,6 +379,7 @@ function OutlierVolumeLink({
   txHash: string;
   blockTimestamp: string;
 }) {
+  const swappedRelative = useSsrSafeRelative(blockTimestamp);
   const label = outlierVolumeLabel(value);
   if (!label) return <span className="text-slate-500">—</span>;
   if (!txUrl) {
@@ -387,7 +391,7 @@ function OutlierVolumeLink({
       href={txUrl}
       target="_blank"
       rel="noopener noreferrer"
-      title={`${label} · ${txHash} · ${relativeTime(blockTimestamp)}`}
+      title={`${label} · ${txHash} · ${swappedRelative}`}
       aria-label={`View transaction ${shortTxHash(txHash)} for outlier swap volume ${label}`}
       className="inline-block max-w-full truncate whitespace-nowrap text-indigo-300 hover:text-indigo-200"
     >

@@ -275,6 +275,28 @@ tldr: **ruleset-required** workflows (`ci`, `Code Quality`, `Sentry suites`, the
 - Audit the full import graph when moving a constant. A clean typecheck does
   not prove the Next server bundle is free of SWR/React client dependencies.
 
+### Client-side clock formatters
+
+- A `"use client"` module renders twice against two clocks: the Next server (or
+  a cached SSR payload) and the browser's hydration render. `relativeTime` and
+  `formatTimestamp` read wall time during render, so the two renders disagree
+  and React reports a hydration mismatch — the class that forced PR #2446 to
+  zero out a fixture timestamp (issue #2448).
+- Use `useSsrSafeRelative(ts)` / `useSsrSafeTimestamp(ts)` for a single value,
+  and `useNowSeconds()` once plus `relativeTimeOrTimestamp(ts, now)` /
+  `timestampOrUtc(ts, now)` for rows inside a loop, where a hook cannot run.
+  All four live in `ui-dashboard/src/hooks/use-now-seconds.ts` and
+  `ui-dashboard/src/lib/format.ts`.
+- `ssr-clock-policy/no-raw-clock-format-in-client` enforces this. Server
+  components, OG helpers, and tests keep the raw formatters — they render once.
+- The rule reads a module's own `"use client"` directive. A module that carries
+  no directive but is imported only from client modules still renders twice and
+  is unguarded. Give such a module the directive when you add a clock read to
+  it, so the rule covers it.
+- The rule covers `relativeTime` and `formatTimestamp` only. `relativeTimeFromIso`
+  has no SSR-safe wrapper, and a bare `Date.now()` read during render is the same
+  hazard. Check both by hand.
+
 ### Migration discipline
 
 - Don't remove an env-var fallback in the same PR that introduces the new var. Keep dual-read for one release so mid-deploy state doesn't break

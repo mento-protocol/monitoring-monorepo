@@ -5,7 +5,8 @@ import type { ReactNode } from "react";
 import { AddressLink } from "@/components/address-link";
 import { Tooltip } from "@/components/tooltip";
 import { Stat } from "@/components/stat";
-import { relativeTime, truncateAddress } from "@/lib/format";
+import { truncateAddress } from "@/lib/format";
+import { useSsrSafeRelative } from "@/hooks/use-now-seconds";
 import { tokenSymbol } from "@/lib/tokens";
 import type { Network } from "@/lib/networks";
 import type { BiPoolExchangeRow, Pool } from "@/lib/types";
@@ -87,6 +88,7 @@ function V2ExchangeStats({
   // ES2017 tsconfig target → use BigInt() constructor instead of `Nn` literals.
   const spreadBps = formatSpreadBps(config.spread);
   const resetMins = Number(config.referenceRateResetFrequency) / 60;
+  const lastResetRelative = useSsrSafeRelative(config.lastBucketUpdate);
 
   return (
     <dl className="grid grid-cols-2 gap-x-4 gap-y-4 text-sm sm:grid-cols-3 lg:grid-cols-5">
@@ -112,7 +114,7 @@ function V2ExchangeStats({
       />
       <Stat
         label="Last Reset"
-        value={relativeTime(config.lastBucketUpdate)}
+        value={lastResetRelative}
         title={config.lastBucketUpdate}
       />
       <OracleFeedStat

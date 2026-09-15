@@ -205,6 +205,110 @@ const browserApiPlugin = {
   },
 };
 
+// Clock formatters that read wall time during render. A `"use client"` module
+// renders twice against two different clocks — once on the server (or in the
+// statically cached SSR payload) and once in the browser's hydration render —
+// so `relativeTime`/`formatTimestamp` produce two different strings and React
+// reports a hydration mismatch. The SSR-safe hooks return a deterministic UTC
+// value until mount. See `docs/pr-checklists/recurring-review-patterns.md`.
+const SSR_SAFE_CLOCK_REPLACEMENTS = {
+  relativeTime: { hook: "useSsrSafeRelative", pure: "relativeTimeOrTimestamp" },
+  formatTimestamp: { hook: "useSsrSafeTimestamp", pure: "timestampOrUtc" },
+};
+const FORMAT_MODULE_PATH = path.join(__dirname, "src", "lib", "format");
+
+function ssrSafeClockMessage(name, { hook, pure }) {
+  return (
+    `${name} reads wall time during render, so a "use client" module ` +
+    `mismatches on hydration. Use ${hook} from @/hooks/use-now-seconds, or ` +
+    `call useNowSeconds() once and pass its value to ${pure}(ts, now) for ` +
+    `rows inside a loop.`
+  );
+}
+
+function resolvedImportPath(source, filename) {
+  if (source.startsWith("@/")) {
+    return path.join(__dirname, "src", source.slice(2));
+  }
+  if (source.startsWith(".")) {
+    return path.resolve(path.dirname(filename), source);
+  }
+  return null;
+}
+
+// The directive decides, not a path glob: `"use client"` is what makes a module
+// render in both places, and a glob over `src/components/**` would catch
+// server-rendered helpers and miss client modules elsewhere. The cost is that a
+// module reached only through a client parent, with no directive of its own, is
+// invisible here — give such a module the directive when it reads the clock.
+const ssrSafeClockRule = {
+  meta: {
+    type: "problem",
+    docs: {
+      description:
+        'Disallow the wall-clock formatters from @/lib/format in modules that carry the "use client" directive.',
+    },
+    schema: [],
+  },
+  create(context) {
+    let isClientModule = false;
+    // Locals bound by `import * as format from "@/lib/format"`, so a namespace
+    // import cannot walk around the named-specifier check.
+    const namespaceLocals = new Set();
+
+    return {
+      Program(node) {
+        const [first] = node.body;
+        isClientModule =
+          first?.type === "ExpressionStatement" &&
+          first.expression.type === "Literal" &&
+          first.expression.value === "use client";
+        namespaceLocals.clear();
+      },
+      ImportDeclaration(node) {
+        if (!isClientModule) return;
+        const resolved = resolvedImportPath(
+          node.source.value,
+          context.filename,
+        );
+        if (resolved?.replace(/\.tsx?$/, "") !== FORMAT_MODULE_PATH) return;
+
+        for (const specifier of node.specifiers) {
+          if (specifier.type === "ImportNamespaceSpecifier") {
+            namespaceLocals.add(specifier.local.name);
+            continue;
+          }
+          if (specifier.type !== "ImportSpecifier") continue;
+          if (specifier.imported.type !== "Identifier") continue;
+          const name = specifier.imported.name;
+          const replacement = SSR_SAFE_CLOCK_REPLACEMENTS[name];
+          if (!replacement) continue;
+          context.report({
+            node: specifier,
+            message: ssrSafeClockMessage(name, replacement),
+          });
+        }
+      },
+      MemberExpression(node) {
+        if (!isClientModule || node.computed) return;
+        if (node.object.type !== "Identifier") return;
+        if (!namespaceLocals.has(node.object.name)) return;
+        if (node.property.type !== "Identifier") return;
+        const replacement = SSR_SAFE_CLOCK_REPLACEMENTS[node.property.name];
+        if (!replacement) return;
+        context.report({
+          node: node.property,
+          message: ssrSafeClockMessage(node.property.name, replacement),
+        });
+      },
+    };
+  },
+};
+
+const ssrClockPlugin = {
+  rules: { "no-raw-clock-format-in-client": ssrSafeClockRule },
+};
+
 export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
@@ -401,6 +505,19 @@ export default tseslint.config(
         symbolAwareRestrictions,
       ],
     },
+  },
+  // Client-side clock formatters — only the SSR-safe hooks may format a
+  // timestamp in a `"use client"` module. Reuses the browser-API policy's
+  // server/OG/test ignore list (those paths render once, so the raw formatters
+  // stay correct there) and adds the hook module itself, which wraps them.
+  {
+    files: browserApiPolicy.clientFiles,
+    ignores: [
+      ...browserApiPolicy.serverAndTestIgnores,
+      "src/hooks/use-now-seconds.ts",
+    ],
+    plugins: { "ssr-clock-policy": ssrClockPlugin },
+    rules: { "ssr-clock-policy/no-raw-clock-format-in-client": "error" },
   },
   {
     ignores: [

@@ -16,10 +16,11 @@ import {
   formatBlock,
   formatBoundaryBps,
   formatEffectivenessPercent,
-  formatTimestamp,
   formatUSD,
-  relativeTime,
+  relativeTimeOrTimestamp,
+  timestampOrUtc,
 } from "@/lib/format";
+import { useNowSeconds } from "@/hooks/use-now-seconds";
 import { sortedCopy } from "@/lib/immutable-sort";
 import { useGQL } from "@/lib/graphql";
 import {
@@ -187,6 +188,7 @@ export function RebalancesTab({
     ? Number(pool.deviationBreachStartedAt)
     : 0;
   const { getName, getTags } = useAddressLabels();
+  const nowSeconds = useNowSeconds();
   const query = normalizeSearch(search);
   const [rawPage, setRawPage] = React.useState(1);
 
@@ -408,8 +410,12 @@ export function RebalancesTab({
                   <Td mono small muted align="right">
                     {formatBlock(r.blockNumber)}
                   </Td>
-                  <Td small muted title={formatTimestamp(r.blockTimestamp)}>
-                    {relativeTime(r.blockTimestamp)}
+                  <Td
+                    small
+                    muted
+                    title={timestampOrUtc(r.blockTimestamp, nowSeconds)}
+                  >
+                    {relativeTimeOrTimestamp(r.blockTimestamp, nowSeconds)}
                     {duringBreach && (
                       <span
                         className="ml-1 text-red-400"

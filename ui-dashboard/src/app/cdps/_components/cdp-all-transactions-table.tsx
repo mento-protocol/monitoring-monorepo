@@ -5,7 +5,11 @@ import { ErrorBox } from "@/components/feedback";
 import { Pagination } from "@/components/pagination";
 import { Row, Table, Td, Th } from "@/components/table";
 import { TxHashCell } from "@/components/tx-hash-cell";
-import { formatBlock, formatTimestamp, relativeTime } from "@/lib/format";
+import { formatBlock } from "@/lib/format";
+import {
+  useSsrSafeRelative,
+  useSsrSafeTimestamp,
+} from "@/hooks/use-now-seconds";
 import { useGQL } from "@/lib/graphql";
 import { hasErrorWithoutData, isLoadingWithoutData } from "@/lib/swr-state";
 import {
@@ -528,6 +532,8 @@ function OverviewRow({
   const kind = badgeKindFor(row);
   const symbol = market?.symbol ?? "—";
   const resolvedSnapshot = positionSnapshotFor(row, snapshot);
+  const timestampTitle = useSsrSafeTimestamp(row.timestamp);
+  const timestampRelative = useSsrSafeRelative(row.timestamp);
   return (
     <Row className={overviewRowClass(row)}>
       <Td>
@@ -565,8 +571,8 @@ function OverviewRow({
       <td className="hidden md:table-cell px-2 sm:px-4 py-1.5 sm:py-2 font-mono text-[10px] sm:text-xs text-slate-400 text-right">
         {formatBlock(row.blockNumber)}
       </td>
-      <Td small muted title={formatTimestamp(row.timestamp)}>
-        {relativeTime(row.timestamp)}
+      <Td small muted title={timestampTitle}>
+        {timestampRelative}
       </Td>
     </Row>
   );

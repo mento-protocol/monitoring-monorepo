@@ -15,7 +15,7 @@ import {
   CDP_MARKETS,
   CDP_TROVE_SCHEMA_FIELDS,
 } from "@/lib/queries";
-import { relativeTime } from "@/lib/format";
+import { useSsrSafeRelative } from "@/hooks/use-now-seconds";
 import type { Network } from "@/lib/networks";
 import { explorerAddressUrl } from "@/lib/tokens";
 import {
@@ -301,6 +301,7 @@ function CdpDetailContent({
   network: Network;
   sourceSplitWarning: string | null;
 }) {
+  const lastEventRelative = useSsrSafeRelative(instance?.lastEventTimestamp);
   return (
     <div className="space-y-8">
       <DetailHeader collateral={collateral} instance={instance} />
@@ -329,7 +330,7 @@ function CdpDetailContent({
           subtitle={
             aggregates.truncated
               ? "Trove list truncated"
-              : `Updated ${relativeTime(instance?.lastEventTimestamp ?? "0")}`
+              : `Updated ${lastEventRelative}`
           }
         />
       </section>
@@ -377,6 +378,7 @@ function DetailHeader({
   instance: CdpInstance | undefined;
 }) {
   const health = deriveCdpHealth(collateral, instance);
+  const lastEventRelative = useSsrSafeRelative(instance?.lastEventTimestamp);
   return (
     <header className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
       <div>
@@ -393,7 +395,7 @@ function DetailHeader({
       <div className="flex flex-col items-end gap-1">
         <CdpHealthBadge health={health} />
         <span className="text-xs text-slate-500">
-          Last event {relativeTime(instance?.lastEventTimestamp ?? "0")}
+          Last event {lastEventRelative}
         </span>
       </div>
     </header>
