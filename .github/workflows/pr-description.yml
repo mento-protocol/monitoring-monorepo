@@ -8,20 +8,31 @@ name: PR Description
 # say "None" or link a GitHub issue per item (for everything knowingly deferred
 # from the PR).
 #
-# REQUIRED-STATUS SAFETY: no workflow-level `paths:` filter — this is meant to
-# run on every PR so it can be a required status (AGENTS.md: required-status
-# workflows MUST NOT use `paths:`). It re-runs on `edited` (so fixing the body
-# clears it) and on `synchronize` (so the status re-attaches to each new head
-# commit). Draft PRs and Dependabot PRs are skipped.
+# ADVISORY STATUS: this check is not in the branch ruleset's required set
+# (ci, Code Quality, Vercel, Vercel Preview Comments, Sentry suites). Its
+# verdict is a function of `github.event.pull_request.body` plus a base-ref
+# copy of the validator, so it is head-independent and `synchronize` cannot
+# change it — dropped below. No workflow-level `paths:` filter is added:
+# the check reads the body, not the diff. A title-only `edited` event skips
+# the job via the `changes.body`/`changes.base` guard below rather than
+# re-validating an unchanged body; a base-change `edited` event still runs,
+# since retargeting to `main` can be the only event a PR ever gets.
+# One exception: the bootstrap fallback below runs the PR-head copy when the
+# base branch lacks the validator, so the PR that introduces or moves
+# scripts/pr/check-pr-description.mjs is head-dependent. Recovery after a
+# later head-commit fix needs a new qualifying event — a body or base edit,
+# a reopen, or ready_for_review — because that refreshes
+# `github.event.pull_request.head.sha` to the current head. A manual re-run
+# of an existing job reuses the same cached event payload and SHA, so it
+# checks out the old head and cannot pick up the fix.
+# Promoting this check to required needs
+# `synchronize` restored in the same change. Draft PRs and Dependabot PRs
+# are skipped.
 
 on:
   pull_request:
     branches: [main]
-    types: [opened, edited, synchronize, reopened, ready_for_review]
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+    types: [opened, edited, reopened, ready_for_review]
 
 permissions:
   contents: read
@@ -29,10 +40,21 @@ permissions:
 jobs:
   check:
     name: PR description format
-    # Skip drafts (work-in-progress) and Dependabot (auto-generated bodies).
-    if: >-
-      github.event.pull_request.draft == false &&
-      github.event.pull_request.user.login != 'dependabot[bot]'
+    # Skip drafts (work-in-progress), Dependabot (auto-generated bodies), and
+    # a title-only `edited` event (body and base unchanged).
+      github.event.pull_request.user.login != 'dependabot[bot]' &&
+      (github.event.action != 'edited' || github.event.changes.body != null ||
+      github.event.changes.base != null)
+    # Concurrency is job-level, not workflow-level: a skipped job (the `if:`
+    # above is false) never enters the group, so a title-only edit can no
+    # longer displace a queued validation-worthy run the way a workflow-level
+    # group would (GitHub replaces a queued run in a shared group even when
+    # `cancel-in-progress` is false — see ci.yml's own concurrency comment).
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: >-
+        ${{ github.event.action != 'edited' || github.event.changes.body !=
+        null || github.event.changes.base != null }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout trusted validator

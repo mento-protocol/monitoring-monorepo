@@ -205,8 +205,8 @@ execution evidence that the pull request author cannot change.
 
 Schema, id coverage and
 append-only history all stay satisfied when a ledger PR edits its own row's
-verdict, counters or `per_defect` bits after the local `--validate --append`,
-and this is the only PR workflow there is. Like `--require-base` it refuses to
+verdict, counters or `per_defect` bits after the local `--validate --append`.
+Like `--require-base` it refuses to
 no-op: with no base it cannot tell which rows are new, and it says so instead
 of passing. It calls no model — the recompute reads the committed
 `result-*.json` and `calibration.json` files — so the workflow stays free of
