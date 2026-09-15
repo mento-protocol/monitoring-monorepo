@@ -6209,6 +6209,7 @@ export type PoolBreakerConfigQuery = {
 // queries/limit-lookup.BROKER_LIMIT_POOL
 export type BrokerLimitPoolQueryVariables = {
   readonly limitId: string;
+  readonly chainId: number;
 };
 export type BrokerLimitPoolQuery = {
   readonly BrokerTradingLimit: ReadonlyArray<{
