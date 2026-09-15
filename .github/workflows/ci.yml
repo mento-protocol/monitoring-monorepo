@@ -1108,8 +1108,9 @@ jobs:
         if: always() && !inputs.no_skip_audit
 
   # Registry-backed Terraform validation inside the required `ci` sentinel.
-  # The separate `Infra` workflow prints richer stack summaries and validates
-  # the same roots, but it is not part of the branch-protection sentinel.
+  # It classifies changed stacks from the registry, validates every one of
+  # them (collecting failures instead of stopping at the first), and writes
+  # a per-stack summary table to the job's step summary.
   terraform:
     name: Terraform Validate (registry)
     needs: changes
@@ -1180,17 +1181,41 @@ jobs:
             matrix="$(node scripts/tf-stacks.mjs changed --json)"
           fi
 
+          {
+            echo "## Terraform stacks"
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+
           count="$(node -e 'const m = JSON.parse(process.argv[1]); console.log(m.include.length)' "$matrix")"
           if [[ "$count" == "0" ]]; then
+            echo "No Terraform stacks changed." >> "$GITHUB_STEP_SUMMARY"
             echo "No Terraform stacks changed."
             exit 0
           fi
 
-          stack_ids="$(node -e 'const m = JSON.parse(process.argv[1]); for (const s of m.include) console.log(s.id)' "$matrix")"
-          while IFS= read -r stack; do
-            [[ -n "$stack" ]] || continue
-            node scripts/tf-stacks.mjs validate "$stack"
-          done <<< "$stack_ids"
+          {
+            echo "| Stack | Path | State prefix | CI plan | CI apply | Apply policy | Result |"
+            echo "| --- | --- | --- | --- | --- | --- | --- |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # fail-fast: false equivalent — validate every changed stack and
+          # collect failures instead of stopping at the first one, then exit
+          # non-zero once all stacks have run.
+          rows="$(node -e 'const m = JSON.parse(process.argv[1]); for (const s of m.include) console.log([s.id, s.path, s.state_prefix, s.ci_plan, s.ci_apply, s.apply_policy].join("\t"))' "$matrix")"
+          failed=0
+          while IFS=$'\t' read -r id path state_prefix ci_plan ci_apply apply_policy; do
+            [[ -n "$id" ]] || continue
+            if node scripts/tf-stacks.mjs validate "$id" </dev/null; then
+              result="pass"
+            else
+              echo "::error::Terraform validate failed for stack: $id"
+              result="fail"
+              failed=1
+            fi
+            echo "| ${id} | ${path} | ${state_prefix} | ${ci_plan} | ${ci_apply} | ${apply_policy} | ${result} |" >> "$GITHUB_STEP_SUMMARY"
+          done <<< "$rows"
+
+          exit "$failed"
       - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
         if: always() && !inputs.no_skip_audit
 

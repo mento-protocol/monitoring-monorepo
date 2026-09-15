@@ -135,38 +135,6 @@ export const WORKFLOW_ARMS = [
             ],
           },
           {
-            patterns: [".github/workflows/infra.yml"],
-            effects: [
-              {
-                command: "pnpm tf:test",
-                reason: "Terraform registry workflow changed",
-              },
-              {
-                verb: "add_terraform_validate_commands",
-                args: ["terraform", "Terraform registry workflow changed"],
-              },
-              {
-                verb: "add_terraform_validate_commands",
-                args: ["alerts/rules", "Terraform registry workflow changed"],
-              },
-              {
-                verb: "add_terraform_validate_commands",
-                args: ["alerts/infra", "Terraform registry workflow changed"],
-              },
-              {
-                verb: "add_terraform_validate_commands",
-                args: [
-                  "aegis/terraform",
-                  "Terraform registry workflow changed",
-                ],
-              },
-              {
-                verb: "add_registered_terraform_validate_commands",
-                args: ["Terraform registry workflow changed"],
-              },
-            ],
-          },
-          {
             patterns: [".github/workflows/metrics-bridge.yml"],
             effects: [
               {

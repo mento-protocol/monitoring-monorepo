@@ -8327,15 +8327,6 @@ assert_order \
   "- pnpm install --frozen-lockfile (link generated package after indexer codegen)" \
   "- pnpm --filter @mento-protocol/indexer-envio lint (central CI workflow changed)"
 
-run_gate ".github/workflows/infra.yml"
-assert_contains "- docs/pr-checklists/ci-workflow-gates.md (GitHub Actions workflow/action changed)"
-assert_contains "- node scripts/workflows/check-github-action-pins.mjs (GitHub Actions workflow/action changed)"
-assert_contains "- pnpm tf:test (Terraform registry workflow changed)"
-assert_contains "- TF_DATA_DIR=terraform/.terraform-agent-gate node scripts/terraform/terraform-fmt-check.mjs terraform (Terraform registry workflow changed)"
-assert_contains "- TF_DATA_DIR=alerts/rules/.terraform-agent-gate node scripts/terraform/terraform-fmt-check.mjs alerts/rules (Terraform registry workflow changed)"
-assert_contains "- TF_DATA_DIR=alerts/infra/.terraform-agent-gate node scripts/terraform/terraform-fmt-check.mjs alerts/infra (Terraform registry workflow changed)"
-assert_contains "- TF_DATA_DIR=aegis/terraform/.terraform-agent-gate node scripts/terraform/terraform-fmt-check.mjs aegis/terraform (Terraform registry workflow changed)"
-
 run_gate ".github/actions/pnpm-install/action.yml"
 assert_contains "- docs/pr-checklists/ci-workflow-gates.md (GitHub Actions workflow/action changed)"
 assert_contains "- node scripts/workflows/check-github-action-pins.mjs (GitHub Actions workflow/action changed)"
