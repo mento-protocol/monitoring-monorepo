@@ -42,6 +42,8 @@ jobs:
     name: PR description format
     # Skip drafts (work-in-progress), Dependabot (auto-generated bodies), and
     # a title-only `edited` event (body and base unchanged).
+    if: >-
+      github.event.pull_request.draft == false &&
       github.event.pull_request.user.login != 'dependabot[bot]' &&
       (github.event.action != 'edited' || github.event.changes.body != null ||
       github.event.changes.base != null)
