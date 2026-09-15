@@ -50,8 +50,7 @@
         "scripts/terraform/terraform-fmt-check.mjs",
         "scripts/terraform/tf-platform-plan-guard.mjs",
         "scripts/tf-stacks.mjs",
-        ".github/workflows/ci.yml",
-        ".github/workflows/infra.yml"
+        ".github/workflows/ci.yml"
       ],
       "aliases": ["pnpm infra:init", "pnpm infra:plan", "pnpm infra:apply"]
     },
@@ -90,7 +89,6 @@
         "scripts/tf-stacks.mjs",
         "scripts/tf-stacks.test.mjs",
         ".github/workflows/ci.yml",
-        ".github/workflows/infra.yml",
         ".github/workflows/peg-policy-publication.yml"
       ]
     },
@@ -118,7 +116,6 @@
         "scripts/terraform/terraform-fmt-check.mjs",
         "scripts/tf-stacks.mjs",
         ".github/workflows/ci.yml",
-        ".github/workflows/infra.yml",
         ".github/workflows/alerts-rules.yml"
       ],
       "aliases": ["pnpm alerts:rules:init", "pnpm alerts:rules:plan"]
@@ -156,7 +153,6 @@
         "scripts/terraform/terraform-fmt-check.mjs",
         "scripts/tf-stacks.mjs",
         ".github/workflows/ci.yml",
-        ".github/workflows/infra.yml",
         ".github/workflows/alerts-infra.yml"
       ],
       "aliases": ["pnpm alerts:infra:init", "pnpm alerts:infra:plan"]
@@ -184,7 +180,6 @@
         "scripts/terraform/terraform-fmt-check.mjs",
         "scripts/tf-stacks.mjs",
         ".github/workflows/ci.yml",
-        ".github/workflows/infra.yml",
         ".github/workflows/aegis-terraform.yml"
       ],
       "aliases": ["pnpm aegis:tf:init", "pnpm aegis:tf:plan"]
@@ -229,7 +224,6 @@
         "scripts/terraform/terraform-fmt-check.mjs",
         "scripts/tf-stacks.mjs",
         ".github/workflows/ci.yml",
-        ".github/workflows/infra.yml",
         ".github/workflows/governance-watchdog.yml"
       ],
       "aliases": ["pnpm gov-watchdog:tf:init", "pnpm gov-watchdog:tf:plan"]

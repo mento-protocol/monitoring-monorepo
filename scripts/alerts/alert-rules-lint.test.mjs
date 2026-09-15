@@ -2722,7 +2722,6 @@ test("bridge dependencies route exact checks and protected apply eligibility", (
     ci.jobs.changes.steps.find((step) => step.id === "filter").with.filters,
   );
   const rules = workflow("alerts-rules");
-  const infra = workflow("infra");
   const dir = mkdtempSync(join(tmpdir(), "bridge-routing-"));
   try {
     for (const [file, rulesExpected, lintExpected] of [
@@ -2734,10 +2733,6 @@ test("bridge dependencies route exact checks and protected apply eligibility", (
         assert(
           picomatch(rules.on[event].paths)(file) === rulesExpected,
           `${file}: exact rules ${event} admission`,
-        );
-        assert(
-          picomatch(infra.on[event].paths)(file),
-          `${file}: coarse infra admission`,
         );
       }
       assert(
