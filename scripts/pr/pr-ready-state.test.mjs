@@ -578,7 +578,29 @@ test("fails closed on required-status-context error when the ruleset read fails 
 });
 
 test("falls back to rulesets for the current gh branch-protection 404", async () => {
-  const result = await fetchRequiredStatusContexts({
+  // The same two-signal proof gates the context list, not just strictness. A
+  // permission-masked 404 could be hiding a classic-only required check, so the
+  // ruleset list cannot be called complete and the caller must fail closed.
+  const rules = async () => ({
+    ok: true,
+    value: [
+      {
+        type: "required_status_checks",
+        parameters: {
+          required_status_checks: [
+            { context: "ci" },
+            { context: "Code Quality" },
+          ],
+        },
+      },
+    ],
+  });
+  const expectedContexts = [
+    { context: "ci", integrationId: null },
+    { context: "Code Quality", integrationId: null },
+  ];
+
+  const masked = await fetchRequiredStatusContexts({
     repo: { owner: "mento-protocol", name: "monitoring-monorepo", host: null },
     baseRef: "main",
     fetchProtection: async () => ({
@@ -586,30 +608,188 @@ test("falls back to rulesets for the current gh branch-protection 404", async ()
       error:
         "gh api repos/mento-protocol/monitoring-monorepo/branches/main/protection/required_status_checks failed with exit 1:\ngh: Not Found (HTTP 404)\n",
     }),
+    fetchRules: rules,
+    fetchBranch: async () => rulesetOnlyBranch,
+  });
+  assertDeepEqual(masked.contexts, expectedContexts);
+  assert(
+    masked.error?.includes("without proving absence"),
+    "an unproven 404 must propagate an error, not report the list complete",
+  );
+  assert(
+    !masked.error.includes("\n"),
+    "the blocker text must stay on one line",
+  );
+  assertEqual(masked.strict, null);
+
+  // Proven absence is what makes the ruleset list authoritative.
+  const proven = await fetchRequiredStatusContexts({
+    repo: { owner: "mento-protocol", name: "monitoring-monorepo", host: null },
+    baseRef: "main",
+    fetchProtection: async () => ({
+      ok: false,
+      error: "gh: Branch not protected (HTTP 404)",
+    }),
+    fetchRules: rules,
+    fetchBranch: async () => rulesetOnlyBranch,
+  });
+  assertDeepEqual(proven, {
+    contexts: expectedContexts,
+    error: null,
+    strict: null,
+  });
+});
+
+test("a permission-masked classic 404 blocks readiness end to end", async () => {
+  // The whole point of propagating the error: a hidden classic-only required
+  // check must not be classified as optional. Drive the real probe output, not
+  // just the fetch helper.
+  const contexts = await fetchRequiredStatusContexts({
+    repo: { owner: "mento-protocol", name: "monitoring-monorepo", host: null },
+    baseRef: "main",
+    fetchProtection: async () => ({
+      ok: false,
+      error: "gh: Not Found (HTTP 404)",
+    }),
+    fetchRules: async () => ({
+      ok: true,
+      value: [
+        {
+          type: "required_status_checks",
+          parameters: { required_status_checks: [{ context: "ci" }] },
+        },
+      ],
+    }),
+    fetchBranch: async () => rulesetOnlyBranch,
+  });
+
+  const summary = summarizeReadyState({
+    pr: {
+      ...basePr,
+      statusCheckRollup: [
+        { name: "ci", conclusion: "SUCCESS", status: "COMPLETED" },
+      ],
+    },
+    reactions: [
+      {
+        content: "+1",
+        created_at: "2026-05-21T13:23:00Z",
+        user: { login: "chatgpt-codex-connector[bot]" },
+      },
+    ],
+    requiredStatusContexts: contexts.contexts,
+    requiredStatusContextsError: contexts.error,
+    requiredStatusContextsAvailable: contexts.error === null,
+    requiredStatusChecksStrict: contexts.strict,
+    baseHealthOid: "a".repeat(40),
+    baseStatusCheckRollup: [
+      { name: "ci", conclusion: "SUCCESS", status: "COMPLETED" },
+    ],
+  });
+
+  assertEqual(
+    summary.ready,
+    false,
+    "an unproven classic 404 must not report ready",
+  );
+  assertEqual(
+    summary.required.blockers.filter(
+      (item) => item.kind === "branch-protection",
+    ).length,
+    1,
+    "the caller must raise its branch-protection blocker",
+  );
+});
+
+test("treats an unconfigured required-status-checks 404 as proven absence", async () => {
+  // A base can carry classic protection for reviews or restrictions while
+  // having no required-status-checks configuration. GitHub answers this only
+  // after reading that protection, so there is no classic context or `strict`
+  // flag to miss — and blocking it would strand a valid setup forever.
+  let branchReads = 0;
+  const result = await fetchRequiredStatusContexts({
+    repo: { owner: "mento-protocol", name: "monitoring-monorepo", host: null },
+    baseRef: "main",
+    fetchProtection: async () => ({
+      ok: false,
+      error: "gh: Required status checks not enabled (HTTP 404)",
+    }),
     fetchRules: async () => ({
       ok: true,
       value: [
         {
           type: "required_status_checks",
           parameters: {
-            required_status_checks: [
-              { context: "ci" },
-              { context: "Code Quality" },
-            ],
+            required_status_checks: [{ context: "ci" }],
+            strict_required_status_checks_policy: false,
           },
         },
       ],
     }),
+    fetchBranch: async () => {
+      branchReads += 1;
+      // Classic protection is enabled here; only the status-check block is
+      // missing, so the branch object must not be what decides this.
+      return { ok: true, value: { protection: { enabled: true } } };
+    },
   });
 
-  assertDeepEqual(result, {
-    contexts: [
-      { context: "ci", integrationId: null },
-      { context: "Code Quality", integrationId: null },
+  assertDeepEqual(result.contexts, [{ context: "ci", integrationId: null }]);
+  assertEqual(result.error, null, "the ruleset list is complete here");
+  assertEqual(result.strict, false, "there is no classic strict flag to miss");
+  assertEqual(
+    branchReads,
+    0,
+    "the message is conclusive; no branch read is needed",
+  );
+});
+
+test("fails closed on the context list for every unproven classic 404", async () => {
+  const rules = async () => ({
+    ok: true,
+    value: [
+      {
+        type: "required_status_checks",
+        parameters: { required_status_checks: [{ context: "ci" }] },
+      },
     ],
-    error: null,
-    strict: null,
   });
+
+  for (const [label, protectionError, branchResult] of [
+    [
+      "a permission-masking 404",
+      "gh: Not Found (HTTP 404)",
+      { ok: true, value: rulesetOnlyBranch.value },
+    ],
+    [
+      "classic protection still enabled",
+      "gh: Branch not protected (HTTP 404)",
+      { ok: true, value: { protection: { enabled: true } } },
+    ],
+    [
+      "an unreadable branch object",
+      "gh: Branch not protected (HTTP 404)",
+      { ok: false, error: "gh: Resource not accessible by integration" },
+    ],
+  ]) {
+    const result = await fetchRequiredStatusContexts({
+      repo: {
+        owner: "mento-protocol",
+        name: "monitoring-monorepo",
+        host: null,
+      },
+      baseRef: "main",
+      fetchProtection: async () => ({ ok: false, error: protectionError }),
+      fetchRules: rules,
+      fetchBranch: async () => branchResult,
+    });
+
+    assert(
+      result.error !== null,
+      `${label} must leave the context list unavailable`,
+    );
+    assertEqual(result.strict, null, `${label} must leave strictness unknown`);
+  }
 });
 
 // A classic-protection 404 alone cannot license a ruleset's non-strict value:
@@ -709,7 +889,9 @@ test("fails closed when the base branch read fails", async () => {
   );
 });
 
-test("needs no branch read when the ruleset is strict or unknown", async () => {
+test("proves classic absence on every 404, whatever the ruleset says", async () => {
+  // The branch read is no longer skipped for strict or unknown rulesets: the
+  // context list needs the same proof, so one read serves both decisions.
   for (const [strictPolicy, expected] of [
     [true, true],
     [undefined, null],
@@ -749,8 +931,13 @@ test("needs no branch read when the ruleset is strict or unknown", async () => {
     assertEqual(result.strict, expected);
     assertEqual(
       branchReads,
-      0,
-      "only a ruleset's confirmed false needs classic absence established",
+      1,
+      "classic absence is established once and reused by both decisions",
+    );
+    assertEqual(
+      result.error,
+      null,
+      "proven absence makes the ruleset context list authoritative",
     );
   }
 });

@@ -63,19 +63,20 @@ Required blockers:
   missing from the branch-protection rollup.
 - Branch-protection context lookup failures caused by unreadable or
   unauthorized protection data; the probe fails closed rather than guessing
-  required-vs-optional status. If the classic branch-protection endpoint returns
-  HTTP 404, whether `gh` renders it as `Not Found` or `Branch not protected`,
-  the probe reads active branch rulesets and derives required status contexts from any
-  `required_status_checks` and named `workflows` rule before using the fallback
-  split. A ruleset result that is empty or defines no required status checks or
-  workflows stays unavailable and blocking because the 404 may mask missing
-  permission to read classic protection rather than prove its absence. For the
-  same reason a ruleset's `strict_required_status_checks_policy: false` is
-  trusted on the 404 path only once classic absence is established
-  independently: the 404 body must say `Branch not protected`, and
-  `repos/{owner}/{repo}/branches/{base}` must report
-  `protection.enabled: false`. That object's top-level `protected` flag proves
-  nothing here — a ruleset-only base still reports `protected: true`.
+  required-vs-optional status. On any classic branch-protection HTTP 404 the
+  probe reads active branch rulesets and derives required status contexts from
+  any `required_status_checks` and named `workflows` rule. It trusts that list,
+  and a ruleset's `strict_required_status_checks_policy: false`, only once one
+  proof establishes that classic protection is absent: the 404 body must say
+  `Branch not protected`, and `repos/{owner}/{repo}/branches/{base}` must report
+  `protection.enabled: false`. The top-level `protected` flag proves nothing —
+  a ruleset-only base still reports `protected: true`. A branch that is protected but has no
+  required-status-checks configuration answers `Required status checks not
+enabled`, which proves absence on its own. Unproven (another 404 body,
+  `protection.enabled` true or missing, a failed branch read) keeps the
+  contexts unavailable and blocking, because a classic-only required check
+  could be hiding behind the 404; strictness stays unknown, and a ruleset's
+  confirmed `true` still stands. An empty ruleset result blocks the same way.
 - Required GitHub review state, including requested changes or required review
   still pending.
 - Unreplied review comments that repo policy requires agents to answer. A
