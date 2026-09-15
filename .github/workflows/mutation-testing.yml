@@ -131,7 +131,11 @@ jobs:
     # the job.
     name: Indexer logic baseline
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # 348 mutants across five files, the slowest of the three baselines. The
+    # 10-minute budget was set on Blacksmith 4-vCPU arm runners, where the job
+    # took 4m29s (2026-09-07). On the GitHub-hosted runners #2413 moved to, the
+    # baseline alone exceeds 10 minutes and the job is cut mid-step.
+    timeout-minutes: 30
     # `pull-requests: read` is required by `dorny/paths-filter` in PR mode.
     permissions:
       contents: read
