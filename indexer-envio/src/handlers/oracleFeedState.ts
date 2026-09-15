@@ -136,6 +136,16 @@ async function bootstrapFeedState(
   }
 }
 
+/** The resolved feed row, plus whether the event was a replay the persisted
+ * row already reflects. A replay means the batch that first applied the event
+ * committed, and Envio commits a batch's entity writes in one transaction, so
+ * every downstream write for that event is already persisted. The caller must
+ * stop rather than redo them against later state. See ADR 0105. */
+export type FeedStateResolution = {
+  state: OracleFeedState;
+  replayed: boolean;
+};
+
 /** Resolve the persisted feed state and apply one report/removal transition.
  * Bootstrap is deliberately processing-only: preload may not see the row an
  * earlier event creates in ordered processing. */
@@ -144,7 +154,7 @@ export async function resolveOracleFeedState(args: {
   event: FeedEvent;
   mutation: FeedMutation;
   bootstrapThroughBlock: bigint;
-}): Promise<OracleFeedState> {
+}): Promise<FeedStateResolution> {
   const id = oracleFeedStateId(args.event.chainId, args.event.rateFeedID);
   const existing = await args.context.OracleFeedState.get(id);
   const base =
@@ -160,13 +170,13 @@ export async function resolveOracleFeedState(args: {
   // assignment and after this handler, so replaying a same-block transition
   // would double-apply it.
   if (args.event.blockNumber === base.bootstrapThroughBlock) {
-    if (existing) return existing;
+    if (existing) return { state: existing, replayed: false };
     const absorbed = {
       ...base,
       updatedAtTimestamp: args.event.blockTimestamp,
     };
     args.context.OracleFeedState.set(absorbed);
-    return absorbed;
+    return { state: absorbed, replayed: false };
   }
   const eventPosition = {
     blockNumber: args.event.blockNumber,
@@ -180,7 +190,7 @@ export async function resolveOracleFeedState(args: {
       base,
       "resolveOracleFeedState",
     );
-    return base;
+    return { state: base, replayed: true };
   }
   const updated =
     args.mutation.kind === "report"
@@ -196,7 +206,7 @@ export async function resolveOracleFeedState(args: {
           eventPosition,
         );
   if (updated !== existing) args.context.OracleFeedState.set(updated);
-  return updated;
+  return { state: updated, replayed: false };
 }
 
 export async function requireOracleFeedState(
@@ -314,7 +324,7 @@ indexer.onEvent(
       poolIds,
       blockNumber,
     );
-    const state = await resolveOracleFeedState({
+    const { state, replayed } = await resolveOracleFeedState({
       context,
       event: {
         chainId: event.chainId,
@@ -329,6 +339,10 @@ indexer.onEvent(
       },
       ...bootstrapInputs,
     });
+    // The pool writes below already committed with the feed row in the batch
+    // that first applied this event. Redoing them would restamp the pools with
+    // this lower block against post-window state. See ADR 0105.
+    if (replayed) return;
     await updatePoolsAfterReportRemoval({
       context,
       poolIds,

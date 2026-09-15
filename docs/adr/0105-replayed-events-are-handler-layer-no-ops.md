@@ -83,6 +83,14 @@ no-op. Keep every throw in the pure transitions.
   replayed log with an invalid expiry is ignored rather than rejected. That is
   sound: an invalid value throws on first delivery, so the watermark can never
   be past one.
+- `resolveOracleFeedState` returns `{ state, replayed }`, and the
+  `OracleReported` and `OracleReportRemoved` handlers return on `replayed`
+  before their downstream pool path. A replay means the batch that first
+  applied the event committed, and Envio commits a batch's entity writes in one
+  transaction, so every downstream write for that event is already persisted.
+  Redoing them would rewrite the event-keyed `OracleSnapshot` row from
+  post-window pool and median state, and no later event repairs an
+  event-keyed row.
 - The transitions keep throwing. A caller that reaches one with an
   out-of-order event still fails the batch, so the guard cannot be bypassed by
   a future call site that forgets the predicate.
@@ -117,19 +125,16 @@ no-op. Keep every throw in the pure transitions.
   token. The token is a warning, so `--errors-only` will not show it.
 - Expected tokens cluster right after a restart. Tokens with no preceding
   restart in the same deployment are the signal worth investigating.
-- Only the two state rows are skipped. The handler that called the guarded
-  helper runs to completion, so a replayed event still executes the downstream
-  pool path — `processOracleReportedPool` and `updatePoolsOracleExpiry` write
-  `Pool`, and `OracleSnapshot` and breach rows are written with the replayed
-  block and timestamp. Before this change the transition threw and that whole
-  batch rolled back, so these writes are newly reachable. They converge:
-  `Pool.updatedAtBlock` and `updatedAtTimestamp` can move backwards for the
-  length of the replay window, but the whole window is re-delivered in order
-  and ends at the same values; `OracleSnapshot` upserts because its id is
-  `eventId(chainId, blockNumber, logIndex)` plus the pool id; `updateHealthAccumulators` adds no duration when
-  `currentTimestamp <= lastTs`; and `recordBreachTransition` is edge-triggered
-  off the persisted row. `Pool` carries no ordering watermark, so this
-  convergence rests entirely on in-order re-delivery of the whole window.
+- The two expiry handlers still run their downstream path on a replay:
+  `updatePoolsOracleExpiry` rewrites `Pool.oracleExpiry` with the same value
+  and restamps `Pool.updatedAtBlock` and `updatedAtTimestamp` from the
+  replayed, lower block. Before this change the transition threw and that
+  whole batch rolled back, so these writes are newly reachable. They converge —
+  the whole window is re-delivered in order and ends at the same values, and
+  no row there is keyed by the event — but `Pool` carries no ordering
+  watermark, so that convergence rests entirely on in-order re-delivery.
+  Giving `Pool` its own watermark would touch every write path in the indexer
+  and is out of scope here.
 - Committed replay output for a clean run is unchanged, so
   `config/replay-integrity.json` needs no bump.
 
@@ -152,10 +157,12 @@ no-op. Keep every throw in the pure transitions.
   `OracleReported`, `OracleReportRemoved`, `TokenReportExpirySet` and
   `ReportExpirySet` logs, the last over two feeds; a same-position conflict
   that still throws; an above-watermark event that still applies; and an expiry
-  log at the feed row's bootstrap boundary that still propagates. The token
-  assertions match on `site=`, so a count is attributable to a helper. Against
-  the pre-fix handlers the replay cases reproduce the production message
-  verbatim.
+  log at the feed row's bootstrap boundary that still propagates. The replayed
+  `OracleReported` case also asserts the pool row is untouched and no
+  `OracleSnapshot` row exists, which fails when the handler's early return is
+  removed. The token assertions match on `site=`, so a count is attributable to
+  a helper. Against the pre-fix handlers the replay cases reproduce the
+  production message verbatim.
 - Reconciliation observation, 2026-09-15, against
   `https://indexer.hyperindex.xyz/2f3dd15/v1/graphql`: pool
   `42220-0x9861f6d2fe392b934c86ec89d2886ceb772b2b41` reports

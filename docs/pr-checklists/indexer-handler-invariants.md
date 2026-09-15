@@ -125,10 +125,13 @@ propagation, also apply [`stateful-data-ui.md`](stateful-data-ui.md).
   `oracleFeedState.ts` / `oracleExpiryState.ts` — emits one
   `context.log.warn` carrying `sortedOracles.replayedEventIgnored` and a
   `site=` naming the guarded helper, and returns the persisted row with no
-  write. Match the predicate to the orderings the transition behind that call
-  site actually rejects: a wider one suppresses live state changes, so the
-  expiry mirror uses `isEventBehindWatermark`. The pure transitions keep
-  throwing, so a call site that skips the predicate still fails closed. See
+  write. A handler told its event was a replay returns before any downstream
+  write keyed by that event — the batch that first applied it committed those
+  rows already, and nothing repairs an event-keyed row. Match the predicate to
+  the orderings the transition behind that call site actually rejects: a wider
+  one suppresses live state changes, so the expiry mirror uses
+  `isEventBehindWatermark`. The pure transitions keep throwing, so a call site
+  that skips the predicate still fails closed. See
   [ADR 0105](../adr/0105-replayed-events-are-handler-layer-no-ops.md).
 - Do not restore traffic-scaled `medianTimestamp` or `reportExpiry` effects to
   `OracleReported`, `OracleReportRemoved`, or `MedianUpdated`. A change to this

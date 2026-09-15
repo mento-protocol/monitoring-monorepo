@@ -833,10 +833,11 @@ describe("SortedOracles event-sourced feed state", () => {
 
   it("ignores a replayed OracleReported below the persisted watermark", async () => {
     const seededState = seedReplayedFeedState();
-    const { mockDb: seededDb } = createTrackedPoolDb(
+    const { mockDb: seededDb, poolId } = createTrackedPoolDb(
       "0x0000000000000000000000000000000000008570",
     );
     const mockDb = seededDb.entities.OracleFeedState.set(seededState);
+    const seededPool = mockDb.entities.Pool.get(poolId);
 
     const { warnings } = await captureWarnings(() =>
       SortedOracles.OracleReported.processEvent({
@@ -860,6 +861,11 @@ describe("SortedOracles event-sourced feed state", () => {
       mockDb.entities.OracleFeedState.get(oracleFeedStateId(CHAIN_ID, FEED)),
       seededState,
     );
+    // The handler must stop before the downstream pool path: the batch that
+    // first applied this event already wrote both rows, and `OracleSnapshot`
+    // is keyed by this event, so nothing would repair a rewrite.
+    assert.deepEqual(mockDb.entities.Pool.get(poolId), seededPool);
+    assert.deepEqual(mockDb.entities.OracleSnapshot.getAll(), []);
     const tokens = replayTokens(warnings);
     assert.equal(tokens.length, 1);
     assert.match(
@@ -871,10 +877,11 @@ describe("SortedOracles event-sourced feed state", () => {
 
   it("ignores a replayed OracleReportRemoved below the persisted watermark", async () => {
     const seededState = seedReplayedFeedState();
-    const { mockDb: seededDb } = createTrackedPoolDb(
+    const { mockDb: seededDb, poolId } = createTrackedPoolDb(
       "0x0000000000000000000000000000000000008571",
     );
     const mockDb = seededDb.entities.OracleFeedState.set(seededState);
+    const seededPool = mockDb.entities.Pool.get(poolId);
 
     const { warnings } = await captureWarnings(() =>
       SortedOracles.OracleReportRemoved.processEvent({
@@ -896,6 +903,7 @@ describe("SortedOracles event-sourced feed state", () => {
       mockDb.entities.OracleFeedState.get(oracleFeedStateId(CHAIN_ID, FEED)),
       seededState,
     );
+    assert.deepEqual(mockDb.entities.Pool.get(poolId), seededPool);
     assert.deepEqual(replaySites(warnings), ["resolveOracleFeedState"]);
   });
 

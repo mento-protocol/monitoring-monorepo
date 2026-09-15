@@ -414,7 +414,7 @@ indexer.onEvent(
       poolIds,
       blockNumber,
     );
-    const oracleFeedState = await resolveOracleFeedState({
+    const { state: oracleFeedState, replayed } = await resolveOracleFeedState({
       context,
       event: {
         chainId: event.chainId,
@@ -430,6 +430,11 @@ indexer.onEvent(
       },
       ...bootstrapInputs,
     });
+    // Everything below already committed with the feed row in the batch that
+    // first applied this event. `OracleSnapshot` is keyed by this event, so
+    // redoing it would rewrite that row from post-window pool and median
+    // state and no later event would repair it. See ADR 0105.
+    if (replayed) return;
 
     await ensureRateFeed({
       context,
