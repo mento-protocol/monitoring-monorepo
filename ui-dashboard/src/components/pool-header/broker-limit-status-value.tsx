@@ -47,10 +47,17 @@ export function BrokerLimitStatusValue({
   if (state.hasError) {
     return <span className="text-xs text-amber-400">Query failed</span>;
   }
-  // Hold the grid slot without announcing an empty tile while the first
-  // request is in flight — the Oracle Price tile uses the same placeholder.
+  // Skeleton parity: reserve the loaded tile's two stacked rows — the mini-bar
+  // row and the compact pair — so the header grid does not grow when the query
+  // resolves. `invisible` keeps the slot without announcing an empty tile, the
+  // same treatment the Oracle Price tile uses.
   if (state.isLoading && state.rows.length === 0) {
-    return <span className="invisible">—</span>;
+    return (
+      <span className="invisible flex flex-col gap-0.5 w-full max-w-52">
+        <span className="h-5" />
+        <span className="text-xs font-mono">—</span>
+      </span>
+    );
   }
 
   const row = worstBrokerRow(state.rows);

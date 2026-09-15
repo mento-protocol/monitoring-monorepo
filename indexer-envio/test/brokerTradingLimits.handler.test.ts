@@ -330,6 +330,42 @@ describe("Broker trading limits", () => {
     assert.equal(configCalls(), 0);
   });
 
+  it("folds onto the pool once its tokens land, with no fresh read", async () => {
+    // The first swap can land before the pool mirrors token0/token1, which
+    // folds to N/A. Nothing else re-folds, so the next swap must, even inside
+    // the refresh window where it reads nothing.
+    // Cool legs, so the second swap is inside the refresh window and reads
+    // nothing — the re-fold cannot be riding on a fresh read.
+    mockLeg(USDM_LIMIT_ID, { netflowGlobal: 100n, limitGlobal: 1144n });
+    mockLeg(AUDM_LIMIT_ID, { netflowGlobal: 100n, limitGlobal: 1597n });
+    let mockDb = seededDb().entities.Pool.set({
+      ...virtualPoolRow(),
+      token0: undefined,
+      token1: undefined,
+    });
+    mockDb = await fireSwap(mockDb);
+    assert.equal(mockDb.entities.Pool.get(POOL_ID)?.limitStatus, "N/A");
+    resetHttpRpcCallCounts();
+
+    mockDb = mockDb.entities.Pool.set({
+      ...mockDb.entities.Pool.get(POOL_ID)!,
+      token0: USDM,
+      token1: AUDM,
+    });
+    mockDb = await fireSwap(mockDb, {
+      blockNumber: START_BLOCK + 1,
+      blockTimestamp: START_TS + 2,
+      logIndex: 1,
+    });
+
+    assert.equal(stateCalls(), 0);
+    assert.equal(configCalls(), 0);
+    const pool = mockDb.entities.Pool.get(POOL_ID);
+    assert.equal(pool?.limitStatus, "OK");
+    assert.equal(pool?.limitPressure0, "0.0874");
+    assert.equal(pool?.limitPressure1, "0.0626");
+  });
+
   it("updates the same rows for a VirtualPool-routed swap", async () => {
     const mockDb = await fireSwap(seededDb(), {
       brokerCaller: VIRTUAL_POOL,

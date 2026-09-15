@@ -121,6 +121,20 @@ describe("BrokerLimitStatusValue", () => {
     expect(progressBarCount(html)).toBe(0);
   });
 
+  it("reserves the loaded tile's two rows while loading", () => {
+    // Skeleton parity: the loading branch must carry the same flex column, the
+    // mini-bar row height and the compact-pair text row as the loaded tile, or
+    // the header grid grows when the query resolves.
+    const loading = render({ isLoading: true });
+    expect(loading).toContain("flex flex-col gap-0.5");
+    expect(loading).toContain("h-5");
+    expect(loading).toContain("text-xs");
+    const loaded = render({ rows: [row({})] });
+    expect(loaded).toContain("flex flex-col gap-0.5");
+    expect(loaded).toContain("h-5");
+    expect(loaded).toContain("text-xs");
+  });
+
   it("shows a dash rather than a zeroed bar before config or state land", () => {
     expect(render()).toContain("—");
     expect(render({ rows: [row({ configKnown: false })] })).toContain("—");

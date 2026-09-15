@@ -13,7 +13,7 @@
 // `start_block`.
 // ---------------------------------------------------------------------------
 
-import type { BrokerTradingLimit, EvmOnEventContext } from "envio";
+import type { BrokerTradingLimit, EvmOnEventContext, Pool } from "envio";
 import { indexer } from "../../indexer.js";
 import { asAddress, asBigInt } from "../../helpers.js";
 import {
@@ -28,6 +28,7 @@ import {
   resetBrokerState,
   shouldRefreshBrokerState,
   type BrokerLimitConfig,
+  type PoolLimitFields,
 } from "../../brokerTradingLimits.js";
 import { brokerTradingLimitEffect } from "../../rpc/effects.js";
 import { findWrappedPool } from "../biPoolManager.js";
@@ -185,14 +186,32 @@ async function applyLeg(
   return { row, adopted: true };
 }
 
+function foldIsCurrent(
+  pool: Pick<Pool, "limitStatus" | "limitPressure0" | "limitPressure1">,
+  fields: PoolLimitFields,
+): boolean {
+  return (
+    pool.limitStatus === fields.limitStatus &&
+    pool.limitPressure0 === fields.limitPressure0 &&
+    pool.limitPressure1 === fields.limitPressure1
+  );
+}
+
 async function refoldPool(
   context: EvmOnEventContext,
   poolId: string,
   rows: readonly BrokerTradingLimit[],
+  adopted: boolean,
 ): Promise<void> {
   const pool = await context.Pool.get(poolId);
   if (!pool) return;
-  context.Pool.set({ ...pool, ...foldPoolLimitFields(rows, pool) });
+  const fields = foldPoolLimitFields(rows, pool);
+  // Nothing fresh this event: write only when the stored fold is actually out
+  // of date. The first fold can land before the pool mirrors its tokens, and
+  // nothing else re-folds afterwards; skipping the no-op write keeps an RPC
+  // blip from flapping a good homepage status.
+  if (!adopted && foldIsCurrent(pool, fields)) return;
+  context.Pool.set({ ...pool, ...fields });
 }
 
 export async function applyBrokerTradingLimits(
@@ -208,13 +227,11 @@ export async function applyBrokerTradingLimits(
   for (const token of args.tokens) {
     outcomes.push(await applyLeg(args, wrapped.poolId, token));
   }
-  // Only re-fold when a leg adopted fresh data. An RPC blip must never flap a
-  // good homepage status back to "N/A".
-  if (!outcomes.some((outcome) => outcome.adopted)) return;
   await refoldPool(
     args.context,
     wrapped.poolId,
     outcomes.map((outcome) => outcome.row),
+    outcomes.some((outcome) => outcome.adopted),
   );
 }
 
@@ -305,6 +322,7 @@ indexer.onEvent(
       context,
       wrapped.poolId,
       await legRowsForPool(context, wrapped.poolId, row),
+      true,
     );
   },
 );
