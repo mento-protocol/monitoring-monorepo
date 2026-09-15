@@ -85,8 +85,9 @@ do not add one-off word or punctuation bans on top of it.
 - Plain words over jargon, but never swap a precise technical term for a
   vaguer everyday one.
 - In each PR opening, explain the old behavior, new behavior, concrete benefit,
-  and any material limit before implementation terms. The `ship` skill owns the
-  detailed template and clarity check.
+  and any material limit before implementation terms, preceded by a plain-language
+  `## tl;dr` that a reader outside this codebase can follow. The `ship` skill owns
+  the detailed template and clarity check.
 - The deterministic Sentry autofix PR generator may use only its trusted facts
   and state why it omitted untrusted detail. Never add untrusted free text to
   satisfy the PR-opening rule.
