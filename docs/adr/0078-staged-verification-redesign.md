@@ -174,10 +174,12 @@ contract` job runs it on every pull request and `main` push.
 
 M3 adds the two confirmed gate-only gaps to existing required jobs. The
 `scripts` job runs the ADR reminder and its tests. The `ui` job runs the normal
-production build and bundle-size limit. The separate Infra validation and
-bundle-size workflows duplicate required coverage. Lighthouse, PR Description,
+production build and bundle-size limit. The bundle-size workflow duplicates
+required coverage (Infra's twin is gone). Lighthouse, PR Description,
 duplication, and schema diff remain reviewed advisory exceptions with their
-current triggers.
+current triggers. **Amended 2026-09-14**: duplication's trigger narrowed from
+`paths-ignore` to a positive `paths:` allow-list mirroring `.jscpd.json`'s
+scan roots (PR #2411); its advisory-exception status is unchanged.
 
 ### Keep local checks bounded and non-authoritative
 

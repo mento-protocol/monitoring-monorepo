@@ -106,18 +106,16 @@ separately reviewed runtime rollover.
 
 ## CI Model
 
-`terraform.stacks.json` owns the coarse `workflowAdmissionPatterns` boundary.
-The required `.github/workflows/ci.yml` workflow runs on every PR and applies
-that boundary only to its internal Terraform job. The advisory
-`.github/workflows/infra.yml` workflow copies the same boundary for push and
-pull-request admission. After either route starts, `scripts/tf-stacks.mjs`
-classifies the exact changed stacks from `changedPathPatterns`. `pnpm tf:test`
-requires all three filters to equal the registry boundary and requires that the
-boundary subsume every stack pattern. Add a new stack input under an existing
-broad boundary. If it needs a new root, extend the registry boundary and all
-three workflow copies in the same change. `.github/workflows/**` is the only
-nested boundary. Using `.github/**` would also admit unrelated repository
-metadata and actions.
+`terraform.stacks.json` owns the `workflowAdmissionPatterns` boundary. The
+required `.github/workflows/ci.yml` workflow runs on every PR and push to main
+and applies that boundary to its internal Terraform job. After the job starts,
+`scripts/tf-stacks.mjs` classifies the exact changed stacks from
+`changedPathPatterns`. `pnpm tf:test` requires the ci.yml filter to equal the
+registry boundary and to subsume every stack pattern. Add a new stack input
+under an existing entry. If it needs a new one, extend the registry boundary
+and the ci.yml filter in the same change. Prefer a top-level boundary; register
+a nested entry in `NESTED_ADMISSION_EXCEPTIONS`. `.github/**` stays banned: it
+would admit unrelated metadata and actions.
 
 `alerts-rules`, `alerts-delivery`, `aegis`, and `governance-watchdog` have CI
 apply behavior on `main`, gated by the `production-infra` GitHub Environment.

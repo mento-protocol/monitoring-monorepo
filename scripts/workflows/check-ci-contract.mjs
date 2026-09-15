@@ -23,7 +23,7 @@ const ORDINARY_GATE_IF = "${{ !inputs.no_skip_audit }}", AUDIT_GATE_IF = "${{ in
 // prettier-ignore
 const CHECKOUT_STEP = Object.freeze({ uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", if: "${{ !inputs.no_skip_audit }}", with: { "persist-credentials": false } }), TIMELINE_STEP = Object.freeze({ uses: "Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad", if: "always() && !inputs.no_skip_audit" });
 // prettier-ignore
-const ORDINARY = "*.md|aegis/**|alerts/**|docs/**|governance-watchdog/**|indexer-envio/**|integration-probes/**|metrics-bridge/**|terraform/**|ui-dashboard/**".split("|");
+const ORDINARY = "*.md|aegis/**|alerts/**|docs/**|governance-watchdog/**|indexer-envio/**|integration-probes/**|metrics-bridge/**|terraform/**|ui-dashboard/**|.agents/**|.claude/**|.codex/**|.github/**|patches/**|scripts/**|shared-config/**|.coderabbit.yaml|.dependency-cruiser.cjs|.gcloudignore|.gitignore|.gitmodules|.lighthouserc.cjs|.node-version|cloudbuild.yaml|eslint.config.mjs|package.json|pnpm-lock.yaml|pnpm-workspace.yaml|terraform.stacks.json".split("|");
 // prettier-ignore
 const CONTROL_PLANE = ".node-version|**/package.json|**/package.json5|**/package.yaml|**/pnpm-workspace.yaml|**/pnpm-lock.yaml|**/.npmrc|**/.pnpmfile.cjs|**/pnpmfile.cjs|**/patches|**/patches/**|**/node_modules|**/node_modules/**|**/tsconfig*.json|**/eslint.config.*|**/vitest*.{js,cjs,mjs,ts,cts,mts}|**/knip.json|**/react-doctor.config.json".split("|");
 export const FORCE_ALL_OUTPUT =
@@ -53,7 +53,7 @@ const EXPECTED_CONDITIONS = Object.freeze({
 });
 
 // prettier-ignore
-const EXPECTED_TIMEOUTS = Object.freeze({ changes: 2, shared: 10, ui: 25, indexer: 20, bridge: 10, "integration-probes": 10, alerts: 10, "gov-watchdog": 10, terraform: 10, aegis: 15, scripts: 55, "guardrail-prose": 5, "docs-checks": 10, "production-infra-contract": 5, "sentry-suites": 5, "version-skew": 5, deps: 5, ci: 2 });
+const EXPECTED_TIMEOUTS = Object.freeze({ changes: 2, shared: 10, ui: 25, indexer: 20, bridge: 10, "integration-probes": 10, alerts: 10, "gov-watchdog": 8, terraform: 5, aegis: 15, scripts: 10, "guardrail-prose": 5, "docs-checks": 10, "production-infra-contract": 8, "sentry-suites": 8, "version-skew": 8, deps: 8, ci: 2 });
 // prettier-ignore
 const EXPECTED_RUNNERS = Object.freeze({ changes: "ubuntu-24.04-arm", shared: "ubuntu-latest", ui: "ubuntu-latest", indexer: "ubuntu-latest", bridge: "ubuntu-latest", "integration-probes": "ubuntu-latest", aegis: "ubuntu-latest", alerts: "ubuntu-latest", "gov-watchdog": "ubuntu-latest", terraform: "ubuntu-24.04-arm", deps: "ubuntu-latest", scripts: "ubuntu-latest", "docs-checks": "ubuntu-latest", "version-skew": "ubuntu-latest", "guardrail-prose": "ubuntu-latest", "production-infra-contract": "ubuntu-latest", "sentry-suites": "ubuntu-latest", ci: "ubuntu-latest" });
 // prettier-ignore
@@ -227,6 +227,9 @@ export function workflowViolations(workflow, filters) {
     JSON.stringify(FILTER_NAMES.map((name) => filters?.[name]))
   )
     errors.push("routed filter is not the functional-filter union");
+  // A namespace a live filter routes but `ordinary` omits forces every job.
+  // prettier-ignore
+  for (const [name, root] of FILTER_NAMES.flatMap((name) => list(filters?.[name]).flat(Infinity).map((rule) => [name, String(rule).split("/")[0]]))) if (!root.includes("*") && !list(filters?.ordinary).some((rule) => rule === root || rule === `${root}/**`)) errors.push(`ordinary misses routed namespace ${root} from ${name}`);
   for (const name of [...FILTER_NAMES, "controlPlane"]) {
     const rules = filters?.[name];
     if (!Array.isArray(rules)) {

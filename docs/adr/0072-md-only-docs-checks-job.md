@@ -221,7 +221,7 @@ costs a duplicate run on mixed diffs and nothing else.
 
 ## Consequences
 
-- **A Markdown-only PR runs a ten-minute-capped job instead of the long-running
+- **A Markdown-only PR runs a thirteen-step job instead of the fifty-two-step
   `scripts` job.** The checks that can actually fail on a
   Markdown edit are exactly the ones that still run.
 - **A new Markdown-triggered check now has two candidate jobs, not one.**
@@ -253,7 +253,7 @@ costs a duplicate run on mixed diffs and nothing else.
 - **A Markdown-only edit under a path that stays in `rootScripts` now costs
   more, not less.** `.agents/**`, `.claude/skills/**`, `alerts/infra/**` and
   the other non-Markdown globs keep routing their own Markdown to `scripts`,
-  and such a diff now sets both filters: the long-running job runs
+  and such a diff now sets both filters: the `scripts` job runs
   exactly as today, plus a second runner repeating nine of its steps. That is
   about one tracked Markdown file in five — 43 of 201, of which 17 sit under
   `.agents/` and 15 under `.claude/skills/`, the skills mirror this repo
@@ -285,7 +285,7 @@ costs a duplicate run on mixed diffs and nothing else.
 ## Evidence
 
 - `.github/workflows/ci.yml`: the `scripts` job carries 52 steps and
-  `timeout-minutes: 55`; `docs-checks` carries 13 steps and
+  `timeout-minutes: 10`; `docs-checks` carries 13 steps and
   `timeout-minutes: 10`.
 - `stalenessSubjects(ROUTING_GROUPS)` from `scripts/gate/routing-table/`
   returns 799 path subjects, 631 distinct, of which 23 are Markdown files —

@@ -138,6 +138,30 @@ function sameContents(fileA, fileB, relativePath) {
 }
 
 /**
+ * The provenance exception tolerates a difference; it must not tolerate a
+ * swap. The canonical tree writes `source: "Codex"` and the Claude mirror
+ * writes `source: "claude"`. A mirror refresh that copies the canonical file
+ * over the mirror leaves both sides byte-identical, which the content
+ * comparison accepts, and CodeRabbit no longer reviews the mirror — so pin
+ * the side here, for the two documented literals only.
+ */
+export function provenanceSideDrift(contentsA, contentsB, relativePath) {
+  if (!isForensicReportPath(relativePath)) return [];
+  const drift = [];
+  if (contentsA.includes('source: "claude"')) {
+    drift.push(
+      `provenance literal in the canonical tree must be source: "Codex": ${relativePath}`,
+    );
+  }
+  if (contentsB.includes('source: "Codex"')) {
+    drift.push(
+      `provenance literal in the Claude mirror must be source: "claude": ${relativePath}`,
+    );
+  }
+  return drift;
+}
+
+/**
  * Compare two mirrored trees.
  *
  * Returns `{ fatal, drift }`. `fatal` holds the abort conditions (a missing
@@ -180,6 +204,15 @@ export function compareMirrors(rootA, rootB) {
         isForensicReportPath(relative)
           ? `content drift (beyond documented provenance literals): ${relative}`
           : `content drift: ${relative}`,
+      );
+    }
+    if (isForensicReportPath(relative)) {
+      drift.push(
+        ...provenanceSideDrift(
+          readFileSync(a, "utf8"),
+          readFileSync(b, "utf8"),
+          relative,
+        ),
       );
     }
     if (isExecutable(a) !== isExecutable(b)) {

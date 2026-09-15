@@ -82,10 +82,11 @@ the weekly usage window, and every push to it triggers another Codex review,
 whose findings then cost replies and often another push. Claude is not a
 per-push cost: `.github/workflows/claude.yml` fires on `opened` and
 `ready_for_review` only, so a Claude re-review is opt-in via `@claude review`.
-CodeRabbit should not be a per-push cost either — it is configured to review
-the opening push and the closeout head only — but PR #2236 observed a run on
-every push, all refused by the spending cap, so budget for the attempt until
-ADR 0066's open question is settled. Two issues is
+CodeRabbit is not a per-push cost either: `auto_incremental_review: false`
+works, and the ADR 0066 amendment of 2026-09-14 records the measurement. It
+reviews the opening push and the closeout head only. Budget at most two trusted
+`@coderabbitai review` or `full review` requests per PR, marked or bare, and
+merge the base before a request rather than after it. Two issues is
 the default because the cost is dominated by review rounds, not by the first
 implementation. **Refuse a batch size above 4.** Say that plainly and stop
 rather than clamping silently — an operator who asked for 6 needs to know they
@@ -569,7 +570,8 @@ Then spawn one worker subagent per issue. Give each a brief containing:
   `pnpm issue:review --pr <pr> --issue <n>`.
 - **The babysit:** sweep every feedback surface — top-level comments, review
   bodies, inline threads, annotations, failing logs. **Batch fixes into single
-  pushes**, because every push costs another Codex review round. Reply before
+  pushes**, because every push costs another Codex review round, and batch them
+  before the CodeRabbit closeout request so the PR spends at most two. Reply before
   resolving, in the two canonical forms: `Fixed in <commit> — <what changed>`
   and `Won't fix: <technical reason why>`. Drive to READY on both projections,
   `pr:feedback-state` clean first, then `pr:ready-state`.

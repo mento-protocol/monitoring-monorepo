@@ -39,9 +39,9 @@ name: Aegis Terraform
 # earlier plan. The apply job starts only after approval, then creates and
 # applies a later plan, so the current path has a documented drift window.
 #
-# Quality gating: PR-level fmt/init/validate is already enforced by `infra.yml`
-# (matrix module `aegis`). This workflow adds the sanitized plan summary and
-# the apply gate.
+# Quality gating: PR-level fmt/init/validate is already enforced by ci.yml's
+# registry-backed `terraform` job (stack `aegis`). This workflow adds the
+# sanitized plan summary and the apply gate.
 
 on:
   workflow_dispatch:

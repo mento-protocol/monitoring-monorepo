@@ -4,17 +4,37 @@ on:
   pull_request:
     branches: [main]
     # Advisory workflow — strictly non-blocking (never fails the PR; see the
-    # job comment) and NOT in the branch ruleset's required checks, so a path
-    # filter is safe. jscpd measures source duplication, so skip the runner
-    # boot on doc-only PRs. `paths-ignore` (not an allowlist) keeps this
-    # fail-open: any PR that touches code still runs the scan.
-    paths-ignore:
-      - "**/*.md"
-      - "**/*.mdx"
-      - docs/**
-      - "**/LICENSE"
+    # job comment) and NOT in the branch ruleset's required checks, so a
+    # positive `paths:` filter is safe (a skipped run cannot leave a
+    # *required* check pending). These globs mirror .jscpd.json's `pattern`
+    # scan roots: jscpd cannot flag duplication in a PR that touches none of
+    # them. Keep both copies in sync with .jscpd.json if the scan roots change.
+    paths:
+      - shared-config/src/**
+      - ui-dashboard/src/**
+      - indexer-envio/src/**
+      - metrics-bridge/src/**
+      - aegis/src/**
+      - governance-watchdog/src/**
+      - alerts/infra/onchain-event-handler/src/**
+      - alerts/infra/oncall-announcer/src/**
+      - .jscpd.json
+      - package.json
+      - .github/workflows/code-health-duplication.yml
   push:
     branches: [main]
+    paths:
+      - shared-config/src/**
+      - ui-dashboard/src/**
+      - indexer-envio/src/**
+      - metrics-bridge/src/**
+      - aegis/src/**
+      - governance-watchdog/src/**
+      - alerts/infra/onchain-event-handler/src/**
+      - alerts/infra/oncall-announcer/src/**
+      - .jscpd.json
+      - package.json
+      - .github/workflows/code-health-duplication.yml
 
 # PR runs cancel on new pushes to the same PR ref; push to main uses a
 # SHA-unique group so consecutive main runs never cancel each other.
@@ -29,10 +49,10 @@ jobs:
     name: jscpd
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    # Strictly advisory — never fails the PR. Surfaces duplication signal
-    # via an uploaded artifact and (optionally) a PR summary comment.
-    # If `jscpd` exits non-zero (it shouldn't, given .jscpd.json's
-    # `exitCode: 0`), the next step still runs to upload the artifact.
+    # Strictly advisory — never fails the PR. Surfaces duplication signal via
+    # the job log (.jscpd.json's console reporter) and an uploaded artifact.
+    # No step posts a PR comment. If `jscpd` exits non-zero (it shouldn't,
+    # given .jscpd.json's `exitCode: 0`), the next step still uploads it.
     continue-on-error: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

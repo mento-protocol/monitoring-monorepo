@@ -363,8 +363,8 @@ test("structural mutations fail closed at each M2 boundary", () => {
   mutateOnce(
     root,
     ".github/workflows/ci.yml",
-    "    runs-on: ubuntu-latest\n    timeout-minutes: 5\n    permissions:\n      contents: read\n      actions: read",
-    "    runs-on: ubuntu-24.04-arm\n    timeout-minutes: 5\n    permissions:\n      contents: read\n      actions: read",
+    "proof for every candidate.\n    runs-on: ubuntu-latest\n",
+    "proof for every candidate.\n    runs-on: ubuntu-24.04-arm\n",
     /dependency-free x64 pnpm cache writer/u,
   );
   mutateOnce(

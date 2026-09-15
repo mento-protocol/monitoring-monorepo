@@ -54,8 +54,8 @@ jobs:
         # We invoke the script via `node` directly rather than `pnpm tf list`
         # because pnpm isn't pre-installed on GitHub/Blacksmith Ubuntu 24.04
         # runners, and the script only uses Node stdlib (no node_modules
-        # needed). Matches the pattern in `.github/workflows/infra.yml` +
-        # `ci.yml` which also call `node scripts/tf-stacks.mjs` directly.
+        # needed). Matches the pattern in `ci.yml`, which also calls
+        # `node scripts/tf-stacks.mjs` directly.
         #
         run: |
           set -euo pipefail
