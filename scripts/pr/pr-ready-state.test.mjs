@@ -36,8 +36,10 @@ import {
 } from "./pr-ready-state-closeout.mjs";
 import { formatCompact, formatHuman } from "./pr-ready-state-format.mjs";
 import { verifyReadinessSnapshot } from "./pr-ready-state-stack.mjs";
+import { latestSettledChecksByIdentity } from "./pr-ready-state-base-health.mjs";
 import {
   annotateStatusCheckSources,
+  fetchBaseBranchHealth,
   fetchRequiredStatusContexts,
   fetchReadinessBases,
   fetchHeadUpdatedAt,
@@ -48,6 +50,7 @@ import {
   requiredStatusContextsFromProtection,
   requiredStatusContextsFromRules,
   requiredStatusContextsFromRulesResult,
+  strictRequiredStatusChecksPolicyFromRules,
   splitRepo,
   watchLoopExitCode,
   workflowPathsFromRules,
@@ -271,6 +274,80 @@ test("extracts required status contexts from nested branch rulesets", () => {
   ]);
 });
 
+test("reads strict_required_status_checks_policy off a required_status_checks rule", () => {
+  for (const strict of [true, false]) {
+    assertEqual(
+      strictRequiredStatusChecksPolicyFromRules([
+        {
+          type: "required_status_checks",
+          parameters: {
+            required_status_checks: [{ context: "ci" }],
+            strict_required_status_checks_policy: strict,
+          },
+        },
+      ]),
+      strict,
+    );
+  }
+  assertEqual(
+    strictRequiredStatusChecksPolicyFromRules([
+      {
+        type: "required_status_checks",
+        parameters: { required_status_checks: [{ context: "ci" }] },
+      },
+    ]),
+    null,
+    "a rule with no strict field is unknown, not false",
+  );
+  assertEqual(
+    strictRequiredStatusChecksPolicyFromRules([{ type: "deletion" }]),
+    null,
+    "no required_status_checks rule is unknown",
+  );
+
+  // A base can carry more than one applicable `required_status_checks` rule
+  // (e.g. an org ruleset layered with a repo ruleset). GitHub enforces the
+  // most restrictive, so any confirmed `true` wins regardless of order.
+  const strictRule = {
+    type: "required_status_checks",
+    parameters: {
+      required_status_checks: [{ context: "ci" }],
+      strict_required_status_checks_policy: true,
+    },
+  };
+  const nonStrictRule = {
+    type: "required_status_checks",
+    parameters: {
+      required_status_checks: [{ context: "Vercel" }],
+      strict_required_status_checks_policy: false,
+    },
+  };
+  const unstatedRule = {
+    type: "required_status_checks",
+    parameters: { required_status_checks: [{ context: "Sentry suites" }] },
+  };
+  assertEqual(
+    strictRequiredStatusChecksPolicyFromRules([nonStrictRule, strictRule]),
+    true,
+    "a stricter later rule must still win",
+  );
+  assertEqual(
+    strictRequiredStatusChecksPolicyFromRules([strictRule, nonStrictRule]),
+    true,
+    "a stricter earlier rule must win",
+  );
+  assertEqual(
+    strictRequiredStatusChecksPolicyFromRules([nonStrictRule, nonStrictRule]),
+    false,
+    "false only when every matching rule explicitly disables strict mode",
+  );
+  assertEqual(
+    strictRequiredStatusChecksPolicyFromRules([nonStrictRule, unstatedRule]),
+    null,
+    "an unstated rule keeps the aggregate unknown, never false",
+  );
+});
+
 test("extracts app-bound required status contexts from branch protection details", () => {
   assertDeepEqual(
     requiredStatusContextsFromProtection({
@@ -318,18 +395,88 @@ test("uses classic branch protection required status contexts when available", a
       { context: "Vercel", integrationId: null },
     ],
     error: null,
+    strict: null,
   });
-  assertEqual(rulesCalls, 0, "rulesets must not be read when protection works");
+  assertEqual(
+    rulesCalls,
+    1,
+    "an unconfirmed classic strict reading must also consult rulesets",
+  );
 });
 
-test("falls back to rulesets for the current gh branch-protection 404", async () => {
+test("reads the strict policy straight off classic protection when no ruleset applies", async () => {
+  for (const strict of [true, false]) {
+    let rulesCalls = 0;
+    const result = await fetchRequiredStatusContexts({
+      repo: {
+        owner: "mento-protocol",
+        name: "monitoring-monorepo",
+        host: null,
+      },
+      baseRef: "main",
+      fetchProtection: async () => ({
+        ok: true,
+        value: { contexts: ["ci"], strict },
+      }),
+      fetchRules: async () => {
+        rulesCalls += 1;
+        return { ok: true, value: [] };
+      },
+    });
+    assertEqual(result.strict, strict);
+    assertEqual(
+      rulesCalls,
+      1,
+      "rulesets are always consulted for ruleset-only required contexts, even once classic already confirms strict",
+    );
+  }
+});
+
+test("unions ruleset-only required contexts with classic protection's contexts", async () => {
+  for (const strict of [true, false]) {
+    const result = await fetchRequiredStatusContexts({
+      repo: {
+        owner: "mento-protocol",
+        name: "monitoring-monorepo",
+        host: null,
+      },
+      baseRef: "main",
+      fetchProtection: async () => ({
+        ok: true,
+        value: { contexts: ["ci"], strict },
+      }),
+      fetchRules: async () => ({
+        ok: true,
+        value: [
+          {
+            type: "required_status_checks",
+            parameters: {
+              required_status_checks: [{ context: "Ruleset Only Check" }],
+              strict_required_status_checks_policy: strict,
+            },
+          },
+        ],
+      }),
+    });
+
+    assertDeepEqual(
+      result.contexts,
+      [
+        { context: "ci", integrationId: null },
+        { context: "Ruleset Only Check", integrationId: null },
+      ],
+      "a ruleset-only required check must not be dropped when classic protection also applies",
+    );
+  }
+});
+
+test("aggregates a stricter ruleset over classic protection's confirmed non-strict flag", async () => {
   const result = await fetchRequiredStatusContexts({
     repo: { owner: "mento-protocol", name: "monitoring-monorepo", host: null },
     baseRef: "main",
     fetchProtection: async () => ({
-      ok: false,
-      error:
-        "gh api repos/mento-protocol/monitoring-monorepo/branches/main/protection/required_status_checks failed with exit 1:\ngh: Not Found (HTTP 404)\n",
+      ok: true,
+      value: { contexts: ["ci"], strict: false },
     }),
     fetchRules: async () => ({
       ok: true,
@@ -337,23 +484,462 @@ test("falls back to rulesets for the current gh branch-protection 404", async ()
         {
           type: "required_status_checks",
           parameters: {
-            required_status_checks: [
-              { context: "ci" },
-              { context: "Code Quality" },
-            ],
+            required_status_checks: [{ context: "ci" }],
+            strict_required_status_checks_policy: true,
           },
         },
       ],
     }),
   });
 
-  assertDeepEqual(result, {
-    contexts: [
-      { context: "ci", integrationId: null },
-      { context: "Code Quality", integrationId: null },
-    ],
-    error: null,
+  assertEqual(
+    result.strict,
+    true,
+    "a ruleset confirming strict must not be shadowed by classic protection's false",
+  );
+});
+
+test("fails closed when a ruleset reports false but classic protection's strict is unknown", async () => {
+  const result = await fetchRequiredStatusContexts({
+    repo: { owner: "mento-protocol", name: "monitoring-monorepo", host: null },
+    baseRef: "main",
+    fetchProtection: async () => ({
+      ok: true,
+      value: { contexts: ["ci"] },
+    }),
+    fetchRules: async () => ({
+      ok: true,
+      value: [
+        {
+          type: "required_status_checks",
+          parameters: {
+            required_status_checks: [{ context: "ci" }],
+            strict_required_status_checks_policy: false,
+          },
+        },
+      ],
+    }),
   });
+
+  assertEqual(
+    result.strict,
+    null,
+    "an unknown classic reading could still mean strict mode is on; a ruleset's false alone cannot demote it",
+  );
+});
+
+test("fails closed when rulesets cannot be read after classic protection reports non-strict", async () => {
+  const result = await fetchRequiredStatusContexts({
+    repo: { owner: "mento-protocol", name: "monitoring-monorepo", host: null },
+    baseRef: "main",
+    fetchProtection: async () => ({
+      ok: true,
+      value: { contexts: ["ci"], strict: false },
+    }),
+    fetchRules: async () => ({
+      ok: false,
+      error: "gh: Resource not accessible by integration (HTTP 403)",
+    }),
+  });
+
+  assertEqual(
+    result.strict,
+    null,
+    "an unreadable ruleset means a stricter override cannot be ruled out",
+  );
+});
+
+test("fails closed on required-status-context error when the ruleset read fails after classic protection succeeds", async () => {
+  // Classic protection succeeding no longer means requiredStatusContexts is
+  // complete: a ruleset can add required contexts classic protection does
+  // not know about, so a failed ruleset read must not be swallowed as
+  // `error: null` — that would let `fetchReadyState` treat classicContexts
+  // as the full set and misclassify a missing ruleset-only check as
+  // optional (see "fails closed when required status contexts cannot be
+  // fetched" for the resulting `summarizeReadyState` blocker).
+  const result = await fetchRequiredStatusContexts({
+    repo: { owner: "mento-protocol", name: "monitoring-monorepo", host: null },
+    baseRef: "main",
+    fetchProtection: async () => ({
+      ok: true,
+      value: { contexts: ["ci"] },
+    }),
+    fetchRules: async () => ({
+      ok: false,
+      error: "gh: Resource not accessible by integration (HTTP 403)",
+    }),
+  });
+
+  assertEqual(
+    result.error,
+    "gh: Resource not accessible by integration (HTTP 403)",
+    "a failed ruleset read must propagate as a required-status-context error, not be swallowed",
+  );
+});
+
+test("falls back to rulesets for the current gh branch-protection 404", async () => {
+  // The same two-signal proof gates the context list, not just strictness. A
+  // permission-masked 404 could be hiding a classic-only required check, so the
+  // ruleset list cannot be called complete and the caller must fail closed.
+  const rules = async () => ({
+    ok: true,
+    value: [
+      {
+        type: "required_status_checks",
+        parameters: {
+          required_status_checks: [
+            { context: "ci" },
+            { context: "Code Quality" },
+          ],
+        },
+      },
+    ],
+  });
+  const expectedContexts = [
+    { context: "ci", integrationId: null },
+    { context: "Code Quality", integrationId: null },
+  ];
+
+  const masked = await fetchRequiredStatusContexts({
+    repo: { owner: "mento-protocol", name: "monitoring-monorepo", host: null },
+    baseRef: "main",
+    fetchProtection: async () => ({
+      ok: false,
+      error:
+        "gh api repos/mento-protocol/monitoring-monorepo/branches/main/protection/required_status_checks failed with exit 1:\ngh: Not Found (HTTP 404)\n",
+    }),
+    fetchRules: rules,
+    fetchBranch: async () => rulesetOnlyBranch,
+  });
+  assertDeepEqual(masked.contexts, expectedContexts);
+  assert(
+    masked.error?.includes("without proving absence"),
+    "an unproven 404 must propagate an error, not report the list complete",
+  );
+  assert(
+    !masked.error.includes("\n"),
+    "the blocker text must stay on one line",
+  );
+  assertEqual(masked.strict, null);
+
+  // Proven absence is what makes the ruleset list authoritative.
+  const proven = await fetchRequiredStatusContexts({
+    repo: { owner: "mento-protocol", name: "monitoring-monorepo", host: null },
+    baseRef: "main",
+    fetchProtection: async () => ({
+      ok: false,
+      error: "gh: Branch not protected (HTTP 404)",
+    }),
+    fetchRules: rules,
+    fetchBranch: async () => rulesetOnlyBranch,
+  });
+  assertDeepEqual(proven, {
+    contexts: expectedContexts,
+    error: null,
+    strict: null,
+  });
+});
+
+test("a permission-masked classic 404 blocks readiness end to end", async () => {
+  // The whole point of propagating the error: a hidden classic-only required
+  // check must not be classified as optional. Drive the real probe output, not
+  // just the fetch helper.
+  const contexts = await fetchRequiredStatusContexts({
+    repo: { owner: "mento-protocol", name: "monitoring-monorepo", host: null },
+    baseRef: "main",
+    fetchProtection: async () => ({
+      ok: false,
+      error: "gh: Not Found (HTTP 404)",
+    }),
+    fetchRules: async () => ({
+      ok: true,
+      value: [
+        {
+          type: "required_status_checks",
+          parameters: { required_status_checks: [{ context: "ci" }] },
+        },
+      ],
+    }),
+    fetchBranch: async () => rulesetOnlyBranch,
+  });
+
+  const summary = summarizeReadyState({
+    pr: {
+      ...basePr,
+      statusCheckRollup: [
+        { name: "ci", conclusion: "SUCCESS", status: "COMPLETED" },
+      ],
+    },
+    reactions: [
+      {
+        content: "+1",
+        created_at: "2026-05-21T13:23:00Z",
+        user: { login: "chatgpt-codex-connector[bot]" },
+      },
+    ],
+    requiredStatusContexts: contexts.contexts,
+    requiredStatusContextsError: contexts.error,
+    requiredStatusContextsAvailable: contexts.error === null,
+    requiredStatusChecksStrict: contexts.strict,
+    baseHealthOid: "a".repeat(40),
+    baseStatusCheckRollup: [
+      { name: "ci", conclusion: "SUCCESS", status: "COMPLETED" },
+    ],
+  });
+
+  assertEqual(
+    summary.ready,
+    false,
+    "an unproven classic 404 must not report ready",
+  );
+  assertEqual(
+    summary.required.blockers.filter(
+      (item) => item.kind === "branch-protection",
+    ).length,
+    1,
+    "the caller must raise its branch-protection blocker",
+  );
+});
+
+test("treats an unconfigured required-status-checks 404 as proven absence", async () => {
+  // A base can carry classic protection for reviews or restrictions while
+  // having no required-status-checks configuration. GitHub answers this only
+  // after reading that protection, so there is no classic context or `strict`
+  // flag to miss — and blocking it would strand a valid setup forever.
+  let branchReads = 0;
+  const result = await fetchRequiredStatusContexts({
+    repo: { owner: "mento-protocol", name: "monitoring-monorepo", host: null },
+    baseRef: "main",
+    fetchProtection: async () => ({
+      ok: false,
+      error: "gh: Required status checks not enabled (HTTP 404)",
+    }),
+    fetchRules: async () => ({
+      ok: true,
+      value: [
+        {
+          type: "required_status_checks",
+          parameters: {
+            required_status_checks: [{ context: "ci" }],
+            strict_required_status_checks_policy: false,
+          },
+        },
+      ],
+    }),
+    fetchBranch: async () => {
+      branchReads += 1;
+      // Classic protection is enabled here; only the status-check block is
+      // missing, so the branch object must not be what decides this.
+      return { ok: true, value: { protection: { enabled: true } } };
+    },
+  });
+
+  assertDeepEqual(result.contexts, [{ context: "ci", integrationId: null }]);
+  assertEqual(result.error, null, "the ruleset list is complete here");
+  assertEqual(result.strict, false, "there is no classic strict flag to miss");
+  assertEqual(
+    branchReads,
+    0,
+    "the message is conclusive; no branch read is needed",
+  );
+});
+
+test("fails closed on the context list for every unproven classic 404", async () => {
+  const rules = async () => ({
+    ok: true,
+    value: [
+      {
+        type: "required_status_checks",
+        parameters: { required_status_checks: [{ context: "ci" }] },
+      },
+    ],
+  });
+
+  for (const [label, protectionError, branchResult] of [
+    [
+      "a permission-masking 404",
+      "gh: Not Found (HTTP 404)",
+      { ok: true, value: rulesetOnlyBranch.value },
+    ],
+    [
+      "classic protection still enabled",
+      "gh: Branch not protected (HTTP 404)",
+      { ok: true, value: { protection: { enabled: true } } },
+    ],
+    [
+      "an unreadable branch object",
+      "gh: Branch not protected (HTTP 404)",
+      { ok: false, error: "gh: Resource not accessible by integration" },
+    ],
+  ]) {
+    const result = await fetchRequiredStatusContexts({
+      repo: {
+        owner: "mento-protocol",
+        name: "monitoring-monorepo",
+        host: null,
+      },
+      baseRef: "main",
+      fetchProtection: async () => ({ ok: false, error: protectionError }),
+      fetchRules: rules,
+      fetchBranch: async () => branchResult,
+    });
+
+    assert(
+      result.error !== null,
+      `${label} must leave the context list unavailable`,
+    );
+    assertEqual(result.strict, null, `${label} must leave strictness unknown`);
+  }
+});
+
+// A classic-protection 404 alone cannot license a ruleset's non-strict value:
+// GitHub returns 404 both when classic protection is absent and when the token
+// may not read it. Probed against this repository on 2026-09-15:
+// `branches/main/protection/required_status_checks` answers "Branch not
+// protected (HTTP 404)", while `branches/main` answers `protected: true`
+// (rulesets set that flag) with `protection.enabled: false`. So absence needs
+// the exact 404 message *and* `protection.enabled === false`; the top-level
+// `protected` flag is useless here.
+function nonStrictRulesetFetchers(protectionError, branchResult) {
+  return {
+    repo: { owner: "mento-protocol", name: "monitoring-monorepo", host: null },
+    baseRef: "main",
+    fetchProtection: async () => ({ ok: false, error: protectionError }),
+    fetchRules: async () => ({
+      ok: true,
+      value: [
+        {
+          type: "required_status_checks",
+          parameters: {
+            required_status_checks: [{ context: "ci" }],
+            strict_required_status_checks_policy: false,
+          },
+        },
+      ],
+    }),
+    fetchBranch: async () => branchResult,
+  };
+}
+
+const rulesetOnlyBranch = {
+  ok: true,
+  value: {
+    protected: true,
+    protection: { enabled: false, required_status_checks: { contexts: [] } },
+  },
+};
+
+test("trusts a ruleset's non-strict policy once classic protection is proven absent", async () => {
+  const result = await fetchRequiredStatusContexts(
+    nonStrictRulesetFetchers(
+      "gh api repos/mento-protocol/monitoring-monorepo/branches/main/protection/required_status_checks failed with exit 1:\ngh: Branch not protected (HTTP 404)\n",
+      rulesetOnlyBranch,
+    ),
+  );
+
+  assertEqual(
+    result.strict,
+    false,
+    "the live ruleset-only shape must let the ruleset's false stand",
+  );
+});
+
+test("fails closed when a classic-protection 404 could be a permission gap", async () => {
+  const result = await fetchRequiredStatusContexts(
+    nonStrictRulesetFetchers(
+      "gh api repos/mento-protocol/monitoring-monorepo/branches/main/protection/required_status_checks failed with exit 1:\ngh: Not Found (HTTP 404)\n",
+      rulesetOnlyBranch,
+    ),
+  );
+
+  assertEqual(
+    result.strict,
+    null,
+    "a bare Not Found may mask an unreadable classic strict: true",
+  );
+});
+
+test("fails closed when classic protection is enabled despite a 404", async () => {
+  const result = await fetchRequiredStatusContexts(
+    nonStrictRulesetFetchers("gh: Branch not protected (HTTP 404)", {
+      ok: true,
+      value: { protected: true, protection: { enabled: true } },
+    }),
+  );
+
+  assertEqual(
+    result.strict,
+    null,
+    "an enabled classic protection contradicts the 404 and must not be trusted",
+  );
+});
+
+test("fails closed when the base branch read fails", async () => {
+  const result = await fetchRequiredStatusContexts(
+    nonStrictRulesetFetchers("gh: Branch not protected (HTTP 404)", {
+      ok: false,
+      error: "gh: Resource not accessible by integration (HTTP 403)",
+    }),
+  );
+
+  assertEqual(
+    result.strict,
+    null,
+    "classic absence cannot be established without the branch read",
+  );
+});
+
+test("proves classic absence on every 404, whatever the ruleset says", async () => {
+  // The branch read is no longer skipped for strict or unknown rulesets: the
+  // context list needs the same proof, so one read serves both decisions.
+  for (const [strictPolicy, expected] of [
+    [true, true],
+    [undefined, null],
+  ]) {
+    let branchReads = 0;
+    const result = await fetchRequiredStatusContexts({
+      repo: {
+        owner: "mento-protocol",
+        name: "monitoring-monorepo",
+        host: null,
+      },
+      baseRef: "main",
+      fetchProtection: async () => ({
+        ok: false,
+        error: "gh: Branch not protected (HTTP 404)",
+      }),
+      fetchRules: async () => ({
+        ok: true,
+        value: [
+          {
+            type: "required_status_checks",
+            parameters: {
+              required_status_checks: [{ context: "ci" }],
+              ...(strictPolicy === undefined
+                ? {}
+                : { strict_required_status_checks_policy: strictPolicy }),
+            },
+          },
+        ],
+      }),
+      fetchBranch: async () => {
+        branchReads += 1;
+        return rulesetOnlyBranch;
+      },
+    });
+
+    assertEqual(result.strict, expected);
+    assertEqual(
+      branchReads,
+      1,
+      "classic absence is established once and reused by both decisions",
+    );
+    assertEqual(
+      result.error,
+      null,
+      "proven absence makes the ruleset context list authoritative",
+    );
+  }
 });
 
 test("fails closed when branch protection is absent and rulesets are unavailable", async () => {
@@ -373,6 +959,7 @@ test("fails closed when branch protection is absent and rulesets are unavailable
   assertDeepEqual(result, {
     contexts: [],
     error: "gh: Resource not accessible by integration (HTTP 403)",
+    strict: null,
   });
 });
 
@@ -391,6 +978,7 @@ test("fails closed when a protection 404 yields no ruleset-required contexts", a
     contexts: [],
     error:
       "Required status contexts unavailable: classic branch protection returned HTTP 404 and branch rulesets did not define required status checks or workflows",
+    strict: null,
   });
 });
 
@@ -412,6 +1000,7 @@ test("fails closed without reading rulesets for non-404 protection errors", asyn
   assertDeepEqual(result, {
     contexts: [],
     error: "gh: Resource not accessible by integration (HTTP 403)",
+    strict: null,
   });
   assertEqual(rulesCalls, 0, "non-404 errors must not trigger a fallback");
 });
@@ -898,6 +1487,34 @@ test("does not collapse duplicate required contexts from different app sources",
   assertDeepEqual(
     split.required.map((check) => `${check.name}:${check.state}`),
     ["ci:pass", "ci:pending"],
+  );
+});
+
+test("one check satisfies both an unbound and an app-bound required context of the same name", () => {
+  // Classic protection can require a bare "ci" (no app) while a ruleset also
+  // requires "ci" from a specific app — fetchRequiredStatusContexts unions
+  // both into requiredStatusContexts. The single "ci" check GitHub reports
+  // for that app satisfies both entries; crediting only the first (the
+  // unbound one, since it matches unconditionally) left the app-bound entry
+  // permanently "pending" even though nothing further could ever satisfy it.
+  const split = splitRequiredAndOptionalChecks(
+    [
+      {
+        name: "ci",
+        status: "COMPLETED",
+        conclusion: "SUCCESS",
+        appId: 15368,
+      },
+    ],
+    [
+      { context: "ci", integrationId: null },
+      { context: "ci", integrationId: 15368 },
+    ],
+  );
+
+  assertDeepEqual(
+    split.required.map((check) => `${check.name}:${check.state}`),
+    ["ci:pass"],
   );
 });
 
@@ -2269,7 +2886,56 @@ test("summarizes ready state when all blocking surfaces are clean", () => {
   assertEqual(summary.statusChecks.skipped.length, 1);
 });
 
-test("blocks confirmed BEHIND even with mergeable head and green required checks", () => {
+test("reports confirmed BEHIND as an informational note only once strict is confirmed off", () => {
+  // Non-strict policy (operator decision 2026-09-15, ADR 0104): a merely
+  // BEHIND head is ready when everything else is clear, but only once the
+  // base's ruleset confirms `requiredStatusChecksStrict: false`. Unknown
+  // (`null`, the default) or confirmed strict (`true`) both fail closed and
+  // keep blocking, exactly like GitHub's own strict mode does.
+  for (const requiredStatusChecksStrict of [undefined, null, true]) {
+    for (const mergeStateStatus of [
+      "BEHIND",
+      "CLEAN",
+      "BLOCKED",
+      "UNKNOWN",
+      undefined,
+    ]) {
+      const summary = summarizeReadyState({
+        pr: {
+          ...basePr,
+          mergeStateStatus,
+          statusCheckRollup: [
+            { name: "lint", conclusion: "SUCCESS", status: "COMPLETED" },
+          ],
+        },
+        reactions: [
+          {
+            content: "+1",
+            created_at: "2026-05-21T13:23:00Z",
+            user: { login: "chatgpt-codex-connector[bot]" },
+          },
+        ],
+        requiredStatusChecksStrict,
+      });
+      assertEqual(summary.ready, mergeStateStatus !== "BEHIND");
+      assertEqual(
+        summary.required.blockers.some((item) => item.kind === "base-update"),
+        mergeStateStatus === "BEHIND",
+      );
+      assertEqual(
+        summary.notes.some((item) => item.kind === "base-update"),
+        false,
+      );
+      // The documented contract field (docs/notes/pr-ready-state.md) must be
+      // on the summary itself, not just steer the internal note/blocker
+      // decision.
+      assertEqual(
+        summary.requiredStatusChecksStrict,
+        requiredStatusChecksStrict ?? null,
+      );
+    }
+  }
+
   for (const mergeStateStatus of [
     "BEHIND",
     "CLEAN",
@@ -2293,15 +2959,685 @@ test("blocks confirmed BEHIND even with mergeable head and green required checks
           user: { login: "chatgpt-codex-connector[bot]" },
         },
       ],
+      requiredStatusChecksStrict: false,
     });
-    assertEqual(summary.ready, mergeStateStatus !== "BEHIND");
+    assertEqual(summary.ready, true);
     assertEqual(summary.pr.mergeStateStatus, mergeStateStatus ?? null);
     assertEqual(summary.pr.autoMergeEnabledAt, "2026-05-21T13:24:00Z");
     assertEqual(
       summary.required.blockers.some((item) => item.kind === "base-update"),
+      false,
+    );
+    assertEqual(
+      summary.notes.some((item) => item.kind === "base-update"),
       mergeStateStatus === "BEHIND",
     );
+    assertEqual(summary.requiredStatusChecksStrict, false);
   }
+});
+
+test("blocks on a red base and fails closed when base health is unreadable", () => {
+  // ADR 0104 stopped GitHub re-running a PR's required checks against the
+  // current base, so "nobody merges while main is red" is enforced here
+  // instead of left as a rule of thumb.
+  const readyPr = {
+    ...basePr,
+    statusCheckRollup: [
+      { name: "ci", conclusion: "SUCCESS", status: "COMPLETED" },
+    ],
+  };
+  const codexReaction = [
+    {
+      content: "+1",
+      created_at: "2026-05-21T13:23:00Z",
+      user: { login: "chatgpt-codex-connector[bot]" },
+    },
+  ];
+  const summarize = (extra) =>
+    summarizeReadyState({
+      pr: readyPr,
+      reactions: codexReaction,
+      requiredStatusContexts: [{ context: "ci", integrationId: null }],
+      ...extra,
+    });
+
+  const green = summarize({
+    baseStatusCheckRollup: [
+      { name: "ci", conclusion: "SUCCESS", status: "COMPLETED" },
+    ],
+    baseHealthOid: "597b71081aaad0212977dc4e090c2952e063fac9",
+  });
+  assertEqual(green.ready, true, "a green base must not block");
+
+  for (const conclusion of [
+    "FAILURE",
+    "CANCELLED",
+    "TIMED_OUT",
+    "ACTION_REQUIRED",
+  ]) {
+    const red = summarize({
+      baseStatusCheckRollup: [{ name: "ci", conclusion, status: "COMPLETED" }],
+      baseHealthOid: "597b71081aaad0212977dc4e090c2952e063fac9",
+    });
+    const blockers = red.required.blockers.filter(
+      (item) => item.kind === "base-red",
+    );
+    assertEqual(red.ready, false, `a ${conclusion} base check must block`);
+    assertEqual(blockers.length, 1);
+    assertEqual(blockers[0].state, "red");
+    assert(
+      blockers[0].name.includes("ci") &&
+        blockers[0].name.includes("597b71081aaad0212977dc4e090c2952e063fac9"),
+      "the blocker must name the failing context and the base commit",
+    );
+  }
+
+  for (const status of ["IN_PROGRESS", "QUEUED"]) {
+    const pending = summarize({
+      baseStatusCheckRollup: [{ name: "ci", status }],
+      baseHealthOid: "597b71081aaad0212977dc4e090c2952e063fac9",
+    });
+    assertEqual(
+      pending.ready,
+      true,
+      `a base check still ${status} is not red and must not block`,
+    );
+  }
+
+  // A base that has not reported the required context at all is pending, not
+  // red: the required-context list is the PR's, and a path-filtered job that
+  // never runs on the base must not manufacture a blocker.
+  assertEqual(
+    summarize({ baseStatusCheckRollup: [] }).ready,
+    true,
+    "an absent base check is pending, not red",
+  );
+
+  // A skipped base check is skipped, exactly as it is on the PR's own head.
+  assertEqual(
+    summarize({
+      baseStatusCheckRollup: [
+        { name: "ci", conclusion: "SKIPPED", status: "COMPLETED" },
+      ],
+    }).ready,
+    true,
+    "a skipped base check must not block",
+  );
+
+  const unreadable = summarize({
+    baseHealthError: "gh: Resource not accessible by integration (HTTP 403)",
+  });
+  const unknownBlockers = unreadable.required.blockers.filter(
+    (item) => item.kind === "base-red",
+  );
+  assertEqual(
+    unreadable.ready,
+    false,
+    "an unreadable base must fail closed, not pass",
+  );
+  assertEqual(unknownBlockers.length, 1);
+  assertEqual(unknownBlockers[0].name, "Base branch health unavailable");
+  assertEqual(
+    unknownBlockers[0].state,
+    "unknown: gh: Resource not accessible by integration (HTTP 403)",
+  );
+
+  // A transport error carries the whole multiline GraphQL query. The blocker
+  // must stay one bounded line, or it breaks the compact/watch stream that
+  // callers quote verbatim.
+  const noisy = summarize({
+    baseHealthError: `gh api graphql -f query=\n  query($owner: String!) {\n    repository {\n      object\n    }\n  }\n failed with exit 1:\ngh: Bad credentials`,
+  });
+  const noisyBlocker = noisy.required.blockers.find(
+    (item) => item.kind === "base-red",
+  );
+  assert(
+    !noisyBlocker.state.includes("\n") && !noisyBlocker.name.includes("\n"),
+    "a base-health blocker must never carry a newline",
+  );
+  assert(
+    noisyBlocker.state.length <= 210,
+    "a base-health diagnostic must stay bounded",
+  );
+  assert(
+    formatCompact(noisy).split("\n").length === 1,
+    "compact output must stay one physical line",
+  );
+});
+
+test("reduces a base rollup to the latest settled run of each check", () => {
+  // A rerun leaves the old FAILURE next to the new SUCCESS. Judging the whole
+  // rollup would keep every open PR blocked on a base someone already fixed.
+  const run = (conclusion, startedAt) => ({
+    name: "ci",
+    status: "COMPLETED",
+    conclusion,
+    ...(startedAt ? { startedAt } : {}),
+  });
+  const pendingRun = (status, startedAt) => ({
+    name: "ci",
+    status,
+    ...(startedAt ? { startedAt } : {}),
+  });
+
+  assertDeepEqual(
+    latestSettledChecksByIdentity([
+      run("FAILURE", "2026-09-15T10:00:00Z"),
+      run("SUCCESS", "2026-09-15T11:00:00Z"),
+    ]).map((check) => check.conclusion),
+    ["SUCCESS"],
+    "a passing rerun must supersede the earlier failure",
+  );
+  assertDeepEqual(
+    latestSettledChecksByIdentity([
+      run("SUCCESS", "2026-09-15T10:00:00Z"),
+      run("FAILURE", "2026-09-15T11:00:00Z"),
+    ]).map((check) => check.conclusion),
+    ["FAILURE"],
+    "a failing rerun must supersede the earlier success",
+  );
+
+  // Ties and missing timestamps cannot order the runs. Fail closed on the
+  // failure in both directions, so ordering within the payload cannot decide
+  // whether a red base looks ready.
+  for (const pair of [
+    [
+      run("SUCCESS", "2026-09-15T10:00:00Z"),
+      run("FAILURE", "2026-09-15T10:00:00Z"),
+    ],
+    [
+      run("FAILURE", "2026-09-15T10:00:00Z"),
+      run("SUCCESS", "2026-09-15T10:00:00Z"),
+    ],
+    [run("SUCCESS"), run("FAILURE")],
+    [run("FAILURE"), run("SUCCESS")],
+  ]) {
+    assertDeepEqual(
+      latestSettledChecksByIdentity(pair).map((check) => check.conclusion),
+      ["FAILURE"],
+      "unorderable duplicate runs must keep the failure",
+    );
+  }
+
+  // A rerun in flight proves nothing yet. Dropping the known failure for it
+  // would clear `base-red` on a base that is still broken, because a pending
+  // base check does not block — every open PR would look mergeable again.
+  for (const status of ["IN_PROGRESS", "QUEUED"]) {
+    assertDeepEqual(
+      latestSettledChecksByIdentity([
+        run("FAILURE", "2026-09-15T10:00:00Z"),
+        pendingRun(status, "2026-09-15T11:00:00Z"),
+      ]).map((check) => check.conclusion),
+      ["FAILURE"],
+      `a ${status} rerun must not supersede a known base failure`,
+    );
+  }
+
+  // Only once the rerun settles green does the failure clear.
+  assertDeepEqual(
+    latestSettledChecksByIdentity([
+      run("FAILURE", "2026-09-15T10:00:00Z"),
+      pendingRun("IN_PROGRESS", "2026-09-15T11:00:00Z"),
+      run("SUCCESS", "2026-09-15T12:00:00Z"),
+    ]).map((check) => check.conclusion),
+    ["SUCCESS"],
+    "a settled passing rerun must supersede the failure",
+  );
+
+  // A check that has never settled is unproven, not red, and must still be
+  // reported so the required context does not vanish from the split.
+  const onlyPending = latestSettledChecksByIdentity([
+    pendingRun("QUEUED", "2026-09-15T10:00:00Z"),
+  ]);
+  assertEqual(onlyPending.length, 1);
+  assertEqual(onlyPending[0].status, "QUEUED");
+
+  // Different checks are different identities and must all survive.
+  assertEqual(
+    latestSettledChecksByIdentity([
+      { name: "ci", conclusion: "SUCCESS" },
+      { name: "Code Quality", conclusion: "SUCCESS" },
+    ]).length,
+    2,
+  );
+});
+
+test("an operator override clears base-red, and only base-red", () => {
+  // `base-red` deadlocks its own recovery: the fix or revert PR that turns
+  // `main` green is blocked by the red `main` it exists to repair. The break
+  // glass carries the same conditions as the Codex gate — operator author,
+  // stated reason, bound to this head.
+  const head = "c".repeat(40);
+  const redBase = "a".repeat(40);
+  const overrideComment = (overrides = {}) => ({
+    body: `/pr-ready-override gate=base-red head=${head} base=${redBase} reason=reverting the bad merge`,
+    author_association: "OWNER",
+    user: { login: "chapati23", type: "User" },
+    created_at: "2026-09-15T12:00:00Z",
+    ...overrides,
+  });
+  const summarize = (issueComments) =>
+    summarizeReadyState({
+      pr: {
+        ...basePr,
+        headRefOid: head,
+        statusCheckRollup: [
+          { name: "ci", conclusion: "SUCCESS", status: "COMPLETED" },
+        ],
+      },
+      issueComments,
+      reactions: [
+        {
+          content: "+1",
+          created_at: "2026-05-21T13:23:00Z",
+          user: { login: "chatgpt-codex-connector[bot]" },
+        },
+      ],
+      requiredStatusContexts: [{ context: "ci", integrationId: null }],
+      baseHealthOid: redBase,
+      baseStatusCheckRollup: [
+        {
+          name: "ci",
+          conclusion: "FAILURE",
+          status: "COMPLETED",
+          completedAt: "2026-09-15T09:00:00Z",
+        },
+      ],
+    });
+  const baseRedBlockers = (summary) =>
+    summary.required.blockers.filter((item) => item.kind === "base-red");
+
+  assertEqual(
+    baseRedBlockers(summarize([])).length,
+    1,
+    "a red base blocks without an override",
+  );
+
+  const overridden = summarize([overrideComment()]);
+  assertEqual(baseRedBlockers(overridden).length, 0);
+  const note = overridden.notes.find((item) => item.kind === "base-red");
+  assertEqual(note.state, "overridden");
+  assertEqual(note.override.author, "chapati23");
+  assertEqual(note.override.reason, "reverting the bad merge");
+  assert(
+    note.name.includes("@chapati23") &&
+      note.name.includes("reverting the bad merge"),
+    "human output must carry the operator and the reason",
+  );
+  assertEqual(overridden.ready, true, "the override clears the blocker");
+  assertEqual(
+    overridden.readinessOverrides.length,
+    1,
+    "an applied override is reported as active",
+  );
+
+  // Any push expires it.
+  assertEqual(
+    baseRedBlockers(
+      summarize([
+        overrideComment({
+          body: `/pr-ready-override gate=base-red head=${"d".repeat(40)} base=${redBase} reason=stale`,
+        }),
+      ]),
+    ).length,
+    1,
+    "an override bound to a superseded head must not apply",
+  );
+
+  // The operator judged one specific red base. `main` advancing to a different
+  // red commit, or an override that names no base at all, needs a new decision.
+  for (const [label, body] of [
+    [
+      "another base commit",
+      `/pr-ready-override gate=base-red head=${head} base=${"e".repeat(40)} reason=stale`,
+    ],
+    [
+      "no base at all",
+      `/pr-ready-override gate=base-red head=${head} reason=stale`,
+    ],
+  ]) {
+    assertEqual(
+      baseRedBlockers(summarize([overrideComment({ body })])).length,
+      1,
+      `an override naming ${label} must not apply`,
+    );
+  }
+
+  // A rerun that newly fails after the operator decided is a red result they
+  // never approved, even with the head and base commit unchanged.
+  const rerunAfterOverride = summarizeReadyState({
+    pr: {
+      ...basePr,
+      headRefOid: head,
+      statusCheckRollup: [
+        { name: "ci", conclusion: "SUCCESS", status: "COMPLETED" },
+      ],
+    },
+    issueComments: [overrideComment()],
+    reactions: [
+      {
+        content: "+1",
+        created_at: "2026-05-21T13:23:00Z",
+        user: { login: "chatgpt-codex-connector[bot]" },
+      },
+    ],
+    requiredStatusContexts: [{ context: "ci", integrationId: null }],
+    baseHealthOid: redBase,
+    baseStatusCheckRollup: [
+      {
+        name: "ci",
+        conclusion: "FAILURE",
+        status: "COMPLETED",
+        completedAt: "2026-09-15T18:00:00Z",
+      },
+    ],
+  });
+  assertEqual(
+    rerunAfterOverride.required.blockers.filter(
+      (item) => item.kind === "base-red",
+    ).length,
+    1,
+    "a base failure newer than the override must not be suppressed",
+  );
+  // GitHub timestamps are second-precision, so a tie is a result the operator
+  // could not have read. Require strictly newer.
+  assertEqual(
+    baseRedBlockers(
+      summarizeReadyState({
+        pr: { ...basePr, headRefOid: head },
+        issueComments: [overrideComment()],
+        requiredStatusContexts: [{ context: "ci", integrationId: null }],
+        baseHealthOid: redBase,
+        baseStatusCheckRollup: [
+          {
+            name: "ci",
+            conclusion: "FAILURE",
+            status: "COMPLETED",
+            completedAt: "2026-09-15T12:00:00Z",
+          },
+        ],
+      }),
+    ).length,
+    1,
+    "a failure tied with the override timestamp must not be suppressed",
+  );
+  assertDeepEqual(
+    rerunAfterOverride.readinessOverrides,
+    [],
+    "a declined base-red override must not be reported as active",
+  );
+
+  // An unreadable base is a state nobody observed: never overridable.
+  const unreadable = summarizeReadyState({
+    pr: { ...basePr, headRefOid: head },
+    issueComments: [overrideComment()],
+    requiredStatusContexts: [{ context: "ci", integrationId: null }],
+    baseHealthError: "gh: Bad credentials",
+  });
+  assertEqual(
+    unreadable.required.blockers.filter((item) => item.kind === "base-red")
+      .length,
+    1,
+    "an unknown base must stay blocking even with an override",
+  );
+
+  // Only an operator may post it.
+  for (const author of [
+    { author_association: "CONTRIBUTOR" },
+    { author_association: "NONE" },
+    { user: { login: "some-bot[bot]", type: "Bot" } },
+  ]) {
+    assertEqual(
+      baseRedBlockers(summarize([overrideComment(author)])).length,
+      1,
+      "a non-operator override must not apply",
+    );
+  }
+
+  // It covers base-red and nothing else: a failing required check on this PR
+  // still blocks with the same override in place.
+  const stillBlocked = summarizeReadyState({
+    pr: {
+      ...basePr,
+      headRefOid: head,
+      statusCheckRollup: [
+        { name: "ci", conclusion: "FAILURE", status: "COMPLETED" },
+      ],
+    },
+    issueComments: [overrideComment()],
+    requiredStatusContexts: [{ context: "ci", integrationId: null }],
+    baseHealthOid: redBase,
+    baseStatusCheckRollup: [
+      { name: "ci", conclusion: "FAILURE", status: "COMPLETED" },
+    ],
+  });
+  assertEqual(stillBlocked.ready, false);
+  assert(
+    stillBlocked.required.blockers.some(
+      (item) => item.kind === "check" && item.state === "fail",
+    ),
+    "the override must not reach this PR's own failing check",
+  );
+});
+
+test("a base rerun in flight keeps the base-red blocker", () => {
+  const summary = summarizeReadyState({
+    pr: {
+      ...basePr,
+      statusCheckRollup: [
+        { name: "ci", conclusion: "SUCCESS", status: "COMPLETED" },
+      ],
+    },
+    reactions: [
+      {
+        content: "+1",
+        created_at: "2026-05-21T13:23:00Z",
+        user: { login: "chatgpt-codex-connector[bot]" },
+      },
+    ],
+    requiredStatusContexts: [{ context: "ci", integrationId: null }],
+    baseHealthOid: "a".repeat(40),
+    // What `fetchBaseBranchHealth` hands over once the rerun is in flight: the
+    // failure is still the latest settled run.
+    baseStatusCheckRollup: [
+      {
+        name: "ci",
+        conclusion: "FAILURE",
+        status: "COMPLETED",
+        startedAt: "2026-09-15T10:00:00Z",
+      },
+    ],
+  });
+
+  assertEqual(
+    summary.ready,
+    false,
+    "a rerun in flight must not clear a red base",
+  );
+  assertEqual(
+    summary.required.blockers.filter((item) => item.kind === "base-red").length,
+    1,
+  );
+});
+
+test("reads base branch health from one rollup query", async () => {
+  const calls = [];
+  const health = await fetchBaseBranchHealth({
+    repo: { owner: "mento-protocol", name: "monitoring-monorepo", host: null },
+    baseRef: "main",
+    fetchJson: async (_repo, args) => {
+      calls.push(args);
+      return {
+        ok: true,
+        value: {
+          data: {
+            repository: {
+              object: {
+                oid: "597b71081aaad0212977dc4e090c2952e063fac9",
+                statusCheckRollup: {
+                  contexts: {
+                    totalCount: 2,
+                    pageInfo: { hasNextPage: false },
+                    nodes: [
+                      {
+                        __typename: "CheckRun",
+                        name: "ci",
+                        status: "COMPLETED",
+                        conclusion: "FAILURE",
+                        startedAt: "2026-09-15T15:10:33Z",
+                        detailsUrl: "https://github.com/run/1",
+                        checkSuite: { app: { databaseId: 15368 } },
+                      },
+                      {
+                        __typename: "StatusContext",
+                        context: "Vercel",
+                        state: "SUCCESS",
+                        createdAt: "2026-09-15T15:08:07Z",
+                        targetUrl: "https://vercel.com/x",
+                        avatarUrl:
+                          "https://avatars.githubusercontent.com/in/8329?s=40&v=4",
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+          },
+        },
+      };
+    },
+  });
+
+  assertEqual(calls.length, 1, "base health must cost exactly one read");
+  assertEqual(health.oid, "597b71081aaad0212977dc4e090c2952e063fac9");
+  assertEqual(health.error, null);
+  // App identity must survive for both node shapes, or an app-bound required
+  // context (this repo pins integration ids 15368 and 8329) cannot match.
+  assertEqual(health.rollup[0].appId, 15368);
+  assertEqual(health.rollup[1].appId, 8329);
+  assertEqual(health.rollup[1].startedAt, "2026-09-15T15:08:07Z");
+});
+
+test("fails closed when base branch health cannot be read", async () => {
+  const repo = {
+    owner: "mento-protocol",
+    name: "monitoring-monorepo",
+    host: null,
+  };
+  const transportFailure = await fetchBaseBranchHealth({
+    repo,
+    baseRef: "main",
+    fetchJson: async () => ({ ok: false, error: "gh: Bad credentials" }),
+  });
+  assertEqual(transportFailure.error, "gh: Bad credentials");
+  assertDeepEqual(transportFailure.rollup, []);
+
+  const graphqlErrors = await fetchBaseBranchHealth({
+    repo,
+    baseRef: "main",
+    fetchJson: async () => ({
+      ok: true,
+      value: { errors: [{ message: "Could not resolve to a Repository" }] },
+    }),
+  });
+  assert(
+    graphqlErrors.error?.includes("Could not resolve to a Repository"),
+    "a GraphQL error payload must surface as a base-health error",
+  );
+
+  const missingCommit = await fetchBaseBranchHealth({
+    repo,
+    baseRef: "main",
+    fetchJson: async () => ({
+      ok: true,
+      value: { data: { repository: { object: null } } },
+    }),
+  });
+  assert(
+    missingCommit.error?.includes("did not resolve to a commit"),
+    "an unresolvable base ref must surface as a base-health error",
+  );
+
+  // A truncated rollup is the dangerous case: an omitted required context
+  // reads as pending, and pending does not block, so a red base would look
+  // ready. Fail closed instead of paginating — this read must stay one
+  // request.
+  const truncated = await fetchBaseBranchHealth({
+    repo,
+    baseRef: "main",
+    fetchJson: async () => ({
+      ok: true,
+      value: {
+        data: {
+          repository: {
+            object: {
+              oid: "597b71081aaad0212977dc4e090c2952e063fac9",
+              statusCheckRollup: {
+                contexts: {
+                  totalCount: 137,
+                  pageInfo: { hasNextPage: true },
+                  nodes: [],
+                },
+              },
+            },
+          },
+        },
+      },
+    }),
+  });
+  assert(
+    truncated.error?.includes("more than one page"),
+    "a rollup wider than one page must fail closed, not report an empty base",
+  );
+  assertDeepEqual(truncated.rollup, []);
+});
+
+test("blocks a textual conflict (mergeable: CONFLICTING or mergeStateStatus: DIRTY)", () => {
+  const greenChecksPr = {
+    ...basePr,
+    autoMergeRequest: { enabledAt: "2026-05-21T13:24:00Z" },
+    statusCheckRollup: [
+      { name: "lint", conclusion: "SUCCESS", status: "COMPLETED" },
+    ],
+  };
+  const codexReaction = [
+    {
+      content: "+1",
+      created_at: "2026-05-21T13:23:00Z",
+      user: { login: "chatgpt-codex-connector[bot]" },
+    },
+  ];
+
+  const conflicting = summarizeReadyState({
+    pr: {
+      ...greenChecksPr,
+      mergeable: "CONFLICTING",
+      mergeStateStatus: "DIRTY",
+    },
+    reactions: codexReaction,
+  });
+  assertEqual(conflicting.ready, false);
+  assertEqual(
+    conflicting.required.blockers.some((item) => item.kind === "mergeability"),
+    true,
+  );
+  assertEqual(
+    conflicting.notes.some((item) => item.kind === "base-update"),
+    false,
+  );
+
+  // Defense in depth: DIRTY blocks even if `mergeable` reports stale.
+  const staleDirty = summarizeReadyState({
+    pr: { ...greenChecksPr, mergeable: "MERGEABLE", mergeStateStatus: "DIRTY" },
+    reactions: codexReaction,
+  });
+  assertEqual(staleDirty.ready, false);
+  assertEqual(
+    staleDirty.required.blockers.some(
+      (item) => item.kind === "mergeability" && item.state === "DIRTY",
+    ),
+    true,
+  );
 });
 
 test("summarizes merged pull requests as terminal ready", () => {
@@ -2323,6 +3659,7 @@ test("summarizes merged pull requests as terminal ready", () => {
   assertEqual(summary.gates.codexReviewSignal.fallbackAction, "wait");
   assertEqual(summary.gates.codeRabbitReviewSignal.state, "not_applicable");
   assertEqual(summary.codeRabbitReviewSignal, "not_applicable");
+  assertEqual(summary.requiredStatusChecksStrict, null);
   // The terminal gate keeps the live gate's shape, counters included.
   assertDeepEqual(summary.gates.codeRabbitReviewSignal, {
     ready: true,
@@ -2959,6 +4296,9 @@ test("ranks the CodeRabbit closeout fallbacks by the review each one wastes", ()
   const oldHead = { headUpdatedAt: observedAt - 10 * 60 * 1000, observedAt };
 
   for (const state of ["missing", "stale"]) {
+    // Fail closed by default (requiredStatusChecksStrict unset): BEHIND still
+    // forces a base merge here, matching `pr-ready-state-core.mjs` treating
+    // BEHIND as a required blocker until strict is confirmed off.
     assertEqual(
       summarizeCodeRabbitReviewGate(state, null, {
         mergeStateStatus: "behind",
@@ -2967,17 +4307,31 @@ test("ranks the CodeRabbit closeout fallbacks by the review each one wastes", ()
         ...exhausted,
       }).fallbackAction,
       "merge_base_first",
-      `${state} behind the base must merge the base first`,
+      `${state} behind the base fails closed and must merge the base first`,
+    );
+    // Non-strict policy (ADR 0104): once strict is confirmed off, BEHIND no
+    // longer outranks the other waits.
+    assertEqual(
+      summarizeCodeRabbitReviewGate(state, null, {
+        mergeStateStatus: "behind",
+        requiredStatusChecksStrict: false,
+        reviewRunning: true,
+        ...freshHead,
+        ...exhausted,
+      }).fallbackAction,
+      "wait_for_running_review",
+      `${state} merely behind a confirmed-non-strict base must not force a base merge`,
     );
     assertEqual(
       summarizeCodeRabbitReviewGate(state, null, {
         mergeStateStatus: "DIRTY",
+        requiredStatusChecksStrict: false,
         reviewRunning: true,
         ...freshHead,
         ...exhausted,
       }).fallbackAction,
       "merge_base_first",
-      `${state} with merge conflicts must merge the base first`,
+      `${state} with merge conflicts must merge the base first regardless of strict`,
     );
     assertEqual(
       summarizeCodeRabbitReviewGate(state, null, {
@@ -3067,7 +4421,25 @@ test("waits out the head grace before asking CodeRabbit for a review", () => {
       now: observedAt,
     }).gates.codeRabbitReviewSignal.fallbackAction,
     "merge_base_first",
-    "the base merge outranks the grace wait",
+    "fails closed by default: BEHIND with unconfirmed strict still outranks the grace wait",
+  );
+  assertEqual(
+    summarizeReadyState({
+      pr: { ...prAt(2), mergeStateStatus: "BEHIND" },
+      now: observedAt,
+      requiredStatusChecksStrict: false,
+    }).gates.codeRabbitReviewSignal.fallbackAction,
+    "wait_for_head_grace",
+    "non-strict policy: once strict is confirmed off, BEHIND does not outrank the grace wait",
+  );
+  assertEqual(
+    summarizeReadyState({
+      pr: { ...prAt(2), mergeStateStatus: "DIRTY" },
+      now: observedAt,
+      requiredStatusChecksStrict: false,
+    }).gates.codeRabbitReviewSignal.fallbackAction,
+    "merge_base_first",
+    "a real conflict still outranks the grace wait regardless of strict",
   );
 });
 
@@ -3199,7 +4571,7 @@ test("human and compact output name the CodeRabbit closeout fallback", () => {
     pr: {
       ...basePr,
       headRefOid: "b".repeat(40),
-      mergeStateStatus: "BEHIND",
+      mergeStateStatus: "DIRTY",
       statusCheckRollup: [],
     },
   });
@@ -3577,7 +4949,9 @@ test("native stacks fetch protection at stack base and report unmerged dependenc
   const result = await stackBases(stackFixture());
   assertEqual(
     result.requests.join("|"),
-    `repos/owner/repo/stacks?pull_request=11&per_page=100|repos/owner/repo/stacks/7|repos/owner/repo/compare/${"a".repeat(40)}...${"b".repeat(40)}?per_page=1|protection:main`,
+    // The trailing `graphql` is the base-health read. Readiness costs exactly
+    // one extra request, and it goes to the protection base, not the PR base.
+    `repos/owner/repo/stacks?pull_request=11&per_page=100|repos/owner/repo/stacks/7|repos/owner/repo/compare/${"a".repeat(40)}...${"b".repeat(40)}?per_page=1|protection:main|graphql`,
   );
   assertEqual(result.stack.diffBaseRef, "parent");
   assertEqual(result.stack.protectionBaseRef, "main");
@@ -3652,7 +5026,13 @@ test("native ancestry verifies each adjacent open layer including descendants of
 test("verified standalone PRs use the immediate base without stack output", async () => {
   const result = await stackBases(stackFixture(), () => []);
   assertEqual(result.stack, null);
-  assertEqual(result.requests.at(-1), "protection:parent");
+  // Protection and base health both read the PR's immediate base; the
+  // base-health `graphql` read is the last of the two.
+  assert(
+    result.requests.includes("protection:parent"),
+    "a standalone PR reads protection at its immediate base",
+  );
+  assertEqual(result.requests.at(-1), "graphql");
   assert(
     !result.requests.some((path) => path.includes("/compare/")),
     "standalone PRs need no ancestry request",
@@ -3760,6 +5140,11 @@ async function finalSnapshot(
   originalStack,
   mutate = () => {},
   standalone = false,
+  baseHealthOid = standalone
+    ? fixture.pr.baseRefOid
+    : (originalStack?.protectionBaseOid ?? null),
+  baseHealthError = null,
+  resolvedBase = undefined,
 ) {
   const currentPr = {
     number: fixture.pr.number,
@@ -3768,32 +5153,155 @@ async function finalSnapshot(
     head: { sha: fixture.pr.headRefOid, ref: fixture.pr.headRefName },
     base: { ref: fixture.pr.baseRefName, sha: fixture.pr.baseRefOid },
   };
-  const next = { currentPr, stack: structuredClone(fixture.stack), standalone };
+  const next = {
+    currentPr,
+    stack: structuredClone(fixture.stack),
+    standalone,
+    resolvedBase,
+  };
   mutate(next);
   await verifyReadinessSnapshot({
     ...fixture,
     stack: originalStack,
-    fetchJson: async (_repo, [path]) => ({
-      ok: true,
-      value: path.includes("/compare/")
-        ? ancestryResult(path)
-        : path.includes("/pulls/")
-          ? next.currentPr
-          : path.includes("?")
-            ? next.standalone
-              ? []
-              : [next.stack]
-            : next.stack,
-    }),
+    baseHealthOid,
+    baseHealthError,
+    fetchJson: async (_repo, [path]) => {
+      if (/\/commits\/[^/]+$/u.test(path)) {
+        return next.resolvedBase === null
+          ? { ok: false, error: "HTTP 404" }
+          : { ok: true, value: { sha: next.resolvedBase } };
+      }
+      return {
+        ok: true,
+        value: path.includes("/compare/")
+          ? ancestryResult(path)
+          : path.includes("/pulls/")
+            ? next.currentPr
+            : path.includes("?")
+              ? next.standalone
+                ? []
+                : [next.stack]
+              : next.stack,
+      };
+    },
   });
 }
 
 test("final snapshot accepts stable native and standalone PRs after readiness reads", async () => {
   const fixture = stackFixture();
   fixture.pr.baseRefOid = "a".repeat(40);
+  // A stacks response that carries `base.sha` gives the layer a verified
+  // protection-base commit, which is what base health binds to.
+  fixture.stack.base.sha = "e".repeat(40);
   const { stack } = await stackBases(fixture);
   await finalSnapshot(fixture, stack);
   await finalSnapshot(fixture, null, () => {}, true);
+});
+
+test("final snapshot rejects base health read from a different base commit", async () => {
+  // Base health resolves a mutable ref. If `main` advances to a red commit
+  // after that query, every other snapshot field can still match, so without
+  // this binding the gate would pass on a base whose health it never read.
+  const fixture = stackFixture();
+  fixture.pr.baseRefOid = "a".repeat(40);
+  fixture.stack.base.sha = "e".repeat(40);
+  const { stack } = await stackBases(fixture);
+
+  for (const [label, standalone, oid] of [
+    ["a standalone PR", true, "b".repeat(40)],
+    ["a native stack layer", false, "b".repeat(40)],
+    ["an unreadable base", true, null],
+  ]) {
+    let rejected = false;
+    try {
+      await finalSnapshot(
+        fixture,
+        standalone ? null : stack,
+        () => {},
+        standalone,
+        oid,
+      );
+    } catch (error) {
+      rejected = error.message.includes("base advanced while gathering");
+    }
+    assert(rejected, `${label} must reject base health from another commit`);
+  }
+});
+
+test("final snapshot resolves an omitted stack base SHA instead of refusing", async () => {
+  // `fetchStackContext` accepts a stacks response without `base.sha`, leaving
+  // `protectionBaseOid` null. Refusing those layers would make their readiness
+  // permanently unavailable, so the protection ref is resolved here instead —
+  // and because that read happens after the health query, a base that moved in
+  // between still fails closed.
+  const fixture = stackFixture();
+  fixture.pr.baseRefOid = "a".repeat(40);
+  const { stack } = await stackBases(fixture);
+  assertEqual(stack.protectionBaseOid, null);
+
+  // Resolved ref matches the commit base health judged: the layer stays usable.
+  await finalSnapshot(
+    fixture,
+    stack,
+    () => {},
+    false,
+    "e".repeat(40),
+    null,
+    "e".repeat(40),
+  );
+
+  for (const [label, resolved, expected] of [
+    ["a base that moved", "f".repeat(40), "base advanced"],
+    ["an unreadable base ref", null, "HTTP 404"],
+    [
+      "a malformed base commit",
+      "not-a-sha",
+      "protection base commit is unreadable",
+    ],
+  ]) {
+    let rejected = false;
+    try {
+      await finalSnapshot(
+        fixture,
+        stack,
+        () => {},
+        false,
+        "e".repeat(40),
+        null,
+        resolved,
+      );
+    } catch (error) {
+      rejected = error.message.includes(expected);
+    }
+    assert(rejected, `${label} must fail closed`);
+  }
+});
+
+test("final snapshot leaves an unreadable base to its structured blocker", async () => {
+  // A failed health read already becomes a required `base-red` blocker with an
+  // unknown state. Throwing here instead would crash the probe and leave watch
+  // mode with no JSON, so the binding check must stand down for that case.
+  const fixture = stackFixture();
+  fixture.pr.baseRefOid = "a".repeat(40);
+  fixture.stack.base.sha = "e".repeat(40);
+  const { stack } = await stackBases(fixture);
+
+  await finalSnapshot(
+    fixture,
+    stack,
+    () => {},
+    false,
+    null,
+    "Base branch health unreadable: gh: Bad credentials",
+  );
+  await finalSnapshot(
+    fixture,
+    null,
+    () => {},
+    true,
+    null,
+    "Base branch health unreadable: gh: Bad credentials",
+  );
 });
 
 test("final snapshot rejects parent or membership changes after protection lookup", async () => {
@@ -3853,9 +5361,14 @@ test("final snapshot rejects parent or membership changes after protection looku
   }
   let rejected = false;
   try {
-    await finalSnapshot(fixture, null);
+    // Supply a base-health OID that matches, so the new base-binding guard
+    // cannot be what rejects this: the transition itself must.
+    await finalSnapshot(fixture, null, () => {}, false, fixture.pr.baseRefOid);
   } catch (error) {
-    rejected = String(error.message).startsWith("Stack metadata unavailable:");
+    rejected =
+      String(error.message).startsWith("Stack metadata unavailable:") &&
+      !error.message.includes("base advanced") &&
+      !error.message.includes("no verified base commit");
   }
   assert(rejected, "standalone to native transition must not emit readiness");
 });
@@ -3865,18 +5378,28 @@ test("final snapshot rejects failed or missing current PR fetch", async () => {
     { ok: false, error: "HTTP 403" },
     { ok: true, value: null },
   ]) {
+    const fixture = stackFixture();
+    fixture.pr.baseRefOid = "a".repeat(40);
+    let fetched = false;
     let rejected = false;
     try {
       await verifyReadinessSnapshot({
-        ...stackFixture(),
+        ...fixture,
         stack: null,
-        fetchJson: async () => result,
+        // Clear the base-binding guard, or this would reject before the fetch
+        // and still pass while the PR-response validation below was gone.
+        baseHealthOid: fixture.pr.baseRefOid,
+        fetchJson: async () => {
+          fetched = true;
+          return result;
+        },
       });
     } catch (error) {
       rejected = String(error.message).startsWith(
         "Stack metadata unavailable:",
       );
     }
+    assert(fetched, "the final lookup must actually run");
     assert(rejected, "final lookup must succeed before readiness");
   }
 });

@@ -187,9 +187,23 @@ function scenario({
   commits,
   files,
   reportedCommitCount = commits.length,
+  behindBy = 0,
+  issueComments = [],
 }) {
   const pr = pullRequest(number, headRef, headSha, files, reportedCommitCount);
+  const baseSha = "f".repeat(40);
   return {
+    baseBranch: { name: "main", commit: { sha: baseSha } },
+    compare: {
+      behind_by: behindBy,
+      base_commit: { sha: baseSha },
+      merge_base_commit: { sha: baseSha },
+    },
+    headCommit: {
+      sha: headSha,
+      commit: { committer: { date: "2026-09-15T10:00:00Z" } },
+    },
+    issueCommentPages: [issueComments],
     workflow: workflowIdentity,
     run: {
       id: runId,
@@ -298,6 +312,18 @@ if (args[1] === "graphql") {
   emit(take("queue"));
   process.exit(0);
 }
+const isCommentPost =
+  args.includes("--method") &&
+  args.includes("POST") &&
+  /\\/issues\\/[^/]+\\/comments$/u.test(route ?? "");
+if (isCommentPost) {
+  writeFileSync(
+    process.env.MOCK_GH_REBASE_MARKER,
+    JSON.stringify({ args, token }),
+  );
+  emit({ id: 1, body: "posted" });
+  process.exit(fixture.commentExit ?? 0);
+}
 if (route?.includes("/actions/workflows/")) emit(take("workflow"));
 else if (route?.includes("/attempts/1/jobs")) emit(take("jobsPages"));
 else if (route?.includes("/actions/runs/")) emit(take("run"));
@@ -305,6 +331,19 @@ else if (route?.includes("/issues/") && route?.endsWith("/events")) {
   if ((fixture.historyExit ?? 0) !== 0) process.exit(fixture.historyExit);
   emit(take("historyPages"));
 }
+else if (route?.includes("/issues/") && route?.endsWith("/comments")) {
+  if ((fixture.issueCommentExit ?? 0) !== 0) process.exit(fixture.issueCommentExit);
+  emit(take("issueCommentPages"));
+}
+else if (route?.includes("/compare/")) {
+  if ((fixture.compareExit ?? 0) !== 0) process.exit(fixture.compareExit);
+  emit(take("compare"));
+}
+else if (/\\/branches\\/[^/]+$/u.test(route ?? "")) {
+  if ((fixture.baseBranchExit ?? 0) !== 0) process.exit(fixture.baseBranchExit);
+  emit(take("baseBranch"));
+}
+else if (/\\/commits\\/[0-9a-f]{40}$/u.test(route ?? "")) emit(take("headCommit"));
 else if (/\\/pulls\\/[^/]+\\/commits$/u.test(route ?? "")) emit(take("commitsPages"));
 else if (/\\/pulls\\/[^/]+\\/files$/u.test(route ?? "")) emit(take("filesPages"));
 else if (/\\/pulls\\/[^/]+$/u.test(route ?? "")) emit(take("pr"));
@@ -320,6 +359,11 @@ function runWriter(fixture) {
     const statePath = path.join(scratch, "state.json");
     const callLogPath = path.join(scratch, "calls.jsonl");
     const mergeMarker = path.join(scratch, "merge-called.txt");
+    const rebaseMarker = path.join(scratch, "rebase-requested.txt");
+    // Never inherit the real GITHUB_STEP_SUMMARY: under Actions the writer
+    // would append this fixture's fake stalled-PR data to the live job summary.
+    const stepSummary = path.join(scratch, "step-summary.md");
+    writeFileSync(stepSummary, "");
     writeFileSync(ghPath, mockGhSource);
     chmodSync(ghPath, 0o755);
     writeFileSync(scenarioPath, JSON.stringify(fixture));
@@ -339,6 +383,8 @@ function runWriter(fixture) {
         MOCK_GH_STATE: statePath,
         MOCK_GH_CALL_LOG: callLogPath,
         MOCK_GH_MERGE_MARKER: mergeMarker,
+        MOCK_GH_REBASE_MARKER: rebaseMarker,
+        GITHUB_STEP_SUMMARY: stepSummary,
         MOCK_EXPECTED_READ_TOKEN: "read-token",
         MOCK_EXPECTED_MERGE_TOKEN: "merge-token",
       },
@@ -352,7 +398,20 @@ function runWriter(fixture) {
     const mergeRequest = merged
       ? JSON.parse(readFileSync(mergeMarker, "utf8"))
       : null;
-    return { ...result, calls, merged, mergeRequest };
+    const stepSummaryText = readFileSync(stepSummary, "utf8");
+    const rebaseRequested = existsSync(rebaseMarker);
+    const rebaseRequest = rebaseRequested
+      ? JSON.parse(readFileSync(rebaseMarker, "utf8"))
+      : null;
+    return {
+      ...result,
+      calls,
+      merged,
+      mergeRequest,
+      rebaseRequested,
+      rebaseRequest,
+      stepSummaryText,
+    };
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
@@ -482,6 +541,133 @@ assert(
     requiredCheckCalls[1].args.includes("--required"),
   "the second required-check call must prove the terminal required-only state",
 );
+assert.equal(
+  routeCalls(pr1872Result, "/pulls/1872/update-branch").length,
+  0,
+  "a head containing the base tip must merge without updating the branch",
+);
+assert(
+  !pr1872Result.rebaseRequested,
+  "a head containing the base tip must not ask Dependabot to rebase",
+);
+// Prove the ancestry check actually ran on the happy path, so the assertions
+// above cannot pass merely because the writer skipped it.
+assert.equal(
+  routeCalls(pr1872Result, `/branches/main`).length,
+  1,
+  "the writer must read the base branch tip exactly once",
+);
+assert.equal(
+  callsMatching(pr1872Result, (args) =>
+    args.some((arg) => arg.includes("/compare/")),
+  ).length,
+  1,
+  "the writer must compare the base tip against the verified head exactly once",
+);
+
+// ADR 0104 took strict required status checks off main, so GitHub no longer
+// blocks a merge whose head has not seen the current base — and once that
+// policy is off a stale but conflict-free head reports `mergeable_state:
+// clean`, never `behind`. This lane merges with the repository GITHUB_TOKEN
+// and emits no push-triggered workflows, so a stale merge would land with no
+// post-merge CI at all. The writer proves ancestry itself instead.
+const behindBaseFixture = scenario({
+  number: 1872,
+  runId: 31995129967,
+  headRef: pr1872HeadRef,
+  headSha: pr1872Head,
+  commits: [commit(pr1872Head)],
+  files: pr1872Files,
+  behindBy: 3,
+});
+const behindBaseResult = runWriter(behindBaseFixture);
+assert.equal(
+  behindBaseResult.status,
+  0,
+  `a stale head must exit without failing the lane:\n${behindBaseResult.stdout}\n${behindBaseResult.stderr}`,
+);
+assert(
+  !behindBaseResult.merged,
+  "a stale head must never reach the merge command",
+);
+// The lane must not repair the branch itself. `update-branch` writes a merge
+// commit authored by this token, and the commit proof accepts only commits
+// authored by dependabot[bot], so the repair would disqualify the pull
+// request from this lane permanently. Dependabot's own rebase brings it back.
+assert.equal(
+  routeCalls(behindBaseResult, "/pulls/1872/update-branch").length,
+  0,
+  "the writer must never update the Dependabot branch itself",
+);
+assert.equal(
+  callsMatching(behindBaseResult, (args) => args.includes("PUT")).length,
+  0,
+  "a stale head must make no PUT of any kind",
+);
+assert.equal(
+  callsMatching(behindBaseResult, (args) => args.includes("POST")).length,
+  0,
+  "a stale head must make no POST of any kind",
+);
+// The stale path is deliberately read-only. Posting `@dependabot rebase` would
+// be recorded as github-actions[bot], whose commands Dependabot ignores, so it
+// would add noise and a false audit trail without causing a rebase. Recovery
+// comes from Dependabot's own default `rebase-strategy: auto`.
+assert(
+  !behindBaseResult.rebaseRequested,
+  "a stale head must not post a rebase command it cannot make effective",
+);
+// The stall must be announced, or the lane looks idle while it is stuck.
+assert(
+  behindBaseResult.stderr.includes("::warning::") ||
+    behindBaseResult.stdout.includes("::warning::"),
+  "a stale head must emit a warning annotation",
+);
+for (const fragment of ["#1872", "3 commit(s)", "@dependabot rebase"]) {
+  assert(
+    behindBaseResult.stepSummaryText.includes(fragment),
+    `the job summary must name ${fragment}`,
+  );
+}
+assert.equal(
+  pr1872Result.stepSummaryText,
+  "",
+  "a merged head must write no stall summary",
+);
+
+// Every ancestry-read failure fails closed rather than merging blind.
+for (const [label, mutation] of [
+  ["unreadable base branch", { baseBranchExit: 1 }],
+  ["unreadable comparison", { compareExit: 1 }],
+  [
+    "comparison without behind_by",
+    { compare: { base_commit: { sha: "f".repeat(40) } } },
+  ],
+  [
+    "comparison against another base",
+    {
+      compare: {
+        behind_by: 0,
+        base_commit: { sha: "a".repeat(40) },
+        merge_base_commit: { sha: "a".repeat(40) },
+      },
+    },
+  ],
+]) {
+  const blindResult = runWriter({
+    ...scenario({
+      number: 1872,
+      runId: 31995129967,
+      headRef: pr1872HeadRef,
+      headSha: pr1872Head,
+      commits: [commit(pr1872Head)],
+      files: pr1872Files,
+    }),
+    ...mutation,
+  });
+  assert.notEqual(blindResult.status, 0, `${label} must fail closed`);
+  assert(!blindResult.merged, `${label} must never reach the merge command`);
+}
 
 for (const [label, count] of [
   [

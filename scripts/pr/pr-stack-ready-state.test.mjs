@@ -85,12 +85,13 @@ assert.equal(
   }).state,
   "UNKNOWN",
 );
+// Non-strict policy: BEHIND alone does not block a stack layer either.
 assert.equal(
   classifyStackObservation({
     ...observed,
     pr: { ...observed.pr, mergeStateStatus: "BEHIND" },
   }).state,
-  "BASE_UPDATE_REQUIRED",
+  "AWAITING_USER_MERGE",
 );
 for (const key of ["headRefOid", "baseRefOid", "headRefName", "baseRefName"])
   assert.equal(
@@ -111,6 +112,51 @@ for (const [checkState, expected] of [
   };
   assert.equal(classifyStackObservation(blocked).state, expected);
 }
+// The oracle emits a required `base-update` blocker whenever strict is `true`
+// or unknown. Classify from that blocker, not the raw merge state, and read it
+// before the check states: a stale required check on a behind layer is a
+// symptom of the moved base, and CHECKS_FAILED would send the operator to
+// chase a check that re-integration reruns anyway.
+const behindWithStaleCheck = {
+  ...observed,
+  ready: false,
+  pr: { ...observed.pr, mergeStateStatus: "BEHIND" },
+  required: {
+    blockers: [
+      {
+        kind: "base-update",
+        name: "Pull request must include the current base before merge",
+        state: "BEHIND",
+      },
+      { kind: "check", name: "ci", state: "fail" },
+    ],
+  },
+};
+assert.equal(
+  classifyStackObservation(behindWithStaleCheck).state,
+  "BASE_UPDATE_REQUIRED",
+);
+// Strict confirmed off demotes BEHIND to a note, so no base-update blocker
+// reaches this classifier and the real check failure stands on its own.
+assert.equal(
+  classifyStackObservation({
+    ...behindWithStaleCheck,
+    required: { blockers: [{ kind: "check", name: "ci", state: "fail" }] },
+  }).state,
+  "CHECKS_FAILED",
+);
+
+// A textual conflict (CONFLICTING/DIRTY) still blocks: it surfaces as a
+// non-check required blocker from pr-ready-state-core.mjs.
+const conflicting = {
+  ...observed,
+  ready: false,
+  pr: { ...observed.pr, mergeStateStatus: "DIRTY" },
+  required: {
+    blockers: [{ kind: "mergeability", name: "Pull request is not mergeable" }],
+  },
+};
+assert.equal(classifyStackObservation(conflicting).state, "READINESS_BLOCKED");
 const canceledWithReplacement = {
   ...observed,
   ready: false,

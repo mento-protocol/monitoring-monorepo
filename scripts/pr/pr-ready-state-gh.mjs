@@ -131,3 +131,23 @@ export async function ghApiJsonPagesResult(repo, args) {
     };
   }
 }
+
+export function splitRepo(repoValue) {
+  const parts = String(repoValue).split("/").filter(Boolean);
+  const name = parts.pop();
+  const owner = parts.pop();
+  if (!owner || !name) {
+    throw new Error(`Unable to parse repository name: ${repoValue}`);
+  }
+  const host = parts.length > 0 ? parts.join("/") : null;
+  return { owner, name, host };
+}
+
+export function repoPath(repo) {
+  return `${repo.owner}/${repo.name}`;
+}
+
+export function repoFromPath(path, host = null) {
+  const { owner, name } = splitRepo(path);
+  return { owner, name, host };
+}
