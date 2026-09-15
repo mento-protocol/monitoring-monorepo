@@ -223,9 +223,11 @@ governs this PR is the one at its head, not the one on `main`. Read
 
 The closeout request follows one order, on every surface:
 
-1. **Merge the base before the request, never after it.** Integrate it as a
-   local merge of the fetched base. Never use GitHub's "Update branch" button
-   or a web-UI edit: each costs a review event.
+1. **When the gate says `merge_base_first`, merge the base before the request,
+   never after it.** A confirmed non-strict BEHIND head is not a reason to
+   merge; leave it alone. Integrate it as a local merge of the fetched base.
+   Never use GitHub's "Update branch" button or a web-UI edit: each costs a
+   review event.
 2. **Batch every fix commit into one push** before requesting.
 3. **Post at most one marked request per accepted head, and at most two per
    PR** — the opening closeout and one after review fixes. A request CodeRabbit

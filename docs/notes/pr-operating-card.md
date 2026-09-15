@@ -492,7 +492,8 @@ If root `package.json` changed, first run
    feedback ledger must be clean **first**. Before the final pair, apply the
    CodeRabbit exact-head closeout in
    [`pr-ready-state.md`](pr-ready-state.md), in its order: merge the base
-   first, batch every fix commit into one push, never post while a CodeRabbit
+   first when the gate asks, batch every fix commit into one push, never post
+   while a CodeRabbit
    check is running on the current head, and post at most one marked request
    per accepted head and at most two per PR (a refused request may be retried
    once, per that note), following the gate's `fallbackAction`
