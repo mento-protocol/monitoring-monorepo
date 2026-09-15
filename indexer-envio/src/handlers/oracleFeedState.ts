@@ -7,12 +7,15 @@ import {
   applyOracleReport,
   applyOracleReportRemoval,
   bootstrapOracleFeedState,
+  isEventAlreadyApplied,
+  isEventBehindWatermark,
   oracleFeedStateId,
 } from "../oracleFeedState.js";
 import { computeHealthStatus, maybePreloadPool } from "../pool.js";
 import { getPoolsByFeed } from "../rpc.js";
 import { oracleReportTimestampsEffectForChain } from "../rpc/effects.js";
 import {
+  logReplayedEventIgnored,
   preloadOracleExpiryState,
   resolveOracleExpiryState,
 } from "./oracleExpiryState.js";
@@ -170,6 +173,15 @@ export async function resolveOracleFeedState(args: {
     blockTimestamp: args.event.blockTimestamp,
     logIndex: args.event.logIndex,
   };
+  if (isEventAlreadyApplied(base, eventPosition)) {
+    logReplayedEventIgnored(
+      args.context,
+      args.event,
+      base,
+      "resolveOracleFeedState",
+    );
+    return base;
+  }
   const updated =
     args.mutation.kind === "report"
       ? applyOracleReport(
@@ -210,12 +222,26 @@ export async function updateOracleFeedStateExpiryIfPresent(args: {
     oracleFeedStateId(args.event.chainId, args.event.rateFeedID),
   );
   if (!state) return;
+  const eventPosition = {
+    blockNumber: args.event.blockNumber,
+    blockTimestamp: args.event.blockTimestamp,
+    logIndex: args.event.logIndex,
+  };
+  // Only the ordering `applyOracleFeedExpiry` rejects is a replay here. The
+  // wider bootstrap-boundary clause would suppress a live propagation: the feed
+  // row's block-close bootstrap takes its expiry from the expiry row as it
+  // stood at that moment, so a later log in the same block still has to land.
+  if (isEventBehindWatermark(state, eventPosition)) {
+    logReplayedEventIgnored(
+      args.context,
+      args.event,
+      state,
+      "updateOracleFeedStateExpiryIfPresent",
+    );
+    return;
+  }
   args.context.OracleFeedState.set(
-    applyOracleFeedExpiry(state, args.reportExpiry, {
-      blockNumber: args.event.blockNumber,
-      blockTimestamp: args.event.blockTimestamp,
-      logIndex: args.event.logIndex,
-    }),
+    applyOracleFeedExpiry(state, args.reportExpiry, eventPosition),
   );
 }
 

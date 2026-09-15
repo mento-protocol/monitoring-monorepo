@@ -83,6 +83,34 @@ function eventPosition(state: OracleFeedState, event: FeedStateEvent): number {
   return Math.sign(event.logIndex - state.updatedAtLogIndex);
 }
 
+/** True when the event sits strictly behind the persisted watermark — the only
+ * ordering `applyOracleFeedExpiry` rejects. A caller that mirrors an expiry the
+ * expiry state machine has already validated uses this rather than the wider
+ * predicate below: an expiry log inside the bootstrap boundary block still has
+ * to reach the feed row. See ADR 0105. */
+export function isEventBehindWatermark(
+  state: OracleFeedState,
+  event: FeedStateEvent,
+): boolean {
+  return eventPosition(state, event) < 0;
+}
+
+/** True when the persisted row already reflects this event's position, so
+ * re-applying it would double-count. Envio delivers each event at least once:
+ * a batch that ends mid-block commits that block's entity writes with
+ * `progress_block` set to the previous block, so the next start re-delivers
+ * the whole block. The transitions below still throw — the handler layer
+ * turns this case into a logged no-op. See ADR 0105. */
+export function isEventAlreadyApplied(
+  state: OracleFeedState,
+  event: FeedStateEvent,
+): boolean {
+  return (
+    isEventBehindWatermark(state, event) ||
+    event.blockNumber <= state.bootstrapThroughBlock
+  );
+}
+
 export function bootstrapOracleFeedState(args: {
   chainId: number;
   rateFeedID: string;

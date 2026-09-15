@@ -58,6 +58,11 @@ Persist one `OracleFeedState` row per feed referenced by an indexed pool:
   ordered state transition cannot be proven. A semantics change requires a
   replay-integrity marker bump and a clean full replay before promotion.
 
+[ADR 0105](0105-replayed-events-are-handler-layer-no-ops.md) refines the last
+clause. Envio delivers each event at least once, so an event the persisted row
+already reflects is a logged handler-layer no-op rather than a failed event.
+The transitions in `oracleFeedState.ts` and `oracleExpiryState.ts` still throw.
+
 ## Alternatives considered
 
 - **Keep one exact `medianTimestamp` read per report** — rejected: it is exact,

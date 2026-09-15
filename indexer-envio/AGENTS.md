@@ -125,6 +125,11 @@ VirtualPool trading limits live in `BrokerTradingLimit`, read from the Broker at
 the swap's block behind a freshness gate; see
 [ADR 0103](../docs/adr/0103-virtualpool-broker-trading-limits.md).
 
+Envio delivers each event at least once, so an ordered state machine treats an
+already-applied event as a no-op logged with
+`sortedOracles.replayedEventIgnored` while its pure transitions keep throwing;
+see [ADR 0105](../docs/adr/0105-replayed-events-are-handler-layer-no-ops.md).
+
 Also apply the shared recurring-review rules for file-size limits, multichain
 enumeration, Hasura row caps, and effect-layer boundaries:
 [`../docs/pr-checklists/recurring-review-patterns.md`](../docs/pr-checklists/recurring-review-patterns.md).

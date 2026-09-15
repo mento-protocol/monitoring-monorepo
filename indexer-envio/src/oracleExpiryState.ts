@@ -50,6 +50,20 @@ function validateEventOrder(
   return position;
 }
 
+/** True when the persisted row already reflects this event's position — the
+ * union of the two orderings `validateEventOrder` rejects. Envio delivers each
+ * event at least once, so the handler layer turns this case into a logged
+ * no-op while the transitions below stay fail-closed. See ADR 0105. */
+export function isEventAlreadyApplied(
+  state: OracleExpiryState,
+  event: ExpiryStateEvent,
+): boolean {
+  return (
+    eventPosition(state, event) < 0 ||
+    event.blockNumber <= state.bootstrapThroughBlock
+  );
+}
+
 export function bootstrapOracleExpiryState(args: {
   chainId: number;
   rateFeedID: string;

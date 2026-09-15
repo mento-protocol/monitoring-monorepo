@@ -227,6 +227,7 @@ Authority: canonical
 - [`adr/0101-legacy-gate-retirement.md`](adr/0101-legacy-gate-retirement.md) — Retire the legacy local quality gate
 - [`adr/0102-github-hosted-runners-only.md`](adr/0102-github-hosted-runners-only.md) — GitHub-hosted runners only; a frozen allow-list blocks other labels
 - [`adr/0103-virtualpool-broker-trading-limits.md`](adr/0103-virtualpool-broker-trading-limits.md) — VirtualPool trading limits come from block-pinned, freshness-gated Broker state reads
+- [`adr/0105-replayed-events-are-handler-layer-no-ops.md`](adr/0105-replayed-events-are-handler-layer-no-ops.md) — Replayed SortedOracles events are handler-layer no-ops; the pure guards stay fail-closed
 
 Authority: non-canonical
 

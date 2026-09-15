@@ -136,6 +136,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0046](0046-event-sourced-oracle-freshness.md)           | Oracle freshness is reconstructed from persisted report events                                                           |
 | [0074](0074-trove-ledger-parallel-append-only-entity.md) | Trove history is a parallel append-only `TroveLedgerEvent`, not a widened `TroveOperationEvent`                          |
 | [0103](0103-virtualpool-broker-trading-limits.md)        | VirtualPool trading limits are a separate entity fed by block-pinned, freshness-gated Broker state reads                 |
+| [0105](0105-replayed-events-are-handler-layer-no-ops.md) | Replayed SortedOracles events are handler-layer no-ops; the pure transitions stay fail-closed                            |
 
 ### ui-dashboard
 

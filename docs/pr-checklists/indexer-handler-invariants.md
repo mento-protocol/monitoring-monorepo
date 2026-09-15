@@ -117,6 +117,19 @@ propagation, also apply [`stateful-data-ui.md`](stateful-data-ui.md).
   state from inside an earlier config log. Never-tracked feeds must not perform
   expiry RPC or fail replay. Cover same-block ordering, flat reports, removals,
   malformed bootstraps, and absent state before changing this path.
+- Envio delivers each event at least once. A batch cut inside a block commits
+  that block's entity writes with `progress_block` set to the previous block,
+  so the next start re-delivers the whole block against rows that already
+  reflect part of it. An ordered state machine therefore detects an
+  already-applied event at the handler layer — `isEventAlreadyApplied` in
+  `oracleFeedState.ts` / `oracleExpiryState.ts` — emits one
+  `context.log.warn` carrying `sortedOracles.replayedEventIgnored` and a
+  `site=` naming the guarded helper, and returns the persisted row with no
+  write. Match the predicate to the orderings the transition behind that call
+  site actually rejects: a wider one suppresses live state changes, so the
+  expiry mirror uses `isEventBehindWatermark`. The pure transitions keep
+  throwing, so a call site that skips the predicate still fails closed. See
+  [ADR 0105](../adr/0105-replayed-events-are-handler-layer-no-ops.md).
 - Do not restore traffic-scaled `medianTimestamp` or `reportExpiry` effects to
   `OracleReported`, `OracleReportRemoved`, or `MedianUpdated`. A change to this
   replay contract requires a full replay, a replay-integrity marker bump with

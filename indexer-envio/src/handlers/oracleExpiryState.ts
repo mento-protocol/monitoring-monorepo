@@ -3,6 +3,7 @@ import {
   applyGlobalReportExpiry,
   applyTokenReportExpiry,
   bootstrapOracleExpiryState,
+  isEventAlreadyApplied,
   oracleExpiryStateId,
 } from "../oracleExpiryState.js";
 import { reportExpiryConfigEffect } from "../rpc/effects.js";
@@ -25,6 +26,36 @@ export async function preloadOracleExpiryState(
   rateFeedID: string,
 ): Promise<void> {
   await context.OracleExpiryState.get(oracleExpiryStateId(chainId, rateFeedID));
+}
+
+/** Greppable marker for an event the persisted row already reflects. Shared by
+ * both SortedOracles state machines; it lives here because
+ * `handlers/oracleFeedState.ts` already imports this module. */
+export const REPLAYED_EVENT_IGNORED = "sortedOracles.replayedEventIgnored";
+
+/** The guarded helper a token came from. One event can reach more than one of
+ * them, so the token carries this to stay attributable. */
+export type ReplayedEventSite =
+  | "resolveOracleFeedState"
+  | "resolveOracleExpiryState"
+  | "updateOracleFeedStateExpiryIfPresent";
+
+/** Record one already-applied event and move on. Envio re-delivers the tail
+ * block of an interrupted run, so this is expected after a restart rather than
+ * a fault; a token in the same run with no preceding restart means a real
+ * ordering inversion. See ADR 0105. */
+export function logReplayedEventIgnored(
+  context: Pick<EvmOnEventContext, "log">,
+  event: OracleExpiryEvent,
+  state: { updatedAtBlock: bigint; updatedAtLogIndex: number },
+  site: ReplayedEventSite,
+): void {
+  context.log.warn(
+    `${REPLAYED_EVENT_IGNORED} site=${site} chainId=${event.chainId} ` +
+      `rateFeedID=${event.rateFeedID} block=${event.blockNumber} ` +
+      `logIndex=${event.logIndex} updatedAtBlock=${state.updatedAtBlock} ` +
+      `updatedAtLogIndex=${state.updatedAtLogIndex}`,
+  );
 }
 
 function unavailableMessage(event: OracleExpiryEvent): string {
@@ -114,6 +145,15 @@ export async function resolveOracleExpiryState(args: {
     blockTimestamp: args.event.blockTimestamp,
     logIndex: args.event.logIndex,
   };
+  if (isEventAlreadyApplied(base, eventPosition)) {
+    logReplayedEventIgnored(
+      args.context,
+      args.event,
+      base,
+      "resolveOracleExpiryState",
+    );
+    return base;
+  }
   const updated =
     args.mutation.kind === "token"
       ? applyTokenReportExpiry(base, args.mutation.reportExpiry, eventPosition)
