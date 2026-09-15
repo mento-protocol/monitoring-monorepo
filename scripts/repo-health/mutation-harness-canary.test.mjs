@@ -2,8 +2,8 @@
  * Behavioral coverage for scripts/repo-health/mutation-harness-canary.mjs.
  *
  * The failure paths are the ones that matter. When Stryker exits non-zero, and
- * when it exits zero on a report that proves nothing — no mutants, or a
- * survivor — the runner must print `MUTATION HARNESS BROKEN` with the
+ * when it exits zero on a report that proves nothing — no mutants, or a mutant
+ * it never killed — the runner must print `MUTATION HARNESS BROKEN` with the
  * installed versions and exit non-zero, so a broken harness never reads as
  * weak tests. The tests stub `stryker` on PATH, so they need no Stryker
  * install and no run.
@@ -117,12 +117,12 @@ function runRunner(fixture) {
   };
 }
 
-test("passes and counts the mutants when every one is detected", () => {
+test("passes and counts the mutants when every one is killed", () => {
   const fixture = newFixture({
     name: "metrics-bridge",
     exitCode: 0,
     versions: { vitest: "4.1.11" },
-    mutantStatuses: ["Killed", "Killed", "Timeout"],
+    mutantStatuses: ["Killed", "Killed", "Killed"],
   });
 
   const result = runRunner(fixture);
@@ -130,9 +130,26 @@ test("passes and counts the mutants when every one is detected", () => {
   assert.equal(result.status, 0);
   assert.match(
     result.stdout,
-    /Mutation harness canary passed for metrics-bridge: 3 mutants, all detected\./,
+    /Mutation harness canary passed for metrics-bridge: 3 mutants, all killed\./,
   );
   assert.doesNotMatch(result.stderr, /MUTATION HARNESS BROKEN/);
+});
+
+test("fails a zero-exit run that timed a mutant out", () => {
+  const fixture = newFixture({
+    name: "metrics-bridge",
+    exitCode: 0,
+    versions: { vitest: "4.1.11" },
+    mutantStatuses: ["Killed", "Timeout"],
+  });
+
+  const result = runRunner(fixture);
+
+  assert.equal(result.status, 1);
+  assert.match(
+    result.stderr,
+    /left 1 of 2 canary mutants unkilled \(Timeout\)/,
+  );
 });
 
 test("runs the canary config, not the real one", () => {
@@ -198,7 +215,7 @@ test("fails a zero-exit run that generated no mutants", () => {
   assert.match(result.stderr, /generated no mutants/);
 });
 
-test("fails a zero-exit run that left a mutant undetected", () => {
+test("fails a zero-exit run that left a mutant unkilled", () => {
   const fixture = newFixture({
     name: "ui-dashboard",
     exitCode: 0,
@@ -209,7 +226,10 @@ test("fails a zero-exit run that left a mutant undetected", () => {
   const result = runRunner(fixture);
 
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /left 2 of 3 canary mutants undetected/);
+  assert.match(
+    result.stderr,
+    /left 2 of 3 canary mutants unkilled \(NoCoverage, Survived\)/,
+  );
 });
 
 test("fails when Stryker writes no report", () => {

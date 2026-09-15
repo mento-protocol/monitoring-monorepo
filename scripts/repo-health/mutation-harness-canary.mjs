@@ -14,7 +14,7 @@
  * Stryker's exit code alone is not enough. A run that generates no valid
  * mutants scores NaN, and `NaN < break` is false, so Stryker exits 0. This
  * runner therefore reads the canary's JSON report and requires at least one
- * mutant with every mutant detected.
+ * mutant with every mutant killed.
  *
  * Run it from a package root, before that package's real mutation run.
  */
@@ -104,18 +104,22 @@ if (mutants.length === 0) {
   );
 }
 
-const undetected = mutants.filter(
-  (mutant) => mutant.status !== "Killed" && mutant.status !== "Timeout",
-);
+// Killed is the only passing status. The fixture is one addition and one
+// ternary, so no mutant can legitimately hang: a Timeout means the runner
+// failed, not that the direct test killed the mutant.
+const unkilled = mutants.filter((mutant) => mutant.status !== "Killed");
 
-if (undetected.length > 0) {
+if (unkilled.length > 0) {
+  const statuses = [...new Set(unkilled.map((mutant) => mutant.status))]
+    .sort()
+    .join(", ");
   reportBroken(
-    `Stryker left ${undetected.length} of ${mutants.length} canary mutants undetected.`,
+    `Stryker left ${unkilled.length} of ${mutants.length} canary mutants unkilled (${statuses}).`,
     1,
   );
 }
 
 console.log(
-  `Mutation harness canary passed for ${packageName}: ${mutants.length} mutants, all detected.`,
+  `Mutation harness canary passed for ${packageName}: ${mutants.length} mutants, all killed.`,
 );
 process.exit(0);

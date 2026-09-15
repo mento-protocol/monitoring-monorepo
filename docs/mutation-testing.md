@@ -45,7 +45,9 @@ a real target ever becomes reachable only through one.
 `scripts/repo-health/mutation-harness-canary.mjs` runs Stryker and then reads
 the canary's own JSON report, because a run that generates no mutants scores
 `NaN`, clears every `break` floor and exits 0. It requires at least one mutant
-and every mutant detected. On failure it prints `MUTATION HARNESS BROKEN` with
+and every mutant `Killed`. A `Timeout` fails too: the fixture is one addition
+and one ternary, so no mutant can legitimately hang, and a timeout never proves
+the direct test killed it. On failure it prints `MUTATION HARNESS BROKEN` with
 the reason and the installed vitest and Stryker versions.
 `.github/workflows/mutation-testing.yml` runs it before each package's
 baseline. Never lower a `break` floor to clear a canary failure.
