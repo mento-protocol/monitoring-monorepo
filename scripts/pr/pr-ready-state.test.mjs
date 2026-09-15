@@ -547,6 +547,34 @@ test("fails closed when rulesets cannot be read after classic protection reports
   );
 });
 
+test("fails closed on required-status-context error when the ruleset read fails after classic protection succeeds", async () => {
+  // Classic protection succeeding no longer means requiredStatusContexts is
+  // complete: a ruleset can add required contexts classic protection does
+  // not know about, so a failed ruleset read must not be swallowed as
+  // `error: null` — that would let `fetchReadyState` treat classicContexts
+  // as the full set and misclassify a missing ruleset-only check as
+  // optional (see "fails closed when required status contexts cannot be
+  // fetched" for the resulting `summarizeReadyState` blocker).
+  const result = await fetchRequiredStatusContexts({
+    repo: { owner: "mento-protocol", name: "monitoring-monorepo", host: null },
+    baseRef: "main",
+    fetchProtection: async () => ({
+      ok: true,
+      value: { contexts: ["ci"] },
+    }),
+    fetchRules: async () => ({
+      ok: false,
+      error: "gh: Resource not accessible by integration (HTTP 403)",
+    }),
+  });
+
+  assertEqual(
+    result.error,
+    "gh: Resource not accessible by integration (HTTP 403)",
+    "a failed ruleset read must propagate as a required-status-context error, not be swallowed",
+  );
+});
+
 test("falls back to rulesets for the current gh branch-protection 404", async () => {
   const result = await fetchRequiredStatusContexts({
     repo: { owner: "mento-protocol", name: "monitoring-monorepo", host: null },
@@ -1152,6 +1180,34 @@ test("does not collapse duplicate required contexts from different app sources",
   assertDeepEqual(
     split.required.map((check) => `${check.name}:${check.state}`),
     ["ci:pass", "ci:pending"],
+  );
+});
+
+test("one check satisfies both an unbound and an app-bound required context of the same name", () => {
+  // Classic protection can require a bare "ci" (no app) while a ruleset also
+  // requires "ci" from a specific app — fetchRequiredStatusContexts unions
+  // both into requiredStatusContexts. The single "ci" check GitHub reports
+  // for that app satisfies both entries; crediting only the first (the
+  // unbound one, since it matches unconditionally) left the app-bound entry
+  // permanently "pending" even though nothing further could ever satisfy it.
+  const split = splitRequiredAndOptionalChecks(
+    [
+      {
+        name: "ci",
+        status: "COMPLETED",
+        conclusion: "SUCCESS",
+        appId: 15368,
+      },
+    ],
+    [
+      { context: "ci", integrationId: null },
+      { context: "ci", integrationId: 15368 },
+    ],
+  );
+
+  assertDeepEqual(
+    split.required.map((check) => `${check.name}:${check.state}`),
+    ["ci:pass"],
   );
 });
 

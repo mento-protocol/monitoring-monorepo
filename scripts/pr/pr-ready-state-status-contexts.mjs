@@ -464,9 +464,14 @@ export async function fetchRequiredStatusContexts({
   ]);
 
   if (!rulesResult.ok) {
+    // A failed ruleset read means a ruleset-only required check cannot be
+    // ruled out. Report classicContexts for diagnostics but propagate the
+    // read error too, the same as every other branch-protection lookup
+    // failure here, so callers fail closed instead of trusting classic's
+    // contexts as complete.
     return {
       contexts: classicContexts,
-      error: null,
+      error: rulesResult.error,
       strict: classicStrict === true ? true : null,
     };
   }

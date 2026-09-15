@@ -58,12 +58,13 @@ merges and recovery through one owner. Recovery uses a local-only helper that
 pins inputs and creates a separate candidate; publication remains a reviewed,
 exact-leased coordinator action outside babysitting. Prefer this separation over
 an automatic sync-and-push tool because live membership and human edits can
-change while local replay runs. A confirmed GitHub `BEHIND` state blocks
-readiness even when Git reports no content conflict. **Amended 2026-09-15
+change while local replay runs. Before the 2026-09-15 amendment below, a
+confirmed GitHub `BEHIND` state blocked readiness even when Git reports no
+content conflict. **Amended 2026-09-15
 ([ADR 0103](0103-non-strict-required-status-checks.md)):** `BEHIND` alone no
-longer blocks once base protection or a matching ruleset confirms strict
-required-status-checks policy is off; unknown or confirmed-strict policy
-still blocks.
+longer blocks once base protection and every applicable ruleset confirm
+strict required-status-checks policy is off; unknown or any confirmed-strict
+source still blocks.
 
 Use a smaller helper-and-consumer feature for the next comparison. Do not create
 synthetic pilot PRs. Broader adoption still needs evidence of cost and reliability;

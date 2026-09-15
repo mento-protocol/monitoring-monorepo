@@ -95,6 +95,11 @@ is green again.
   required merely for being BEHIND.
 - The `OrganizationAdmin` `always` bypass is unchanged by this decision; nothing
   here narrows or widens it.
+- **Amends** [ADR 0101](0101-legacy-gate-retirement.md)'s rollback step 2: that
+  legacy-gate-retirement rollback instructed the operator to keep ruleset
+  13494367's strict current-base required checks. This decision turns that
+  policy off, so the ADR 0101 rollback must restore the ruleset with strict
+  still off, not re-enable it.
 
 ## Evidence
 

@@ -223,18 +223,27 @@ export function splitRequiredAndOptionalChecks(
 
   for (const check of suppressSupersededCancelledChecks(statusCheckRollup)) {
     const name = checkDisplayName(check);
-    const matchedRequiredContext = requiredStatusContexts.find((context) =>
+    // A single check can satisfy more than one required-context entry: an
+    // unbound entry (no app) and an app-bound entry of the same name both
+    // match any check reporting that name, e.g. when classic protection
+    // requires a bare "ci" and a ruleset also requires "ci" from a specific
+    // app. Mark every matching entry as seen, not just the first — crediting
+    // only the first left the other permanently "pending" even though the
+    // one emitted check already satisfies it too.
+    const matchingRequiredContexts = requiredStatusContexts.filter((context) =>
       checkMatchesRequiredContext(check, context),
     );
     const isRequired = requiredStatusContextsAvailable
-      ? matchedRequiredContext !== undefined
+      ? matchingRequiredContexts.length > 0
       : !isOptionalCheckName(name);
     if (isRequired) {
-      seenRequiredContexts.add(
-        matchedRequiredContext === undefined
-          ? name
-          : requiredContextIdentity(matchedRequiredContext),
-      );
+      if (matchingRequiredContexts.length > 0) {
+        for (const context of matchingRequiredContexts) {
+          seenRequiredContexts.add(requiredContextIdentity(context));
+        }
+      } else {
+        seenRequiredContexts.add(name);
+      }
     }
     const item = checkToItem(check, { required: isRequired });
     if (isRequired) {

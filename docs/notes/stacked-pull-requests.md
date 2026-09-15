@@ -233,10 +233,11 @@ use operating-card step 8 and ADR 0084.
 Do not infer progress from a GitHub “merging” spinner. Read the PR state,
 current head, protection branch, `mergeStateStatus`, required checks and pending
 merge setting. `DIRTY` (a textual conflict) still requires resolution before
-merge; `BEHIND` alone does not once base protection or a matching ruleset confirms strict is off
-(operator decision 2026-09-15,
-[ADR 0103](../adr/0103-non-strict-required-status-checks.md); the readiness
-probe fails closed until then). A pending merge
+merge; `BEHIND` alone does not once base protection and every applicable
+ruleset confirm strict is off (operator decision 2026-09-15,
+[ADR 0103](../adr/0103-non-strict-required-status-checks.md); any one
+still-strict or unknown source keeps the readiness probe failing closed). A
+pending merge
 setting records intent, not completion. Preserve an existing request during
 authorized repair and verify its state afterward; do not cancel or resubmit it
 merely to discover an operation UUID. A head update may invalidate the
