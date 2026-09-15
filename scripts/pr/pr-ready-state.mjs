@@ -380,6 +380,8 @@ export async function fetchReadyState({
     repo,
     pr,
     stack,
+    baseHealthOid: baseHealth?.oid ?? null,
+    baseHealthError: baseHealth?.error ?? null,
     fetchJson: ghApiJsonResult,
   });
   const annotatedPr = {

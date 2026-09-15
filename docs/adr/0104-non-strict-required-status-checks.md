@@ -88,18 +88,30 @@ proves nothing about freshness. `behind_by == 0` also implies no conflict,
 since a head containing the base tip merges trivially. Every failed or
 malformed read of either endpoint fails closed.
 
-A stale head exits without merging, and the stale path stays read-only.
-`update-branch` would write a merge commit authored by that token, and the
-writer's own commit proof accepts only commits authored by `dependabot[bot]`,
-so the repair would disqualify the pull request from the lane for good. Posting
-`@dependabot rebase` is no better: GitHub records a `GITHUB_TOKEN` comment as
-`github-actions[bot]`, whose commands Dependabot ignores, so the comment would
-add noise and a false audit trail without causing a rebase. Recovery needs
-nothing from this job. `.github/dependabot.yml` sets no `rebase-strategy`, so
-Dependabot keeps its default `auto` and rebases its own out-of-date pull
-requests; that push lands under its identity and starts a fresh classifier run,
-which brings the pull request back. Until then it stays unmerged, which is the
-safe outcome.
+A stale head exits without merging, and the stale path stays read-only, because
+both repairs are worse than stalling. `update-branch` would write a merge commit
+authored by that token, and the writer's own commit proof accepts only commits
+authored by `dependabot[bot]`, so the repair would disqualify the pull request
+from the lane for good. Posting `@dependabot rebase` is no better: GitHub
+records a `GITHUB_TOKEN` comment as `github-actions[bot]`, whose commands
+Dependabot ignores, so it would add noise and a false audit trail without
+causing a rebase. Provisioning an identity Dependabot accepts would mean a new
+secret, which [ADR 0030](0030-iac-before-cli-secrets.md) keeps IaC-owned.
+
+The lane therefore stalls, and the stall is real rather than theoretical. Under
+the default `rebase-strategy: auto`, GitHub documents that Dependabot rebases an
+open pull request "when you use Dependabot version updates for any open
+Dependabot pull request when your schedule runs" and "when Dependabot detects
+that a Dependabot pull request is in conflict after a recent push to the target
+branch" — being merely behind is not a trigger, and with strict mode off a
+behind pull request is not in conflict either. This repository schedules
+`github-actions` weekly on Monday, so a stale pull request waits for that run;
+GitHub also stops rebasing any pull request left unmerged for 30 days. The
+writer therefore emits a `::warning::` annotation and a job-summary entry naming
+the pull request, its head, and `behind_by`, so the lane cannot look idle while
+it is stuck. A human can post `@dependabot rebase` to recover it immediately.
+Until one of those happens the pull request stays unmerged, which is the safe
+outcome.
 
 The comparison is still an observation, not a server-enforced precondition: the
 merge endpoint's `sha` pins the pull request's head, not the base. Two writers
@@ -145,6 +157,11 @@ lane.
   13494367's strict current-base required checks. This decision turns that
   policy off, so the ADR 0101 rollback must restore the ruleset with strict
   still off, not re-enable it.
+- **Amends** [ADR 0078](0078-staged-verification-redesign.md) in three places:
+  its cutover condition, its migration gate 5, and its rollback plan all
+  required strict current-base checking. The first two are annotated as
+  historical; the rollback now says to keep required CI and leave strict off,
+  so running it cannot re-enable the policy.
 
 ## Evidence
 

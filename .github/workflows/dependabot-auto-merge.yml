@@ -16,7 +16,8 @@ name: Dependabot auto-merge
 # Main's ruleset no longer requires a pull request to include the current base
 # (ADR 0104), so this writer carries that validation itself: it compares the
 # base tip against the verified head and merges only when the head contains it.
-# A stale head is left alone for Dependabot's own rebase to recover.
+# A stale head is left alone and the stall is announced; it recovers on the next
+# scheduled Dependabot run or a human `@dependabot rebase`.
 #
 # The repository GITHUB_TOKEN performs the evidence reads and the final write.
 # Separate environment variables keep the read path and final-write seam
@@ -479,22 +480,36 @@ jobs:
           # containing the base tip merges trivially.
           verify_base_ancestry
 
-          # The stale path is read-only. `update-branch` would write a merge
-          # commit authored by this token, and the commit proof above accepts
-          # only commits authored by dependabot[bot], so the repair would
-          # disqualify the pull request from this lane for good; a
-          # token-authored push also starts no workflow run, so nothing would
-          # revalidate it. Posting `@dependabot rebase` is no better: the
-          # comment would be recorded as github-actions[bot], whose commands
+          # The stale path is read-only, and it stalls. Both repairs are worse
+          # than stalling: `update-branch` would write a merge commit authored
+          # by this token, which the commit proof above rejects, disqualifying
+          # the pull request from this lane for good; and `@dependabot rebase`
+          # posted here is recorded as github-actions[bot], whose commands
           # Dependabot ignores, so it would add noise and a false audit trail
-          # without causing a rebase. Recovery needs no help from this job.
-          # `.github/dependabot.yml` sets no `rebase-strategy`, so Dependabot
-          # keeps its default `auto` and rebases its own out-of-date pull
-          # requests. That push lands under its identity and starts a fresh
-          # classifier run, which brings the pull request back here. Until then
-          # it stays unmerged, which is the safe outcome.
+          # without causing a rebase.
+          #
+          # Recovery is real but not immediate. Under the default
+          # `rebase-strategy: auto`, Dependabot rebases an open pull request
+          # "when your schedule runs" and "when Dependabot detects that a
+          # Dependabot pull request is in conflict after a recent push to the
+          # target branch" — merely being behind is not a trigger. This
+          # repository schedules `github-actions` weekly on Monday, so a stale
+          # pull request waits for that run, and Dependabot stops rebasing any
+          # pull request left unmerged for 30 days. Announce the stall loudly
+          # rather than letting the lane look idle: a human can post
+          # `@dependabot rebase` to recover it immediately.
           if [[ "$OBSERVED_BEHIND_BY" != '0' ]]; then
-            echo "::notice::The verified head is $OBSERVED_BEHIND_BY commit(s) behind $EXPECTED_BASE. Leaving the pull request unmerged."
+            echo "::warning::Dependabot PR #$PR_NUMBER is $OBSERVED_BEHIND_BY commit(s) behind $EXPECTED_BASE and will not auto-merge. A scheduled Dependabot run rebases it only while it is under 30 days old; otherwise comment @dependabot rebase."
+            if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+              {
+                echo '### Dependabot auto-merge stalled'
+                echo ''
+                echo "- Pull request: #$PR_NUMBER"
+                echo "- Head: \`$EXPECTED_HEAD\`"
+                echo "- Behind \`$EXPECTED_BASE\` by: $OBSERVED_BEHIND_BY commit(s)"
+                echo '- Recovery: a scheduled Dependabot run rebases it only while it is under 30 days old. Otherwise comment `@dependabot rebase`.'
+              } >> "$GITHUB_STEP_SUMMARY"
+            fi
             exit 0
           fi
 

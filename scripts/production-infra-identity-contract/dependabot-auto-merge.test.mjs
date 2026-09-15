@@ -360,6 +360,10 @@ function runWriter(fixture) {
     const callLogPath = path.join(scratch, "calls.jsonl");
     const mergeMarker = path.join(scratch, "merge-called.txt");
     const rebaseMarker = path.join(scratch, "rebase-requested.txt");
+    // Never inherit the real GITHUB_STEP_SUMMARY: under Actions the writer
+    // would append this fixture's fake stalled-PR data to the live job summary.
+    const stepSummary = path.join(scratch, "step-summary.md");
+    writeFileSync(stepSummary, "");
     writeFileSync(ghPath, mockGhSource);
     chmodSync(ghPath, 0o755);
     writeFileSync(scenarioPath, JSON.stringify(fixture));
@@ -380,6 +384,7 @@ function runWriter(fixture) {
         MOCK_GH_CALL_LOG: callLogPath,
         MOCK_GH_MERGE_MARKER: mergeMarker,
         MOCK_GH_REBASE_MARKER: rebaseMarker,
+        GITHUB_STEP_SUMMARY: stepSummary,
         MOCK_EXPECTED_READ_TOKEN: "read-token",
         MOCK_EXPECTED_MERGE_TOKEN: "merge-token",
       },
@@ -393,6 +398,7 @@ function runWriter(fixture) {
     const mergeRequest = merged
       ? JSON.parse(readFileSync(mergeMarker, "utf8"))
       : null;
+    const stepSummaryText = readFileSync(stepSummary, "utf8");
     const rebaseRequested = existsSync(rebaseMarker);
     const rebaseRequest = rebaseRequested
       ? JSON.parse(readFileSync(rebaseMarker, "utf8"))
@@ -404,6 +410,7 @@ function runWriter(fixture) {
       mergeRequest,
       rebaseRequested,
       rebaseRequest,
+      stepSummaryText,
     };
   } finally {
     rmSync(scratch, { recursive: true, force: true });
@@ -609,6 +616,23 @@ assert.equal(
 assert(
   !behindBaseResult.rebaseRequested,
   "a stale head must not post a rebase command it cannot make effective",
+);
+// The stall must be announced, or the lane looks idle while it is stuck.
+assert(
+  behindBaseResult.stderr.includes("::warning::") ||
+    behindBaseResult.stdout.includes("::warning::"),
+  "a stale head must emit a warning annotation",
+);
+for (const fragment of ["#1872", "3 commit(s)", "@dependabot rebase"]) {
+  assert(
+    behindBaseResult.stepSummaryText.includes(fragment),
+    `the job summary must name ${fragment}`,
+  );
+}
+assert.equal(
+  pr1872Result.stepSummaryText,
+  "",
+  "a merged head must write no stall summary",
 );
 
 // Every ancestry-read failure fails closed rather than merging blind.

@@ -4735,6 +4735,11 @@ async function finalSnapshot(
   originalStack,
   mutate = () => {},
   standalone = false,
+  baseHealthOid = standalone
+    ? fixture.pr.baseRefOid
+    : (originalStack?.protectionBaseOid ?? null),
+  baseHealthError = null,
+  resolvedBase = undefined,
 ) {
   const currentPr = {
     number: fixture.pr.number,
@@ -4743,32 +4748,155 @@ async function finalSnapshot(
     head: { sha: fixture.pr.headRefOid, ref: fixture.pr.headRefName },
     base: { ref: fixture.pr.baseRefName, sha: fixture.pr.baseRefOid },
   };
-  const next = { currentPr, stack: structuredClone(fixture.stack), standalone };
+  const next = {
+    currentPr,
+    stack: structuredClone(fixture.stack),
+    standalone,
+    resolvedBase,
+  };
   mutate(next);
   await verifyReadinessSnapshot({
     ...fixture,
     stack: originalStack,
-    fetchJson: async (_repo, [path]) => ({
-      ok: true,
-      value: path.includes("/compare/")
-        ? ancestryResult(path)
-        : path.includes("/pulls/")
-          ? next.currentPr
-          : path.includes("?")
-            ? next.standalone
-              ? []
-              : [next.stack]
-            : next.stack,
-    }),
+    baseHealthOid,
+    baseHealthError,
+    fetchJson: async (_repo, [path]) => {
+      if (/\/commits\/[^/]+$/u.test(path)) {
+        return next.resolvedBase === null
+          ? { ok: false, error: "HTTP 404" }
+          : { ok: true, value: { sha: next.resolvedBase } };
+      }
+      return {
+        ok: true,
+        value: path.includes("/compare/")
+          ? ancestryResult(path)
+          : path.includes("/pulls/")
+            ? next.currentPr
+            : path.includes("?")
+              ? next.standalone
+                ? []
+                : [next.stack]
+              : next.stack,
+      };
+    },
   });
 }
 
 test("final snapshot accepts stable native and standalone PRs after readiness reads", async () => {
   const fixture = stackFixture();
   fixture.pr.baseRefOid = "a".repeat(40);
+  // A stacks response that carries `base.sha` gives the layer a verified
+  // protection-base commit, which is what base health binds to.
+  fixture.stack.base.sha = "e".repeat(40);
   const { stack } = await stackBases(fixture);
   await finalSnapshot(fixture, stack);
   await finalSnapshot(fixture, null, () => {}, true);
+});
+
+test("final snapshot rejects base health read from a different base commit", async () => {
+  // Base health resolves a mutable ref. If `main` advances to a red commit
+  // after that query, every other snapshot field can still match, so without
+  // this binding the gate would pass on a base whose health it never read.
+  const fixture = stackFixture();
+  fixture.pr.baseRefOid = "a".repeat(40);
+  fixture.stack.base.sha = "e".repeat(40);
+  const { stack } = await stackBases(fixture);
+
+  for (const [label, standalone, oid] of [
+    ["a standalone PR", true, "b".repeat(40)],
+    ["a native stack layer", false, "b".repeat(40)],
+    ["an unreadable base", true, null],
+  ]) {
+    let rejected = false;
+    try {
+      await finalSnapshot(
+        fixture,
+        standalone ? null : stack,
+        () => {},
+        standalone,
+        oid,
+      );
+    } catch (error) {
+      rejected = error.message.includes("base advanced while gathering");
+    }
+    assert(rejected, `${label} must reject base health from another commit`);
+  }
+});
+
+test("final snapshot resolves an omitted stack base SHA instead of refusing", async () => {
+  // `fetchStackContext` accepts a stacks response without `base.sha`, leaving
+  // `protectionBaseOid` null. Refusing those layers would make their readiness
+  // permanently unavailable, so the protection ref is resolved here instead —
+  // and because that read happens after the health query, a base that moved in
+  // between still fails closed.
+  const fixture = stackFixture();
+  fixture.pr.baseRefOid = "a".repeat(40);
+  const { stack } = await stackBases(fixture);
+  assertEqual(stack.protectionBaseOid, null);
+
+  // Resolved ref matches the commit base health judged: the layer stays usable.
+  await finalSnapshot(
+    fixture,
+    stack,
+    () => {},
+    false,
+    "e".repeat(40),
+    null,
+    "e".repeat(40),
+  );
+
+  for (const [label, resolved, expected] of [
+    ["a base that moved", "f".repeat(40), "base advanced"],
+    ["an unreadable base ref", null, "HTTP 404"],
+    [
+      "a malformed base commit",
+      "not-a-sha",
+      "protection base commit is unreadable",
+    ],
+  ]) {
+    let rejected = false;
+    try {
+      await finalSnapshot(
+        fixture,
+        stack,
+        () => {},
+        false,
+        "e".repeat(40),
+        null,
+        resolved,
+      );
+    } catch (error) {
+      rejected = error.message.includes(expected);
+    }
+    assert(rejected, `${label} must fail closed`);
+  }
+});
+
+test("final snapshot leaves an unreadable base to its structured blocker", async () => {
+  // A failed health read already becomes a required `base-red` blocker with an
+  // unknown state. Throwing here instead would crash the probe and leave watch
+  // mode with no JSON, so the binding check must stand down for that case.
+  const fixture = stackFixture();
+  fixture.pr.baseRefOid = "a".repeat(40);
+  fixture.stack.base.sha = "e".repeat(40);
+  const { stack } = await stackBases(fixture);
+
+  await finalSnapshot(
+    fixture,
+    stack,
+    () => {},
+    false,
+    null,
+    "Base branch health unreadable: gh: Bad credentials",
+  );
+  await finalSnapshot(
+    fixture,
+    null,
+    () => {},
+    true,
+    null,
+    "Base branch health unreadable: gh: Bad credentials",
+  );
 });
 
 test("final snapshot rejects parent or membership changes after protection lookup", async () => {
@@ -4828,9 +4956,14 @@ test("final snapshot rejects parent or membership changes after protection looku
   }
   let rejected = false;
   try {
-    await finalSnapshot(fixture, null);
+    // Supply a base-health OID that matches, so the new base-binding guard
+    // cannot be what rejects this: the transition itself must.
+    await finalSnapshot(fixture, null, () => {}, false, fixture.pr.baseRefOid);
   } catch (error) {
-    rejected = String(error.message).startsWith("Stack metadata unavailable:");
+    rejected =
+      String(error.message).startsWith("Stack metadata unavailable:") &&
+      !error.message.includes("base advanced") &&
+      !error.message.includes("no verified base commit");
   }
   assert(rejected, "standalone to native transition must not emit readiness");
 });
@@ -4840,18 +4973,28 @@ test("final snapshot rejects failed or missing current PR fetch", async () => {
     { ok: false, error: "HTTP 403" },
     { ok: true, value: null },
   ]) {
+    const fixture = stackFixture();
+    fixture.pr.baseRefOid = "a".repeat(40);
+    let fetched = false;
     let rejected = false;
     try {
       await verifyReadinessSnapshot({
-        ...stackFixture(),
+        ...fixture,
         stack: null,
-        fetchJson: async () => result,
+        // Clear the base-binding guard, or this would reject before the fetch
+        // and still pass while the PR-response validation below was gone.
+        baseHealthOid: fixture.pr.baseRefOid,
+        fetchJson: async () => {
+          fetched = true;
+          return result;
+        },
       });
     } catch (error) {
       rejected = String(error.message).startsWith(
         "Stack metadata unavailable:",
       );
     }
+    assert(fetched, "the final lookup must actually run");
     assert(rejected, "final lookup must succeed before readiness");
   }
 });
