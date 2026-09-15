@@ -460,7 +460,13 @@ function VirtualPoolHeaderTiles({
             />
           </span>
         }
-        value={<BrokerLimitStatusValue state={brokerLimits} />}
+        value={
+          <BrokerLimitStatusValue
+            pool={pool}
+            network={network}
+            state={brokerLimits}
+          />
+        }
       />
       {hasOracleFeed ? (
         <Stat

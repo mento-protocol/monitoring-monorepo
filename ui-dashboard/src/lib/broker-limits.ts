@@ -147,6 +147,33 @@ export function orderRowsByPoolTokens(
   return sortedCopy(rows, (a, b) => rank(a) - rank(b));
 }
 
+export type BrokerLegCoverage = {
+  /** Both pool token legs have a row whose config and state reads landed. */
+  complete: boolean;
+  /** Pool tokens still waiting on one of those reads. Empty when the pool has
+   *  not mirrored its own token legs yet, because there is nothing to name. */
+  pending: string[];
+};
+
+/** Which of a pool's two token legs the Broker has not fully read. Mirrors
+ *  `foldPoolLimitFields` in the indexer: one leg's RPC read can succeed while
+ *  the other fails, and the readable leg must not speak for the pool — the
+ *  unread leg may already sit at its cap. */
+export function brokerLegCoverage(
+  rows: BrokerTradingLimitRow[],
+  token0: string | null,
+  token1: string | null,
+): BrokerLegCoverage {
+  if (!token0 || !token1) return { complete: false, pending: [] };
+  const pending = [token0, token1].filter((token) => {
+    const row = rows.find(
+      (candidate) => candidate.token.toLowerCase() === token.toLowerCase(),
+    );
+    return !row?.configKnown || !row.stateKnown;
+  });
+  return { complete: pending.length === 0, pending };
+}
+
 const STATUS_RANK: Record<string, number> = {
   "N/A": 0,
   OK: 1,
@@ -154,9 +181,16 @@ const STATUS_RANK: Record<string, number> = {
   CRITICAL: 3,
 };
 
-/** Worst indexed status across a pool's legs. "N/A" for no rows and for any
- *  status the indexer has not written yet — never a fabricated OK. */
-export function worstRowStatus(rows: BrokerTradingLimitRow[]): string {
+/** Worst indexed status across a pool's legs. "N/A" until both legs are fully
+ *  read, so a partial read never reports OK, and "N/A" for any status the
+ *  indexer has not written yet — never a fabricated OK. WARN and CRITICAL
+ *  still dominate once both legs are known. */
+export function worstRowStatus(
+  rows: BrokerTradingLimitRow[],
+  token0: string | null,
+  token1: string | null,
+): string {
+  if (!brokerLegCoverage(rows, token0, token1).complete) return "N/A";
   let worst = "N/A";
   let worstRank = 0;
   for (const row of rows) {

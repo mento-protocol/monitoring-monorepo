@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  brokerLegCoverage,
   enabledWindows,
   formatWholeUnits,
   orderRowsByPoolTokens,
@@ -139,31 +140,109 @@ describe("formatWholeUnits", () => {
   });
 });
 
+function usdmRow(
+  overrides: Partial<BrokerTradingLimitRow> = {},
+): BrokerTradingLimitRow {
+  return row({ token: USDM, id: "usdm", ...overrides });
+}
+
+describe("brokerLegCoverage", () => {
+  it("is complete once both pool legs carry a fully read row", () => {
+    expect(brokerLegCoverage([row(), usdmRow()], AUDM, USDM)).toEqual({
+      complete: true,
+      pending: [],
+    });
+  });
+
+  it("names a leg whose row is missing or only half read", () => {
+    expect(brokerLegCoverage([row()], AUDM, USDM)).toEqual({
+      complete: false,
+      pending: [USDM],
+    });
+    expect(
+      brokerLegCoverage([row(), usdmRow({ stateKnown: false })], AUDM, USDM),
+    ).toEqual({ complete: false, pending: [USDM] });
+    expect(
+      brokerLegCoverage([row({ configKnown: false }), usdmRow()], AUDM, USDM),
+    ).toEqual({ complete: false, pending: [AUDM] });
+  });
+
+  it("matches a leg whatever case the pool token carries", () => {
+    expect(
+      brokerLegCoverage([row(), usdmRow()], AUDM.toUpperCase(), USDM).complete,
+    ).toBe(true);
+  });
+
+  it("names nothing while the pool has not mirrored its token legs", () => {
+    expect(brokerLegCoverage([row()], null, USDM)).toEqual({
+      complete: false,
+      pending: [],
+    });
+  });
+});
+
 describe("worstRowStatus", () => {
   it("takes the worst indexed status across the legs", () => {
     expect(
-      worstRowStatus([
-        row({ limitStatus: "OK" }),
-        row({ limitStatus: "CRITICAL" }),
-      ]),
+      worstRowStatus(
+        [row({ limitStatus: "OK" }), usdmRow({ limitStatus: "CRITICAL" })],
+        AUDM,
+        USDM,
+      ),
     ).toBe("CRITICAL");
     expect(
-      worstRowStatus([
-        row({ limitStatus: "WARN" }),
-        row({ limitStatus: "OK" }),
-      ]),
+      worstRowStatus(
+        [row({ limitStatus: "WARN" }), usdmRow({ limitStatus: "OK" })],
+        AUDM,
+        USDM,
+      ),
     ).toBe("WARN");
   });
 
   it("is N/A with no rows and with an unknown status", () => {
-    expect(worstRowStatus([])).toBe("N/A");
-    expect(worstRowStatus([row({ limitStatus: "PENDING" })])).toBe("N/A");
+    expect(worstRowStatus([], AUDM, USDM)).toBe("N/A");
+    expect(
+      worstRowStatus(
+        [row({ limitStatus: "PENDING" }), usdmRow({ limitStatus: "PENDING" })],
+        AUDM,
+        USDM,
+      ),
+    ).toBe("N/A");
   });
 
   it("prefers a real OK over an N/A sibling leg", () => {
     expect(
-      worstRowStatus([row({ limitStatus: "N/A" }), row({ limitStatus: "OK" })]),
+      worstRowStatus(
+        [row({ limitStatus: "N/A" }), usdmRow({ limitStatus: "OK" })],
+        AUDM,
+        USDM,
+      ),
     ).toBe("OK");
+  });
+
+  it("holds at N/A while either pool leg is unread", () => {
+    // A readable OK leg must not speak for the pool: the unread sibling can
+    // already be at its cap. Same rule as the indexer's `foldPoolLimitFields`.
+    expect(worstRowStatus([row({ limitStatus: "OK" })], AUDM, USDM)).toBe(
+      "N/A",
+    );
+    expect(
+      worstRowStatus(
+        [
+          row({ limitStatus: "OK" }),
+          usdmRow({ stateKnown: false, limitStatus: "N/A" }),
+        ],
+        AUDM,
+        USDM,
+      ),
+    ).toBe("N/A");
+    expect(
+      worstRowStatus(
+        [row({ limitStatus: "OK" }), usdmRow({ limitStatus: "OK" })],
+        null,
+        USDM,
+      ),
+    ).toBe("N/A");
   });
 });
 

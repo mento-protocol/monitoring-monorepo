@@ -171,6 +171,25 @@ describe("BrokerLimitPanel", () => {
     expect(html).toContain("WARN");
   });
 
+  it("holds the badge at N/A while a pool leg is unread", () => {
+    // The readable leg must not report OK for the pool: the unread sibling can
+    // already be at its cap. Its own bar still renders.
+    const oneLegMissing = render({ rows: [row({ limitStatus: "OK" })] });
+    expect(oneLegMissing).toContain("⚪");
+    expect(oneLegMissing).not.toContain("🟢");
+    expect(progressBarCount(oneLegMissing)).toBe(1);
+
+    const legUnread = render({
+      rows: [
+        row({ limitStatus: "OK" }),
+        { ...usdmRow, stateKnown: false, limitStatus: "N/A" },
+      ],
+    });
+    expect(legUnread).toContain("⚪");
+    expect(legUnread).not.toContain("🟢");
+    expect(legUnread).toContain("Baseline state pending");
+  });
+
   it("holds back the bars until the config is known", () => {
     const html = render({
       rows: [row({ configKnown: false, limitStatus: "N/A" })],

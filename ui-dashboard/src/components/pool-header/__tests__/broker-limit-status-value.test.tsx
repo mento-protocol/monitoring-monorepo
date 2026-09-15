@@ -7,10 +7,40 @@ import {
   LIMIT_FLAG_LG,
   type BrokerLimitsState,
 } from "@/lib/broker-limits";
-import type { BrokerTradingLimitRow } from "@/lib/types";
+import type { Network } from "@/lib/networks";
+import type { BrokerTradingLimitRow, Pool } from "@/lib/types";
 
 const AUDM = "0x7175504c455076f15c04a2f90a8e352281f492f9";
 const USDM = "0x765de816845861e75a25fca122bb6898b8b1282a";
+
+const NETWORK: Network = {
+  id: "celo-mainnet",
+  label: "Celo",
+  chainId: 42220,
+  contractsNamespace: null,
+  hasuraUrl: "https://hasura.example.com/v1/graphql",
+  hasuraSecret: "",
+  explorerBaseUrl: "https://celoscan.io",
+  tokenSymbols: { [AUDM]: "AUDm", [USDM]: "USDm" },
+  addressLabels: {},
+  local: false,
+  testnet: false,
+  hasVirtualPools: true,
+};
+
+const POOL: Pool = {
+  id: "42220-0x1d013077b00b28038a3f1e7a29aba34e12e562e9",
+  chainId: 42220,
+  token0: AUDM,
+  token1: USDM,
+  source: "virtual_pool_factory",
+  wrappedExchangeId:
+    "0xd580d237231109e6a96d67d82450611c610a805a26660c90281bdc0cd04a95c7",
+  createdAtBlock: "1",
+  createdAtTimestamp: "1",
+  updatedAtBlock: "1",
+  updatedAtTimestamp: "1",
+};
 
 function row(
   overrides: Partial<BrokerTradingLimitRow> = {},
@@ -50,9 +80,22 @@ function row(
   };
 }
 
-function render(overrides: Partial<BrokerLimitsState> = {}) {
+/** The quiet USDm leg. Present and fully read in every case that expects the
+ *  tile to summarise the pool, and never the tightest leg. */
+const quietUsdmRow = row({
+  id: "usdm",
+  token: USDM,
+  limitGlobal: "1144",
+  netflowGlobal: "100",
+  limitPressureGlobal: "0.0874",
+  limitStatus: "OK",
+});
+
+function render(overrides: Partial<BrokerLimitsState> = {}, pool: Pool = POOL) {
   return renderToStaticMarkup(
     <BrokerLimitStatusValue
+      pool={pool}
+      network={NETWORK}
       state={{ rows: [], isLoading: false, hasError: false, ...overrides }}
     />,
   );
@@ -93,6 +136,7 @@ describe("BrokerLimitStatusValue", () => {
           limitPressure0: "0.2500",
           limitPressure1: "0.1200",
         }),
+        quietUsdmRow,
       ],
     });
 
@@ -105,7 +149,9 @@ describe("BrokerLimitStatusValue", () => {
   });
 
   it("marks a breached window without leaving the valid ARIA range", () => {
-    const html = render({ rows: [row({ limitPressureGlobal: "1.2000" })] });
+    const html = render({
+      rows: [row({ limitPressureGlobal: "1.2000" }), quietUsdmRow],
+    });
 
     expect(html).toContain('aria-valuenow="100"');
     expect(html).toContain('aria-valuetext="120% (over limit)"');
@@ -129,7 +175,7 @@ describe("BrokerLimitStatusValue", () => {
     expect(loading).toContain("flex flex-col gap-0.5");
     expect(loading).toContain("h-5");
     expect(loading).toContain("text-xs");
-    const loaded = render({ rows: [row({})] });
+    const loaded = render({ rows: [row({}), quietUsdmRow] });
     expect(loaded).toContain("flex flex-col gap-0.5");
     expect(loaded).toContain("h-5");
     expect(loaded).toContain("text-xs");
@@ -141,5 +187,36 @@ describe("BrokerLimitStatusValue", () => {
     expect(
       progressBarCount(render({ rows: [row({ stateKnown: false })] })),
     ).toBe(0);
+  });
+
+  it("stays partial while a pool leg is unread, and names it", () => {
+    // The readable AUDm leg is at 99.9%, but the pool summary must not present
+    // it as the tightest while the USDm leg has no reading at all.
+    const legMissing = render({ rows: [row()] });
+    expect(progressBarCount(legMissing)).toBe(0);
+    expect(legMissing).toContain("—");
+    expect(legMissing).toContain("the USDm leg has no Broker reading yet");
+
+    const legUnread = render({
+      rows: [row(), { ...quietUsdmRow, stateKnown: false }],
+    });
+    expect(progressBarCount(legUnread)).toBe(0);
+    expect(legUnread).toContain("the USDm leg has no Broker reading yet");
+
+    const bothUnread = render({ rows: [] });
+    expect(bothUnread).toContain("the AUDm and USDm legs have");
+  });
+
+  it("names no leg while the pool has not mirrored its tokens", () => {
+    const html = render({ rows: [row()] }, { ...POOL, token1: null });
+    expect(progressBarCount(html)).toBe(0);
+    expect(html).not.toContain("Partial read");
+  });
+
+  it("summarises the tightest leg once both legs are read", () => {
+    const html = render({ rows: [row(), quietUsdmRow] });
+    expect(progressBarCount(html)).toBe(1);
+    expect(html).toContain('aria-valuetext="100%"');
+    expect(html).not.toContain("Partial read");
   });
 });

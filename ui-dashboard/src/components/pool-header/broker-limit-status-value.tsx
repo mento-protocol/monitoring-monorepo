@@ -6,11 +6,15 @@ import {
   type WindowSummary,
 } from "@/components/pool-header/limit-mini-bar";
 import {
+  brokerLegCoverage,
   enabledWindows,
   worstBrokerRow,
   type BrokerLimitWindow,
   type BrokerLimitsState,
 } from "@/lib/broker-limits";
+import type { Network } from "@/lib/networks";
+import { tokenSymbol } from "@/lib/tokens";
+import type { Pool } from "@/lib/types";
 
 const SHORT_KEY: Record<BrokerLimitWindow["key"], string> = {
   global: "LG",
@@ -40,8 +44,12 @@ function summarize(window: BrokerLimitWindow): WindowSummary {
  * scale.
  */
 export function BrokerLimitStatusValue({
+  pool,
+  network,
   state,
 }: {
+  pool: Pool;
+  network: Network;
   state: BrokerLimitsState;
 }) {
   // One stable live region wraps every branch. The branches replace each other
@@ -49,12 +57,31 @@ export function BrokerLimitStatusValue({
   // screen reader could announce it.
   return (
     <span role="status" aria-live="polite" className="block">
-      <BrokerLimitStatusBody state={state} />
+      <BrokerLimitStatusBody pool={pool} network={network} state={state} />
     </span>
   );
 }
 
-function BrokerLimitStatusBody({ state }: { state: BrokerLimitsState }) {
+/** Names the legs the Broker has not read yet, in the degraded-note voice the
+ *  Limits tab uses. */
+function partialReadTitle(network: Network, pending: string[]): string {
+  const symbols = pending.map((token) => tokenSymbol(network, token));
+  const subject =
+    symbols.length === 1
+      ? `the ${symbols[0]} leg has`
+      : `the ${symbols.join(" and ")} legs have`;
+  return `Partial read — ${subject} no Broker reading yet; the next swap on this exchange records it.`;
+}
+
+function BrokerLimitStatusBody({
+  pool,
+  network,
+  state,
+}: {
+  pool: Pool;
+  network: Network;
+  state: BrokerLimitsState;
+}) {
   if (state.hasError) {
     return <span className="text-xs text-amber-400">Query failed</span>;
   }
@@ -67,6 +94,26 @@ function BrokerLimitStatusBody({ state }: { state: BrokerLimitsState }) {
       <span className="invisible flex flex-col gap-0.5 w-full max-w-52">
         <span className="h-5" />
         <span className="text-xs font-mono">—</span>
+      </span>
+    );
+  }
+
+  // The tile summarises the pool, so a leg the Broker has not read holds it at
+  // the partial state. Presenting the readable leg as "the tightest" would hide
+  // an unread sibling that may already be critical — the same rule
+  // `foldPoolLimitFields` applies in the indexer.
+  const coverage = brokerLegCoverage(state.rows, pool.token0, pool.token1);
+  if (!coverage.complete) {
+    return (
+      <span
+        className="text-slate-500"
+        title={
+          coverage.pending.length > 0
+            ? partialReadTitle(network, coverage.pending)
+            : undefined
+        }
+      >
+        —
       </span>
     );
   }

@@ -45,7 +45,9 @@ export function BrokerLimitPanel({
       <div role="status" aria-live="polite">
         <div className="flex items-center gap-3 mb-4">
           <h2 className="text-base font-semibold text-white">Trading Limits</h2>
-          <LimitBadge status={worstRowStatus(state.rows)} />
+          <LimitBadge
+            status={worstRowStatus(state.rows, pool.token0, pool.token1)}
+          />
         </div>
         <BrokerLimitBody pool={pool} state={state} />
       </div>
