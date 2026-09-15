@@ -83,6 +83,12 @@ no-op. Keep every throw in the pure transitions.
   replayed log with an invalid expiry is ignored rather than rejected. That is
   sound: an invalid value throws on first delivery, so the watermark can never
   be past one.
+- The re-delivered tail of an interrupted batch lands exactly on the
+  watermark, where `eventPosition` is 0 and the predicate is false. Both feed
+  transitions return their input unchanged there and throw on a conflicting
+  payload, and every applying path rebuilds the row, so
+  `resolveOracleFeedState` reads that case off reference equality and reports
+  it as a replay too.
 - `resolveOracleFeedState` returns `{ state, replayed }`, and the
   `OracleReported` and `OracleReportRemoved` handlers return on `replayed`
   before their downstream pool path. A replay means the batch that first
@@ -125,6 +131,13 @@ no-op. Keep every throw in the pure transitions.
   token. The token is a warning, so `--errors-only` will not show it.
 - Expected tokens cluster right after a restart. Tokens with no preceding
   restart in the same deployment are the signal worth investigating.
+- A re-delivery inside a feed's own bootstrap block stays undetected. That
+  branch returns the persisted row for every log in the block without
+  recording which logs it has seen, so a first delivery and a re-delivery are
+  indistinguishable there. This predates the guard — the branch never threw —
+  and the exposure is one block per feed. Closing it needs a persisted per-log
+  frontier on `OracleFeedState`, which is a schema change with its own resync,
+  so it is not done here.
 - The two expiry handlers still run their downstream path on a replay:
   `updatePoolsOracleExpiry` rewrites `Pool.oracleExpiry` with the same value
   and restamps `Pool.updatedAtBlock` and `updatedAtTimestamp` from the
@@ -157,7 +170,8 @@ no-op. Keep every throw in the pure transitions.
   `OracleReported`, `OracleReportRemoved`, `TokenReportExpirySet` and
   `ReportExpirySet` logs, the last over two feeds; a same-position conflict
   that still throws; an above-watermark event that still applies; and an expiry
-  log at the feed row's bootstrap boundary that still propagates. The replayed
+  log at the feed row's bootstrap boundary that still propagates; an identical
+  `OracleReported` re-delivered exactly at the watermark. The replayed
   `OracleReported` case also asserts the pool row is untouched and no
   `OracleSnapshot` row exists, which fails when the handler's early return is
   removed. The token assertions match on `site=`, so a count is attributable to

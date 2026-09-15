@@ -1022,6 +1022,43 @@ describe("SortedOracles event-sourced feed state", () => {
     );
   });
 
+  // The re-delivered tail of an interrupted batch lands exactly on the
+  // watermark, where `eventPosition` is 0 and the predicate is false.
+  it("ignores an identical OracleReported at the persisted watermark", async () => {
+    const seededState = seedReplayedFeedState(4);
+    const { mockDb: seededDb, poolId } = createTrackedPoolDb(
+      "0x0000000000000000000000000000000000008578",
+    );
+    const mockDb = seededDb.entities.OracleFeedState.set(seededState);
+    const seededPool = mockDb.entities.Pool.get(poolId);
+
+    const { warnings } = await captureWarnings(() =>
+      SortedOracles.OracleReported.processEvent({
+        event: SortedOracles.OracleReported.createMockEvent({
+          token: FEED,
+          oracle: REPORTER_B,
+          value: ONE,
+          timestamp: 1_700_010_500n,
+          mockEventData: {
+            chainId: CHAIN_ID,
+            logIndex: 4,
+            srcAddress: SORTED_ORACLES,
+            block: { number: REPLAY_BLOCK, timestamp: REPLAY_BLOCK_TIMESTAMP },
+          },
+        }),
+        mockDb,
+      }),
+    );
+
+    assert.deepEqual(
+      mockDb.entities.OracleFeedState.get(oracleFeedStateId(CHAIN_ID, FEED)),
+      seededState,
+    );
+    assert.deepEqual(mockDb.entities.Pool.get(poolId), seededPool);
+    assert.deepEqual(mockDb.entities.OracleSnapshot.getAll(), []);
+    assert.deepEqual(replaySites(warnings), ["resolveOracleFeedState"]);
+  });
+
   it("propagates an expiry log inside the feed row's bootstrap boundary block", async () => {
     const boundaryBlock = 60_779_450;
     const seededFeedState = bootstrapOracleFeedState({

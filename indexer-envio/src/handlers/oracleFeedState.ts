@@ -205,8 +205,22 @@ export async function resolveOracleFeedState(args: {
           args.mutation.reporterAddress,
           eventPosition,
         );
+  // The re-delivered tail of an interrupted batch lands exactly on the
+  // watermark, which the predicate above cannot see: both transitions return
+  // their input unchanged at `position === 0` and throw on a conflicting
+  // payload, and every applying path rebuilds the row. Reference equality is
+  // therefore the whole test. See ADR 0105.
+  const replayed = updated === base;
+  if (replayed) {
+    logReplayedEventIgnored(
+      args.context,
+      args.event,
+      base,
+      "resolveOracleFeedState",
+    );
+  }
   if (updated !== existing) args.context.OracleFeedState.set(updated);
-  return { state: updated, replayed: false };
+  return { state: updated, replayed };
 }
 
 export async function requireOracleFeedState(
