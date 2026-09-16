@@ -418,9 +418,11 @@ async function main() {
         .min_total_unique_source_reserve_surplus_warning_bytes;
     const reserveStatus = !Number.isSafeInteger(reserveSurplusWarningThreshold)
       ? "not_configured"
-      : totalUniqueReserveSurplus < reserveSurplusWarningThreshold
-        ? "nearly_exhausted"
-        : "healthy";
+      : !Number.isSafeInteger(totalUniqueReserveSurplus)
+        ? "not_configured"
+        : totalUniqueReserveSurplus < reserveSurplusWarningThreshold
+          ? "nearly_exhausted"
+          : "healthy";
     const result = {
       valid: true,
       suite_id: context.suite.suite_id,

@@ -33,7 +33,7 @@ pnpm deploy:indexer:metrics <commit>  # Per-chain hosted indexing progress
 pnpm deploy:indexer:info <commit>     # Hosted deployment info/cache state
 pnpm deploy:indexer:perf <commit>     # Combined status/metrics/log snapshot for perf comparisons
 pnpm deploy:indexer:verify <commit>   # Require sync, core rows, schema-compatible sUSDS baseline/sampler integrity, and Polygon replay
-pnpm deploy:indexer:promote <commit>  # Human-approved only; agents never auto-promote
+pnpm deploy:indexer:promote <commit>  # Promote a synced deployment to prod; human-approved only, agents never auto-promote
 pnpm deploy:indexer:verify <commit> --prod  # After propagation, match fixed-endpoint _meta identity to target; verify semantic data
 pnpm deploy:indexer:rollback <last-good-sha>  # Restore prod: re-promote if registered, else rebuild + resync
 

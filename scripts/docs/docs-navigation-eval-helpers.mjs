@@ -174,6 +174,11 @@ export function validateFixtureSuite(
     }
     const reserveSurplusWarning =
       targets.min_total_unique_source_reserve_surplus_warning_bytes;
+    if ((reserve === undefined) !== (reserveSurplusWarning === undefined)) {
+      errors.push(
+        "min_total_unique_source_headroom_bytes and min_total_unique_source_reserve_surplus_warning_bytes must be configured together",
+      );
+    }
     if (
       (requireHeadroomReserve || reserveSurplusWarning !== undefined) &&
       (!Number.isSafeInteger(reserveSurplusWarning) ||

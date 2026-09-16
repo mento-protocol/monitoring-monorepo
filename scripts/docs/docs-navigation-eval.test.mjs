@@ -477,6 +477,12 @@ test("fixture byte budgets can contain every cheapest accepted route", () => {
     validateFixtureSuite(missingReserve, context.inventory).join("\n"),
     /min_total_unique_source_headroom_bytes must be a positive integer/,
   );
+  assert.match(
+    validateFixtureSuite(missingReserve, context.inventory, {
+      requireHeadroomReserve: false,
+    }).join("\n"),
+    /min_total_unique_source_headroom_bytes and min_total_unique_source_reserve_surplus_warning_bytes must be configured together/,
+  );
 
   const missingReserveWarning = structuredClone(context.suite);
   delete missingReserveWarning.targets
@@ -484,6 +490,12 @@ test("fixture byte budgets can contain every cheapest accepted route", () => {
   assert.match(
     validateFixtureSuite(missingReserveWarning, context.inventory).join("\n"),
     /min_total_unique_source_reserve_surplus_warning_bytes must be a positive integer/,
+  );
+  assert.match(
+    validateFixtureSuite(missingReserveWarning, context.inventory, {
+      requireHeadroomReserve: false,
+    }).join("\n"),
+    /min_total_unique_source_headroom_bytes and min_total_unique_source_reserve_surplus_warning_bytes must be configured together/,
   );
 
   const reserveTooHigh = structuredClone(context.suite);
