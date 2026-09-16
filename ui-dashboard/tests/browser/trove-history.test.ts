@@ -295,17 +295,17 @@ test("interim ordering handles old/new schema, rollback and complete-ledger hand
   await expect(page.getByText(/may omit newer operations/)).toHaveCount(0);
   await expect(operations.locator("tbody tr")).toHaveCount(999);
   mode = "failed";
-  await page.clock.fastForward(300_001);
+  await page.clock.runFor(300_001);
   await expect(
     page.getByText(/Operation ordering could not be checked/),
   ).toBeVisible();
   mode = "legacy";
-  await page.clock.fastForward(300_001);
+  await page.clock.runFor(300_001);
   await expect(
     page.getByText(/Operation ordering is not yet confirmed/),
   ).toBeVisible();
   mode = "ledger";
-  await page.clock.fastForward(300_001);
+  await page.clock.runFor(300_001);
   await expect(
     page.getByRole("table", { name: "Trove ledger", exact: true }),
   ).toBeVisible();
