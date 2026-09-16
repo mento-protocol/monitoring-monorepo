@@ -333,6 +333,18 @@ test("counts Markdown definitions displayed literally inside raw HTML", () => {
   );
 });
 
+test("counts inline Markdown syntax displayed literally inside raw HTML", () => {
+  assertFail(
+    sizedBody({
+      tldrWords: 20,
+      problemWords: 100,
+      solutionWords: 274,
+      extra: '\n<p>[visible](url "title words")</p>',
+    }),
+    /authored PR description is 402 words; the ceiling is 400/,
+  );
+});
+
 test("counts prose written as unlisted named character references", () => {
   const encoded = "&Aacute;&Aacute;&Aacute;&Aacute;";
   assertFail(

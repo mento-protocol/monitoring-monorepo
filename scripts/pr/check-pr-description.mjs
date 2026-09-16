@@ -25,6 +25,8 @@ const HTML_HIDDEN_RE = new RegExp(
   "gi",
 );
 const HTML_TAG_RE = new RegExp(`<${HTML_ATTRIBUTES}>`, "g");
+const HTML_ENTITY_RE =
+  /&(?:#(?:[0-9]+|[xX][0-9A-Fa-f]+)|[A-Za-z][A-Za-z0-9]*);/g;
 const DEFERRALS_HEADING_RE = /^##\s+Deferrals\s*$/;
 const DEFERRALS_STYLE_RE = /^ {0,3}#{1,6}\s*Deferrals([^A-Za-z0-9_]|$)/i;
 const NONE_RE = /^\s*(?:[-*]\s+)?none\s*\.?\s*$/i;
@@ -160,6 +162,18 @@ function countWords(text) {
     .length;
 }
 
+function decodeCharacterReference(reference) {
+  let decoded = "";
+
+  const walk = (node) => {
+    if (node.type === "text") decoded += node.value;
+    if (Array.isArray(node.children)) node.children.forEach(walk);
+  };
+
+  walk(fromMarkdown(reference));
+  return decoded;
+}
+
 /**
  * Words inside raw HTML. A reader sees prose wrapped in `<p>` or a
  * `<details>` block, so it counts against the budget even though the opening
@@ -170,14 +184,14 @@ function htmlWordCount(value) {
   const text = value
     .replace(HTML_COMMENT_RE, " ")
     .replace(HTML_HIDDEN_RE, " ")
-    // Tags go before parsing, so a `&lt;p&gt;` the reader sees as text is
-    // decoded by mdast without becoming markup.
+    // Tags go before decoding, so a `&lt;p&gt;` the reader sees as text is
+    // never mistaken for markup.
     .replace(HTML_TAG_RE, " ");
 
-  // Raw HTML displays Markdown block syntax literally. A punctuation-only
-  // prefix keeps definitions and headings as text while mdast decodes every
-  // standard named and numeric character reference.
-  return visibleWordCount(text.replace(/^/gm, ". "));
+  // Decode each reference through mdast in isolation. Reparsing the whole
+  // string would treat Markdown-looking raw HTML text as links, images, or
+  // code even though GitHub displays that syntax literally.
+  return countWords(text.replace(HTML_ENTITY_RE, decodeCharacterReference));
 }
 
 /**
