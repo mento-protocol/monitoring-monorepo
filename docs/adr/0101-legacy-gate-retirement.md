@@ -3,7 +3,7 @@ title: Retire the legacy local quality gate
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-14
+last_verified: 2026-09-16
 scope: ci/process
 date: 2026-09
 doc_type: adr
@@ -12,6 +12,15 @@ garden_lane: adrs-architecture
 ---
 
 # ADR 0101 — Retire the legacy local quality gate
+
+**Status:** Accepted (Sep 2026), amended 2026-09-16, in force.
+
+Amended 2026-09-16: [ADR 0106](0106-sentry-triage-moves-to-operator-skills.md)
+retired the Sentry triage and autofix pipeline. Two entries in "Retained
+consumers" below asserted that Sentry's self-run gate, CI wiring and broker
+were retained, and that a required broker suite imported the process-identity
+helper tests. Those files are gone; both entries are restated in place. The
+rest of this record, including the rollback obligations, is unchanged.
 
 ## Decision
 
@@ -45,15 +54,21 @@ Retain these independent controls:
 - `scripts/lib/mapped-command-process-identity.mjs` and its tests preserve
   marker descriptor authentication for the staged Sentry triage broker. The
   required broker suite imports the helper tests. Its workflow staging path
-  and broker shim move with it.
+  and broker shim move with it. Amended 2026-09-16 (ADR 0106): the broker,
+  its workflow staging path and its shim are deleted, so no broker suite
+  imports the helper tests. The helper file stays; its only remaining pin is
+  `scripts/docs/check-verification-redesign-evidence.mjs`.
 - `scripts/workflows/indexer-handler-invariant-{contract,families}.mjs`
   preserve checklist ownership and completeness. The existing root indexer
   contract suite remains in CI.
 - `scripts/check-agent-quality-gate-package-scripts.mjs` retains its stable
   name and pre-install entry points. It rejects changed trusted aliases and
   unsanctioned lifecycle hooks. Only aliases for deleted commands are removed.
-- Sentry's independent self-run gate, CI wiring and broker remain. The unused
-  local-selector extractor, probe supervisor and their synthetic tests are removed.
+- Sentry's independent self-run gate, CI wiring and broker remained until
+  ADR 0106, which deleted all three with the pipeline they served. The
+  repo-wide predicates in the CI wiring moved to
+  `scripts/workflows/ci-sentinel-core.mjs`. The unused local-selector
+  extractor, probe supervisor and their synthetic tests are removed.
 - Documentation index/link checks, mandatory checklist contracts, dependency
   architecture checks, setup hooks and process-state refusal checks remain.
 
@@ -107,6 +122,7 @@ ADR 0075 remains archived under ADR 0084; no merge wrapper returns.
 
 #2006 and #2032 lose their legacy scheduling/recovery scope. #2094's deleted
 self-test environment failures no longer apply. #2042 remains completed;
-its retained Sentry invariants and rollback obligations are preserved above.
+its rollback obligations are preserved above; its retained Sentry invariants
+were retired by ADR 0106.
 Known diagnostic limitations do not become claims that recovery was fixed.
 Merge and post-merge evidence remain necessary before #2128 and #2122 close.

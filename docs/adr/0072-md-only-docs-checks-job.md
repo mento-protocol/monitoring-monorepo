@@ -3,7 +3,7 @@ title: The Markdown globs route to a small docs-checks CI job instead of the scr
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-14
+last_verified: 2026-09-16
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -13,8 +13,16 @@ garden_lane: adrs-architecture
 
 # ADR 0072 — the Markdown globs route to `docs-checks`, not the long-running `scripts` job
 
-**Status:** Accepted (Aug 2026), amended 2026-09-14, in force.
+**Status:** Accepted (Aug 2026), amended 2026-09-14 and 2026-09-16, in force.
 **Scope:** ci/process
+
+Amended 2026-09-16: [ADR 0106](0106-sentry-triage-moves-to-operator-skills.md)
+deleted the Sentry CI-wiring tree. The two enforcers this ADR names —
+`pinValidationOrderBlockers` for the pin-validator ordering and
+`sentinelBlockers` for the `allowed-skips` rule — moved to
+`scripts/workflows/ci-sentinel-core.mjs`, called from
+`scripts/workflows/check-ci-contract.mjs`. Both properties are still
+machine-pinned; the amendment notes below record where.
 
 The `docs-checks` job remains in force. [ADR 0101](0101-legacy-gate-retirement.md)
 retires the local gate and removes `gate:routing-table:test` from CI. The
@@ -140,7 +148,13 @@ byte-identical, and add a `docs-checks` job gated on it.
   change parameterizes it over `["scripts", "docs-checks"]`. Both of its probes
   — drop the validator, move it after install — work unchanged for either name,
   so a later PR that reorders this job fails required CI the same way it would
-  in `scripts`.
+  in `scripts`. Amended 2026-09-16: that test was deleted with the Sentry tree.
+  [ADR 0106](0106-sentry-triage-moves-to-operator-skills.md) moved
+  `pinValidationOrderBlockers` into `scripts/workflows/ci-sentinel-core.mjs`
+  and made `scripts/workflows/check-ci-contract.mjs` its caller, over
+  `["scripts", "docs-checks", "production-infra-contract"]`, with both probes
+  re-expressed against `docs-checks` in `check-ci-contract.test.mjs`. The pin
+  is unbroken and now runs in `ci:contract:test`.
 - All nine steps stay in `scripts` as well. A change to the documentation
   tooling must still run them against the real corpus. A mixed diff sets both
   filters, runs both jobs, and pays for one duplicate pass.
@@ -151,7 +165,8 @@ byte-identical, and add a `docs-checks` job gated on it.
   lives inside the already-required `ci.yml`.
 - `scripts/sentry/ci-wiring/check-sentry-suites-in-ci-core.mjs` counts the
   sentinel's path-gated dependencies in prose; that count moves from fourteen
-  to fifteen in the same change.
+  to fifteen in the same change. That file is now
+  `scripts/workflows/ci-sentinel-core.mjs` (ADR 0106).
 
 ## Alternatives considered
 
@@ -281,7 +296,13 @@ costs a duplicate run on mixed diffs and nothing else.
   for entries in `TRUSTED_JOBS`, which holds one job mapped to `null`, and the
   guard reads `trusted.get(name) != null`. Removing `docs-checks` from
   `allowed-skips` would fail no test — it would fail the required `ci` context
-  on every non-Markdown PR instead.
+  on every non-Markdown PR instead. Amended 2026-09-16: that rule now lives in
+  `sentinelBlockers` in `scripts/workflows/ci-sentinel-core.mjs` (ADR 0106),
+  and it IS a machine check for this job. `check-ci-contract.mjs` passes a
+  `trusted` map covering every `FIXED_JOBS` entry with each conditional job's
+  own `if:`, so `trusted.get("docs-checks") != null` holds, and it separately
+  pins `allowed-skips` to `CONDITIONAL_JOBS` exactly. Removing `docs-checks`
+  now fails `pnpm ci:contract:test` before it reaches the sentinel.
 
 ## Evidence
 
@@ -325,8 +346,9 @@ costs a duplicate run on mixed diffs and nothing else.
   reproduces the two largest buckets exactly. Those PRs run both jobs.
 - `pinValidationOrderBlockers` is called from exactly one place,
   `scripts/sentry/ci-wiring/check-sentry-suites-in-ci-lifecycle.test.mjs`, with
-  the job name `"scripts"` hard-coded. Running it against the candidate with
-  `"docs-checks"` returns `[]`, and both of its probes are rejected for that
+  the job name `"scripts"` hard-coded (ADR 0106 moved that call site to
+  `scripts/workflows/check-ci-contract.mjs`). Running it against the candidate
+  with `"docs-checks"` returns `[]`, and both of its probes are rejected for that
   name, so parameterizing the test is sufficient to pin the new job's ordering.
 - `docs/evals/documentation-navigation-baseline.json` records
   `run.repository_base_commit` `a82f8c580d145806865f031755c7b5411f89c976`,
