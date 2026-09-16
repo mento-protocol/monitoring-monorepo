@@ -10,7 +10,7 @@ name: PR Description
 # from the PR).
 #
 # ADVISORY STATUS: this check is not in the branch ruleset's required set
-# (ci, Code Quality, Vercel, Vercel Preview Comments, Sentry suites). Its
+# (ci, Code Quality, Vercel, Vercel Preview Comments). Its
 # verdict is a function of `github.event.pull_request.body` plus a base-ref
 # copy of the validator, so it is head-independent and `synchronize` cannot
 # change it — dropped below. No workflow-level `paths:` filter is added:

@@ -423,8 +423,9 @@ test("the aggregate names failed, cancelled, missing, unexpected, and skipped jo
     ],
     [
       "cancellation",
-      (results) => (results["sentry-suites"] = { result: "cancelled" }),
-      "invalid job result: sentry-suites=cancelled",
+      (results) =>
+        (results["production-infra-contract"] = { result: "cancelled" }),
+      "invalid job result: production-infra-contract=cancelled",
     ],
     ["missing", (results) => delete results.scripts, "missing job: scripts"],
     [

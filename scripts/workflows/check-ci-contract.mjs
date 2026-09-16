@@ -4,7 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // prettier-ignore
-import { envMutationBlockers, parseActionList, sentinelBlockers } from "../sentry/ci-wiring/check-sentry-suites-in-ci-core.mjs";
+import { envMutationBlockers, parseActionList, sentinelBlockers } from "./ci-sentinel-core.mjs";
 import { isMapping } from "../lib/workflow-yaml.mjs";
 import yaml from "js-yaml";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -34,15 +34,15 @@ export const FILTER_NAMES = Object.freeze("shared|ui|indexer|bridge|integrationP
 export const CONDITIONAL_JOBS = Object.freeze("shared|ui-static|ui|indexer-test|indexer-checks|bridge|integration-probes|aegis|alerts|gov-watchdog|terraform|scripts|docs-checks".split("|"));
 
 // prettier-ignore
-export const FIXED_JOBS = Object.freeze(["changes", ...CONDITIONAL_JOBS, "production-infra-contract", "sentry-suites"]);
+export const FIXED_JOBS = Object.freeze(["changes", ...CONDITIONAL_JOBS, "production-infra-contract"]);
 
 // prettier-ignore
 const EXPECTED_CONDITIONS = Object.freeze({ shared: `${FORCE_ALL} || needs.changes.outputs.shared == 'true'`, "ui-static": `${FORCE_ALL} || needs.changes.outputs.ui == 'true'`, ui: `${FORCE_ALL} || needs.changes.outputs.ui == 'true'`, "indexer-test": `${FORCE_ALL} || needs.changes.outputs.indexer == 'true'`, "indexer-checks": `${FORCE_ALL} || needs.changes.outputs.indexer == 'true'`, bridge: `${FORCE_ALL} || needs.changes.outputs.bridge == 'true'`, "integration-probes": `${FORCE_ALL} || needs.changes.outputs.integrationProbes == 'true'`, aegis: `${FORCE_ALL} || needs.changes.outputs.aegis == 'true'`, alerts: `${FORCE_ALL} || needs.changes.outputs.alerts == 'true'`, "gov-watchdog": `${FORCE_ALL} || needs.changes.outputs.govWatchdog == 'true'`, terraform: `${FORCE_ALL} || needs.changes.outputs.terraform == 'true'`, scripts: `${FORCE_ALL} || needs.changes.outputs.rootScripts == 'true'`, "docs-checks": `${FORCE_ALL} || needs.changes.outputs.docs == 'true'` });
 
 // prettier-ignore
-const EXPECTED_TIMEOUTS = Object.freeze({ changes: 2, shared: 10, "ui-static": 10, ui: 25, "indexer-test": 20, "indexer-checks": 10, bridge: 10, "integration-probes": 10, alerts: 10, "gov-watchdog": 8, terraform: 5, aegis: 15, scripts: 10, "docs-checks": 10, "production-infra-contract": 8, "sentry-suites": 8, ci: 2 });
+const EXPECTED_TIMEOUTS = Object.freeze({ changes: 2, shared: 10, "ui-static": 10, ui: 25, "indexer-test": 20, "indexer-checks": 10, bridge: 10, "integration-probes": 10, alerts: 10, "gov-watchdog": 8, terraform: 5, aegis: 15, scripts: 10, "docs-checks": 10, "production-infra-contract": 8, ci: 2 });
 // prettier-ignore
-const EXPECTED_RUNNERS = Object.freeze({ changes: "ubuntu-24.04-arm", shared: "ubuntu-latest", "ui-static": "ubuntu-latest", ui: "ubuntu-latest", "indexer-test": "ubuntu-latest", "indexer-checks": "ubuntu-latest", bridge: "ubuntu-latest", "integration-probes": "ubuntu-latest", aegis: "ubuntu-latest", alerts: "ubuntu-latest", "gov-watchdog": "ubuntu-latest", terraform: "ubuntu-24.04-arm", scripts: "ubuntu-latest", "docs-checks": "ubuntu-latest", "production-infra-contract": "ubuntu-latest", "sentry-suites": "ubuntu-latest", ci: "ubuntu-latest" });
+const EXPECTED_RUNNERS = Object.freeze({ changes: "ubuntu-24.04-arm", shared: "ubuntu-latest", "ui-static": "ubuntu-latest", ui: "ubuntu-latest", "indexer-test": "ubuntu-latest", "indexer-checks": "ubuntu-latest", bridge: "ubuntu-latest", "integration-probes": "ubuntu-latest", aegis: "ubuntu-latest", alerts: "ubuntu-latest", "gov-watchdog": "ubuntu-latest", terraform: "ubuntu-24.04-arm", scripts: "ubuntu-latest", "docs-checks": "ubuntu-latest", "production-infra-contract": "ubuntu-latest", ci: "ubuntu-latest" });
 // prettier-ignore
 const EXPECTED_JOB_ENV = Object.freeze({ "indexer-test": { ENVIO_STRICT_START_BLOCK: "true" }, "indexer-checks": { ENVIO_STRICT_START_BLOCK: "true" }, aegis: { FOUNDRY_PROFILE: "ci" } });
 // prettier-ignore

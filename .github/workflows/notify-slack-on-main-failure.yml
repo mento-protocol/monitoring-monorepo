@@ -48,9 +48,6 @@ on:
       - Terraform Drift Detection
       - Platform Settings Drift Detection
       - Terraform Deploy Queue Watch
-      - Sentry Triage Agent
-      - Sentry Triage Ingest
-      - Sentry Autofix
       - Documentation Garden
       - File-size Watchlist
       - Review Skill Eval Freshness

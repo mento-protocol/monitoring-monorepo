@@ -20,13 +20,12 @@ name: Platform Settings Drift Detection
 # CREDENTIAL. The read hits `GET /repos/{owner}/{repo}/actions/permissions/
 # workflow`, which requires `administration: read`. Authenticated by the
 # dedicated `PLATFORM_SETTINGS_AUDIT_TOKEN` secret — a fine-grained PAT with
-# Administration:Read on THIS repo only, scoped to the `sentry-pipeline`
+# Administration:Read on THIS repo only, scoped to the `platform-settings-drift`
 # GitHub Environment and modeled by the platform stack
-# (terraform/github-environment.tf). Deliberately NOT the autofix App (whose minimal
-# Contents+PR trust boundary we do not widen) and NOT the CI `TF_VAR_github_token`
+# (terraform/github-environment.tf). Deliberately NOT the CI `TF_VAR_github_token`
 # (which must not gain administration). Read-only by design: it can never CHANGE
-# a setting. While the secret is unprovisioned the job no-ops, mirroring the rest
-# of the ADR-0036 pipeline. Runbook: docs/notes/sentry-triage-pipeline.md.
+# a setting. While the secret is unprovisioned the job no-ops. The environment is
+# this workflow's own since ADR 0106 retired the shared `sentry-pipeline` one.
 
 on:
   schedule:
@@ -50,15 +49,15 @@ jobs:
     # workflow_dispatch can target any ref; without this a manual dispatch from a
     # feature branch would check out that branch and run its code with the
     # Administration-scoped PLATFORM_SETTINGS_AUDIT_TOKEN in scope. Restrict the
-    # secret-bearing job to main. Matches sentry-triage-ingest.yml /
-    # sentry-triage-archive.yml. (Scheduled runs are always on the default
+    # secret-bearing job to main. (Scheduled runs are always on the default
     # branch, so this only ever narrows manual dispatch.)
     if: github.ref == 'refs/heads/main'
-    # sentry-pipeline Environment (issue #1289): its main-only deployment-branch
-    # policy makes PLATFORM_SETTINGS_AUDIT_TOKEN access server-enforced — a
-    # branch-modified workflow_dispatch on a non-main ref is refused before this
-    # job runs, even if the `if:` main guard above is stripped on that branch.
-    environment: sentry-pipeline
+    # platform-settings-drift Environment (issue #1289, re-homed by ADR 0106):
+    # its main-only deployment-branch policy makes PLATFORM_SETTINGS_AUDIT_TOKEN
+    # access server-enforced — a branch-modified workflow_dispatch on a non-main
+    # ref is refused before this job runs, even if the `if:` main guard above is
+    # stripped on that branch.
+    environment: platform-settings-drift
     permissions:
       contents: read
       issues: write
@@ -80,7 +79,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "${AUDIT_TOKEN}" ]; then
-            echo "::notice::PLATFORM_SETTINGS_AUDIT_TOKEN not provisioned — platform-settings drift check is inert (see terraform/github-environment.tf + docs/notes/sentry-triage-pipeline.md)."
+            echo "::notice::PLATFORM_SETTINGS_AUDIT_TOKEN not provisioned — platform-settings drift check is inert (see terraform/github-environment.tf)."
             echo "state=inert" >> "$GITHUB_OUTPUT"
             exit 0
           fi

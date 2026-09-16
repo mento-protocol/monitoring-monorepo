@@ -53,7 +53,7 @@ name: Supply Chain
 on:
   workflow_dispatch:
   # Advisory workflow — NOT in the branch ruleset's required checks (only
-  # `ci`, `Code Quality`, `Sentry suites`, and the Vercel checks are), so a
+  # `ci`, `Code Quality`, and the Vercel checks are), so a
   # `paths:` filter is safe here: a skipped run cannot leave a *required* check
   # pending.
   #

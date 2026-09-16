@@ -42,12 +42,6 @@ lint:
         - docs/evals/review-skill-finder-reports/**
         - docs/evals/review-skill-runs/**
         - scripts/review/prompts/**
-    - linters: [markdownlint]
-      paths:
-        # LLM prompt payloads (e.g. the Sentry triage-agent prompt), not rendered
-        # documentation — prose rules like MD041 (first line must be an H1) don't
-        # apply. Prettier still normalizes their formatting.
-        - .github/prompts/**
     - linters: [prettier]
       paths:
         # Generated deterministically by scripts/context/docs-index.mjs. Formatting it
