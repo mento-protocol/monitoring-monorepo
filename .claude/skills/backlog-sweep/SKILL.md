@@ -247,7 +247,7 @@ slot to a conflict that is not there. Treat two `pkg:tooling` candidates as
 independent when all three hold: each body names its expected files or
 directories; no path either body names equals or contains a path the other
 names, compared on whole path segments (`scripts/pr/` against
-`scripts/workflows/` is disjoint, `docs/` against `docs/notes/` is not); and
+`scripts/repo-health/` is disjoint, `docs/` against `docs/notes/` is not); and
 neither names a shared root file or control root —
 `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `.trunk/**`,
 `.github/workflows/**`, `scripts/workflows/**`.
