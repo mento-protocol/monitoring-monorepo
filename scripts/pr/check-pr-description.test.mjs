@@ -461,6 +461,18 @@ test("does not count an attribute holding an angle bracket as prose", () => {
   );
 });
 
+test("does not strip a comment delimiter inside an HTML attribute", () => {
+  assertFail(
+    sizedBody({
+      tldrWords: 20,
+      problemWords: 100,
+      solutionWords: 272,
+      extra: '\n<div data-example="<!--">one two three four</div>',
+    }),
+    /authored PR description is 401 words; the ceiling is 400/,
+  );
+});
+
 test("counts prose written as numeric character references", () => {
   // "word" as decimal references; GitHub renders it as the word.
   const encoded = "&#119;&#111;&#114;&#100;";

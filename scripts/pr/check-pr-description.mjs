@@ -44,6 +44,41 @@ function linesOf(body) {
   return body.split(/\r?\n/);
 }
 
+function htmlCommentRanges(value) {
+  const ranges = [];
+  let inTag = false;
+  let quote = null;
+
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index];
+
+    if (inTag) {
+      if (quote !== null) {
+        if (character === quote) quote = null;
+      } else if (character === '"' || character === "'") {
+        quote = character;
+      } else if (character === ">") {
+        inTag = false;
+      }
+      continue;
+    }
+
+    if (value.startsWith("<!--", index)) {
+      const close = value.indexOf("-->", index + 4);
+      const end = close === -1 ? value.length : close + 3;
+      ranges.push([index, end]);
+      index = end - 1;
+      continue;
+    }
+
+    if (character === "<" && /[A-Za-z/!?]/.test(value[index + 1] ?? "")) {
+      inTag = true;
+    }
+  }
+
+  return ranges;
+}
+
 function stripHtmlComments(body) {
   const ranges = [];
 
@@ -53,9 +88,11 @@ function stripHtmlComments(body) {
       Number.isInteger(node.position?.start.offset) &&
       Number.isInteger(node.position?.end.offset)
     ) {
-      for (const match of node.value.matchAll(/<!--[\s\S]*?(?:-->|$)/g)) {
-        const start = node.position.start.offset + match.index;
-        ranges.push([start, start + match[0].length]);
+      for (const [localStart, localEnd] of htmlCommentRanges(node.value)) {
+        ranges.push([
+          node.position.start.offset + localStart,
+          node.position.start.offset + localEnd,
+        ]);
       }
       return;
     }
