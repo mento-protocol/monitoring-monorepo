@@ -698,9 +698,6 @@ export function validFixtureFiles() {
         ],
       ]),
     )}`,
-    "alerts/infra/sentry-ingest-watcher/main.tf": bucketGrantFixture(
-      "google_storage_bucket.function_bucket.name",
-    ),
     "governance-watchdog/infra/storage.tf": bucketGrantFixture(
       "google_storage_bucket.watchdog_notifications_function.name",
     ),

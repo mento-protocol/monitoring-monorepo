@@ -73,9 +73,9 @@ provider "google" {
 # Variables: Read/write, Administration: Read/write, and Environments:
 # Read/write. Administration is required by `github_workflow_repository_permissions`
 # in `github-actions-permissions.tf` (pins the default workflow-token permission
-# to read-only — issue #1557); Environments is required by the `sentry-pipeline`
-# GitHub Environment and its `github_actions_environment_secret` resources in
-# `github-environment.tf` (issue #1289) — managing the environment and writing
+# to read-only — issue #1557); Environments is required by the GitHub
+# Environments and their `github_actions_environment_secret` resources in
+# `github-environment.tf` (issue #1289) — managing an environment and writing
 # its secrets (environment public-key read + secret PUT) 403s without it.
 # This keeps the credential repository-scoped and avoids the org-admin scope
 # that an organization-level secret or variable would force.

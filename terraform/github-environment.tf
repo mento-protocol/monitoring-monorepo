@@ -1,4 +1,4 @@
-# GitHub Environment that gates the Sentry triage/autofix pipeline secrets.
+# GitHub Environments that gate this repository's server-enforced secrets.
 #
 # THREAT (issue #1289). Repo-level GitHub Actions secrets are readable by ANY
 # workflow run in the repo, including a run of a BRANCH-MODIFIED workflow file
@@ -10,28 +10,33 @@
 #
 # FIX. A GitHub Environment whose deployment-branch policy names `main`
 # explicitly makes secret access SERVER-ENFORCED: a job that declares
-# `environment: sentry-pipeline` only receives the environment's secrets when
-# the run's ref satisfies the branch policy, no matter what the branch's
+# `environment: platform-settings-drift` only receives the environment's secrets
+# when the run's ref satisfies the branch policy, no matter what the branch's
 # workflow file says. A `workflow_dispatch` from a feature branch is refused at
 # the environment gate before the job starts; scheduled runs (always on the
-# default branch) and `issues`-event runs (also the default branch) pass.
+# default branch) pass.
 #
 # The policy MUST be an explicit `branch_pattern`, not `protected_branches`
 # (#1649) — see the deployment_branch_policy block below for why that shape
 # fails open in this repo.
 # This mirrors the `production-infra` environment that already gates Terraform
-# applies — but this one carries NO required reviewers (the pipeline is
-# unattended; a reviewer gate would stall every scheduled run) and NO wait timer.
+# applies — but `platform-settings-drift` carries NO required reviewers (the
+# audit is unattended; a reviewer gate would stall every scheduled run) and NO
+# wait timer.
 #
-# SCOPE. Only the Sentry-pipeline-EXCLUSIVE secrets move here. The shared
-# CLAUDE_CODE_OAUTH_TOKEN stays a repo-level secret (github-secrets.tf) because
+# SCOPE. `platform-settings-drift` holds exactly one secret, the
+# Administration:Read PAT its workflow reads. The shared CLAUDE_CODE_OAUTH_TOKEN
+# stays a repo-level secret (github-secrets.tf) because
 # `.github/workflows/claude.yml` consumes it on `pull_request` events from
 # feature branches — precisely the surface a main-only environment denies — so a
 # main-only environment is fundamentally incompatible with that consumer. Its
 # blast radius is inference-quota abuse only (it holds no repo/data write
-# capability of its own), an accepted residual; the Sentry jobs that declare this
-# environment still stop leaking it off-main as a side effect. See the runbook in
-# docs/notes/sentry-triage-pipeline.md.
+# capability of its own), an accepted residual.
+#
+# HISTORY. This environment was named `sentry-pipeline` and held five secrets
+# until ADR 0106 retired the Sentry triage and autofix pipeline. The audit token
+# was the one survivor; it now owns an environment of its own with the same
+# main-only policy rather than borrowing a pipeline's.
 #
 # ROLLOUT ORDER (docs/terraform.md "GitHub Environments"): a new `environment:`
 # workflow reference AUTO-CREATES an unprotected Environment if the protected one
@@ -41,9 +46,9 @@
 # github-secrets.tf stay in place for that apply), then land the workflow
 # references and the repo-level secret removals.
 
-resource "github_repository_environment" "sentry_pipeline" {
+resource "github_repository_environment" "platform_settings_drift" {
   repository  = "monitoring-monorepo"
-  environment = "sentry-pipeline"
+  environment = "platform-settings-drift"
 
   # `can_admins_bypass = false` keeps repo admins subject to whatever protection
   # rules this environment declares. It does NOT bound the deployment-branch
@@ -77,13 +82,13 @@ resource "github_repository_environment" "sentry_pipeline" {
   }
 }
 
-# The one branch allowed to deploy to `sentry-pipeline`. Exact name, no glob:
-# `main` matches only `main`. Without this resource the custom policy above has
-# an empty allow-list and every deployment is refused, so the two must land in
-# the same apply.
-resource "github_repository_environment_deployment_policy" "sentry_pipeline_main" {
+# The one branch allowed to deploy to `platform-settings-drift`. Exact name, no
+# glob: `main` matches only `main`. Without this resource the custom policy above
+# has an empty allow-list and every deployment is refused, so the two must land
+# in the same apply.
+resource "github_repository_environment_deployment_policy" "platform_settings_drift_main" {
   repository     = "monitoring-monorepo"
-  environment    = github_repository_environment.sentry_pipeline.environment
+  environment    = github_repository_environment.platform_settings_drift.environment
   branch_pattern = "main"
 }
 
@@ -159,86 +164,25 @@ resource "github_repository_environment_deployment_policy" "production_services_
   branch_pattern = "main"
 }
 
-# The five Sentry-pipeline-EXCLUSIVE secrets, moved from `github_actions_secret`
-# (repo scope) in github-secrets.tf to `github_actions_environment_secret`
-# (environment scope). Each stays `count`-gated on the SAME tfvar exactly as its
-# former repo-level resource was, so `terraform apply` still succeeds while the
-# value is unset and the pipeline stays inert until the operator provisions it.
-# `value` (not the deprecated `plaintext_value`) matches the repo-level secrets'
+# The one environment-scoped secret, held at `github_actions_environment_secret`
+# rather than `github_actions_secret` (repo scope) in github-secrets.tf. It stays
+# `count`-gated on its tfvar, so `terraform apply` still succeeds while the value
+# is unset and the audit stays inert until the operator provisions it. `value`
+# (not the deprecated `plaintext_value`) matches the repo-level secrets'
 # attribute on the `integrations/github ~> 6.12` provider. `environment` is wired
-# to the resource above so Terraform creates the Environment before its secrets.
-
-# SENTRY_TRIAGE_TOKEN — read-only Sentry token (Issue/Event, Project, Org read).
-# Consumed by the ingest job and the triage select/triage jobs, all of which now
-# declare `environment: sentry-pipeline`.
-resource "github_actions_environment_secret" "sentry_triage_token" {
-  # checkov:skip=CKV_GIT_4: same state-backed plaintext trade-off as the
-  # repo-level mirrors; see the threat-model note in github-secrets.tf.
-  count = var.sentry_triage_token == "" ? 0 : 1
-
-  repository  = "monitoring-monorepo"
-  environment = github_repository_environment.sentry_pipeline.environment
-  secret_name = "SENTRY_TRIAGE_TOKEN"
-  value       = var.sentry_triage_token
-}
-
-# SENTRY_PROJECTION_TOKEN — fine-grained GitHub PAT (Issues R/W on the three
-# owning repos only). Consumed by the serialized `project` job in
-# sentry-triage-agent.yml, which now declares `environment: sentry-pipeline`.
-# The job's existing inline `github.ref == 'refs/heads/main'` gate on this secret
-# becomes a redundant belt-and-suspenders once the environment enforces main.
-resource "github_actions_environment_secret" "sentry_projection_token" {
-  # checkov:skip=CKV_GIT_4: same state-backed plaintext trade-off; see
-  # github-secrets.tf.
-  count = var.sentry_projection_token == "" ? 0 : 1
-
-  repository  = "monitoring-monorepo"
-  environment = github_repository_environment.sentry_pipeline.environment
-  secret_name = "SENTRY_PROJECTION_TOKEN"
-  value       = var.sentry_projection_token
-}
-
-# AUTOFIX_APP_PRIVATE_KEY — PEM private key of the `sentry-autofix` GitHub App.
-# Consumed as a presence guard by the autofix `select` job and to mint the App
-# installation token by the autofix `finalize` job; both now declare
-# `environment: sentry-pipeline`. This is the highest-value secret in the set (it
-# mints Contents:R/W + Pull-requests:R/W tokens), so server-enforced main-only
-# access matters most here.
-resource "github_actions_environment_secret" "autofix_app_private_key" {
-  # checkov:skip=CKV_GIT_4: same state-backed plaintext trade-off; see
-  # github-secrets.tf.
-  count = var.autofix_app_private_key == "" ? 0 : 1
-
-  repository  = "monitoring-monorepo"
-  environment = github_repository_environment.sentry_pipeline.environment
-  secret_name = "AUTOFIX_APP_PRIVATE_KEY"
-  value       = var.autofix_app_private_key
-}
-
-# SENTRY_ARCHIVE_TOKEN — write-scoped Sentry token (Issue/Event R+W only).
-# Consumed only by the `archive` job in sentry-triage-archive.yml, which now
-# declares `environment: sentry-pipeline`.
-resource "github_actions_environment_secret" "sentry_archive_token" {
-  # checkov:skip=CKV_GIT_4: same state-backed plaintext trade-off; see
-  # github-secrets.tf.
-  count = var.sentry_archive_token == "" ? 0 : 1
-
-  repository  = "monitoring-monorepo"
-  environment = github_repository_environment.sentry_pipeline.environment
-  secret_name = "SENTRY_ARCHIVE_TOKEN"
-  value       = var.sentry_archive_token
-}
+# to the resource above so Terraform creates the Environment before its secret.
 
 # PLATFORM_SETTINGS_AUDIT_TOKEN — fine-grained GitHub PAT (Administration: Read
 # on this repo only). Consumed only by the `check` job in
-# platform-settings-drift.yml, which now declares `environment: sentry-pipeline`.
+# platform-settings-drift.yml, which declares
+# `environment: platform-settings-drift`.
 resource "github_actions_environment_secret" "platform_settings_audit_token" {
-  # checkov:skip=CKV_GIT_4: same state-backed plaintext trade-off; see
-  # github-secrets.tf.
+  # checkov:skip=CKV_GIT_4: same state-backed plaintext trade-off as the
+  # repo-level mirrors; see the threat-model note in github-secrets.tf.
   count = var.platform_settings_audit_token == "" ? 0 : 1
 
   repository  = "monitoring-monorepo"
-  environment = github_repository_environment.sentry_pipeline.environment
+  environment = github_repository_environment.platform_settings_drift.environment
   secret_name = "PLATFORM_SETTINGS_AUDIT_TOKEN"
   value       = var.platform_settings_audit_token
 }
