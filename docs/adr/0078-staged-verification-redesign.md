@@ -316,7 +316,9 @@ removes.
 
 Issue #2127 therefore removes repository verification from pre-push after the
 graph-pin repair reaches protected `main`, protected-main CI passes, and strict
-current-base checking is active. The cutover keeps staged formatting
+current-base checking is active. **Amended by
+[ADR 0104](0104-non-strict-required-status-checks.md):** that policy is off; do
+not re-enable it. The cutover keeps staged formatting
 on pre-commit. It must add the fixed `/ship` author-check trigger table. It must
 also keep the full legacy gate available as a diagnostic until its separately
 approved retirement. Required CI does not run the diagnostic regression suite.
@@ -336,7 +338,8 @@ The amended migration has these gates:
 3. Add fixed CI selection and aggregate contracts.
 4. Repair the retained graph pin and require green protected-main CI.
 5. Apply strict current-base checking in a separate human-approved
-   administration step.
+   administration step. **Amended by
+   [ADR 0104](0104-non-strict-required-status-checks.md): retired.**
 6. Require explicit human approval before removing repository verification
    from pre-push. The operator granted this approval on 2026-09-02 under the
    conditions above.
@@ -429,8 +432,9 @@ shadow evidence stays in GitHub runs and the later Markdown evidence record.
 ## Historical rollback plan
 
 Before legacy deletion, keep required CI and strict current-base protection.
-Revert the cutover commit. The retained gate runtime then resumes the mandatory
-hook.
+**Amended by [ADR 0104](0104-non-strict-required-status-checks.md):** keep
+required CI; leave strict off. Revert the cutover commit. The retained gate
+runtime then resumes the mandatory hook.
 
 After legacy deletion, first revert the retirement commit. Restore the gate
 runtime, coordinator, aliases, tests, and mixed-version lock behavior before

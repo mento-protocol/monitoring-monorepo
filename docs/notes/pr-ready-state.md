@@ -38,9 +38,25 @@ them required for the current PR.
 
 Required blockers:
 
-- GitHub `mergeStateStatus: BEHIND`, even when `mergeable` is `MERGEABLE`.
-  Integrate the current protection base and require fresh checks; a pending
-  merge setting does not waive this blocker.
+- `mergeable: CONFLICTING` or `mergeStateStatus: DIRTY`: a textual conflict
+  with the base always blocks. `mergeStateStatus: BEHIND` alone blocks unless
+  the fetched branch protection or ruleset confirms
+  `strict_required_status_checks_policy: false` for the base
+  (operator decision 2026-09-15,
+  [ADR 0104](../adr/0104-non-strict-required-status-checks.md)); confirmed
+  off, it is reported in `notes[]` for visibility instead of
+  `required.blockers[]`. Unknown fails closed the same as any other
+  branch-protection lookup gap.
+
+- `base-red`: a required context on the base branch head that ended in
+  `failure`, `cancelled`, `timed_out` or `action_required`, named with the
+  base commit it was read at. Pending, in-progress and skipped base checks are
+  not red. A base whose health cannot be read blocks with `state: "unknown"`.
+  With strict mode off, GitHub no longer reruns a PR's checks against the
+  current base, so this is what stops a merge onto a red `main`. It blocks the
+  fix PR too, so the operator override below clears it, reported in `notes[]`
+  as `state: "overridden"` with the author and reason. An unknown base is
+  never overridable.
 
 - Closed-unmerged PRs. Merged PRs are terminal-ready and short-circuit the
   expensive readiness sweep because there is nothing left to fix or wait on.
@@ -50,13 +66,20 @@ Required blockers:
   missing from the branch-protection rollup.
 - Branch-protection context lookup failures caused by unreadable or
   unauthorized protection data; the probe fails closed rather than guessing
-  required-vs-optional status. If the classic branch-protection endpoint returns
-  HTTP 404, whether `gh` renders it as `Not Found` or `Branch not protected`,
-  the probe reads active branch rulesets and derives required status contexts from any
-  `required_status_checks` and named `workflows` rule before using the fallback
-  split. A ruleset result that is empty or defines no required status checks or
-  workflows stays unavailable and blocking because the 404 may mask missing
-  permission to read classic protection rather than prove its absence.
+  required-vs-optional status. On any classic branch-protection HTTP 404 the
+  probe reads active branch rulesets and derives required status contexts from
+  any `required_status_checks` and named `workflows` rule. It trusts that list,
+  and a ruleset's `strict_required_status_checks_policy: false`, only once one
+  proof establishes that classic protection is absent: the 404 body must say
+  `Branch not protected`, and `repos/{owner}/{repo}/branches/{base}` must report
+  `protection.enabled: false`. The top-level `protected` flag proves nothing —
+  a ruleset-only base still reports `protected: true`. A branch that is protected but has no
+  required-status-checks configuration answers `Required status checks not
+enabled`, which proves absence on its own. Unproven (another 404 body,
+  `protection.enabled` true or missing, a failed branch read) keeps the
+  contexts unavailable and blocking, because a classic-only required check
+  could be hiding behind the 404; strictness stays unknown, and a ruleset's
+  confirmed `true` still stands. An empty ruleset result blocks the same way.
 - Required GitHub review state, including requested changes or required review
   still pending.
 - Unreplied review comments that repo policy requires agents to answer. A
@@ -70,20 +93,30 @@ Required blockers:
   reaction must be created at or after the current-head update lower bound:
   the head commit's GitHub push timestamp when available, otherwise the first
   current-head check/status observation timestamp.
-- A human break-glass override for the Codex PR-description approval gate only,
-  when Codex review is externally blocked after the rest of the required
-  readiness surface is clean. The override must be a PR comment from a GitHub
-  `OWNER`, `MEMBER`, or `COLLABORATOR` human author:
+- A human break-glass override for two gates, each named explicitly. The
+  override must be a PR comment from a GitHub `OWNER`, `MEMBER`, or
+  `COLLABORATOR` human author:
 
   ```text
   /pr-ready-override gate=codex-description-approval head=<full-head-sha> reason=<why this is safe>
+  /pr-ready-override gate=base-red head=<full-head-sha> base=<base-oid> reason=<why this is safe>
   ```
 
-  The override is scoped to the exact current head SHA, so any new push expires
-  it. It is reported as gate state `overridden` with `readinessOverrides[]`
-  evidence; it is not hidden as a normal Codex approval. It never overrides
-  failing or pending required checks, merge conflicts, draft state, requested
-  changes, unresolved review threads, or unreplied review comments.
+  Use `codex-description-approval` when Codex review is externally blocked
+  after the rest of the required readiness surface is clean. Use `base-red` to
+  land the fix or revert that turns a red `main` green, which `base-red` would
+  otherwise block: get that PR green on its own checks first, then an operator
+  posts the override.
+
+  Either override is scoped to the exact current head SHA, so any new push
+  expires it, and a reason is required. `base-red` also names the base commit
+  the operator judged: a base that moves to another red commit needs a fresh
+  decision, and a base whose health could not be read is never overridable. Each is reported as `overridden` with
+  `readinessOverrides[]` evidence — the Codex one as a gate state, `base-red`
+  as a `notes[]` entry carrying the author and reason — never hidden as a
+  normal pass. Each covers only its own gate. Neither overrides failing or
+  pending required checks, merge conflicts, draft state, requested changes,
+  unresolved review threads, or unreplied review comments.
 
 Optional signals:
 
@@ -203,9 +236,11 @@ governs this PR is the one at its head, not the one on `main`. Read
 
 The closeout request follows one order, on every surface:
 
-1. **Merge the base before the request, never after it.** Integrate it as a
-   local merge of the fetched base. Never use GitHub's "Update branch" button
-   or a web-UI edit: each costs a review event.
+1. **When the gate says `merge_base_first`, merge the base before the request,
+   never after it.** A confirmed non-strict BEHIND head is not a reason to
+   merge; leave it alone. Integrate it as a local merge of the fetched base.
+   Never use GitHub's "Update branch" button or a web-UI edit: each costs a
+   review event.
 2. **Batch every fix commit into one push** before requesting.
 3. **Post at most one marked request per accepted head, and at most two per
    PR** — the opening closeout and one after review fixes. A request CodeRabbit
@@ -225,10 +260,14 @@ The closeout request follows one order, on every surface:
 For a missing or stale signal the gate reports `fallbackAction` in this
 precedence:
 
-- `merge_base_first` — the PR is BEHIND its base or DIRTY (merge conflicts).
-  Merge the base before any request. For a native stack layer, bring the base in through the
-  history-change procedure in
-  [`stacked-pull-requests.md`](stacked-pull-requests.md), never as a local
+- `merge_base_first` — the PR is DIRTY (merge conflicts), or BEHIND while
+  `requiredStatusChecksStrict` is not confirmed `false` (unknown or `true`).
+  Merge the base before any request. Once strict is confirmed off (operator
+  decision 2026-09-15, ADR 0104), a merely BEHIND PR stops triggering this:
+  forcing a base merge for a non-conflicting, non-blocked PR would
+  reintroduce the re-integration churn the policy change removes. For a
+  native stack layer, bring the base in through the history-change procedure
+  in [`stacked-pull-requests.md`](stacked-pull-requests.md), never as a local
   merge commit.
 - `wait_for_running_review` — the current head's CodeRabbit check is still
   running. A request now supersedes it and bills the discarded review.
@@ -445,6 +484,15 @@ Expected top-level fields:
       }
     ]
   },
+  "notes": [
+    {
+      "kind": "base-update",
+      "name": "Pull request is behind the current base",
+      "state": "BEHIND",
+      "required": false,
+      "url": "https://github.com/..."
+    }
+  ],
   "gates": {
     "codexDescriptionApproval": {
       "ready": false,
@@ -487,6 +535,7 @@ Expected top-level fields:
   ],
   "codexReviewSignal": "in_flight",
   "codeRabbitReviewSignal": "not_applicable",
+  "requiredStatusChecksStrict": false,
   "summary": "1 required blocker(s) remain."
 }
 ```
@@ -504,10 +553,23 @@ Field expectations:
   this before fetching comments, reactions, check sources, and branch
   protection so post-merge babysitting exits quickly and does not mistake
   GitHub's post-merge `mergeable: UNKNOWN` for a blocker.
-- `pr.mergeStateStatus`: GitHub's aggregate merge status. `BEHIND` is an
-  explicit base-update blocker, and `BEHIND` or `DIRTY` sends the CodeRabbit
-  closeout to `merge_base_first`; other aggregate states do not replace the
-  required-check and feedback projections.
+- `pr.mergeStateStatus`: GitHub's aggregate merge status. `DIRTY` is a
+  required blocker and also sends the CodeRabbit closeout to
+  `merge_base_first`. `BEHIND` alone is a required blocker too, unless the
+  probe's fetched `requiredStatusChecksStrict` confirms `false` for the base
+  (see below), in which case it is reported in `notes[]` instead and does
+  not send the closeout to `merge_base_first`. Other aggregate states do not
+  replace the required-check and feedback projections.
+- `requiredStatusChecksStrict`: tri-state read straight off the
+  already-fetched classic branch protection (`strict`) or ruleset
+  (`strict_required_status_checks_policy`) response — `true`, `false`, or
+  `null` when no source states it. A base can carry more than one applicable
+  `required_status_checks` ruleset rule; any confirmed `true` wins, and the
+  result is `false` only when every matching rule explicitly disables strict
+  mode. Only a confirmed `false` demotes `mergeStateStatus: BEHIND`; `true`
+  and `null` both fail closed, matching every other branch-protection lookup
+  gap in this probe, and both keep `fallbackAction: merge_base_first` for a
+  BEHIND PR too.
 - `pr.autoMergeEnabledAt`: the observed pending auto-merge enable timestamp,
   or null. It records intent and never proves merge completion.
 - `pr.mergedAt` / `pr.closedAt`: terminal timestamps when GitHub provides them.
@@ -518,6 +580,8 @@ Field expectations:
   `name`, `state`, `required: true`, and a URL when GitHub provides one.
 - `optional.items[]`: advisory signals worth reporting separately. Every item
   needs `kind`, `name`, `state`, and `required: false`.
+- `notes[]`: non-blocking informational items, such as `mergeStateStatus:
+BEHIND`. Never treat a `notes[]` entry as a blocker.
 - `gates`: named repo-policy gates that are not obvious from raw check status.
   Each gate should say whether it is required for readiness.
 - `readinessOverrides[]`: active human break-glass overrides that affected a
@@ -663,9 +727,9 @@ requests and returns `PENDING` when reached.
    no automatic run follows the push: refresh once the head is stable instead of
    waiting for one that cannot start. The one exception is an opening review
    that never completed, where a later push can still draw a full run, so wait
-   the bounded time anyway. Merge the base before the request and never after
-   it: an ordinary PR takes a local merge of the fetched base, a native stack
-   layer takes the history-change procedure in
+   the bounded time anyway. On `merge_base_first` only, merge the base before
+   the request, never after: an ordinary PR by local merge of the fetched base,
+   a native stack layer by the history-change procedure in
    [`stacked-pull-requests.md`](stacked-pull-requests.md). Then, if
    `gates.codeRabbitReviewSignal.state` is `missing` or `stale`, recheck the
    head and follow the gate's `fallbackAction`: post the one marked closeout

@@ -174,7 +174,56 @@ export async function fetchStackContext({ repo, pr, fetchJson }) {
   };
 }
 
-export async function verifyReadinessSnapshot({ repo, pr, stack, fetchJson }) {
+export async function verifyReadinessSnapshot({
+  repo,
+  pr,
+  stack,
+  baseHealthOid = null,
+  baseHealthError = null,
+  fetchJson,
+}) {
+  // Base health is read through a mutable ref (`main`, or a stack's protection
+  // base), so the commit it judged has to be pinned to the same base this
+  // snapshot verifies. Without this, `main` advancing to a red commit after the
+  // health query leaves every other field unchanged, and the gate would report
+  // PASS on a base whose health it never actually read. A stack layer whose
+  // stacks response omits the optional `base.sha` has no verified base commit
+  // at all, so its health cannot be bound and must not be trusted.
+  //
+  // A read that already failed is not this check's business: it becomes a
+  // required `base-red` blocker with an unknown state, which is the documented
+  // structured output (docs/notes/pr-ready-state.md). Throwing over it would
+  // turn a blocked-but-reportable PR into a crashed probe and leave watch mode
+  // with no JSON at all. Only a health read claiming success has to match.
+  if (baseHealthError === null) {
+    let verifiedBaseOid = stack ? stack.protectionBaseOid : pr.baseRefOid;
+    if (verifiedBaseOid == null) {
+      // A native stacks response may omit the optional `base.sha`, and
+      // refusing those layers outright would make their readiness permanently
+      // unavailable. Resolve the protection ref here instead: read after the
+      // health query, it is an independent observation of the same base, so a
+      // base that moved in between still shows up as a mismatch below.
+      const baseRef = stack?.protectionBaseRef ?? pr.baseRefName;
+      const baseResult = await fetchJson(repo, [
+        `repos/${repo.owner}/${repo.name}/commits/${encodeURIComponent(baseRef)}`,
+      ]);
+      requireMetadata(
+        baseResult.ok,
+        baseResult.error ?? "protection base lookup failed",
+      );
+      verifiedBaseOid = baseResult.value?.sha ?? null;
+      requireMetadata(
+        typeof verifiedBaseOid === "string" &&
+          /^[0-9a-f]{40}$/u.test(verifiedBaseOid),
+        "protection base commit is unreadable",
+      );
+    }
+    requireMetadata(
+      baseHealthOid === verifiedBaseOid,
+      "base advanced while gathering readiness data",
+    );
+  }
+
   const result = await fetchJson(repo, [
     `repos/${repo.owner}/${repo.name}/pulls/${pr.number}`,
   ]);

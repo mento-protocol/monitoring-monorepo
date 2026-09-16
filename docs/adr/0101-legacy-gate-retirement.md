@@ -79,9 +79,13 @@ pre-retirement source `7623f5282c166dbc2c397f16169835427b3c3575`. The final
 manifests also include main integration `71bdfc7d5415ffbd5d5de43122945af66bbddc98`.
 
 1. Stop merges through the normal human repository process.
-2. Read ruleset `13494367`. Keep its strict current-base required checks. If
-   protection drifted, restore the recorded known-safe ruleset only with
-   separate operator approval. This PR changes no provider rule.
+2. Read ruleset `13494367`. Keep its required checks. **Amended 2026-09-15
+   ([ADR 0104](0104-non-strict-required-status-checks.md)):** do not re-enable
+   `strict_required_status_checks_policy` — that policy is off by separate
+   operator decision, and this rollback must restore the recorded known-safe
+   ruleset with it still off, not on. If protection drifted for any other
+   reason, restore the recorded known-safe ruleset only with separate
+   operator approval. This PR changes no provider rule.
 3. Revert the retirement commit first. Restore runtime, coordinator, aliases,
    shared containment and tests before any hook is enabled. Resolve later
    source conflicts without discarding current retained safeguards.

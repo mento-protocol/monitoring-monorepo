@@ -82,6 +82,8 @@ pnpm agent:context-budget --strict # Enforce root, scoped-file, and aggregate-ro
 # Run feedback-state first. Final all-clear needs the current-head Codex
 # PR-description +1 or this exact-head human override:
 # /pr-ready-override gate=codex-description-approval head=<full-head-sha> reason=<why this is safe>
+# A red `main` blocks every PR; land its fix with:
+# /pr-ready-override gate=base-red head=<sha> base=<base-oid> reason=<why>
 pnpm --silent pr:feedback-state --pr 123 --json  # Normalize unresolved/reply-required feedback before all-clear
 pnpm pr:ready-state --pr 123 --json              # Final current-head required-readiness probe
 node scripts/pr/pr-stack-recover.mjs --help      # Prepare local native-stack recovery; never publishes or merges

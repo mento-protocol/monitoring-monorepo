@@ -306,8 +306,9 @@ polled. Do not foreground-poll and never sleep-poll.
      draw a full run, so wait the bounded time as in the `true` branch before
      posting. Then apply the closeout order
      [`pr-ready-state.md`](pr-ready-state.md) states in full, which governs
-     this surface too: merge the base before the request and never after it, as
-     a local merge of the fetched base — never through GitHub's "Update branch"
+     this surface too: on `merge_base_first` only, merge the base before the
+     request and never after, as a local merge of the fetched base — never
+     merely because the PR is behind, and never through GitHub's "Update branch"
      button or a web-UI edit, because each costs a review event, and a base
      merge or rebase after the request can draw an unprompted full re-review of
      the whole PR; batch every fix commit into one push; post at most one
