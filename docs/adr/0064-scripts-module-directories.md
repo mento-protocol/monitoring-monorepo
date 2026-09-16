@@ -89,13 +89,16 @@ Cloud Run checklist that pinned it from the other side went with the wrapper. On
 `case` takes the first matching arm, so a new arm for a path of the shape
 `scripts/<dir>/deploy-*.sh` goes ABOVE the pair or it never runs.
 
-`scripts/sentry/gate/sentry-suite-manifest.json` is stricter than a glob. Its keys are exact
-repo-relative paths, and `scripts/sentry/gate/sentry-suite-gate.mjs` reconciles them against
+`scripts/sentry/gate/sentry-suite-manifest.json` was stricter than a glob (it and
+its gate were deleted by
+[ADR 0106](0106-sentry-triage-moves-to-operator-skills.md); the pin class is
+recorded here because the shape recurs). Its keys were exact
+repo-relative paths, and `scripts/sentry/gate/sentry-suite-gate.mjs` reconciled them against
 `findSentrySuites()` by exact set equality in both directions.
-`findSentrySuites()` recurses and matches on the `sentry-` basename prefix, so a
-move is discovered but the manifest key is stale, and the gate fails closed with
-the JSON patch to apply. Move a Sentry suite and update the manifest key in the
-same commit.
+`findSentrySuites()` recursed and matched on the `sentry-` basename prefix, so a
+move was discovered but the manifest key was stale, and the gate failed closed with
+the JSON patch to apply. Any future exact-set manifest inherits that obligation:
+move a pinned file and update its key in the same commit.
 
 **3. A `scripts/` subdirectory gets no `AGENTS.md` of its own.**
 `scripts/context/agent-context-budget.mjs` treats every tracked `AGENTS.md` as
@@ -380,7 +383,9 @@ not only the arm of the consumer that happens to fail loudest.
   in-file comment records that `scripts/**` matches every depth.
 - Exact-set manifest: `scripts/sentry/gate/sentry-suite-manifest.json`,
   `findSentrySuites()` in `scripts/sentry/gate/sentry-suite-gate.mjs`, and
-  [ADR 0062](0062-sentry-suites-self-run-gate.md).
+  [ADR 0062](0062-sentry-suites-self-run-gate.md) — all three deleted by
+  [ADR 0106](0106-sentry-triage-moves-to-operator-skills.md). No exact-set
+  manifest is live today; the class stays listed because the shape recurs.
 - Instruction-file budget and lane: `INSTRUCTION_FILENAMES` and the route
   computation in `scripts/context/agent-context-budget.mjs`; the
   `agent-instructions` → `agent-entry-points` mapping in

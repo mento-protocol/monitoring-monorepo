@@ -35,10 +35,13 @@ excluded from every Terraform plan job outright (issue #1388): even the
 placeholder/read-only PR posture is too much for them, because `terraform
 plan` executes PR-head HCL (`data "external"` runs programs at plan time)
 while the job holds the read-only plan SA — whose state-bucket
-`storage.objectViewer` access includes cleartext secret values in state. The
-autofix diff guard also forbids `*.tf`/`*.hcl`/`*.tfvars` at any depth;
-the plan-job `if:` exclusion is defense in depth behind it, and
-`scripts/workflows/check-autofix-ci-trust.mjs` enforces the pattern structurally.
+`storage.objectViewer` access includes cleartext secret values in state.
+[ADR 0106](../adr/0106-sentry-triage-moves-to-operator-skills.md) deleted the
+autofix leg and the diff guard that forbade `*.tf`/`*.hcl`/`*.tfvars` at any
+depth, so the plan-job `if:` exclusion is now the only remaining control, and it
+is inert: nothing creates a `sentry-autofix/*` branch any more. It stays because
+`scripts/workflows/check-autofix-ci-trust.mjs` enforces the pattern structurally
+and still governs where a new secret-bearing lane may go.
 
 ## CI identity boundaries
 

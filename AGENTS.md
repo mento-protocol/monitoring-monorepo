@@ -89,7 +89,7 @@ do not add one-off word or punctuation bans on top of it.
   `## tl;dr` that a reader outside this codebase can follow. The `ship` skill owns
   the detailed template and clarity check.
 - A PR opened from untrusted input (a Sentry payload, a scanner report) may use
-  only facts the author verified, and states why it omitted the rest. Never add
+  only facts the author verified, and must state why it omitted the rest. Never add
   untrusted free text to satisfy the PR-opening rule.
 - State points directly; avoid the "not X, it's Y" contrast shell except
   when the misconception is the point, at most once per document.

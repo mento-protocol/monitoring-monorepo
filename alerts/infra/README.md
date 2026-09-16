@@ -193,9 +193,11 @@ chain key.
   after 30 minutes without another matching failure
 - On-chain handler drop and processing-budget policies share the same
   `#alerts-infra` destination
-- `sentry-triage-ingest-stale` shares that destination too, and is the only
-  policy here that alerts on an absent series rather than on a signal it
-  received
+- No policy in this stack alerts on an absent series. The one that did
+  (`sentry-triage-ingest-stale`) was deleted with the Sentry pipeline
+  ([ADR 0106](../../docs/adr/0106-sentry-triage-moves-to-operator-skills.md)).
+  A new dead-man switch needs its own metric descriptor and an absence
+  condition; no policy here can be copied for it
 
 ### Build-artifact retention
 

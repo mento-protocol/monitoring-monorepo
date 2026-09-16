@@ -34,6 +34,11 @@ The word "required" means **enforced by the `main` branch ruleset**, not "feels 
 - `Code Quality` (the Trunk workflow's job)
 - `Vercel` and `Vercel Preview Comments` (the Vercel platform)
 
+`Sentry suites` is pending removal from the live ruleset. No workflow emits it
+after [ADR 0106](../adr/0106-sentry-triage-moves-to-operator-skills.md), so it
+stays pending on every PR until an operator edits the ruleset. Drop this
+paragraph once that edit lands.
+
 Verify the live list before relying on this:
 
 ```
@@ -345,17 +350,17 @@ non-Dependabot — they pass every historical CI trust check — but their diffs
 were machine-authored from untrusted Sentry input, so any secret a
 `pull_request` job exposes to their PR-head code is an exfiltration channel
 (issue #1388). `scripts/workflows/check-autofix-ci-trust.mjs` enforces this
-structurally in the `scripts` CI job.
+structurally in the `scripts` CI job. It parses the workflow with `js-yaml` and
+analyzes the parsed structure, so exotic-but-valid YAML (anchors, `\uXXXX`
+escapes, block scalars, flow/JSON roots) cannot slip a trigger or secret past
+it; unparsable YAML fails closed.
 
 [ADR 0106](../adr/0106-sentry-triage-moves-to-operator-skills.md) deleted the
 autofix leg, so nothing creates that branch any more and the guards below are
 inert. They stay because the checker is what enforces them, and because the same
 checker carries the repo-wide `pull_request_target` refusal. Treat this section
 as live: it still governs where a new secret-bearing lane may go. Retiring the
-namespace is a separate task. It parses the workflow with `js-yaml` and analyzes the parsed
-structure, so exotic-but-valid YAML (anchors, `\uXXXX` escapes, block scalars,
-flow/JSON roots) cannot slip a trigger or secret past it; unparsable YAML fails
-closed.
+namespace is a separate task.
 
 - [ ] The trust boundary covers every way an autofix branch is REACHABLE, not just `pull_request`: the eventual PR (`pull_request`), the `push` the finalizer makes to `sentry-autofix/*` before the PR exists (when the workflow's `branches:`/`branches-ignore:` filter admits that branch — a `branches: [main]` or tags-only push does not), and that branch's `create` event. A credential-bearing job reachable via a context must exclude it on the job's `if:` for THAT context — `!startsWith(github.event.pull_request.head.ref, 'sentry-autofix/')` for pull_request; `!startsWith(github.ref, 'refs/heads/sentry-autofix/')` (or `github.ref_name`, `'sentry-autofix/'`) for push/create — or carry an `# autofix-ci-trust: <why unreachable>` annotation. A job annotation must be a genuine comment INSIDE that job's body (indented deeper than the job key); a comment above `jobs:` is file-level and covers every job. The checker is per-job: one guarded job does not vouch for an unguarded sibling
 - [ ] "Credential-bearing" is broader than `${{ secrets.* }}`. It also covers: a
