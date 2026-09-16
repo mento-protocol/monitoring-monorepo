@@ -134,19 +134,12 @@ rule, even when they describe one.
    The apply re-reads live state, so a clean preview does not narrow its
    mutation scope. The authority must cover the full projection, including
    unrelated items and closed issues that have no Project item.
-   It re-reads and reclassifies each issue before it changes the Project item or
-   labels. After each open-state projection, it re-reads the issue and
-   reprojects bounded concurrent state changes. After closed-label cleanup, it
-   verifies that the issue remains closed and has no queue label. If the issue
-   reopened, it restores a queue label confirmed immediately before cleanup and
-   projects the open state. If the confirmed state is ambiguous, or if only an
-   older enumerated queue label is known, it uses `needs-grooming`. If a
-   post-cleanup check fails, it makes bounded attempts to restore this retry
-   state before exit. This keeps the issue visible without granting stale
-   claim, review, or release authority. A concurrent conflict with a fallback
-   `needs-grooming` label stays visible and fails closed for manual resolution.
-   It fails if a closed issue retains a queue label or if state does not settle
-   within the bounded attempts. It also reports each incompletely groomed
+   ADR 0082 below owns the per-issue re-read, reclassification, and
+   closed-label cleanup semantics, including the bounded restore that keeps a
+   concurrently reopened issue visible — falling back to `needs-grooming` when
+   the confirmed state is ambiguous — without granting stale claim, review, or
+   release authority. The sync fails closed when that state does not settle.
+   It also reports each incompletely groomed
    `agent-ready` issue as a per-issue failure, after that issue's own
    projection and confirmed by a fresh read, so the report never withholds a
    Project item and never fires on a stale enumeration snapshot. A per-issue failure
