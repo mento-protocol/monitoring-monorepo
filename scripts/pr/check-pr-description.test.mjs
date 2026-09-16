@@ -812,6 +812,36 @@ test("counts opening prose between inline-code comment delimiters", () => {
   );
 });
 
+test("accepts Problem prose between inline-code comment delimiters", () => {
+  assertPass(`## tl;dr
+
+The validator now preserves visible Markdown beside comment-like inline code, so reviewers can rely on every required opening section being checked accurately.
+
+## The Problem
+
+\`<!--\` The old behavior hid this rendered problem explanation. \`-->\`
+
+## The Solution
+
+The validator keeps visible prose while removing real HTML comments.
+`);
+});
+
+test("accepts Solution prose between inline-code comment delimiters", () => {
+  assertPass(`## tl;dr
+
+The validator now preserves visible Markdown beside comment-like inline code, so reviewers can rely on every required opening section being checked accurately.
+
+## The Problem
+
+The old behavior hid rendered prose beside comment-like inline code.
+
+## The Solution
+
+\`<!--\` The validator now sees this rendered solution explanation. \`-->\`
+`);
+});
+
 test("does not count visible text inside raw HTML", () => {
   assertFail(
     `## tl;dr
