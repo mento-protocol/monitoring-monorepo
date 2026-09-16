@@ -192,6 +192,12 @@ test("rejects wildcard, wrapped, and compound Claude spoken-nudge permissions", 
     // Escapes cannot hide the binary name from the check.
     String.raw`Bash(s\ay "hey")`,
     "Bash(s''ay \"hey\")",
+    // The voice is part of the literal. `say` exits 0 on an unknown voice and
+    // speaks the default instead, so an unpinned or re-pointed entry would
+    // change which voice the operator hears with nothing reporting it.
+    'Bash(say "hey, i need your approval in the agent chat")',
+    'Bash(say -v Fred "hey, i need your approval in the agent chat")',
+    'Bash(say -v "hey, i need your approval in the agent chat")',
     // The retired ElevenLabs path, including the entry this repo granted until
     // 2026-09-16. It has no reviewed phrase now, so every form fails.
     'Bash(sag --api-key-file ~/.config/elevenlabs_api_key -v Charlie "hey, i need your approval in the agent chat")',
@@ -216,9 +222,9 @@ test("accepts the reviewed single-command Claude spoken-nudge permissions", () =
   assertNoFailures(
     runContract({
       allow: [
-        'Bash(say "hey, i need your feedback in the agent chat")',
-        'Bash(say "hey, i need your approval in the agent chat")',
-        'Bash(say "hey, the task finished and needs your attention in the agent chat")',
+        'Bash(say -v Aaron "hey, i need your feedback in the agent chat")',
+        'Bash(say -v Aaron "hey, i need your approval in the agent chat")',
+        'Bash(say -v Aaron "hey, the task finished and needs your attention in the agent chat")',
         'Bash(spd-say "hey, i need your feedback in the agent chat")',
         'Bash(spd-say "hey, i need your approval in the agent chat")',
         'Bash(spd-say "hey, the task finished and needs your attention in the agent chat")',
@@ -305,9 +311,9 @@ test("accepts every reviewed allowlist entry the settings file grants", () => {
         "Bash(terraform -chdir=terraform output:*)",
         "Bash(terraform -chdir=terraform plan:*)",
         "Bash(terraform -chdir=terraform validate:*)",
-        'Bash(say "hey, i need your feedback in the agent chat")',
-        'Bash(say "hey, i need your approval in the agent chat")',
-        'Bash(say "hey, the task finished and needs your attention in the agent chat")',
+        'Bash(say -v Aaron "hey, i need your feedback in the agent chat")',
+        'Bash(say -v Aaron "hey, i need your approval in the agent chat")',
+        'Bash(say -v Aaron "hey, the task finished and needs your attention in the agent chat")',
         'Bash(spd-say "hey, i need your feedback in the agent chat")',
         'Bash(spd-say "hey, i need your approval in the agent chat")',
         'Bash(spd-say "hey, the task finished and needs your attention in the agent chat")',

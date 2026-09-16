@@ -22,8 +22,21 @@ required before meaningful progress can continue.
 locally: no network call, no API key, no third-party service.
 
 ```bash
-say "hey, i need your approval in the agent chat"
+say -v Aaron "hey, i need your approval in the agent chat"
 ```
+
+## Pin the voice
+
+Always pass `-v Aaron`. macOS 27 changed the default voice, and the operator
+picked this one, so the pre-approved phrases in `.claude/settings.json` carry
+the flag as part of the literal.
+
+`say` does not fail on a voice it does not have: it exits 0 and speaks the
+default instead, so a missing voice sounds like a working nudge in the wrong
+voice. `say -v '?'` lists what is installed. When Aaron is not there, install it
+under System Settings, Accessibility, Spoken Content, System Voice, Manage
+Voices, and say so in chat rather than re-pointing the pinned command at another
+voice.
 
 ## Name the session
 
@@ -31,7 +44,7 @@ Several sessions can speak to one operator, so name the session before the
 message:
 
 ```bash
-say "In ci cost audit: I need your approval in the agent chat."
+say -v Aaron "In ci cost audit: I need your approval in the agent chat."
 ```
 
 Take the label from the session or pane title when it describes the task,

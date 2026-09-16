@@ -89,13 +89,18 @@ const allowedClaudeBashScriptPermissions = new Set([
 // entry would pre-approve an arbitrary message argument, and a shell
 // substitution there reads local file contents aloud.
 //
+// `-v Aaron` pins the voice, because macOS 27 changed the default and `say`
+// exits 0 on an unknown voice name rather than failing. The flag is part of the
+// literal, so changing the voice is a deliberate edit here and in the settings
+// file rather than something an existing pre-approval silently covers.
+//
 // `sag` is the retired ElevenLabs path and has no reviewed entry at all. It
 // still routes through this rule so a resurrected grant fails by name instead
 // of falling into the generic branch.
 const allowedClaudeSpokenNudgePermissions = new Set([
-  'Bash(say "hey, i need your feedback in the agent chat")',
-  'Bash(say "hey, i need your approval in the agent chat")',
-  'Bash(say "hey, the task finished and needs your attention in the agent chat")',
+  'Bash(say -v Aaron "hey, i need your feedback in the agent chat")',
+  'Bash(say -v Aaron "hey, i need your approval in the agent chat")',
+  'Bash(say -v Aaron "hey, the task finished and needs your attention in the agent chat")',
   'Bash(spd-say "hey, i need your feedback in the agent chat")',
   'Bash(spd-say "hey, i need your approval in the agent chat")',
   'Bash(spd-say "hey, the task finished and needs your attention in the agent chat")',
