@@ -27,16 +27,20 @@ say -v Aaron "hey, i need your approval in the agent chat"
 
 ## Pin the voice
 
-Always pass `-v Aaron`. macOS 27 changed the default voice, and the operator
-picked this one, so the pre-approved phrases in `.claude/settings.json` carry
-the flag as part of the literal.
+Always pass `-v Aaron`. The default voice is not stable across macOS releases,
+and the operator picked this one, so the pre-approved phrases in
+`.claude/settings.json` carry the flag as part of the literal.
+
+`say -v '?'` lists the voice as `Aaron (Enhanced)`. The short name resolves to
+it: `-v Aaron` and `-v "Aaron (Enhanced)"` render byte-identical audio, and both
+differ from the default. The pre-approval uses the short name so no permission
+literal has to carry parentheses.
 
 `say` does not fail on a voice it does not have: it exits 0 and speaks the
 default instead, so a missing voice sounds like a working nudge in the wrong
-voice. `say -v '?'` lists what is installed. When Aaron is not there, install it
-under System Settings, Accessibility, Spoken Content, System Voice, Manage
-Voices, and say so in chat rather than re-pointing the pinned command at another
-voice.
+voice. When `say -v '?'` does not list Aaron, install it under System Settings,
+Accessibility, Spoken Content, System Voice, Manage Voices. Say so in chat
+rather than re-pointing the pinned command at another voice.
 
 ## Name the session
 
