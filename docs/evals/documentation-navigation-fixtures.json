@@ -8,7 +8,8 @@
     "questions_over_context_budget": 0,
     "max_question_source_bytes": 45000,
     "max_total_unique_source_bytes": 262000,
-    "min_total_unique_source_headroom_bytes": 32768
+    "min_total_unique_source_headroom_bytes": 32768,
+    "min_total_unique_source_reserve_surplus_warning_bytes": 8192
   },
   "bootstrap_sources": ["AGENTS.md", "docs/README.md"],
   "forbidden_sources": [
@@ -70,6 +71,7 @@
       "category": "deployment",
       "question": "What is the current sequence for deploying a new Envio indexer version, monitoring its sync, and promoting it without allowing an agent to auto-promote?",
       "accepted_routes": [
+        ["docs/notes/quick-commands.md"],
         ["docs/deployment.md"],
         [".agents/skills/deploy-indexer/SKILL.md"]
       ],

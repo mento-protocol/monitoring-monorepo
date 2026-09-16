@@ -163,6 +163,9 @@ Scores stay separate so a cheap strength cannot hide an expensive failure:
   complete run may not exceed 262,000 unique source bytes, including bootstrap
   sources. The live fixture reserves at least 32,768 bytes below the suite cap,
   so normal documentation growth cannot consume the last few bytes unnoticed.
+  A non-failing warning starts when less than 8,192 bytes remain above that
+  reserve. This one-quarter-reserve threshold leaves a meaningful gardening
+  window without making routine documentation additions noisy.
   Fixture validation proves that the cheapest accepted route for every
   question fits the per-question cap and that their unique union fits both the
   suite cap and its reserve before a run begins.
@@ -172,10 +175,12 @@ the 262,000-byte cap to absorb normal documentation growth. Restore the reserve
 by routing questions through narrower canonical sources that still contain the
 required answer, and keep deeper authority as an accepted alternative when it
 remains valid. Package-script refusal and PR readiness use the quick-command
-reference as their narrow route. The readiness guide and PR operating card
-remain accepted deeper authorities. Run
-`pnpm docs:navigation-eval -- --check-fixtures --json` to inspect the selected
-floor, required reserve, and remaining surplus.
+reference as their narrow route. The indexer deployment sequence uses the same
+reference, including its explicit human-only promotion boundary, while the
+deployment runbook and deploy skill remain accepted deeper authorities. The
+readiness guide and PR operating card also remain accepted deeper authorities.
+Run `pnpm docs:navigation-eval -- --check-fixtures --json` to inspect the
+selected floor, required reserve, warning status, and remaining surplus.
 
 The scorer intentionally does not claim to grade arbitrary prose for semantic
 correctness. Canonical routing plus exact evidence makes the answer reviewable;

@@ -435,6 +435,10 @@ test("fixture byte budgets can contain every cheapest accepted route", () => {
   );
   assert.equal(context.suite.targets.max_total_unique_source_bytes, 262_000);
   assert.equal(reserve, 32_768);
+  assert.equal(
+    context.suite.targets.min_total_unique_source_reserve_surplus_warning_bytes,
+    8_192,
+  );
   const selectedRoutes = new Map(
     floor.questions.map((question) => [question.question_id, question.route]),
   );
@@ -445,6 +449,9 @@ test("fixture byte budgets can contain every cheapest accepted route", () => {
     "docs/notes/quick-commands.md",
   ]);
   assert.deepEqual(selectedRoutes.get("deployment-terraform-registry-apply"), [
+    "docs/notes/quick-commands.md",
+  ]);
+  assert.deepEqual(selectedRoutes.get("deployment-indexer-promote"), [
     "docs/notes/quick-commands.md",
   ]);
 
@@ -469,6 +476,14 @@ test("fixture byte budgets can contain every cheapest accepted route", () => {
   assert.match(
     validateFixtureSuite(missingReserve, context.inventory).join("\n"),
     /min_total_unique_source_headroom_bytes must be a positive integer/,
+  );
+
+  const missingReserveWarning = structuredClone(context.suite);
+  delete missingReserveWarning.targets
+    .min_total_unique_source_reserve_surplus_warning_bytes;
+  assert.match(
+    validateFixtureSuite(missingReserveWarning, context.inventory).join("\n"),
+    /min_total_unique_source_reserve_surplus_warning_bytes must be a positive integer/,
   );
 
   const reserveTooHigh = structuredClone(context.suite);
@@ -1485,6 +1500,18 @@ test("CLI checks fixtures and validates a structured result", () => {
     checked.context_floor.min_total_unique_source_headroom_bytes,
     32_768,
   );
+  assert.equal(
+    checked.context_floor.min_total_unique_source_reserve_surplus_warning_bytes,
+    8_192,
+  );
+  assert.equal(
+    checked.context_floor.total_unique_reserve_status,
+    checked.context_floor.total_unique_reserve_surplus_bytes <
+      checked.context_floor
+        .min_total_unique_source_reserve_surplus_warning_bytes
+      ? "nearly_exhausted"
+      : "healthy",
+  );
   assert.ok(checked.context_floor.total_unique_reserve_surplus_bytes >= 0);
   assert.ok(
     checked.context_floor.total_unique_headroom_bytes >=
@@ -1493,6 +1520,61 @@ test("CLI checks fixtures and validates a structured result", () => {
 
   const temp = mkdtempSync(path.join(tmpdir(), "docs-navigation-eval-"));
   try {
+    const legacyFixturesPath = path.join(temp, "legacy-fixtures.json");
+    const legacySuite = structuredClone(context.suite);
+    delete legacySuite.targets.min_total_unique_source_headroom_bytes;
+    delete legacySuite.targets
+      .min_total_unique_source_reserve_surplus_warning_bytes;
+    writeFileSync(legacyFixturesPath, `${JSON.stringify(legacySuite)}\n`);
+    const legacyCheck = spawnSync(
+      process.execPath,
+      [
+        scriptPath,
+        "--check-fixtures",
+        "--fixtures",
+        legacyFixturesPath,
+        "--baseline-fixtures",
+        legacyFixturesPath,
+        "--json",
+      ],
+      { cwd: repoRoot, encoding: "utf8" },
+    );
+    assert.equal(legacyCheck.status, 0, legacyCheck.stderr);
+    assert.equal(
+      JSON.parse(legacyCheck.stdout).context_floor.total_unique_reserve_status,
+      "not_configured",
+    );
+
+    const warningFixturesPath = path.join(temp, "warning-fixtures.json");
+    const warningSuite = structuredClone(context.suite);
+    warningSuite.targets.min_total_unique_source_reserve_surplus_warning_bytes =
+      checked.context_floor.total_unique_reserve_surplus_bytes + 1;
+    writeFileSync(warningFixturesPath, `${JSON.stringify(warningSuite)}\n`);
+    const warningCheck = spawnSync(
+      process.execPath,
+      [
+        scriptPath,
+        "--check-fixtures",
+        "--fixtures",
+        warningFixturesPath,
+        "--json",
+      ],
+      {
+        cwd: repoRoot,
+        encoding: "utf8",
+        env: { ...process.env, GITHUB_ACTIONS: "true" },
+      },
+    );
+    assert.equal(warningCheck.status, 0, warningCheck.stderr);
+    assert.equal(
+      JSON.parse(warningCheck.stdout).context_floor.total_unique_reserve_status,
+      "nearly_exhausted",
+    );
+    assert.match(
+      warningCheck.stderr,
+      /^::warning title=Documentation navigation reserve::.*reserve is nearly exhausted/m,
+    );
+
     const resultPath = path.join(temp, "result.json");
     writeFileSync(resultPath, `${JSON.stringify(validResult())}\n`);
     const validate = spawnSync(

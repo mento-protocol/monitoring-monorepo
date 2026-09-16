@@ -172,6 +172,17 @@ export function validateFixtureSuite(
         "min_total_unique_source_headroom_bytes must be a positive integer",
       );
     }
+    const reserveSurplusWarning =
+      targets.min_total_unique_source_reserve_surplus_warning_bytes;
+    if (
+      (requireHeadroomReserve || reserveSurplusWarning !== undefined) &&
+      (!Number.isSafeInteger(reserveSurplusWarning) ||
+        reserveSurplusWarning <= 0)
+    ) {
+      errors.push(
+        "min_total_unique_source_reserve_surplus_warning_bytes must be a positive integer",
+      );
+    }
   }
 
   if (
