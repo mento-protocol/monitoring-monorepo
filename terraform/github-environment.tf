@@ -63,7 +63,16 @@
 #      `state=ok`, not `state=inert`. It is still reading the `sentry-pipeline`
 #      copy of the secret at this point; an inert run means phase 1 damaged
 #      something and must be fixed before this PR merges.
-#   4. Merge THIS PR. It repoints `platform-settings-drift.yml` at the new
+#   4. DRAIN THE PIPELINE, THEN MERGE THIS PR. Before the merge, disable the
+#      four retired workflows — `Sentry Triage Ingest`, `Sentry Triage Agent`,
+#      `Sentry Triage Archive` and `Sentry Autofix` — through the Actions UI or
+#      `gh workflow disable`, then confirm none of them is still executing:
+#      `gh run list --workflow <name> --status in_progress` and the same command
+#      with `--status queued` must both come back empty. Cancel what remains or
+#      let it finish. Each of those workflows set `cancel-in-progress: false`, so
+#      a job already running holds its `sentry-pipeline` secrets until it ends,
+#      and deleting the workflow file does not stop it. Merging repoints
+#      `platform-settings-drift.yml` at the new
 #      environment and deletes `sentry-pipeline`, its deployment policy and its
 #      five secrets from the configuration. Between the merge and step 5 the
 #      environment still exists on GitHub while nothing references it; the
@@ -100,7 +109,8 @@
 #
 # Destroying the four Sentry environment secrets (SENTRY_TRIAGE_TOKEN,
 # SENTRY_PROJECTION_TOKEN, SENTRY_ARCHIVE_TOKEN, AUTOFIX_APP_PRIVATE_KEY) is
-# deliberate; revoke them out of band after step 5. The audit token is never at
+# deliberate; revoke them out of band after step 5, once step 4's drain has
+# stopped the last run that could still be holding them. The audit token is never at
 # risk in this order: phase 1 creates its replacement before anything is
 # destroyed, so no state holds the only copy of a value GitHub cannot read back.
 #

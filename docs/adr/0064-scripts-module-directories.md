@@ -13,10 +13,12 @@ garden_lane: adrs-architecture
 
 # ADR 0064 — scripts/ may use module subdirectories; basenames and pinned paths are the constraint
 
-**Status:** Accepted (Aug 2026), in force.
+**Status:** Accepted (Aug 2026), amended 2026-09-16, in force.
 **Scope:** ci/process
 
 Retirement amendment: [ADR 0101](0101-legacy-gate-retirement.md) removes local gate routing and its pins. Retained Sentry supervision, package policy, CI wiring and indexer contracts remain; their current paths are listed in `scripts/AGENTS.md`. Gate-only path lists below are historical.
+
+Removal amendment (2026-09-16): [ADR 0106](0106-sentry-triage-moves-to-operator-skills.md) deletes `scripts/sentry/**` with the triage and autofix pipeline, so the retained Sentry supervision and its CI wiring named in the paragraph above no longer exist and `sentry/` is no longer one of this ADR's module subdirectories. The eight surviving `ci` sentinel predicates moved to `scripts/workflows/ci-sentinel-core.mjs` and the Sentry-to-Slack bridge contract to `scripts/alerts/sentry-bridge-contract.test.mjs`; `scripts/AGENTS.md` carries the current paths. Package policy and indexer contracts are unchanged. This ADR's decision — `scripts/` may use module subdirectories, with basenames and pinned paths as the constraint — is unchanged.
 
 ## Context
 

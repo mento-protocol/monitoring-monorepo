@@ -115,8 +115,9 @@ only the thing holding the credentials changed.
   the plan for the new secret as **1 to create**, because it is `count`-gated on
   that tfvar and an empty value plans as a no-op rather than as an error; (2)
   apply the platform stack from `main`; (3) verify the scheduled
-  `platform-settings-drift` run still reports `state=ok`; (4) merge this PR,
-  which repoints `platform-settings-drift.yml` at the new environment and
+  `platform-settings-drift` run still reports `state=ok`; (4) drain the four
+  retired workflows as the credentials bullet below requires, then merge this
+  PR, which repoints `platform-settings-drift.yml` at the new environment and
   deletes `sentry-pipeline` — updating this branch with `main` first duplicates
   phase 1's three added blocks outside the conflict markers, so read the
   resolution note at step 4 of the rollout order before merging; (5) apply the
@@ -132,11 +133,20 @@ only the thing holding the credentials changed.
   bullet). Getting the order wrong is silent by default — the workflow no-ops on
   an unprovisioned secret and exits green — so its inert branch now emits a
   `::warning::` annotation naming the invariant it did not check.
-- **Deleting resources does not revoke credentials.** The Sentry triage,
-  archive and projection tokens and the `sentry-autofix` GitHub App private key
-  must be revoked out of band after merge. The bridge's `sentry_auth_token`
-  stays: [ADR 0004](0004-two-alert-planes.md)'s Sentry-to-Slack bridge is
-  untouched by this decision.
+- **Deleting resources does not revoke credentials, and a running job keeps
+  them.** Drain the pipeline before this PR merges. Disable
+  `Sentry Triage Ingest`, `Sentry Triage Agent`, `Sentry Triage Archive` and
+  `Sentry Autofix` through the Actions UI or `gh workflow disable`, then confirm
+  none of the four is still executing:
+  `gh run list --workflow <name> --status in_progress` and the same command with
+  `--status queued` must both come back empty. Cancel what remains or let it
+  finish. Each retired workflow set `cancel-in-progress: false`, so a job
+  already running holds its `sentry-pipeline` secrets until it ends, and
+  deleting the workflow file does not stop it. Merge only after the
+  last run has stopped. The Sentry triage, archive and projection tokens and the
+  `sentry-autofix` GitHub App private key are then revoked out of band. The
+  bridge's `sentry_auth_token` stays: [ADR 0004](0004-two-alert-planes.md)'s
+  Sentry-to-Slack bridge is untouched by this decision.
 - **Issue #1282 goes quiet.** The run-record writers that appended
   `run-record:v1` comments to the public tracker issue are deleted with the
   ingest leg, and the Cloud Function dead-man switch that read those comments is

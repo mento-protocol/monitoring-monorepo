@@ -49,7 +49,7 @@ validators. Inventories, pinned hashes, and identities stay with their domain.
 
 Move each pin class together.
 
-- **Retained process-marker helper.** `lib/mapped-command-process-identity.mjs` has no caller since ADR 0106 deleted the Sentry broker, but `docs/check-verification-redesign-evidence.mjs` pins its path by name. Keep the file and its tests; a move updates that pin.
+- **Retained process-marker helper.** `lib/mapped-command-process-identity.mjs` has no caller since ADR 0106 deleted the Sentry broker, but `scripts/docs/check-verification-redesign-evidence.mjs` pins its path by name. Keep the file and its tests; a move updates that pin.
 - **Indexer invariant ownership.** `workflows/indexer-handler-invariant-{contract,families}.mjs` supplies the retained checklist contract; root indexer contract tests and CI filters pin these paths.
 - **Review-eval pins.** Runbook: `run-eval*`,
   `install-review-eval-launchd*`, `review-eval-*publication*`,
