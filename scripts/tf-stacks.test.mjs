@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url";
 import "./lib/hcl.test.mjs";
 import "./deploy-staging-contract.test.mjs";
 import "./production-infra-identity-contract/index.test.mjs";
-import "./sentry/gate/sentry-provider-contract.test.mjs";
+import "./alerts/sentry-bridge-contract.test.mjs";
 import "./alerts/check-peg-policy-publication.test.mjs";
 import "./terraform/check-metrics-bridge-template-plan.test.mjs";
 

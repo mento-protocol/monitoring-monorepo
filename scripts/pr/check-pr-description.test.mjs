@@ -6,7 +6,6 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { renderPublicationBody } from "../review/review-eval-publication.mjs";
-import { buildPrBody } from "../sentry/autofix/sentry-autofix-finalize.mjs";
 import { validatePrDescription } from "./check-pr-description.mjs";
 
 const repoRoot = fileURLToPath(new URL("../../", import.meta.url));
@@ -490,10 +489,6 @@ ${filler(1)}
     }),
     /authored PR description is 402 words; the ceiling is 400/,
   );
-});
-
-test("accepts the deterministic Sentry autofix PR body", () => {
-  assertPass(buildPrBody({ shortId: "APP-MENTO-ORG-2S", queueIssue: 1278 }));
 });
 
 test("accepts the review-eval publication body with the report in Details", () => {
