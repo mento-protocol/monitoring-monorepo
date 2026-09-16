@@ -1017,18 +1017,15 @@ output is its summary.
 for the rest. A human can open each link and merge in the GitHub UI. Listing a
 link is not merge approval, and this skill never merges.
 
-Finally, send one spoken line saying the report is ready, through the fallback
-ladder in
+Finally, send one spoken line saying the report is ready, through
 [`spoken-attention-nudge.md`](../../../docs/notes/spoken-attention-nudge.md).
-That note owns the command, the key-file rule, and the `say`/`spd-say`
-fallbacks; do not re-derive them here. Run the nudge with escalated execution
-rather than inside the workspace sandbox — `sag` needs the network and the local
-audio device, and a sandboxed attempt fails in a way that looks like a missing
-command.
+That note owns the `say` command, the session label, and the `spd-say` Linux
+fallback; do not re-derive them here. Run the nudge with escalated execution
+rather than inside the workspace sandbox — `say` needs the local audio device,
+and a sandboxed attempt fails in a way that looks like a missing command.
 
 Keep the spoken text fixed and low-information: no issue numbers, PR numbers,
-paths, or findings. It goes to a third-party service, and the report on disk is
-where the detail belongs.
+paths, or findings. The report on disk is where the detail belongs.
 
 When every spoken path fails, **say so in the report** instead of skipping
 quietly. A sweep that finished overnight and could not announce itself is a

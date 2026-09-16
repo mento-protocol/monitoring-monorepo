@@ -172,22 +172,31 @@ test("accepts the presence-guarded Claude SessionEnd invocation", () => {
 
 console.log("\nClaude Bash permission allowlist");
 
-test("rejects direct and wrapped Claude sag permissions without the canonical key path", () => {
+test("rejects wildcard, wrapped, and compound Claude spoken-nudge permissions", () => {
   const permissions = [
-    'Bash(sag --api-key-file ~/.config/sag/elevenlabs-api-key -v Charlie "hey, i need your approval in the agent chat")',
-    'Bash(sag -v Charlie --api-key-file ~/.config/sag/elevenlabs-api-key "hey, i need your approval in the agent chat")',
-    'Bash(sag speak --api-key-file ~/.config/sag/elevenlabs-api-key -v Charlie "hey, i need your approval in the agent chat")',
+    // Wildcards: the message argument is what must stay literal, because a
+    // shell substitution there speaks whatever it reads.
+    "Bash(say:*)",
+    "Bash(spd-say:*)",
+    'Bash(say "$(cat ~/.ssh/id_rsa)")',
+    'Bash(say "hey, i need your approval in the agent chat":*)',
+    // Wrappers and absolute paths.
+    'Bash(command say "hey, i need your approval in the agent chat")',
+    'Bash(env LANG=C say "hey, i need your approval in the agent chat")',
+    'Bash(/usr/bin/say "hey, i need your approval in the agent chat")',
+    'Bash(/usr/bin/env LANG=C /usr/bin/say "hey, i need your approval in the agent chat")',
+    "Bash(command say:*)",
+    // Compound commands: the reviewed phrase does not license its neighbour.
+    'Bash(echo ready && say "hey, i need your approval in the agent chat")',
+    'Bash(say "hey, i need your approval in the agent chat"; printf %s done)',
+    // Escapes cannot hide the binary name from the check.
+    String.raw`Bash(s\ay "hey")`,
+    "Bash(s''ay \"hey\")",
+    // The retired ElevenLabs path, including the entry this repo granted until
+    // 2026-09-16. It has no reviewed phrase now, so every form fails.
+    'Bash(sag --api-key-file ~/.config/elevenlabs_api_key -v Charlie "hey, i need your approval in the agent chat")',
     "Bash(sag:*)",
-    'Bash(env LANG=C sag --api-key-file ~/.config/other-key -v Charlie "hey, i need your approval in the agent chat")',
     'Bash(command sag -v Charlie "hey, i need your approval in the agent chat")',
-    'Bash(echo ready && sag --api-key-file ~/.config/other-key -v Charlie "hey, i need your approval in the agent chat")',
-    'Bash(/usr/bin/env LANG=C /usr/local/bin/sag --api-key-file ~/.config/other-key -v Charlie "hey, i need your approval in the agent chat")',
-    "Bash(command sag:*)",
-    'Bash(env LANG=C command sag --api-key-file ~/.config/elevenlabs_api_key -v Charlie "hey, i need your approval in the agent chat")',
-    'Bash(command sag --api-key-file=~/.config/elevenlabs_api_key -v Charlie "hey, i need your approval in the agent chat")',
-    'Bash(sag --api-key-file ~/.config/other-key -v Charlie "hey"; printf %s --api-key-file ~/.config/elevenlabs_api_key)',
-    String.raw`Bash(s\ag --api-key-file /tmp/other-key -v Charlie "hey")`,
-    "Bash(s''ag --api-key-file /tmp/other-key -v Charlie \"hey\")",
   ];
 
   for (const permission of permissions) {
@@ -195,21 +204,24 @@ test("rejects direct and wrapped Claude sag permissions without the canonical ke
     assert(
       failures.some((failure) =>
         failure.includes(
-          "sag permissions must include --api-key-file with the canonical ~/.config/elevenlabs_api_key path",
+          "spoken-nudge permissions must match one of the reviewed literal say/spd-say phrases",
         ),
       ),
-      `expected wrapped sag path failure for ${permission}, got ${JSON.stringify(failures)}`,
+      `expected spoken-nudge failure for ${permission}, got ${JSON.stringify(failures)}`,
     );
   }
 });
 
-test("accepts the reviewed single-command Claude sag permissions", () => {
+test("accepts the reviewed single-command Claude spoken-nudge permissions", () => {
   assertNoFailures(
     runContract({
       allow: [
-        'Bash(sag --api-key-file ~/.config/elevenlabs_api_key -v Charlie "hey, i need your feedback in the agent chat")',
-        'Bash(sag --api-key-file ~/.config/elevenlabs_api_key -v Charlie "hey, i need your approval in the agent chat")',
-        'Bash(sag --api-key-file ~/.config/elevenlabs_api_key -v Charlie "hey, the task finished and needs your attention in the agent chat")',
+        'Bash(say "hey, i need your feedback in the agent chat")',
+        'Bash(say "hey, i need your approval in the agent chat")',
+        'Bash(say "hey, the task finished and needs your attention in the agent chat")',
+        'Bash(spd-say "hey, i need your feedback in the agent chat")',
+        'Bash(spd-say "hey, i need your approval in the agent chat")',
+        'Bash(spd-say "hey, the task finished and needs your attention in the agent chat")',
       ],
     }),
   );
@@ -218,7 +230,9 @@ test("accepts the reviewed single-command Claude sag permissions", () => {
 test("rejects every unreviewed Claude Bash permission", () => {
   const permissions = [
     "Bash(pnpm agent:quality-gate:*)",
+    'Bash(cmd=say; "$cmd" "hey")',
     'Bash(cmd=sag; "$cmd" --api-key-file /tmp/other-key -v Charlie "hey")',
+    "Bash(echo sayonara)",
     "Bash(echo sagacious)",
   ];
 
