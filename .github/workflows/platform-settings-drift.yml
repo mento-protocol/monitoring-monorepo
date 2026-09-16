@@ -78,8 +78,15 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
+          # A warning, not a notice: an inert run is GREEN, and the most likely
+          # cause is that the `platform-settings-drift` Environment was
+          # auto-created unprotected because the workflow reference reached
+          # `main` before the platform apply (ADR 0106 rename; see
+          # terraform/github-environment.tf "ROLLOUT ORDER"). A green run in
+          # which the #1564 invariant was never read must be visible in the run
+          # list, not only in the log.
           if [ -z "${AUDIT_TOKEN}" ]; then
-            echo "::notice::PLATFORM_SETTINGS_AUDIT_TOKEN not provisioned — platform-settings drift check is inert (see terraform/github-environment.tf)."
+            echo "::warning::PLATFORM_SETTINGS_AUDIT_TOKEN not provisioned — platform-settings drift check is INERT and the read-only default-workflow-token invariant was NOT checked (see terraform/github-environment.tf)."
             echo "state=inert" >> "$GITHUB_OUTPUT"
             exit 0
           fi

@@ -45,6 +45,29 @@
 # migration plan: apply this file's resources first (repo-level secrets in
 # github-secrets.tf stay in place for that apply), then land the workflow
 # references and the repo-level secret removals.
+#
+# THAT ORDER IS NOT AUTOMATIC FOR THE ADR 0106 RENAME, and the rename is a
+# DESTROY-AND-CREATE: the environment name is the resource's identity on
+# GitHub, so no `moved` block applies. `platform-settings-drift.yml` carries
+# `environment: platform-settings-drift` in the same change, so a plain merge
+# would auto-create the environment unprotected, with no
+# PLATFORM_SETTINGS_AUDIT_TOKEN in it, and the scheduled audit would take its
+# `state=inert` path — a GREEN run in which the #1564 invariant is not checked.
+# The apply is a manual human apply on the platform stack, so the operator
+# closes the window by hand, in this order:
+#
+#   1. From the PR branch, `terraform -chdir=terraform apply`. This destroys
+#      `sentry-pipeline` and creates `platform-settings-drift` with its
+#      main-only policy and the audit-token secret.
+#   2. Merge the PR immediately. Between 1 and 2 the workflow on `main` still
+#      names `sentry-pipeline`, which no longer exists, so a scheduled run in
+#      that window is inert — keep the window under one 05:41 UTC cron tick.
+#   3. Verify the next scheduled run of `platform-settings-drift.yml` reports
+#      `state=ok`, not `state=inert`. An inert run means the secret did not
+#      reach the job; do not read a green inert run as a passing audit.
+#
+# The inert branch of that workflow emits a ::warning:: annotation so step 3
+# is visible in the run list rather than only in the log.
 
 resource "github_repository_environment" "platform_settings_drift" {
   repository  = "monitoring-monorepo"

@@ -135,6 +135,13 @@ Boundaries of the decision:
   Any future environment introduced this way must land applied-and-protected
   before its first workflow reference merges. ADR 0106's rename of
   `sentry-pipeline` to `platform-settings-drift` is subject to the same order.
+  It satisfies it without splitting into two PRs: the platform stack is a
+  manual human apply, so the operator applies it from the PR branch and merges
+  immediately, then confirms the next scheduled `platform-settings-drift` run
+  reports `state=ok` rather than the green `state=inert` no-op. That procedure
+  is written out at `terraform/github-environment.tf` "ROLLOUT ORDER". Use the
+  two-PR shape wherever the apply is automated and the operator cannot hold the
+  window closed by hand.
 
 ## Alternatives considered
 

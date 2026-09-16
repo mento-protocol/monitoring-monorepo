@@ -100,6 +100,20 @@ only the thing holding the credentials changed.
   an _unprotected_ environment if the protected one does not exist yet, so the
   platform stack must be applied before this PR's workflow change reaches
   `main`. The platform stack is a manual human apply.
+- **The rename is a destroy-and-create, and this PR carries both phases.** The
+  environment name is the resource's identity on GitHub, so no `moved` block
+  applies, and `platform-settings-drift.yml` already names the new environment
+  in the same change. ADR 0050's two-phase shape normally splits that across
+  two PRs; here the operator closes the window by hand instead, because the
+  platform stack is a manual apply and a split would leave a Sentry-named
+  environment live behind a Sentry-removal PR. The order, also recorded at
+  `terraform/github-environment.tf` "ROLLOUT ORDER": (1) apply the platform
+  stack from this branch; (2) merge immediately, keeping the window under one
+  05:41 UTC cron tick; (3) verify the next scheduled `platform-settings-drift`
+  run reports `state=ok`, not `state=inert`. Getting it wrong is silent by
+  default — the workflow no-ops on an unprovisioned secret and exits green — so
+  its inert branch now emits a `::warning::` annotation naming the invariant it
+  did not check.
 - **Deleting resources does not revoke credentials.** The Sentry triage,
   archive and projection tokens and the `sentry-autofix` GitHub App private key
   must be revoked out of band after merge. The bridge's `sentry_auth_token`
@@ -135,9 +149,18 @@ only the thing holding the credentials changed.
   `scripts/sentry/**`, `alerts/infra/sentry-ingest-watcher/**`,
   `alerts/infra/sentry-triage-channel.tf`,
   `docs/notes/sentry-triage-pipeline.md`.
-- Relocated rather than deleted: the `ci` sentinel predicates to
-  `scripts/workflows/ci-sentinel-core.mjs`, and the bridge's provider contract
-  to `scripts/alerts/sentry-bridge-contract.test.mjs`.
+- Relocated rather than deleted: eight of the twelve `ci` sentinel predicates
+  to `scripts/workflows/ci-sentinel-core.mjs`, and the bridge's provider
+  contract to `scripts/alerts/sentry-bridge-contract.test.mjs`. The eight are
+  `isPlainObject`, `envMutationBlockers`, `withInput`, `parseActionList`,
+  `sentinelBlockers`, `contextOwnershipBlockers`, `triggerBlockers` and
+  `pinValidationOrderBlockers`; `check-ci-contract.mjs` calls the last three,
+  over every workflow file, over ci.yml's `on:` triggers, and over
+  `["scripts", "docs-checks", "production-infra-contract"]` respectively, with
+  mutation probes in `check-ci-contract.test.mjs`. The four not carried —
+  `workflowBlockers`, `jobBlockers`, `provenCommands`, `nearMisses` — are named
+  in that module's header beside the `check-ci-contract.mjs` assertion that
+  already proves each one's property over a closed job set.
 - Terraform: `terraform/github-environment.tf` now declares
   `platform-settings-drift` in place of `sentry-pipeline`; the identity contract
   in `scripts/production-infra-identity-contract/` pins the new shape.
