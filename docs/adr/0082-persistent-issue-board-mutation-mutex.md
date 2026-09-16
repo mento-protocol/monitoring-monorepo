@@ -501,11 +501,19 @@ membership by the selected Project ID. It skips the mutex only when the issue is
 open, has one exact queue label, and already belongs to that Project. A missing
 open item is added under the mutex. The add must return the selected item ID.
 Sync does not inspect or change Project Status. Every possible item add or label
-cleanup acquires the mutex and re-reads the issue under that lock. A closed issue
+cleanup acquires the mutex and re-reads the issue under that lock. It also
+reclassifies the issue before it changes the Project item or labels, and after
+each open-state projection it re-reads the issue and reprojects bounded
+concurrent state changes. A closed issue
 cleanup verifies that the issue remains closed and that all queue labels are
 absent. A concurrent reopen restores the exact queue label observed before
 cleanup when possible. An ambiguous restore uses `needs-grooming` and preserves
-any concurrent conflict.
+any concurrent conflict. A restore that knows only an older enumerated queue
+label takes the same `needs-grooming` fallback. When a post-cleanup check fails,
+sync makes bounded attempts to restore that retry state before exit, which keeps
+the issue visible without granting stale claim, review, or release authority.
+Sync fails when a closed issue retains a queue label or when state does not
+settle within those attempts.
 A per-issue failure does not stop later issues. Sync lists the successful and
 failed issue numbers and exits nonzero after it processes the list.
 
