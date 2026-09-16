@@ -59,11 +59,6 @@ Authority: non-canonical
 - [`.claude/commands/babysit-indexer-deploy.md`](../.claude/commands/babysit-indexer-deploy.md); sources: [`.agents/skills/deploy-indexer/SKILL.md`](../.agents/skills/deploy-indexer/SKILL.md); [`docs/deployment.md`](deployment.md)
 - [`.claude/commands/verify-ui.md`](../.claude/commands/verify-ui.md); sources: [`docs/notes/dashboard-verification.md`](notes/dashboard-verification.md)
 
-Authority: unmanaged
-
-- [`.github/prompts/sentry-autofix.md`](../.github/prompts/sentry-autofix.md) (unmanaged)
-- [`.github/prompts/sentry-triage.md`](../.github/prompts/sentry-triage.md) (unmanaged)
-
 ## operator-runbooks
 
 Authority: canonical
@@ -95,7 +90,6 @@ Authority: canonical
 - [`docs/notes/pr-ready-state.md`](notes/pr-ready-state.md)
 - [`docs/notes/quick-commands.md`](notes/quick-commands.md)
 - [`docs/notes/reserve-yield-indexer.md`](notes/reserve-yield-indexer.md)
-- [`docs/notes/sentry-triage-pipeline.md`](notes/sentry-triage-pipeline.md)
 - [`docs/notes/slack-github-subscriptions.md`](notes/slack-github-subscriptions.md)
 - [`docs/notes/spoken-attention-nudge.md`](notes/spoken-attention-nudge.md)
 - [`docs/notes/stacked-pull-requests.md`](notes/stacked-pull-requests.md)
@@ -168,9 +162,7 @@ Authority: canonical
 - [`adr/0033-adr-process-and-gate.md`](adr/0033-adr-process-and-gate.md) — Architectural decisions are recorded as ADRs, enforced by a reminder gate
 - [`adr/0034-steth-wallet-daily-sampler.md`](adr/0034-steth-wallet-daily-sampler.md) — stETH actuals use a launch-aligned sub-daily wallet balance sampler
 - [`adr/0035-config-public-npm-package.md`](adr/0035-config-public-npm-package.md) — shared-config publishes as the public @mento-protocol/config package
-- [`adr/0036-sentry-triage-pipeline.md`](adr/0036-sentry-triage-pipeline.md) — Sentry triage/autofix runs as a staged GitHub Actions agent pipeline with a GitHub-Issue queue
 - [`adr/0037-dashboard-graphql-zod-mini.md`](adr/0037-dashboard-graphql-zod-mini.md) — Native GraphQL transport and client-side Zod Mini for the dashboard
-- [`adr/0038-sentry-central-plane-verdict-projection.md`](adr/0038-sentry-central-plane-verdict-projection.md) — Central Sentry triage plane with owning-repo verdict projection
 - [`adr/0039-multistrategy-pools-historical-fx-volume.md`](adr/0039-multistrategy-pools-historical-fx-volume.md) — Model pool strategies many-to-many and price same-currency swaps from historical FX crosses
 - [`adr/0040-bounded-documentation-garden-queue.md`](adr/0040-bounded-documentation-garden-queue.md) — Documentation gardening runs through one bounded issue queue
 - [`adr/0041-offline-documentation-navigation-evaluation.md`](adr/0041-offline-documentation-navigation-evaluation.md) — Documentation navigation is evaluated offline with deterministic scoring
@@ -188,18 +180,15 @@ Authority: canonical
 - [`adr/0053-explicit-deployment-source-staging.md`](adr/0053-explicit-deployment-source-staging.md) — Routine GCP deploys use explicit source-staging buckets
 - [`adr/0054-same-project-peg-policy-artifact.md`](adr/0054-same-project-peg-policy-artifact.md) — Peg policy stays private in the monitoring project
 - [`adr/0055-peg-policy-bucket-controller-recovery.md`](adr/0055-peg-policy-bucket-controller-recovery.md) — Peg policy bucket controller recovers authoritative IAM reconciliation
-- [`adr/0056-agent-mcp-credential-broker.md`](adr/0056-agent-mcp-credential-broker.md) — An untrusted agent's MCP credentials sit behind a loopback broker, not in its env
 - [`adr/0057-peg-observation-advancement.md`](adr/0057-peg-observation-advancement.md) — Repeated Peg provider observations retain bounded health, never sample authority
 - [`adr/0058-metrics-bridge-dedicated-cloud-build-executor.md`](adr/0058-metrics-bridge-dedicated-cloud-build-executor.md) — Metrics Bridge uses a dedicated Cloud Build executor
 - [`adr/0059-repo-owned-file-size-watchlist-scheduler.md`](adr/0059-repo-owned-file-size-watchlist-scheduler.md) — File-size watchlist scheduling is repository-owned and issue-only
 - [`adr/0060-upstash-management-key-bootstrap.md`](adr/0060-upstash-management-key-bootstrap.md) — Upstash management API keys use a human-owned bootstrap integration
 - [`adr/0061-exact-plan-guard-for-manual-platform-applies.md`](adr/0061-exact-plan-guard-for-manual-platform-applies.md) — Manual platform applies use an exact private plan guard
-- [`adr/0062-sentry-suites-self-run-gate.md`](adr/0062-sentry-suites-self-run-gate.md) — An unconditional gate job runs the Sentry suites and proves from their output that they asserted
 - [`adr/0063-dashboard-grafana-history-read-access.md`](adr/0063-dashboard-grafana-history-read-access.md) — Peg history reads Grafana Cloud through a dedicated read-only token
 - [`adr/0064-scripts-module-directories.md`](adr/0064-scripts-module-directories.md) — scripts/ may use module subdirectories; basenames and pinned paths are the constraint
 - [`adr/0065-scripts-file-size-watchlist-scope.md`](adr/0065-scripts-file-size-watchlist-scope.md) — scripts/ is inside the file-size watchlist, with named-mechanism exemptions
 - [`adr/0066-coderabbit-replaces-bugbot-third-reviewer.md`](adr/0066-coderabbit-replaces-bugbot-third-reviewer.md) — CodeRabbit replaces Cursor BugBot as the third PR review bot
-- [`adr/0070-sentry-requeue-settlement-sentinel.md`](adr/0070-sentry-requeue-settlement-sentinel.md) — A withheld terminal label serializes the Sentry archive settlement against the triage re-queue
 - [`adr/0071-susds-launch-aligned-daily-sampler.md`](adr/0071-susds-launch-aligned-daily-sampler.md) — sUSDS actuals use a launch-aligned bounded daily sampler
 - [`adr/0072-md-only-docs-checks-job.md`](adr/0072-md-only-docs-checks-job.md) — The Markdown globs route to a small docs-checks CI job instead of the scripts job
 - [`adr/0073-guardrail-prose-pinned-in-ci.md`](adr/0073-guardrail-prose-pinned-in-ci.md) — Normative guardrail sentences are pinned in CI, and scripts are not
@@ -229,14 +218,20 @@ Authority: canonical
 - [`adr/0103-virtualpool-broker-trading-limits.md`](adr/0103-virtualpool-broker-trading-limits.md) — VirtualPool trading limits come from block-pinned, freshness-gated Broker state reads
 - [`adr/0104-non-strict-required-status-checks.md`](adr/0104-non-strict-required-status-checks.md) — Non-strict required status checks for main
 - [`adr/0105-replayed-events-are-handler-layer-no-ops.md`](adr/0105-replayed-events-are-handler-layer-no-ops.md) — Replayed SortedOracles events are handler-layer no-ops; the pure guards stay fail-closed
+- [`adr/0106-sentry-triage-moves-to-operator-skills.md`](adr/0106-sentry-triage-moves-to-operator-skills.md) — Sentry triage and autofix move from a CI pipeline to operator-run skills
 
 Authority: non-canonical
 
 - [`adr/0007-agent-quality-gate-and-merge-oracle.md`](adr/0007-agent-quality-gate-and-merge-oracle.md) — Local agent quality gate plus two-projection PR all-clear and Codex gate (archived)
 - [`adr/0020-swr-polling-read-model.md`](adr/0020-swr-polling-read-model.md) — Read model is SWR polling plus bounded snapshot composition at current scale (archived)
+- [`adr/0036-sentry-triage-pipeline.md`](adr/0036-sentry-triage-pipeline.md) — Sentry triage/autofix runs as a staged GitHub Actions agent pipeline with a GitHub-Issue queue (archived)
+- [`adr/0038-sentry-central-plane-verdict-projection.md`](adr/0038-sentry-central-plane-verdict-projection.md) — Central Sentry triage plane with owning-repo verdict projection (archived)
+- [`adr/0056-agent-mcp-credential-broker.md`](adr/0056-agent-mcp-credential-broker.md) — An untrusted agent's MCP credentials sit behind a loopback broker, not in its env (archived)
+- [`adr/0062-sentry-suites-self-run-gate.md`](adr/0062-sentry-suites-self-run-gate.md) — An unconditional gate job runs the Sentry suites and proves from their output that they asserted (archived)
 - [`adr/0067-depletion-alerts.md`](adr/0067-depletion-alerts.md) — Depletion alerts (archived)
 - [`adr/0068-sentry-fixture-authoring-policy.md`](adr/0068-sentry-fixture-authoring-policy.md) — Adversarial fixtures are authored to scan clean; no value or line registry (archived)
 - [`adr/0069-gate-routing-table-as-data.md`](adr/0069-gate-routing-table-as-data.md) — The quality gate's routing table is data, compiled by the repo's own bash-case translator (archived)
+- [`adr/0070-sentry-requeue-settlement-sentinel.md`](adr/0070-sentry-requeue-settlement-sentinel.md) — A withheld terminal label serializes the Sentry archive settlement against the triage re-queue (archived)
 - [`adr/0075-pr-merge.md`](adr/0075-pr-merge.md) — One sanctioned operator merge path (archived)
 - [`adr/0076-fair-quality-gate-coordinator.md`](adr/0076-fair-quality-gate-coordinator.md) — Fair local quality-gate coordination across worktrees (archived)
 - [`adr/0079-sealed-exact-file-patch-secret-suppression.md`](adr/0079-sealed-exact-file-patch-secret-suppression.md) — Autoreview permits only sealed exact-file-patch secret suppression (archived)

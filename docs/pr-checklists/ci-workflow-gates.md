@@ -33,7 +33,6 @@ The word "required" means **enforced by the `main` branch ruleset**, not "feels 
 - `ci` (the CI sentinel job)
 - `Code Quality` (the Trunk workflow's job)
 - `Vercel` and `Vercel Preview Comments` (the Vercel platform)
-- `Sentry suites` (the credential-safe Sentry regression job)
 
 Verify the live list before relying on this:
 
@@ -341,12 +340,19 @@ Decision framework for `runs-on`:
 
 ## 10. Autofix CI trust boundary — machine-authored PRs are untrusted
 
-Sentry-autofix PRs (head branch `sentry-autofix/*`) are same-repo, non-fork,
+PRs on the head branch `sentry-autofix/*` are same-repo, non-fork,
 non-Dependabot — they pass every historical CI trust check — but their diffs
-are machine-authored from untrusted Sentry input, so any secret a `pull_request`
-job exposes to their PR-head code is an exfiltration channel (issue #1388).
-`scripts/workflows/check-autofix-ci-trust.mjs` enforces this structurally in the
-`scripts` CI job. It parses the workflow with `js-yaml` and analyzes the parsed
+were machine-authored from untrusted Sentry input, so any secret a
+`pull_request` job exposes to their PR-head code is an exfiltration channel
+(issue #1388). `scripts/workflows/check-autofix-ci-trust.mjs` enforces this
+structurally in the `scripts` CI job.
+
+[ADR 0106](../adr/0106-sentry-triage-moves-to-operator-skills.md) deleted the
+autofix leg, so nothing creates that branch any more and the guards below are
+inert. They stay because the checker is what enforces them, and because the same
+checker carries the repo-wide `pull_request_target` refusal. Treat this section
+as live: it still governs where a new secret-bearing lane may go. Retiring the
+namespace is a separate task. It parses the workflow with `js-yaml` and analyzes the parsed
 structure, so exotic-but-valid YAML (anchors, `\uXXXX` escapes, block scalars,
 flow/JSON roots) cannot slip a trigger or secret past it; unparsable YAML fails
 closed.

@@ -146,7 +146,7 @@ Worked examples:
 
 ### CI workflow gates — [checklist](ci-workflow-gates.md)
 
-tldr: **ruleset-required** workflows (`ci`, `Code Quality`, `Sentry suites`, the Vercel checks) MUST NOT use `paths:`/`paths-ignore:` (skipped runs = pending forever); **advisory** workflows SHOULD use `paths:` to avoid booting a runner on irrelevant PRs (CI-cost control). Deploy jobs MUST gate on `if: github.ref == 'refs/heads/main'`. Third-party actions MUST be SHA-pinned; `node scripts/workflows/check-github-action-pins.mjs` enforces this in Code Quality. Concurrency group with `cancel-in-progress: false`. Cache keys MUST include every input that affects the cached output. Full rules in the linked checklist.
+tldr: **ruleset-required** workflows (`ci`, `Code Quality`, the Vercel checks) MUST NOT use `paths:`/`paths-ignore:` (skipped runs = pending forever); **advisory** workflows SHOULD use `paths:` to avoid booting a runner on irrelevant PRs (CI-cost control). Deploy jobs MUST gate on `if: github.ref == 'refs/heads/main'`. Third-party actions MUST be SHA-pinned; `node scripts/workflows/check-github-action-pins.mjs` enforces this in Code Quality. Concurrency group with `cancel-in-progress: false`. Cache keys MUST include every input that affects the cached output. Full rules in the linked checklist.
 
 ### Marker-based setup/cache scripts
 
@@ -242,9 +242,6 @@ tldr: **ruleset-required** workflows (`ci`, `Code Quality`, `Sentry suites`, the
   assertion. Run and update both suites when it is. `MAX_HANDLED_ID_QUERIES`
   feeds the finalize suite's timeout pin as well as the selector behavior.
 - Add the module to the machine-enforced file-size test covering its area. If review is what catches a cap breach, the machinery didn't — the autofix modules were absent from that list while the triage ones were on it.
-- Sentry legs only: do NOT add a new `scripts/sentry-*.test.mjs` for a split. A
-  new suite file triggers the registration cascade for the manifest floor and
-  `ci.yml`. Put the tests in an existing suite.
 - For a pure split, prove behaviour is unchanged rather than asserting it, with a harness suited to the subsystem. **CLI or script splits:** drive the entry point across its paths against a stub binary, run the identical harness against `git archive` of the pre-split tree, and diff stdout, stderr, exit codes and every generated file. **UI, library or Terraform splits:** the equivalent is the suite the module already owns — visual snapshots, a type surface, or `terraform plan` showing no diff. The requirement is a before/after comparison a reviewer can re-run, not a particular tool.
 
 ### Security / CSP

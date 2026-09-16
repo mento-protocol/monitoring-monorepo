@@ -320,7 +320,7 @@ Two `pkg:tooling` candidates are independent when all three hold:
 
 - each body names its expected files or directories;
 - no path either body names equals or contains a path the other names, compared
-  on whole path segments — `scripts/pr/` against `scripts/sentry/` is disjoint,
+  on whole path segments — `scripts/pr/` against `scripts/workflows/` is disjoint,
   `docs/` against `docs/notes/` is not, because the first contains the second
   and two workers would edit one file;
 - neither names a shared root file or a control root: `package.json`,

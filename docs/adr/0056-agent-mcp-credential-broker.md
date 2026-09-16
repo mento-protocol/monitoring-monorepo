@@ -1,9 +1,10 @@
 ---
 title: An untrusted agent's MCP credentials sit behind a loopback broker, not in its env
-status: active
+status: archived
 owner: eng
-canonical: true
-last_verified: 2026-08-10
+canonical: false
+last_verified: 2026-09-16
+superseded_by: ADR-0106
 scope: ci/process
 date: 2026-07
 doc_type: adr
@@ -13,9 +14,18 @@ garden_lane: adrs-architecture
 
 # ADR 0056 — An untrusted agent's MCP credentials sit behind a loopback broker, not in its env
 
-**Status:** Accepted (Jul 2026), in force.
+**Status:** Superseded by
+[ADR 0106](0106-sentry-triage-moves-to-operator-skills.md) (Sep 2026).
+Historical decision retained.
 **Scope:** ci/process (the Sentry triage agent first; the pattern for any future
 MCP credential handed to an untrusted agent).
+
+**The broker is deleted with its only consumer.** ADR 0106 retires the CI
+triage agent, and an operator session reaches Sentry through its own MCP server
+under the operator's credentials, so there is no server-side secret to keep out
+of an unattended agent's environment. The pattern below stands on its own and is
+worth re-reading before any future MCP credential is handed to an untrusted
+agent; nothing in the tree implements it today.
 
 ## Context
 
@@ -172,8 +182,9 @@ start is theatre. The variable must be absent when the process is exec'd. So:
   `{sentry.io, us.sentry.io, de.sentry.io}` and the steering bypass reproduces.
 - Enforced by `scripts/sentry/broker/sentry-mcp-broker.mjs`,
   `scripts/sentry/broker/sentry-mcp-broker.test.mjs` (fail-closed and mutation-checked), and
-  `.github/workflows/sentry-triage-agent.yml`. Operator detail in
-  [`docs/notes/sentry-triage-pipeline.md`](../notes/sentry-triage-pipeline.md).
+  `.github/workflows/sentry-triage-agent.yml`. All three were deleted by
+  [ADR 0106](0106-sentry-triage-moves-to-operator-skills.md), along with the
+  operator runbook this line linked.
 - Broker readiness is not the whole toolchain. The credential path can be
   healthy while the MCP server itself never registers, and that failure is
   silent: the CLI initialises without the server and the agent simply has no

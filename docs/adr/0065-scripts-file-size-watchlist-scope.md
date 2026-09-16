@@ -3,7 +3,7 @@ title: scripts/ is inside the file-size watchlist, with named-mechanism exemptio
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-27
+last_verified: 2026-09-16
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -60,8 +60,7 @@ first; `scripts/` has no generated tree today, so nothing is lost to it.
 **Tests are excluded, as in every scope but Aegis.** Package configs set
 `max-lines: off` for tests, and `scripts/` tests inherit that rule rather than a
 new one. The reason is not only consistency: splitting a `scripts/` suite is
-per-file work a size row cannot describe. A Sentry suite's pass-count floor in
-`sentry-suite-manifest.json` must be re-measured; an enumerated `ci.yml`
+per-file work a size row cannot describe. An enumerated `ci.yml`
 paths-filter must gain the new basename or the job silently stops running;
 `deploy-staging-contract.test.mjs` is the single path the callsite contract
 excludes from self-scanning, so a sibling holding its inert examples fails the
@@ -211,10 +210,9 @@ that nothing holds in place.
   own files stay under the file-size hard cap"
 - The retired trust-root pins that justified the three original exemptions:
   [ADR 0087](0087-autoreview-removal-thin-two-model-review.md)
-- Test-split costs behind the exclusion:
-  [`scripts/sentry/gate/sentry-suite-manifest.json`](../../scripts/sentry/gate/sentry-suite-manifest.json)
-  and [ADR 0062](0062-sentry-suites-self-run-gate.md); `verifyExemptRoute` in
-  `scripts/sentry/gate/sentry-suite-gate.mjs`; `CONTRACT_FIXTURE` in
+- Test-split costs behind the exclusion: the Sentry suite manifest and gate
+  ([ADR 0062](0062-sentry-suites-self-run-gate.md), both deleted by
+  [ADR 0106](0106-sentry-triage-moves-to-operator-skills.md)); `CONTRACT_FIXTURE` in
   `scripts/deploy-staging-callsite-discovery.mjs` and
   [ADR 0053](0053-explicit-deployment-source-staging.md); the silent-skip
   failure mode of enumerated paths-filters in

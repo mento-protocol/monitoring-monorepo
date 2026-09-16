@@ -1,9 +1,10 @@
 ---
 title: A withheld terminal label serializes the Sentry archive settlement against the triage re-queue
-status: active
+status: archived
 owner: eng
-canonical: true
-last_verified: 2026-08-21
+canonical: false
+last_verified: 2026-09-16
+superseded_by: ADR-0106
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -13,8 +14,17 @@ garden_lane: adrs-architecture
 
 # ADR 0070 — The archive's terminal marker is withheld from the re-queue's shed, and read back as a sentinel
 
-**Status:** Accepted (Aug 2026), in force.
+**Status:** Superseded by
+[ADR 0106](0106-sentry-triage-moves-to-operator-skills.md) (Sep 2026).
+Historical decision retained.
 **Scope:** ci/process
+
+**The race this sentinel settles cannot happen any more.** ADR 0106 deletes the
+archive and re-queue legs, and with them the two concurrent writers the withheld
+terminal label serialized. An operator session triages one issue at a time under
+a human, so there is no second writer to lose to. The technique — withhold the
+terminal marker from the shed, then read it back as a sentinel — is recorded
+below for the next place two unlockable writers meet.
 
 ## Context
 

@@ -91,9 +91,9 @@ The system has four principal data paths:
 3. **Event and incident path:** discrete events bypass the metric path.
    QuickNode and governance handlers deliver through their owning Cloud
    Functions. The Sentry-to-Slack bridge is configured directly through the
-   Sentry and Slack providers, with no function in that path; scheduled Sentry
-   workflows separately triage incidents into GitHub issues and eligible
-   autofix PRs.
+   Sentry and Slack providers, with no function in that path. Triaging a Sentry
+   issue into a GitHub issue and a fix PR is an operator task run from the
+   `sentry-triage` and `sentry-fix` skills, not a workflow in this repository.
 4. **Integration-health path:** scheduled read-only quote probes publish a
    bounded snapshot to Upstash for the dashboard.
 
@@ -102,7 +102,7 @@ The governing decisions are
 [ADR 0001](./docs/adr/0001-monorepo-independent-deploys.md),
 [ADR 0003](./docs/adr/0003-hasura-graphql-read-api.md),
 [ADR 0004](./docs/adr/0004-two-alert-planes.md), and
-[ADR 0036](./docs/adr/0036-sentry-triage-pipeline.md).
+[ADR 0106](./docs/adr/0106-sentry-triage-moves-to-operator-skills.md).
 
 ## Runtime boundaries
 
@@ -117,7 +117,6 @@ The governing decisions are
 | Metric rules and routing   | Grafana rules, contact points, templates, mute timings        | Grafana Cloud                | [`alerts/AGENTS.md`](./alerts/AGENTS.md)                                     |
 | Event delivery             | QuickNode handler and on-call rotation announcer              | Cloud Functions              | [`alerts/AGENTS.md`](./alerts/AGENTS.md)                                     |
 | Sentry notification bridge | Direct Sentry-to-Slack alert and channel configuration        | Terraform providers          | [`sentry-bridge/README.md`](./alerts/infra/channels/sentry-bridge/README.md) |
-| Sentry triage and autofix  | Incident ingest, issue projection, and eligible fix PRs       | GitHub Actions               | [ADR 0036](./docs/adr/0036-sentry-triage-pipeline.md)                        |
 | Governance watchdog        | Governance event notifications                                | Cloud Function               | [`governance-watchdog/README.md`](./governance-watchdog/README.md)           |
 | Integration probes         | Read-only aggregator and router coverage snapshots            | GitHub Actions and Upstash   | [`integration-probes/AGENTS.md`](./integration-probes/AGENTS.md)             |
 
@@ -182,8 +181,9 @@ The two alert planes are intentionally separate:
   expressions; and the same Terraform root owns contact points, routing,
   templates, and mute timings.
 - **Event and incident delivery:** `alerts/infra/` owns QuickNode-to-Slack
-  delivery, the Sentry bridge, and the on-call rotation announcer. Scheduled
-  Sentry workflows own issue projection and autofix PRs.
+  delivery, the Sentry bridge, and the on-call rotation announcer. Sentry issue
+  triage and fix PRs are operator-run and live outside this repository
+  ([ADR 0106](./docs/adr/0106-sentry-triage-moves-to-operator-skills.md)).
   `governance-watchdog/` independently owns governance delivery to
   Discord/Telegram.
 

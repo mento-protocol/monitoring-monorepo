@@ -1,9 +1,10 @@
 ---
 title: Central Sentry triage plane with owning-repo verdict projection
-status: active
+status: archived
 owner: eng
-canonical: true
-last_verified: 2026-08-23
+canonical: false
+last_verified: 2026-09-16
+superseded_by: ADR-0106
 scope: ci/process
 date: 2026-07
 doc_type: adr
@@ -13,9 +14,17 @@ garden_lane: adrs-architecture
 
 # ADR 0038 — Central Sentry triage plane with owning-repo verdict projection
 
-**Status:** Accepted (Jul 2026), in force. Refines
+**Status:** Superseded by
+[ADR 0106](0106-sentry-triage-moves-to-operator-skills.md) (Sep 2026).
+Historical decision retained. Refined
 [ADR 0036](0036-sentry-triage-pipeline.md) Stage C ("phased mutations").
 **Scope:** ci/process
+
+**The central triage plane is deleted.** ADR 0106 moves projection into the
+operator-run `sentry-triage` skill, which files the owning-repo issue from the
+session's own GitHub credentials instead of a CI-held `SENTRY_PROJECTION_TOKEN`.
+The projected-issue format below is ported byte for byte into that skill, so the
+shape this ADR fixes still holds; only the writer changed.
 
 **Current refinement:** [ADR 0050](0050-environment-scoped-pipeline-secrets.md)
 moved `SENTRY_PROJECTION_TOKEN` from repository scope to the main-only

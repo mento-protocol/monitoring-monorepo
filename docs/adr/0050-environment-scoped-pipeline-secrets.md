@@ -3,7 +3,7 @@ title: Pipeline secrets are gated by a Terraform-managed GitHub Environment
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-26
+last_verified: 2026-09-16
 scope: terraform / ci
 date: 2026-07
 doc_type: adr
@@ -17,8 +17,14 @@ garden_lane: adrs-architecture
 its first implementation used a branch-policy mechanism that does not work in
 this repo and silently failed open; see "Correction" below and
 [#1649](https://github.com/mento-protocol/monitoring-monorepo/issues/1649).
-**Scope:** terraform / ci (Sentry pipeline first; the pattern for future
-secret-bearing scheduled workflows).
+**Scope:** terraform / ci (the pattern for every secret-bearing scheduled
+workflow).
+
+Amended 2026-09-16: [ADR 0106](0106-sentry-triage-moves-to-operator-skills.md)
+retired the Sentry pipeline this pattern was built for. The decision stands and
+now gates `platform-settings-drift`, `production-infra` and
+`production-services`; the Sentry examples have been replaced with the surviving
+ones.
 
 ## Correction (2026-07-27) — use an explicit branch pattern
 
@@ -61,12 +67,12 @@ verified.
 
 ## Context
 
-The Sentry triage/autofix pipeline (ADR 0036) holds five repo-level Actions
-secrets, including the autofix App private key, which mints Contents:R/W +
-Pull-requests:R/W installation tokens. Repo-level secrets are readable by any
-workflow run in the repository — including a `workflow_dispatch` of a feature
-branch whose copy of the workflow file was rewritten to drop its
-`if: github.ref == 'refs/heads/main'` guard. The guard is evaluated from the
+Scheduled workflows hold high-value repo-level Actions secrets — at the time
+this was written, five of them, including a GitHub App private key that minted
+Contents:R/W + Pull-requests:R/W installation tokens. Repo-level secrets are
+readable by any workflow run in the repository — including a
+`workflow_dispatch` of a feature branch whose copy of the workflow file was
+rewritten to drop its `if: github.ref == 'refs/heads/main'` guard. The guard is evaluated from the
 dispatched ref, so it is a convention the branch author controls, not a
 boundary (issue #1289).
 
@@ -77,7 +83,7 @@ before the job starts — independent of the branch's workflow content.
 
 ## Decision
 
-Sentry-pipeline secrets move from repo scope to a `sentry-pipeline` GitHub
+A secret-bearing scheduled workflow's secrets move from repo scope to a GitHub
 Environment whose deployment-branch policy allows `main` only. The environment
 and its secrets are **Terraform-managed** (`terraform/github-environment.tf`,
 platform stack) — the secrets were already IaC-owned (ADR 0030), so their gate
@@ -91,14 +97,15 @@ is too, and every platform apply reconciles drift.
 
 Boundaries of the decision:
 
-- **No required reviewers or wait timer.** The pipeline is unattended and
-  scheduled; a reviewer gate would stall every run. The `main` branch pattern is
-  the control.
+- **No required reviewers or wait timer** on an unattended environment. A
+  reviewer gate would stall every scheduled run, so the `main` branch pattern is
+  the control. `production-infra` is the exception: it declares a reviewer
+  because a human approves every production apply (ADR 0029).
 - **`can_admins_bypass = false`, and what it is not.** It keeps repo admins
   subject to whatever protection rules an environment declares — the required
   reviewer and wait timer. It does **not** govern the deployment-branch policy,
-  and this environment declares no reviewer or timer, so on `sentry-pipeline`
-  the flag is inert. It is set because `false` is the strictest value and costs
+  and an unattended environment declares no reviewer or timer, so on
+  `platform-settings-drift` the flag is inert. It is set because `false` is the strictest value and costs
   nothing, not because it restricts branches. (Earlier revisions of this ADR
   described it as closing an admin branch-policy bypass; that was wrong — the
   admin dispatch it was meant to explain succeeded because the branch policy
@@ -122,11 +129,12 @@ Boundaries of the decision:
   hash-pinned exactly as their repo-level predecessors were.
 - **Two-phase rollout, in order.** Phase 1 creates the protected environment
   and mirrors the secrets (purely additive; repo copies remain). Phase 2 adds
-  `environment: sentry-pipeline` to the secret-bearing jobs and removes the
-  repo copies. The order is load-bearing: a workflow `environment:` reference
+  the `environment:` reference to the secret-bearing jobs and removes the repo
+  copies. The order is load-bearing: a workflow `environment:` reference
   reaching `main` before the environment exists auto-creates it **unprotected**.
   Any future environment introduced this way must land applied-and-protected
-  before its first workflow reference merges.
+  before its first workflow reference merges. ADR 0106's rename of
+  `sentry-pipeline` to `platform-settings-drift` is subject to the same order.
 
 ## Alternatives considered
 
@@ -148,14 +156,14 @@ Boundaries of the decision:
 
 ## Consequences
 
-- A branch-rewritten `workflow_dispatch` can no longer reach the pipeline's
-  secrets; an off-main dispatch of a gated job is refused at the environment
-  gate before the job starts (previously a graceful in-job no-op).
+- A branch-rewritten `workflow_dispatch` can no longer reach a gated job's
+  secrets; an off-main dispatch is refused at the environment gate before the
+  job starts (previously a graceful in-job no-op).
 - The platform PAT permission set grows by Environments: Read/write
   (documented in `providers.tf`, `variables.tf`, `terraform.tfvars.example`).
 - New secret-bearing scheduled workflows should scope their secrets to an
   environment following this pattern rather than adding repo-level secrets
   with `if:` guards.
-- Rollout steps live in `docs/notes/sentry-triage-pipeline.md`
-  ("GitHub Environment rollout"); the environment-creation phase is
-  #1289 phase 1, the enforcement flip is phase 2.
+- Rollout steps live in [`docs/terraform.md`](../terraform.md)
+  ("GitHub Environments"); the environment-creation phase is #1289 phase 1, the
+  enforcement flip is phase 2.

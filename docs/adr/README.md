@@ -69,19 +69,19 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0009](0009-supply-chain-hardening.md)                      | Supply-chain posture: release-age gate, lockfile-lint, SHA-pinned Actions                                                                    |
 | [0010](0010-required-checks-no-paths-filters.md)            | Required CI checks carry no `paths:` filters; only advisory jobs may                                                                         |
 | [0033](0033-adr-process-and-gate.md)                        | ADRs record architectural decisions, enforced by a reminder gate                                                                             |
-| [0036](0036-sentry-triage-pipeline.md)                      | Sentry triage/autofix: staged GitHub Actions agent pipeline + GH-Issue queue                                                                 |
-| [0038](0038-sentry-central-plane-verdict-projection.md)     | Central Sentry triage plane; actionable verdicts projected into owning repos                                                                 |
+| [0036](0036-sentry-triage-pipeline.md)                      | Archived: Sentry triage/autofix as a staged GitHub Actions pipeline + GH-Issue queue                                                         |
+| [0038](0038-sentry-central-plane-verdict-projection.md)     | Archived: central Sentry triage plane; verdicts projected into owning repos                                                                  |
 | [0040](0040-bounded-documentation-garden-queue.md)          | Weekly bounded documentation packets enter one serialized GitHub Issue queue                                                                 |
 | [0041](0041-offline-documentation-navigation-evaluation.md) | Fresh-agent documentation navigation is evaluated offline with deterministic scoring                                                         |
-| [0056](0056-agent-mcp-credential-broker.md)                 | An untrusted agent's MCP credentials sit behind a loopback broker, not in its env                                                            |
+| [0056](0056-agent-mcp-credential-broker.md)                 | Archived: an untrusted agent's MCP credentials sit behind a loopback broker                                                                  |
 | [0059](0059-repo-owned-file-size-watchlist-scheduler.md)    | Monthly lint-aware file-size drift enters one repository-owned issue route                                                                   |
-| [0062](0062-sentry-suites-self-run-gate.md)                 | An unconditional gate job runs the Sentry suites and proves from output they ran                                                             |
+| [0062](0062-sentry-suites-self-run-gate.md)                 | Archived: an unconditional gate job runs the Sentry suites and proves they asserted                                                          |
 | [0064](0064-scripts-module-directories.md)                  | `scripts/` may use module subdirectories; basenames and pinned paths constrain moves                                                         |
 | [0065](0065-scripts-file-size-watchlist-scope.md)           | `scripts/` sits inside the file-size watchlist, with named-mechanism exemptions                                                              |
 | [0066](0066-coderabbit-replaces-bugbot-third-reviewer.md)   | CodeRabbit replaces Cursor BugBot as the third advisory PR reviewer                                                                          |
 | [0068](0068-sentry-fixture-authoring-policy.md)             | Archived: adversarial fixtures authored to scan clean; both enforcers deleted                                                                |
 | [0069](0069-gate-routing-table-as-data.md)                  | The gate's routing table is data, compiled by the repo's own bash-`case` translator                                                          |
-| [0070](0070-sentry-requeue-settlement-sentinel.md)          | The archive's terminal label is withheld from the re-queue's shed and read back                                                              |
+| [0070](0070-sentry-requeue-settlement-sentinel.md)          | Archived: the archive's terminal label is withheld from the re-queue's shed                                                                  |
 | [0072](0072-md-only-docs-checks-job.md)                     | The Markdown globs route to a small `docs-checks` job; some Markdown runs both jobs                                                          |
 | [0073](0073-guardrail-prose-pinned-in-ci.md)                | Normative guardrail sentences are pinned in CI; script digests deliberately are not                                                          |
 | [0075](0075-pr-merge.md)                                    | Archived: local operator merge wrapper                                                                                                       |
@@ -110,6 +110,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0101](0101-legacy-gate-retirement.md)                      | Retire the legacy local gate after accepted M6 evaluation; preserve retained CI and shared safeguards                                        |
 | [0102](0102-github-hosted-runners-only.md)                  | GitHub-hosted runners only; a frozen allow-list blocks other labels                                                                          |
 | [0104](0104-non-strict-required-status-checks.md)           | `main` no longer requires a PR to be caught up once aggregate strictness confirms off; checks must be green and a real conflict still blocks |
+| [0106](0106-sentry-triage-moves-to-operator-skills.md)      | Sentry triage and autofix move from a CI pipeline to operator-run skills                                                                     |
 
 ### shared-config
 

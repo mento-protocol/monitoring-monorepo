@@ -1,9 +1,10 @@
 ---
 title: Sentry triage/autofix runs as a staged GitHub Actions agent pipeline with a GitHub-Issue queue
-status: active
+status: archived
 owner: eng
-canonical: true
-last_verified: 2026-08-11
+canonical: false
+last_verified: 2026-09-16
+superseded_by: ADR-0106
 scope: ci/process
 date: 2026-07
 doc_type: adr
@@ -13,8 +14,18 @@ garden_lane: adrs-architecture
 
 # ADR 0036 — Sentry triage/autofix: staged GitHub Actions agent pipeline with a GitHub-Issue queue
 
-**Status:** Accepted (Jul 2026), in force.
+**Status:** Superseded by
+[ADR 0106](0106-sentry-triage-moves-to-operator-skills.md) (Sep 2026).
+Historical decision retained.
 **Scope:** ci/process
+
+**The pipeline is deleted.** ADR 0106 replaces it with the operator-run
+`sentry-triage` and `sentry-fix` skills, and Sentry itself becomes the queue in
+place of the GitHub-Issue stubs. The workflows, `scripts/sentry/**`, the five
+pipeline secrets and the `sentry-pipeline` GitHub Environment described below no
+longer exist. The 125 queue stubs and the `sentry:*` labels stay as history.
+The stance against an OpenClaw cron host recorded here is revisited only when a
+cron host is adopted.
 
 ## Context
 

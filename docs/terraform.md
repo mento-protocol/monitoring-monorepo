@@ -302,8 +302,6 @@ replace them with manual secrets or use the refresh selectors outside the five
 registered trusted-main plan workflows and `terraform-drift.yml`.
 Only `CLAUDE_CODE_OAUTH_TOKEN` currently has `prevent_destroy`; inspect every
 planned mirror deletion.
-Sentry credential routing lives in
-[`docs/notes/sentry-triage-pipeline.md`](notes/sentry-triage-pipeline.md).
 
 ## GitHub Environments
 
@@ -353,15 +351,21 @@ After importing, their plan must read `0 to add, N to change, 0 to destroy`. A
 diff that drops `production-infra`'s `reviewers` would remove the production
 apply gate — do not apply it.
 
-`sentry-pipeline` (`terraform/github-environment.tf`, issue #1289,
-[ADR 0050](adr/0050-environment-scoped-pipeline-secrets.md)) gates the Sentry
-triage/autofix pipeline's exclusive secrets. It has the same `main`-only branch
-pattern, admin bypass disabled, and — deliberately, the pipeline is unattended —
-no reviewer or wait timer. Every platform apply reconciles its policy and
-secrets. Every secret-bearing Sentry job declares it, so those secrets are
+`platform-settings-drift` (`terraform/github-environment.tf`, issue #1289,
+[ADR 0050](adr/0050-environment-scoped-pipeline-secrets.md),
+[ADR 0106](adr/0106-sentry-triage-moves-to-operator-skills.md)) gates
+`PLATFORM_SETTINGS_AUDIT_TOKEN`. It has the same `main`-only branch pattern,
+admin bypass disabled, and — deliberately, the audit is unattended — no reviewer
+or wait timer. Every platform apply reconciles its policy and secret. The
+`check` job in `platform-settings-drift.yml` declares it, so the token is
 reachable only from `main`, server-enforced even on a branch-modified
 `workflow_dispatch`. `CLAUDE_CODE_OAUTH_TOKEN` intentionally stays repo-level
 for `claude.yml`.
+
+This environment replaced `sentry-pipeline` when ADR 0106 retired the Sentry
+pipeline. Apply the platform stack before the workflow's `environment:` change
+reaches `main`: a reference to an environment that does not exist yet
+auto-creates it **unprotected**.
 
 Never recreate retired `Production`/`production` names or manage
 Environment secrets outside their owning IaC/integration path. A new workflow
