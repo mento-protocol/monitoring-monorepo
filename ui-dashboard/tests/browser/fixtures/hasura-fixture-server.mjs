@@ -232,12 +232,11 @@ const virtualPoolExchangeRow = {
   stablePoolResetSize: "1000000000000000000000",
   bucket0: "1000000000000000000000",
   bucket1: "1000000000000000000000",
-  // Zero sentinel on purpose: this row is SSR-prefetched, and `V2ExchangePanel`
-  // renders "Last Reset" through `relativeTime`, which reads the live clock.
-  // The Next server uses real wall time while the browser clock is pinned to
-  // WEEKDAY_FIXTURE_INSTANT, so any real timestamp renders two different
-  // strings and trips a hydration mismatch. "0" renders "—" on both sides.
-  lastBucketUpdate: "0",
+  // A real timestamp: `V2ExchangePanel` renders "Last Reset" through
+  // `useSsrSafeRelative`, which is deterministic until mount, so the Next
+  // server's wall time and the browser's pinned clock agree on the hydration
+  // render (issue #2448). One reset frequency ago.
+  lastBucketUpdate: String(nowSeconds() - 300),
   isDeprecated: false,
   wrappedByPoolId: virtualPool.id,
 };
@@ -1712,6 +1711,18 @@ export function handleGraphQL(
         BrokerTradingLimit: brokerTradingLimits.filter(
           (limit) => limit.poolId === String(variables.poolId),
         ),
+      };
+    // `/limit/[limitId]` resolver: bytes32 limit id -> wrapping VirtualPool.
+    case "BrokerLimitPool":
+      return {
+        BrokerTradingLimit: brokerTradingLimits
+          .filter(
+            (limit) =>
+              limit.limitId === String(variables.limitId) &&
+              limit.chainId === Number(variables.chainId),
+          )
+          .slice(0, 1)
+          .map(({ poolId }) => ({ poolId })),
       };
     case "PoolV2Exchange":
       return {

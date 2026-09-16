@@ -3,12 +3,11 @@
 import { useEffect, useState } from "react";
 import { AddressLink } from "@/components/address-link";
 import { TableSkeleton } from "@/components/skeletons";
+import { formatWei, truncateAddress } from "@/lib/format";
 import {
-  formatTimestamp,
-  formatWei,
-  relativeTime,
-  truncateAddress,
-} from "@/lib/format";
+  useSsrSafeRelative,
+  useSsrSafeTimestamp,
+} from "@/hooks/use-now-seconds";
 import { NETWORKS, networkIdForChainId } from "@/lib/networks";
 import { displayLabel, isMintKind, kindLabel } from "@/lib/stables";
 import { explorerTxUrl } from "@/lib/tokens";
@@ -456,13 +455,12 @@ function SupplyChangeRow({
     ? event.amount.slice(1)
     : event.amount;
   const formatted = formatWei(absAmount, event.tokenDecimals, 2);
+  const timestampTitle = useSsrSafeTimestamp(event.blockTimestamp);
+  const timestampRelative = useSsrSafeRelative(event.blockTimestamp);
   return (
     <tr className="border-t border-slate-800/70">
-      <td
-        className="py-3 pr-4 whitespace-nowrap"
-        title={formatTimestamp(event.blockTimestamp)}
-      >
-        {relativeTime(event.blockTimestamp)}
+      <td className="py-3 pr-4 whitespace-nowrap" title={timestampTitle}>
+        {timestampRelative}
       </td>
       <td className="py-3 pr-4 font-medium text-slate-100">
         {displayLabel(event.tokenSymbol, event.source)}

@@ -295,8 +295,17 @@ either trust workflow. It waits for every required check and verifies a
 non-empty passing required-only projection. It then repeats the complete
 workflow, run, job, PR, head, maintainer-change body, close-history, commit,
 file, and queue proof. The issue-event read is the final authoritative read.
-The final write is a synchronous REST merge with the exact head SHA and squash
-method. It cannot enqueue, create an auto-merge request, or pin issue-event
+It then proves the head contains the base tip: it compares the base branch tip
+against the verified head and requires `behind_by == 0`. With `main` no longer
+requiring an up-to-date PR
+([ADR 0104](../adr/0104-non-strict-required-status-checks.md)), a stale but
+conflict-free head reports `mergeable_state: clean`, so only the comparison
+proves freshness. A stale head exits without merging or writing, and the lane
+stalls: `rebase-strategy: auto` rebases on schedule or conflict, not on being
+behind, so it waits for the Monday run or a human `@dependabot rebase`. The
+writer emits a `::warning::` and job summary naming the PR and `behind_by`. ADR
+0104 records why neither repair is safe here. The final write is a synchronous
+REST merge with the exact head SHA and squash method. It cannot enqueue, create an auto-merge request, or pin issue-event
 history. A close and reopen inside the remaining request window is a residual
 race. Neither workflow checks out or executes PR code. The writer does not read
 upstream outputs, artifacts, or caches. `pnpm tf:test` pins both parsed workflow

@@ -86,7 +86,8 @@ CodeRabbit is not a per-push cost either: `auto_incremental_review: false`
 works, and the ADR 0066 amendment of 2026-09-14 records the measurement. It
 reviews the opening push and the closeout head only. Budget at most two trusted
 `@coderabbitai review` or `full review` requests per PR, marked or bare, and
-merge the base before a request rather than after it. Two issues is
+merge the base before a request rather than after it when the gate asks for a
+base merge at all. Two issues is
 the default because the cost is dominated by review rounds, not by the first
 implementation. **Refuse a batch size above 4.** Say that plainly and stop
 rather than clamping silently — an operator who asked for 6 needs to know they

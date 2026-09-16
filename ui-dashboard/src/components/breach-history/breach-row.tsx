@@ -7,7 +7,10 @@
 import React from "react";
 import type { DeviationThresholdBreach } from "@/lib/types";
 import type { Network } from "@/lib/networks";
-import { formatTimestamp, relativeTime } from "@/lib/format";
+import {
+  useSsrSafeRelative,
+  useSsrSafeTimestamp,
+} from "@/hooks/use-now-seconds";
 import { formatDurationShort } from "@/lib/bridge-status";
 import {
   formatDeviationPct,
@@ -28,6 +31,12 @@ export function BreachRow({
   getName: (addr: string | null, chainId?: number) => string;
 }) {
   const isOpen = breach.endedAt == null;
+  const startedTitle = useSsrSafeTimestamp(breach.startedAt);
+  const startedRelative = useSsrSafeRelative(breach.startedAt);
+  // Render-time wall-clock read, not an SSR-safe hook: the breach-history
+  // queries are not in the pool-detail SSR prefetch
+  // (src/lib/pool-detail-ssr.ts), so these rows only ever render from client
+  // SWR data.
   const now = Math.floor(Date.now() / 1000);
   // Trading-seconds on open rows (closed rows already had weekend closure
   // subtracted) so the Duration column doesn't shrink when an FX-weekend
@@ -75,17 +84,14 @@ export function BreachRow({
 
   return (
     <tr className="border-t border-slate-800/60 text-slate-300">
-      <td
-        className="py-2 pr-4 whitespace-nowrap"
-        title={formatTimestamp(breach.startedAt)}
-      >
+      <td className="py-2 pr-4 whitespace-nowrap" title={startedTitle}>
         <a
           href={explorerTxUrl(network, breach.startedByTxHash)}
           target="_blank"
           rel="noopener noreferrer"
           className="hover:text-indigo-400 transition-colors"
         >
-          {relativeTime(breach.startedAt)}
+          {startedRelative}
         </a>
       </td>
       <td

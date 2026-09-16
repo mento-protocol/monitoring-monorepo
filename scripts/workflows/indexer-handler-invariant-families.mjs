@@ -269,6 +269,8 @@ export const INDEXER_HANDLER_INVARIANT_FAMILIES = [
     exact: [
       "indexer-envio/test/aggregators-parity.test.ts",
       "indexer-envio/test/deployment-namespaces.test.ts",
+      "indexer-envio/test/harness-canary/subject.test.ts",
+      "indexer-envio/test/harness-canary/subject.ts",
       "indexer-envio/test/oracle-reporters-parity.test.ts",
       "indexer-envio/test/script-findings.test.ts",
       "indexer-envio/test/wormholeScratchWarnings.test.ts",

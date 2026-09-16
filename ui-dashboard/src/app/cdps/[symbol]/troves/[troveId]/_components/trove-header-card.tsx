@@ -1,7 +1,12 @@
+"use client";
+
 import type { ReactNode } from "react";
 import { AddressLink } from "@/components/address-link";
 import { Tooltip } from "@/components/tooltip";
-import { formatTimestamp, relativeTime } from "@/lib/format";
+import {
+  useSsrSafeRelative,
+  useSsrSafeTimestamp,
+} from "@/hooks/use-now-seconds";
 import { NETWORKS, networkIdForChainId } from "@/lib/networks";
 import { explorerTxUrl } from "@/lib/tokens";
 import {
@@ -40,11 +45,11 @@ function EventTimeLink({
   chainId: number;
   prefix: string;
 }) {
+  const label = useSsrSafeRelative(timestamp);
+  const exact = useSsrSafeTimestamp(timestamp);
   if (!timestamp || timestamp === "0") {
     return <span className="text-slate-500">—</span>;
   }
-  const label = relativeTime(timestamp);
-  const exact = formatTimestamp(timestamp);
   // `Tooltip` (not a plain `title`) for the no-destination branches: a
   // `title` attribute alone is unreachable without a mouse, and this exact
   // timestamp is the only place that precision is available — most notably
@@ -138,6 +143,7 @@ export function TroveHeaderCard({
    *  `false`. */
   batchMissing?: boolean;
 }) {
+  const lastUpdatedRelative = useSsrSafeRelative(trove.lastUpdatedAt);
   return (
     <header className="rounded-lg border border-slate-800 bg-slate-900/60 p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -180,9 +186,8 @@ export function TroveHeaderCard({
 
       <p className="mt-4 text-xs text-slate-500">
         Values shown are indexed as of the last recorded event (
-        {relativeTime(trove.lastUpdatedAt)}), which can be a plain ownership
-        transfer rather than a debt or price change — not a live RPC or oracle
-        read.
+        {lastUpdatedRelative}), which can be a plain ownership transfer rather
+        than a debt or price change — not a live RPC or oracle read.
         {batchRateTimestamp != null && (
           <>
             {" "}
@@ -214,6 +219,7 @@ function BatchRateLabel({
   batchRateTimestamp: string | null;
   batchMissing: boolean;
 }) {
+  const batchRateAt = useSsrSafeTimestamp(batchRateTimestamp);
   if (interestBatchId == null) return null;
   if (batchMissing) {
     return (
@@ -240,7 +246,7 @@ function BatchRateLabel({
   return (
     <span role="status" aria-live="polite">
       <Tooltip
-        content={`Rate as of the batch's own last update (${formatTimestamp(batchRateTimestamp)}) — separate from this trove's own timestamp in the footer below.`}
+        content={`Rate as of the batch's own last update (${batchRateAt}) — separate from this trove's own timestamp in the footer below.`}
         label="About the batch rate's timestamp"
       >
         <span className="ml-1 text-[10px] text-slate-500 cursor-help">
@@ -311,7 +317,7 @@ function TroveHeaderStats({
   batchRateTimestamp: string | null;
   batchMissing: boolean;
 }) {
-  const icrTimestamp = formatTimestamp(trove.lastUpdatedAt);
+  const icrTimestamp = useSsrSafeTimestamp(trove.lastUpdatedAt);
   const endedAt = trove.closedAt ?? null;
   const endedTxHash = trove.closedTxHash ?? null;
 

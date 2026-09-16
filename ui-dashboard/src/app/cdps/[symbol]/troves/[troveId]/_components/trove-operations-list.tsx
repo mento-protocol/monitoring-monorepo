@@ -5,7 +5,10 @@ import { TableSkeleton } from "@/components/skeletons";
 import { Row, Table, Td, Th } from "@/components/table";
 import { Tooltip } from "@/components/tooltip";
 import { TxHashCell } from "@/components/tx-hash-cell";
-import { formatTimestamp, relativeTime } from "@/lib/format";
+import {
+  useSsrSafeRelative,
+  useSsrSafeTimestamp,
+} from "@/hooks/use-now-seconds";
 import {
   BADGE_LABELS,
   BADGE_STYLES,
@@ -92,6 +95,8 @@ function OperationRow({
   debtSymbol: string;
 }) {
   const kind = badgeKindFor({ kind: "troveOp", ...row });
+  const absolute = useSsrSafeTimestamp(row.timestamp);
+  const relative = useSsrSafeRelative(row.timestamp);
   return (
     <Row>
       <Td>
@@ -117,8 +122,8 @@ function OperationRow({
         {/* `Tooltip`, not a plain `title` — a `title` alone on a `<td>` is
             unreachable without a mouse; mirrors the header's
             `EventTimeLink` fix for the same gap. */}
-        <Tooltip content={formatTimestamp(row.timestamp)}>
-          <span>{relativeTime(row.timestamp)}</span>
+        <Tooltip content={absolute}>
+          <span>{relative}</span>
         </Tooltip>
       </Td>
     </Row>

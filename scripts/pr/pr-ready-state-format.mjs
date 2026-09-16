@@ -88,6 +88,12 @@ export function formatHuman(summary) {
         `${item.kind}: ${item.name} (${item.state}) ${item.url ?? ""}`.trim(),
     ],
     [
+      "Notes",
+      summary.notes ?? [],
+      (item) =>
+        `${item.kind}: ${item.name} (${item.state}) ${item.url ?? ""}`.trim(),
+    ],
+    [
       "Unresolved review threads",
       summary.unresolvedReviewThreads,
       (item) =>
@@ -165,5 +171,6 @@ export function formatCompact(summary) {
     `coderabbit_signal=${summary.codeRabbitReviewSignal}`,
     `coderabbit_fallback=${summary.gates?.codeRabbitReviewSignal?.fallbackAction ?? "unknown"}`,
     `overrides=${summary.readinessOverrides?.length ?? 0}`,
+    `notes=${summary.notes?.length ?? 0}`,
   ].join(" ");
 }

@@ -94,6 +94,14 @@ threshold-derived history uses the threshold captured at event time.
   coexist.
 - Dynamic status uses `role="status"` or `role="alert"`; sortable headers expose
   `aria-sort`. Add deterministic axe coverage for new shared semantic controls.
+- A `"use client"` module formats a timestamp with `useSsrSafeRelative` /
+  `useSsrSafeTimestamp` from `src/hooks/use-now-seconds.ts`, or with
+  `useNowSeconds()` once plus `relativeTimeOrTimestamp(ts, now)` /
+  `timestampOrUtc(ts, now)` inside a map callback, where a hook cannot run. A
+  row that is its own component uses the hooks. The
+  `ssr-clock-policy/no-raw-clock-format-in-client` rule blocks a raw
+  `relativeTime` or `formatTimestamp` import there, and sees only modules that
+  carry the directive themselves.
 - Source files have a soft cap of 600 effective lines and a lint cap of 1,000
   effective lines. The package `max-lines` rule skips blank lines and comments.
   The tier-1 enrichment entry point and extracted modules use the same rule

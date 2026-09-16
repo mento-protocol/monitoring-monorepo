@@ -14,6 +14,12 @@ import {
   findActiveReadinessOverrides,
   isTrustedHumanAuthor,
 } from "./pr-ready-state-overrides.mjs";
+import {
+  buildBaseRedFindings,
+  checkMatchesRequiredContext,
+  requiredContextIdentity,
+  requiredContextName,
+} from "./pr-ready-state-base-red.mjs";
 
 export {
   BOT_APPROVER,
@@ -29,176 +35,31 @@ export {
   findActiveReadinessOverrides,
   parseReadinessOverrideComment,
 } from "./pr-ready-state-overrides.mjs";
-const OPTIONAL_CHECK_NAMES = new Set([
-  // CodeRabbit is advisory and reports SUCCESS when a rate-limited review never
-  // ran. Report its lag, but read review evidence instead of its conclusion.
-  "CodeRabbit",
-  "Core Web Vitals + accessibility (ui-dashboard)",
-  "GraphQL schema diff",
-  "jscpd",
-]);
+import {
+  checkDisplayName,
+  classifyCheck,
+  groupStatusChecks,
+  isOptionalCheckName,
+  normalizeStatusValue,
+  suppressSupersededCancelledChecks,
+} from "./pr-ready-state-check-state.mjs";
+export {
+  checkDisplayName,
+  classifyCheck,
+  groupStatusChecks,
+} from "./pr-ready-state-check-state.mjs";
 
-const PASS_VALUES = new Set(["SUCCESS", "PASSED", "PASS"]);
-const FAIL_VALUES = new Set([
-  "ACTION_REQUIRED",
-  "CANCELLED",
-  "ERROR",
-  "FAIL",
-  "FAILED",
-  "FAILURE",
-  "STALE",
-  "STARTUP_FAILURE",
-  "TIMED_OUT",
-]);
-const PENDING_VALUES = new Set([
-  "EXPECTED",
-  "IN_PROGRESS",
-  "PENDING",
-  "QUEUED",
-  "REQUESTED",
-  "WAITING",
-]);
-const SKIPPED_VALUES = new Set(["NEUTRAL", "SKIPPED"]);
+const MAX_DIAGNOSTIC_LENGTH = 200;
 
-function normalizeStatusValue(value) {
-  return String(value ?? "")
-    .trim()
-    .toUpperCase();
-}
-
-export function checkDisplayName(check) {
-  return (
-    check.name ??
-    check.context ??
-    check.workflowName ??
-    check.app?.name ??
-    check.__typename ??
-    "unknown check"
-  );
-}
-
-function isOptionalCheckName(name) {
-  return OPTIONAL_CHECK_NAMES.has(name);
-}
-
-export function classifyCheck(check) {
-  const values = [
-    check.conclusion,
-    check.state,
-    check.status,
-    check.rollupStatus,
-  ].map(normalizeStatusValue);
-
-  if (values.some((value) => FAIL_VALUES.has(value))) return "fail";
-  if (values.some((value) => PENDING_VALUES.has(value))) return "pending";
-  if (values.some((value) => SKIPPED_VALUES.has(value))) return "skipped";
-  if (values.some((value) => PASS_VALUES.has(value))) return "pass";
-
-  return "pending";
-}
-
-function checkRunOrderTimestampMs(check) {
-  // Use startedAt so delayed cancellation completion does not make a stale
-  // run appear newer than the passing run that superseded it.
-  const timestamp = check.startedAt ?? check.completedAt ?? null;
-  const parsed = Date.parse(timestamp ?? "");
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function checkIdentity(check) {
-  const appId =
-    check.appId ?? check.app_id ?? check.app?.id ?? check.app?.databaseId ?? "";
-  return [
-    checkDisplayName(check),
-    check.workflowName ?? check.workflow_name ?? "",
-    appId,
-  ].join("\0");
-}
-
-function suppressSupersededCancelledChecks(statusCheckRollup = []) {
-  const latestPassingTimeByIdentity = new Map();
-
-  for (const check of statusCheckRollup) {
-    if (classifyCheck(check) !== "pass") continue;
-    const timestampMs = checkRunOrderTimestampMs(check);
-    if (timestampMs === null) continue;
-    const identity = checkIdentity(check);
-    const previous = latestPassingTimeByIdentity.get(identity) ?? -Infinity;
-    if (timestampMs > previous) {
-      latestPassingTimeByIdentity.set(identity, timestampMs);
-    }
-  }
-
-  return statusCheckRollup.filter((check) => {
-    if (normalizeStatusValue(check.conclusion) !== "CANCELLED") return true;
-    const timestampMs = checkRunOrderTimestampMs(check);
-    if (timestampMs === null) return true;
-    const newerPassingTime = latestPassingTimeByIdentity.get(
-      checkIdentity(check),
-    );
-    return newerPassingTime === undefined || newerPassingTime <= timestampMs;
-  });
-}
-
-export function groupStatusChecks(statusCheckRollup = []) {
-  const grouped = {
-    pass: [],
-    fail: [],
-    pending: [],
-    skipped: [],
-  };
-
-  for (const check of suppressSupersededCancelledChecks(statusCheckRollup)) {
-    const group = classifyCheck(check);
-    grouped[group].push({
-      name: checkDisplayName(check),
-      status: check.status ?? check.state ?? null,
-      conclusion: check.conclusion ?? null,
-      detailsUrl: check.detailsUrl ?? check.targetUrl ?? null,
-    });
-  }
-
-  for (const checks of Object.values(grouped)) {
-    checks.sort((a, b) => a.name.localeCompare(b.name));
-  }
-
-  return grouped;
-}
-
-function requiredContextName(context) {
-  return typeof context === "string" ? context : context.context;
-}
-
-function requiredContextIntegrationId(context) {
-  const value =
-    typeof context === "string"
-      ? null
-      : (context.integrationId ?? context.integration_id ?? null);
-  return value === null || value === undefined ? null : Number(value);
-}
-
-function requiredContextIdentity(context) {
-  return `${requiredContextName(context)}\0${requiredContextIntegrationId(context) ?? ""}`;
-}
-
-function checkAppId(check) {
-  const value =
-    check.appId ??
-    check.app_id ??
-    check.app?.id ??
-    check.app?.databaseId ??
-    null;
-  return value === null || value === undefined ? null : Number(value);
-}
-
-function checkMatchesRequiredContext(check, context) {
-  if (checkDisplayName(check) !== requiredContextName(context)) return false;
-
-  const requiredIntegrationId = requiredContextIntegrationId(context);
-  if (requiredIntegrationId === null) return true;
-
-  const appId = checkAppId(check);
-  return appId !== null && appId === requiredIntegrationId;
+// Fold a multiline transport error into one bounded line so a blocker carrying
+// it cannot break the single-line compact/watch stream.
+function compactDiagnostic(value) {
+  const collapsed = String(value ?? "")
+    .replace(/\s+/gu, " ")
+    .trim();
+  return collapsed.length > MAX_DIAGNOSTIC_LENGTH
+    ? `${collapsed.slice(0, MAX_DIAGNOSTIC_LENGTH - 1)}…`
+    : collapsed;
 }
 
 function checkToItem(check, { required }) {
@@ -223,18 +84,27 @@ export function splitRequiredAndOptionalChecks(
 
   for (const check of suppressSupersededCancelledChecks(statusCheckRollup)) {
     const name = checkDisplayName(check);
-    const matchedRequiredContext = requiredStatusContexts.find((context) =>
+    // A single check can satisfy more than one required-context entry: an
+    // unbound entry (no app) and an app-bound entry of the same name both
+    // match any check reporting that name, e.g. when classic protection
+    // requires a bare "ci" and a ruleset also requires "ci" from a specific
+    // app. Mark every matching entry as seen, not just the first — crediting
+    // only the first left the other permanently "pending" even though the
+    // one emitted check already satisfies it too.
+    const matchingRequiredContexts = requiredStatusContexts.filter((context) =>
       checkMatchesRequiredContext(check, context),
     );
     const isRequired = requiredStatusContextsAvailable
-      ? matchedRequiredContext !== undefined
+      ? matchingRequiredContexts.length > 0
       : !isOptionalCheckName(name);
     if (isRequired) {
-      seenRequiredContexts.add(
-        matchedRequiredContext === undefined
-          ? name
-          : requiredContextIdentity(matchedRequiredContext),
-      );
+      if (matchingRequiredContexts.length > 0) {
+        for (const context of matchingRequiredContexts) {
+          seenRequiredContexts.add(requiredContextIdentity(context));
+        }
+      } else {
+        seenRequiredContexts.add(name);
+      }
     }
     const item = checkToItem(check, { required: isRequired });
     if (isRequired) {
@@ -530,6 +400,7 @@ export function summarizeTerminalReadyState(pr) {
       ready: true,
       items: [],
     },
+    notes: [],
     gates: terminalGates({ merged }),
     summary: merged
       ? "Pull request is already merged."
@@ -543,6 +414,7 @@ export function summarizeTerminalReadyState(pr) {
     codexApprovalReaction: merged,
     codexReviewSignal: merged ? "approved" : "missing",
     codeRabbitReviewSignal: "not_applicable",
+    requiredStatusChecksStrict: null,
   };
 }
 
@@ -555,6 +427,17 @@ export function summarizeReadyState({
   requiredStatusContexts = [],
   requiredStatusContextsError = null,
   requiredStatusContextsAvailable = requiredStatusContexts.length > 0,
+  // Tri-state: `true`/`false` when the fetched branch protection or ruleset
+  // confirms the policy; `null` when unknown. Fails closed like every other
+  // branch-protection lookup gap here: only a confirmed `false` demotes
+  // BEHIND to a note (operator decision 2026-09-15, ADR 0104).
+  requiredStatusChecksStrict = null,
+  // The base branch head's own status rollup, plus the commit it was read at.
+  // A non-null `baseHealthError` means the read failed and the base's health
+  // is unknown; both feed the `base-red` blocker below.
+  baseStatusCheckRollup = [],
+  baseHealthOid = null,
+  baseHealthError = null,
   includeFeedbackDetails = false,
   codeRabbitPathFilterSkip = null,
   // Wall-clock "now" for the closeout waits. Not the caller's `observedAt`
@@ -632,6 +515,7 @@ export function summarizeReadyState({
     ["fail", "pending"].includes(check.state),
   );
   const requiredBlockers = [];
+  const notes = [];
 
   if (pr.isDraft) {
     requiredBlockers.push({
@@ -653,15 +537,78 @@ export function summarizeReadyState({
     });
   }
 
-  if (normalizeStatusValue(pr.mergeStateStatus) === "BEHIND") {
+  // `mergeable: CONFLICTING` normally implies `mergeStateStatus: DIRTY`, so
+  // the check above already blocks it. Check DIRTY independently so a
+  // conflict still blocks even if GitHub reports a stale `mergeable` value.
+  if (mergeable && normalizeStatusValue(pr.mergeStateStatus) === "DIRTY") {
     requiredBlockers.push({
-      kind: "base-update",
-      name: "Pull request must include the current base before merge",
-      state: "BEHIND",
+      kind: "mergeability",
+      name: "Pull request has a merge conflict with the base",
+      state: "DIRTY",
       required: true,
       url: pr.url,
     });
   }
+
+  if (normalizeStatusValue(pr.mergeStateStatus) === "BEHIND") {
+    // Non-strict policy (operator decision 2026-09-15, ADR 0104): once the
+    // base's ruleset confirms `strict_required_status_checks_policy: false`,
+    // a PR merely behind the base is not a required blocker on its own. A
+    // textual conflict still blocks via the `mergeable` check above (kind
+    // "mergeability") or GitHub's `mergeStateStatus: DIRTY`. Until strict is
+    // confirmed off, fail closed and keep blocking, exactly as GitHub does.
+    if (requiredStatusChecksStrict === false) {
+      notes.push({
+        kind: "base-update",
+        name: "Pull request is behind the current base",
+        state: "BEHIND",
+        required: false,
+        url: pr.url,
+      });
+    } else {
+      requiredBlockers.push({
+        kind: "base-update",
+        name: "Pull request must include the current base before merge",
+        state: "BEHIND",
+        required: true,
+        url: pr.url,
+      });
+    }
+  }
+
+  // ADR 0104 stopped GitHub re-running a PR's required checks against the
+  // current base, so "nobody merges while main is red" needs an enforced
+  // blocker rather than a rule of thumb. Judge the base head by the same
+  // required-contexts set and the same fail/pending/pass classification the
+  // PR's own checks get: only a failed, cancelled, timed-out or
+  // action-required conclusion is red; pending, in-progress and skipped are
+  // not. An unreadable base leaves its health unknown and blocks too. The
+  // caller has already reduced the rollup to the latest run per check, so a
+  // rerun that fixed the base does not keep blocking here.
+  // `base-red` stops any merge onto a red base, which would also stop the fix
+  // that turns it green; the operator override is the authorized way out.
+  // Policy and its bindings live in pr-ready-state-base-red.mjs.
+  const baseRed = buildBaseRedFindings({
+    redBaseChecks:
+      baseHealthError === null
+        ? splitRequiredAndOptionalChecks(
+            baseStatusCheckRollup,
+            requiredStatusContexts,
+            { requiredStatusContextsAvailable },
+          ).required.filter((check) => check.state === "fail")
+        : [],
+    baseHealthError:
+      baseHealthError === null ? null : compactDiagnostic(baseHealthError),
+    baseHealthOid,
+    baseStatusCheckRollup,
+    requiredStatusContexts,
+    requiredStatusContextsAvailable,
+    activeReadinessOverrides,
+    currentHeadOid,
+    prUrl: pr.url,
+  });
+  requiredBlockers.push(...baseRed.blockers);
+  notes.push(...baseRed.notes);
 
   if (reviewDecision === "CHANGES_REQUESTED") {
     requiredBlockers.push({
@@ -742,6 +689,7 @@ export function summarizeReadyState({
       codeRabbitPathFilterSkip,
       {
         mergeStateStatus: pr.mergeStateStatus ?? null,
+        requiredStatusChecksStrict,
         // CodeRabbit registers a check run while it reviews; the pending group
         // already classifies status-only runs as pending.
         reviewRunning: statusChecks.pending.some(
@@ -793,6 +741,7 @@ export function summarizeReadyState({
     ready,
     required,
     optional,
+    notes,
     gates,
     summary: summaryText,
     pr: summaryPr(pr, headUpdatedAt),
@@ -801,10 +750,17 @@ export function summarizeReadyState({
     unresolvedReviewThreads,
     unrepliedRootReviewComments,
     topLevelBotComments,
-    readinessOverrides: activeReadinessOverrides,
+    // The documented contract is that this array holds overrides that actually
+    // affected a gate. A base-red comment that retired nothing changed
+    // nothing, so it must not appear here claiming otherwise.
+    readinessOverrides: activeReadinessOverrides.filter(
+      (override) =>
+        override.gate !== "base-red" || override === baseRed.appliedOverride,
+    ),
     codexApprovalReaction,
     codexReviewSignal,
     codeRabbitReviewSignal,
+    requiredStatusChecksStrict,
   };
 
   if (includeFeedbackDetails) {

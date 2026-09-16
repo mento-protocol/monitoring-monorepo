@@ -80,9 +80,7 @@ vi.mock("@/lib/format", async (importOriginal) => {
   const mod = await importOriginal<typeof import("@/lib/format")>();
   return {
     ...mod,
-    formatTimestamp: (ts: string) => `formatted:${ts}`,
     formatWei: (val: string) => `wei:${val}`,
-    relativeTime: (ts: string) => `rel:${ts}`,
   };
 });
 

@@ -354,9 +354,10 @@ If root `package.json` changed, first run
    - **An existing PR** is the push target. Before creating the ship commit,
      require local `HEAD` to equal its `headRefOid`; if intended commits
      already exist locally, require that OID to be their ancestor and inspect
-     the intervening range. If an ordinary PR branch is missing current base
-     commits, merge the base in — rebase is only acceptable before first
-     publication. Merge it locally from the fetched base, never through
+     the intervening range. Merge the base only when the oracle asks —
+     `merge_base_first`, or a real conflict — never merely for being behind,
+     and never to clear `base-red`, which only a green base or the operator
+     override clears; rebase is only acceptable before first publication. Merge it locally, never through
      GitHub's "Update branch" button or a web-UI edit, because each costs a
      CodeRabbit review event; and merge it before the CodeRabbit closeout
      request rather than after, because a base merge after the request can draw
@@ -491,7 +492,8 @@ If root `package.json` changed, first run
    feedback ledger must be clean **first**. Before the final pair, apply the
    CodeRabbit exact-head closeout in
    [`pr-ready-state.md`](pr-ready-state.md), in its order: merge the base
-   first, batch every fix commit into one push, never post while a CodeRabbit
+   first when the gate asks, batch every fix commit into one push, never post
+   while a CodeRabbit
    check is running on the current head, and post at most one marked request
    per accepted head and at most two per PR (a refused request may be retried
    once, per that note), following the gate's `fallbackAction`
@@ -501,7 +503,13 @@ If root `package.json` changed, first run
    `chatgpt-codex-connector[bot]` PR-description approval, unless a documented
    human break-glass comment applies:
    `/pr-ready-override gate=codex-description-approval head=<full-head-sha>
-reason=<why this is safe>`. Do not block on slow optional bots that branch
+reason=<why this is safe>`. When `main` itself is red, the recovery order is:
+   open the fix or revert PR, get it green on its own checks, have an operator
+   post `/pr-ready-override gate=base-red head=<full-head-sha> base=<base-oid>
+reason=<why>`,
+   then drive it to ALL_CLEAR. The override waives `base-red` only; it is not
+   approval to merge, which still needs the user's explicit per-PR word.
+   Nothing else merges until `main` is green again. Do not block on slow optional bots that branch
    protection does not require, and do not post routine or duplicate `@codex
 review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
    lifecycle-triggered, and a direct tag produces a duplicate pass, not a
@@ -554,8 +562,14 @@ review` requests. **Never tag `chatgpt-codex-connector` directly** — it is
    non-empty passing required-only projection. The wait is an untrusted delay.
    The writer repeats the complete workflow, run, job, PR, head,
    maintainer-change body, close-history, commit, file, and queue proof after
-   it. It then calls the synchronous REST merge endpoint with the exact head
-   SHA and squash method.
+   it. It then proves the head contains the base tip (`behind_by == 0`), since
+   with strict off a stale head still reports `mergeable_state: clean`
+   ([ADR 0104](../adr/0104-non-strict-required-status-checks.md)). Only then
+   does it call the synchronous REST merge endpoint with the exact head SHA and
+   squash method. A stale head merges nothing and writes nothing: it emits a
+   `::warning::` and a job summary naming the PR and `behind_by`. Dependabot's
+   scheduled rebase recovers it while it is under 30 days old; after that a
+   human must comment `@dependabot rebase`.
    The endpoint cannot enqueue or leave a standing auto-merge request. A later
    push cannot satisfy the exact-head write. A recorded close remains a durable
    human veto after the same PR and head are reopened. Dependabot must open a

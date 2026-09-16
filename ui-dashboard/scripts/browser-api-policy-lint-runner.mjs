@@ -3,6 +3,31 @@ import { fileURLToPath } from "node:url";
 
 const DASHBOARD_ROOT_URL = new URL("../", import.meta.url);
 const POLICY_RULE_ID = "browser-api-policy/no-unsupported-receiver-property";
+const SSR_CLOCK_RULE_ID = "ssr-clock-policy/no-raw-clock-format-in-client";
+const REPORTED_RULE_IDS = new Set([POLICY_RULE_ID, SSR_CLOCK_RULE_ID]);
+// Same import, with and without the directive: the rule must fire on the client
+// module and stay silent on the server one.
+const RAW_CLOCK_IMPORT_SOURCE = `
+  import { relativeTime, formatTimestamp, truncateAddress } from "@/lib/format";
+
+  export function label(ts: string): string {
+    return \`\${relativeTime(ts)} \${formatTimestamp(ts)} \${truncateAddress(ts)}\`;
+  }
+`;
+const SSR_SAFE_CLOCK_SOURCE = `
+  "use client";
+
+  import { relativeTimeOrTimestamp, truncateAddress } from "@/lib/format";
+  import { useSsrSafeRelative } from "@/hooks/use-now-seconds";
+
+  export function label(ts: string, now: number | null): string {
+    return \`\${relativeTimeOrTimestamp(ts, now)} \${truncateAddress(ts)}\`;
+  }
+
+  export function useLabel(ts: string): string {
+    return useSsrSafeRelative(ts);
+  }
+`;
 const BLOCKED_SOURCE = `
   [3, 1].toSorted();
   [3, 1].toReversed();
@@ -184,6 +209,56 @@ const cases = {
     filePath: "sentry.server.config.ts",
     source: BLOCKED_SOURCE,
   },
+  clockClient: {
+    filePath: "src/components/breach-history/breach-row.tsx",
+    source: `"use client";\n${RAW_CLOCK_IMPORT_SOURCE}`,
+  },
+  clockServer: {
+    filePath: "src/app/pool/[poolId]/page.tsx",
+    source: RAW_CLOCK_IMPORT_SOURCE,
+  },
+  clockHookModule: {
+    filePath: "src/hooks/use-now-seconds.ts",
+    source: `"use client";\n${RAW_CLOCK_IMPORT_SOURCE}`,
+  },
+  clockNamespaceClient: {
+    filePath: "src/components/breach-history/breach-row.tsx",
+    source: `
+      "use client";
+
+      import * as format from "@/lib/format";
+
+      export function label(ts: string): string {
+        return \`\${format.relativeTime(ts)} \${format.formatTimestamp(ts)} \${format.truncateAddress(ts)}\`;
+      }
+    `,
+  },
+  clockNamespaceEscapes: {
+    filePath: "src/components/breach-history/breach-row.tsx",
+    source: `
+      "use client";
+
+      import * as format from "@/lib/format";
+
+      const { formatTimestamp: stamp } = format;
+      const key = "relativeTime" as const;
+
+      export function label(ts: string, props: { relativeTime: string }): string {
+        const { relativeTime } = props;
+        return \`\${format["relativeTime"](ts)} \${format[\`relativeTime\`](ts)} \${format[key](ts)} \${stamp(ts)} \${relativeTime}\`;
+      }
+    `,
+  },
+  // Next scans the whole directive prologue, so a rule that reads only the
+  // first statement would go silent on this file.
+  clockStrictPrologue: {
+    filePath: "src/components/breach-history/breach-row.tsx",
+    source: `"use strict";\n"use client";\n${RAW_CLOCK_IMPORT_SOURCE}`,
+  },
+  clockSsrSafe: {
+    filePath: "src/components/breach-history/breach-row.tsx",
+    source: SSR_SAFE_CLOCK_SOURCE,
+  },
 };
 const eslint = new ESLint({
   cwd: fileURLToPath(DASHBOARD_ROOT_URL),
@@ -203,7 +278,7 @@ for (const [name, fixture] of Object.entries(cases)) {
   resultEntries.push([
     name,
     result.messages
-      .filter(({ ruleId }) => ruleId === POLICY_RULE_ID)
+      .filter(({ ruleId }) => REPORTED_RULE_IDS.has(ruleId))
       .map(({ ruleId, message }) => ({ ruleId, message })),
   ]);
 }

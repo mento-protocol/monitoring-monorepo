@@ -22,7 +22,11 @@ import {
   formatDurationShort,
   transferDeliveryDurationSec,
 } from "@/lib/bridge-status";
-import { relativeTime, formatTimestamp, truncateAddress } from "@/lib/format";
+import { truncateAddress } from "@/lib/format";
+import {
+  useSsrSafeRelative,
+  useSsrSafeTimestamp,
+} from "@/hooks/use-now-seconds";
 import { networkForChainId, tokenAddressForSymbol } from "@/lib/networks";
 import { explorerAddressUrl, explorerTxUrl } from "@/lib/tokens";
 import { wormholescanUrl } from "@/lib/wormhole/urls";
@@ -92,8 +96,9 @@ export function TimeCell({
   ts: string | null;
   whUrl: string | null;
 }) {
-  const relative = ts ? relativeTime(ts) : "—";
-  const precise = ts ? formatTimestamp(ts) : undefined;
+  const relative = useSsrSafeRelative(ts);
+  const preciseLabel = useSsrSafeTimestamp(ts);
+  const precise = ts ? preciseLabel : undefined;
   if (whUrl) {
     return (
       <a

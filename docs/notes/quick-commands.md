@@ -24,6 +24,7 @@ pnpm install
 pnpm indexer:codegen              # Generate schema types
 pnpm indexer:dev                  # Start mainnet indexer
 pnpm --filter @mento-protocol/indexer-envio indexer:reserve-yield:test    # Codegen mainnet config, test sUSDS/stETH, restore mainnet codegen
+pnpm indexer:mutation:canary       # Harness canary: 100% or the mutation harness is broken; run it first
 pnpm indexer:mutation              # Targeted StrykerJS baseline for indexer pure logic
 pnpm deploy:indexer                # Push HEAD to envio branch and trigger hosted reindex
 pnpm deploy:indexer:status <commit> --watch --compact  # Low-noise registration + sync wait
@@ -82,6 +83,8 @@ pnpm agent:context-budget --strict # Enforce root, scoped-file, and aggregate-ro
 # Run feedback-state first. Final all-clear needs the current-head Codex
 # PR-description +1 or this exact-head human override:
 # /pr-ready-override gate=codex-description-approval head=<full-head-sha> reason=<why this is safe>
+# A red `main` blocks every PR; land its fix with:
+# /pr-ready-override gate=base-red head=<sha> base=<base-oid> reason=<why>
 pnpm --silent pr:feedback-state --pr 123 --json  # Normalize unresolved/reply-required feedback before all-clear
 pnpm pr:ready-state --pr 123 --json              # Final current-head required-readiness probe
 node scripts/pr/pr-stack-recover.mjs --help      # Prepare local native-stack recovery; never publishes or merges
@@ -108,7 +111,9 @@ pnpm dashboard:lighthouse:pool-fixture # Blocking deterministic production-build
 pnpm --filter @mento-protocol/ui-dashboard test:browser                   # Fixture browser + visual snapshot tests on cached next build via next start
 pnpm --filter @mento-protocol/ui-dashboard test:browser:production        # Same with a fresh fixture build
 pnpm --filter @mento-protocol/ui-dashboard test:browser:update-snapshots # Rebaseline legitimate visual snapshot changes
+pnpm dashboard:mutation:canary  # Harness canary: 100% or the mutation harness is broken; run it first
 pnpm dashboard:mutation       # Targeted StrykerJS baseline for dashboard pure logic
+pnpm bridge:mutation:canary     # Harness canary: 100% or the mutation harness is broken; run it first
 pnpm bridge:mutation          # Targeted StrykerJS baseline for metrics-bridge rebalance probe logic
 
 # Aggregator integration probes

@@ -4,6 +4,7 @@
     "scripts/*.{mjs,ts}",
     "scripts/intel-marathon/*.mjs",
     "vitest.mutation.config.ts",
+    "stryker.canary.config.mjs",
     "tests/**/*.test.{ts,tsx}",
     "tests/browser/fixtures/hasura-fixture-server.mjs",
     "tests/browser/fixtures/fixed-weekend-server-clock.mjs"

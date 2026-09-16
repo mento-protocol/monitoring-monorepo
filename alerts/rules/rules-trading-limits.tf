@@ -13,6 +13,9 @@ resource "grafana_rule_group" "trading_limits" {
 
     annotations = {
       summary = "L0 (short-term) trading limit at {{ with (index $values \"utilization\") }}{{ printf \"%.1f\" .Value }}{{ else }}unknown{{ end }}% for {{ $labels.limitId }} on {{ $labels.chain | title }}"
+      # Resolver route: the dashboard trades the bytes32 limit id for the
+      # wrapping VirtualPool and opens its Limits tab (issue #2447).
+      pool_url = "https://monitoring.mento.org/limit/{{ $labels.limitIdValue }}"
     }
 
     labels = {
@@ -135,6 +138,9 @@ resource "grafana_rule_group" "trading_limits" {
 
     annotations = {
       summary = "L1 (medium-term) trading limit at {{ with (index $values \"utilization\") }}{{ printf \"%.1f\" .Value }}{{ else }}unknown{{ end }}% for {{ $labels.limitId }} on {{ $labels.chain | title }}"
+      # Resolver route: the dashboard trades the bytes32 limit id for the
+      # wrapping VirtualPool and opens its Limits tab (issue #2447).
+      pool_url = "https://monitoring.mento.org/limit/{{ $labels.limitIdValue }}"
     }
 
     labels = {
@@ -257,6 +263,9 @@ resource "grafana_rule_group" "trading_limits" {
 
     annotations = {
       summary = "LG (global lifetime) trading limit at {{ with (index $values \"utilization\") }}{{ printf \"%.1f\" .Value }}{{ else }}unknown{{ end }}% for {{ $labels.limitId }} on {{ $labels.chain | title }}"
+      # Resolver route: the dashboard trades the bytes32 limit id for the
+      # wrapping VirtualPool and opens its Limits tab (issue #2447).
+      pool_url = "https://monitoring.mento.org/limit/{{ $labels.limitIdValue }}"
     }
 
     labels = {

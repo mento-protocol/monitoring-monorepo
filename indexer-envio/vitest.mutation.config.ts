@@ -11,6 +11,7 @@ export default defineConfig({
       "test/tradingLimits.test.ts",
       "test/brokerTradingLimits.test.ts",
       "test/stables.test.ts",
+      "test/harness-canary/subject.test.ts",
     ],
     env: {
       ENVIO_START_BLOCK_CELO: "0",

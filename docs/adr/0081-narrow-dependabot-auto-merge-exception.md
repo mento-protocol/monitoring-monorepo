@@ -89,7 +89,13 @@ Use two workflows as one pinned security boundary:
    head, maintainer-change body, close-history, commit, file, and queue proof
    after it.
 5. The writer calls `PUT /repos/{owner}/{repo}/pulls/{number}/merge` with the
-   verified head SHA and squash method. This synchronous endpoint cannot
+   verified head SHA and squash method. **Amended 2026-09-15
+   ([ADR 0104](0104-non-strict-required-status-checks.md)):** before that it
+   compares the base tip against the verified head and merges only at
+   `behind_by == 0`; with strict off a stale head reports `clean`, so the merge
+   state no longer proves freshness. A stale head writes nothing, emits a
+   `::warning::` and job summary, and waits for Dependabot's scheduled rebase
+   (under 30 days) or a human `@dependabot rebase`. This synchronous endpoint cannot
    enqueue or create an auto-merge request. Head-repository-and-branch-scoped
    concurrency cancels a stale writer when a newer run for the same Dependabot
    branch starts. A fork that reuses the branch name has a separate group.

@@ -14,6 +14,16 @@ export const HUMAN_OVERRIDE_ASSOCIATIONS = new Set([
 const READINESS_OVERRIDE_COMMAND = "/pr-ready-override";
 export const CODEX_DESCRIPTION_APPROVAL_OVERRIDE_GATE =
   "codex-description-approval";
+// The `base-red` blocker would otherwise deadlock its own recovery: the fix or
+// revert PR that turns `main` green is blocked by the red `main` it exists to
+// repair. This is the documented way out, and it carries exactly the same
+// conditions as the Codex gate above — a human operator author, a reason, and
+// binding to the current head — so it expires on any push.
+export const BASE_RED_OVERRIDE_GATE = "base-red";
+const SUPPORTED_OVERRIDE_GATES = new Set([
+  CODEX_DESCRIPTION_APPROVAL_OVERRIDE_GATE,
+  BASE_RED_OVERRIDE_GATE,
+]);
 
 function issueCommentAuthorAssociation(comment) {
   return String(
@@ -59,12 +69,16 @@ export function parseReadinessOverrideComment(comment, currentHeadOid = null) {
 
   const gate = extractOverrideValue(body, "gate")?.toLowerCase() ?? null;
   const head = extractOverrideValue(body, "head");
+  // `base-red` names a specific red base commit, not just a head: `main`
+  // advancing to a different red commit must need a fresh decision.
+  const overrideBase = extractOverrideValue(body, "base");
   const reason = extractOverrideReason(body);
   const author = comment.user?.login ?? comment.author?.login ?? null;
   const createdAt = comment.created_at ?? comment.createdAt ?? null;
   const base = {
     gate,
     head,
+    base: overrideBase,
     reason,
     author,
     authorAssociation:
@@ -77,7 +91,7 @@ export function parseReadinessOverrideComment(comment, currentHeadOid = null) {
   if (!isHumanOverrideAuthor(comment)) {
     return { ...base, reasonIgnored: "author_not_allowed" };
   }
-  if (gate !== CODEX_DESCRIPTION_APPROVAL_OVERRIDE_GATE) {
+  if (!SUPPORTED_OVERRIDE_GATES.has(gate)) {
     return { ...base, reasonIgnored: "unsupported_gate" };
   }
   if (!head || !currentHeadOid || head !== currentHeadOid) {
@@ -85,6 +99,9 @@ export function parseReadinessOverrideComment(comment, currentHeadOid = null) {
   }
   if (!reason) {
     return { ...base, reasonIgnored: "missing_reason" };
+  }
+  if (gate === BASE_RED_OVERRIDE_GATE && !overrideBase) {
+    return { ...base, reasonIgnored: "missing_base" };
   }
 
   return {

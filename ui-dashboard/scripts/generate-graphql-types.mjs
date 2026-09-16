@@ -42,6 +42,7 @@ const DOCUMENT_SOURCES = [
   "src/lib/bridge-queries.ts",
   "src/lib/queries/broker.ts",
   "src/lib/queries/config.ts",
+  "src/lib/queries/limit-lookup.ts",
   "src/lib/queries/liquity.ts",
   "src/lib/queries/lp.ts",
   "src/lib/queries/ols.ts",

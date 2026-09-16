@@ -1,8 +1,13 @@
+"use client";
+
 import Link from "next/link";
 import { AddressLink } from "@/components/address-link";
 import { Row, Td } from "@/components/table";
 import { Tooltip } from "@/components/tooltip";
-import { formatTimestamp, relativeTime } from "@/lib/format";
+import {
+  useSsrSafeRelative,
+  useSsrSafeTimestamp,
+} from "@/hooks/use-now-seconds";
 import { NETWORKS, networkIdForChainId } from "@/lib/networks";
 import { explorerTxUrl } from "@/lib/tokens";
 import type { CdpCollateral, CdpTrove } from "../../_lib/types";
@@ -37,7 +42,7 @@ function OpenTroveRow({
   collateral: CdpCollateral;
 }) {
   const { trove } = row;
-  const icrTimestamp = formatTimestamp(trove.lastUpdatedAt);
+  const icrTimestamp = useSsrSafeTimestamp(trove.lastUpdatedAt);
   const icrTitle =
     trove.icrBps < 0
       ? `Indexed ICR unavailable. Row last updated at ${icrTimestamp}.`
@@ -192,12 +197,12 @@ function EventTimeValue({
   chainId: number;
   prefix: string;
 }) {
+  const label = useSsrSafeRelative(timestamp);
+  const exact = useSsrSafeTimestamp(timestamp);
   if (!timestamp || timestamp === "0") {
     return <span className="text-slate-500">—</span>;
   }
 
-  const label = relativeTime(timestamp);
-  const exact = formatTimestamp(timestamp);
   if (!txHash) {
     return (
       <Tooltip content={`${prefix} ${exact}.`} align="right">
@@ -299,8 +304,8 @@ function UpdatedValue({
   trove: CdpTrove;
   chainId: number;
 }) {
-  const label = relativeTime(trove.lastUpdatedAt);
-  const timestamp = formatTimestamp(trove.lastUpdatedAt);
+  const label = useSsrSafeRelative(trove.lastUpdatedAt);
+  const timestamp = useSsrSafeTimestamp(trove.lastUpdatedAt);
   const networkId = networkIdForChainId(chainId);
   const network = networkId ? NETWORKS[networkId] : null;
   // Deliberately a plain link, not a Tooltip (unlike EventTimeValue on the

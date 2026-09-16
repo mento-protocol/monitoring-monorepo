@@ -19,10 +19,11 @@ import {
 } from "@/lib/constants";
 import {
   formatBlock,
-  formatTimestamp,
   formatWei,
-  relativeTime,
+  relativeTimeOrTimestamp,
+  timestampOrUtc,
 } from "@/lib/format";
+import { useNowSeconds } from "@/hooks/use-now-seconds";
 import { useGQL } from "@/lib/graphql";
 import {
   POOL_DAILY_SNAPSHOTS_CHART,
@@ -55,6 +56,7 @@ export function LiquidityTab({
 }) {
   const { network } = useNetwork();
   const { getName, getTags } = useAddressLabels();
+  const nowSeconds = useNowSeconds();
   const query = normalizeSearch(search);
   const [rawPage, setRawPage] = React.useState(1);
 
@@ -202,8 +204,12 @@ export function LiquidityTab({
                 <Td mono small muted align="right">
                   {formatBlock(r.blockNumber)}
                 </Td>
-                <Td small muted title={formatTimestamp(r.blockTimestamp)}>
-                  {relativeTime(r.blockTimestamp)}
+                <Td
+                  small
+                  muted
+                  title={timestampOrUtc(r.blockTimestamp, nowSeconds)}
+                >
+                  {relativeTimeOrTimestamp(r.blockTimestamp, nowSeconds)}
                 </Td>
               </Row>
             ))}

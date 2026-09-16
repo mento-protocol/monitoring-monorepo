@@ -23,7 +23,7 @@ import type { SWRResponse } from "swr";
 import { EmptyBox, ErrorBox, StaleRefreshNotice } from "@/components/feedback";
 import { TableSkeleton } from "@/components/skeletons";
 import { Row, Table, Td, Th } from "@/components/table";
-import { relativeTime } from "@/lib/format";
+import { useSsrSafeRelative } from "@/hooks/use-now-seconds";
 import { HASURA_TIMEOUT_MS, useGQL } from "@/lib/graphql";
 import { CDP_TROVES_BY_OWNER } from "@/lib/queries";
 import { hasErrorWithoutData } from "@/lib/swr-state";
@@ -295,6 +295,7 @@ function OwnerTroveHitRow({
    *  id, no history link (the route needs the market's symbol slug). */
   collateral: CdpCollateral | undefined;
 }) {
+  const lastUpdated = useSsrSafeRelative(row.lastUpdatedAt);
   return (
     <Row>
       <Td>
@@ -335,7 +336,7 @@ function OwnerTroveHitRow({
       <Td align="right" mono>
         {formatTokenAmount(row.coll, "USDm")}
       </Td>
-      <Td align="right">{relativeTime(row.lastUpdatedAt)}</Td>
+      <Td align="right">{lastUpdated}</Td>
     </Row>
   );
 }
