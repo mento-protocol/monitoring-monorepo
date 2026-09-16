@@ -178,6 +178,18 @@ test("fails an authored body over the word ceiling", () => {
   );
 });
 
+test("counts prose between inline-code comment delimiters", () => {
+  assertFail(
+    sizedBody({
+      tldrWords: 20,
+      problemWords: 100,
+      solutionWords: 275,
+      extra: "\n`<!--` overflow `-->`",
+    }),
+    /authored PR description is 401 words; the ceiling is 400/,
+  );
+});
+
 test("excludes the template checklist from the word count", () => {
   assertPass(
     sizedBody({
@@ -281,6 +293,41 @@ test("still separates words at a rendered space entity", () => {
       extra: `
 <p>inter&nbsp;national inter&thinsp;national</p>
 `,
+    }),
+    /authored PR description is 402 words; the ceiling is 400/,
+  );
+});
+
+test("decodes named whitespace entities inside raw HTML", () => {
+  assertFail(
+    sizedBody({
+      tldrWords: 20,
+      problemWords: 100,
+      solutionWords: 274,
+      extra: "\n<p>one&Tab;two</p>",
+    }),
+    /authored PR description is 401 words; the ceiling is 400/,
+  );
+});
+
+test("does not count named punctuation entities inside raw HTML", () => {
+  assertPass(
+    sizedBody({
+      tldrWords: 20,
+      problemWords: 100,
+      solutionWords: 275,
+      extra: "\n<p>&comma;</p>",
+    }),
+  );
+});
+
+test("counts Markdown definitions displayed literally inside raw HTML", () => {
+  assertFail(
+    sizedBody({
+      tldrWords: 20,
+      problemWords: 100,
+      solutionWords: 275,
+      extra: "\n<p>[label]: /visible</p>",
     }),
     /authored PR description is 402 words; the ceiling is 400/,
   );
@@ -670,6 +717,24 @@ Visible problem prose. <!-- template note -->
 
 <!-- prefix --> Visible solution prose.
 `);
+});
+
+test("counts opening prose between inline-code comment delimiters", () => {
+  assertFail(
+    `## tl;dr
+
+\`<!--\` ${filler(81)} \`-->\`
+
+## The Problem
+
+\`<!--\` The old behavior hid rendered prose. \`-->\`
+
+## The Solution
+
+\`<!--\` The validator now sees that prose. \`-->\`
+`,
+    /'## tl;dr' section is 81 words; the limit is 80/,
+  );
 });
 
 test("does not count visible text inside raw HTML", () => {
