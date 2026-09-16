@@ -473,6 +473,18 @@ test("does not strip a comment delimiter inside an HTML attribute", () => {
   );
 });
 
+test("maps comments in container HTML back to source offsets", () => {
+  assertFail(
+    sizedBody({
+      tldrWords: 20,
+      problemWords: 100,
+      solutionWords: 275,
+      extra: "\n> <div>\n> a\n> <!-- hidden -->\n> </div>",
+    }),
+    /authored PR description is 401 words; the ceiling is 400/,
+  );
+});
+
 test("counts prose written as numeric character references", () => {
   // "word" as decimal references; GitHub renders it as the word.
   const encoded = "&#119;&#111;&#114;&#100;";

@@ -88,7 +88,11 @@ function stripHtmlComments(body) {
       Number.isInteger(node.position?.start.offset) &&
       Number.isInteger(node.position?.end.offset)
     ) {
-      for (const [localStart, localEnd] of htmlCommentRanges(node.value)) {
+      const source = body.slice(
+        node.position.start.offset,
+        node.position.end.offset,
+      );
+      for (const [localStart, localEnd] of htmlCommentRanges(source)) {
         ranges.push([
           node.position.start.offset + localStart,
           node.position.start.offset + localEnd,
