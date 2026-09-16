@@ -56,6 +56,31 @@ updates:
       prefix: chore(deps)
       prefix-development: chore(deps-dev)
 
+    # Hold vitest on 4.x until Stryker's vitest runner supports vitest 5.
+    # Under vitest 5 the runner's per-test name filter matches nothing, every
+    # covered mutant survives with the tests passing, and the weekly Mutation
+    # Testing workflow reads as a test-strength collapse (issue #2449,
+    # stryker-mutator/stryker-js#6210; fix PRs #6214 and #6220 are unreleased).
+    # `ignore` applies to the whole entry, so it also holds the five packages
+    # that carry no Stryker dependency and are still on vitest 5.x —
+    # shared-config, integration-probes, governance-watchdog and the two alert
+    # function roots — at 5.x majors. Splitting the entry would break the
+    # single grouped PR for shared dependencies described above, so the wider
+    # reach is accepted.
+    # `ignore` also suppresses security updates, so a vitest advisory patched
+    # only in a newer major needs this block removed and the runner fixed in
+    # the same PR. Remove it once a released
+    # `@stryker-mutator/vitest-runner` passes `pnpm indexer:mutation:canary`,
+    # `pnpm bridge:mutation:canary`, and `pnpm dashboard:mutation:canary` on
+    # the newer vitest.
+    ignore:
+      - dependency-name: vitest
+        update-types:
+          - version-update:semver-major
+      - dependency-name: "@vitest/coverage-v8"
+        update-types:
+          - version-update:semver-major
+
     groups:
       # Next.js and React are coupled to the Vercel deployment contract and the
       # React Compiler pin. Isolate every level for focused verification.

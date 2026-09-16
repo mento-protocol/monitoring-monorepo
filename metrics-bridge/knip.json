@@ -1,6 +1,10 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "entry": ["vitest.mutation.config.ts", "test/**/*.test.ts"],
+  "entry": [
+    "vitest.mutation.config.ts",
+    "stryker.canary.config.mjs",
+    "test/**/*.test.ts"
+  ],
   "project": ["src/**/*.ts", "test/**/*.ts", "*.config.*"],
   "ignoreDependencies": ["@stryker-mutator/api"],
   "rules": {

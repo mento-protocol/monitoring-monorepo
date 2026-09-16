@@ -148,6 +148,7 @@ pnpm codegen    # Generate types
 pnpm dev        # Start indexer stack
 pnpm start      # Start without codegen
 pnpm stop       # Stop Docker containers
+pnpm test:mutation:canary  # Harness canary — run it before the baseline
 pnpm test:mutation     # Targeted StrykerJS pure-logic baseline
 pnpm knip:report       # Report-only unused-file/export/dependency scan
 ```

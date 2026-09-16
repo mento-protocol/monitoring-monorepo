@@ -174,7 +174,7 @@ test("focused external inputs and exact owners cannot drift", () => {
 test("the live indexer module inventory keeps its routing totals", () => {
   for (const [label, paths, routed, excluded] of [
     ["source", currentIndexerSources, 131, 5],
-    ["test", currentIndexerTests, 90, 5],
+    ["test", currentIndexerTests, 90, 7],
   ]) {
     const decisions = getIndexerHandlerInvariantChecklistDecisions(paths);
     assert.equal(decisions.length, paths.length, `${label} decision count`);
@@ -211,7 +211,7 @@ test("the live indexer module inventory keeps its routing totals", () => {
     136,
     "current source module inventory",
   );
-  assert.equal(currentIndexerTests.length, 95, "current test module inventory");
+  assert.equal(currentIndexerTests.length, 97, "current test module inventory");
   assert.doesNotThrow(
     () =>
       getIndexerHandlerInvariantChecklistDecisions([
@@ -268,6 +268,7 @@ test("named indexer modules keep their exact routing owner", () => {
     ["indexer-envio/test/self-heal.test.ts", "invariant-tests"],
     ["indexer-envio/test/startBlockInvariant.test.ts", "invariant-tests"],
     ["indexer-envio/test/swap.test.ts", "invariant-tests"],
+    ["indexer-envio/test/harness-canary/subject.ts", "test-excluded"],
     ["indexer-envio/test/wormholeScratchWarnings.test.ts", "test-excluded"],
     ["indexer-envio/abis/FPMM.json", "abi-runtime-inputs"],
     [
