@@ -82,31 +82,40 @@ const allowedClaudeBashScriptPermissions = new Set([
   "Bash(bash ./ui-dashboard/scripts/check-react-doctor-score.sh:*)",
 ]);
 
-// Keep this in sync with `.claude/settings.json`. Exact entries make the key
-// path part of the `sag` invocation itself; wrappers, compound commands, and
-// comments cannot satisfy the check by mentioning the canonical path elsewhere.
-const allowedClaudeSagPermissions = new Set([
-  'Bash(sag --api-key-file ~/.config/elevenlabs_api_key -v Charlie "hey, i need your feedback in the agent chat")',
-  'Bash(sag --api-key-file ~/.config/elevenlabs_api_key -v Charlie "hey, i need your approval in the agent chat")',
-  'Bash(sag --api-key-file ~/.config/elevenlabs_api_key -v Charlie "hey, the task finished and needs your attention in the agent chat")',
+// Keep this in sync with `.claude/settings.json`. The spoken attention nudge
+// (docs/notes/spoken-attention-nudge.md) speaks one fixed phrase through the
+// local `say` binary, with `spd-say` as the Linux best-effort fallback, so the
+// reviewed set holds whole literal commands. A wildcard, wrapper, or compound
+// entry would pre-approve an arbitrary message argument, and a shell
+// substitution there reads local file contents aloud.
+//
+// `-v Aaron` pins the voice, because macOS 27 changed the default and `say`
+// exits 0 on an unknown voice name rather than failing. The flag is part of the
+// literal, so changing the voice is a deliberate edit here and in the settings
+// file rather than something an existing pre-approval silently covers.
+//
+// `sag` is the retired ElevenLabs path and has no reviewed entry at all. It
+// still routes through this rule so a resurrected grant fails by name instead
+// of falling into the generic branch.
+const allowedClaudeSpokenNudgePermissions = new Set([
+  'Bash(say -v Aaron "hey, i need your feedback in the agent chat")',
+  'Bash(say -v Aaron "hey, i need your approval in the agent chat")',
+  'Bash(say -v Aaron "hey, the task finished and needs your attention in the agent chat")',
+  'Bash(spd-say "hey, i need your feedback in the agent chat")',
+  'Bash(spd-say "hey, i need your approval in the agent chat")',
+  'Bash(spd-say "hey, the task finished and needs your attention in the agent chat")',
 ]);
 
 const allowedClaudeOtherBashPermissions = new Set([
   "Bash(terraform -chdir=terraform output:*)",
   "Bash(terraform -chdir=terraform plan:*)",
   "Bash(terraform -chdir=terraform validate:*)",
-  'Bash(say "hey, i need your feedback in the agent chat")',
-  'Bash(say "hey, i need your approval in the agent chat")',
-  'Bash(say "hey, the task finished and needs your attention in the agent chat")',
-  'Bash(spd-say "hey, i need your feedback in the agent chat")',
-  'Bash(spd-say "hey, i need your approval in the agent chat")',
-  'Bash(spd-say "hey, the task finished and needs your attention in the agent chat")',
   "Bash(ESLINT_BASELINE_MAIN=* node *)",
 ]);
 
 const allowedClaudeBashPermissions = new Set([
   ...allowedClaudeBashScriptPermissions,
-  ...allowedClaudeSagPermissions,
+  ...allowedClaudeSpokenNudgePermissions,
   ...allowedClaudeOtherBashPermissions,
 ]);
 
@@ -137,7 +146,13 @@ function isClaudeBashScriptPermission(permission) {
   return bashScriptPermission.test(permission);
 }
 
-function isClaudeSagPermission(permission) {
+// The three spoken-nudge binaries, at a word boundary and behind an optional
+// directory prefix. Quote and line-continuation stripping happens first, so an
+// entry cannot hide the binary name inside escapes.
+const spokenNudgeCommand =
+  /(?:^|[\s;&|()'"`$])(?:[^\s;&|()'"`$]+\/)?(?:spd-say|say|sag)(?=$|[\s:;&|()'"`$])/;
+
+function isClaudeSpokenNudgePermission(permission) {
   if (!permission.startsWith("Bash(")) return false;
 
   const command = permission.slice(
@@ -147,9 +162,7 @@ function isClaudeSagPermission(permission) {
   const normalizedCommand = command
     .replace(/\\\r?\n/g, "")
     .replace(/[\\'"]/g, "");
-  return /(?:^|[\s;&|()'"`$])(?:[^\s;&|()'"`$]+\/)?sag(?=$|[\s:;&|()'"`$])/.test(
-    normalizedCommand,
-  );
+  return spokenNudgeCommand.test(normalizedCommand);
 }
 
 function validateClaudePermissions(settings, fail) {
@@ -185,11 +198,11 @@ function validateClaudePermissions(settings, fail) {
     }
 
     if (
-      isClaudeSagPermission(permission) &&
-      !allowedClaudeSagPermissions.has(permission)
+      isClaudeSpokenNudgePermission(permission) &&
+      !allowedClaudeSpokenNudgePermissions.has(permission)
     ) {
       fail(
-        `.claude/settings.json: sag permissions must include --api-key-file with the canonical ~/.config/elevenlabs_api_key path and match a reviewed single-command allowlist entry: ${permission}`,
+        `.claude/settings.json: spoken-nudge permissions must match one of the reviewed literal say/spd-say phrases, with no wildcard, wrapper, or compound command: ${permission}`,
       );
       continue;
     }

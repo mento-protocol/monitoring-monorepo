@@ -3,7 +3,7 @@ title: Spoken Attention Nudge
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-22
+last_verified: 2026-09-16
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -13,68 +13,108 @@ garden_lane: operator-runbooks
 # Spoken Attention Nudge
 
 When you need the user's attention and they are not actively responding, send a
-brief spoken nudge with `sag` in addition to the normal chat message. Default to
+brief spoken nudge with `say` in addition to the normal chat message. Default to
 doing this when blocked on a user decision, waiting on approval for a production
 mutation, a long task has finished and needs user follow-up, or plan feedback is
 required before meaningful progress can continue.
 
-Use Charlie's voice with `sag` when it is installed and configured. Keep the
-spoken message short and specific. Both Codex and Claude should prefer the
-repo-standard key file path so behavior does not depend on shell startup files
-or stripped environment variables:
+`say` is the macOS built-in and the only spoken path on macOS. It speaks
+locally: no network call, no API key, no third-party service.
 
 ```bash
-sag --api-key-file ~/.config/elevenlabs_api_key -v Charlie "hey, i need your approval in the agent chat"
+say -v Aaron "hey, i need your approval in the agent chat"
 ```
 
-`sag` needs network access to ElevenLabs, a readable ElevenLabs API key, and the
-local audio device. A human operator provisions
-`$HOME/.config/elevenlabs_api_key` with mode `0600`; agents may pass that
-path to `sag` but must not open, copy, create, rotate, or retrieve the
-credential. The key file is required for Codex because it does not reliably
-inherit shell startup files, and its environment policy strips secret-like
-variables such as `ELEVENLABS_API_KEY`, even when they exist in `.zshrc`.
-Claude may inherit `.zshrc` in local shells, but should still use the same
-key-file command so the two agents behave consistently.
+## Pin the voice
 
-Because `sag` is a third-party CLI, it may not exist on every
-developer machine. Use this fallback order:
+Always pass `-v Aaron`. The default voice is not stable across macOS releases,
+and the operator picked this one, so the pre-approved phrases in
+`.claude/settings.json` carry the flag as part of the literal.
+
+`say -v '?'` lists the voice as `Aaron (Enhanced)`. The short name resolves to
+it: `-v Aaron` and `-v "Aaron (Enhanced)"` render byte-identical audio, and both
+differ from the default. The pre-approval uses the short name so no permission
+literal has to carry parentheses.
+
+`say` does not fail on a voice it does not have: it exits 0 and speaks the
+default instead, so a missing voice sounds like a working nudge in the wrong
+voice. When `say -v '?'` does not list Aaron, install it under System Settings,
+Accessibility, Spoken Content, System Voice, Manage Voices. Say so in chat
+rather than re-pointing the pinned command at another voice.
+
+## Name the session
+
+Several sessions can speak to one operator, so name the session before the
+message:
 
 ```bash
-msg="hey, i need your feedback in the agent chat"
-sent=0
-if command -v sag >/dev/null 2>&1 && [ -r "$HOME/.config/elevenlabs_api_key" ]; then
-  sag --api-key-file ~/.config/elevenlabs_api_key -v Charlie "$msg" && sent=1
-fi
-if [ "$sent" -eq 0 ] && command -v say >/dev/null 2>&1; then
-  say "$msg" && sent=1
-fi
-if [ "$sent" -eq 0 ] && command -v spd-say >/dev/null 2>&1; then
-  spd-say "$msg" && sent=1
-fi
-if [ "$sent" -eq 0 ]; then
-  printf 'spoken nudge unavailable; falling back to chat only: %s\n' "$msg" >&2
-fi
+say -v Aaron "In ci cost audit: I need your approval in the agent chat."
 ```
 
-On macOS, `say` is the expected built-in fallback. Linux has no universal
-built-in TTS command; `spd-say` is best-effort only when installed. In Codex,
-request escalated execution for the nudge instead of trying to run it inside the
-workspace sandbox. If every spoken path fails, report the failure in chat and
-continue with the visible written request; do not silently assume the user heard
-the nudge. The compound fallback recipe may require normal command approval.
+Take the label from the session or pane title when it describes the task,
+otherwise from the repository and branch or a short task description. Avoid a
+label several sessions share, such as `Claude` or `main`. Keep it short and easy
+to say. Put the same label in the written request so the operator can match the
+two.
 
-`sag` sends the spoken text to ElevenLabs. Keep both remote and local fallback
-messages fixed and low-information: never include secrets, logs, identifiers,
-addresses, filenames, or copied local content. Claude command pre-approvals
-should stay limited to the literal phrases tracked in `.claude/settings.json`.
-Do not pre-approve arbitrary `say`, `spd-say`, or `sag` message arguments,
-because shell substitutions in those arguments could disclose local file
-contents through speech or the ElevenLabs request.
+Use metadata tied to this session, not whichever pane holds focus. In cmux, look
+the title up through the caller's own `CMUX_WORKSPACE_ID` and `CMUX_SURFACE_ID`,
+and never speak those IDs. Do not guess a title, and do not change focus or
+titles. When that lookup is unavailable, use the working directory, branch, and
+task context.
+
+Type the label out as plain text, using letters, digits, spaces, `.`, `_`, and
+`-` only. Never paste a pane title or a ref name into the command: `$(…)`, a
+backtick, or a quote in that title runs before `say` does. When a title carries
+anything outside that set, write a safe task label instead.
+
+Pass the whole message as one safely quoted argument. Never build it from
+command substitution, a file, or captured output.
+
+**Known limit.** The pre-approved phrases live in `.claude/settings.json` and
+cover Claude only. A labelled line is not one of them, so it prompts for
+approval, and an away operator cannot give it. Speak the labelled line when
+someone can approve it. Otherwise speak a pre-approved phrase, which tells the
+operator that a session needs them but not which one, and name the session in
+the written request. Codex has no equivalent pre-approval: its nudge goes
+through escalated execution, which can prompt for either form, and an
+unanswered prompt is a failed spoken path — fall back to the written request.
+Closing the gap needs a reviewed helper that derives the label itself.
+Pre-approving `say` with a free message argument is not the way to close it: a
+shell substitution in that argument reads local file contents aloud.
+
+## Keep the spoken text low-information
+
+Keep the message short and fixed. Never speak secrets, logs, identifiers,
+hashes, addresses, filenames, paths, or copied local content. A label may carry
+non-sensitive session, pane, workspace, repository, and branch names; when a
+name holds sensitive text, use a safe task label instead.
+
+Claude command pre-approvals stay limited to the literal phrases tracked in
+`.claude/settings.json`. Do not pre-approve `say` or `spd-say` with a wildcard
+or an arbitrary message argument, because a shell substitution in that argument
+could read local file contents aloud.
+
+## Fallback and failure
+
+Linux has no universal built-in TTS command; `spd-say` is best-effort only when
+installed:
+
+```bash
+spd-say "hey, i need your feedback in the agent chat"
+```
+
+The workspace sandbox can block the local audio service. Run the nudge with
+escalated permissions when it does instead of retrying inside the sandbox; in
+Codex, request escalated execution. If every spoken path fails, report the
+failure in chat and continue with the visible written request; do not silently
+assume the user heard the nudge.
+
+## Do not hook it
 
 Do not wire this into the existing SessionEnd hook. The current shared hook
 events do not know whether the agent is genuinely waiting on the user versus
 waiting on CI, bot review, deploy sync, or another external process, so a hook
-would either miss the important decision point or create noisy false alarms.
-Use the manual `sag` call at the moment the agent identifies a real user-input
+would either miss the important decision point or create noisy false alarms. Use
+the manual `say` call at the moment the agent identifies a real user-input
 blocker.

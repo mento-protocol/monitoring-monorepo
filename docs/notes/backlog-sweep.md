@@ -908,15 +908,16 @@ The report ends with one URL for each READY PR. A human can open each link and
 merge in the GitHub UI. Listing a link is not merge approval. The sweep never
 merges.
 
-The sweep then announces the report through the fallback ladder in
-[`spoken-attention-nudge.md`](spoken-attention-nudge.md), which owns the
-command and its key-file rule. The nudge runs with escalated execution, not
-inside the workspace sandbox: it needs the network and the local audio device,
-and a sandboxed attempt fails in a way indistinguishable from a missing
-command. The spoken text stays fixed and low-information — it goes to a
-third-party service, and the detail belongs in the report. When every spoken
-path fails, the report says so rather than leaving the operator to assume they
-were told.
+The sweep then announces the report through
+[`spoken-attention-nudge.md`](spoken-attention-nudge.md), which owns the `say`
+command. The operator is away by design, so the sweep speaks one of the note's
+three fixed phrases rather than a labelled line, which would prompt for an
+approval nobody is there to give. The nudge runs with escalated execution, not
+inside the workspace sandbox: it needs the local audio device, and a sandboxed
+attempt fails in a way indistinguishable from a missing command. The spoken text
+stays fixed and low-information, and the detail belongs in the report. When
+every spoken path fails, the report says so rather than leaving the operator to
+assume they were told.
 
 ## Staging
 
