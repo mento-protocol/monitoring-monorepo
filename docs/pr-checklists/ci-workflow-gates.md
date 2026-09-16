@@ -97,29 +97,28 @@ has moved.
 M6 collection and recovery are retired; historical evidence is linked from ADR 0101.
 
 After the exact checkout, protected inline admission code compares the admitted
-base and source Git trees. It rejects changes to package manifests, pnpm
-workspace files, pnpm lockfiles, package patches, the Node and pnpm selections,
-`.npmrc`, `.pnpmfile.cjs`, `pnpmfile.cjs`, and tracked `node_modules` paths.
-It also rejects changes to `ci.yml`, the no-skip dispatcher, the CI contract
-source and test entry point, the no-skip checker and runtime parser, both
-focused retained-contract definitions, and either
-protected local action. The reusable audit starts only after this comparison
-succeeds. Package-execution drift can use the ordinary-force-all evidence form
-when the protected filter selects every retained job and every job succeeds.
-Evidence-instrument drift cannot count through either evidence form. The
-comparison needs no content hash registry.
+base and source Git trees, and the reusable audit starts only once that
+comparison succeeds. It rejects changes to package manifests, pnpm workspace
+files, pnpm lockfiles, package patches, the Node and pnpm selections, `.npmrc`,
+`.pnpmfile.cjs`, `pnpmfile.cjs`, tracked `node_modules` paths, `ci.yml`, the
+no-skip dispatcher, the CI contract source and test entry point, the no-skip
+checker and runtime parser, both focused retained-contract definitions, and
+either protected local action. Package-execution drift can use the
+ordinary-force-all evidence form when the protected filter selects every
+retained job and every job succeeds. Evidence-instrument drift cannot count
+through either evidence form. The comparison needs no content hash registry.
 
 Admission requires the pull request base SHA, dispatch `GITHUB_SHA`, and live
 `main` SHA to be equal. An older pull request with a stale base SHA is
 intentionally ineligible. Update or rebase its branch, then read fresh immutable
 inputs. Treat this refusal as fail-closed admission, not a workflow failure.
 
-The audit runs every retained deterministic CI job. It runs the focused agent
+The audit runs every retained deterministic CI job, including the focused agent
 setup and package-policy contract, indexer handler invariant contract, and
-dependency-cruiser root contract. Neither ordinary CI nor the audit executes
-the legacy local-gate Bash regression suite. The legacy routing-table and indexer route parity suites are retired in both
-ordinary CI and the audit. The audit still runs the retained package-script
-validator before dependency installation.
+dependency-cruiser root contract. It still runs the retained package-script
+validator before dependency installation. Neither ordinary CI nor the audit
+executes the legacy local-gate Bash regression suite, and the legacy
+routing-table and indexer route parity suites are retired in both.
 
 - [ ] Keep the dispatcher read-only. Do not forward repository or environment
       secrets. Do not use `secrets: inherit`. Called jobs still receive GitHub's
@@ -130,10 +129,8 @@ validator before dependency installation.
       after exact checkout and before the admission summary. Compare the
       admitted base and source objects. Do not invoke candidate code or pnpm
       during admission.
-- [ ] Keep package manifests, workspace files, lockfiles, package patches, Node
-      selection, pnpm configuration, and tracked `node_modules` in the
-      comparison path set. Do not add a content hash registry for data already
-      bound by the two Git objects.
+- [ ] Keep the comparison path set above intact. Do not add a content hash
+      registry for data already bound by the two Git objects.
 - [ ] Keep the semantic retained `ci.yml` graph pin current. Review each pin update against the changed CI graph.
 - [ ] Keep audit inputs limited to `ci.yml` and the protected dispatcher. Do not
       add a second workflow caller that can bypass admission.
@@ -157,10 +154,10 @@ validator before dependency installation.
       documentation, browser, build, generation, or test command.
 - [ ] Reject package-execution path drift during admission. Ordinary
       CI remains the validation path for package, dependency, and toolchain PRs.
-- [ ] Reject evidence-instrument drift during admission. Protect `ci.yml`, the
+- [ ] Reject evidence-instrument drift during admission: `ci.yml`, the
       dispatcher, the CI contract source and test entry point, the no-skip
-      checker and runtime parser, all focused contract
-      definitions, and both protected local action trees. Do not count
+      checker and runtime parser, all focused contract definitions, and both
+      protected local action trees stay protected. Do not count
       instrument-changing pull requests.
 - [ ] Keep every package-execution admission path family in the ordinary
       `controlPlane` filter. A qualifying ordinary-force-all proof must run
@@ -250,85 +247,71 @@ as soon as the advisory publishes; the schedule does not apply to them. See
 [ADR 0092](../adr/0092-dependabot-npm-version-updates.md).
 
 Dependabot groups routine updates. One exact group can auto-merge through
-`.github/workflows/dependabot-auto-merge.yml`.
+`.github/workflows/dependabot-auto-merge.yml`. Every tier below it requires an
+operator-authorized merge.
 
-- **GitHub-owned `actions/*` patch / minor in `actions-minor-patch`:**
-  auto-merge after required checks pass.
-- **Third-party GitHub Actions:** require an operator-authorized merge. This includes
-  load-bearing gates such as `re-actors/alls-green` and credential actions
-  such as `google-github-actions/auth`.
-- **Major:** require human review and an operator-authorized merge. Check action input/output
-  changes and ESM-only migrations that can skip dependents. Use `@codex review`
-  for a second opinion.
-- **Maintainer changes:** require an operator-authorized merge at every tier.
+- **GitHub-owned `actions/*` patch / minor in `actions-minor-patch`:** the only
+  auto-merge lane; it merges after required checks pass.
+- **Third-party GitHub Actions:** includes load-bearing gates such as
+  `re-actors/alls-green` and credential actions such as
+  `google-github-actions/auth`.
+- **Major:** also requires human review. Check action input/output changes and
+  ESM-only migrations that can skip dependents. Use `@codex review` for a
+  second opinion.
+- **Maintainer changes:** at every tier.
 - **Security advisories:** bypass cooldown and stay outside the named routine
-  group. Require an operator-authorized merge.
-- **`actions/create-github-app-token`:** require an operator-authorized merge. This action can
-  mint GitHub App installation tokens. Keep credential tooling outside the lane
-  so it cannot change an authentication boundary by itself.
-- **`anthropics/*`:** require an operator-authorized merge. These actions participate in the
-  review boundary and remain separate from other third-party groups.
-- **`dependabot/*`:** require an operator-authorized merge. `dependabot/fetch-metadata`
-  classifies this auto-merge lane, so it cannot update itself through the lane.
-  Dependabot-owned actions remain separate from other third-party groups.
-- **Every npm group, version or security:** require an operator-authorized merge.
-  The auto-merge classifier requires the `github_actions` ecosystem, so no
-  npm PR can enter the lane.
+  group.
+- **`actions/create-github-app-token`:** this action can mint GitHub App
+  installation tokens. Keep credential tooling outside the lane so it cannot
+  change an authentication boundary by itself.
+- **`anthropics/*`:** these actions participate in the review boundary and
+  remain separate from other third-party groups.
+- **`dependabot/*`:** `dependabot/fetch-metadata` classifies the auto-merge
+  lane, so it cannot update itself through the lane. Dependabot-owned actions
+  remain separate from other third-party groups.
+- **Every npm group, version or security:** the auto-merge classifier requires
+  the `github_actions` ecosystem, so no npm PR can enter the lane.
 
 All version-update tiers use `default-days: 7`; the `github-actions` ecosystem
 has no per-tier cooldown. GitHub skips cooldown for security updates. Requiring
 the exact `actions-minor-patch` dependency group and `actions/*` publisher
 boundary keep those immediate security updates outside auto-merge.
 
-The lane has two pinned workflows. The `pull_request` classifier has read-only
-permissions. It verifies the event and pinned Dependabot metadata. The
-default-branch `workflow_run` writer treats completion as an untrusted signal.
-It re-reads the exact workflow and run, first-attempt job and step results,
-current PR and head, the complete issue-event close history, the current PR
-body's exact `Maintainer changes` marker, every commit, every changed file, and
-the base's merge queue. It requires one open same-repository PR, no prior
-`closed` or `reopened` event, verified Dependabot-authored commits, and only
-modified top-level workflow YAML. A recorded close remains a durable human veto
-after the same PR and head are reopened. Dependabot must open a new PR before
-the update can enter this lane again. The writer always rejects changes to
-either trust workflow. It waits for every required check and verifies a
-non-empty passing required-only projection. It then repeats the complete
-workflow, run, job, PR, head, maintainer-change body, close-history, commit,
-file, and queue proof. The issue-event read is the final authoritative read.
-It then proves the head contains the base tip: it compares the base branch tip
-against the verified head and requires `behind_by == 0`. With `main` no longer
-requiring an up-to-date PR
-([ADR 0104](../adr/0104-non-strict-required-status-checks.md)), a stale but
-conflict-free head reports `mergeable_state: clean`, so only the comparison
-proves freshness. A stale head exits without merging or writing, and the lane
-stalls: `rebase-strategy: auto` rebases on schedule or conflict, not on being
-behind, so it waits for the Monday run or a human `@dependabot rebase`. The
-writer emits a `::warning::` and job summary naming the PR and `behind_by`. ADR
-0104 records why neither repair is safe here. The final write is a synchronous
-REST merge with the exact head SHA and squash method. It cannot enqueue, create an auto-merge request, or pin issue-event
-history. A close and reopen inside the remaining request window is a residual
-race. Neither workflow checks out or executes PR code. The writer does not read
-upstream outputs, artifacts, or caches. `pnpm tf:test` pins both parsed workflow
-shapes. The autofix trust checker rejects every `pull_request_target` workflow.
+The lane has two pinned workflows, and
+[ADR 0081](../adr/0081-narrow-dependabot-auto-merge-exception.md) owns their
+full proof list and accepted residuals. The read-only `pull_request` classifier
+verifies the event and the pinned Dependabot metadata. The default-branch
+`workflow_run` writer treats that completion as an untrusted signal: it
+re-reads authoritative GitHub state, requires one open same-repository PR with
+verified Dependabot-authored commits and only modified top-level workflow YAML,
+always rejects changes to either trust workflow, waits for every required
+check, repeats the complete proof with the issue-event read last, and finishes
+with a synchronous exact-head squash REST merge that cannot enqueue. A recorded
+close is a durable human veto that reopening the same PR and head does not
+clear; Dependabot must open a new PR to re-enter the lane. The writer refuses
+while `main` has a merge queue. A stale head writes nothing: with `main` no
+longer requiring an up-to-date PR
+([ADR 0104](../adr/0104-non-strict-required-status-checks.md)) the writer
+proves `behind_by == 0` itself, emits a `::warning::` and job summary naming
+the PR and `behind_by`, and stalls until Dependabot's scheduled rebase or a
+human `@dependabot rebase`. Neither workflow checks out or executes PR code,
+the writer reads no upstream outputs, artifacts, or caches, and `pnpm tf:test`
+pins both parsed workflow shapes.
 
 Before changing the classifier policy or successful job shape, drain every
 in-flight run from the prior classifier version or add an explicit runtime
 version binding. The writer uses the stable workflow ID and path. Those values
 alone do not distinguish old classifier source from new classifier source.
 
-The automatic `GITHUB_TOKEN` merge does not emit this repository's `push`
-workflows. Required PR checks are the final automated evidence for this narrow
-lane. The writer refuses if `main` has a merge queue. The final REST endpoint
-has no enqueue behavior, so a queue activated after the last read cannot turn
-the write into deferred queue state. A future queue rollout must still keep
-this lane disabled until a reviewed design defines its queue behavior. The
-repository accepts the built-in token's residual risk for this bounded routine
-group. `GH_READ_TOKEN` and `FINAL_MERGE_TOKEN` both resolve to `github.token` by
+`GH_READ_TOKEN` and `FINAL_MERGE_TOKEN` both resolve to `github.token` by
 design. Keep the variables separate so tests can prove that all evidence reads
 use the read seam and only the synchronous exact-head REST request uses the
-final-write seam. Issue #2091 was closed as not planned. This lane will not add a
-`merge-operators` Team, credential broker, dedicated merge App, protected merge
-Environment, or controlled lifecycle ruleset.
+final-write seam. A `GITHUB_TOKEN` merge emits no `push` workflows, so required
+PR checks are this lane's final automated evidence. A future merge-queue
+rollout must keep the lane disabled until a reviewed design defines its queue
+behavior. This lane will not add a `merge-operators` Team, credential broker,
+dedicated merge App, protected merge Environment, or controlled lifecycle
+ruleset; issue #2091 was closed as not planned.
 
 - [ ] If you add a new external review integration — GitHub App or Action — that is load-bearing for review or merge gating, keep its updates outside routine groups when an isolated review improves the self-update boundary
 - [ ] If you add a new `package-ecosystem` to `dependabot.yml`, keep it on the
