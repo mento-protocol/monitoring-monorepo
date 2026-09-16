@@ -56,6 +56,24 @@
 # The apply is a manual human apply on the platform stack, so the operator
 # closes the window by hand, in this order:
 #
+#   0. BEFORE THE APPLY, PROVE THE SURVIVING SECRET IS RE-CREATED. Destroying
+#      an Environment destroys its secrets server-side, and GitHub cannot read
+#      a secret value back, so a secret destroyed without a matching create is
+#      unrecoverable — the operator would have to mint a new Administration:Read
+#      fine-grained PAT. `github_actions_environment_secret.platform_settings_audit_token`
+#      is `count`-gated on `var.platform_settings_audit_token`, so an empty or
+#      missing tfvar plans as destroy-with-NO-create and does not error. The
+#      same ADR 0106 rollout also strips the Sentry lines out of the gitignored
+#      `terraform/terraform.tfvars`, which is exactly the edit that can drop the
+#      audit-token line by accident. Therefore: confirm `terraform.tfvars` still
+#      sets `platform_settings_audit_token` to a non-empty value, run
+#      `terraform -chdir=terraform plan`, and read the plan for
+#      `github_actions_environment_secret.platform_settings_audit_token` as
+#      REPLACED — 1 to destroy AND 1 to create. If it shows destroy only, stop
+#      and restore the tfvar before applying.
+#      The other four environment secrets (SENTRY_TRIAGE_TOKEN,
+#      SENTRY_PROJECTION_TOKEN, SENTRY_ARCHIVE_TOKEN, AUTOFIX_APP_PRIVATE_KEY)
+#      are destroyed deliberately and must be revoked out of band after merge.
 #   1. From the PR branch, `terraform -chdir=terraform apply`. This destroys
 #      `sentry-pipeline` and creates `platform-settings-drift` with its
 #      main-only policy and the audit-token secret.

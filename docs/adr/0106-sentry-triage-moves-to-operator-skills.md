@@ -107,13 +107,24 @@ only the thing holding the credentials changed.
   two PRs; here the operator closes the window by hand instead, because the
   platform stack is a manual apply and a split would leave a Sentry-named
   environment live behind a Sentry-removal PR. The order, also recorded at
-  `terraform/github-environment.tf` "ROLLOUT ORDER": (1) apply the platform
-  stack from this branch; (2) merge immediately, keeping the window under one
-  05:41 UTC cron tick; (3) verify the next scheduled `platform-settings-drift`
-  run reports `state=ok`, not `state=inert`. Getting it wrong is silent by
-  default — the workflow no-ops on an unprovisioned secret and exits green — so
-  its inert branch now emits a `::warning::` annotation naming the invariant it
-  did not check.
+  `terraform/github-environment.tf` "ROLLOUT ORDER": (0) before applying,
+  confirm `terraform.tfvars` still sets `platform_settings_audit_token` and read
+  a `terraform plan` for
+  `github_actions_environment_secret.platform_settings_audit_token` as
+  **replaced** — 1 to destroy and 1 to create, not destroy only; (1) apply the
+  platform stack from this branch; (2) merge immediately, keeping the window
+  under one 05:41 UTC cron tick; (3) verify the next scheduled
+  `platform-settings-drift` run reports `state=ok`, not `state=inert`. Step 0
+  exists because destroying the environment destroys its secrets server-side,
+  GitHub cannot read a secret value back, and the audit-token resource is
+  `count`-gated on its tfvar — so an empty value plans as destroy-with-no-create
+  rather than as an error, and the PAT would have to be minted again. The same
+  rollout edits the gitignored `terraform.tfvars` to strip its Sentry lines,
+  which is the edit that can drop the audit-token line by accident. The other
+  four environment secrets are destroyed deliberately; revoke them out of band
+  (next bullet). Getting the order wrong is silent by default — the workflow
+  no-ops on an unprovisioned secret and exits green — so its inert branch now
+  emits a `::warning::` annotation naming the invariant it did not check.
 - **Deleting resources does not revoke credentials.** The Sentry triage,
   archive and projection tokens and the `sentry-autofix` GitHub App private key
   must be revoked out of band after merge. The bridge's `sentry_auth_token`
