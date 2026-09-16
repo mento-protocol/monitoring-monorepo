@@ -33,11 +33,14 @@ The word "required" means **enforced by the `main` branch ruleset**, not "feels 
 - `ci` (the CI sentinel job)
 - `Code Quality` (the Trunk workflow's job)
 - `Vercel` and `Vercel Preview Comments` (the Vercel platform)
+- `Sentry suites` (still in the live ruleset, emitted by nothing)
 
 `Sentry suites` is pending removal from the live ruleset. No workflow emits it
 after [ADR 0106](../adr/0106-sentry-triage-moves-to-operator-skills.md), so it
-stays pending on every PR until an operator edits the ruleset. Drop this
-paragraph once that edit lands.
+stays pending on every PR and blocks the merge until an operator edits the
+ruleset. Drop its bullet and this paragraph once that edit lands. The tl;dr in
+[`recurring-review-patterns.md`](recurring-review-patterns.md) carries the same
+caveat.
 
 Verify the live list before relying on this:
 

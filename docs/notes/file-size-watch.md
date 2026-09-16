@@ -16,7 +16,12 @@ The table below is a historical pre-retirement snapshot with the counts of
 2026-09-04. Removed gate files are not current split candidates. The ten
 `scripts/sentry/**` rows were struck on 2026-09-16 because
 [ADR 0106](../adr/0106-sentry-triage-moves-to-operator-skills.md) deleted those
-files; every remaining count is still the 2026-09-04 measurement. This is
+files. One replacement row was added in the same change:
+`scripts/workflows/ci-sentinel-core.mjs`, which holds the eight `ci` sentinel
+predicates relocated out of `scripts/sentry/ci-wiring/`. It carries its
+2026-09-16 counts, so the monthly run has a baseline to diff against instead of
+reporting an existing file as new every month. Every other count is still the
+2026-09-04 measurement. This is
 passive guidance, not an active-work queue. Refresh it with
 `node scripts/repo-health/file-size-watchlist.mjs`; use `--format issue` when a
 concrete
@@ -141,6 +146,7 @@ Use `--format issue` for GitHub Issues; do not append this report to `BACKLOG.md
 |   464 |   606 |     0 | watch         | `scripts/supply-chain/lockfile-lint-override-ranges.mjs`                                  |
 |   457 |   624 |     0 | watch         | `indexer-envio/src/handlers/biPoolManager.ts`                                             |
 |   450 |   618 |     0 | watch         | `ui-dashboard/src/app/peg-monitoring/_lib/peg-board-model.ts`                             |
+|   413 |   700 | (new) | watch         | `scripts/workflows/ci-sentinel-core.mjs`                                                  |
 |   368 |   611 |    +3 | watch         | `scripts/pr/pr-feedback-state-claude.mjs`                                                 |
 |   338 |   610 |     0 | watch         | `scripts/supply-chain/override-prune-report.mjs`                                          |
 |   333 |   632 |     0 | watch         | `ui-dashboard/src/lib/volume-hero.ts`                                                     |

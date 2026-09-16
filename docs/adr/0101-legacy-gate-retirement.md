@@ -51,13 +51,14 @@ consumers were the deleted local gate and its tests. Restore them on rollback.
 
 Retain these independent controls:
 
-- `scripts/lib/mapped-command-process-identity.mjs` and its tests preserve
-  marker descriptor authentication for the staged Sentry triage broker. The
-  required broker suite imports the helper tests. Its workflow staging path
-  and broker shim move with it. Amended 2026-09-16 (ADR 0106): the broker,
-  its workflow staging path and its shim are deleted, so no broker suite
-  imports the helper tests. The helper file stays; its only remaining pin is
-  `scripts/docs/check-verification-redesign-evidence.mjs`.
+- `scripts/lib/mapped-command-process-identity.mjs` and its tests preserved
+  marker descriptor authentication for the staged Sentry triage broker, whose
+  required suite imported the helper tests, and the broker's workflow staging
+  path and shim moved with it. Amended 2026-09-16 (ADR 0106): the broker, that
+  staging path and the shim are deleted, so the helper has no current broker
+  consumer and no suite imports its tests. It remains pinned by
+  `scripts/docs/check-verification-redesign-evidence.mjs`, which names the path
+  without running it, and it is retained here with its tests for rollback.
 - `scripts/workflows/indexer-handler-invariant-{contract,families}.mjs`
   preserve checklist ownership and completeness. The existing root indexer
   contract suite remains in CI.
