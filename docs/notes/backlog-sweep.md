@@ -910,12 +910,14 @@ merges.
 
 The sweep then announces the report through
 [`spoken-attention-nudge.md`](spoken-attention-nudge.md), which owns the `say`
-command and its session label. The nudge runs with escalated execution, not
+command. The operator is away by design, so the sweep speaks one of the note's
+three fixed phrases rather than a labelled line, which would prompt for an
+approval nobody is there to give. The nudge runs with escalated execution, not
 inside the workspace sandbox: it needs the local audio device, and a sandboxed
-attempt fails in a way indistinguishable from a missing command. The spoken
-text stays fixed and low-information, and the detail belongs in the report.
-When every spoken path fails, the report says so rather than leaving the
-operator to assume they were told.
+attempt fails in a way indistinguishable from a missing command. The spoken text
+stays fixed and low-information, and the detail belongs in the report. When
+every spoken path fails, the report says so rather than leaving the operator to
+assume they were told.
 
 ## Staging
 

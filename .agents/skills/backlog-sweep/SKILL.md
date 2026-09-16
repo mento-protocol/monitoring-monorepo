@@ -1019,10 +1019,12 @@ link is not merge approval, and this skill never merges.
 
 Finally, send one spoken line saying the report is ready, through
 [`spoken-attention-nudge.md`](../../../docs/notes/spoken-attention-nudge.md).
-That note owns the `say` command, the session label, and the `spd-say` Linux
-fallback; do not re-derive them here. Run the nudge with escalated execution
-rather than inside the workspace sandbox — `say` needs the local audio device,
-and a sandboxed attempt fails in a way that looks like a missing command.
+That note owns the `say` command and the `spd-say` Linux fallback; do not
+re-derive them here. The operator is away by design here, so speak one of the
+note's three fixed phrases: a labelled line prompts for an approval nobody is
+there to give. Name the sweep in the written report instead. Run the nudge with escalated execution rather than inside the workspace
+sandbox — `say` needs the local audio device, and a sandboxed attempt fails in a
+way that looks like a missing command.
 
 Keep the spoken text fixed and low-information: no issue numbers, PR numbers,
 paths, or findings. The report on disk is where the detail belongs.

@@ -40,17 +40,31 @@ label several sessions share, such as `Claude` or `main`. Keep it short and easy
 to say. Put the same label in the written request so the operator can match the
 two.
 
+Use metadata tied to this session, not whichever pane holds focus. In cmux, look
+the title up through the caller's own `CMUX_WORKSPACE_ID` and `CMUX_SURFACE_ID`,
+and never speak those IDs. Do not guess a title, and do not change focus or
+titles. When that lookup is unavailable, use the working directory, branch, and
+task context.
+
+Type the label out as plain text, using letters, digits, spaces, `.`, `_`, and
+`-` only. Never paste a pane title or a ref name into the command: `$(…)`, a
+backtick, or a quote in that title runs before `say` does. When a title carries
+anything outside that set, write a safe task label instead.
+
 Pass the whole message as one safely quoted argument. Never build it from
 command substitution, a file, or captured output.
 
-**Known limit.** A labelled line is not one of the pre-approved phrases in
-`.claude/settings.json`, so it prompts for approval, and an away operator cannot
-give it. Speak the labelled line when someone can approve it. Otherwise speak a
-pre-approved phrase, which tells the operator that a session needs them but not
-which one, and name the session in the written request. Closing that gap needs a
-reviewed helper that derives the label itself. Pre-approving `say` with a free
-message argument is not the way to close it: a shell substitution in that
-argument reads local file contents aloud.
+**Known limit.** The pre-approved phrases live in `.claude/settings.json` and
+cover Claude only. A labelled line is not one of them, so it prompts for
+approval, and an away operator cannot give it. Speak the labelled line when
+someone can approve it. Otherwise speak a pre-approved phrase, which tells the
+operator that a session needs them but not which one, and name the session in
+the written request. Codex has no equivalent pre-approval: its nudge goes
+through escalated execution, which can prompt for either form, and an
+unanswered prompt is a failed spoken path — fall back to the written request.
+Closing the gap needs a reviewed helper that derives the label itself.
+Pre-approving `say` with a free message argument is not the way to close it: a
+shell substitution in that argument reads local file contents aloud.
 
 ## Keep the spoken text low-information
 
