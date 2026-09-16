@@ -5,7 +5,6 @@ import { isVirtualPool, type Pool } from "@/lib/types";
 import type { Network } from "@/lib/networks";
 import {
   formatOraclePrice,
-  relativeTime,
   relativeTimeOrTimestamp,
   timestampOrUtc,
 } from "@/lib/format";
@@ -40,7 +39,7 @@ function oracleFreshnessDisplay(
     lastLabel:
       nowSeconds === null
         ? relativeTimeOrTimestamp(freshnessTsString, null)
-        : `last ${relativeTime(freshnessTsString, nowSeconds * 1000)}`,
+        : `last ${relativeTimeOrTimestamp(freshnessTsString, nowSeconds)}`,
   };
 }
 

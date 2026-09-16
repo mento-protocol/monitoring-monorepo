@@ -1,5 +1,7 @@
+"use client";
+
 import Link from "next/link";
-import { relativeTime } from "@/lib/format";
+import { useSsrSafeRelative } from "@/hooks/use-now-seconds";
 import type { CdpCollateral, CdpInstance } from "../_lib/types";
 import { type CdpAggregates, deriveCdpHealth } from "../_lib/health";
 import { cdpSymbolSlug, formatTokenAmount } from "../_lib/format";
@@ -86,9 +88,7 @@ function CardActivitySubtitle({
   ops24hLoading: boolean;
   ops24hHasError: boolean;
 }) {
-  const lastActivity = lastEventTimestamp
-    ? relativeTime(lastEventTimestamp)
-    : "—";
+  const lastActivity = useSsrSafeRelative(lastEventTimestamp);
   const activity = activity24h ?? EMPTY_CDP_MARKET_ACTIVITY;
   // Loading and error both render `—` so a failed fetch isn't masquerading
   // as a "no activity in 24h" zero. The Recent CDP Transactions table below

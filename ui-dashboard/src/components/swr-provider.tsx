@@ -1,5 +1,16 @@
 "use client";
 
+// Bundling, not behaviour: pin the shared clock store into the root client
+// chunk. `@/hooks/use-now-seconds` is imported by ~20 client modules across
+// eight routes but not by the root layout, and Turbopack partitions chunks by
+// the set of entries that reach a module — a module reached by most entries
+// but not all splits the shared chunks and re-emits Next runtime code into
+// each new one. Measured on 2026-09-15: without this import the "All client JS
+// chunks" budget totals 1,190,637 bytes brotli across 76 chunk files; with it,
+// 1,135,212 across 71. Per-route payload is unchanged either way. Delete this
+// line and `pnpm dashboard:size-limit` fails.
+import "@/hooks/use-now-seconds";
+
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   SWRConfig,

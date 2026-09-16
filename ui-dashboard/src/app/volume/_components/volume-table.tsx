@@ -8,7 +8,8 @@ import { ChainIcon } from "@/components/chain-icon";
 import { AddressLink } from "@/components/address-link";
 import { Skeleton, EmptyBox, ErrorBox } from "@/components/feedback";
 import { TableSkeleton } from "@/components/skeletons";
-import { formatUSD, relativeTime } from "@/lib/format";
+import { formatUSD } from "@/lib/format";
+import { useSsrSafeRelative } from "@/hooks/use-now-seconds";
 import {
   aggregateTraderPoolsByWindow,
   cmpBigInt,
@@ -231,6 +232,7 @@ function TraderRow({
 }) {
   const [expanded, setExpanded] = useState(false);
   const network = networkForChainId(trader.chainId);
+  const lastSeenRelative = useSsrSafeRelative(String(trader.lastSeenTimestamp));
   // Only fetch the pool breakdown after the user opens the row — paying for
   // 20 sub-queries upfront would defeat the point of paginated fetches.
   const breakdown = useGQL<{
@@ -308,7 +310,7 @@ function TraderRow({
           {formatUSD(weiToUsd(trader.feesPaidUsdWei))}
         </Td>
         <Td align="right" muted>
-          {relativeTime(String(trader.lastSeenTimestamp))}
+          {lastSeenRelative}
         </Td>
         <Td align="right">
           <button

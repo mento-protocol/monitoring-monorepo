@@ -12,7 +12,12 @@ import { Pagination } from "@/components/pagination";
 import { TableSkeleton } from "@/components/skeletons";
 import { Row, Table, Td, Th } from "@/components/table";
 import { TableSearch } from "@/components/table-search";
-import { formatTimestamp, parseWei, relativeTime } from "@/lib/format";
+import {
+  parseWei,
+  relativeTimeOrTimestamp,
+  timestampOrUtc,
+} from "@/lib/format";
+import { useNowSeconds } from "@/hooks/use-now-seconds";
 import { useGQL } from "@/lib/graphql";
 import { sortedCopy } from "@/lib/immutable-sort";
 import { POOL_LP_POSITIONS } from "@/lib/queries";
@@ -61,6 +66,7 @@ export function LpsTab({
   const shouldSkip = isFpmmPool === false;
   const { getName, getTags } = useAddressLabels();
   const { network } = useNetwork();
+  const nowSeconds = useNowSeconds();
   const query = normalizeSearch(search);
   const [rawPage, setRawPage] = React.useState(1);
 
@@ -297,9 +303,15 @@ export function LpsTab({
                   <Td
                     small
                     muted
-                    title={formatTimestamp(position.lastUpdatedTimestamp)}
+                    title={timestampOrUtc(
+                      position.lastUpdatedTimestamp,
+                      nowSeconds,
+                    )}
                   >
-                    {relativeTime(position.lastUpdatedTimestamp)}
+                    {relativeTimeOrTimestamp(
+                      position.lastUpdatedTimestamp,
+                      nowSeconds,
+                    )}
                   </Td>
                 </Row>
               );

@@ -2,7 +2,8 @@
 
 import { EmptyBox, ErrorBox, StaleRefreshNotice } from "@/components/feedback";
 import { Row, Table, Td, Th } from "@/components/table";
-import { formatTimestamp } from "@/lib/format";
+import { timestampOrUtc } from "@/lib/format";
+import { useNowSeconds } from "@/hooks/use-now-seconds";
 import { formatTokenAmount } from "../../../../_lib/format";
 import { CDP_TROVES_DETAIL_LIMIT } from "../../../../_lib/types";
 import { formatInterestRate } from "../_lib/format";
@@ -180,6 +181,7 @@ function QueuePanelBody({
   troveStatus: string;
   debtSymbol: string;
 }) {
+  const nowSeconds = useNowSeconds();
   if (queue.error != null && !queue.hasLoadedOnce) {
     // First-load failure: the rest of the page keeps rendering; this panel
     // degrades alone. Retry is automatic — the shared SWR retry policy and
@@ -202,7 +204,7 @@ function QueuePanelBody({
         >
           This market is shut down
           {queue.model.shutDownAt != null
-            ? ` (since ${formatTimestamp(queue.model.shutDownAt)})`
+            ? ` (since ${timestampOrUtc(queue.model.shutDownAt, nowSeconds)})`
             : ""}
           {" — "}redemptions are urgent-mode and no longer follow the rate
           queue, so rate order does not decide which troves are redeemed.

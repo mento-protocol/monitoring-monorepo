@@ -9,11 +9,12 @@ import { TableSearch } from "@/components/table-search";
 import { TxHashCell } from "@/components/tx-hash-cell";
 import {
   formatBlock,
-  formatTimestamp,
   formatWei,
   parseWei,
-  relativeTime,
+  relativeTimeOrTimestamp,
+  timestampOrUtc,
 } from "@/lib/format";
+import { useNowSeconds } from "@/hooks/use-now-seconds";
 import { useGQL } from "@/lib/graphql";
 import { POOL_RESERVES } from "@/lib/queries";
 import { hasErrorWithoutData, isLoadingWithoutData } from "@/lib/swr-state";
@@ -57,6 +58,7 @@ export function ReservesTab({
     { poolId, limit },
   );
   const { network } = useNetwork();
+  const nowSeconds = useNowSeconds();
   const query = normalizeSearch(search);
 
   const rows = data?.ReserveUpdate ?? [];
@@ -186,8 +188,12 @@ export function ReservesTab({
                   <td className="hidden sm:table-cell px-2 sm:px-4 py-1.5 sm:py-2 font-mono text-[10px] sm:text-xs text-slate-400 text-right">
                     {formatBlock(r.blockNumber)}
                   </td>
-                  <Td small muted title={formatTimestamp(r.blockTimestamp)}>
-                    {relativeTime(r.blockTimestamp)}
+                  <Td
+                    small
+                    muted
+                    title={timestampOrUtc(r.blockTimestamp, nowSeconds)}
+                  >
+                    {relativeTimeOrTimestamp(r.blockTimestamp, nowSeconds)}
                   </Td>
                 </Row>
               );

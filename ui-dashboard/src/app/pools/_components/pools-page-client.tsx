@@ -17,12 +17,13 @@ import { RECENT_SWAPS, POOL_SWAPS } from "@/lib/queries";
 import {
   truncateAddress,
   formatWei,
-  relativeTime,
-  formatTimestamp,
+  relativeTimeOrTimestamp,
+  timestampOrUtc,
   formatBlock,
   isNamespacedPoolId,
   isValidAddress,
 } from "@/lib/format";
+import { useNowSeconds } from "@/hooks/use-now-seconds";
 import { poolName, tokenSymbol } from "@/lib/tokens";
 import {
   GlobalPoolsTable,
@@ -462,6 +463,7 @@ function SwapTable({
   poolNames: Record<string, string>;
   poolsByNamespacedId: Map<string, GlobalPoolEntry>;
 }) {
+  const nowSeconds = useNowSeconds();
   return (
     <Table>
       <thead>
@@ -517,8 +519,12 @@ function SwapTable({
               <Td mono small muted align="right">
                 {formatBlock(s.blockNumber)}
               </Td>
-              <Td small muted title={formatTimestamp(s.blockTimestamp)}>
-                {relativeTime(s.blockTimestamp)}
+              <Td
+                small
+                muted
+                title={timestampOrUtc(s.blockTimestamp, nowSeconds)}
+              >
+                {relativeTimeOrTimestamp(s.blockTimestamp, nowSeconds)}
               </Td>
             </Row>
           );

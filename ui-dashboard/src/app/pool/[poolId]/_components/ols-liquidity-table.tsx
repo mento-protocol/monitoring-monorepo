@@ -6,7 +6,12 @@ import { SenderCell } from "@/components/sender-cell";
 import { TableSkeleton } from "@/components/skeletons";
 import { Row, Table, Td, Th } from "@/components/table";
 import { TxHashCell } from "@/components/tx-hash-cell";
-import { formatTimestamp, formatWei, relativeTime } from "@/lib/format";
+import {
+  formatWei,
+  relativeTimeOrTimestamp,
+  timestampOrUtc,
+} from "@/lib/format";
+import { useNowSeconds } from "@/hooks/use-now-seconds";
 import { tokenSymbol } from "@/lib/tokens";
 import type { OlsLiquidityEvent, Pool } from "@/lib/types";
 import { tokenDecimalsFor } from "../_lib/helpers";
@@ -26,6 +31,7 @@ export function OlsLiquidityTable({
   error: Error | null;
   limit: number;
 }) {
+  const nowSeconds = useNowSeconds();
   if (error) return <ErrorBox message={error.message} />;
   if (isLoading) return <TableSkeleton variant="rows" rows={limit} />;
   if (events.length === 0)
@@ -51,8 +57,12 @@ export function OlsLiquidityTable({
           const takenDec = tokenDecimalsFor(pool, e.tokenTakenFromPool);
           return (
             <Row key={e.id}>
-              <Td small muted title={formatTimestamp(e.blockTimestamp)}>
-                {relativeTime(e.blockTimestamp)}
+              <Td
+                small
+                muted
+                title={timestampOrUtc(e.blockTimestamp, nowSeconds)}
+              >
+                {relativeTimeOrTimestamp(e.blockTimestamp, nowSeconds)}
               </Td>
               <td className="px-4 py-2">
                 {e.direction === 0 ? (

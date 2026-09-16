@@ -14,11 +14,12 @@ import { TxHashCell } from "@/components/tx-hash-cell";
 import { ENVIO_MAX_ROWS, SEARCH_BOOTSTRAP_LIMIT } from "@/lib/constants";
 import {
   formatBlock,
-  formatTimestamp,
   formatWei,
   getSwapDirection,
-  relativeTime,
+  relativeTimeOrTimestamp,
+  timestampOrUtc,
 } from "@/lib/format";
+import { useNowSeconds } from "@/hooks/use-now-seconds";
 import { useGQL } from "@/lib/graphql";
 import {
   POOL_DAILY_SNAPSHOTS_CHART,
@@ -50,6 +51,7 @@ export function SwapsTab({
 }) {
   const { network } = useNetwork();
   const { getName, getTags } = useAddressLabels();
+  const nowSeconds = useNowSeconds();
   const query = normalizeSearch(search);
   const [rawPage, setRawPage] = React.useState(1);
 
@@ -237,8 +239,12 @@ export function SwapsTab({
                   <td className="hidden md:table-cell px-2 sm:px-4 py-1.5 sm:py-2 font-mono text-[10px] sm:text-xs text-slate-400 text-right">
                     {formatBlock(s.blockNumber)}
                   </td>
-                  <Td small muted title={formatTimestamp(s.blockTimestamp)}>
-                    {relativeTime(s.blockTimestamp)}
+                  <Td
+                    small
+                    muted
+                    title={timestampOrUtc(s.blockTimestamp, nowSeconds)}
+                  >
+                    {relativeTimeOrTimestamp(s.blockTimestamp, nowSeconds)}
                   </Td>
                 </Row>
               );

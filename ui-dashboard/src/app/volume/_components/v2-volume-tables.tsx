@@ -6,7 +6,8 @@ import { SortableTh } from "@/components/sortable-th";
 import { ChainIcon } from "@/components/chain-icon";
 import { AddressLink } from "@/components/address-link";
 import { Skeleton, EmptyBox, ErrorBox } from "@/components/feedback";
-import { formatUSD, relativeTime } from "@/lib/format";
+import { formatUSD } from "@/lib/format";
+import { useSsrSafeRelative } from "@/hooks/use-now-seconds";
 import {
   aggregateBrokerViaByTrader,
   brokerViaDisplayName,
@@ -234,6 +235,7 @@ function V2TraderRow({
   via: ReturnType<typeof useV2TraderVia>;
 }) {
   const network = networkForChainId(row.chainId);
+  const lastSeenRelative = useSsrSafeRelative(String(row.lastSeenTimestamp));
   return (
     <Row>
       <Td align="right" muted>
@@ -265,7 +267,7 @@ function V2TraderRow({
         {row.swapCount.toLocaleString()}
       </Td>
       <Td align="right" muted>
-        {relativeTime(String(row.lastSeenTimestamp))}
+        {lastSeenRelative}
       </Td>
     </Row>
   );

@@ -6,7 +6,10 @@ import { TableSkeleton } from "@/components/skeletons";
 import { Row, Table, Td, Th } from "@/components/table";
 import { Tooltip } from "@/components/tooltip";
 import { TxHashCell } from "@/components/tx-hash-cell";
-import { formatTimestamp, relativeTime } from "@/lib/format";
+import {
+  useSsrSafeRelative,
+  useSsrSafeTimestamp,
+} from "@/hooks/use-now-seconds";
 import { BADGE_STYLES, type BadgeKind } from "../../../../_lib/transactions";
 import { formatSignedWei, formatTokenAmount } from "../../../../_lib/format";
 import {
@@ -63,12 +66,14 @@ function feesCellText(row: CdpTroveLedgerEventRow, debtSymbol: string): string {
 }
 
 function TimeCell({ timestamp }: { timestamp: string }) {
+  const absolute = useSsrSafeTimestamp(timestamp);
+  const relative = useSsrSafeRelative(timestamp);
   return (
     <Td small muted>
       {/* `Tooltip`, not a plain `title` — a `title` alone on a `<td>` is
           unreachable without a mouse (same fix as the interim list). */}
-      <Tooltip content={formatTimestamp(timestamp)}>
-        <span>{relativeTime(timestamp)}</span>
+      <Tooltip content={absolute}>
+        <span>{relative}</span>
       </Tooltip>
     </Td>
   );
