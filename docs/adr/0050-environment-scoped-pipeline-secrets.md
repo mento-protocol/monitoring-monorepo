@@ -134,14 +134,15 @@ Boundaries of the decision:
   reaching `main` before the environment exists auto-creates it **unprotected**.
   Any future environment introduced this way must land applied-and-protected
   before its first workflow reference merges. ADR 0106's rename of
-  `sentry-pipeline` to `platform-settings-drift` is subject to the same order.
-  It satisfies it without splitting into two PRs: the platform stack is a
-  manual human apply, so the operator applies it from the PR branch and merges
-  immediately, then confirms the next scheduled `platform-settings-drift` run
-  reports `state=ok` rather than the green `state=inert` no-op. That procedure
-  is written out at `terraform/github-environment.tf` "ROLLOUT ORDER". Use the
-  two-PR shape wherever the apply is automated and the operator cannot hold the
-  window closed by hand.
+  `sentry-pipeline` to `platform-settings-drift` is subject to the same order
+  and uses the two-PR shape, because a rename is a destroy-and-create and the
+  platform stack can only be planned or applied from a clean `main` checkout at
+  freshly fetched `origin/main` (terraform/AGENTS.md, ADR 0061) — no apply can
+  run from a PR branch, so the operator cannot hold the window closed by hand.
+  Phase 1 adds the new environment and a second copy of the secret while the old
+  environment stays live; phase 2 repoints the workflow and deletes the old
+  environment. That procedure is written out at
+  `terraform/github-environment.tf` "ROLLOUT ORDER".
 
 ## Alternatives considered
 

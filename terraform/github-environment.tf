@@ -19,10 +19,6 @@
 # The policy MUST be an explicit `branch_pattern`, not `protected_branches`
 # (#1649) — see the deployment_branch_policy block below for why that shape
 # fails open in this repo.
-# This mirrors the `production-infra` environment that already gates Terraform
-# applies — but `platform-settings-drift` carries NO required reviewers (the
-# audit is unattended; a reviewer gate would stall every scheduled run) and NO
-# wait timer.
 #
 # SCOPE. `platform-settings-drift` holds exactly one secret, the
 # Administration:Read PAT its workflow reads. The shared CLAUDE_CODE_OAUTH_TOKEN
@@ -33,60 +29,73 @@
 # blast radius is inference-quota abuse only (it holds no repo/data write
 # capability of its own), an accepted residual.
 #
-# HISTORY. This environment was named `sentry-pipeline` and held five secrets
-# until ADR 0106 retired the Sentry triage and autofix pipeline. The audit token
-# was the one survivor; it now owns an environment of its own with the same
-# main-only policy rather than borrowing a pipeline's.
+# HISTORY. A `sentry-pipeline` environment held five secrets until ADR 0106
+# retired the Sentry triage and autofix pipeline. The audit token was the one
+# survivor; it now owns an environment of its own with the same main-only policy
+# rather than borrowing a pipeline's.
 #
-# ROLLOUT ORDER (docs/terraform.md "GitHub Environments"): a new `environment:`
-# workflow reference AUTO-CREATES an unprotected Environment if the protected one
-# does not already exist. Therefore this environment + its secrets MUST be
-# applied BEFORE the workflow `environment:` references reach `main`. See the
-# migration plan: apply this file's resources first (repo-level secrets in
-# github-secrets.tf stay in place for that apply), then land the workflow
-# references and the repo-level secret removals.
+# ROLLOUT ORDER (docs/terraform.md "GitHub Environments"). A workflow
+# `environment:` reference AUTO-CREATES an UNPROTECTED Environment if the
+# protected one does not already exist, so the environment must be applied
+# before the reference reaches `main`. The rename from `sentry-pipeline` is a
+# DESTROY-AND-CREATE — the environment name is the resource's identity on
+# GitHub, so no `moved` block applies — and the platform stack can only be
+# planned or applied by `pnpm tf plan platform` / `pnpm tf apply platform` from
+# a clean `main` checkout at freshly fetched `origin/main` (terraform/AGENTS.md;
+# ADR 0061). Nothing can be applied from this branch. ADR 0050's two-PR shape
+# therefore governs, with the create and the destroy in separate PRs:
 #
-# THAT ORDER IS NOT AUTOMATIC FOR THE ADR 0106 RENAME, and the rename is a
-# DESTROY-AND-CREATE: the environment name is the resource's identity on
-# GitHub, so no `moved` block applies. `platform-settings-drift.yml` carries
-# `environment: platform-settings-drift` in the same change, so a plain merge
-# would auto-create the environment unprotected, with no
-# PLATFORM_SETTINGS_AUDIT_TOKEN in it, and the scheduled audit would take its
-# `state=inert` path — a GREEN run in which the #1564 invariant is not checked.
-# The apply is a manual human apply on the platform stack, so the operator
-# closes the window by hand, in this order:
+#   1. PHASE 1 — PR "chore/platform-settings-drift-environment". Purely
+#      additive: it creates `platform-settings-drift`, its main-only deployment
+#      policy and `platform_settings_drift_audit_token`, the second copy of
+#      PLATFORM_SETTINGS_AUDIT_TOKEN. `sentry-pipeline` and its five secrets
+#      stay live, so the drift workflow keeps working throughout. BEFORE that
+#      apply, confirm the gitignored `terraform/terraform.tfvars` still sets
+#      `platform_settings_audit_token` to a non-empty value and read the plan
+#      for `github_actions_environment_secret.platform_settings_drift_audit_token`
+#      as 1 TO CREATE. The resource is `count`-gated on that tfvar, so an empty
+#      or missing value plans as no-op rather than as an error, and the new
+#      environment would land with no secret in it.
+#   2. Merge phase 1, then apply the platform stack from `main`:
+#      `pnpm tf plan platform`, then, after explicit human approval,
+#      `pnpm tf apply platform -- -auto-approve`.
+#   3. Verify the scheduled `platform-settings-drift.yml` run still reports
+#      `state=ok`, not `state=inert`. It is still reading the `sentry-pipeline`
+#      copy of the secret at this point; an inert run means phase 1 damaged
+#      something and must be fixed before this PR merges.
+#   4. Merge THIS PR. It repoints `platform-settings-drift.yml` at the new
+#      environment and deletes `sentry-pipeline`, its deployment policy and its
+#      five secrets from the configuration. Between the merge and step 5 the
+#      environment still exists on GitHub while nothing references it; the
+#      workflow reads the phase-1 secret, so there is no inert window.
+#   5. Apply the platform stack from `main` again, the same way, to destroy
+#      `sentry-pipeline`. Every workflow that declared
+#      `environment: sentry-pipeline` is deleted in this merge, so no run can
+#      auto-recreate it between steps 4 and 5. BEFORE this apply, confirm
+#      `terraform.tfvars` still sets `platform_settings_audit_token` — the same
+#      rollout strips the Sentry lines out of that file, which is the edit that
+#      can drop the audit-token line by accident — and read the plan for
+#      `github_actions_environment_secret.platform_settings_drift_audit_token`
+#      as UNCHANGED. If it plans as destroy, the tfvar was lost; restore it
+#      before applying, or the drift audit goes inert.
+#   6. Verify the next scheduled `platform-settings-drift.yml` run reports
+#      `state=ok`. An inert run means the secret did not reach the job; do not
+#      read a green inert run as a passing audit.
 #
-#   0. BEFORE THE APPLY, PROVE THE SURVIVING SECRET IS RE-CREATED. Destroying
-#      an Environment destroys its secrets server-side, and GitHub cannot read
-#      a secret value back, so a secret destroyed without a matching create is
-#      unrecoverable — the operator would have to mint a new Administration:Read
-#      fine-grained PAT. `github_actions_environment_secret.platform_settings_audit_token`
-#      is `count`-gated on `var.platform_settings_audit_token`, so an empty or
-#      missing tfvar plans as destroy-with-NO-create and does not error. The
-#      same ADR 0106 rollout also strips the Sentry lines out of the gitignored
-#      `terraform/terraform.tfvars`, which is exactly the edit that can drop the
-#      audit-token line by accident. Therefore: confirm `terraform.tfvars` still
-#      sets `platform_settings_audit_token` to a non-empty value, run
-#      `terraform -chdir=terraform plan`, and read the plan for
-#      `github_actions_environment_secret.platform_settings_audit_token` as
-#      REPLACED — 1 to destroy AND 1 to create. If it shows destroy only, stop
-#      and restore the tfvar before applying.
-#      The other four environment secrets (SENTRY_TRIAGE_TOKEN,
-#      SENTRY_PROJECTION_TOKEN, SENTRY_ARCHIVE_TOKEN, AUTOFIX_APP_PRIVATE_KEY)
-#      are destroyed deliberately and must be revoked out of band after merge.
-#   1. From the PR branch, `terraform -chdir=terraform apply`. This destroys
-#      `sentry-pipeline` and creates `platform-settings-drift` with its
-#      main-only policy and the audit-token secret.
-#   2. Merge the PR immediately. Between 1 and 2 the workflow on `main` still
-#      names `sentry-pipeline`, which no longer exists, so a scheduled run in
-#      that window is inert — keep the window under one 05:41 UTC cron tick.
-#   3. Verify the next scheduled run of `platform-settings-drift.yml` reports
-#      `state=ok`, not `state=inert`. An inert run means the secret did not
-#      reach the job; do not read a green inert run as a passing audit.
+# Destroying the four Sentry environment secrets (SENTRY_TRIAGE_TOKEN,
+# SENTRY_PROJECTION_TOKEN, SENTRY_ARCHIVE_TOKEN, AUTOFIX_APP_PRIVATE_KEY) is
+# deliberate; revoke them out of band after step 5. The audit token is never at
+# risk in this order: phase 1 creates its replacement before anything is
+# destroyed, so no state holds the only copy of a value GitHub cannot read back.
 #
-# The inert branch of that workflow emits a ::warning:: annotation so step 3
-# is visible in the run list rather than only in the log.
+# The inert branch of that workflow emits a ::warning:: annotation so steps 3
+# and 6 are visible in the run list rather than only in the log.
 
+# `platform-settings-drift` holds exactly one secret, the Administration:Read
+# PAT that `.github/workflows/platform-settings-drift.yml` reads. It mirrors the
+# `production-infra` shape but carries NO required reviewers (the audit is
+# unattended; a reviewer gate would stall every scheduled run) and NO wait
+# timer. The explicit main-only branch pattern is the whole control.
 resource "github_repository_environment" "platform_settings_drift" {
   repository  = "monitoring-monorepo"
   environment = "platform-settings-drift"
@@ -205,19 +214,16 @@ resource "github_repository_environment_deployment_policy" "production_services_
   branch_pattern = "main"
 }
 
-# The one environment-scoped secret, held at `github_actions_environment_secret`
-# rather than `github_actions_secret` (repo scope) in github-secrets.tf. It stays
-# `count`-gated on its tfvar, so `terraform apply` still succeeds while the value
-# is unset and the audit stays inert until the operator provisions it. `value`
-# (not the deprecated `plaintext_value`) matches the repo-level secrets'
+# PLATFORM_SETTINGS_AUDIT_TOKEN, held on the `platform-settings-drift`
+# environment. Fine-grained GitHub PAT (Administration: Read on this repo only),
+# consumed only by the `check` job in
+# `.github/workflows/platform-settings-drift.yml`. It stays `count`-gated on
+# `var.platform_settings_audit_token`, so `terraform apply` still succeeds while
+# the value is unset and the audit stays inert until the operator provisions it.
+# `value` (not the deprecated `plaintext_value`) matches the repo-level secrets'
 # attribute on the `integrations/github ~> 6.12` provider. `environment` is wired
 # to the resource above so Terraform creates the Environment before its secret.
-
-# PLATFORM_SETTINGS_AUDIT_TOKEN — fine-grained GitHub PAT (Administration: Read
-# on this repo only). Consumed only by the `check` job in
-# platform-settings-drift.yml, which declares
-# `environment: platform-settings-drift`.
-resource "github_actions_environment_secret" "platform_settings_audit_token" {
+resource "github_actions_environment_secret" "platform_settings_drift_audit_token" {
   # checkov:skip=CKV_GIT_4: same state-backed plaintext trade-off as the
   # repo-level mirrors; see the threat-model note in github-secrets.tf.
   count = var.platform_settings_audit_token == "" ? 0 : 1

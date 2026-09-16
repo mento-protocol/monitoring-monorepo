@@ -362,10 +362,14 @@ reachable only from `main`, server-enforced even on a branch-modified
 `workflow_dispatch`. `CLAUDE_CODE_OAUTH_TOKEN` intentionally stays repo-level
 for `claude.yml`.
 
-This environment replaced `sentry-pipeline` when ADR 0106 retired the Sentry
-pipeline. Apply the platform stack before the workflow's `environment:` change
-reaches `main`: a reference to an environment that does not exist yet
-auto-creates it **unprotected**.
+This environment replaces `sentry-pipeline` as ADR 0106 retires the Sentry
+pipeline. A reference to an environment that does not exist yet auto-creates it
+**unprotected**, and the platform stack only plans or applies from a clean
+`main` at freshly fetched `origin/main`, so the rename runs as two PRs: a purely
+additive phase-1 PR that creates `platform-settings-drift` and a second copy of
+the token, applied from `main`; then the ADR 0106 PR that repoints the workflow
+and deletes `sentry-pipeline`, applied from `main` again. The full step list
+lives at `terraform/github-environment.tf` "ROLLOUT ORDER".
 
 Never recreate retired `Production`/`production` names or manage
 Environment secrets outside their owning IaC/integration path. A new workflow

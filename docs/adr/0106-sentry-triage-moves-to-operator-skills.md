@@ -98,33 +98,37 @@ only the thing holding the credentials changed.
   `platform-settings-drift` environment with the same policy. The rollout order
   from ADR 0050 still applies: a workflow `environment:` reference auto-creates
   an _unprotected_ environment if the protected one does not exist yet, so the
-  platform stack must be applied before this PR's workflow change reaches
-  `main`. The platform stack is a manual human apply.
-- **The rename is a destroy-and-create, and this PR carries both phases.** The
-  environment name is the resource's identity on GitHub, so no `moved` block
-  applies, and `platform-settings-drift.yml` already names the new environment
-  in the same change. ADR 0050's two-phase shape normally splits that across
-  two PRs; here the operator closes the window by hand instead, because the
-  platform stack is a manual apply and a split would leave a Sentry-named
-  environment live behind a Sentry-removal PR. The order, also recorded at
-  `terraform/github-environment.tf` "ROLLOUT ORDER": (0) before applying,
+  protected environment must be applied before this PR's workflow change reaches
+  `main`.
+- **The rename is a destroy-and-create, so it takes two PRs.** The environment
+  name is the resource's identity on GitHub, so no `moved` block applies. The
+  platform stack can only be planned or applied by `pnpm tf plan platform` /
+  `pnpm tf apply platform` from a clean `main` checkout at freshly fetched
+  `origin/main` (terraform/AGENTS.md, ADR 0061), so nothing can be applied from
+  this branch and ADR 0050's two-PR shape governs. The order, also recorded at
+  `terraform/github-environment.tf` "ROLLOUT ORDER": (1) merge the purely
+  additive phase-1 PR `chore/platform-settings-drift-environment`, which creates
+  `platform-settings-drift`, its main-only deployment policy and
+  `github_actions_environment_secret.platform_settings_drift_audit_token`,
+  leaving `sentry-pipeline` and its five secrets live; before that apply,
   confirm `terraform.tfvars` still sets `platform_settings_audit_token` and read
-  a `terraform plan` for
-  `github_actions_environment_secret.platform_settings_audit_token` as
-  **replaced** — 1 to destroy and 1 to create, not destroy only; (1) apply the
-  platform stack from this branch; (2) merge immediately, keeping the window
-  under one 05:41 UTC cron tick; (3) verify the next scheduled
-  `platform-settings-drift` run reports `state=ok`, not `state=inert`. Step 0
-  exists because destroying the environment destroys its secrets server-side,
-  GitHub cannot read a secret value back, and the audit-token resource is
-  `count`-gated on its tfvar — so an empty value plans as destroy-with-no-create
-  rather than as an error, and the PAT would have to be minted again. The same
-  rollout edits the gitignored `terraform.tfvars` to strip its Sentry lines,
-  which is the edit that can drop the audit-token line by accident. The other
-  four environment secrets are destroyed deliberately; revoke them out of band
-  (next bullet). Getting the order wrong is silent by default — the workflow
-  no-ops on an unprovisioned secret and exits green — so its inert branch now
-  emits a `::warning::` annotation naming the invariant it did not check.
+  the plan for the new secret as **1 to create**, because it is `count`-gated on
+  that tfvar and an empty value plans as a no-op rather than as an error; (2)
+  apply the platform stack from `main`; (3) verify the scheduled
+  `platform-settings-drift` run still reports `state=ok`; (4) merge this PR,
+  which repoints `platform-settings-drift.yml` at the new environment and
+  deletes `sentry-pipeline`; (5) apply the platform stack from `main` again to
+  destroy `sentry-pipeline`, after confirming the plan leaves
+  `platform_settings_drift_audit_token` **unchanged**; (6) verify the next
+  scheduled run reports `state=ok`. Between (4) and (5) the retired environment
+  still exists on GitHub with nothing pointing at it: every workflow that
+  declared `environment: sentry-pipeline` is deleted in this merge, so no run
+  can auto-recreate it. The audit token is never at risk in this order, because
+  phase 1 creates its replacement before anything is destroyed. The other four
+  environment secrets are destroyed deliberately; revoke them out of band (next
+  bullet). Getting the order wrong is silent by default — the workflow no-ops on
+  an unprovisioned secret and exits green — so its inert branch now emits a
+  `::warning::` annotation naming the invariant it did not check.
 - **Deleting resources does not revoke credentials.** The Sentry triage,
   archive and projection tokens and the `sentry-autofix` GitHub App private key
   must be revoked out of band after merge. The bridge's `sentry_auth_token`
@@ -155,7 +159,8 @@ only the thing holding the credentials changed.
 
 ## Evidence
 
-- Issue #2464, PR branch `chore/remove-sentry-pipeline`.
+- Issue #2464, PR branch `chore/remove-sentry-pipeline`, preceded by the
+  phase-1 PR branch `chore/platform-settings-drift-environment`.
 - Deleted: `.github/workflows/sentry-*.yml`, `.github/prompts/sentry-*.md`,
   `scripts/sentry/**`, `alerts/infra/sentry-ingest-watcher/**`,
   `alerts/infra/sentry-triage-channel.tf`,
@@ -174,4 +179,8 @@ only the thing holding the credentials changed.
   already proves each one's property over a closed job set.
 - Terraform: `terraform/github-environment.tf` now declares
   `platform-settings-drift` in place of `sentry-pipeline`; the identity contract
-  in `scripts/production-infra-identity-contract/` pins the new shape.
+  in `scripts/production-infra-identity-contract/` pins the new shape. The
+  phase-1 PR adds the same environment, deployment policy and
+  `platform_settings_drift_audit_token` block byte for byte alongside the
+  `sentry-pipeline` resources it leaves in place, so the two end states agree
+  and this branch's only Terraform effect after phase 1 lands is the deletion.
