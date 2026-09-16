@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import type { Pool } from "envio";
+// @ts-expect-error -- ReScript output ships no type declarations, and envio
+// publishes no `exports` map, so the logger singleton is importable directly.
+import * as Logging from "envio/src/Logging.res.mjs";
 import {
   indexerTestHelpers,
   processMockEvents,
@@ -16,12 +19,16 @@ import {
   _setMockOracleReportTimestamps,
   _setMockReportExpiryConfig,
 } from "../src/EventHandlers.ts";
+import { REPLAYED_EVENT_IGNORED } from "../src/handlers/oracleExpiryState.ts";
 import { makePoolId } from "../src/helpers.ts";
 import {
+  applyOracleFeedExpiry,
+  applyOracleReport,
   bootstrapOracleFeedState,
   oracleFeedStateId,
 } from "../src/oracleFeedState.ts";
 import {
+  applyTokenReportExpiry,
   bootstrapOracleExpiryState,
   oracleExpiryStateId,
 } from "../src/oracleExpiryState.ts";
@@ -67,6 +74,56 @@ function createTrackedPoolDb(address: string, overrides: Partial<Pool> = {}) {
     }),
   );
   return { mockDb, poolId };
+}
+
+type PinoLike = {
+  child: (...args: unknown[]) => Record<string, unknown>;
+};
+
+/** Run one event and return every `context.log.warn` message it emitted.
+ * Envio builds the per-event user logger as a child of the pino instance the
+ * ecosystem captured at config load (`Evm.toEventLogger`), so the spy patches
+ * `child` on that instance in place rather than swapping the singleton. The
+ * runtime hands the preload pass `Logging.noopLogger`
+ * (`envio/src/UserContext.res`), so a token counted exactly once here also
+ * proves the preload pass stayed silent. */
+async function captureWarnings<T>(
+  run: () => Promise<T>,
+): Promise<{ result: T; warnings: string[] }> {
+  const logger = Logging.getLogger() as PinoLike;
+  const originalChild = logger.child;
+  const warnings: string[] = [];
+  logger.child = function spyChild(...args: unknown[]) {
+    const child = originalChild.apply(this, args);
+    const originalWarn = child["uwarn"] as (
+      params: unknown,
+      message: string,
+    ) => void;
+    child["uwarn"] = (params: unknown, message: string) => {
+      warnings.push(message);
+      originalWarn.call(child, params, message);
+    };
+    return child;
+  };
+  try {
+    return { result: await run(), warnings };
+  } finally {
+    logger.child = originalChild;
+  }
+}
+
+function replayTokens(warnings: readonly string[]): string[] {
+  return warnings.filter((message) =>
+    message.startsWith(REPLAYED_EVENT_IGNORED),
+  );
+}
+
+/** The `site=` field of each token, sorted. One event can reach more than one
+ * guarded helper, so a bare count says nothing about which one rejected it. */
+function replaySites(warnings: readonly string[]): string[] {
+  return replayTokens(warnings)
+    .map((message) => /\bsite=(\S+)/.exec(message)?.[1] ?? "")
+    .sort();
 }
 
 describe("SortedOracles event-sourced feed state", () => {
@@ -721,5 +778,564 @@ describe("SortedOracles event-sourced feed state", () => {
     assert.equal(state.reportExpiry, tokenOverride);
     assert.equal(state.updatedAtBlock, 60_664_521n);
     assert.equal(mockDb.entities.Pool.get(poolId)?.oracleExpiry, tokenOverride);
+  });
+
+  // Envio delivers each event at least once: a batch that ends mid-block
+  // commits that block's entity writes with `progress_block` set to the
+  // previous block, so the next start re-delivers the whole block. The
+  // positions below mirror the 2026-09-15 resync crash on commit a57133c21
+  // (`block=60779445 logIndex=4`). See ADR 0105.
+  const REPLAY_BLOCK = 60_779_445;
+  const REPLAY_BLOCK_TIMESTAMP = 1_700_010_600;
+  const REPORTER_A = "0x00000000000000000000000000000000000000aa";
+  const REPORTER_B = "0x00000000000000000000000000000000000000bb";
+  const REPORTER_C = "0x00000000000000000000000000000000000000cc";
+
+  /** A feed row whose watermark sits at `REPLAY_BLOCK` log index 9, well past
+   * its bootstrap boundary. */
+  function seedReplayedFeedState(logIndex = 9, rateFeedID = FEED) {
+    return applyOracleReport(
+      bootstrapOracleFeedState({
+        chainId: CHAIN_ID,
+        rateFeedID,
+        reporters: [REPORTER_A],
+        timestamps: [1_700_010_000n],
+        reportExpiry: 3_600n,
+        bootstrapThroughBlock: 60_779_400n,
+      }),
+      REPORTER_B,
+      1_700_010_500n,
+      {
+        blockNumber: BigInt(REPLAY_BLOCK),
+        logIndex,
+        blockTimestamp: BigInt(REPLAY_BLOCK_TIMESTAMP),
+      },
+    );
+  }
+
+  /** An expiry row whose watermark sits at `REPLAY_BLOCK` log index 9. */
+  function seedReplayedExpiryState(rateFeedID = FEED, logIndex = 9) {
+    return applyTokenReportExpiry(
+      bootstrapOracleExpiryState({
+        chainId: CHAIN_ID,
+        rateFeedID,
+        globalReportExpiry: 3_600n,
+        tokenReportExpiry: 0n,
+        bootstrapThroughBlock: 60_779_400n,
+      }),
+      7_200n,
+      {
+        blockNumber: BigInt(REPLAY_BLOCK),
+        logIndex,
+        blockTimestamp: BigInt(REPLAY_BLOCK_TIMESTAMP),
+      },
+    );
+  }
+
+  it("ignores a replayed OracleReported below the persisted watermark", async () => {
+    const seededState = seedReplayedFeedState();
+    const { mockDb: seededDb, poolId } = createTrackedPoolDb(
+      "0x0000000000000000000000000000000000008570",
+    );
+    const mockDb = seededDb.entities.OracleFeedState.set(seededState);
+    const seededPool = mockDb.entities.Pool.get(poolId);
+
+    const { warnings } = await captureWarnings(() =>
+      SortedOracles.OracleReported.processEvent({
+        event: SortedOracles.OracleReported.createMockEvent({
+          token: FEED,
+          oracle: REPORTER_C,
+          value: ONE,
+          timestamp: 1_700_010_550n,
+          mockEventData: {
+            chainId: CHAIN_ID,
+            logIndex: 4,
+            srcAddress: SORTED_ORACLES,
+            block: { number: REPLAY_BLOCK, timestamp: REPLAY_BLOCK_TIMESTAMP },
+          },
+        }),
+        mockDb,
+      }),
+    );
+
+    assert.deepEqual(
+      mockDb.entities.OracleFeedState.get(oracleFeedStateId(CHAIN_ID, FEED)),
+      seededState,
+    );
+    // The handler must stop before the downstream pool path: the batch that
+    // first applied this event already wrote both rows, and `OracleSnapshot`
+    // is keyed by this event, so nothing would repair a rewrite.
+    assert.deepEqual(mockDb.entities.Pool.get(poolId), seededPool);
+    assert.deepEqual(mockDb.entities.OracleSnapshot.getAll(), []);
+    const tokens = replayTokens(warnings);
+    assert.equal(tokens.length, 1);
+    assert.match(
+      tokens[0]!,
+      /block=60779445 logIndex=4 updatedAtBlock=60779445 updatedAtLogIndex=9/,
+    );
+    assert.deepEqual(replaySites(warnings), ["resolveOracleFeedState"]);
+  });
+
+  it("ignores a replayed OracleReportRemoved below the persisted watermark", async () => {
+    const seededState = seedReplayedFeedState();
+    const { mockDb: seededDb, poolId } = createTrackedPoolDb(
+      "0x0000000000000000000000000000000000008571",
+    );
+    const mockDb = seededDb.entities.OracleFeedState.set(seededState);
+    const seededPool = mockDb.entities.Pool.get(poolId);
+
+    const { warnings } = await captureWarnings(() =>
+      SortedOracles.OracleReportRemoved.processEvent({
+        event: SortedOracles.OracleReportRemoved.createMockEvent({
+          token: FEED,
+          oracle: REPORTER_B,
+          mockEventData: {
+            chainId: CHAIN_ID,
+            logIndex: 4,
+            srcAddress: SORTED_ORACLES,
+            block: { number: REPLAY_BLOCK, timestamp: REPLAY_BLOCK_TIMESTAMP },
+          },
+        }),
+        mockDb,
+      }),
+    );
+
+    assert.deepEqual(
+      mockDb.entities.OracleFeedState.get(oracleFeedStateId(CHAIN_ID, FEED)),
+      seededState,
+    );
+    assert.deepEqual(mockDb.entities.Pool.get(poolId), seededPool);
+    assert.deepEqual(replaySites(warnings), ["resolveOracleFeedState"]);
+  });
+
+  it("ignores a replayed TokenReportExpirySet in both state machines", async () => {
+    const seededFeedState = seedReplayedFeedState();
+    const seededExpiryState = seedReplayedExpiryState();
+    const { mockDb: seededDb } = createTrackedPoolDb(
+      "0x0000000000000000000000000000000000008572",
+    );
+    let mockDb = seededDb.entities.OracleFeedState.set(seededFeedState);
+    mockDb = mockDb.entities.OracleExpiryState.set(seededExpiryState);
+
+    const { warnings } = await captureWarnings(() =>
+      SortedOracles.TokenReportExpirySet.processEvent({
+        event: SortedOracles.TokenReportExpirySet.createMockEvent({
+          token: FEED,
+          reportExpiry: 900n,
+          mockEventData: {
+            chainId: CHAIN_ID,
+            logIndex: 4,
+            srcAddress: SORTED_ORACLES,
+            block: { number: REPLAY_BLOCK, timestamp: REPLAY_BLOCK_TIMESTAMP },
+          },
+        }),
+        mockDb,
+      }),
+    );
+
+    assert.deepEqual(
+      mockDb.entities.OracleFeedState.get(oracleFeedStateId(CHAIN_ID, FEED)),
+      seededFeedState,
+    );
+    assert.deepEqual(
+      mockDb.entities.OracleExpiryState.get(
+        oracleExpiryStateId(CHAIN_ID, FEED),
+      ),
+      seededExpiryState,
+    );
+    // One token per state machine: the expiry row and the feed row's expiry
+    // mirror each reject the same replayed log, and `site=` tells them apart.
+    assert.deepEqual(replaySites(warnings), [
+      "resolveOracleExpiryState",
+      "updateOracleFeedStateExpiryIfPresent",
+    ]);
+  });
+
+  it("still applies an OracleReported above the persisted watermark", async () => {
+    const seededState = seedReplayedFeedState();
+    const { mockDb: seededDb } = createTrackedPoolDb(
+      "0x0000000000000000000000000000000000008573",
+    );
+    const mockDb = seededDb.entities.OracleFeedState.set(seededState);
+
+    const { warnings } = await captureWarnings(() =>
+      SortedOracles.OracleReported.processEvent({
+        event: SortedOracles.OracleReported.createMockEvent({
+          token: FEED,
+          oracle: REPORTER_C,
+          value: ONE,
+          timestamp: 1_700_010_650n,
+          mockEventData: {
+            chainId: CHAIN_ID,
+            logIndex: 0,
+            srcAddress: SORTED_ORACLES,
+            block: {
+              number: REPLAY_BLOCK + 1,
+              timestamp: REPLAY_BLOCK_TIMESTAMP + 5,
+            },
+          },
+        }),
+        mockDb,
+      }),
+    );
+
+    const state = mockDb.entities.OracleFeedState.get(
+      oracleFeedStateId(CHAIN_ID, FEED),
+    ) as {
+      activeReporters: string[];
+      updatedAtBlock: bigint;
+      updatedAtLogIndex: number;
+    };
+    assert.deepEqual(state.activeReporters, [
+      REPORTER_A,
+      REPORTER_B,
+      REPORTER_C,
+    ]);
+    assert.equal(state.updatedAtBlock, BigInt(REPLAY_BLOCK + 1));
+    assert.equal(state.updatedAtLogIndex, 0);
+    assert.deepEqual(replayTokens(warnings), []);
+  });
+
+  it("still throws when a same-position OracleReported conflicts", async () => {
+    const seededState = seedReplayedFeedState(4);
+    const { mockDb: seededDb } = createTrackedPoolDb(
+      "0x0000000000000000000000000000000000008574",
+    );
+    const mockDb = seededDb.entities.OracleFeedState.set(seededState);
+
+    await assert.rejects(
+      SortedOracles.OracleReported.processEvent({
+        event: SortedOracles.OracleReported.createMockEvent({
+          token: FEED,
+          oracle: REPORTER_B,
+          value: ONE,
+          timestamp: 1_700_010_501n,
+          mockEventData: {
+            chainId: CHAIN_ID,
+            logIndex: 4,
+            srcAddress: SORTED_ORACLES,
+            block: { number: REPLAY_BLOCK, timestamp: REPLAY_BLOCK_TIMESTAMP },
+          },
+        }),
+        mockDb,
+      }),
+      /OracleReported conflicts at persisted event position/,
+    );
+  });
+
+  // The re-delivered tail of an interrupted batch lands exactly on the
+  // watermark, where `eventPosition` is 0 and the predicate is false.
+  it("ignores an identical OracleReported at the persisted watermark", async () => {
+    const seededState = seedReplayedFeedState(4);
+    const { mockDb: seededDb, poolId } = createTrackedPoolDb(
+      "0x0000000000000000000000000000000000008578",
+    );
+    const mockDb = seededDb.entities.OracleFeedState.set(seededState);
+    const seededPool = mockDb.entities.Pool.get(poolId);
+
+    const { warnings } = await captureWarnings(() =>
+      SortedOracles.OracleReported.processEvent({
+        event: SortedOracles.OracleReported.createMockEvent({
+          token: FEED,
+          oracle: REPORTER_B,
+          value: ONE,
+          timestamp: 1_700_010_500n,
+          mockEventData: {
+            chainId: CHAIN_ID,
+            logIndex: 4,
+            srcAddress: SORTED_ORACLES,
+            block: { number: REPLAY_BLOCK, timestamp: REPLAY_BLOCK_TIMESTAMP },
+          },
+        }),
+        mockDb,
+      }),
+    );
+
+    assert.deepEqual(
+      mockDb.entities.OracleFeedState.get(oracleFeedStateId(CHAIN_ID, FEED)),
+      seededState,
+    );
+    assert.deepEqual(mockDb.entities.Pool.get(poolId), seededPool);
+    assert.deepEqual(mockDb.entities.OracleSnapshot.getAll(), []);
+    assert.deepEqual(replaySites(warnings), ["resolveOracleFeedState"]);
+  });
+
+  it("propagates an expiry log inside the feed row's bootstrap boundary block", async () => {
+    const boundaryBlock = 60_779_450;
+    const seededFeedState = bootstrapOracleFeedState({
+      chainId: CHAIN_ID,
+      rateFeedID: FEED,
+      reporters: [REPORTER_A],
+      timestamps: [1_700_010_000n],
+      reportExpiry: 3_600n,
+      bootstrapThroughBlock: BigInt(boundaryBlock),
+    });
+    const seededExpiryState = bootstrapOracleExpiryState({
+      chainId: CHAIN_ID,
+      rateFeedID: FEED,
+      globalReportExpiry: 3_600n,
+      tokenReportExpiry: 0n,
+      bootstrapThroughBlock: BigInt(boundaryBlock - 1),
+    });
+    const { mockDb: seededDb } = createTrackedPoolDb(
+      "0x0000000000000000000000000000000000008575",
+    );
+    let mockDb = seededDb.entities.OracleFeedState.set(seededFeedState);
+    mockDb = mockDb.entities.OracleExpiryState.set(seededExpiryState);
+
+    const { warnings } = await captureWarnings(() =>
+      SortedOracles.TokenReportExpirySet.processEvent({
+        event: SortedOracles.TokenReportExpirySet.createMockEvent({
+          token: FEED,
+          reportExpiry: 7_200n,
+          mockEventData: {
+            chainId: CHAIN_ID,
+            logIndex: 2,
+            srcAddress: SORTED_ORACLES,
+            block: {
+              number: boundaryBlock,
+              timestamp: REPLAY_BLOCK_TIMESTAMP,
+            },
+          },
+        }),
+        mockDb,
+      }),
+    );
+
+    // The feed row's block-close bootstrap took its expiry from the expiry row
+    // as that row stood at bootstrap time, so it does not yet carry this log.
+    // The mirror must apply it; only `eventPosition < 0` is a replay here.
+    assert.equal(
+      (
+        mockDb.entities.OracleFeedState.get(
+          oracleFeedStateId(CHAIN_ID, FEED),
+        ) as { reportExpiry: bigint; updatedAtLogIndex: number }
+      ).reportExpiry,
+      7_200n,
+    );
+    assert.equal(
+      (
+        mockDb.entities.OracleExpiryState.get(
+          oracleExpiryStateId(CHAIN_ID, FEED),
+        ) as { reportExpiry: bigint }
+      ).reportExpiry,
+      7_200n,
+    );
+    assert.deepEqual(replayTokens(warnings), []);
+  });
+
+  it("ignores a replayed ReportExpirySet on every affected feed", async () => {
+    const FEED_B = "0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1";
+    _setMockReportExpiryConfig(CHAIN_ID, FEED_B, {
+      globalReportExpiry: 3_600n,
+      tokenReportExpiry: 0n,
+      reportExpiry: 3_600n,
+    });
+    registerMockRateFeedDependenciesHttp(CHAIN_ID, FEED_B, []);
+    const seededFeedStates = new Map(
+      [FEED, FEED_B].map((feed) => [feed, seedReplayedFeedState(9, feed)]),
+    );
+    const seededExpiryStates = new Map(
+      [FEED, FEED_B].map((feed) => [feed, seedReplayedExpiryState(feed)]),
+    );
+
+    const { mockDb: seededDb } = createTrackedPoolDb(
+      "0x0000000000000000000000000000000000008576",
+    );
+    let mockDb = seededDb.entities.Pool.set(
+      makePool({
+        id: makePoolId(CHAIN_ID, "0x0000000000000000000000000000000000008577"),
+        referenceRateFeedID: FEED_B,
+        reserves0: 10n ** 21n,
+        reserves1: 10n ** 21n,
+        invertRateFeedKnown: true,
+        tokenDecimalsKnown: true,
+        oracleExpiry: 3_600n,
+        lastMedianPrice: ONE,
+        medianLive: true,
+      }),
+    );
+    for (const feed of [FEED, FEED_B]) {
+      mockDb = mockDb.entities.OracleFeedState.set(seededFeedStates.get(feed)!);
+      mockDb = mockDb.entities.OracleExpiryState.set(
+        seededExpiryStates.get(feed)!,
+      );
+    }
+
+    const { warnings } = await captureWarnings(() =>
+      SortedOracles.ReportExpirySet.processEvent({
+        event: SortedOracles.ReportExpirySet.createMockEvent({
+          reportExpiry: 900n,
+          mockEventData: {
+            chainId: CHAIN_ID,
+            logIndex: 4,
+            srcAddress: SORTED_ORACLES,
+            block: { number: REPLAY_BLOCK, timestamp: REPLAY_BLOCK_TIMESTAMP },
+          },
+        }),
+        mockDb,
+      }),
+    );
+
+    for (const feed of [FEED, FEED_B]) {
+      assert.deepEqual(
+        mockDb.entities.OracleFeedState.get(oracleFeedStateId(CHAIN_ID, feed)),
+        seededFeedStates.get(feed),
+      );
+      assert.deepEqual(
+        mockDb.entities.OracleExpiryState.get(
+          oracleExpiryStateId(CHAIN_ID, feed),
+        ),
+        seededExpiryStates.get(feed),
+      );
+    }
+    // The global handler fans out over every feed, so each guarded site fires
+    // once per feed.
+    assert.deepEqual(replaySites(warnings), [
+      "resolveOracleExpiryState",
+      "resolveOracleExpiryState",
+      "updateOracleFeedStateExpiryIfPresent",
+      "updateOracleFeedStateExpiryIfPresent",
+    ]);
+  });
+
+  // `MedianUpdated` writes no feed-state field of its own, so before the guard
+  // below nothing distinguished its first delivery from its re-delivery: the
+  // report log it follows leaves the watermark at a strictly lower logIndex in
+  // the same block either way.
+  it("ignores a replayed MedianUpdated at the persisted watermark", async () => {
+    const seededState = seedReplayedFeedState(5);
+    const { mockDb: seededDb, poolId } = createTrackedPoolDb(
+      "0x0000000000000000000000000000000000008579",
+    );
+    const mockDb = seededDb.entities.OracleFeedState.set(seededState);
+    const seededPool = mockDb.entities.Pool.get(poolId);
+
+    const { warnings } = await captureWarnings(() =>
+      SortedOracles.MedianUpdated.processEvent({
+        event: SortedOracles.MedianUpdated.createMockEvent({
+          token: FEED,
+          value: 11n * 10n ** 23n,
+          mockEventData: {
+            chainId: CHAIN_ID,
+            logIndex: 5,
+            srcAddress: SORTED_ORACLES,
+            block: { number: REPLAY_BLOCK, timestamp: REPLAY_BLOCK_TIMESTAMP },
+          },
+        }),
+        mockDb,
+      }),
+    );
+
+    assert.deepEqual(
+      mockDb.entities.OracleFeedState.get(oracleFeedStateId(CHAIN_ID, FEED)),
+      seededState,
+    );
+    // `OracleSnapshot` is keyed by this event, so a rewrite from the
+    // post-window pool and median state would stand forever.
+    assert.deepEqual(mockDb.entities.Pool.get(poolId), seededPool);
+    assert.deepEqual(mockDb.entities.OracleSnapshot.getAll(), []);
+    assert.deepEqual(replaySites(warnings), ["claimMedianUpdate"]);
+  });
+
+  it("claims a first-delivery MedianUpdated and advances the watermark", async () => {
+    const seededState = seedReplayedFeedState(4);
+    const { mockDb: seededDb, poolId } = createTrackedPoolDb(
+      "0x000000000000000000000000000000000000857a",
+    );
+    const mockDb = seededDb.entities.OracleFeedState.set(seededState);
+    const medianValue = 11n * 10n ** 23n;
+
+    const { warnings } = await captureWarnings(() =>
+      SortedOracles.MedianUpdated.processEvent({
+        event: SortedOracles.MedianUpdated.createMockEvent({
+          token: FEED,
+          value: medianValue,
+          mockEventData: {
+            chainId: CHAIN_ID,
+            logIndex: 5,
+            srcAddress: SORTED_ORACLES,
+            block: { number: REPLAY_BLOCK, timestamp: REPLAY_BLOCK_TIMESTAMP },
+          },
+        }),
+        mockDb,
+      }),
+    );
+
+    const state = mockDb.entities.OracleFeedState.get(
+      oracleFeedStateId(CHAIN_ID, FEED),
+    ) as {
+      activeReporters: string[];
+      medianReportTimestamp: bigint;
+      updatedAtBlock: bigint;
+      updatedAtLogIndex: number;
+    };
+    // Only the watermark moves; the report-sourced fields are untouched.
+    assert.deepEqual(state.activeReporters, [REPORTER_A, REPORTER_B]);
+    assert.equal(
+      state.medianReportTimestamp,
+      seededState.medianReportTimestamp,
+    );
+    assert.equal(state.updatedAtBlock, BigInt(REPLAY_BLOCK));
+    assert.equal(state.updatedAtLogIndex, 5);
+    assert.equal(mockDb.entities.Pool.get(poolId)?.oraclePrice, medianValue);
+    assert.deepEqual(replayTokens(warnings), []);
+  });
+
+  // The exact-watermark case for both expiry state machines: `eventPosition`
+  // is 0, so neither already-applied predicate sees it, and only a transition
+  // returning its input unchanged marks it as a replay.
+  it("ignores an identical TokenReportExpirySet at the persisted watermark", async () => {
+    const seededExpiryState = seedReplayedExpiryState(FEED, 4);
+    // The feed row as the first application left it: this log's expiry, and
+    // the watermark at this log's own position.
+    const seededFeedState = applyOracleFeedExpiry(
+      seedReplayedFeedState(3),
+      7_200n,
+      {
+        blockNumber: BigInt(REPLAY_BLOCK),
+        logIndex: 4,
+        blockTimestamp: BigInt(REPLAY_BLOCK_TIMESTAMP),
+      },
+    );
+    const { mockDb: seededDb, poolId } = createTrackedPoolDb(
+      "0x000000000000000000000000000000000000857b",
+      { oracleExpiry: 7_200n },
+    );
+    let mockDb = seededDb.entities.OracleFeedState.set(seededFeedState);
+    mockDb = mockDb.entities.OracleExpiryState.set(seededExpiryState);
+    const seededPool = mockDb.entities.Pool.get(poolId);
+
+    const { warnings } = await captureWarnings(() =>
+      SortedOracles.TokenReportExpirySet.processEvent({
+        event: SortedOracles.TokenReportExpirySet.createMockEvent({
+          token: FEED,
+          reportExpiry: 7_200n,
+          mockEventData: {
+            chainId: CHAIN_ID,
+            logIndex: 4,
+            srcAddress: SORTED_ORACLES,
+            block: { number: REPLAY_BLOCK, timestamp: REPLAY_BLOCK_TIMESTAMP },
+          },
+        }),
+        mockDb,
+      }),
+    );
+
+    assert.deepEqual(
+      mockDb.entities.OracleExpiryState.get(
+        oracleExpiryStateId(CHAIN_ID, FEED),
+      ),
+      seededExpiryState,
+    );
+    assert.deepEqual(
+      mockDb.entities.OracleFeedState.get(oracleFeedStateId(CHAIN_ID, FEED)),
+      seededFeedState,
+    );
+    assert.deepEqual(mockDb.entities.Pool.get(poolId), seededPool);
+    assert.deepEqual(replaySites(warnings), [
+      "resolveOracleExpiryState",
+      "updateOracleFeedStateExpiryIfPresent",
+    ]);
   });
 });

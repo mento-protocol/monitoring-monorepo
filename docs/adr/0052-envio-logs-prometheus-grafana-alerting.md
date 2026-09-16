@@ -66,6 +66,17 @@ transport.
   Prometheus-backed `Envio Effect Cache Invalidations` Grafana rule; it is not
   emitted by one of the structured handler error families above.
 
+- `sortedOracles.replayedEventIgnored` (`handlers/oracleFeedState.ts`,
+  `handlers/oracleExpiryState.ts`) is a structured **warning**, not an error
+  family. It marks a SortedOracles event the persisted row already reflects,
+  which Envio's at-least-once delivery makes routine after a restart; see
+  [ADR 0105](0105-replayed-events-are-handler-layer-no-ops.md). Read it with
+  `pnpm deploy:indexer:logs "$COMMIT" --level warn --since 2h` and grep the
+  token — `--errors-only` narrows to errors and will not show it. Each line
+  carries a `site=` field naming the guarded helper, because one event can
+  reach more than one. It gets no
+  alert rule for the same reason the families above get none.
+
 ## Alternatives considered
 
 - **Restore Loki ingestion and LogQL alerting** — rejected: no repository-owned

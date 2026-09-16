@@ -50,6 +50,7 @@ import { ensureRateFeed, preloadRateFeed } from "./rateFeed.js";
 import {
   oracleFeedBootstrapInputs,
   preloadOracleFeedState,
+  claimMedianUpdate,
   requireOracleFeedState,
   resolveOracleFeedState,
   updateOracleFeedStateExpiryIfPresent,
@@ -414,7 +415,7 @@ indexer.onEvent(
       poolIds,
       blockNumber,
     );
-    const oracleFeedState = await resolveOracleFeedState({
+    const { state: oracleFeedState, replayed } = await resolveOracleFeedState({
       context,
       event: {
         chainId: event.chainId,
@@ -430,6 +431,11 @@ indexer.onEvent(
       },
       ...bootstrapInputs,
     });
+    // Everything below already committed with the feed row in the batch that
+    // first applied this event. `OracleSnapshot` is keyed by this event, so
+    // redoing it would rewrite that row from post-window pool and median
+    // state and no later event would repair it. See ADR 0105.
+    if (replayed) return;
 
     await ensureRateFeed({
       context,
@@ -555,6 +561,26 @@ indexer.onEvent(
             logIndex: event.logIndex,
           })
         : null;
+    // Claim the log before any write. A restart re-delivers the whole tail
+    // block, and every write below — the event-keyed `OracleSnapshot`, the
+    // pool rows, the breaker EMA blend — would otherwise run a second time
+    // against state that already reflects it. See ADR 0105.
+    if (
+      oracleFeedState !== null &&
+      claimMedianUpdate({
+        context,
+        event: {
+          chainId: event.chainId,
+          rateFeedID,
+          blockNumber,
+          blockTimestamp,
+          logIndex: event.logIndex,
+        },
+        state: oracleFeedState,
+      })
+    ) {
+      return;
+    }
     const medianTimestamp = oracleFeedState?.medianReportTimestamp ?? null;
     const reportExpiry = oracleFeedState?.reportExpiry ?? null;
 

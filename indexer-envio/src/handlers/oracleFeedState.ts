@@ -7,12 +7,16 @@ import {
   applyOracleReport,
   applyOracleReportRemoval,
   bootstrapOracleFeedState,
+  isEventAlreadyApplied,
+  isEventAtOrBehindWatermark,
+  isEventBehindWatermark,
   oracleFeedStateId,
 } from "../oracleFeedState.js";
 import { computeHealthStatus, maybePreloadPool } from "../pool.js";
 import { getPoolsByFeed } from "../rpc.js";
 import { oracleReportTimestampsEffectForChain } from "../rpc/effects.js";
 import {
+  logReplayedEventIgnored,
   preloadOracleExpiryState,
   resolveOracleExpiryState,
 } from "./oracleExpiryState.js";
@@ -133,6 +137,16 @@ async function bootstrapFeedState(
   }
 }
 
+/** The resolved feed row, plus whether the event was a replay the persisted
+ * row already reflects. A replay means the batch that first applied the event
+ * committed, and Envio commits a batch's entity writes in one transaction, so
+ * every downstream write for that event is already persisted. The caller must
+ * stop rather than redo them against later state. See ADR 0105. */
+export type FeedStateResolution = {
+  state: OracleFeedState;
+  replayed: boolean;
+};
+
 /** Resolve the persisted feed state and apply one report/removal transition.
  * Bootstrap is deliberately processing-only: preload may not see the row an
  * earlier event creates in ordered processing. */
@@ -141,7 +155,7 @@ export async function resolveOracleFeedState(args: {
   event: FeedEvent;
   mutation: FeedMutation;
   bootstrapThroughBlock: bigint;
-}): Promise<OracleFeedState> {
+}): Promise<FeedStateResolution> {
   const id = oracleFeedStateId(args.event.chainId, args.event.rateFeedID);
   const existing = await args.context.OracleFeedState.get(id);
   const base =
@@ -157,19 +171,28 @@ export async function resolveOracleFeedState(args: {
   // assignment and after this handler, so replaying a same-block transition
   // would double-apply it.
   if (args.event.blockNumber === base.bootstrapThroughBlock) {
-    if (existing) return existing;
+    if (existing) return { state: existing, replayed: false };
     const absorbed = {
       ...base,
       updatedAtTimestamp: args.event.blockTimestamp,
     };
     args.context.OracleFeedState.set(absorbed);
-    return absorbed;
+    return { state: absorbed, replayed: false };
   }
   const eventPosition = {
     blockNumber: args.event.blockNumber,
     blockTimestamp: args.event.blockTimestamp,
     logIndex: args.event.logIndex,
   };
+  if (isEventAlreadyApplied(base, eventPosition)) {
+    logReplayedEventIgnored(
+      args.context,
+      args.event,
+      base,
+      "resolveOracleFeedState",
+    );
+    return { state: base, replayed: true };
+  }
   const updated =
     args.mutation.kind === "report"
       ? applyOracleReport(
@@ -183,8 +206,22 @@ export async function resolveOracleFeedState(args: {
           args.mutation.reporterAddress,
           eventPosition,
         );
+  // The re-delivered tail of an interrupted batch lands exactly on the
+  // watermark, which the predicate above cannot see: both transitions return
+  // their input unchanged at `position === 0` and throw on a conflicting
+  // payload, and every applying path rebuilds the row. Reference equality is
+  // therefore the whole test. See ADR 0105.
+  const replayed = updated === base;
+  if (replayed) {
+    logReplayedEventIgnored(
+      args.context,
+      args.event,
+      base,
+      "resolveOracleFeedState",
+    );
+  }
   if (updated !== existing) args.context.OracleFeedState.set(updated);
-  return updated;
+  return { state: updated, replayed };
 }
 
 export async function requireOracleFeedState(
@@ -210,13 +247,79 @@ export async function updateOracleFeedStateExpiryIfPresent(args: {
     oracleFeedStateId(args.event.chainId, args.event.rateFeedID),
   );
   if (!state) return;
-  args.context.OracleFeedState.set(
-    applyOracleFeedExpiry(state, args.reportExpiry, {
-      blockNumber: args.event.blockNumber,
-      blockTimestamp: args.event.blockTimestamp,
-      logIndex: args.event.logIndex,
-    }),
+  const eventPosition = {
+    blockNumber: args.event.blockNumber,
+    blockTimestamp: args.event.blockTimestamp,
+    logIndex: args.event.logIndex,
+  };
+  // Only the ordering `applyOracleFeedExpiry` rejects is a replay here. The
+  // wider bootstrap-boundary clause would suppress a live propagation: the feed
+  // row's block-close bootstrap takes its expiry from the expiry row as it
+  // stood at that moment, so a later log in the same block still has to land.
+  if (isEventBehindWatermark(state, eventPosition)) {
+    logReplayedEventIgnored(
+      args.context,
+      args.event,
+      state,
+      "updateOracleFeedStateExpiryIfPresent",
+    );
+    return;
+  }
+  // Same exact-watermark case as `resolveOracleFeedState`: the transition
+  // returns its input unchanged only for an identical expiry at `position ===
+  // 0` (a conflicting one throws, and the caller above has already excluded a
+  // non-positive `reportExpiry`), so reference equality is the whole test.
+  const updated = applyOracleFeedExpiry(
+    state,
+    args.reportExpiry,
+    eventPosition,
   );
+  if (updated === state) {
+    logReplayedEventIgnored(
+      args.context,
+      args.event,
+      state,
+      "updateOracleFeedStateExpiryIfPresent",
+    );
+    return;
+  }
+  args.context.OracleFeedState.set(updated);
+}
+
+/** Claim one `MedianUpdated` log against the feed watermark, so its downstream
+ * writes run exactly once. Unlike the report transitions, `MedianUpdated`
+ * changes no feed-state field of its own — it advances the watermark alone, so
+ * that a re-delivery lands on it and is recognised. Returns true when the row
+ * already reflects this log, in which case the caller writes nothing: the
+ * batch that first applied it committed its `OracleSnapshot` (keyed by this
+ * event, so no later event repairs it), its `Pool` rows and its breaker EMA
+ * blend. See ADR 0105. */
+export function claimMedianUpdate(args: {
+  context: EvmOnEventContext;
+  event: FeedEvent;
+  state: OracleFeedState;
+}): boolean {
+  const eventPosition = {
+    blockNumber: args.event.blockNumber,
+    blockTimestamp: args.event.blockTimestamp,
+    logIndex: args.event.logIndex,
+  };
+  if (isEventAtOrBehindWatermark(args.state, eventPosition)) {
+    logReplayedEventIgnored(
+      args.context,
+      args.event,
+      args.state,
+      "claimMedianUpdate",
+    );
+    return true;
+  }
+  args.context.OracleFeedState.set({
+    ...args.state,
+    updatedAtBlock: args.event.blockNumber,
+    updatedAtLogIndex: args.event.logIndex,
+    updatedAtTimestamp: args.event.blockTimestamp,
+  });
+  return false;
 }
 
 async function updatePoolsAfterReportRemoval(args: {
@@ -288,7 +391,7 @@ indexer.onEvent(
       poolIds,
       blockNumber,
     );
-    const state = await resolveOracleFeedState({
+    const { state, replayed } = await resolveOracleFeedState({
       context,
       event: {
         chainId: event.chainId,
@@ -303,6 +406,10 @@ indexer.onEvent(
       },
       ...bootstrapInputs,
     });
+    // The pool writes below already committed with the feed row in the batch
+    // that first applied this event. Redoing them would restamp the pools with
+    // this lower block against post-window state. See ADR 0105.
+    if (replayed) return;
     await updatePoolsAfterReportRemoval({
       context,
       poolIds,
