@@ -117,7 +117,10 @@ only the thing holding the credentials changed.
   apply the platform stack from `main`; (3) verify the scheduled
   `platform-settings-drift` run still reports `state=ok`; (4) merge this PR,
   which repoints `platform-settings-drift.yml` at the new environment and
-  deletes `sentry-pipeline`; (5) apply the platform stack from `main` again to
+  deletes `sentry-pipeline` — updating this branch with `main` first duplicates
+  phase 1's three added blocks outside the conflict markers, so read the
+  resolution note at step 4 of the rollout order before merging; (5) apply the
+  platform stack from `main` again to
   destroy `sentry-pipeline`, after confirming the plan leaves
   `platform_settings_drift_audit_token` **unchanged**; (6) verify the next
   scheduled run reports `state=ok`. Between (4) and (5) the retired environment
@@ -183,4 +186,11 @@ only the thing holding the credentials changed.
   phase-1 PR adds the same environment, deployment policy and
   `platform_settings_drift_audit_token` block byte for byte alongside the
   `sentry-pipeline` resources it leaves in place, so the two end states agree
-  and this branch's only Terraform effect after phase 1 lands is the deletion.
+  and the only intended Terraform effect of this branch after phase 1 lands is
+  the deletion. The merge that produces that end state does not reach it on its
+  own. Phase 1 appends its blocks after the `sentry-pipeline` resources this
+  branch deletes, so Git marks a conflict only on the file's header comment and
+  auto-merges a second copy of all three added blocks below it. Step 4 of the
+  rollout order in `terraform/github-environment.tf` states the resolution:
+  keep exactly one copy of each block, then re-run `terraform fmt -check`,
+  `terraform validate` and `pnpm tf:test`.

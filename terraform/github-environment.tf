@@ -68,6 +68,22 @@
 #      five secrets from the configuration. Between the merge and step 5 the
 #      environment still exists on GitHub while nothing references it; the
 #      workflow reads the phase-1 secret, so there is no inert window.
+#      UPDATING THIS BRANCH WITH `main` FIRST NEEDS A RESOLUTION BEYOND THE
+#      CONFLICT MARKERS. Phase 1 appends its three new blocks AFTER the
+#      `sentry-pipeline` resources this branch deletes, so Git does not read the
+#      two sides as the same addition. The merge marks a conflict only on this
+#      file's header comment. Below it, Git auto-merges BOTH copies of
+#      `github_repository_environment.platform_settings_drift`, of
+#      `github_repository_environment_deployment_policy.platform_settings_drift_main`
+#      and of
+#      `github_actions_environment_secret.platform_settings_drift_audit_token`,
+#      outside the markers. Terraform rejects that file with "Duplicate
+#      resource configuration". The resolution MUST keep exactly ONE copy of
+#      each of the three blocks. The duplicates are byte for byte identical, so
+#      either copy will do. Re-run `terraform fmt -check`, `terraform validate`
+#      and `pnpm tf:test` on the resolved tree before merging. The conflicts in
+#      `scripts/production-infra-identity-contract/surfaces.mjs` land inside
+#      their markers and need no extra handling.
 #   5. Apply the platform stack from `main` again, the same way, to destroy
 #      `sentry-pipeline`. Every workflow that declared
 #      `environment: sentry-pipeline` is deleted in this merge, so no run can
