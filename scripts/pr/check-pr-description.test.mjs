@@ -485,6 +485,45 @@ test("maps comments in container HTML back to source offsets", () => {
   );
 });
 
+test("preserves prose after an indented same-line comment", () => {
+  assertFail(
+    sizedBody({
+      tldrWords: 20,
+      problemWords: 100,
+      solutionWords: 275,
+      extra: "\n<!-- note -->    overflow",
+    }),
+    /authored PR description is 401 words; the ceiling is 400/,
+  );
+});
+
+test("keeps indented same-line prose visible in opening sections", () => {
+  assertPass(`## tl;dr
+
+The check that reads pull request descriptions now wants a plain summary first.
+
+## The Problem
+
+<!-- note -->    Visible problem prose.
+
+## The Solution
+
+<!-- note -->    Visible solution prose.
+`);
+});
+
+test("ignores container markers inside multiline HTML tags", () => {
+  assertFail(
+    sizedBody({
+      tldrWords: 20,
+      problemWords: 100,
+      solutionWords: 272,
+      extra: '\n> <div\n> title="<!--">\n> one two three four\n> </div>',
+    }),
+    /authored PR description is 401 words; the ceiling is 400/,
+  );
+});
+
 test("counts prose written as numeric character references", () => {
   // "word" as decimal references; GitHub renders it as the word.
   const encoded = "&#119;&#111;&#114;&#100;";

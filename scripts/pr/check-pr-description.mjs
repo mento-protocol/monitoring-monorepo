@@ -27,6 +27,7 @@ const HTML_HIDDEN_RE = new RegExp(
 const HTML_TAG_RE = new RegExp(`<${HTML_ATTRIBUTES}>`, "g");
 const HTML_ENTITY_RE =
   /&(?:#(?:[0-9]+|[xX][0-9A-Fa-f]+)|[A-Za-z][A-Za-z0-9]*);/g;
+const HTML_COMMENT_PLACEHOLDER = "\u2060";
 const DEFERRALS_HEADING_RE = /^##\s+Deferrals\s*$/;
 const DEFERRALS_STYLE_RE = /^ {0,3}#{1,6}\s*Deferrals([^A-Za-z0-9_]|$)/i;
 const NONE_RE = /^\s*(?:[-*]\s+)?none\s*\.?\s*$/i;
@@ -79,8 +80,39 @@ function htmlCommentRanges(value) {
   return ranges;
 }
 
+function lineStartOffsets(body) {
+  const offsets = [0];
+  for (const match of body.matchAll(/\r?\n/g)) {
+    offsets.push(match.index + match[0].length);
+  }
+  return offsets;
+}
+
+function nodeSourceOffset(bodyLines, lineOffsets, node, index) {
+  if (index === node.value.length) return node.position.end.offset;
+
+  const before = node.value.slice(0, index);
+  const localLine = before.split("\n").length - 1;
+  const lastNewline = before.lastIndexOf("\n");
+  const localColumn = index - lastNewline - 1;
+  const valueLine = node.value.split("\n")[localLine] ?? "";
+  const bodyLine = node.position.start.line - 1 + localLine;
+  const sourceLine = bodyLines[bodyLine] ?? "";
+  const contentStart =
+    localLine === 0
+      ? node.position.start.column - 1
+      : sourceLine.endsWith(valueLine)
+        ? sourceLine.length - valueLine.length
+        : sourceLine.lastIndexOf(valueLine);
+
+  if (contentStart < 0) return null;
+  return lineOffsets[bodyLine] + contentStart + localColumn;
+}
+
 function stripHtmlComments(body) {
   const ranges = [];
+  const bodyLines = linesOf(body);
+  const lineOffsets = lineStartOffsets(body);
 
   const walk = (node) => {
     if (
@@ -88,15 +120,15 @@ function stripHtmlComments(body) {
       Number.isInteger(node.position?.start.offset) &&
       Number.isInteger(node.position?.end.offset)
     ) {
-      const source = body.slice(
-        node.position.start.offset,
-        node.position.end.offset,
-      );
-      for (const [localStart, localEnd] of htmlCommentRanges(source)) {
-        ranges.push([
-          node.position.start.offset + localStart,
-          node.position.start.offset + localEnd,
-        ]);
+      for (const [localStart, localEnd] of htmlCommentRanges(node.value)) {
+        const start = nodeSourceOffset(
+          bodyLines,
+          lineOffsets,
+          node,
+          localStart,
+        );
+        const end = nodeSourceOffset(bodyLines, lineOffsets, node, localEnd);
+        if (start !== null && end !== null) ranges.push([start, end]);
       }
       return;
     }
@@ -107,9 +139,19 @@ function stripHtmlComments(body) {
 
   let stripped = body;
   for (const [start, end] of ranges.reverse()) {
-    stripped = stripped.slice(0, start) + stripped.slice(end);
+    stripped =
+      stripped.slice(0, start) + HTML_COMMENT_PLACEHOLDER + stripped.slice(end);
   }
   return stripped;
+}
+
+function normalizeCommentedHeadings(body) {
+  return linesOf(body)
+    .map((line) => {
+      const withoutComments = line.replaceAll(HTML_COMMENT_PLACEHOLDER, "");
+      return H2_HEADING_RE.test(withoutComments) ? withoutComments : line;
+    })
+    .join("\n");
 }
 
 function stripFencedBlocks(body) {
@@ -146,7 +188,7 @@ function stripFencedBlocks(body) {
 }
 
 function firstNonBlankLine(body) {
-  return linesOf(body).find((line) => line.trim() !== "") ?? "";
+  return linesOf(body).find(hasVisibleCharacters) ?? "";
 }
 
 function h2Headings(body) {
@@ -343,7 +385,7 @@ export function validatePrDescription(body) {
     };
   }
 
-  const commentStripped = stripHtmlComments(body);
+  const commentStripped = normalizeCommentedHeadings(stripHtmlComments(body));
   const firstLine = firstNonBlankLine(commentStripped);
   const { body: fenceStripped, hasUnclosedFence } =
     stripFencedBlocks(commentStripped);
