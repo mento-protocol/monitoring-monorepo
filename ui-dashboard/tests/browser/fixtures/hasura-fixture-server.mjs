@@ -1713,6 +1713,18 @@ export function handleGraphQL(
           (limit) => limit.poolId === String(variables.poolId),
         ),
       };
+    // `/limit/[limitId]` resolver: bytes32 limit id -> wrapping VirtualPool.
+    case "BrokerLimitPool":
+      return {
+        BrokerTradingLimit: brokerTradingLimits
+          .filter(
+            (limit) =>
+              limit.limitId === String(variables.limitId) &&
+              limit.chainId === Number(variables.chainId),
+          )
+          .slice(0, 1)
+          .map(({ poolId }) => ({ poolId })),
+      };
     case "PoolV2Exchange":
       return {
         BiPoolExchange:
