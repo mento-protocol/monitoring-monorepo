@@ -512,6 +512,25 @@ The check that reads pull request descriptions now wants a plain summary first.
 `);
 });
 
+test("keeps a standalone comment blank before indented code", () => {
+  assertFail(
+    `## tl;dr
+
+The check that reads pull request descriptions now wants a plain summary first.
+
+## The Problem
+
+- Reviewers need a clear problem statement.
+
+## The Solution
+
+<!-- template note -->
+    code is not explanatory prose
+`,
+    /Solution.*must contain visible content/,
+  );
+});
+
 test("ignores container markers inside multiline HTML tags", () => {
   assertFail(
     sizedBody({
@@ -521,6 +540,23 @@ test("ignores container markers inside multiline HTML tags", () => {
       extra: '\n> <div\n> title="<!--">\n> one two three four\n> </div>',
     }),
     /authored PR description is 401 words; the ceiling is 400/,
+  );
+});
+
+test("strips comments after a bare closing delimiter", () => {
+  assertPass(
+    body(`
+
+## Details
+
+<div>
+</
+<!-- note -->## Deferrals
+
+- #123 follow-up
+</div>
+`),
+    /deferrals declared/,
   );
 });
 
@@ -1544,6 +1580,22 @@ ${heading}
 `),
       /isn't exactly '## Deferrals'/,
     );
+  }
+});
+
+test("fails commented Deferrals near misses at every non-H2 depth", () => {
+  for (const depth of [1, 3, 4, 5, 6]) {
+    for (const separator of [" ", ""]) {
+      assertFail(
+        body(`
+
+${"#".repeat(depth)}${separator}Def<!-- note -->errals
+
+- #123 follow-up
+`),
+        /isn't exactly '## Deferrals'/,
+      );
+    }
   }
 });
 

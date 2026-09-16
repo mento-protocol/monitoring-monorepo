@@ -72,7 +72,13 @@ function htmlCommentRanges(value) {
       continue;
     }
 
-    if (character === "<" && /[A-Za-z/!?]/.test(value[index + 1] ?? "")) {
+    const nextCharacter = value[index + 1] ?? "";
+    const startsEndTag =
+      nextCharacter === "/" && /[A-Za-z]/.test(value[index + 2] ?? "");
+    if (
+      character === "<" &&
+      (/[A-Za-z!?]/.test(nextCharacter) || startsEndTag)
+    ) {
       inTag = true;
     }
   }
@@ -136,11 +142,27 @@ function stripHtmlComments(body) {
   };
 
   walk(fromMarkdown(body));
+  ranges.sort(([left], [right]) => left - right);
+
+  const hasSameLineTail = (end) => {
+    const newline = body.indexOf("\n", end);
+    const lineEnd = newline === -1 ? body.length : newline;
+    let cursor = end;
+
+    for (const [commentStart, commentEnd] of ranges) {
+      if (commentEnd <= cursor) continue;
+      if (commentStart >= lineEnd) break;
+      if (/\S/.test(body.slice(cursor, commentStart))) return true;
+      cursor = Math.min(commentEnd, lineEnd);
+    }
+
+    return /\S/.test(body.slice(cursor, lineEnd));
+  };
 
   let stripped = body;
-  for (const [start, end] of ranges.reverse()) {
-    stripped =
-      stripped.slice(0, start) + HTML_COMMENT_PLACEHOLDER + stripped.slice(end);
+  for (const [start, end] of ranges.toReversed()) {
+    const replacement = hasSameLineTail(end) ? HTML_COMMENT_PLACEHOLDER : "";
+    stripped = stripped.slice(0, start) + replacement + stripped.slice(end);
   }
   return stripped;
 }
@@ -458,9 +480,9 @@ export function validatePrDescription(body) {
     };
   }
 
-  const deferralsStyle = linesOf(fenceStripped).filter((line) =>
-    DEFERRALS_STYLE_RE.test(line),
-  );
+  const deferralsStyle = linesOf(fenceStripped)
+    .map((line) => line.replaceAll(HTML_COMMENT_PLACEHOLDER, ""))
+    .filter((line) => DEFERRALS_STYLE_RE.test(line));
   const nearMiss = deferralsStyle.filter(
     (line) => !DEFERRALS_HEADING_RE.test(line),
   );
