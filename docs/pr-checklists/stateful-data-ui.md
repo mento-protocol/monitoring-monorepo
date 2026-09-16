@@ -253,33 +253,17 @@ If the risky behavior is interactive, a static markup assertion is not enough.
 ## 6. PR description requirements
 
 Before opening the PR, start with the repo-wide description standard's exact
-heading lines, in this order:
+heading lines, in this order: `## tl;dr`, `## The Problem`, `## The Solution`.
 
-```markdown
-## tl;dr
-```
-
-- Two to four plain sentences, about 60 words, for a reader outside this
-  codebase. CI rejects more than 80. No paths, flags, or identifiers.
-
-```markdown
-## The Problem
-```
-
-- Maximum three bullets.
-- Explain what the system did before, what failed or became difficult, and the
-  concrete effect on users or operators.
-- Use visible Markdown prose or bullets. Raw HTML other than comments,
-  paragraphs that contain it, and code blocks do not count as an explanation.
-
-```markdown
-## The Solution
-```
-
-- Explain what the system does after the PR, why that behavior improves the
-  situation, and any material limit or non-goal.
-- Use visible Markdown prose or bullets. Raw HTML other than comments,
-  paragraphs that contain it, and code blocks do not count as an explanation.
+- The Problem takes at most three bullets: what the system did before, what
+  failed or became difficult, and the concrete effect on users or operators.
+- The Solution explains what the system does after the PR, why that behavior
+  improves the situation, and any material limit or non-goal.
+- `.github/PULL_REQUEST_TEMPLATE.md` and `scripts/pr/check-pr-description.mjs`
+  own the rest: a two-to-four-sentence, about-60-word tl;dr that CI rejects
+  above 80 words and that carries no paths, flags, or identifiers, and the rule
+  that raw HTML other than comments, paragraphs containing it, and code blocks
+  do not count as a visible explanation.
 
 Then include these deeper sections:
 
