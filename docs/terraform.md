@@ -307,7 +307,7 @@ Sentry credential routing lives in
 
 ## GitHub Environments
 
-All three Environments are Terraform-managed in
+All four Environments are Terraform-managed in
 `terraform/github-environment.tf` and restrict deployments with an **explicit
 `main` branch pattern** (`custom_branch_policies = true` plus a
 `github_repository_environment_deployment_policy`), never
@@ -362,6 +362,18 @@ secrets. Every secret-bearing Sentry job declares it, so those secrets are
 reachable only from `main`, server-enforced even on a branch-modified
 `workflow_dispatch`. `CLAUDE_CODE_OAUTH_TOKEN` intentionally stays repo-level
 for `claude.yml`.
+
+`platform-settings-drift` (`terraform/github-environment.tf`, issue #1289,
+[ADR 0050](adr/0050-environment-scoped-pipeline-secrets.md)) holds exactly one
+secret, `PLATFORM_SETTINGS_AUDIT_TOKEN`. It has the same `main`-only branch
+pattern, admin bypass disabled, and — deliberately, the audit is unattended — no
+reviewer or wait timer. This is phase 1 of the issue #2464 rollout: the change
+is purely additive, so `sentry-pipeline` stays live and the `check` job in
+`.github/workflows/platform-settings-drift.yml` keeps reading the copy of the
+token that environment holds today. Until PR #2465 repoints the workflow and
+deletes `sentry-pipeline`, both environments carry the token and every platform
+apply reconciles both. The header comment of
+`terraform/github-environment.tf` records the phase-1 apply order.
 
 Never recreate retired `Production`/`production` names or manage
 Environment secrets outside their owning IaC/integration path. A new workflow
