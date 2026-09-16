@@ -10,9 +10,31 @@
  * what prove it rejects.
  *
  * These predicates were written for the Sentry suite-wiring checker
- * (`scripts/sentry/ci-wiring/`) and moved here verbatim when ADR 0106 deleted
- * that tree. They are not Sentry-specific: they judge the `ci` sentinel's
- * ability to turn any red job into a red required check.
+ * (`scripts/sentry/ci-wiring/check-sentry-suites-in-ci-core.mjs`). ADR 0106
+ * deleted that tree and carried a SUBSET here — the repo-wide ones, unchanged
+ * in body: `isPlainObject`, `envMutationBlockers`, `withInput`,
+ * `parseActionList`, `sentinelBlockers`, `contextOwnershipBlockers`,
+ * `triggerBlockers` and `pinValidationOrderBlockers` (with its
+ * `parseShellScript`/`isCommand` helpers). They are not Sentry-specific: they
+ * judge the `ci` sentinel's ability to turn any red job into a red required
+ * check.
+ *
+ * Four predicates were NOT carried, because check-ci-contract.mjs already
+ * proves what each of them proved, over a closed job set the old checker did
+ * not have:
+ *
+ *   - `workflowBlockers` (no workflow-level `env:`/`defaults:`) — the contract
+ *     checker's "workflow runtime changed" error asserts both are `undefined`.
+ *   - `jobBlockers` (per-job `if:`/`continue-on-error`/`strategy`/`container`/
+ *     `environment`/`uses`/`defaults`/`env:` and its `needs` recursion) — the
+ *     contract checker pins the whole job set to `FIXED_JOBS`, every `if:` to
+ *     `EXPECTED_CONDITIONS`, every conditional job's `needs` to `changes`, and
+ *     rejects those same keys job by job, so a dangling or untrusted
+ *     dependency cannot exist to recurse into.
+ *   - `provenCommands` and `nearMisses` (a named suite file really runs) — they
+ *     took a Sentry suite-file list as their target; the surviving equivalent
+ *     is `REQUIRED_COMMANDS`, which pins each retained job's exact commands,
+ *     `if:` and `env:`.
  */
 
 import assert from "node:assert/strict";
@@ -343,6 +365,334 @@ export function sentinelBlockers(workflow, trustedJobs) {
         `the \`ci\` sentinel no longer lists path-gated \`${name}\` under \`allowed-skips\` ` +
           `(${JSON.stringify([...allowedSkips])}); a PR outside its paths filter would skip it, and ` +
           "alls-green turns an unlisted skip into a red required `ci` context — blocking every such merge",
+      );
+    }
+  }
+  return blockers;
+}
+
+/** Escape a literal string for embedding in a `RegExp`. */
+function escapeRegExpLiteral(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Could a job `name:` — a template the runner substitutes `${{ }}` expressions
+ * into before publishing the check run — produce `target`? Every expression is
+ * over-approximated as an arbitrary string, so a `false` return PROVES the
+ * published name can never be `target`, whatever the expressions evaluate to; a
+ * name with no expression is proven distinct exactly when it differs literally.
+ * This is what lets the ownership scan fail closed on a dynamic name it cannot
+ * evaluate (`${{ 'ci' }}`) while still clearing a statically distinct one
+ * (`Drift Plan (${{ matrix.id }})`).
+ *
+ * @param {string} template
+ * @param {string} target
+ */
+function nameCouldEqual(template, target) {
+  let pattern = "";
+  let index = 0;
+  while (index < template.length) {
+    const open = template.indexOf("${{", index);
+    if (open < 0) {
+      pattern += escapeRegExpLiteral(template.slice(index));
+      break;
+    }
+    pattern += escapeRegExpLiteral(template.slice(index, open));
+    const close = template.indexOf("}}", open + 3);
+    pattern += "[\\s\\S]*";
+    if (close < 0) break; // unterminated: the rest is inside the expression
+    index = close + 2;
+  }
+  return new RegExp(`^${pattern}$`).test(target);
+}
+
+/**
+ * The check-run name a job publishes is its `name:`, defaulting to its key. The
+ * required `ci` status context is matched by that name across every workflow,
+ * so the guarantee that a red `scripts` reaches the merge gate holds only while
+ * exactly one job — the real sentinel — publishes the name `ci`. Rename the
+ * sentinel and give the name to a trivial always-green job in another workflow
+ * and the required context resolves to the decoy.
+ *
+ * A job key is a static YAML identifier, but an explicit `name:` may be a
+ * `${{ }}` template the runner evaluates. This scan cannot evaluate it, so it
+ * cannot prove such a name is not `context`. Any dynamic name whose literal
+ * skeleton still admits `context` is rejected outright — a statically distinct
+ * one (`Drift Plan (${{ matrix.id }})`) clears via `nameCouldEqual`. Without
+ * this, a decoy `name: ${{ 'ci' }}` job publishes the required context while
+ * this comparison reads its unevaluated text and never counts it.
+ *
+ * @param {Array<{ path: string, workflow: Record<string, any> }>} workflows
+ * @param {string} context the required check-run name, e.g. `ci`
+ * @param {string} owner the `path#jobKey` that must be its sole producer
+ */
+export function contextOwnershipBlockers(workflows, context, owner) {
+  const owners = [];
+  const ambiguous = [];
+  for (const { path, workflow } of workflows) {
+    if (!isPlainObject(workflow?.jobs)) continue;
+    for (const [key, job] of Object.entries(workflow.jobs)) {
+      if (!isPlainObject(job)) continue;
+      // A reusable-workflow job (`uses:`) publishes its own called jobs' check
+      // runs, not one named after this key, so it cannot claim the context.
+      if (typeof job.uses === "string") continue;
+      const declared = typeof job.name === "string" ? job.name : key;
+      if (declared.includes("${{")) {
+        if (nameCouldEqual(declared, context)) {
+          ambiguous.push(`${path}#${key} (name: ${declared})`);
+        }
+        continue;
+      }
+      if (declared === context) owners.push(`${path}#${key}`);
+    }
+  }
+  const blockers = [];
+  if (ambiguous.length > 0) {
+    blockers.push(
+      `the required \`${context}\` check-run name may be claimed by ${ambiguous.length} job(s) with a ` +
+        `\`\${{ }}\` name this scan cannot evaluate (${ambiguous.join(", ")}); give each a static name ` +
+        `provably distinct from \`${context}\``,
+    );
+  }
+  if (!(owners.length === 1 && owners[0] === owner)) {
+    blockers.push(
+      `the required \`${context}\` check-run name is published by ${owners.length} job(s) ` +
+        `(${owners.join(", ") || "none"}); exactly one — ${owner} — may, or the required context can resolve to a decoy`,
+    );
+  }
+  return blockers;
+}
+
+/**
+ * Everything that stops ci.yml from running on a pull request to main.
+ * Every other predicate in this file assumes these jobs run before a merge.
+ *
+ * @param {Record<string, any>} workflow
+ */
+export function triggerBlockers(workflow) {
+  const triggers = workflow.on;
+  if (!isPlainObject(triggers)) return ["ci.yml declares no `on:` triggers"];
+  if (!("pull_request" in triggers)) {
+    return [
+      "ci.yml no longer runs on `pull_request`, so none of these jobs gate a merge",
+    ];
+  }
+
+  const trigger = triggers.pull_request ?? {};
+  const blockers = [];
+
+  // Absent both filters the trigger covers every base branch, main included,
+  // so `undefined` is correct here. A NEGATIVE filter is not: GitHub rejects a
+  // trigger that sets both keys, so rejecting `branches-ignore` outright has no
+  // false positive, and it is the only form that can exclude main while
+  // `branches` reads as unset.
+  const branches = trigger.branches;
+  if (branches !== undefined) {
+    // A `branches:` list may itself carry negations: `branches: [main, "!main"]`
+    // lists main yet excludes it, because a later negative pattern overrides an
+    // earlier positive for the same ref. `includes("main")` reads that as
+    // covered. This repo's trigger uses positive patterns only, so any `!`
+    // entry is rejected outright — no false positive, and it is the form that
+    // can exclude main while `branches` literally names it.
+    const patterns = Array.isArray(branches) ? branches : [branches];
+    const negated = patterns.filter(
+      (entry) => typeof entry === "string" && entry.startsWith("!"),
+    );
+    if (negated.length > 0) {
+      blockers.push(
+        `ci.yml's \`pull_request\` trigger \`branches:\` uses negative patterns ${JSON.stringify(negated)}, ` +
+          "which can exclude main even while it is listed",
+      );
+    } else if (!patterns.includes("main")) {
+      blockers.push(
+        `ci.yml's \`pull_request\` trigger no longer covers main: ${JSON.stringify(branches)}`,
+      );
+    }
+  }
+  if (trigger["branches-ignore"] !== undefined) {
+    blockers.push(
+      `ci.yml's \`pull_request\` trigger uses \`branches-ignore: ${JSON.stringify(trigger["branches-ignore"])}\`, ` +
+        "which can exclude main — the workflow would never run, and every affected PR " +
+        "would wait forever on a required `ci` context that never reports",
+    );
+  }
+  // A `paths:`/`paths-ignore:` on the trigger skips the WORKFLOW, not just a
+  // job, so no `allowed-skips` reasoning applies and nothing here would run.
+  if ((trigger.paths ?? trigger["paths-ignore"]) !== undefined) {
+    blockers.push(
+      "ci.yml's `pull_request` trigger is path-scoped, so a PR outside those paths runs no job at all",
+    );
+  }
+  // Default types are opened/synchronize/reopened. Narrowing them would stop
+  // the workflow re-running on a push to the branch.
+  const types = trigger.types;
+  if (
+    !(
+      types === undefined ||
+      (Array.isArray(types) &&
+        types.includes("opened") &&
+        types.includes("synchronize") &&
+        types.includes("reopened"))
+    )
+  ) {
+    blockers.push(
+      `ci.yml's \`pull_request\` trigger narrows \`types\` to ${JSON.stringify(types)}, so pushes may not re-run it`,
+    );
+  }
+  return blockers;
+}
+
+/**
+ * Characters a bare word may contain. Everything that can redirect, chain,
+ * background, group, substitute, glob, or quote is absent, so a line built
+ * only from these words is a single simple command whose exit status the
+ * step's `bash -e` propagates.
+ */
+const BARE_WORD = /^[A-Za-z0-9_@%+=:,./-]+$/;
+
+/**
+ * Words that stop a line from being a simple command, or that change the
+ * shell state the exit-status reasoning rests on. `set +e` is the obvious one;
+ * the keywords matter because `if pnpm x` puts `pnpm x` in a condition, where
+ * a failure is swallowed.
+ */
+// prettier-ignore
+const NOT_A_SIMPLE_COMMAND = new Set("if|then|else|elif|fi|for|while|until|do|done|case|esac|select|function|coproc|time|set|shopt|trap|exec|eval|source|.|export|declare|local|readonly|alias|unalias|exit|return|break|continue".split("|"));
+
+/**
+ * Split a shell script into the simple commands it runs, or explain why it
+ * cannot be read that way.
+ *
+ * An allowlist, not a blacklist of dangerous suffixes: a line counts only when
+ * every word is bare. `pnpm docs:index --check || true` fails because `|` is
+ * not a bare-word character, and so does `; true`, `|| :`, a trailing `&`, a
+ * `$(…)`, and a redirect. Blacklisting suffixes would have to enumerate those;
+ * this cannot miss one.
+ *
+ * @param {string} script
+ * @returns {{ commands: string[][], blocker: string | null }}
+ */
+export function parseShellScript(script) {
+  const commands = [];
+  for (const line of script.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed === "" || trimmed.startsWith("#")) continue;
+    const words = trimmed.split(/[ \t]+/);
+    if (!words.every((word) => BARE_WORD.test(word))) {
+      return {
+        commands: [],
+        blocker: `\`${trimmed}\` is not a plain command — shell syntax here can mask a non-zero exit`,
+      };
+    }
+    if (NOT_A_SIMPLE_COMMAND.has(words[0])) {
+      return {
+        commands: [],
+        blocker: `\`${trimmed}\` starts with \`${words[0]}\`, which can change the shell state or swallow a failure`,
+      };
+    }
+    commands.push(words);
+  }
+  return { commands, blocker: null };
+}
+
+/**
+ * @param {string[]} command
+ * @param {string[]} target
+ */
+export function isCommand(command, target) {
+  return (
+    command.length === target.length &&
+    command.every((word, index) => word === target[index])
+  );
+}
+
+/**
+ * Blockers when a job runs untrusted execution before validating it. The pin
+ * validator (check-agent-quality-gate-package-scripts.mjs) is what makes the
+ * job's trust safe: it pins each trusted alias to an exact command, so a drifted
+ * `"docs:index": "node … && curl evil"` is rejected, and it rejects an
+ * unsanctioned lifecycle hook a package-only PR adds. Both guarantees hold only
+ * while the validator runs FIRST — before it, two surfaces would run unchecked:
+ *
+ *   - `installAction` (`pnpm install`) runs the root lifecycle hooks; a
+ *     `postinstall` that truncates the suites and this validator would execute
+ *     before validation (Codex 3754887736), so the validator must precede it.
+ *   - a trusted `pnpm <alias>` step runs its (possibly drifted) command; the
+ *     meta-check re-checks the pins but runs last, so an earlier alias would run
+ *     an appended command before the pins are checked.
+ *
+ * `trustedAliases` was the validator's own pin set, read by spawning it in the
+ * deleted Sentry lifecycle test. `null` widens that to EVERY `pnpm` invocation,
+ * which is what `check-ci-contract.mjs` passes: it needs no probe, it cannot
+ * drift out of step with the validator, and it is strictly stronger — the three
+ * pinned jobs run the validator as their first `run:` step, so no `pnpm` step
+ * precedes it in any of them.
+ *
+ * @param {Record<string, any>} workflow
+ * @param {string} name the job whose step order is judged
+ * @param {string[]} validatorTarget the pin validator command, matched whole
+ * @param {Set<string> | null} trustedAliases pinned aliases, or null for every
+ *   `pnpm` alias
+ * @param {string} installAction the local install action's `uses:` value
+ */
+export function pinValidationOrderBlockers(
+  workflow,
+  name,
+  validatorTarget,
+  trustedAliases,
+  installAction,
+) {
+  const steps = ciJob(workflow, name).steps ?? [];
+  let validatorIndex = -1;
+  let installIndex = -1;
+  const aliasHits = [];
+  for (let index = 0; index < steps.length; index += 1) {
+    const step = steps[index];
+    if (!isPlainObject(step)) continue;
+    if (typeof step.uses === "string") {
+      if (step.uses === installAction && installIndex < 0) installIndex = index;
+      continue;
+    }
+    if (typeof step.run !== "string" || stepBlockers(step).length > 0) continue;
+    const { commands, blocker } = parseShellScript(step.run);
+    if (blocker) continue;
+    if (
+      validatorIndex < 0 &&
+      commands.length === 1 &&
+      isCommand(commands[0], validatorTarget)
+    ) {
+      validatorIndex = index;
+    }
+    for (const command of commands) {
+      if (command[0] !== "pnpm") continue;
+      const alias = command[1] === "run" ? command[2] : command[1];
+      if (
+        typeof alias === "string" &&
+        (trustedAliases === null || trustedAliases.has(alias))
+      ) {
+        aliasHits.push({ index, run: command.join(" ") });
+      }
+    }
+  }
+  if (validatorIndex < 0) {
+    return [
+      `the \`${name}\` job never runs \`${validatorTarget.join(" ")}\` as a whole step command, ` +
+        "so it runs pnpm-install and trusted aliases without rejecting lifecycle hooks or validating pins first",
+    ];
+  }
+  const blockers = [];
+  if (installIndex >= 0 && installIndex < validatorIndex) {
+    blockers.push(
+      `the \`${name}\` job runs \`${installAction}\` (step ${installIndex}) before the pin validator ` +
+        `(step ${validatorIndex}) — a root install lifecycle hook would run before the validator rejects it`,
+    );
+  }
+  for (const hit of aliasHits) {
+    if (hit.index < validatorIndex) {
+      blockers.push(
+        `the \`${name}\` job runs \`${hit.run}\` (step ${hit.index}) before the pin validator ` +
+          `(step ${validatorIndex}) — a drifted alias would run its appended command before the pins are checked`,
       );
     }
   }

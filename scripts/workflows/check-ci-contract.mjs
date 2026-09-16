@@ -4,7 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // prettier-ignore
-import { envMutationBlockers, parseActionList, sentinelBlockers } from "./ci-sentinel-core.mjs";
+import { contextOwnershipBlockers, envMutationBlockers, parseActionList, pinValidationOrderBlockers, sentinelBlockers, triggerBlockers } from "./ci-sentinel-core.mjs";
 import { isMapping } from "../lib/workflow-yaml.mjs";
 import yaml from "js-yaml";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -15,6 +15,21 @@ export const ALLOWED_RUNNER_LABELS = Object.freeze([
   "ubuntu-24.04-arm",
 ]);
 const FORCE_ALL = "needs.changes.outputs.forceAll == 'true'";
+// The required check-run name and the single job allowed to publish it. Every
+// workflow in .github/workflows is scanned: a sibling workflow with a job
+// named `ci` would publish the same required context, and the ruleset would be
+// satisfied by whichever of them reports.
+export const REQUIRED_CONTEXT = "ci";
+export const CONTEXT_OWNER = ".github/workflows/ci.yml#ci";
+// The pin validator must run before `pnpm install` (which executes the root
+// lifecycle hooks) and before any `pnpm <alias>` step, in every job that runs
+// both. ADR 0072 added `docs-checks`; `production-infra-contract` is
+// unconditional and trusts the pinned `tf:test` and `issue:board:test` aliases.
+// prettier-ignore
+const PIN_VALIDATOR_COMMAND = Object.freeze(["node", "scripts/check-agent-quality-gate-package-scripts.mjs"]);
+const INSTALL_ACTION = "$/.github/actions/pnpm-install";
+// prettier-ignore
+const PIN_ORDER_JOBS = Object.freeze(["scripts", "docs-checks", "production-infra-contract"]);
 const DORNY_PIN = "dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d";
 const ALLS_GREEN_PIN =
   "re-actors/alls-green@b5b5b37504aa4183270bd3d855c52a67f212be35";
@@ -138,6 +153,18 @@ export function workflowViolations(workflow, filters) {
   const errors = [];
   const jobs = workflow.jobs ?? {};
   if (workflow.name !== "CI") errors.push("workflow name must remain CI");
+  // Everything below assumes these jobs run before a merge to main.
+  errors.push(...triggerBlockers(workflow));
+  for (const name of PIN_ORDER_JOBS) {
+    try {
+      // prettier-ignore
+      errors.push(...pinValidationOrderBlockers(workflow, name, PIN_VALIDATOR_COMMAND, null, INSTALL_ACTION));
+    } catch (error) {
+      errors.push(
+        `${name} pin-validation order is unreadable: ${error.message}`,
+      );
+    }
+  }
   if (workflow.env !== undefined || workflow.defaults !== undefined)
     errors.push("workflow runtime changed");
   errors.push(
@@ -288,6 +315,34 @@ export function workflowViolations(workflow, filters) {
   return [...new Set(errors)];
 }
 
+// Cross-workflow negative control: exactly one job in the whole of
+// .github/workflows may publish the required `ci` check-run name. A decoy job
+// named `ci` in a sibling workflow satisfies the ruleset context without
+// running a single suite, and nothing inside ci.yml can see it. A workflow
+// that fails to parse is an error, not a pass.
+export function contextOwnershipViolations(root = ROOT) {
+  const errors = [];
+  const workflows = [];
+  const dir = join(root, ".github/workflows");
+  for (const name of readdirSync(dir).filter((n) => /\.ya?ml$/u.test(n))) {
+    const path = `.github/workflows/${name}`;
+    try {
+      // prettier-ignore
+      const workflow = yaml.load(readFileSync(join(dir, name), "utf8"), { schema: yaml.CORE_SCHEMA });
+      if (!isMapping(workflow)) {
+        errors.push(`${path} has no top-level workflow mapping`);
+        continue;
+      }
+      workflows.push({ path, workflow });
+    } catch (error) {
+      errors.push(`${path} could not be parsed as YAML: ${error.message}`);
+    }
+  }
+  // prettier-ignore
+  errors.push(...contextOwnershipBlockers(workflows, REQUIRED_CONTEXT, CONTEXT_OWNER));
+  return errors;
+}
+
 // Negative control: no workflow may name a runs-on label outside the frozen
 // allow-list, and the two actionlint self-hosted-runner allow-lists (which
 // exist only to acknowledge those same labels to actionlint) must agree.
@@ -322,6 +377,7 @@ async function main() {
   const { workflow, filters } = await loadCi();
   const errors = [
     ...workflowViolations(workflow, filters),
+    ...contextOwnershipViolations(),
     ...runnerLabelViolations(),
   ];
   if (errors.length > 0) {
