@@ -40,8 +40,12 @@ vi.mock("@/components/tag-input", () => ({
     tags: string[];
     onChange: (tags: string[]) => void;
   }) => (
+    // `aria-label` keeps the stub as accessible as the real `TagInput`
+    // (a labelled combobox), so the axe assertion below measures the
+    // editor's own markup rather than the stub's missing label.
     <input
       data-testid="tag-input-stub"
+      aria-label="Tags"
       value={tags.join(",")}
       onChange={(e) =>
         onChange(
@@ -427,8 +431,34 @@ describe("AddressLabelEditor — tablist keyboard contract", () => {
 
   it("has no axe violations on the tablist and its panels", async () => {
     render({ address: VALID_ADDR, onClose: () => undefined });
-    const results = await axe(container);
-    expect(results.violations).toEqual([]);
+    const dialogMarkup = container.querySelector("dialog")?.innerHTML;
+    expect(dialogMarkup).toBeTruthy();
+
+    // jsdom's `showModal` polyfill only sets the `open` attribute, and
+    // axe-core then returns every ARIA rule under a native `<dialog>` as
+    // `incomplete` instead of pass/fail — an assertion on `violations`
+    // inside the dialog stays green even for an invalid tablist. Re-host
+    // the same markup in a plain container so the rules produce real
+    // results. Detach the React container first so the copied ids stay
+    // unique in the document.
+    container.remove();
+    const probe = document.createElement("div");
+    probe.innerHTML = dialogMarkup!;
+    document.body.appendChild(probe);
+    try {
+      const results = await axe(probe);
+      expect(results.violations).toEqual([]);
+      // Guard the guard: `aria-required-children` is the rule that catches a
+      // non-`role="tab"` child of the tablist. If it ever stops running here,
+      // the assertion above would be vacuous again.
+      const evaluated = [...results.passes, ...results.violations].map(
+        (r) => r.id,
+      );
+      expect(evaluated).toContain("aria-required-children");
+    } finally {
+      probe.remove();
+      document.body.appendChild(container);
+    }
   });
 });
 
