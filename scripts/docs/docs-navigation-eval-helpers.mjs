@@ -380,7 +380,7 @@ export function buildNavigationPrompt(
     )
     .join("\n");
   const answerScope = questionId
-    ? `- This is a bounded escalation for \`${questionId}\`. Return exactly one answer object in the \`answers\` array. Validate it with \`pnpm docs:navigation-eval -- --validate <result.json> --question ${questionId}\`.`
+    ? `- This is a bounded escalation for \`${questionId}\`. Return exactly one answer object in the \`answers\` array.`
     : "- Answer every question in the suite; the `answers` array must contain all 15-20 answers.";
   return `# Fresh-agent documentation navigation evaluation
 
