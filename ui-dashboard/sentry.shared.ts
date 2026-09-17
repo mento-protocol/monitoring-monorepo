@@ -194,20 +194,24 @@ function isExtensionOnlyErrorEvent(event: {
     values?: { stacktrace?: { frames?: { filename?: string }[] } }[];
   };
 }): boolean {
-  const filenames = (event.exception?.values ?? [])
-    .flatMap((value) => value.stacktrace?.frames ?? [])
-    .map((frame) => frame.filename)
-    .filter(
-      (filename): filename is string =>
-        typeof filename === "string" &&
-        filename !== "" &&
-        filename !== "<anonymous>" &&
-        filename !== "[native code]",
-    );
-  if (filenames.length === 0) return false;
-  return filenames.every((filename) =>
-    EXTENSION_SCRIPT_DENY_URLS.some((pattern) => pattern.test(filename)),
-  );
+  let usableFrames = 0;
+  for (const value of event.exception?.values ?? []) {
+    for (const frame of value.stacktrace?.frames ?? []) {
+      const filename = frame.filename;
+      if (
+        typeof filename !== "string" ||
+        filename === "" ||
+        filename === "<anonymous>" ||
+        filename === "[native code]"
+      ) {
+        continue;
+      }
+      if (!EXTENSION_SCRIPT_DENY_URLS.some((pattern) => pattern.test(filename)))
+        return false;
+      usableFrames += 1;
+    }
+  }
+  return usableFrames > 0;
 }
 
 // Wallet extensions (the MetaMask family) inject a provider script into every
