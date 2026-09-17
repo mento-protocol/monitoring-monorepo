@@ -567,6 +567,7 @@ test("prompt is deterministic and never leaks routes or qualification traps", ()
   assert.match(first, /result schema remains allowed/);
   assert.match(first, /do not\s+repeat them in an answer's `loaded_sources`/);
   assert.match(first, /scripts\/docs\/docs-navigation-eval-result\.mjs/);
+  assert.ok(!first.includes("--validate"));
   assert.ok(!first.includes("shared-config/AGENTS.md"));
   assert.ok(!first.includes("docs/PLAN-celo-mainnet-indexer.md"));
   const targeted = buildNavigationPrompt(context.suite, {
@@ -575,7 +576,7 @@ test("prompt is deterministic and never leaks routes or qualification traps", ()
   });
   assert.match(targeted, new RegExp(context.suite.questions[0].id));
   assert.match(targeted, /Return exactly one answer object/);
-  assert.match(targeted, /--validate <result\.json> --question/);
+  assert.ok(!targeted.includes("--validate"));
   assert.ok(!targeted.includes(context.suite.questions[1].id));
 });
 
