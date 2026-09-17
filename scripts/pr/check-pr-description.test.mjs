@@ -178,6 +178,18 @@ test("fails an authored body over the word ceiling", () => {
   );
 });
 
+test("counts prose between inline-code comment delimiters", () => {
+  assertFail(
+    sizedBody({
+      tldrWords: 20,
+      problemWords: 100,
+      solutionWords: 275,
+      extra: "\n`<!--` overflow `-->`",
+    }),
+    /authored PR description is 401 words; the ceiling is 400/,
+  );
+});
+
 test("excludes the template checklist from the word count", () => {
   assertPass(
     sizedBody({
@@ -281,6 +293,53 @@ test("still separates words at a rendered space entity", () => {
       extra: `
 <p>inter&nbsp;national inter&thinsp;national</p>
 `,
+    }),
+    /authored PR description is 402 words; the ceiling is 400/,
+  );
+});
+
+test("decodes named whitespace entities inside raw HTML", () => {
+  assertFail(
+    sizedBody({
+      tldrWords: 20,
+      problemWords: 100,
+      solutionWords: 274,
+      extra: "\n<p>one&Tab;two</p>",
+    }),
+    /authored PR description is 401 words; the ceiling is 400/,
+  );
+});
+
+test("does not count named punctuation entities inside raw HTML", () => {
+  assertPass(
+    sizedBody({
+      tldrWords: 20,
+      problemWords: 100,
+      solutionWords: 275,
+      extra: "\n<p>&comma;</p>",
+    }),
+  );
+});
+
+test("counts Markdown definitions displayed literally inside raw HTML", () => {
+  assertFail(
+    sizedBody({
+      tldrWords: 20,
+      problemWords: 100,
+      solutionWords: 275,
+      extra: "\n<p>[label]: /visible</p>",
+    }),
+    /authored PR description is 402 words; the ceiling is 400/,
+  );
+});
+
+test("counts inline Markdown syntax displayed literally inside raw HTML", () => {
+  assertFail(
+    sizedBody({
+      tldrWords: 20,
+      problemWords: 100,
+      solutionWords: 274,
+      extra: '\n<p>[visible](url "title words")</p>',
     }),
     /authored PR description is 402 words; the ceiling is 400/,
   );
@@ -399,6 +458,105 @@ test("does not count an attribute holding an angle bracket as prose", () => {
 </div>
 `,
     }),
+  );
+});
+
+test("does not strip a comment delimiter inside an HTML attribute", () => {
+  assertFail(
+    sizedBody({
+      tldrWords: 20,
+      problemWords: 100,
+      solutionWords: 272,
+      extra: '\n<div data-example="<!--">one two three four</div>',
+    }),
+    /authored PR description is 401 words; the ceiling is 400/,
+  );
+});
+
+test("maps comments in container HTML back to source offsets", () => {
+  assertFail(
+    sizedBody({
+      tldrWords: 20,
+      problemWords: 100,
+      solutionWords: 275,
+      extra: "\n> <div>\n> a\n> <!-- hidden -->\n> </div>",
+    }),
+    /authored PR description is 401 words; the ceiling is 400/,
+  );
+});
+
+test("preserves prose after an indented same-line comment", () => {
+  assertFail(
+    sizedBody({
+      tldrWords: 20,
+      problemWords: 100,
+      solutionWords: 275,
+      extra: "\n<!-- note -->    overflow",
+    }),
+    /authored PR description is 401 words; the ceiling is 400/,
+  );
+});
+
+test("keeps indented same-line prose visible in opening sections", () => {
+  assertPass(`## tl;dr
+
+The check that reads pull request descriptions now wants a plain summary first.
+
+## The Problem
+
+<!-- note -->    Visible problem prose.
+
+## The Solution
+
+<!-- note -->    Visible solution prose.
+`);
+});
+
+test("keeps a standalone comment blank before indented code", () => {
+  assertFail(
+    `## tl;dr
+
+The check that reads pull request descriptions now wants a plain summary first.
+
+## The Problem
+
+- Reviewers need a clear problem statement.
+
+## The Solution
+
+<!-- template note -->
+    code is not explanatory prose
+`,
+    /Solution.*must contain visible content/,
+  );
+});
+
+test("ignores container markers inside multiline HTML tags", () => {
+  assertFail(
+    sizedBody({
+      tldrWords: 20,
+      problemWords: 100,
+      solutionWords: 272,
+      extra: '\n> <div\n> title="<!--">\n> one two three four\n> </div>',
+    }),
+    /authored PR description is 401 words; the ceiling is 400/,
+  );
+});
+
+test("strips comments after a bare closing delimiter", () => {
+  assertPass(
+    body(`
+
+## Details
+
+<div>
+</
+<!-- note -->## Deferrals
+
+- #123 follow-up
+</div>
+`),
+    /deferrals declared/,
   );
 });
 
@@ -669,6 +827,54 @@ Visible problem prose. <!-- template note -->
 ## The Solution
 
 <!-- prefix --> Visible solution prose.
+`);
+});
+
+test("counts opening prose between inline-code comment delimiters", () => {
+  assertFail(
+    `## tl;dr
+
+\`<!--\` ${filler(81)} \`-->\`
+
+## The Problem
+
+\`<!--\` The old behavior hid rendered prose. \`-->\`
+
+## The Solution
+
+\`<!--\` The validator now sees that prose. \`-->\`
+`,
+    /'## tl;dr' section is 81 words; the limit is 80/,
+  );
+});
+
+test("accepts Problem prose between inline-code comment delimiters", () => {
+  assertPass(`## tl;dr
+
+The validator now preserves visible Markdown beside comment-like inline code, so reviewers can rely on every required opening section being checked accurately.
+
+## The Problem
+
+\`<!--\` The old behavior hid this rendered problem explanation. \`-->\`
+
+## The Solution
+
+The validator keeps visible prose while removing real HTML comments.
+`);
+});
+
+test("accepts Solution prose between inline-code comment delimiters", () => {
+  assertPass(`## tl;dr
+
+The validator now preserves visible Markdown beside comment-like inline code, so reviewers can rely on every required opening section being checked accurately.
+
+## The Problem
+
+The old behavior hid rendered prose beside comment-like inline code.
+
+## The Solution
+
+\`<!--\` The validator now sees this rendered solution explanation. \`-->\`
 `);
 });
 
@@ -1374,6 +1580,22 @@ ${heading}
 `),
       /isn't exactly '## Deferrals'/,
     );
+  }
+});
+
+test("fails commented Deferrals near misses at every non-H2 depth", () => {
+  for (const depth of [1, 3, 4, 5, 6]) {
+    for (const separator of [" ", ""]) {
+      assertFail(
+        body(`
+
+${"#".repeat(depth)}${separator}Def<!-- note -->errals
+
+- #123 follow-up
+`),
+        /isn't exactly '## Deferrals'/,
+      );
+    }
   }
 });
 
