@@ -82,9 +82,10 @@ export const SOURCE_SCOPES = [
     // native C sources. Tests are excluded as everywhere but Aegis: splitting
     // a scripts/ suite means re-measuring a manifest floor or
     // re-enumerating a paths-filter, per-file work a size row cannot describe.
-    // Where the tree wanted a test-side gate it built one —
-    // check-sentry-suites-in-ci.test.mjs hard-caps 20 files, and the select and
-    // brief Sentry legs pin their own modules the same way.
+    // Where the tree wants a per-file gate it builds one —
+    // scripts/workflows/check-no-skip-audit.mjs pins exact counts of protected
+    // actions, pnpm installs and timeline steps, so a split that moves one of
+    // them fails until the count is re-pinned deliberately.
     label: "scripts",
     prefix: "scripts/",
     extensions: [".mjs", ".js", ".cjs", ".sh", ".c"],

@@ -3,7 +3,7 @@ title: Remove the autoreview machinery; keep a thin two-model closeout review
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-03
+last_verified: 2026-09-16
 supersedes: ADR-0079, ADR-0068
 scope: ci/process
 date: 2026-09
@@ -14,8 +14,15 @@ garden_lane: adrs-architecture
 
 # ADR 0087 — Remove the autoreview machinery; keep a thin two-model closeout review
 
-**Status:** Accepted (Sep 2026), in force.
+**Status:** Accepted (Sep 2026), amended 2026-09-16, in force.
 **Scope:** ci/process
+
+Amended 2026-09-16: [ADR 0106](0106-sentry-triage-moves-to-operator-skills.md)
+deleted the `sentry-suites` CI job and `scripts/sentry/**`. One cell of the
+"Protections removed, and what stands in" table below claimed required CI
+exercised the mapped-command marker helper through that job. It no longer does;
+the cell is restated and the loss is recorded as a residual. The decision to
+remove the autoreview machinery is unchanged.
 
 ## Context
 
@@ -92,15 +99,15 @@ superseded by this record.
 
 ### Protections removed, and what stands in for each
 
-| Removed                                                           | What stands in                                                                                                                                                                                                                                                                                       |
-| ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Bundle secret and sensitive-path scan before a model saw the diff | Trunk trufflehog at push time; GitHub secret scanning                                                                                                                                                                                                                                                |
-| Sealed exact-file-patch suppression (ADR 0079)                    | nothing — the exception it carried is retired with it                                                                                                                                                                                                                                                |
-| Empty-workspace isolation against third-party prompt injection    | `sandbox_mode="read-only"` plus an explicit environment allowlist in the new script                                                                                                                                                                                                                  |
-| Reviewer runtime pinned to protected `main`                       | nothing — see the residuals below                                                                                                                                                                                                                                                                    |
-| Root-runtime trust job                                            | nothing — the guard it re-ran is deleted                                                                                                                                                                                                                                                             |
-| Sequential 90-minute autoreview suite on `ubuntu-latest`          | the six shared Darwin identity and lineage files it also exercised now run only in the local gate self-test, and required CI exercises the mapped-command marker helper through the Sentry suites job (#2296 moved the gate regression suite out of CI); the sequential `--jobs 1` execution is lost |
-| Report files scanned before they were written                     | `.reviews/` is gitignored and the script refuses an `--out` path inside the repo that is not ignored                                                                                                                                                                                                 |
+| Removed                                                           | What stands in                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Bundle secret and sensitive-path scan before a model saw the diff | Trunk trufflehog at push time; GitHub secret scanning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Sealed exact-file-patch suppression (ADR 0079)                    | nothing — the exception it carried is retired with it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Empty-workspace isolation against third-party prompt injection    | `sandbox_mode="read-only"` plus an explicit environment allowlist in the new script                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Reviewer runtime pinned to protected `main`                       | nothing — see the residuals below                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Root-runtime trust job                                            | nothing — the guard it re-ran is deleted                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Sequential 90-minute autoreview suite on `ubuntu-latest`          | nothing — the six shared Darwin identity and lineage files it also exercised ran afterwards only in the local gate self-test, which [ADR 0101](0101-legacy-gate-retirement.md) deleted, and required CI exercised the mapped-command marker helper through the Sentry suites job until [ADR 0106](0106-sentry-triage-moves-to-operator-skills.md) deleted that job (#2296 had already moved the gate regression suite out of CI). None of the six run now: no package script and no workflow invokes them, and the only surviving reference to `scripts/lib/mapped-command-process-identity.test.mjs` is the path allow-list in `scripts/docs/check-verification-redesign-evidence.mjs`, which pins the path without executing it. That local-gate coverage is lost, as is the sequential `--jobs 1` execution |
+| Report files scanned before they were written                     | `.reviews/` is gitignored and the script refuses an `--out` path inside the repo that is not ignored                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 
 ### Accepted residuals
 
@@ -129,6 +136,16 @@ superseded by this record.
 9. **A name collision.** `~/.claude/bin/codex-review.sh` is a different operator
    tool with a different CLI and different exit codes. In this repo the closeout
    is `pnpm agent:closeout-review`.
+10. **The mapped-command marker helper has no test runner** (added 2026-09-16 by
+    [ADR 0106](0106-sentry-triage-moves-to-operator-skills.md)). Deleting the
+    `sentry-suites` job removed the last required-CI consumer of
+    `scripts/lib/mapped-command-process-identity.test.mjs`. The helper and its
+    tests are retained by
+    [ADR 0101](0101-legacy-gate-retirement.md) for rollback, and nothing in the
+    tree imports the helper at runtime, so no shipped behaviour is unguarded —
+    but the tests now run only when someone runs them by hand. Restoring
+    coverage means adding a package script and a CI step, which is its own
+    claimed task.
 
 ### Mechanisms this voids
 

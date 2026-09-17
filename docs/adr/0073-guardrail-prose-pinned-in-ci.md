@@ -3,7 +3,7 @@ title: Normative guardrail sentences are pinned in CI, and scripts are not
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-02
+last_verified: 2026-09-16
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -13,10 +13,12 @@ garden_lane: adrs-architecture
 
 # ADR 0073 — normative guardrail sentences are pinned in CI, and scripts are not
 
-**Status:** Accepted (Aug 2026), in force.
+**Status:** Accepted (Aug 2026), amended 2026-09-16, in force.
 **Scope:** ci/process
 
 Retirement amendment: [ADR 0101](0101-legacy-gate-retirement.md) removes local gate routing and its pins. Retained Sentry supervision, package policy, CI wiring and indexer contracts remain; their current paths are listed in `scripts/AGENTS.md`. Gate-only path lists below are historical.
+
+Removal amendment (2026-09-16): [ADR 0106](0106-sentry-triage-moves-to-operator-skills.md) deletes `scripts/sentry/**` with the triage and autofix pipeline, so the retained Sentry supervision and its CI wiring named in the paragraph above no longer exist. The eight surviving `ci` sentinel predicates moved to `scripts/workflows/ci-sentinel-core.mjs` and the Sentry-to-Slack bridge contract to `scripts/alerts/sentry-bridge-contract.test.mjs`; `scripts/AGENTS.md` carries the current paths. Package policy and indexer contracts are unchanged. This ADR's decision — pin normative guardrail sentences in CI, do not pin scripts — is unchanged.
 
 ## Context
 

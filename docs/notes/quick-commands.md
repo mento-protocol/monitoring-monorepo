@@ -137,13 +137,6 @@ pnpm issue:board sync                          # Apply the authorized projection
 pnpm issue:board backfill --issue 901 --dry-run # Preview fill-only ownership-field recovery from a trusted claim comment
 pnpm issue:board:test                          # Offline tests for the issue-board helper
 
-# Sentry triage pipeline (Stage A — deterministic ingest; Stage B — read-only triage + digest; ADR 0036)
-pnpm sentry:ingest --dry-run                   # Print queue-issue mutations without applying (needs local SENTRY_TRIAGE_TOKEN)
-pnpm sentry:ingest:test                        # Offline tests for the ingest helper (docs/notes/sentry-triage-pipeline.md)
-pnpm sentry:digest:test                        # Offline tests for the per-run Slack verdict-digest collector
-pnpm sentry:broker:test                        # Offline tests for the triage agent's loopback credential broker (ADR 0056)
-SENTRY_TRIAGE_ISSUES='[123]' pnpm sentry:digest --channel '#sentry-triage'  # Print a batch's Slack digest payload (gh auth; does not post)
-
 # Public config package
 pnpm --filter @mento-protocol/config build     # Clean-build the public protocol metadata package
 npm pack ./shared-config --dry-run             # Inspect the files that would publish to npm

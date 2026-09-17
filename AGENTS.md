@@ -88,9 +88,9 @@ do not add one-off word or punctuation bans on top of it.
   and any material limit before implementation terms, preceded by a plain-language
   `## tl;dr` that a reader outside this codebase can follow. The `ship` skill owns
   the detailed template and clarity check.
-- The deterministic Sentry autofix PR generator may use only its trusted facts
-  and state why it omitted untrusted detail. Never add untrusted free text to
-  satisfy the PR-opening rule.
+- A PR opened from untrusted input (a Sentry payload, a scanner report) may use
+  only facts the author verified, and must state why it omitted the rest. Never add
+  untrusted free text to satisfy the PR-opening rule.
 - State points directly; avoid the "not X, it's Y" contrast shell except
   when the misconception is the point, at most once per document.
 - Do not announce what you are about to say — say it.

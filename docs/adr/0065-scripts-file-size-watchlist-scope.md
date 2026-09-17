@@ -3,7 +3,7 @@ title: scripts/ is inside the file-size watchlist, with named-mechanism exemptio
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-27
+last_verified: 2026-09-16
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -13,10 +13,22 @@ garden_lane: adrs-architecture
 
 # ADR 0065 — scripts/ is inside the file-size watchlist, with named-mechanism exemptions
 
-**Status:** Accepted (Aug 2026), in force.
+**Status:** Accepted (Aug 2026), amended 2026-09-16, in force.
 **Scope:** ci/process
 
-Retirement amendment: [ADR 0101](0101-legacy-gate-retirement.md) removes local gate routing and its pins. Retained Sentry supervision, package policy, CI wiring and indexer contracts remain; their current paths are listed in `scripts/AGENTS.md`. Gate-only path lists below are historical.
+Amended 2026-09-16: [ADR 0106](0106-sentry-triage-moves-to-operator-skills.md)
+deleted `scripts/sentry/**`, including the three subsystem-local test gates this
+record cites as live examples —
+`scripts/sentry/ci-wiring/check-sentry-suites-in-ci.test.mjs`,
+`scripts/sentry/autofix/sentry-autofix-select.test.mjs` and
+`scripts/sentry/triage/sentry-triage-brief.test.mjs`. Those passages are
+restated in the past tense below. The decision is unchanged: `scripts/` is a
+watchlist scope at any depth and tests stay excluded. The surviving per-file
+gate the watchlist's own code comment now names is
+`scripts/workflows/check-no-skip-audit.mjs`. Dated measurement rows are left as
+recorded.
+
+Retirement amendment: [ADR 0101](0101-legacy-gate-retirement.md) removes local gate routing and its pins. Retained package policy and indexer contracts remain; their current paths are listed in `scripts/AGENTS.md`. The Sentry supervision and CI-wiring pins it retained are gone with ADR 0106. Gate-only path lists below are historical.
 
 ## Context
 
@@ -34,14 +46,16 @@ so there was no config for the watchlist to mirror and no lint rule behind a
 therefore been vacuous for `scripts/` the whole time.
 
 The tree noticed before this ADR did.
-`scripts/sentry/ci-wiring/check-sentry-suites-in-ci.test.mjs` carries a hand-maintained list of
-20 paths, imports `countLines` and `HARD_CAP` from the watchlist, and fails when
-one of them crosses 1,000 raw lines. Its comment gave the reason outright — "the
+`scripts/sentry/ci-wiring/check-sentry-suites-in-ci.test.mjs` carried a hand-maintained list of
+20 paths, imported `countLines` and `HARD_CAP` from the watchlist, and failed when
+one of them crossed 1,000 raw lines. Its comment gave the reason outright — "the
 root ESLint config sets no `max-lines`, and the file-size watchlist scopes the
 package `src/` trees, not scripts/" — and this change corrects it. One subsystem
 built its own gate because the shared one could not see it.
-`sentry-autofix-select.test.mjs` and `sentry-triage-brief.test.mjs` pin their
-legs' modules the same way, for the same reason.
+`sentry-autofix-select.test.mjs` and `sentry-triage-brief.test.mjs` pinned their
+legs' modules the same way, for the same reason. (All three were deleted by
+[ADR 0106](0106-sentry-triage-moves-to-operator-skills.md); the observation that
+prompted this scope change stands.)
 
 Meanwhile the tree grew to 251 tracked files, including the four largest files
 in the repository. The `scripts/` reorganization
@@ -60,17 +74,17 @@ first; `scripts/` has no generated tree today, so nothing is lost to it.
 **Tests are excluded, as in every scope but Aegis.** Package configs set
 `max-lines: off` for tests, and `scripts/` tests inherit that rule rather than a
 new one. The reason is not only consistency: splitting a `scripts/` suite is
-per-file work a size row cannot describe. A Sentry suite's pass-count floor in
-`sentry-suite-manifest.json` must be re-measured; an enumerated `ci.yml`
+per-file work a size row cannot describe. An enumerated `ci.yml`
 paths-filter must gain the new basename or the job silently stops running;
 `deploy-staging-contract.test.mjs` is the single path the callsite contract
 excludes from self-scanning, so a sibling holding its inert examples fails the
 contract closed; `tf-stacks.test.mjs` is the verified importer for the
 provider-contract exemption route. A monthly row saying "1,771 lines" beside any
 of those is noise, and there would be 38 such rows — 36 of them actionable —
-burying the two that matter. Where the tree wanted a test-side gate it already
-built one: `check-sentry-suites-in-ci.test.mjs` hard-caps 20 paths, and the
-select and brief Sentry legs pin their own modules the same way.
+burying the two that matter. Where the tree wants a test-side gate it builds
+one: `scripts/workflows/check-no-skip-audit.mjs` pins exact counts today, and
+the Sentry legs did the same for their own modules until ADR 0106 deleted them
+(`check-sentry-suites-in-ci.test.mjs` hard-capped 20 paths).
 
 **`.sh` files count, on hash-comment semantics.** `countLines` takes a
 `hashComments` option, applied to `.sh` paths. Without it a shell `#` comment
@@ -159,9 +173,10 @@ that nothing holds in place.
   stale and every new soft-cap row reads as fresh drift: 15 rows go actionable
   at once, or 29 against no parseable baseline at all. Refreshed, the queue is
   three, all at hard or near-hard.
-- Two `scripts/` files join that queue: `agent-quality-gate.sh` and
-  `sentry-triage-archive.mjs`. Both are over the hard cap with nothing holding
-  them.
+- Two `scripts/` files joined that queue when this ADR landed:
+  `agent-quality-gate.sh` and `sentry-triage-archive.mjs`. Both were over the
+  hard cap with nothing holding them. ADR 0106 deleted the second; the gate
+  row stands (see below).
 - **The gate's row shrank by 45% at D5c, and the residual is the process-control
   layer by design.** Projected here at `2e3df696` as ~3,519 raw / ~2,266 rough
   from a 6,163-raw file; measured after D5c landed, the gate is **3,327 raw /
@@ -190,12 +205,13 @@ that nothing holds in place.
   last said and resets to 0 on the next refresh. The table keeps the size; the
   issue keeps the fact that it moved.
 - `scripts/` test files stay outside this report. Twenty-four are over 1,000 raw
-  lines, and none of them is in the 20-path list in
-  `check-sentry-suites-in-ci.test.mjs` — that list holds nine test files of its
-  own, all currently under the cap it enforces. The gap is deliberate and named here
+  lines. When this was written none of them was in the 20-path list in
+  `check-sentry-suites-in-ci.test.mjs` — that list held nine test files of its
+  own, all then under the cap it enforced; ADR 0106 has since deleted the list
+  with its subsystem. The gap is deliberate and named here
   rather than left implied. Closing it means a suite pinning its own subjects,
   the pattern `sentry-autofix-select.test.mjs` and `sentry-triage-brief.test.mjs`
-  already use, not widening this scope.
+  used, not widening this scope.
 - A future exemption is an ADR change. Adding one means editing this record and
   `SCRIPTS_EXEMPTIONS` in the same PR — the test reds unless both move —
   alongside the pin list in `scripts/AGENTS.md` that ADR 0064 already requires.
@@ -206,15 +222,20 @@ that nothing holds in place.
 - Exemption mechanics and the non-tautological proofs:
   [`scripts/repo-health/file-size-watchlist.test.mjs`](../../scripts/repo-health/file-size-watchlist.test.mjs)
 - No root `max-lines`: [`eslint.config.mjs`](../../eslint.config.mjs)
-- The subsystem-local gate this leaves in place:
+- The per-file gate this leaves in place:
+  [`scripts/workflows/check-no-skip-audit.mjs`](../../scripts/workflows/check-no-skip-audit.mjs),
+  which pins exact counts of protected actions, pnpm installs and timeline
+  steps, so a split that moves one of them fails until the count is re-pinned.
+  It is the gate the watchlist's own scope comment now names. Historical: the
+  subsystem-local gate cited when this ADR was written was
   `scripts/sentry/ci-wiring/check-sentry-suites-in-ci.test.mjs`, "the checker's
-  own files stay under the file-size hard cap"
+  own files stay under the file-size hard cap", deleted by
+  [ADR 0106](0106-sentry-triage-moves-to-operator-skills.md)
 - The retired trust-root pins that justified the three original exemptions:
   [ADR 0087](0087-autoreview-removal-thin-two-model-review.md)
-- Test-split costs behind the exclusion:
-  [`scripts/sentry/gate/sentry-suite-manifest.json`](../../scripts/sentry/gate/sentry-suite-manifest.json)
-  and [ADR 0062](0062-sentry-suites-self-run-gate.md); `verifyExemptRoute` in
-  `scripts/sentry/gate/sentry-suite-gate.mjs`; `CONTRACT_FIXTURE` in
+- Test-split costs behind the exclusion: the Sentry suite manifest and gate
+  ([ADR 0062](0062-sentry-suites-self-run-gate.md), both deleted by
+  [ADR 0106](0106-sentry-triage-moves-to-operator-skills.md)); `CONTRACT_FIXTURE` in
   `scripts/deploy-staging-callsite-discovery.mjs` and
   [ADR 0053](0053-explicit-deployment-source-staging.md); the silent-skip
   failure mode of enumerated paths-filters in

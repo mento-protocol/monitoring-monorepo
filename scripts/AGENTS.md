@@ -30,7 +30,6 @@ subdirectories.
 - `alerts/`: alert-rule lint, peg-policy checks
 - `repo-health/`: code-health, file-size, lint
 - `terraform/`: movable Terraform guards/helpers
-- `sentry/`: triage/autofix/gate/broker/ci-wiring
 
 `lib/` and `production-infra-identity-contract/` predate the reorg.
 `.config/wt.toml` and eight docs pin flat `setup.sh`.
@@ -50,7 +49,7 @@ validators. Inventories, pinned hashes, and identities stay with their domain.
 
 Move each pin class together.
 
-- **Retained process-marker helper.** `lib/mapped-command-process-identity.mjs` is used by the Sentry probe and staged triage broker. The required broker suite imports its tests; keep that import, the manifest floor and staging pins aligned.
+- **Retained process-marker helper.** `lib/mapped-command-process-identity.mjs` has no caller since ADR 0106 deleted the Sentry broker, but `scripts/docs/check-verification-redesign-evidence.mjs` pins its path by name. Keep the file and its tests; a move updates that pin.
 - **Indexer invariant ownership.** `workflows/indexer-handler-invariant-{contract,families}.mjs` supplies the retained checklist contract; root indexer contract tests and CI filters pin these paths.
 - **Review-eval pins.** Runbook: `run-eval*`,
   `install-review-eval-launchd*`, `review-eval-*publication*`,
@@ -61,8 +60,9 @@ Move each pin class together.
   `docs/evals/documentation-navigation-fixtures.json` names its source.
 - **Verification evidence.** `.gitattributes` pins
   `scripts/docs/check-verification-redesign-evidence*.mjs`.
-- **Sentry suite manifest.** `scripts/sentry/gate/sentry-suite-manifest.json`
-  enforces two-way path equality with `findSentrySuites()`; moves fail closed.
+- **Sentry bridge contract.** `alerts/sentry-bridge-contract.test.mjs` covers the
+  alert-delivery bridge, not the retired pipeline; `tf-stacks.test.mjs` imports
+  it by path.
 - **Babysit pin.** Move `pr/pr-stack-ready-state*.mjs` with
   `.claude/babysit-pr.sh`.
 - `pr:ready-state:test`: `pr/pr-ready-state*.mjs` and

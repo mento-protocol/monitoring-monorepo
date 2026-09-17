@@ -3,7 +3,7 @@ title: File-size and lint-hygiene watch list
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-04
+last_verified: 2026-09-16
 doc_type: report
 scope: repo-wide
 review_interval_days: 30
@@ -12,7 +12,17 @@ garden_lane: notes-plans-archive
 
 # File-size and lint-hygiene watch list
 
-The table below is a historical pre-retirement snapshot. Removed gate files are not current split candidates. This is passive guidance, not an active-work queue. Refresh it with
+The table below is a historical pre-retirement snapshot with the counts of
+2026-09-04. Removed gate files are not current split candidates. The ten
+`scripts/sentry/**` rows were struck on 2026-09-16 because
+[ADR 0106](../adr/0106-sentry-triage-moves-to-operator-skills.md) deleted those
+files. One replacement row was added in the same change:
+`scripts/workflows/ci-sentinel-core.mjs`, which holds the eight `ci` sentinel
+predicates relocated out of `scripts/sentry/ci-wiring/`. It carries its
+2026-09-16 counts, so the monthly run has a baseline to diff against instead of
+reporting an existing file as new every month. Every other count is still the
+2026-09-04 measurement. This is
+passive guidance, not an active-work queue. Refresh it with
 `node scripts/repo-health/file-size-watchlist.mjs`; use `--format issue` when a
 concrete
 split is ready for GitHub Issues.
@@ -54,7 +64,6 @@ Use `--format issue` for GitHub Issues; do not append this report to `BACKLOG.md
 |  1636 |  1704 | (new) | hard cap      | `scripts/pr/issue-board-lock.mjs`                                                         |
 |  1582 |  1712 |  +101 | hard cap      | `scripts/gate/darwin-process-lineage.mjs`                                                 |
 |  1390 |  1466 |     0 | hard cap      | `scripts/gate/darwin-process-lineage-state.mjs`                                           |
-|  1261 |  2105 |     0 | hard cap      | `scripts/sentry/triage/sentry-triage-archive.mjs`                                         |
 |  1251 |  1311 |     0 | hard cap      | `scripts/gate/darwin-process-identity-helper.mjs`                                         |
 |  1140 |  1178 | (new) | hard cap      | `scripts/pr/issue-board-transactions.mjs`                                                 |
 |   982 |  1054 |     0 | near hard cap | `metrics-bridge/src/peg/poller.ts`                                                        |
@@ -62,7 +71,6 @@ Use `--format issue` for GitHub Issues; do not append this report to `BACKLOG.md
 |   932 |   997 |     0 | soft cap      | `scripts/gate/quality-gate-coordinator-support.sh`                                        |
 |   862 |   967 |   -15 | soft cap      | `scripts/pr/pr-ready-state.mjs`                                                           |
 |   862 |   904 |     0 | soft cap      | `scripts/deploy-staging-contract.mjs`                                                     |
-|   859 |  1505 |     0 | soft cap      | `scripts/sentry/triage/sentry-triage-ingest.mjs`                                          |
 |   844 |   901 |     0 | soft cap      | `scripts/alerts/check-peg-registry-integrity.mjs`                                         |
 |   819 |   961 |   +58 | soft cap      | `scripts/review/review-eval-fixtures.mjs`                                                 |
 |   819 |   876 |   +98 | soft cap      | `scripts/production-infra-identity-contract/workflow-inventory.mjs`                       |
@@ -119,19 +127,15 @@ Use `--format issue` for GitHub Issues; do not append this report to `BACKLOG.md
 |   570 |   606 | (new) | watch         | `scripts/gate/trunk-check-once.sh`                                                        |
 |   569 |   719 |     0 | watch         | `ui-dashboard/src/lib/queries/volume.ts`                                                  |
 |   565 |   617 |     0 | watch         | `scripts/context/docs-index-helpers.mjs`                                                  |
-|   560 |   913 |     0 | watch         | `scripts/sentry/autofix/sentry-autofix-finalize.mjs`                                      |
 |   560 |   784 |     0 | watch         | `ui-dashboard/src/app/page-client.tsx`                                                    |
 |   560 |   647 |     0 | watch         | `scripts/lib/hcl.mjs`                                                                     |
 |   560 |   610 | (new) | watch         | `scripts/review/review-eval-experiment-contract.mjs`                                      |
 |   557 |   709 |     0 | watch         | `indexer-envio/src/handlers/broker.ts`                                                    |
-|   555 |   952 |     0 | watch         | `scripts/sentry/triage/sentry-triage-project-core.mjs`                                    |
 |   546 |   669 |     0 | watch         | `indexer-envio/src/pool/self-heal.ts`                                                     |
 |   543 |   625 |   +11 | watch         | `ui-dashboard/src/app/cdps/[symbol]/troves/[troveId]/_components/trove-balance-chart.tsx` |
 |   536 |   606 |     0 | watch         | `ui-dashboard/src/app/volume/page-client.tsx`                                             |
 |   527 |   638 |     0 | watch         | `ui-dashboard/src/lib/pool-og.ts`                                                         |
 |   526 |   772 |     0 | watch         | `scripts/deploy/deploy-indexer-status.mjs`                                                |
-|   523 |   823 |   +17 | watch         | `scripts/sentry/ci-wiring/check-sentry-suites-in-ci-core.mjs`                             |
-|   518 |   793 |     0 | watch         | `scripts/sentry/gate/sentry-suite-gate.mjs`                                               |
 |   511 |   725 |     0 | watch         | `ui-dashboard/src/components/volume-over-time-chart.tsx`                                  |
 |   503 |   724 |     0 | watch         | `ui-dashboard/src/components/time-series-chart-card.tsx`                                  |
 |   500 |   654 |     0 | watch         | `indexer-envio/src/handlers/wormhole/nttManager.ts`                                       |
@@ -142,10 +146,7 @@ Use `--format issue` for GitHub Issues; do not append this report to `BACKLOG.md
 |   464 |   606 |     0 | watch         | `scripts/supply-chain/lockfile-lint-override-ranges.mjs`                                  |
 |   457 |   624 |     0 | watch         | `indexer-envio/src/handlers/biPoolManager.ts`                                             |
 |   450 |   618 |     0 | watch         | `ui-dashboard/src/app/peg-monitoring/_lib/peg-board-model.ts`                             |
-|   432 |   724 |     0 | watch         | `scripts/sentry/triage/sentry-triage-project.mjs`                                         |
-|   425 |   932 |     0 | watch         | `scripts/sentry/triage/sentry-triage-requeue.mjs`                                         |
-|   394 |   697 |     0 | watch         | `scripts/sentry/triage/sentry-triage-digest.mjs`                                          |
-|   373 |   707 |     0 | watch         | `scripts/sentry/broker/sentry-mcp-broker.mjs`                                             |
+|   413 |   700 | (new) | watch         | `scripts/workflows/ci-sentinel-core.mjs`                                                  |
 |   368 |   611 |    +3 | watch         | `scripts/pr/pr-feedback-state-claude.mjs`                                                 |
 |   338 |   610 |     0 | watch         | `scripts/supply-chain/override-prune-report.mjs`                                          |
 |   333 |   632 |     0 | watch         | `ui-dashboard/src/lib/volume-hero.ts`                                                     |

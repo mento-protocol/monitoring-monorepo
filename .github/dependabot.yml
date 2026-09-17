@@ -17,9 +17,8 @@ version: 2
 updates:
   # npm / pnpm workspace dependencies. The root directory covers every
   # workspace member through pnpm-lock.yaml. governance-watchdog and the two
-  # alert function roots keep their own lockfiles for standalone deploys, and
-  # sentry-ingest-watcher is a lockfile-less Cloud Function manifest outside
-  # the workspace; they need their own directories. One entry keeps a shared
+  # alert function roots keep their own lockfiles for standalone deploys, so
+  # they need their own directories. One entry keeps a shared
   # dependency such as viem in one grouped PR across all roots, which is what
   # scripts/supply-chain/version-skew-check.mjs requires of the catalog.
   - package-ecosystem: npm
@@ -28,7 +27,6 @@ updates:
       - /governance-watchdog
       - /alerts/infra/onchain-event-handler
       - /alerts/infra/oncall-announcer
-      - /alerts/infra/sentry-ingest-watcher
     schedule:
       interval: weekly
       day: monday

@@ -320,7 +320,7 @@ Two `pkg:tooling` candidates are independent when all three hold:
 
 - each body names its expected files or directories;
 - no path either body names equals or contains a path the other names, compared
-  on whole path segments — `scripts/pr/` against `scripts/sentry/` is disjoint,
+  on whole path segments — `scripts/pr/` against `scripts/repo-health/` is disjoint,
   `docs/` against `docs/notes/` is not, because the first contains the second
   and two workers would edit one file;
 - neither names a shared root file or a control root: `package.json`,
@@ -492,10 +492,14 @@ candidate. Two sets qualify:
   already fetched, where they are counted as outside the queue
   ([`backlog-ranking.md`](backlog-ranking.md)). Exclude bot records: every
   issue authored by `app/github-actions`, and every issue carrying
-  `drift-detection`, `sentry-triage`, a `sentry:*` label, `dependencies`,
-  `security-advisories`, or `file-size-watchlist`. Those workflows own their
-  own lifecycles, and labeling their output into the human queue would bury
-  the issues a person wrote.
+  `drift-detection`, `sentry`, `sentry-triage`, a `sentry:*` label,
+  `dependencies`, `security-advisories`, or `file-size-watchlist`. Those
+  workflows own their own lifecycles, and labeling their output into the human
+  queue would bury the issues a person wrote. The plain `sentry` label is the
+  one the operator-run `sentry-triage` skill files under
+  ([ADR 0106](../adr/0106-sentry-triage-moves-to-operator-skills.md)); those
+  issues belong to `sentry-fix`, and an operator files them under their own
+  account, so the bot-author filter does not catch them.
 
 **Skip a candidate the pass cannot improve.** Without such a rule an
 `agent-ready` issue whose body names no path stays a candidate for ever: it can

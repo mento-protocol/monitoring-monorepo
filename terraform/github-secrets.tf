@@ -127,36 +127,20 @@ resource "github_actions_secret" "integration_probe_squid_integrator_id" {
   value       = var.squid_integrator_id
 }
 
-# Sentry triage/autofix pipeline secrets
-# ───────────────────────────────────────
+# Claude Code secret
+# ───────────────────
 #
-# The staged Sentry triage/autofix pipeline (ADR 0036) runs entirely inside this
-# repo's GitHub Actions. Its Sentry-pipeline-EXCLUSIVE secrets
-# (SENTRY_TRIAGE_TOKEN, SENTRY_PROJECTION_TOKEN, AUTOFIX_APP_PRIVATE_KEY,
-# SENTRY_ARCHIVE_TOKEN, PLATFORM_SETTINGS_AUDIT_TOKEN) moved OUT of repo scope to
-# the `sentry-pipeline` GitHub Environment in `github-environment.tf` (issue
-# #1289): a repo-level secret is readable by any branch-modified workflow run via
-# workflow_dispatch, whereas the environment restricts access to `main`
-# server-side. Only CLAUDE_CODE_OAUTH_TOKEN stays here, at repo scope, because it
-# is SHARED with `.github/workflows/claude.yml` (which reads it on `pull_request`
-# events from feature branches — the very surface a main-only environment
-# denies), and it is inference-only with no repo write capability of its own.
+# Environment-scoped secrets live in `github-environment.tf`, not here: a
+# repo-level secret is readable by any branch-modified workflow run via
+# workflow_dispatch, whereas an environment restricts access to `main`
+# server-side (issue #1289). CLAUDE_CODE_OAUTH_TOKEN stays at repo scope because
+# it is read by `.github/workflows/claude.yml` on `pull_request` events from
+# feature branches — the very surface a main-only environment denies — and it is
+# inference-only with no repo write capability of its own.
 #
-# CLAUDE_CODE_OAUTH_TOKEN is `count`-gated on its tfvar being non-empty, exactly
-# like the integration-probe aggregator keys above: plan and apply succeed while
-# the value is unset. The pipeline stays inert until the tokens exist AND
-# `github_actions_variable.sentry_triage_enabled` is flipped to "true" (see
-# `github-variables.tf`). Human provisioning runbook:
-# `docs/notes/sentry-triage-pipeline.md`.
-
-# The five Sentry-pipeline-EXCLUSIVE secrets that used to live here as repo-level
-# `github_actions_secret` resources — SENTRY_TRIAGE_TOKEN, SENTRY_PROJECTION_TOKEN,
-# AUTOFIX_APP_PRIVATE_KEY, SENTRY_ARCHIVE_TOKEN, PLATFORM_SETTINGS_AUDIT_TOKEN —
-# are now `github_actions_environment_secret` resources on the `sentry-pipeline`
-# GitHub Environment in `github-environment.tf` (issue #1289). Applying their
-# removal DESTROYS the repo-level copies; do that only AFTER the environment + its
-# secrets are applied and the workflows declare `environment: sentry-pipeline`
-# (the migration plan is in github-environment.tf and docs/notes/sentry-triage-pipeline.md).
+# It is `count`-gated on its tfvar being non-empty, exactly like the
+# integration-probe aggregator keys above: plan and apply succeed while the value
+# is unset.
 
 resource "github_actions_secret" "claude_code_oauth_token" {
   # checkov:skip=CKV_GIT_4: Same state-backed plaintext trade-off as
@@ -173,7 +157,7 @@ resource "github_actions_secret" "claude_code_oauth_token" {
   #
   #   1. Adoption overwrite: GitHub secret writes are upserts, so the first
   #      apply with the tfvar set OVERWRITES the live value. The runbook
-  #      (docs/notes/sentry-triage-pipeline.md) therefore requires putting a
+  #      therefore requires putting a
   #      current working token — in practice a freshly minted
   #      `claude setup-token` value, since GitHub can't read secrets back —
   #      into tfvars, which rotates the token for claude.yml too.

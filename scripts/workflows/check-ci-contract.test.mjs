@@ -17,6 +17,7 @@ import {
   FIXED_JOBS,
   aggregateViolations,
   concurrencyGroup,
+  contextOwnershipViolations,
   forceAllForChanges,
   loadCi,
   matchedFiles,
@@ -25,6 +26,8 @@ import {
 } from "./check-ci-contract.mjs";
 
 const LIVE = await loadCi();
+const PIN_VALIDATOR_RUN =
+  "node scripts/check-agent-quality-gate-package-scripts.mjs";
 const FORCE_ALL_GUARD = "needs.changes.outputs.forceAll == 'true'";
 const UI_SOURCE = "ui-dashboard/src/app/page.tsx";
 
@@ -288,6 +291,17 @@ const STATIC_MUTATIONS = [
       workflow.concurrency.group = "${{ github.workflow }}-${{ github.ref }}";
     },
   ],
+  // The four probes below cover the predicates ADR 0106 relocated from the
+  // deleted Sentry CI-wiring checker. Passing on the live ci.yml proves only
+  // that they accept; these prove they reject.
+  // prettier-ignore
+  ["pull_request trigger narrowed off main", /no longer covers main/u, ({ workflow }) => { workflow.on.pull_request.branches = ["release/**"]; }],
+  // prettier-ignore
+  ["pull_request trigger removed", /no longer runs on `pull_request`/u, ({ workflow }) => { delete workflow.on.pull_request; }],
+  // prettier-ignore
+  ["docs-checks pin validator dropped", /never runs .* as a whole step command/u, ({ workflow }) => { workflow.jobs["docs-checks"].steps = workflow.jobs["docs-checks"].steps.filter((step) => step.run !== PIN_VALIDATOR_RUN); }],
+  // prettier-ignore
+  ["docs-checks pin validator moved after install", /before the pin validator/u, ({ workflow }) => { const steps = workflow.jobs["docs-checks"].steps; const at = steps.findIndex((step) => step.run === PIN_VALIDATOR_RUN); steps.push(...steps.splice(at, 1)); }],
 ];
 
 test("static contract mutations fail closed with a precise reason", () => {
@@ -423,8 +437,9 @@ test("the aggregate names failed, cancelled, missing, unexpected, and skipped jo
     ],
     [
       "cancellation",
-      (results) => (results["sentry-suites"] = { result: "cancelled" }),
-      "invalid job result: sentry-suites=cancelled",
+      (results) =>
+        (results["production-infra-contract"] = { result: "cancelled" }),
+      "invalid job result: production-infra-contract=cancelled",
     ],
     ["missing", (results) => delete results.scripts, "missing job: scripts"],
     [
@@ -553,6 +568,56 @@ test("runnerLabelViolations rejects an unregistered runs-on label and a byte-mis
   rmSync(dir, { recursive: true, force: true });
 });
 
+test("contextOwnershipViolations is clean on the live repo", () => {
+  assert.deepEqual(contextOwnershipViolations(), []);
+});
+
+test("contextOwnershipViolations rejects a decoy ci job, an unevaluable name, and an unparsable workflow", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ci-context-owner-test-"));
+  mkdirSync(join(dir, ".github/workflows"), { recursive: true });
+  // prettier-ignore
+  writeFileSync(join(dir, ".github/workflows/ci.yml"), "name: CI\non:\n  pull_request:\n    branches: [main]\njobs:\n  ci:\n    runs-on: ubuntu-latest\n    steps: []\n");
+  assert.deepEqual(contextOwnershipViolations(dir), []);
+
+  // A sibling workflow job keyed `ci` publishes the same required check-run
+  // name. Nothing inside ci.yml can see it.
+  // prettier-ignore
+  writeFileSync(join(dir, ".github/workflows/decoy.yml"), "name: Decoy\non: push\njobs:\n  ci:\n    runs-on: ubuntu-latest\n    steps: []\n");
+  assert.match(
+    contextOwnershipViolations(dir).join("\n"),
+    /published by 2 job\(s\)/u,
+    "a decoy job named ci must be rejected",
+  );
+  rmSync(join(dir, ".github/workflows/decoy.yml"));
+
+  // A `${{ }}` name this scan cannot evaluate fails closed, while a statically
+  // distinct one clears — and a reusable-workflow call never claims the name.
+  // prettier-ignore
+  writeFileSync(join(dir, ".github/workflows/dynamic.yml"), "name: Dynamic\non: push\njobs:\n  d:\n    name: \"${{ 'ci' }}\"\n    runs-on: ubuntu-latest\n    steps: []\n");
+  assert.match(
+    contextOwnershipViolations(dir).join("\n"),
+    /this scan cannot evaluate/u,
+    "an unevaluable job name that could be `ci` must be rejected",
+  );
+  // prettier-ignore
+  writeFileSync(join(dir, ".github/workflows/dynamic.yml"), "name: Dynamic\non: push\njobs:\n  d:\n    name: \"Drift (${{ matrix.id }})\"\n    runs-on: ubuntu-latest\n    steps: []\n  call:\n    uses: ./.github/workflows/other.yml\n");
+  assert.deepEqual(
+    contextOwnershipViolations(dir),
+    [],
+    "a statically distinct dynamic name and a reusable-workflow call must clear",
+  );
+
+  // prettier-ignore
+  writeFileSync(join(dir, ".github/workflows/broken.yml"), "jobs:\n  a:\n    runs-on: ubuntu-latest\n    runs-on: evil\n");
+  assert.match(
+    contextOwnershipViolations(dir).join("\n"),
+    /broken\.yml/u,
+    "a workflow that fails to parse must fail closed",
+  );
+
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test("the replacement checker and tests stay within their size budgets", () => {
   const implementation = readFileSync(
     fileURLToPath(new URL("./check-ci-contract.mjs", import.meta.url)),
@@ -566,9 +631,12 @@ test("the replacement checker and tests stay within their size budgets", () => {
   // Raised from 300/500 for runnerLabelViolations tests (issue #2400);
   // tests raised again to 600 for the fail-closed YAML-parse-error test;
   // implementation raised again to 345 after main's independent right-sized
-  // EXPECTED_TIMEOUTS/EXPECTED_RUNNERS growth (#2412) landed on top of it.
-  assert.ok(implementation < 345, `${implementation} implementation lines`);
-  assert.ok(tests < 600, `${tests} test lines`);
+  // EXPECTED_TIMEOUTS/EXPECTED_RUNNERS growth (#2412) landed on top of it;
+  // raised to 400/680 by ADR 0106, which moved the `ci` trigger, pin-order and
+  // cross-workflow context-ownership checks here from the deleted Sentry
+  // CI-wiring suite rather than letting them lapse.
+  assert.ok(implementation < 400, `${implementation} implementation lines`);
+  assert.ok(tests < 680, `${tests} test lines`);
   assert.ok(
     tests < implementation * 2,
     `${tests} tests vs ${implementation} implementation`,

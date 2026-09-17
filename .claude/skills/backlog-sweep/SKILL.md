@@ -247,7 +247,7 @@ slot to a conflict that is not there. Treat two `pkg:tooling` candidates as
 independent when all three hold: each body names its expected files or
 directories; no path either body names equals or contains a path the other
 names, compared on whole path segments (`scripts/pr/` against
-`scripts/sentry/` is disjoint, `docs/` against `docs/notes/` is not); and
+`scripts/repo-health/` is disjoint, `docs/` against `docs/notes/` is not); and
 neither names a shared root file or control root —
 `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `.trunk/**`,
 `.github/workflows/**`, `scripts/workflows/**`.
@@ -690,7 +690,7 @@ The full procedure is
    `risk:*` or exactly one `pkg:*`, and issues with no queue-state label read
    from the roster the ranking already fetched. Drop every bot record —
    anything authored by `app/github-actions` or carrying `drift-detection`,
-   `sentry-triage`, a `sentry:*` label, `dependencies`,
+   `sentry`, `sentry-triage`, a `sentry:*` label, `dependencies`,
    `security-advisories`, or `file-size-watchlist`. Then walk that order and
    test the skip key below as you reach each candidate, stopping at the first 10
    survivors; the test costs one comment read each, so walk it lazily rather

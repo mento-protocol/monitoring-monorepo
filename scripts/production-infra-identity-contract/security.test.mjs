@@ -821,16 +821,16 @@ expectFailure(
 );
 
 const githubVariableCollisionFiles = liveRepositoryFiles();
-const sentryArchiveVariable = `  variable_name = "SENTRY_ARCHIVE_ENABLED"
-  value         = var.sentry_archive_enabled`;
+const slackChannelVariable = `  variable_name = "TERRAFORM_APPLY_SLACK_CHANNEL"
+  value         = var.terraform_apply_slack_channel`;
 assert(
   githubVariableCollisionFiles["terraform/github-variables.tf"].includes(
-    sentryArchiveVariable,
+    slackChannelVariable,
   ),
 );
 githubVariableCollisionFiles["terraform/github-variables.tf"] =
   githubVariableCollisionFiles["terraform/github-variables.tf"].replace(
-    sentryArchiveVariable,
+    slackChannelVariable,
     `  variable_name = "GCP_PRODUCTION_INFRA_SERVICE_ACCOUNT"
   value         = google_service_account.metrics_bridge_deployer.email`,
   );
@@ -841,16 +841,16 @@ expectFailure(
 
 const githubSecretCollisionFiles = liveRepositoryFiles();
 const githubResourceNameKey = ["secret", "name"].join("_");
-const sentryArchiveEntry = `  ${githubResourceNameKey} = "SENTRY_ARCHIVE_TOKEN"
-  value       = var.sentry_archive_token`;
+const auditTokenEntry = `  ${githubResourceNameKey} = "PLATFORM_SETTINGS_AUDIT_TOKEN"
+  value       = var.platform_settings_audit_token`;
 assert(
   githubSecretCollisionFiles["terraform/github-environment.tf"].includes(
-    sentryArchiveEntry,
+    auditTokenEntry,
   ),
 );
 githubSecretCollisionFiles["terraform/github-environment.tf"] =
   githubSecretCollisionFiles["terraform/github-environment.tf"].replace(
-    sentryArchiveEntry,
+    auditTokenEntry,
     `  ${githubResourceNameKey} = "GCP_SERVICE_ACCOUNT"
   value       = google_service_account.metrics_bridge_deployer.email`,
   );

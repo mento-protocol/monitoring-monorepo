@@ -3,7 +3,7 @@ title: Dependabot batches npm version updates into Monday groups
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-10
+last_verified: 2026-09-16
 scope: ci/process
 date: 2026-09
 doc_type: adr
@@ -13,8 +13,12 @@ garden_lane: adrs-architecture
 
 # ADR 0092 — Dependabot batches npm version updates into Monday groups
 
-**Status:** Accepted (Sep 2026), in force.
+**Status:** Accepted (Sep 2026), amended 2026-09-16, in force.
 **Scope:** ci/process
+
+Amended 2026-09-16: [ADR 0106](0106-sentry-triage-moves-to-operator-skills.md)
+removed the `sentry-ingest-watcher` root from the `npm` entry's `directories`.
+The cadence, cooldown and groups are unchanged.
 
 ## Context
 
@@ -36,11 +40,13 @@ protocol reason.
 
 Add an `npm` update entry to `.github/dependabot.yml`:
 
-- Weekly on Monday 06:00 UTC across the workspace root, the three
+- Weekly on Monday 06:00 UTC across the workspace root and the three
   standalone lockfile roots (`governance-watchdog`, the two alert function
-  roots), and the lockfile-less `sentry-ingest-watcher` Cloud Function
-  manifest, in one entry, so a shared dependency lands in one grouped PR and
-  `pnpm skew:check` keeps the catalog aligned.
+  roots), in one entry, so a shared dependency lands in one grouped PR and
+  `pnpm skew:check` keeps the catalog aligned. A fifth directory, the
+  lockfile-less `sentry-ingest-watcher` Cloud Function manifest, was listed
+  until [ADR 0106](0106-sentry-triage-moves-to-operator-skills.md) deleted that
+  function with the rest of the Sentry triage pipeline.
 - Cooldown of 7 days for minor and patch and 21 days for major. Security
   updates bypass cooldown by GitHub design.
 - Version-update groups by blast radius: `next-runtime`, `envio-runtime`,

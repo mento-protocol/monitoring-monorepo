@@ -1,4 +1,13 @@
 #!/usr/bin/env node
+/**
+ * Contract for the Sentry alert-delivery bridge (`alerts/infra/channels/
+ * sentry-bridge`): the pinned `jianyuan/sentry` provider version, the two Slack
+ * fan-out alerts, and the critical-channel variables.
+ *
+ * This suite lived in `scripts/sentry/gate/` until ADR 0106 deleted that tree.
+ * It covers the bridge, which the Sentry triage and autofix pipeline never
+ * touched and which outlives it. `scripts/tf-stacks.test.mjs` imports it.
+ */
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -7,11 +16,11 @@ import {
   attributeExpression,
   normalizeExpression,
   terraformTopLevelBlocks,
-} from "../../lib/hcl.mjs";
+} from "../lib/hcl.mjs";
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
-  "../../..",
+  "../..",
 );
 const alertsInfraRoot = path.join(repoRoot, "alerts/infra");
 const bridgeRoot = path.join(alertsInfraRoot, "channels/sentry-bridge");
@@ -224,4 +233,4 @@ for (const [relativePath, variableName] of [
   );
 }
 
-console.log("Sentry provider contract tests passed");
+console.log("Sentry bridge contract tests passed");

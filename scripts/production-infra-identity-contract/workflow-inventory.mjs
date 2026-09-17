@@ -176,20 +176,17 @@ const JOB_ENVIRONMENT_INVENTORY = new Map([
       url: "https://console.cloud.google.com/run?project=mento-monitoring",
     },
   ],
-  // Sentry triage/autofix + platform-settings-drift secret-bearing jobs bind the
-  // `sentry-pipeline` Environment (issue #1289) so its main-only deployment-branch
-  // policy gates their secrets server-side. These jobs write the bare-string form
-  // (`environment: sentry-pipeline`), so the registered value is the string, not
-  // the {name, url} object form the production deploy jobs above use — the
-  // inventory match is isDeepStrictEqual, so the shape must mirror the YAML.
-  [".github/workflows/platform-settings-drift.yml#check", "sentry-pipeline"],
-  [".github/workflows/sentry-autofix.yml#select", "sentry-pipeline"],
-  [".github/workflows/sentry-autofix.yml#finalize", "sentry-pipeline"],
-  [".github/workflows/sentry-triage-agent.yml#select", "sentry-pipeline"],
-  [".github/workflows/sentry-triage-agent.yml#triage", "sentry-pipeline"],
-  [".github/workflows/sentry-triage-agent.yml#project", "sentry-pipeline"],
-  [".github/workflows/sentry-triage-archive.yml#archive", "sentry-pipeline"],
-  [".github/workflows/sentry-triage-ingest.yml#ingest", "sentry-pipeline"],
+  // The platform-settings drift check binds its own `platform-settings-drift`
+  // Environment (issue #1289, re-homed by ADR 0106) so the main-only
+  // deployment-branch policy gates PLATFORM_SETTINGS_AUDIT_TOKEN server-side.
+  // The job writes the bare-string form
+  // (`environment: platform-settings-drift`), so the registered value is the
+  // string, not the {name, url} object form the production deploy jobs above use
+  // — the inventory match is isDeepStrictEqual, so the shape must mirror the YAML.
+  [
+    ".github/workflows/platform-settings-drift.yml#check",
+    "platform-settings-drift",
+  ],
 ]);
 
 const LOCAL_DEPENDENCY_INVENTORY = [

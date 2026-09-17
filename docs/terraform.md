@@ -302,12 +302,10 @@ replace them with manual secrets or use the refresh selectors outside the five
 registered trusted-main plan workflows and `terraform-drift.yml`.
 Only `CLAUDE_CODE_OAUTH_TOKEN` currently has `prevent_destroy`; inspect every
 planned mirror deletion.
-Sentry credential routing lives in
-[`docs/notes/sentry-triage-pipeline.md`](notes/sentry-triage-pipeline.md).
 
 ## GitHub Environments
 
-All four Environments are Terraform-managed in
+All three Environments are Terraform-managed in
 `terraform/github-environment.tf` and restrict deployments with an **explicit
 `main` branch pattern** (`custom_branch_policies = true` plus a
 `github_repository_environment_deployment_policy`), never
@@ -353,27 +351,25 @@ After importing, their plan must read `0 to add, N to change, 0 to destroy`. A
 diff that drops `production-infra`'s `reviewers` would remove the production
 apply gate — do not apply it.
 
-`sentry-pipeline` (`terraform/github-environment.tf`, issue #1289,
-[ADR 0050](adr/0050-environment-scoped-pipeline-secrets.md)) gates the Sentry
-triage/autofix pipeline's exclusive secrets. It has the same `main`-only branch
-pattern, admin bypass disabled, and — deliberately, the pipeline is unattended —
-no reviewer or wait timer. Every platform apply reconciles its policy and
-secrets. Every secret-bearing Sentry job declares it, so those secrets are
+`platform-settings-drift` (`terraform/github-environment.tf`, issue #1289,
+[ADR 0050](adr/0050-environment-scoped-pipeline-secrets.md),
+[ADR 0106](adr/0106-sentry-triage-moves-to-operator-skills.md)) gates
+`PLATFORM_SETTINGS_AUDIT_TOKEN`. It has the same `main`-only branch pattern,
+admin bypass disabled, and — deliberately, the audit is unattended — no reviewer
+or wait timer. Every platform apply reconciles its policy and secret. The
+`check` job in `platform-settings-drift.yml` declares it, so the token is
 reachable only from `main`, server-enforced even on a branch-modified
 `workflow_dispatch`. `CLAUDE_CODE_OAUTH_TOKEN` intentionally stays repo-level
 for `claude.yml`.
 
-`platform-settings-drift` (`terraform/github-environment.tf`, issue #1289,
-[ADR 0050](adr/0050-environment-scoped-pipeline-secrets.md)) holds exactly one
-secret, `PLATFORM_SETTINGS_AUDIT_TOKEN`. It has the same `main`-only branch
-pattern, admin bypass disabled, and — deliberately, the audit is unattended — no
-reviewer or wait timer. This is phase 1 of the issue #2464 rollout: the change
-is purely additive, so `sentry-pipeline` stays live and the `check` job in
-`.github/workflows/platform-settings-drift.yml` keeps reading the copy of the
-token that environment holds today. Until PR #2465 repoints the workflow and
-deletes `sentry-pipeline`, both environments carry the token and every platform
-apply reconciles both. The header comment of
-`terraform/github-environment.tf` records the phase-1 apply order.
+This environment replaces `sentry-pipeline` as ADR 0106 retires the Sentry
+pipeline. A reference to an environment that does not exist yet auto-creates it
+**unprotected**, and the platform stack only plans or applies from a clean
+`main` at freshly fetched `origin/main`, so the rename runs as two PRs: a purely
+additive phase-1 PR that creates `platform-settings-drift` and a second copy of
+the token, applied from `main`; then the ADR 0106 PR that repoints the workflow
+and deletes `sentry-pipeline`, applied from `main` again. The full step list
+lives at `terraform/github-environment.tf` "ROLLOUT ORDER".
 
 Never recreate retired `Production`/`production` names or manage
 Environment secrets outside their owning IaC/integration path. A new workflow

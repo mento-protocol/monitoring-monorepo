@@ -13,10 +13,12 @@ garden_lane: adrs-architecture
 
 # ADR 0064 — scripts/ may use module subdirectories; basenames and pinned paths are the constraint
 
-**Status:** Accepted (Aug 2026), in force.
+**Status:** Accepted (Aug 2026), amended 2026-09-16, in force.
 **Scope:** ci/process
 
 Retirement amendment: [ADR 0101](0101-legacy-gate-retirement.md) removes local gate routing and its pins. Retained Sentry supervision, package policy, CI wiring and indexer contracts remain; their current paths are listed in `scripts/AGENTS.md`. Gate-only path lists below are historical.
+
+Removal amendment (2026-09-16): [ADR 0106](0106-sentry-triage-moves-to-operator-skills.md) deletes `scripts/sentry/**` with the triage and autofix pipeline, so the retained Sentry supervision and its CI wiring named in the paragraph above no longer exist and `sentry/` is no longer one of this ADR's module subdirectories. The eight surviving `ci` sentinel predicates moved to `scripts/workflows/ci-sentinel-core.mjs` and the Sentry-to-Slack bridge contract to `scripts/alerts/sentry-bridge-contract.test.mjs`; `scripts/AGENTS.md` carries the current paths. Package policy and indexer contracts are unchanged. This ADR's decision — `scripts/` may use module subdirectories, with basenames and pinned paths as the constraint — is unchanged.
 
 ## Context
 
@@ -89,13 +91,16 @@ Cloud Run checklist that pinned it from the other side went with the wrapper. On
 `case` takes the first matching arm, so a new arm for a path of the shape
 `scripts/<dir>/deploy-*.sh` goes ABOVE the pair or it never runs.
 
-`scripts/sentry/gate/sentry-suite-manifest.json` is stricter than a glob. Its keys are exact
-repo-relative paths, and `scripts/sentry/gate/sentry-suite-gate.mjs` reconciles them against
+`scripts/sentry/gate/sentry-suite-manifest.json` was stricter than a glob (it and
+its gate were deleted by
+[ADR 0106](0106-sentry-triage-moves-to-operator-skills.md); the pin class is
+recorded here because the shape recurs). Its keys were exact
+repo-relative paths, and `scripts/sentry/gate/sentry-suite-gate.mjs` reconciled them against
 `findSentrySuites()` by exact set equality in both directions.
-`findSentrySuites()` recurses and matches on the `sentry-` basename prefix, so a
-move is discovered but the manifest key is stale, and the gate fails closed with
-the JSON patch to apply. Move a Sentry suite and update the manifest key in the
-same commit.
+`findSentrySuites()` recursed and matched on the `sentry-` basename prefix, so a
+move was discovered but the manifest key was stale, and the gate failed closed with
+the JSON patch to apply. Any future exact-set manifest inherits that obligation:
+move a pinned file and update its key in the same commit.
 
 **3. A `scripts/` subdirectory gets no `AGENTS.md` of its own.**
 `scripts/context/agent-context-budget.mjs` treats every tracked `AGENTS.md` as
@@ -380,7 +385,9 @@ not only the arm of the consumer that happens to fail loudest.
   in-file comment records that `scripts/**` matches every depth.
 - Exact-set manifest: `scripts/sentry/gate/sentry-suite-manifest.json`,
   `findSentrySuites()` in `scripts/sentry/gate/sentry-suite-gate.mjs`, and
-  [ADR 0062](0062-sentry-suites-self-run-gate.md).
+  [ADR 0062](0062-sentry-suites-self-run-gate.md) — all three deleted by
+  [ADR 0106](0106-sentry-triage-moves-to-operator-skills.md). No exact-set
+  manifest is live today; the class stays listed because the shape recurs.
 - Instruction-file budget and lane: `INSTRUCTION_FILENAMES` and the route
   computation in `scripts/context/agent-context-budget.mjs`; the
   `agent-instructions` → `agent-entry-points` mapping in

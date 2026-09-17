@@ -265,8 +265,8 @@ test("structural mutations fail closed at each M2 boundary", () => {
   mutateOnce(
     root,
     ".github/workflows/ci.yml",
-    "  sentry-suites:\n    name: Sentry suites",
-    "  sentry-suites:\n    name: Sentry suites\n    env:\n      EXPANDED: ${{ secrets.EXPANDED_CREDENTIAL }}",
+    "  production-infra-contract:\n    name: Production infrastructure contract",
+    "  production-infra-contract:\n    name: Production infrastructure contract\n    env:\n      EXPANDED: ${{ secrets.EXPANDED_CREDENTIAL }}",
     /approved PR authority/u,
   );
   mutateOnce(

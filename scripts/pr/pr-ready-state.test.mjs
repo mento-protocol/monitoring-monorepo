@@ -324,7 +324,7 @@ test("reads strict_required_status_checks_policy off a required_status_checks ru
   };
   const unstatedRule = {
     type: "required_status_checks",
-    parameters: { required_status_checks: [{ context: "Sentry suites" }] },
+    parameters: { required_status_checks: [{ context: "Code Quality" }] },
   };
   assertEqual(
     strictRequiredStatusChecksPolicyFromRules([nonStrictRule, strictRule]),

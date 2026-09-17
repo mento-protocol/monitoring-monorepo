@@ -420,8 +420,10 @@ boundary are fixed by
 **Vercel's native Git integration watches `main`** — every push that changes dashboard-affecting files triggers an automatic production deploy. Pushes that only touch unrelated directories (e.g. `terraform/`, `indexer-envio/`) are skipped by `ui-dashboard/scripts/vercel-ignore-build.sh`. PR preview deployments diff each push incrementally against that branch's previous preview deployment (falling back to the merge base with `origin/main` on a branch's first push). So a docs-only PR skips, and once a branch's dashboard change has been previewed, later non-dashboard commits on the same branch skip too instead of rebuilding the whole branch on every push.
 
 `ui-dashboard/vercel.json` suppresses ordinary deployments for
-`sentry-autofix/*` through `git.deploymentEnabled` (ADR 0036 Phase 2b, issue
-#1452). Treat this source-controlled rule as workflow hygiene, not a secret
+`sentry-autofix/*` through `git.deploymentEnabled` (issue #1452). Nothing
+creates that branch since [ADR 0106](adr/0106-sentry-triage-moves-to-operator-skills.md)
+retired the autofix leg, so the rule is inert; it is retained with the CI-trust
+guards that name the same namespace. Treat this source-controlled rule as workflow hygiene, not a secret
 boundary: branch code can change it. Provider-owned deployment eligibility and
 protection must reject untrusted code, and operators must not manually deploy
 autofix branches. See [ADR 0019](adr/0019-vercel-path-aware-deploys.md).

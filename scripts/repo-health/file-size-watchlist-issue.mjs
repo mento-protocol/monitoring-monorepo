@@ -56,8 +56,9 @@ const ACTIONABLE_BASE_LABELS = [
  * Deciding the floor per row was the alternative, and it needs a list of the
  * control surfaces a row can reach. Such a list under-scans: it missed the
  * low-risk rule's credential clause and its production-data clause, so
- * `scripts/sentry/triage/sentry-triage-archive.mjs`, a live actionable row that
- * writes production Sentry state, classified as low risk. A constant floor
+ * `scripts/pr/issue-board-transactions.mjs`, a live actionable hard-cap row
+ * that writes production issue-board claim state, classifies as low risk on a
+ * path list that only looks for deploy and Terraform roots. A constant floor
  * cannot rot that way, and a human who reads the issue can still apply
  * `risk:low`.
  */

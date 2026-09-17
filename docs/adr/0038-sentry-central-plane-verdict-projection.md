@@ -1,9 +1,10 @@
 ---
 title: Central Sentry triage plane with owning-repo verdict projection
-status: active
+status: archived
 owner: eng
-canonical: true
-last_verified: 2026-08-23
+canonical: false
+last_verified: 2026-09-16
+superseded_by: ADR-0106
 scope: ci/process
 date: 2026-07
 doc_type: adr
@@ -13,14 +14,28 @@ garden_lane: adrs-architecture
 
 # ADR 0038 — Central Sentry triage plane with owning-repo verdict projection
 
-**Status:** Accepted (Jul 2026), in force. Refines
+**Status:** Superseded by
+[ADR 0106](0106-sentry-triage-moves-to-operator-skills.md) (Sep 2026).
+Historical decision retained. Refined
 [ADR 0036](0036-sentry-triage-pipeline.md) Stage C ("phased mutations").
 **Scope:** ci/process
 
-**Current refinement:** [ADR 0050](0050-environment-scoped-pipeline-secrets.md)
-moved `SENTRY_PROJECTION_TOKEN` from repository scope to the main-only
-`sentry-pipeline` GitHub Environment. The fixed three-repository Issues-write
-boundary and token isolation from the triage agent remain in force.
+**The central triage plane is deleted.** ADR 0106 moves projection into the
+operator-run `sentry-triage` skill, which files the owning-repo issue from the
+session's own GitHub credentials instead of a CI-held `SENTRY_PROJECTION_TOKEN`.
+The projected-issue format below is ported byte for byte into that skill, so the
+shape this ADR fixes still holds; only the writer changed.
+
+**Historical refinement, no longer in force:**
+[ADR 0050](0050-environment-scoped-pipeline-secrets.md) moved
+`SENTRY_PROJECTION_TOKEN` from repository scope to the main-only
+`sentry-pipeline` GitHub Environment, and the token's fixed three-repository
+Issues-write boundary kept it isolated from the triage agent. ADR 0106 removes
+all of that: the token's Terraform resource and its environment are destroyed,
+the token is revoked out of band, and the operator's own GitHub credentials
+write the projected issue, so there is no token-scoped repository boundary left
+to enforce. Read this paragraph as the record of how the boundary worked while
+the central plane ran, not as a current control.
 
 ## Context
 

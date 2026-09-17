@@ -1,9 +1,10 @@
 ---
 title: An unconditional gate job runs the Sentry suites and proves from their output that they asserted
-status: active
+status: archived
 owner: eng
-canonical: true
-last_verified: 2026-09-01
+canonical: false
+last_verified: 2026-09-16
+superseded_by: ADR-0106
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -13,8 +14,18 @@ garden_lane: adrs-architecture
 
 # ADR 0062 — The Sentry suites prove they ran, from an unconditional gate job that runs them
 
-**Status:** Accepted (Aug 2026), in force.
+**Status:** Superseded by
+[ADR 0106](0106-sentry-triage-moves-to-operator-skills.md) (Sep 2026).
+Historical decision retained.
 **Scope:** ci/process
+
+**There are no Sentry suites left to gate.** ADR 0106 deletes
+`scripts/sentry/**`, the `sentry-suites` job and its wiring checker. The pure
+predicates the checker used to judge the `ci` sentinel were not Sentry-specific
+and moved verbatim to `scripts/workflows/ci-sentinel-core.mjs`, where
+`check-ci-contract.mjs` still runs them. The argument below — that a job proving
+from a suite's own output that it asserted is strictly stronger than a job
+proving CI _would_ run it — is the part worth keeping.
 
 Retirement amendment: [ADR 0101](0101-legacy-gate-retirement.md) removes local gate routing and its pins. Retained Sentry supervision, package policy, CI wiring and indexer contracts remain; their current paths are listed in `scripts/AGENTS.md`. Gate-only path lists below are historical.
 

@@ -36,8 +36,8 @@ variable "github_token" {
     GitHub scopes these repo permissions independently: Variables for
     `github_actions_variable`, Administration for
     `github_workflow_repository_permissions` (`github-actions-permissions.tf`,
-    issue #1557), and Environments for the `sentry-pipeline` GitHub Environment +
-    its `github_actions_environment_secret` mirrors (`github-environment.tf`,
+    issue #1557), and Environments for the GitHub Environments and their
+    `github_actions_environment_secret` mirrors (`github-environment.tf`,
     issue #1289) — a PAT missing any of these 403s.
   EOT
   type        = string
@@ -51,17 +51,13 @@ variable "platform_settings_audit_token" {
     by `.github/workflows/platform-settings-drift.yml` to read
     `GET /repos/{owner}/{repo}/actions/permissions/workflow` and assert the repo
     default workflow-token permission stays read-only (issues #1564, #1557).
-    Mirrors into the `PLATFORM_SETTINGS_AUDIT_TOKEN` environment secret on BOTH
-    the `sentry-pipeline` and the `platform-settings-drift` GitHub Environments
-    (`github-environment.tf`, issue #1289) for the issue #2464 transition; the
-    workflow reads the `sentry-pipeline` copy until PR #2465 repoints it and
-    deletes that environment. Both mirrors are count-gated so `terraform apply`
-    succeeds while unset and the drift check
-    no-ops. Read-only by design: it can never CHANGE a
+    Mirrors into the `PLATFORM_SETTINGS_AUDIT_TOKEN` environment secret on the
+    `platform-settings-drift` GitHub Environment (`github-environment.tf`,
+    issues #1289, ADR 0106), count-gated so `terraform apply` succeeds while
+    unset and the drift check no-ops. Read-only by design: it can never CHANGE a
     setting. Deliberately SEPARATE from `github_token` (Administration:
-    Read/write, kept local-only, never a CI secret) and from the autofix App
-    (whose minimal Contents+Pull-requests trust boundary we do not widen). Leave
-    empty until provisioned; see docs/notes/sentry-triage-pipeline.md.
+    Read/write, kept local-only, never a CI secret). Leave empty until
+    provisioned.
   EOT
   type        = string
   sensitive   = true
@@ -196,163 +192,22 @@ variable "squid_integrator_id" {
   default     = ""
 }
 
-# ── Sentry triage/autofix (ADR 0036) ──────────────────────────────────────────
+# ── Claude Code ───────────────────────────────────────────────────────────────
 
-variable "sentry_triage_token" {
+variable "claude_code_oauth_token" {
   description = <<-EOT
-    READ-ONLY Sentry internal-integration token for the scheduled Sentry
-    triage/autofix pipeline (ADR 0036). Scopes: Issue & Event Read, Project
-    Read, Organization Read — NO write scopes. Mirrors into the
-    `SENTRY_TRIAGE_TOKEN` environment secret on the `sentry-pipeline` GitHub
-    Environment (`github-environment.tf`, issue #1289). Leave empty until
+    Claude Max-subscription OAuth token (`claude setup-token`) used by
+    `anthropics/claude-code-action@v1`. Mirrors into the repo-level Actions
+    secret `CLAUDE_CODE_OAUTH_TOKEN`, which ALREADY exists live and is read by
+    `.github/workflows/claude.yml` — setting this value overwrites (rotates)
+    the live secret, and once applied it must not be emptied (the resource
+    has `prevent_destroy`; see github-secrets.tf). Leave empty until
     provisioned; the secret resource is `count`-gated so `terraform apply`
     succeeds without it.
   EOT
   type        = string
   sensitive   = true
   default     = ""
-}
-
-variable "claude_code_oauth_token" {
-  description = <<-EOT
-    Claude Max-subscription OAuth token (`claude setup-token`) used by
-    `anthropics/claude-code-action@v1` in the Sentry triage/autofix pipeline
-    (ADR 0036). Mirrors into the repo-level Actions secret
-    `CLAUDE_CODE_OAUTH_TOKEN`, which ALREADY exists live and is shared with
-    `.github/workflows/claude.yml` — setting this value overwrites (rotates)
-    the live secret, and once applied it must not be emptied (the resource
-    has `prevent_destroy`; see github-secrets.tf and the runbook in
-    docs/notes/sentry-triage-pipeline.md). Leave empty until provisioned; the
-    secret resource is `count`-gated so `terraform apply` succeeds without it.
-  EOT
-  type        = string
-  sensitive   = true
-  default     = ""
-}
-
-variable "sentry_triage_enabled" {
-  description = <<-EOT
-    Kill switch for the scheduled Sentry triage/autofix workflows (ADR 0036,
-    ADR 0030). Mirrors into the repo-level Actions variable
-    `SENTRY_TRIAGE_ENABLED`; the workflows no-op unless it equals "true".
-    Defaults to "false" so the pipeline stays inert until deliberately
-    activated by a follow-up tfvar change plus a re-apply.
-  EOT
-  type        = string
-  default     = "false"
-
-  validation {
-    condition     = contains(["true", "false"], var.sentry_triage_enabled)
-    error_message = "sentry_triage_enabled must be the string \"true\" or \"false\"."
-  }
-}
-
-variable "sentry_projection_token" {
-  description = <<-EOT
-    Fine-grained GitHub PAT for the Sentry triage VERDICT PROJECTION step
-    (ADR 0038): Issues Read+Write on EXACTLY the three owning repos
-    (frontend-monorepo, mento-analytics-api, minipay-dapp) and NOTHING else —
-    no contents, no pull-requests. Mirrors into the `SENTRY_PROJECTION_TOKEN`
-    environment secret on the `sentry-pipeline` GitHub Environment
-    (`github-environment.tf`, issue #1289), which the projection step alone reads
-    to file the owning-repo issue. Leave empty until provisioned; the secret resource is
-    `count`-gated so `terraform apply` succeeds without it and the workflow
-    no-ops gracefully. See the runbook in docs/notes/sentry-triage-pipeline.md
-    for how to mint it.
-  EOT
-  type        = string
-  sensitive   = true
-  default     = ""
-}
-
-variable "autofix_app_id" {
-  description = <<-EOT
-    GitHub App ID for the Sentry AUTOFIX leg (ADR 0036 Phase 2b): the App the
-    autofix finalize step uses to push the fix branch and open the PR, so
-    required CI + Codex review actually fire on it (a `github.token` push does
-    not trigger downstream workflows). Mirrors into the repo-level Actions
-    variable `AUTOFIX_APP_ID`. Leave empty until provisioned; the variable
-    resource is `count`-gated so `terraform apply` succeeds without it and the
-    autofix workflow no-ops. See the runbook in
-    docs/notes/sentry-triage-pipeline.md for how to create the App.
-  EOT
-  type        = string
-  default     = ""
-}
-
-variable "autofix_app_private_key" {
-  description = <<-EOT
-    PEM private key for the Sentry autofix GitHub App (see `autofix_app_id`).
-    Mirrors into the `AUTOFIX_APP_PRIVATE_KEY` environment secret on the
-    `sentry-pipeline` GitHub Environment (`github-environment.tf`, issue #1289),
-    which the autofix finalize step alone reads to mint a short-lived
-    installation token for the branch push + PR create. The App is installed on
-    `mento-protocol/monitoring-monorepo` only, with Contents: Read&Write +
-    Pull requests: Read&Write and no webhooks — the whole trust boundary. Leave
-    empty until provisioned; the secret resource is `count`-gated so
-    `terraform apply` succeeds without it. Brand-new, no external consumer, so
-    no `prevent_destroy`. See the runbook in docs/notes/sentry-triage-pipeline.md.
-  EOT
-  type        = string
-  sensitive   = true
-  default     = ""
-}
-
-variable "sentry_archive_token" {
-  description = <<-EOT
-    WRITE-SCOPED Sentry internal-integration token for the Phase 2a
-    human-approved archive leg (ADR 0036 Stage C). Scopes: Issue & Event
-    Read + Write — NOTHING else. The archive workflow
-    (`.github/workflows/sentry-triage-archive.yml`) is its ONLY consumer, and
-    only to set a Sentry issue to `archived_until_escalating` (never a hard
-    resolve). Mirrors into the `SENTRY_ARCHIVE_TOKEN` environment secret on the
-    `sentry-pipeline` GitHub Environment (`github-environment.tf`, issue #1289).
-    Separate from the read-only `sentry_triage_token` by design — do NOT reuse
-    that token here. Leave empty until provisioned; the secret resource is
-    `count`-gated so `terraform apply` succeeds without it and the workflow
-    no-ops gracefully. See the runbook in docs/notes/sentry-triage-pipeline.md
-    for how to mint it.
-  EOT
-  type        = string
-  sensitive   = true
-  default     = ""
-}
-
-variable "sentry_autofix_enabled" {
-  description = <<-EOT
-    Kill switch for the scheduled Sentry AUTOFIX workflow (ADR 0036 Phase 2b,
-    ADR 0030). Mirrors into the repo-level Actions variable
-    `SENTRY_AUTOFIX_ENABLED`; the workflow no-ops unless it equals "true".
-    Separate from `sentry_triage_enabled` so the read-only triage pipeline and
-    the PR-writing autofix leg activate independently. Defaults to "false" so
-    autofix stays inert until deliberately activated by a follow-up tfvar change
-    plus a re-apply.
-  EOT
-  type        = string
-  default     = "false"
-
-  validation {
-    condition     = contains(["true", "false"], var.sentry_autofix_enabled)
-    error_message = "sentry_autofix_enabled must be the string \"true\" or \"false\"."
-  }
-}
-
-variable "sentry_archive_enabled" {
-  description = <<-EOT
-    Kill switch for the Phase 2a human-approved Sentry archive workflow
-    (ADR 0036, ADR 0030). Mirrors into the repo-level Actions variable
-    `SENTRY_ARCHIVE_ENABLED`; the archive workflow no-ops unless it equals
-    "true". Defaults to "false" so the archive leg stays inert until
-    deliberately activated by a follow-up tfvar change plus a re-apply, even
-    after `sentry_archive_token` is provisioned.
-  EOT
-  type        = string
-  default     = "false"
-
-  validation {
-    condition     = contains(["true", "false"], var.sentry_archive_enabled)
-    error_message = "sentry_archive_enabled must be the string \"true\" or \"false\"."
-  }
 }
 
 # ── Auth (Google OAuth / NextAuth) ─────────────────────────────────────────

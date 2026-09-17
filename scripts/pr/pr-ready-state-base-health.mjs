@@ -65,7 +65,7 @@ export function latestSettledChecksByIdentity(rollup = []) {
 }
 
 // One read, both surfaces. This repo's required contexts span check runs
-// ("ci", "Code Quality", "Sentry suites") and commit statuses ("Vercel"), and
+// ("ci", "Code Quality") and commit statuses ("Vercel"), and
 // no single REST endpoint returns both; GraphQL's rollup does, and carries the
 // app identity each one needs to match an app-bound required context — a check
 // run's `checkSuite.app.databaseId`, a status context's `/in/<id>` avatar URL.

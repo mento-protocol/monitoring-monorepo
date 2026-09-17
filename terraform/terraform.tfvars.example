@@ -24,7 +24,7 @@ vercel_token = "vcp_..."
 #      Administration is required by github_workflow_repository_permissions in
 #      github-actions-permissions.tf — issue #1557 — which pins the default
 #      workflow-token permission to read-only; Environments is required by the
-#      sentry-pipeline GitHub Environment + its environment secrets in
+#      GitHub Environments + their environment secrets in
 #      github-environment.tf — issue #1289. GitHub scopes these repo
 #      permissions independently. All are repo-level — org-admin is still NOT
 #      needed.)
@@ -95,14 +95,7 @@ upstash_api_key = "..."
 # `count`-gated so `terraform apply` succeeds without it.
 # squid_integrator_id = "..."
 
-# ── Sentry triage/autofix (ADR 0036) ──────────────────────────────────────────
-# READ-ONLY Sentry internal-integration token for the triage pipeline.
-# Scopes: Issue & Event Read, Project Read, Organization Read — NO write scopes.
-# Leave empty until provisioned; the GitHub Actions secret resource is
-# `count`-gated so `terraform apply` succeeds without it. See the human runbook
-# in docs/notes/sentry-triage-pipeline.md for how to mint it.
-# sentry_triage_token = "xxx-read-only-sentry-token-xxx"
-
+# ── Claude Code ───────────────────────────────────────────────────────────────
 # Claude Max OAuth token from `claude setup-token` for claude-code-action.
 # Leave empty until provisioned; the GitHub Actions secret resource is
 # `count`-gated so `terraform apply` succeeds without it.
@@ -110,68 +103,8 @@ upstash_api_key = "..."
 # shared with .github/workflows/claude.yml — setting this value overwrites
 # (rotates) it on apply, so it must be a fresh working `claude setup-token`
 # value, and once applied it must never be emptied (the resource has
-# `prevent_destroy`). See the runbook in docs/notes/sentry-triage-pipeline.md.
+# `prevent_destroy`).
 # claude_code_oauth_token = "xxx-claude-oauth-token-xxx"
-
-# Kill switch for the scheduled Sentry triage workflows (string "true"/"false",
-# default "false"). Flip to "true" only after both Phase-1 workflow PRs are
-# merged AND the two tokens above are provisioned. Still IaC — set it here and
-# re-apply, never via the GitHub UI.
-# sentry_triage_enabled = "false"
-
-# Fine-grained GitHub PAT for the verdict-projection step (ADR 0038): Issues
-# Read+Write on EXACTLY frontend-monorepo, mento-analytics-api, minipay-dapp —
-# no contents, no pull-requests, no other repos. Leave empty until provisioned;
-# the GitHub Actions secret resource is `count`-gated so `terraform apply`
-# succeeds without it and the workflow no-ops gracefully. Brand-new, no external
-# consumers, so no `prevent_destroy`. See docs/notes/sentry-triage-pipeline.md
-# for how to mint the `sentry-triage-projector` PAT.
-# sentry_projection_token = "github_pat_xxx-issues-rw-three-repos-xxx"
-
-# ── Sentry autofix PRs (ADR 0036 Phase 2b) ────────────────────────────────────
-# GitHub App credential for the autofix leg's branch push + PR create (so
-# required CI + Codex review fire on the fix PR — a `github.token` push does
-# not trigger downstream workflows). Create the App once, then set both values.
-# Runbook: docs/notes/sentry-triage-pipeline.md → "Activating autofix PRs".
-#   GitHub → Settings → Developer settings → GitHub Apps → New GitHub App:
-#     - Permissions: Contents Read & write, Pull requests Read & write. Nothing
-#       else — no Issues, no Actions, no webhooks. This is the whole trust
-#       boundary.
-#     - Install on `mento-protocol/monitoring-monorepo` ONLY.
-#     - Record the App ID; generate a private key (downloads a PEM).
-# Both are `count`-gated so `terraform apply` succeeds while empty and the
-# autofix workflow no-ops. Brand-new, no external consumers, so no
-# `prevent_destroy`.
-# autofix_app_id = "123456"
-# autofix_app_private_key = <<-PEM
-#   -----BEGIN RSA PRIVATE KEY-----
-#   ...paste the generated PEM here...
-#   -----END RSA PRIVATE KEY-----
-# PEM
-
-# Kill switch for the scheduled autofix workflow (string "true"/"false", default
-# "false"). SEPARATE from sentry_triage_enabled — flip to "true" only after this
-# workflow PR merges AND the App above is provisioned. Still IaC — set it here
-# and re-apply, never via the GitHub UI.
-# sentry_autofix_enabled = "false"
-
-# ── Sentry triage archive loop (ADR 0036 Phase 2a) ────────────────────────────
-# WRITE-scoped Sentry token for the Phase 2a human-approved archive leg
-# (ADR 0036 Stage C). Mint a SECOND internal integration in Sentry (org
-# mento-labs) → Settings → Developer Settings → New Internal Integration, name
-# `sentry-triage-archiver`, scopes Issue & Event: Read + Write and NOTHING else
-# (no Project, no Organization, no Member). Do NOT reuse the read-only
-# sentry_triage_token here. Leave empty until provisioned; the GitHub Actions
-# secret resource is `count`-gated so `terraform apply` succeeds without it and
-# the archive workflow no-ops gracefully. Brand-new, no external consumers, so
-# no `prevent_destroy`. See docs/notes/sentry-triage-pipeline.md.
-# sentry_archive_token = "xxx-write-scoped-sentry-archive-token-xxx"
-
-# Kill switch for the Phase 2a Sentry archive workflow (string "true"/"false",
-# default "false"). Flip to "true" only after the archive workflow PR is merged
-# AND sentry_archive_token above is provisioned. Still IaC — set it here and
-# re-apply, never via the GitHub UI.
-# sentry_archive_enabled = "false"
 
 # ── Arkham Intelligence ───────────────────────────────────────────────────────
 # API key for manual /api/arkham/enrich counterparty tagging.

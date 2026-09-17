@@ -232,7 +232,6 @@ jobs:
               # on listener + channel changes too.
               - alerts/infra/onchain-event-listeners/**
               - alerts/infra/channels/**
-              - alerts/infra/sentry-ingest-watcher/**
               - alerts/infra/*.tf
               - shared-config/**
               - scripts/eslint-baseline-diff.mjs
@@ -995,10 +994,6 @@ jobs:
       - name: Test with coverage (oncall-announcer)
         working-directory: alerts/infra/oncall-announcer
         run: pnpm run test:coverage
-      # The Sentry ingest watcher imports nothing but its own modules — plain
-      # ESM plus `node --test`, so it needs no package-local install step.
-      - name: Test (sentry-ingest-watcher)
-        run: pnpm alerts:watcher:test
       # Verify event-hashes.json is in sync with safe-abi.json. The handler
       # computes Safe event topic hashes at runtime from safe-abi.json
       # (constants.ts:extractEventSignatures), and the QuickNode webhook
@@ -1318,8 +1313,6 @@ jobs:
         #   the `docs:*` and `agent:context-*` suites); the pin validator keeps
         #   that trust safe by rejecting a
         #   drifted command (e.g. an appended `&& <command>`) before it executes.
-        #   check-sentry-suites-in-ci.test.mjs pins this ordering, because the
-        #   direct `sentry:*` author-check aliases use the same validator.
         run: node scripts/check-agent-quality-gate-package-scripts.mjs
       # GitHub resolves $/ from the running commit; actionlint lacks support.
       # trunk-ignore(actionlint/action)
@@ -1525,11 +1518,6 @@ jobs:
         # shared module, so they belong in a required job rather than only in
         # the advisory supply-chain workflow.
         run: node --test scripts/lib/pnpm-override-selector.test.mjs
-      # The Sentry suites used to run here, one step each (issue #1721). They
-      # now run in the unconditional `sentry-suites` job, which also proves from
-      # their own output that each one asserted (issue #1779, ADR 0062) — a
-      # strictly stronger claim than a step existing. Running them in both jobs
-      # cost a second copy of the whole set and let the two paths disagree.
       - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
         if: always() && !inputs.no_skip_audit
 
@@ -1588,9 +1576,6 @@ jobs:
         # unsanctioned `postinstall` before install would run it, and a drifted
         # alias command before it executes. This job needs its own copy — on a
         # Markdown-only diff the `scripts` job no longer runs at all.
-        # check-sentry-suites-in-ci.test.mjs pins this ordering for this job by
-        # name, exactly as it does for `scripts`, so moving pnpm-install or an
-        # alias above this step fails required CI.
         run: node scripts/check-agent-quality-gate-package-scripts.mjs
       # GitHub resolves $/ from the running commit; actionlint lacks support.
       # trunk-ignore(actionlint/action)
@@ -1663,11 +1648,10 @@ jobs:
           restore-cache: ${{ !inputs.no_skip_audit }}
           write-cache: ${{ !inputs.no_skip_audit && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
       - name: Terraform production infrastructure contract
-        # Deliberately unconditional, and deliberately the first command here.
-        # check-sentry-suites-in-ci-coverage.test.mjs exempts
-        # sentry-provider-contract.test.mjs only while an unconditional step of
-        # this job runs tf-stacks.test.mjs, so this step may never carry an
-        # `if:` — and anything ahead of it that can fail would skip it.
+        # Deliberately unconditional, and deliberately the first command here:
+        # `tf-stacks.test.mjs` is the only proof that every registered Terraform
+        # stack still resolves, so this step may never carry an `if:` — and
+        # anything ahead of it that can fail would skip it.
         run: pnpm tf:test
       # Moved here from the deleted unconditional `guardrail-prose` job, which
       # paid a whole runner boot for two sub-second commands. This job is the
@@ -1714,61 +1698,6 @@ jobs:
       - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
         if: always() && !inputs.no_skip_audit
 
-  sentry-suites:
-    name: Sentry suites
-    # Unconditional by design (no `if:`): a skipped required check counts as
-    # satisfied, so this job — like production-infra-contract — must never be
-    # skippable. It runs the Sentry suites itself and proves, from their own
-    # output, that each asserted (issue #1779, ADR 0062); the #1754 checker only
-    # proves CI *would* run them.
-    #
-    # The step list is closed-world and its order is load-bearing. The two
-    # upstream, SHA-pinned actions are the only things trusted before the gate.
-    # `scripts/sentry/gate/sentry-suite-gate.mjs` is the FIRST and ONLY PR-authored code that
-    # runs before the suites: `pnpm install` is deliberately ordered AFTER it
-    # (the composite action's postinstall is PR-authored code) and there is no
-    # other pre-gate step, which closes the R1 window where such a step could
-    # append `NODE_OPTIONS=--import=…process.exit(0)` to $GITHUB_ENV and neuter
-    # every later suite into a false-green no-op. The gate and every
-    # scripts/sentry-*.mjs it spawns import only `node:` builtins, so it needs no
-    # install. `env -u NODE_OPTIONS` strips a poisoned value from the gate's own
-    # env for defense in depth; the gate additionally refuses to start if
-    # NODE_OPTIONS or NODE_PATH is set and re-strips both per spawned suite.
-    runs-on: ubuntu-latest
-    timeout-minutes: 8
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ inputs.no_skip_audit && inputs.audit_source_sha || github.sha }}
-          fetch-depth: ${{ inputs.no_skip_audit && '0' || '1' }}
-          persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version-file: .node-version
-          package-manager-cache: false
-      - name: Run and assert the Sentry suites
-        run: /usr/bin/env -u NODE_OPTIONS -u NODE_PATH node scripts/sentry/gate/sentry-suite-gate.mjs
-      # Steps 4-5 run AFTER the gate, and only after it. The install's composite
-      # `postinstall` is PR-authored code, so putting it first would restore the
-      # R1 window the job exists to close; ordering it here keeps that window
-      # shut and still gives the checker the `js-yaml` it needs.
-      # GitHub resolves $/ from the running commit; actionlint lacks support.
-      # trunk-ignore(actionlint/action)
-      - uses: $/.github/actions/pnpm-install
-        with:
-          restore-cache: ${{ !inputs.no_skip_audit }}
-      - name: Sentry CI wiring assertion
-        # The static half of the pair (issue #1721, relocated by #1779 PR C).
-        # The gate above proves the suites ran; it cannot prove its own job still
-        # exists, is unconditional, and still reaches the required `ci` context —
-        # so this pins that, re-proves the one suite the gate does not run
-        # (sentry-provider-contract, via `pnpm tf:test`). It ran in the path-gated
-        # `scripts` job until this PR, where a dashboard-only, indexer-only or
-        # non-Markdown doc-asset diff skipped it entirely.
-        run: node scripts/sentry/ci-wiring/check-sentry-suites-in-ci.test.mjs
-
   ci:
     name: ci
     needs:
@@ -1788,7 +1717,6 @@ jobs:
         scripts,
         docs-checks,
         production-infra-contract,
-        sentry-suites,
       ]
     if: always()
     runs-on: ubuntu-latest
