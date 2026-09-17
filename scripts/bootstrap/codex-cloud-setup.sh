@@ -12,16 +12,8 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=scripts/bootstrap/codex-cloud-git-helpers.sh
 source "$REPO_ROOT/scripts/bootstrap/codex-cloud-git-helpers.sh"
 
-run_as_root() {
-  if [[ "$(id -u)" == "0" ]]; then
-    "$@"
-  elif command -v sudo >/dev/null 2>&1; then
-    sudo "$@"
-  else
-    echo "error: need root privileges to run: $*" >&2
-    return 1
-  fi
-}
+# shellcheck source=scripts/bootstrap/codex-cloud-github-cli.sh
+source "$REPO_ROOT/scripts/bootstrap/codex-cloud-github-cli.sh"
 
 is_enabled() {
   case "${1,,}" in
@@ -55,43 +47,6 @@ persist_user_path_entry() {
       printf '\n%s\n' "$export_line" >>"$profile"
     fi
   done
-}
-
-install_github_cli_from_official_apt_repo() {
-  local arch
-  arch="$(dpkg --print-architecture)"
-
-  echo "==> Installing GitHub CLI from cli.github.com apt repository"
-  run_as_root apt-get install -y ca-certificates curl gnupg
-  run_as_root install -m 0755 -d /etc/apt/keyrings
-  curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
-    | run_as_root tee /etc/apt/keyrings/githubcli-archive-keyring.gpg >/dev/null
-  run_as_root chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
-  echo "deb [arch=${arch} signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
-    | run_as_root tee /etc/apt/sources.list.d/github-cli.list >/dev/null
-  run_as_root apt-get update
-  run_as_root apt-get install -y gh
-}
-
-ensure_github_cli() {
-  if command -v gh >/dev/null 2>&1; then
-    return 0
-  fi
-
-  echo "==> Installing GitHub CLI"
-  if command -v apt-get >/dev/null 2>&1; then
-    run_as_root apt-get update
-    if run_as_root apt-get install -y gh; then
-      return 0
-    fi
-
-    install_github_cli_from_official_apt_repo
-    return 0
-  fi
-
-  echo "error: gh is not installed and this image has no apt-get installer." >&2
-  echo "Install GitHub CLI in the base image or expose it before running this setup." >&2
-  return 1
 }
 
 ensure_origin_main_ref() {
@@ -548,6 +503,7 @@ echo "==> Marking repository safe for git"
 git config --global --add safe.directory "$REPO_ROOT" || true
 
 ensure_github_cli
+ensure_github_cli_attach_support
 ensure_github_auth
 configure_github_git_auth
 

@@ -1346,6 +1346,13 @@ jobs:
         # Retained SessionEnd, setup-marker, and pre-install policy checks were
         # extracted from the legacy Bash gate suite.
         run: bash scripts/bootstrap/agent-setup-contract.test.sh
+      - name: Codex Cloud setup behavior suite
+        # The contract suite above is grep-based. This one runs the hosted
+        # setup's own functions against mocked installers, so a regression in
+        # the Foundry installer verification, the GitHub API and write probes,
+        # or the gh capability upgrade fails here instead of in a cloud
+        # container an agent cannot inspect.
+        run: bash scripts/bootstrap/codex-cloud-setup.test.sh
       - name: Dependency-cruiser root contract
         # Preserve the independent architecture-root equality that was embedded
         # in the legacy gate suite.

@@ -287,9 +287,42 @@ echo "==> Configuring GitHub integration mode"
 # The token is read inline as a presence check and never bound to a local
 # variable: a bare token assignment reads as a literal credential to the secret
 # scanners that watch this file.
+#
+# Both probes below match a flag in captured help text, never a version string:
+# distro builds backport flags unevenly. Capturing first also keeps the script
+# safe under `set -o pipefail`, where a missing or failing gh would otherwise
+# read as a pipeline failure instead of the "unsupported" answer these owe their
+# callers. `gh api --slurp` backs pr:ready-state and is part of the gh-first
+# capability gate in docs/notes/github-tooling-surfaces.md. `gh pr edit --attach`
+# (gh 2.99.0 or later) uploads the Before/After screenshots
+# docs/notes/dashboard-verification.md requires; it is deliberately NOT part of
+# that routing gate, because losing it blocks dashboard visual evidence alone
+# and must not push a session onto the MCP fallback for all PR work.
+gh_supports_api_slurp() {
+  local help_text
+  command -v gh >/dev/null 2>&1 || return 1
+  help_text="$(gh api --help 2>/dev/null)" || return 1
+  grep -q -- '--slurp' <<<"$help_text"
+}
+
+gh_supports_pr_edit_attach() {
+  local help_text
+  command -v gh >/dev/null 2>&1 || return 1
+  help_text="$(gh pr edit --help 2>/dev/null)" || return 1
+  grep -q -- '--attach' <<<"$help_text"
+}
+
+# Set only where the branches below hand PR work to gh rather than to the MCP
+# fallback. `gh pr edit --attach` needs that same path — it resolves the PR
+# before uploading — so the MCP fallback is itself a visual-evidence blocker,
+# whatever the local binary's help text says.
+gh_api_path_selected=false
+
 if [[ -n "${GH_TOKEN:-${GITHUB_TOKEN:-}}" ]]; then
-  # Reinstall unless a gh that already supports `--slurp` is on PATH.
-  if ! { command -v gh >/dev/null 2>&1 && gh api --help 2>/dev/null | grep -q -- '--slurp'; }; then
+  # Reinstall unless a gh that already supports both required flags is on PATH.
+  # The tarball below tracks the latest cli/cli release, so it carries `--attach`
+  # whenever the download succeeds; no extra install source is needed for it.
+  if ! { gh_supports_api_slurp && gh_supports_pr_edit_attach; }; then
     echo "==> GH_TOKEN detected; installing current gh from the GitHub release tarball"
     gh_tmp="$(mktemp -d)"
     gh_arch="$(dpkg --print-architecture 2>/dev/null || echo amd64)"
@@ -313,13 +346,14 @@ if [[ -n "${GH_TOKEN:-${GITHUB_TOKEN:-}}" ]]; then
   fi
   if ! command -v gh >/dev/null 2>&1; then
     echo "WARN: gh is not installed (download failed above); using the GitHub MCP server for PR/API work." >&2
-  elif ! gh api --help 2>/dev/null | grep -q -- '--slurp'; then
+  elif ! gh_supports_api_slurp; then
     # An older gh may still be on PATH if the tarball upgrade failed (no sudo,
     # blocked download). pr:ready-state calls `gh api --paginate --slurp`, which
     # that binary lacks, so do NOT advertise availability — force the MCP fallback.
     echo "WARN: gh on PATH is too old (no 'gh api --slurp'); the release-tarball upgrade did not apply." >&2
     echo "WARN: pr:ready-state needs --slurp; using the GitHub MCP server for PR/API work meanwhile." >&2
   elif gh auth status >/dev/null 2>&1; then
+    gh_api_path_selected=true
     echo "gh is installed and 'gh auth status' passes — but that only proves /user is served."
     echo "Before relying on gh-backed flows (pr:ready-state), verify the full capability gate:"
     echo "    gh api repos/<owner>/<repo> --jq .full_name"
@@ -328,6 +362,9 @@ if [[ -n "${GH_TOKEN:-${GITHUB_TOKEN:-}}" ]]; then
     echo "In Claude cloud sessions the credential proxy blocks GraphQL regardless of GH_TOKEN, and"
     echo "REST /repos/* behavior varies by session; if either call fails, use the GitHub MCP server"
     echo "(docs/notes/github-tooling-surfaces.md)."
+    echo "That gate also governs visual evidence: 'gh pr edit --attach' resolves the PR through"
+    echo "GraphQL, so a present --attach flag is necessary but not sufficient. Treat a failed gate"
+    echo "as a dashboard visual-evidence blocker too (docs/notes/dashboard-verification.md)."
     echo "Reminder: pass --repo <owner/name> (or set GH_REPO) — the git remote is the local proxy, not a GitHub host."
   else
     echo "WARN: gh is installed but not authenticated — check the GH_TOKEN scopes/org approval." >&2
@@ -339,6 +376,26 @@ else
   echo "credential proxy overrides Authorization and blocks GraphQL either way; REST /repos/*"
   echo "behavior varies by session (docs/notes/github-tooling-surfaces.md)."
   echo "See docs/notes/github-tooling-surfaces.md for the gh->MCP mapping."
+fi
+
+# Reported outside the token branch and outside the routing chain above, because
+# every path that leaves this container unable to run `gh pr edit --attach` — no
+# token, no binary, a binary too old, or an MCP fallback that has no attachment
+# equivalent — loses dashboard visual evidence the same way. Reporting it here
+# is what keeps that discovery out of the publication step. The flag probe
+# answers "unsupported" for a missing gh, so neither test needs a guard.
+if [[ "$gh_api_path_selected" != "true" ]] || ! gh_supports_pr_edit_attach; then
+  if [[ "$gh_api_path_selected" != "true" ]]; then
+    echo "WARN: PR work here uses the GitHub MCP server, which cannot upload attachments." >&2
+  else
+    echo "WARN: gh on PATH has no 'gh pr edit --attach' (needs gh 2.99.0 or later)." >&2
+  fi
+  echo "WARN: docs/notes/dashboard-verification.md uploads the Before/After screenshots with" >&2
+  echo "WARN: 'gh pr edit --attach', so a dashboard UI task must report a visual-evidence" >&2
+  echo "WARN: blocker rather than publish without it. Other PR work is unaffected." >&2
+  echo "WARN: To fix: set GH_TOKEN, allow the cli/cli release download so the tarball install" >&2
+  echo "WARN: above can run, and confirm the capability gate in" >&2
+  echo "WARN: docs/notes/github-tooling-surfaces.md; or ship gh 2.99.0 or later in the image." >&2
 fi
 
 echo "Claude Code on the web setup complete."
