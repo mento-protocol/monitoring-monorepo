@@ -65,6 +65,9 @@ if (shouldEnableSentry(clientEnv.NEXT_PUBLIC_VERCEL_ENV)) {
     replaysSessionSampleRate: 0.1,
     replaysOnErrorSampleRate: 1.0,
     sendDefaultPii: false,
+    // filterAndStripSentryEvent also drops errors raised entirely inside a
+    // wallet-extension injected script; see EXTENSION_SCRIPT_DENY_URLS in
+    // sentry.shared.
     beforeSend: filterAndStripSentryEvent,
     beforeSendTransaction: filterAndStripSentryEvent,
   });

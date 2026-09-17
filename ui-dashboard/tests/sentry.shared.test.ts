@@ -19,6 +19,60 @@ describe("resolveTracesSampleRate", () => {
   );
 });
 
+const WALLET_EXTENSION_MESSAGE =
+  "MetaMask: Lost connection to the extension provider.";
+
+function eventWithFrames(filenames: string[]) {
+  return {
+    exception: {
+      values: [
+        {
+          type: "Error",
+          value: WALLET_EXTENSION_MESSAGE,
+          stacktrace: { frames: filenames.map((filename) => ({ filename })) },
+        },
+      ],
+    },
+  };
+}
+
+const INPAGE_SCRIPT =
+  "chrome-extension://nkbihfbeogaeaoehlefnkodbefgpgknn/scripts/inpage.js";
+
+const FIRST_PARTY_SCRIPT =
+  "https://monitoring.mento.org/_next/static/chunks/app/page.js";
+
+describe("filterAndStripSentryEvent — extension-script noise", () => {
+  it("drops an event whose frames all come from an injected extension script", () => {
+    expect(filter(eventWithFrames([INPAGE_SCRIPT, INPAGE_SCRIPT]))).toBeNull();
+  });
+
+  // Frames run oldest first, so each order puts the other script at the throw
+  // site. Both keep the event: one first-party frame means our code is involved.
+  it.each([
+    [
+      "first-party frame at the throw site",
+      [INPAGE_SCRIPT, FIRST_PARTY_SCRIPT],
+    ],
+    ["extension frame at the throw site", [FIRST_PARTY_SCRIPT, INPAGE_SCRIPT]],
+  ])("keeps an event with a %s", (_name, filenames) => {
+    const event = eventWithFrames(filenames);
+    expect(filter(event)).toBe(event);
+  });
+
+  it("keeps an event that carries no stack frames", () => {
+    const event = { exception: { values: [{ type: "Error", value: "boom" }] } };
+    expect(filter(event)).toBe(event);
+  });
+
+  it.each(["moz-extension://abc/inpage.js", "safari-web-extension://abc/x.js"])(
+    "drops injected-script noise from %s",
+    (filename) => {
+      expect(filter(eventWithFrames([filename]))).toBeNull();
+    },
+  );
+});
+
 // Minimal test harness: stripAuthHeaders takes an ErrorEvent | TransactionEvent
 // and mutates/returns it. For unit-test purposes we can cast a loose object to
 // the relevant shape — the scrubber only reads fields by optional path.

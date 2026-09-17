@@ -178,8 +178,53 @@ export function filterAndStripSentryEvent<
   T extends ErrorEvent | TransactionEvent,
 >(event: T): T | null {
   if (isLoopbackRequestEvent(event)) return null;
+  if (isExtensionOnlyErrorEvent(event)) return null;
   return stripAuthHeaders(event);
 }
+
+// True only when the event carries at least one usable stack frame and every
+// usable frame sits in an injected extension script. Sentry's own `denyUrls`
+// would be the obvious home for this, but `_getEventFilterUrl` matches a single
+// frame — the throw site — so a first-party error that throws inside an
+// extension callback would be dropped with it. Requiring every frame keeps that
+// error. `<anonymous>` and `[native code]` carry no URL, so they are skipped the
+// way @sentry/core's `_getLastValidUrl` skips them.
+function isExtensionOnlyErrorEvent(event: {
+  exception?: {
+    values?: { stacktrace?: { frames?: { filename?: string }[] } }[];
+  };
+}): boolean {
+  let usableFrames = 0;
+  for (const value of event.exception?.values ?? []) {
+    for (const frame of value.stacktrace?.frames ?? []) {
+      const filename = frame.filename;
+      if (
+        typeof filename !== "string" ||
+        filename === "" ||
+        filename === "<anonymous>" ||
+        filename === "[native code]"
+      ) {
+        continue;
+      }
+      if (!EXTENSION_SCRIPT_DENY_URLS.some((pattern) => pattern.test(filename)))
+        return false;
+      usableFrames += 1;
+    }
+  }
+  return usableFrames > 0;
+}
+
+// Wallet extensions (the MetaMask family) inject a provider script into every
+// page and report their own connection failures through it, so the whole stack
+// trace sits in the injected bundle. Match the extension URL scheme rather than
+// the message, so an error our own code raises is still captured even when it
+// reads like the extension message. Server and edge runtimes never load
+// extension scripts, so the check is inert there.
+const EXTENSION_SCRIPT_DENY_URLS: RegExp[] = [
+  /^chrome-extension:\/\//i,
+  /^moz-extension:\/\//i,
+  /^safari-web-extension:\/\//i,
+];
 
 // Sample 20% of traces in production and disable performance tracing on
 // preview and development deployments to preserve the Sentry quota.
