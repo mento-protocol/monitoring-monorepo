@@ -122,20 +122,8 @@ pnpm integrations:probe --write-upstash  # Publish latest snapshot for /integrat
 pnpm integrations:probe:test   # Unit tests for probe adapters/parsers
 
 # Agent issue workboard
-# (Claude cloud sessions without the capability gate: MCP fallback in
-# docs/notes/github-tooling-surfaces.md)
-pnpm issue:claim --count 3 --agent codex       # Claim ready issues, record ownership, preserve Project Status
-pnpm issue:claim --issue 901 --agent codex --branch fix/901 --claim-id sweep-901 --sweep-eligible --body-sha256 <digest> # Claim one inspected sweep snapshot
-pnpm issue:groom --issue 901 --add-label pkg:tooling,kind:workflow # Add routing labels under the per-issue mutex; refuses a write that completes sweep eligibility, an owned issue, or an undefined label
-pnpm issue:review --pr 123 --issue 901         # Move claimed issue to in-pr / review
-pnpm issue:review --pr 123 --issue 901 --claim-id <id> --rebind-branch # Prove and bind a PR branch created after claim
-pnpm issue:release --issue 901 --claim-id <id> # Release the matching claim back to agent-ready
-pnpm issue:release --issue 901 --claim-id <id> --closed-unmerged-pr # Release after the stored PR closes unmerged
-pnpm issue:release --issue 901 --claim-id <id> --merged-pr --needs-grooming # Continue a still-open issue after its stored PR merges
-pnpm issue:board sync --dry-run                # Preview the repository-wide projection; reports incompletely groomed agent-ready issues
-pnpm issue:board sync                          # Apply the authorized projection; preserve Project Status
-pnpm issue:board backfill --issue 901 --dry-run # Preview fill-only ownership-field recovery from a trusted claim comment
-pnpm issue:board:test                          # Offline tests for the issue-board helper
+# Issue lifecycle commands (claim, groom, review, release, board) and the
+# Claude cloud MCP fallback: docs/notes/agent-issue-workflow.md
 
 # Public config package
 pnpm --filter @mento-protocol/config build     # Clean-build the public protocol metadata package
