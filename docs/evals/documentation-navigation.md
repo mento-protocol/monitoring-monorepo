@@ -341,9 +341,10 @@ on digest drift. Read this as a current-contract run, not as that marker's scope
 | Unique suite bytes                  |  258,542 / 262,000 | 251,231 / 262,000 |
 | Questions over the per-question cap |                  0 |                 0 |
 
-The first attempt validated nothing: the request schema rejected every evidence
-span. PR #2478 repaired it with `line_start` plus `line_count` bounded to 21
-lines, and both later runs validated with zero errors. The sole miss was
+The first attempt scored nothing, in two stages: the request schema failed on
+`uniqueItems` before generation, and spans over the 21-line cap then failed
+local validation. PR #2478 repaired both with `line_start` plus `line_count`
+bounded to 21 lines, and both later runs validated with zero errors. The sole miss was
 `commands-issue-lifecycle`, where the run answered from
 `docs/notes/quick-commands.md`, which restates the command block owned by
 `docs/notes/agent-issue-workflow.md`, never links to it, and has drifted from
