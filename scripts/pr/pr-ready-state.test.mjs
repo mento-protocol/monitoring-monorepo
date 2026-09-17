@@ -26,6 +26,7 @@ import {
   splitRequiredAndOptionalChecks,
 } from "./pr-ready-state-core.mjs";
 import {
+  codeRabbitRateLimitRefusalTime,
   countTrustedCodeRabbitReviewRequests,
   findCodeRabbitPathFilterSkipCandidate,
   validateCodeRabbitPathFilterSkip,
@@ -33,6 +34,7 @@ import {
 import {
   summarizeCodeRabbitReviewGate,
   CODERABBIT_HEAD_GRACE_MS,
+  CODERABBIT_REFUSAL_RETRY_MS,
 } from "./pr-ready-state-closeout.mjs";
 import { formatCompact, formatHuman } from "./pr-ready-state-format.mjs";
 import { verifyReadinessSnapshot } from "./pr-ready-state-stack.mjs";
@@ -4479,6 +4481,253 @@ test("waits when the head update time is unknown", () => {
     "request_review_once_for_head",
     "a known head past the grace still earns its one request",
   );
+});
+
+// The observed PR #2410 shapes (2026-09-14): a marked request, CodeRabbit's
+// rate-limit refusal reply, and the accepted reply the manual retry drew.
+const CODERABBIT_REFUSAL_REPLY = [
+  "<!-- This is an auto-generated reply by CodeRabbit -->",
+  "<!-- CodeRabbit review command invocation: v2:1f0ce80985cd0efef -->",
+  "<details>",
+  "<summary>⚠️ Action not completed</summary>",
+  "",
+  "Review rate limited.",
+  "",
+  "</details>",
+].join("\n");
+const CODERABBIT_ACCEPTED_REPLY = CODERABBIT_REFUSAL_REPLY.replace(
+  "<summary>⚠️ Action not completed</summary>\n\nReview rate limited.",
+  "<summary>✅ Action performed</summary>\n\nReview finished.",
+);
+const CODERABBIT_NO_FILES_REPLY = CODERABBIT_REFUSAL_REPLY.replace(
+  "Review rate limited.",
+  "No files to review.",
+);
+
+test("binds a CodeRabbit rate-limit refusal to the request it answered", () => {
+  const currentHeadOid = "b".repeat(40);
+  const oldHeadOid = "a".repeat(40);
+  const request = (head = currentHeadOid, at = "2026-09-14T19:54:45Z") => ({
+    body: `@coderabbitai review\n\n<!-- coderabbit-final-head-review:${head} -->`,
+    author_association: "MEMBER",
+    user: { login: "chapati23" },
+    created_at: at,
+  });
+  const reply = (
+    body,
+    at = "2026-09-14T19:54:56Z",
+    login = "coderabbitai[bot]",
+  ) => ({ body, user: { login }, created_at: at });
+  const refusalTime = (issueComments) =>
+    codeRabbitRateLimitRefusalTime({ issueComments, currentHeadOid });
+  const classify = (issueComments) =>
+    classifyCodeRabbitReviewSignal({
+      currentHeadOid,
+      issueComments,
+      refusedAt: refusalTime(issueComments),
+    });
+
+  const refused = [request(), reply(CODERABBIT_REFUSAL_REPLY)];
+  assertEqual(refusalTime(refused), Date.parse("2026-09-14T19:54:56Z"));
+  assertEqual(classify(refused), "refused");
+
+  // The trust boundary: comment bodies are untrusted input, so the refusal
+  // counts only from CodeRabbit itself.
+  const untrustedRefusal = [
+    request(),
+    reply(CODERABBIT_REFUSAL_REPLY, "2026-09-14T19:54:56Z", "outside-user"),
+  ];
+  assertEqual(refusalTime(untrustedRefusal), null);
+  assertEqual(
+    classify(untrustedRefusal),
+    "requested",
+    "an untrusted author must not flip the state with the refusal text",
+  );
+
+  // A CodeRabbit comment that is not its reply to a review command, and an
+  // "Action not completed" with another reason, are not rate-limit refusals.
+  assertEqual(
+    refusalTime([
+      request(),
+      reply(CODERABBIT_REFUSAL_REPLY.split("\n").slice(2).join("\n")),
+    ]),
+    null,
+  );
+  assertEqual(refusalTime([request(), reply(CODERABBIT_NO_FILES_REPLY)]), null);
+
+  // CodeRabbit answers one command per reply, so a later reply belongs to
+  // another command and must not strand the retry by clearing the refusal.
+  assertEqual(
+    refusalTime([
+      request(),
+      reply(CODERABBIT_REFUSAL_REPLY),
+      reply(CODERABBIT_ACCEPTED_REPLY, "2026-09-14T20:00:00Z"),
+    ]),
+    Date.parse("2026-09-14T19:54:56Z"),
+  );
+
+  // Only a later request supersedes the refusal, whether or not its own reply
+  // has landed yet.
+  assertEqual(
+    refusalTime([
+      request(),
+      reply(CODERABBIT_REFUSAL_REPLY),
+      request(currentHeadOid, "2026-09-14T20:14:13Z"),
+    ]),
+    null,
+  );
+  assertEqual(
+    refusalTime([
+      request(),
+      reply(CODERABBIT_REFUSAL_REPLY),
+      request(currentHeadOid, "2026-09-14T20:14:13Z"),
+      reply(CODERABBIT_ACCEPTED_REPLY, "2026-09-14T20:14:19Z"),
+    ]),
+    null,
+  );
+
+  // A refusal that answered another head's request says nothing about this one,
+  // and without a current head nothing can be bound at all.
+  assertEqual(
+    refusalTime([
+      request(oldHeadOid, "2026-09-14T18:00:00Z"),
+      reply(CODERABBIT_REFUSAL_REPLY, "2026-09-14T18:00:10Z"),
+      request(),
+    ]),
+    null,
+  );
+  assertEqual(
+    codeRabbitRateLimitRefusalTime({
+      issueComments: refused,
+      currentHeadOid: null,
+    }),
+    null,
+  );
+
+  // A completed exact-head run still outranks a refused request.
+  assertEqual(
+    classifyCodeRabbitReviewSignal({
+      currentHeadOid,
+      issueComments: refused,
+      refusedAt: refusalTime(refused),
+      reviews: [
+        {
+          author: { login: "coderabbitai" },
+          body: "**Run ID**: `008b2b08-511b-40b3-bfae-6673f0339188`",
+          commit: { oid: currentHeadOid },
+        },
+      ],
+    }),
+    "reviewed",
+  );
+});
+
+test("emits the closeout retry once the refusal cooldown has passed", () => {
+  assertEqual(CODERABBIT_REFUSAL_RETRY_MS, minutesMs(30));
+  const observedAt = Date.parse("2026-09-14T20:25:00Z");
+  const gate = (context) =>
+    summarizeCodeRabbitReviewGate("refused", null, {
+      headUpdatedAt: observedAt - minutesMs(60),
+      observedAt,
+      requestCount: 1,
+      requestBudget: 2,
+      ...context,
+    });
+
+  assertEqual(gate({}).ready, false);
+  assertEqual(gate({}).required, false);
+  assertEqual(
+    gate({ refusedAt: observedAt - minutesMs(29) }).fallbackAction,
+    "wait_for_refusal_window",
+    "inside the cooldown a retry is refused again and spends the last slot",
+  );
+  assertEqual(
+    gate({ refusedAt: observedAt - minutesMs(30) }).fallbackAction,
+    "request_review_once_for_head",
+    "past the cooldown the refused head earns the remaining request",
+  );
+  assertEqual(
+    gate({ refusedAt: new Date(observedAt - minutesMs(31)).toISOString() })
+      .fallbackAction,
+    "request_review_once_for_head",
+    "an ISO refusal time reads like an epoch one",
+  );
+  assertEqual(
+    gate({}).fallbackAction,
+    "wait_for_refusal_window",
+    "an unknown refusal time fails closed on the wait",
+  );
+  assertEqual(
+    gate({ refusedAt: observedAt - minutesMs(60), requestCount: 2 })
+      .fallbackAction,
+    "request_budget_exhausted",
+    "the budget of 2 is unchanged: a refusal does not buy a third request",
+  );
+  assertEqual(
+    gate({ refusedAt: observedAt - minutesMs(60), reviewRunning: true })
+      .fallbackAction,
+    "wait_for_running_review",
+    "a running review still outranks the retry",
+  );
+  assertEqual(
+    gate({ refusedAt: observedAt - minutesMs(60), mergeStateStatus: "DIRTY" })
+      .fallbackAction,
+    "merge_base_first",
+    "a conflicted PR still merges the base first",
+  );
+});
+
+test("projects a refused current-head request as the retry the agent may post", () => {
+  const currentHeadOid = "b".repeat(40);
+  const observedAt = Date.parse("2026-09-14T20:25:00Z");
+  const headTime = new Date(observedAt - minutesMs(60)).toISOString();
+  const summarize = (replyLogin) =>
+    summarizeReadyState({
+      pr: {
+        ...basePr,
+        headRefOid: currentHeadOid,
+        headUpdatedAt: headTime,
+        commits: [{ oid: currentHeadOid, committedDate: headTime }],
+      },
+      issueComments: [
+        {
+          body: `@coderabbitai review\n\n<!-- coderabbit-final-head-review:${currentHeadOid} -->`,
+          author_association: "MEMBER",
+          user: { login: "chapati23" },
+          created_at: "2026-09-14T19:54:45Z",
+        },
+        {
+          body: CODERABBIT_REFUSAL_REPLY,
+          user: { login: replyLogin },
+          created_at: "2026-09-14T19:54:56Z",
+        },
+      ],
+      now: observedAt,
+    });
+
+  const refused = summarize("coderabbitai[bot]");
+  assertEqual(refused.codeRabbitReviewSignal, "refused");
+  assertEqual(refused.gates.codeRabbitReviewSignal.requestCount, 1);
+  assertEqual(refused.gates.codeRabbitReviewSignal.requestBudget, 2);
+  assertEqual(
+    refused.gates.codeRabbitReviewSignal.fallbackAction,
+    "request_review_once_for_head",
+  );
+  assertEqual(
+    refused.required.blockers.some((blocker) =>
+      String(blocker.name ?? "").includes("CodeRabbit"),
+    ),
+    false,
+    "the gate stays advisory: a refusal never blocks readiness",
+  );
+
+  const spoofed = summarize("outside-user");
+  assertEqual(
+    spoofed.codeRabbitReviewSignal,
+    "requested",
+    "an untrusted refusal reply must leave the probe waiting",
+  );
+  assertEqual(spoofed.gates.codeRabbitReviewSignal.fallbackAction, "wait");
 });
 
 test("counts trusted head-bound and bare CodeRabbit requests against the budget", () => {

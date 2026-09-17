@@ -392,7 +392,9 @@ four passages named at its end.
   whose precedence [`../notes/pr-ready-state.md`](../notes/pr-ready-state.md)
   states: merge the base first, never post while a CodeRabbit check runs on
   the head, wait out a head under five minutes old or of unknown age, stop at
-  the budget, else post one marked request for the head. The runbooks match:
+  the budget, wait out the 30-minute cooldown after a rate-limit refusal
+  (added 2026-09-17), else post one marked request for the head. The runbooks
+  match:
   merge the base first, batch a fix round into one push, and never use
   GitHub's "Update branch" button or edit files in the web UI on an open PR.
   A first version also modelled the head's age to the minute (activation

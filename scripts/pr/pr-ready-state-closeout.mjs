@@ -17,6 +17,17 @@ export const CODERABBIT_REVIEW_REQUEST_BUDGET = 2;
 // re-review a base merge draws). Requesting inside that window buys a billed
 // review the vendor would have run for free.
 export const CODERABBIT_HEAD_GRACE_MS = 5 * 60 * 1000;
+// A refused request buys no review, so the remaining budget slot may go to one
+// retry — but the shared quota refills on a rolling window, and a retry inside
+// it is refused again and spends that slot for nothing. The cooldown runs from
+// the refusal because the reply CodeRabbit posts to a request names no window
+// (every one of the 24 refusal replies this repo recorded between 2026-09-09
+// and 2026-09-16 omits it, including PR #2410's). The separate auto-review
+// notice that does name one was absent there. Observed refills ran 2 to 54
+// minutes and the one measured manual retry succeeded 19.5 minutes after a
+// refusal, so 30 minutes sits mid-range and still leaves the second half of
+// the default one-hour watch for the review itself.
+export const CODERABBIT_REFUSAL_RETRY_MS = 30 * 60 * 1000;
 
 function validIsoTimestamp(value) {
   return Number.isFinite(Date.parse(value ?? "")) ? value : null;
@@ -86,9 +97,10 @@ function codeRabbitCloseoutFallbackAction(
     observedAt,
     requestCount,
     requestBudget,
+    refusedAt,
   },
 ) {
-  if (!["missing", "stale"].includes(state)) return "wait";
+  if (!["missing", "stale", "refused"].includes(state)) return "wait";
   // A conflicted PR (DIRTY) always needs the base merged before anything else
   // can be reviewed. A BEHIND PR needs it too whenever BEHIND is still a
   // required blocker in `pr-ready-state-core.mjs` — i.e. until the base's
@@ -117,6 +129,14 @@ function codeRabbitCloseoutFallbackAction(
     return "wait_for_head_grace";
   }
   if (requestCount >= requestBudget) return "request_budget_exhausted";
+  // An unknown refusal time cannot show the cooldown has passed, so it fails
+  // closed on the wait.
+  if (
+    state === "refused" &&
+    (refusedAt === null || observedAt - refusedAt < CODERABBIT_REFUSAL_RETRY_MS)
+  ) {
+    return "wait_for_refusal_window";
+  }
   return "request_review_once_for_head";
 }
 
@@ -143,6 +163,7 @@ export function summarizeCodeRabbitReviewGate(
       observedAt: normalizeEpochMs(context?.observedAt) ?? Date.now(),
       requestCount,
       requestBudget,
+      refusedAt: normalizeEpochMs(context?.refusedAt),
     }),
     requestCount,
     requestBudget,
