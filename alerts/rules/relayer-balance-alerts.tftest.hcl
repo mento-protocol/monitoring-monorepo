@@ -19,6 +19,11 @@ run "relayer_balance_alerts_follow_the_runway_policy" {
   }
 
   assert {
+    condition     = sort(keys(local.relayer_burn)) == sort(keys(local.chains))
+    error_message = "Every chain in the registry needs a relayer_burn entry, and no stale ones may remain."
+  }
+
+  assert {
     condition = (
       local.refiller_balance_rules["celo"].threshold == ceil(7200 * 14 / 30) &&
       local.refiller_balance_rules["polygon"].threshold == ceil(7000 * 14 / 30) &&
@@ -54,7 +59,7 @@ run "relayer_balance_alerts_follow_the_runway_policy" {
 
   assert {
     condition = alltrue([
-      for k, c in local.chains : alltrue([
+      for k, c in local.relayer_burn : alltrue([
         for class_key, cls in c.signer_classes : alltrue([
           for feed in cls.feeds :
           strcontains(local.signer_balance_rules["${k}/default"].exclude, feed)
@@ -62,6 +67,26 @@ run "relayer_balance_alerts_follow_the_runway_policy" {
       ])
     ])
     error_message = "The default signer rule must exclude every feed a signer class covers, or that signer would alert twice with two thresholds."
+  }
+
+  assert {
+    condition = alltrue(flatten([
+      for k, c in local.relayer_burn : [
+        for class_key, cls in c.signer_classes : [
+          for feed in cls.feeds :
+          strcontains(file("${path.module}/../../aegis/config.yaml"), "RelayerSigner${feed}: ")
+        ]
+      ]
+    ])) && strcontains(file("${path.module}/../../aegis/config.yaml"), "RelayerRefiller: ")
+    error_message = "Every owner these rules select must be published by Aegis (a global var in aegis/config.yaml), or the rule can never fire."
+  }
+
+  assert {
+    condition = alltrue([
+      for rule in grafana_rule_group.oracle_relayers.rule : rule.no_data_state == "OK"
+      if startswith(rule.name, "Low Refiller Balance")
+    ])
+    error_message = "Refiller rules must not alert on NoData: their series only exists after Aegis deploys the RelayerRefiller owner, and the two deploys are not ordered."
   }
 
   assert {

@@ -20,6 +20,7 @@ global:
     RelayerSignerCELONGN: '0x5008F97b7713e2166041375a316990868F92B3d2'
     RelayerSignerCELOPHP: '0xCCD3D48D6a5340156d85DC5A43743e65Bd4a6E51'
     RelayerSignerCELOUSD: '0x7E43bBD97e3447d0DD8ef2C6946e1b1e87bDb87F'
+    RelayerSignerCELOXAUT: '0x9eebAb5CE43a671399aC54cC3c49514469a51a80'
     RelayerSignerCELOXOF: '0xB3B87B49De2C5012467505cAb551773023B89aEB'
     RelayerSignerCELOZAR: '0x17C8c519CD32abDE464D4FA19c7461A399eE2c5a'
     RelayerSignerCHFUSD: '0x75bB7BC38Bb886D86B6cBaBfC334B807F6926b7d'
@@ -619,6 +620,8 @@ metrics:
       - [RelayerSignerCELONGN]
       - [RelayerSignerCELOPHP]
       - [RelayerSignerCELOUSD]
+      # CELO/XAUT only relays on Celo mainnet
+      - [RelayerSignerCELOXAUT]
       - [RelayerSignerCELOXOF]
       - [RelayerSignerCELOZAR]
       - [RelayerSignerCHFUSD]

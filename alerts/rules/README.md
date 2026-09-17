@@ -169,7 +169,7 @@ when the annotation is present.
 ## Relayer wallet balances
 
 Both rules live in `rules-oracle-relayers.tf` and take their numbers from the
-`chains` registry in `protocol-routing-locals.tf`, in days of runway rather than
+`relayer_burn` map in `relayer-balance-locals.tf`, in days of runway rather than
 flat token amounts. The burn figures mirror the `DAILY_COST` table in the
 oracle-relayer refill script; update both together.
 

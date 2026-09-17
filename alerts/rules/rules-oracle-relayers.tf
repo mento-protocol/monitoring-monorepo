@@ -184,14 +184,19 @@ resource "grafana_rule_group" "oracle_relayers" {
       condition      = "belowThreshold"
       for            = "5m"
       exec_err_state = "Error"
-      no_data_state  = "NoData"
+      # OK rather than NoData: the series only exists once Aegis has deployed
+      # the RelayerRefiller owner, and the Aegis deploy and this stack's apply
+      # start independently on merge. Aegis going dark is covered by its own
+      # liveness alerts, and relayer-balance-alerts.tftest.hcl fails if the
+      # owner ever disappears from aegis/config.yaml.
+      no_data_state = "OK"
 
       annotations = {
         summary        = "Low ${rule.value.chain.symbol} balance in the relayer refiller wallet on {{ $labels.chain | title }}: {{ with (index $values \"balance\") }}{{ humanize .Value }}{{ else }}unknown{{ end }} ${rule.value.chain.symbol}"
         currentBalance = "{{ with (index $values \"balance\") }}{{ humanize .Value }}{{ else }}unknown{{ end }}"
         threshold      = tostring(rule.value.threshold)
         runwayDays     = "{{ with (index $values \"runwayDays\") }}{{ printf \"%.0f\" .Value }}{{ else }}unknown{{ end }}"
-        monthlyBurn    = tostring(rule.value.chain.refiller_monthly_burn)
+        monthlyBurn    = tostring(rule.value.monthly_burn)
       }
 
       labels = {
