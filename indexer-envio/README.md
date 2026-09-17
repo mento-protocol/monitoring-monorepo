@@ -182,6 +182,10 @@ When a new `@mento-protocol/contracts` version is published:
    `src/EventHandlers.ts`.
 5. Run `pnpm codegen` and the cross-layer checklist in
    [`docs/pr-checklists/stateful-data-ui.md`](../docs/pr-checklists/stateful-data-ui.md).
+6. If the contract needs shared-config data, update the matching file under
+   `../shared-config/` and its mirror under `config/` in the same change; the
+   mirror parity tests under `test/` enforce equality. The Dependencies section
+   of [`AGENTS.md`](AGENTS.md) owns the rule.
 
 ### Performance Diagnostics
 
