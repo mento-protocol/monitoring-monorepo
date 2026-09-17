@@ -403,6 +403,26 @@ async function main() {
       context.suite,
       context.inventory,
     );
+    const totalUniqueHeadroom =
+      context.suite.targets.max_total_unique_source_bytes -
+      contextFloor.total_unique_route_bytes;
+    const requiredTotalUniqueHeadroom =
+      context.suite.targets.min_total_unique_source_headroom_bytes;
+    const totalUniqueReserveSurplus = Number.isSafeInteger(
+      requiredTotalUniqueHeadroom,
+    )
+      ? totalUniqueHeadroom - requiredTotalUniqueHeadroom
+      : null;
+    const reserveSurplusWarningThreshold =
+      context.suite.targets
+        .min_total_unique_source_reserve_surplus_warning_bytes;
+    const reserveStatus = !Number.isSafeInteger(reserveSurplusWarningThreshold)
+      ? "not_configured"
+      : !Number.isSafeInteger(totalUniqueReserveSurplus)
+        ? "not_configured"
+        : totalUniqueReserveSurplus < reserveSurplusWarningThreshold
+          ? "nearly_exhausted"
+          : "healthy";
     const result = {
       valid: true,
       suite_id: context.suite.suite_id,
@@ -414,18 +434,27 @@ async function main() {
           context.suite.targets.max_question_source_bytes -
           contextFloor.max_question_route_bytes,
         total_unique_route_bytes: contextFloor.total_unique_route_bytes,
-        total_unique_headroom_bytes:
-          context.suite.targets.max_total_unique_source_bytes -
-          contextFloor.total_unique_route_bytes,
-        min_total_unique_source_headroom_bytes:
-          context.suite.targets.min_total_unique_source_headroom_bytes,
-        total_unique_reserve_surplus_bytes:
-          context.suite.targets.max_total_unique_source_bytes -
-          contextFloor.total_unique_route_bytes -
-          context.suite.targets.min_total_unique_source_headroom_bytes,
+        total_unique_headroom_bytes: totalUniqueHeadroom,
+        min_total_unique_source_headroom_bytes: requiredTotalUniqueHeadroom,
+        min_total_unique_source_reserve_surplus_warning_bytes:
+          reserveSurplusWarningThreshold,
+        total_unique_reserve_surplus_bytes: totalUniqueReserveSurplus,
+        total_unique_reserve_status: reserveStatus,
       },
     };
     printObject(result, options.json);
+    if (reserveStatus === "nearly_exhausted") {
+      const message =
+        `documentation navigation reserve is nearly exhausted: ` +
+        `${totalUniqueReserveSurplus} bytes remain above the required ` +
+        `${requiredTotalUniqueHeadroom}-byte headroom; ` +
+        `warning threshold is ${reserveSurplusWarningThreshold} bytes`;
+      process.stderr.write(
+        process.env.GITHUB_ACTIONS === "true"
+          ? `::warning title=Documentation navigation reserve::${message}\n`
+          : `docs-navigation-eval: warning: ${message}\n`,
+      );
+    }
     return;
   }
   if (options.mode === "prompt") {

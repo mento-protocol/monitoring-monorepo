@@ -26,76 +26,8 @@ const HTML_HIDDEN_RE = new RegExp(
 );
 const HTML_TAG_RE = new RegExp(`<${HTML_ATTRIBUTES}>`, "g");
 const HTML_ENTITY_RE =
-  /&(?:#([0-9]+)|#[xX]([0-9A-Fa-f]+)|([A-Za-z][A-Za-z0-9]*));/g;
-// GitHub renders a character reference as a character, so the counter decodes
-// one rather than dropping it: prose encoded as `&#119;`-style references is
-// prose. Every name outside the tables below decodes to a counting letter, so
-// an unlisted name such as `&Aacute;` adds a word instead of disappearing.
-//
-// Names that render as a space, and so separate two words.
-const SPACE_ENTITIES = new Set([
-  "nbsp",
-  "ensp",
-  "emsp",
-  "emsp13",
-  "emsp14",
-  "numsp",
-  "puncsp",
-  "thinsp",
-  "hairsp",
-]);
-// Names that render as nothing at all. They must decode to the empty string,
-// not a space: `inter&shy;national` is one rendered word, and turning the soft
-// hyphen into a space would count it as two.
-const ZERO_WIDTH_ENTITIES = new Set(["zwnj", "zwj", "lrm", "rlm", "shy"]);
-// Names that render as punctuation or a symbol. They add no word, so listing
-// them keeps a body that writes `&mdash;` from being counted one word over.
-const PUNCTUATION_ENTITIES = new Map([
-  ["amp", "&"],
-  ["lt", "<"],
-  ["gt", ">"],
-  ["quot", '"'],
-  ["apos", "'"],
-  ["mdash", "—"],
-  ["ndash", "–"],
-  ["horbar", "―"],
-  ["hellip", "…"],
-  ["ldquo", "“"],
-  ["rdquo", "”"],
-  ["lsquo", "‘"],
-  ["rsquo", "’"],
-  ["laquo", "«"],
-  ["raquo", "»"],
-  ["bull", "•"],
-  ["middot", "·"],
-  ["dagger", "†"],
-  ["Dagger", "‡"],
-  ["sect", "§"],
-  ["para", "¶"],
-  ["times", "×"],
-  ["divide", "÷"],
-  ["plusmn", "±"],
-  ["minus", "−"],
-  ["deg", "°"],
-  ["prime", "′"],
-  ["Prime", "″"],
-  ["copy", "©"],
-  ["reg", "®"],
-  ["trade", "™"],
-  ["euro", "€"],
-  ["pound", "£"],
-  ["yen", "¥"],
-  ["cent", "¢"],
-  ["larr", "←"],
-  ["rarr", "→"],
-  ["harr", "↔"],
-  ["darr", "↓"],
-  ["uarr", "↑"],
-  ["check", "✓"],
-  ["cross", "✗"],
-]);
-// Any other name renders as at least one visible character, so it counts.
-const ENTITY_PLACEHOLDER = "x";
+  /&(?:#(?:[0-9]+|[xX][0-9A-Fa-f]+)|[A-Za-z][A-Za-z0-9]*);/g;
+const HTML_COMMENT_PLACEHOLDER = "\u2060";
 const DEFERRALS_HEADING_RE = /^##\s+Deferrals\s*$/;
 const DEFERRALS_STYLE_RE = /^ {0,3}#{1,6}\s*Deferrals([^A-Za-z0-9_]|$)/i;
 const NONE_RE = /^\s*(?:[-*]\s+)?none\s*\.?\s*$/i;
@@ -113,53 +45,135 @@ function linesOf(body) {
   return body.split(/\r?\n/);
 }
 
-function stripHtmlCommentLines(body) {
-  let inComment = false;
-  const kept = [];
+function htmlCommentRanges(value) {
+  const ranges = [];
+  let inTag = false;
+  let quote = null;
 
-  for (const originalLine of linesOf(body)) {
-    let line = originalLine;
-    let output = "";
-    let strippedComment = false;
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index];
 
-    while (line !== "") {
-      if (inComment) {
-        const close = line.indexOf("-->");
-        if (close === -1) {
-          break;
-        }
-        inComment = false;
-        strippedComment = true;
-        line = line.slice(close + 3);
-        continue;
+    if (inTag) {
+      if (quote !== null) {
+        if (character === quote) quote = null;
+      } else if (character === '"' || character === "'") {
+        quote = character;
+      } else if (character === ">") {
+        inTag = false;
       }
-
-      const open = line.indexOf("<!--");
-      if (open === -1) {
-        output += line;
-        break;
-      }
-
-      output += line.slice(0, open);
-      strippedComment = true;
-
-      const close = line.indexOf("-->", open + 4);
-      if (close === -1) {
-        inComment = true;
-        break;
-      }
-
-      line = line.slice(close + 3);
-    }
-
-    if (strippedComment && output.trim() === "") {
       continue;
     }
 
-    kept.push(strippedComment ? output.trimStart() : output);
+    if (value.startsWith("<!--", index)) {
+      const close = value.indexOf("-->", index + 4);
+      const end = close === -1 ? value.length : close + 3;
+      ranges.push([index, end]);
+      index = end - 1;
+      continue;
+    }
+
+    const nextCharacter = value[index + 1] ?? "";
+    const startsEndTag =
+      nextCharacter === "/" && /[A-Za-z]/.test(value[index + 2] ?? "");
+    if (
+      character === "<" &&
+      (/[A-Za-z!?]/.test(nextCharacter) || startsEndTag)
+    ) {
+      inTag = true;
+    }
   }
 
-  return kept.join("\n");
+  return ranges;
+}
+
+function lineStartOffsets(body) {
+  const offsets = [0];
+  for (const match of body.matchAll(/\r?\n/g)) {
+    offsets.push(match.index + match[0].length);
+  }
+  return offsets;
+}
+
+function nodeSourceOffset(bodyLines, lineOffsets, node, index) {
+  if (index === node.value.length) return node.position.end.offset;
+
+  const before = node.value.slice(0, index);
+  const localLine = before.split("\n").length - 1;
+  const lastNewline = before.lastIndexOf("\n");
+  const localColumn = index - lastNewline - 1;
+  const valueLine = node.value.split("\n")[localLine] ?? "";
+  const bodyLine = node.position.start.line - 1 + localLine;
+  const sourceLine = bodyLines[bodyLine] ?? "";
+  const contentStart =
+    localLine === 0
+      ? node.position.start.column - 1
+      : sourceLine.endsWith(valueLine)
+        ? sourceLine.length - valueLine.length
+        : sourceLine.lastIndexOf(valueLine);
+
+  if (contentStart < 0) return null;
+  return lineOffsets[bodyLine] + contentStart + localColumn;
+}
+
+function stripHtmlComments(body) {
+  const ranges = [];
+  const bodyLines = linesOf(body);
+  const lineOffsets = lineStartOffsets(body);
+
+  const walk = (node) => {
+    if (
+      node.type === "html" &&
+      Number.isInteger(node.position?.start.offset) &&
+      Number.isInteger(node.position?.end.offset)
+    ) {
+      for (const [localStart, localEnd] of htmlCommentRanges(node.value)) {
+        const start = nodeSourceOffset(
+          bodyLines,
+          lineOffsets,
+          node,
+          localStart,
+        );
+        const end = nodeSourceOffset(bodyLines, lineOffsets, node, localEnd);
+        if (start !== null && end !== null) ranges.push([start, end]);
+      }
+      return;
+    }
+    if (Array.isArray(node.children)) node.children.forEach(walk);
+  };
+
+  walk(fromMarkdown(body));
+  ranges.sort(([left], [right]) => left - right);
+
+  const hasSameLineTail = (end) => {
+    const newline = body.indexOf("\n", end);
+    const lineEnd = newline === -1 ? body.length : newline;
+    let cursor = end;
+
+    for (const [commentStart, commentEnd] of ranges) {
+      if (commentEnd <= cursor) continue;
+      if (commentStart >= lineEnd) break;
+      if (/\S/.test(body.slice(cursor, commentStart))) return true;
+      cursor = Math.min(commentEnd, lineEnd);
+    }
+
+    return /\S/.test(body.slice(cursor, lineEnd));
+  };
+
+  let stripped = body;
+  for (const [start, end] of ranges.toReversed()) {
+    const replacement = hasSameLineTail(end) ? HTML_COMMENT_PLACEHOLDER : "";
+    stripped = stripped.slice(0, start) + replacement + stripped.slice(end);
+  }
+  return stripped;
+}
+
+function normalizeCommentedHeadings(body) {
+  return linesOf(body)
+    .map((line) => {
+      const withoutComments = line.replaceAll(HTML_COMMENT_PLACEHOLDER, "");
+      return H2_HEADING_RE.test(withoutComments) ? withoutComments : line;
+    })
+    .join("\n");
 }
 
 function stripFencedBlocks(body) {
@@ -196,7 +210,7 @@ function stripFencedBlocks(body) {
 }
 
 function firstNonBlankLine(body) {
-  return linesOf(body).find((line) => line.trim() !== "") ?? "";
+  return linesOf(body).find(hasVisibleCharacters) ?? "";
 }
 
 function h2Headings(body) {
@@ -253,40 +267,36 @@ function countWords(text) {
     .length;
 }
 
+function decodeCharacterReference(reference) {
+  let decoded = "";
+
+  const walk = (node) => {
+    if (node.type === "text") decoded += node.value;
+    if (Array.isArray(node.children)) node.children.forEach(walk);
+  };
+
+  walk(fromMarkdown(reference));
+  return decoded;
+}
+
 /**
  * Words inside raw HTML. A reader sees prose wrapped in `<p>` or a
  * `<details>` block, so it counts against the budget even though the opening
  * sections do not accept it as their explanation. Tags, attributes, and
  * non-rendering elements contribute nothing.
  */
-function decodeCharacterReference(match, decimal, hex, name) {
-  if (decimal !== undefined || hex !== undefined) {
-    const code = Number.parseInt(
-      decimal ?? hex,
-      decimal === undefined ? 16 : 10,
-    );
-    if (!Number.isInteger(code) || code < 0 || code > 0x10ffff) return " ";
-    // A surrogate half is not a character GitHub renders on its own.
-    if (code >= 0xd800 && code <= 0xdfff) return " ";
-    return String.fromCodePoint(code);
-  }
-  // Reference names are case-sensitive: `&Dagger;` is ‡ and `&dagger;` is †,
-  // so the lookup keeps the case the body used.
-  if (ZERO_WIDTH_ENTITIES.has(name)) return "";
-  if (SPACE_ENTITIES.has(name)) return " ";
-  return PUNCTUATION_ENTITIES.get(name) ?? ENTITY_PLACEHOLDER;
-}
-
 function htmlWordCount(value) {
-  return countWords(
-    value
-      .replace(HTML_COMMENT_RE, " ")
-      .replace(HTML_HIDDEN_RE, " ")
-      // Tags go before decoding, so a `&lt;p&gt;` the reader sees as text is
-      // never mistaken for markup.
-      .replace(HTML_TAG_RE, " ")
-      .replace(HTML_ENTITY_RE, decodeCharacterReference),
-  );
+  const text = value
+    .replace(HTML_COMMENT_RE, " ")
+    .replace(HTML_HIDDEN_RE, " ")
+    // Tags go before decoding, so a `&lt;p&gt;` the reader sees as text is
+    // never mistaken for markup.
+    .replace(HTML_TAG_RE, " ");
+
+  // Decode each reference through mdast in isolation. Reparsing the whole
+  // string would treat Markdown-looking raw HTML text as links, images, or
+  // code even though GitHub displays that syntax literally.
+  return countWords(text.replace(HTML_ENTITY_RE, decodeCharacterReference));
 }
 
 /**
@@ -397,7 +407,7 @@ export function validatePrDescription(body) {
     };
   }
 
-  const commentStripped = stripHtmlCommentLines(body);
+  const commentStripped = normalizeCommentedHeadings(stripHtmlComments(body));
   const firstLine = firstNonBlankLine(commentStripped);
   const { body: fenceStripped, hasUnclosedFence } =
     stripFencedBlocks(commentStripped);
@@ -470,9 +480,9 @@ export function validatePrDescription(body) {
     };
   }
 
-  const deferralsStyle = linesOf(fenceStripped).filter((line) =>
-    DEFERRALS_STYLE_RE.test(line),
-  );
+  const deferralsStyle = linesOf(fenceStripped)
+    .map((line) => line.replaceAll(HTML_COMMENT_PLACEHOLDER, ""))
+    .filter((line) => DEFERRALS_STYLE_RE.test(line));
   const nearMiss = deferralsStyle.filter(
     (line) => !DEFERRALS_HEADING_RE.test(line),
   );
