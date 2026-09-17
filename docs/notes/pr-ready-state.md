@@ -58,10 +58,11 @@ Required blockers:
   as `state: "overridden"` with the author and reason. An unknown base is
   never overridable.
 
-- Closed-unmerged PRs. Merged PRs are terminal-ready and short-circuit the
-  expensive readiness sweep because there is nothing left to fix or wait on.
-  Closed-unmerged PRs report only the terminal `state` blocker; review gates are
-  non-required because no Codex or reviewer action can unblock a closed PR.
+- Closed-unmerged PRs. The babysit gate proves a same-repo head before any
+  terminal-state exit. Merged PRs are then terminal-ready and short-circuit the
+  readiness sweep. Closed-unmerged PRs report only the terminal `state` blocker;
+  review gates are non-required because no Codex or reviewer action can unblock
+  a closed PR.
 - Required check runs or status contexts that are failing, pending, queued, or
   missing from the branch-protection rollup.
 - Branch-protection context lookup failures caused by unreadable or
@@ -543,9 +544,9 @@ Expected top-level fields:
 Field expectations:
 
 - `ready`: `true` only when every required blocker is clear. Optional lag must
-  not flip this to `false`. A PR whose `pr.state` is `MERGED` is terminal-ready;
-  a PR whose `pr.state` is `CLOSED` without merge is terminal-blocked with a
-  `state` blocker.
+  not flip this to `false`. Callers prove a same-repo head before acting on
+  terminal state: `MERGED` is terminal-ready; `CLOSED` without merge is
+  terminal-blocked with a `state` blocker.
 - `required.ready`: mirrors the required-readiness half of the decision. Agents
   use it only after `pr:feedback-state` has a clean feedback ledger; it is not
   sufficient for all-clear by itself.
@@ -573,9 +574,9 @@ Field expectations:
 - `pr.autoMergeEnabledAt`: the observed pending auto-merge enable timestamp,
   or null. It records intent and never proves merge completion.
 - `pr.mergedAt` / `pr.closedAt`: terminal timestamps when GitHub provides them.
-- Terminal closed PR summaries may use gate state `not_applicable` for gates
-  that are normally required on open PRs. Agents should act on the terminal
-  `state` blocker instead of requesting more review.
+- Terminal closed PR summaries may mark normally required gates
+  `not_applicable`. Act on the terminal `state` blocker instead of requesting
+  more review.
 - `required.blockers[]`: only required blockers. Every item needs `kind`,
   `name`, `state`, `required: true`, and a URL when GitHub provides one.
 - `optional.items[]`: advisory signals worth reporting separately. Every item
