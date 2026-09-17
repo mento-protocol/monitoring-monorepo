@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
+import { eventFiltersIntegration } from "@sentry/nextjs";
 import {
+  EXTENSION_SCRIPT_DENY_URLS,
   filterAndStripSentryEvent,
   resolveTracesSampleRate,
   shouldEnableSentry,
@@ -15,6 +17,65 @@ describe("resolveTracesSampleRate", () => {
     "disables tracing when VERCEL_ENV is %s",
     (vercelEnv) => {
       expect(resolveTracesSampleRate(vercelEnv)).toBe(0);
+    },
+  );
+});
+
+// Run the real EventFilters integration over the deny list the browser client
+// passes to Sentry.init, so the test covers the SDK's own matching instead of
+// a copy of it. Stack frames are ordered oldest first, so the last frame is the
+// one Sentry matches against denyUrls.
+function filterExtensionNoise<T extends object>(event: T): T | null {
+  const filters = eventFiltersIntegration({
+    denyUrls: EXTENSION_SCRIPT_DENY_URLS,
+  });
+  const { processEvent } = filters;
+  if (!processEvent) throw new Error("EventFilters lost its processEvent hook");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const client = { getOptions: () => ({}) } as any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return processEvent(event as any, {}, client) as T | null;
+}
+
+const WALLET_EXTENSION_MESSAGE =
+  "MetaMask: Lost connection to the extension provider.";
+
+function eventWithFrames(filenames: string[]) {
+  return {
+    exception: {
+      values: [
+        {
+          type: "Error",
+          value: WALLET_EXTENSION_MESSAGE,
+          stacktrace: { frames: filenames.map((filename) => ({ filename })) },
+        },
+      ],
+    },
+  };
+}
+
+const INPAGE_SCRIPT =
+  "chrome-extension://nkbihfbeogaeaoehlefnkodbefgpgknn/scripts/inpage.js";
+
+describe("EXTENSION_SCRIPT_DENY_URLS", () => {
+  it("drops an event whose frames all come from an injected extension script", () => {
+    expect(
+      filterExtensionNoise(eventWithFrames([INPAGE_SCRIPT, INPAGE_SCRIPT])),
+    ).toBeNull();
+  });
+
+  it("keeps an event with a first-party frame carrying the same message", () => {
+    const event = eventWithFrames([
+      INPAGE_SCRIPT,
+      "https://monitoring.mento.org/_next/static/chunks/app/page.js",
+    ]);
+    expect(filterExtensionNoise(event)).toBe(event);
+  });
+
+  it.each(["moz-extension://abc/inpage.js", "safari-web-extension://abc/x.js"])(
+    "drops injected-script noise from %s",
+    (filename) => {
+      expect(filterExtensionNoise(eventWithFrames([filename]))).toBeNull();
     },
   );
 });

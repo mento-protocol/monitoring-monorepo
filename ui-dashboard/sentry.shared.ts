@@ -181,6 +181,20 @@ export function filterAndStripSentryEvent<
   return stripAuthHeaders(event);
 }
 
+// Wallet extensions (the MetaMask family) inject a provider script into every
+// page and report their own connection failures through it, so the whole stack
+// trace sits in the injected bundle. Match the extension URL scheme rather than
+// the message: Sentry's EventFilters integration tests `denyUrls` against the
+// top stack frame's filename (`_getEventFilterUrl` in @sentry/core), so an
+// error thrown by our own code keeps a first-party top frame and is still
+// captured, even when it reads like the extension message. Browser client only
+// — server and edge runtimes never load extension scripts.
+export const EXTENSION_SCRIPT_DENY_URLS: RegExp[] = [
+  /^chrome-extension:\/\//i,
+  /^moz-extension:\/\//i,
+  /^safari-web-extension:\/\//i,
+];
+
 // Sample 20% of traces in production and disable performance tracing on
 // preview and development deployments to preserve the Sentry quota.
 //

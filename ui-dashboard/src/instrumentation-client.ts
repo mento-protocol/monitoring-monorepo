@@ -1,5 +1,6 @@
 import * as Sentry from "@sentry/nextjs";
 import {
+  EXTENSION_SCRIPT_DENY_URLS,
   filterAndStripSentryEvent,
   resolveTracesSampleRate,
   shouldEnableSentry,
@@ -65,6 +66,9 @@ if (shouldEnableSentry(clientEnv.NEXT_PUBLIC_VERCEL_ENV)) {
     replaysSessionSampleRate: 0.1,
     replaysOnErrorSampleRate: 1.0,
     sendDefaultPii: false,
+    // Drop errors thrown entirely inside a wallet-extension injected script;
+    // see EXTENSION_SCRIPT_DENY_URLS in sentry.shared.
+    denyUrls: EXTENSION_SCRIPT_DENY_URLS,
     beforeSend: filterAndStripSentryEvent,
     beforeSendTransaction: filterAndStripSentryEvent,
   });
