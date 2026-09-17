@@ -187,12 +187,13 @@ resource "grafana_rule_group" "oracle_relayers" {
       condition      = "belowThreshold"
       for            = "5m"
       exec_err_state = "Error"
-      # OK rather than NoData: the series only exists once Aegis has deployed
-      # the RelayerRefiller owner, and the Aegis deploy and this stack's apply
-      # start independently on merge. Aegis going dark is covered by its own
-      # liveness alerts, and relayer-balance-alerts.tftest.hcl fails if the
-      # owner ever disappears from aegis/config.yaml.
-      no_data_state = "OK"
+      # NoData alerts, like the signer rules: if this chain's RelayerRefiller
+      # series ever disappears (variant removed, balance call stops publishing)
+      # the wallet would otherwise go unwatched in silence. The Aegis liveness
+      # alerts do not cover that, since they pass on any successful call. The
+      # cost is rollout order: approve this stack's apply only after the Aegis
+      # deploy that adds the owner has succeeded (see README.md).
+      no_data_state = "NoData"
 
       annotations = {
         summary        = "Low ${rule.value.chain.symbol} balance in the relayer refiller wallet on {{ $labels.chain | title }}: {{ with (index $values \"balance\") }}{{ humanize .Value }}{{ else }}unknown{{ end }} ${rule.value.chain.symbol}"

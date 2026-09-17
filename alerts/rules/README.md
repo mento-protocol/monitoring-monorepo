@@ -186,6 +186,13 @@ alert means the automation is not keeping up: check the function's
 refiller balance. Both route to `#alerts-oracles` (prod) or `#alerts-testnet`
 at warning/info severity and never page.
 
+**Rollout order.** These rules alert on missing data, so a new owner (a new
+signer, or the refiller on a new chain) must be published by Aegis before the
+rule that selects it is applied. Merge deploys Aegis on its own; approve this
+stack's `production-infra` apply only after that deploy has succeeded and the
+series is visible in Grafana. Approving early raises NoData alerts until Aegis
+catches up.
+
 ## Bridge transfers
 
 The [bridge alert runbook](../../docs/notes/bridge-transfer-alerting.md) owns

@@ -94,10 +94,10 @@ run "relayer_balance_alerts_follow_the_runway_policy" {
 
   assert {
     condition = alltrue([
-      for rule in grafana_rule_group.oracle_relayers.rule : rule.no_data_state == "OK"
+      for rule in grafana_rule_group.oracle_relayers.rule : rule.no_data_state == "NoData"
       if startswith(rule.name, "Low Refiller Balance")
     ])
-    error_message = "Refiller rules must not alert on NoData: their series only exists after Aegis deploys the RelayerRefiller owner, and the two deploys are not ordered."
+    error_message = "Refiller rules must alert on NoData: a missing RelayerRefiller series would otherwise leave the wallet unwatched without anyone noticing."
   }
 
   assert {
