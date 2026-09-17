@@ -1,0 +1,842 @@
+{
+  "schema_version": 1,
+  "suite_id": "documentation-navigation-v1",
+  "fixture_digest": "15f3f3c6ac36b7e81a4128b861ef06f6805516f23b27abe71a6321a5897dd3ec",
+  "run": {
+    "agent": "Codex",
+    "model": "gpt-5.6-sol",
+    "effort": "low",
+    "executed_at": "2026-09-17T11:47:45Z",
+    "repository_base_commit": "db5ef44143d4b915b3d9b16a07f159f84606edf8",
+    "fresh_context": true,
+    "read_only": true,
+    "bootstrap_sources": [
+      {
+        "path": "AGENTS.md",
+        "bytes": 8066,
+        "sha256": "6dc8eabe3efb53bdbab9717da8f995ec69e493e8784933918d0cdbc1beee12c5"
+      },
+      {
+        "path": "docs/README.md",
+        "bytes": 27951,
+        "sha256": "a6c407ecaf3cec6ea41493f00f5fba40702ffd6bac88c06fd952ebb46ed8364c"
+      }
+    ]
+  },
+  "answers": [
+    {
+      "question_id": "package-shared-config-authority",
+      "chosen_documents": ["shared-config/AGENTS.md"],
+      "answer": "Change these values in `shared-config/`, which publishes `@mento-protocol/config` and owns chain metadata, deployment namespaces, token and pool labels, FX calendars, thresholds, and shared ABIs. Update source or JSON inputs, never `dist/`. Keep the indexer JSON mirrors synchronized. For an exported-shape change, build shared-config first, then run direct consumer typechecks. For every shared-config change, also run the shared-config build, dashboard build, and dashboard size-limit checks. Required CI supplies coverage, Knip, downstream-consumer, and conditional mirror coverage.",
+      "evidence": [
+        {
+          "path": "shared-config/AGENTS.md",
+          "line_start": 18,
+          "line_count": 17,
+          "supports": "Defines shared-config as the source of truth and requires stable exports, consumer typechecks, mirror synchronization, and source-only edits."
+        },
+        {
+          "path": "shared-config/AGENTS.md",
+          "line_start": 45,
+          "line_count": 10,
+          "supports": "Defines the build order, dashboard build and size checks, and required CI coverage."
+        }
+      ],
+      "authority_qualifications": [
+        {
+          "path": "shared-config/AGENTS.md",
+          "authority": "canonical",
+          "qualification": "",
+          "verified_against": []
+        }
+      ],
+      "loaded_sources": [
+        {
+          "path": "shared-config/AGENTS.md",
+          "bytes": 2298,
+          "sha256": "4a4b324ba357edb5f96ee63ef9bf1366b3e246ed05d3df00812c65cdcfdf088c"
+        }
+      ]
+    },
+    {
+      "question_id": "package-indexer-add-contract",
+      "chosen_documents": [
+        "indexer-envio/AGENTS.md",
+        "indexer-envio/README.md"
+      ],
+      "answer": "Use `indexer-envio/README.md`, with `indexer-envio/AGENTS.md` as the package router and invariant owner. Add the ABI through `scripts/generateAbis.mjs` and `pnpm generate:abis`, or hand-vendor a minimal documented exception. Add the contract and event to every applicable `config.multichain.*.yaml`, update `schema.graphql`, add the handler under `src/handlers/`, and side-effect import its module from `src/EventHandlers.ts`. Run package-script codegen. Run all affected variants, with non-mainnet variants first and mainnet last because they share one generated tree. If shared-config data is needed, update the canonical shared-config file and the checked-in `indexer-envio/config/` mirror in the same change; parity tests enforce equality.",
+      "evidence": [
+        {
+          "path": "indexer-envio/README.md",
+          "line_start": 173,
+          "line_count": 16,
+          "supports": "Provides the current six-step contract-add procedure for ABI, config, schema, handler entry point, codegen, checklist, and shared-config mirrors."
+        },
+        {
+          "path": "indexer-envio/README.md",
+          "line_start": 126,
+          "line_count": 9,
+          "supports": "Requires package-script codegen and side-effect registration through EventHandlers.ts."
+        },
+        {
+          "path": "indexer-envio/AGENTS.md",
+          "line_start": 42,
+          "line_count": 17,
+          "supports": "Maps hosted configs, handler entry point, checked-in mirrors, and ABI tooling."
+        },
+        {
+          "path": "indexer-envio/AGENTS.md",
+          "line_start": 59,
+          "line_count": 11,
+          "supports": "Defines affected codegen variants and their required execution order."
+        }
+      ],
+      "authority_qualifications": [
+        {
+          "path": "indexer-envio/AGENTS.md",
+          "authority": "canonical",
+          "qualification": "",
+          "verified_against": []
+        },
+        {
+          "path": "indexer-envio/README.md",
+          "authority": "canonical",
+          "qualification": "",
+          "verified_against": []
+        }
+      ],
+      "loaded_sources": [
+        {
+          "path": "indexer-envio/AGENTS.md",
+          "bytes": 7235,
+          "sha256": "e97b6d949f03c6f7ab2cde876baa9fa1e7f0e4e4b7fe3b0f024b3b0842a3ebb5"
+        },
+        {
+          "path": "indexer-envio/README.md",
+          "bytes": 22228,
+          "sha256": "76c0f59f9cd3baff3f0667942d87b8fac97bb2e93cfa18e3010854d9eac4327f"
+        }
+      ]
+    },
+    {
+      "question_id": "package-dashboard-browser-verification",
+      "chosen_documents": ["docs/notes/dashboard-verification.md"],
+      "answer": "A dashboard UI change is incomplete until the changed behavior is exercised in a real browser. If session state changes the surface, verify both public and authenticated states. Run localhost on fixed port 3210. `pnpm dev` uses the live production Envio endpoint by default; set `NEXT_PUBLIC_HASURA_URL` only for a non-production or fixture endpoint. Verify logged-out behavior in an isolated context or after clearing both Auth.js session-cookie names. Verify authenticated behavior with a simulated local Auth.js token and confirm protected routes and controls render. Automated browser tests must use the package scripts and their local fixture Hasura server, which is the only GraphQL source for those tests; never point fixture tests at hosted Hasura or Envio.",
+      "evidence": [
+        {
+          "path": "docs/notes/dashboard-verification.md",
+          "line_start": 13,
+          "line_count": 6,
+          "supports": "Requires real-browser exercise and both public and authenticated states when applicable."
+        },
+        {
+          "path": "docs/notes/dashboard-verification.md",
+          "line_start": 20,
+          "line_count": 18,
+          "supports": "Defines the fixed localhost server and the default live production Envio data source."
+        },
+        {
+          "path": "docs/notes/dashboard-verification.md",
+          "line_start": 59,
+          "line_count": 10,
+          "supports": "Defines isolated logged-out verification and protected-route behavior."
+        },
+        {
+          "path": "docs/notes/dashboard-verification.md",
+          "line_start": 110,
+          "line_count": 19,
+          "supports": "Defines simulated authenticated-session setup and required UI confirmation."
+        },
+        {
+          "path": "docs/notes/dashboard-verification.md",
+          "line_start": 187,
+          "line_count": 20,
+          "supports": "Requires package-script browser tests and the local fixture server as the sole GraphQL source."
+        }
+      ],
+      "authority_qualifications": [
+        {
+          "path": "docs/notes/dashboard-verification.md",
+          "authority": "canonical",
+          "qualification": "",
+          "verified_against": []
+        }
+      ],
+      "loaded_sources": [
+        {
+          "path": "docs/notes/dashboard-verification.md",
+          "bytes": 19421,
+          "sha256": "c6937876c078e264339c28b4ed6f667edef0e89f5597fa985c120ef55534dce8"
+        }
+      ]
+    },
+    {
+      "question_id": "deployment-indexer-promote",
+      "chosen_documents": [".agents/skills/deploy-indexer/SKILL.md"],
+      "answer": "Deploy the exact clean, reproducible `HEAD` by running `pnpm deploy:indexer --yes`, which lease-force-pushes it to the `envio` deploy-trigger branch. Confirm registration with a five-minute ceiling, then keep the foreground status watch running until every chain is caught up, with a 90-minute sync ceiling. Inspect target-specific build and runtime logs, capture the performance snapshot, and require the errors-only health check. Treat caught-up as pending verification, not promotion-ready. Run `pnpm deploy:indexer:verify <commit>` and stop on any failure. Promotion requires explicit end-to-end production authorization; monitoring, preloading, or `--resume-preload` is not authorization. After approval, capture the prior production commit, run `pnpm deploy:indexer:promote <commit> -y`, require `prod_status=prod`, wait five minutes for endpoint propagation, then run `pnpm deploy:indexer:verify <commit> --prod` and complete the application and dashboard verification phases. An agent must never auto-promote.",
+      "evidence": [
+        {
+          "path": ".agents/skills/deploy-indexer/SKILL.md",
+          "line_start": 128,
+          "line_count": 8,
+          "supports": "Requires explicit promotion authorization and states that monitoring or preloading does not authorize promotion."
+        },
+        {
+          "path": ".agents/skills/deploy-indexer/SKILL.md",
+          "line_start": 152,
+          "line_count": 17,
+          "supports": "Defines the push-to-envio command and rejected-push behavior."
+        },
+        {
+          "path": ".agents/skills/deploy-indexer/SKILL.md",
+          "line_start": 170,
+          "line_count": 21,
+          "supports": "Separates registration from sync and defines the registration watch."
+        },
+        {
+          "path": ".agents/skills/deploy-indexer/SKILL.md",
+          "line_start": 203,
+          "line_count": 21,
+          "supports": "Defines caught-up monitoring and the 90-minute ceiling."
+        },
+        {
+          "path": ".agents/skills/deploy-indexer/SKILL.md",
+          "line_start": 244,
+          "line_count": 17,
+          "supports": "Requires performance and error-log checks and forbids promotion before sync."
+        },
+        {
+          "path": ".agents/skills/deploy-indexer/SKILL.md",
+          "line_start": 275,
+          "line_count": 14,
+          "supports": "Requires compatibility classification before promotion."
+        },
+        {
+          "path": ".agents/skills/deploy-indexer/SKILL.md",
+          "line_start": 293,
+          "line_count": 16,
+          "supports": "Requires the narrow deployment verifier and fail-closed handling."
+        },
+        {
+          "path": ".agents/skills/deploy-indexer/SKILL.md",
+          "line_start": 328,
+          "line_count": 17,
+          "supports": "Requires explicit production authorization and defines promotion success."
+        },
+        {
+          "path": ".agents/skills/deploy-indexer/SKILL.md",
+          "line_start": 346,
+          "line_count": 16,
+          "supports": "Defines the five-minute endpoint propagation wait."
+        },
+        {
+          "path": ".agents/skills/deploy-indexer/SKILL.md",
+          "line_start": 369,
+          "line_count": 20,
+          "supports": "Defines post-promotion verification against the static production endpoint."
+        }
+      ],
+      "authority_qualifications": [
+        {
+          "path": ".agents/skills/deploy-indexer/SKILL.md",
+          "authority": "canonical",
+          "qualification": "",
+          "verified_against": []
+        }
+      ],
+      "loaded_sources": [
+        {
+          "path": ".agents/skills/deploy-indexer/SKILL.md",
+          "bytes": 27994,
+          "sha256": "0ab0457e1337108a2da9dfc44a3e3e583ac0573480b91560e4a4f444c10bf2f8"
+        }
+      ]
+    },
+    {
+      "question_id": "deployment-terraform-registry-apply",
+      "chosen_documents": ["docs/terraform.md"],
+      "answer": "`terraform.stacks.json` is the ownership and routing source of truth. Do not infer ownership from paths. The `platform` stack uses a manual plan and a human-approved local apply. Stacks whose registry policy is `push-main-production-infra-environment` normally apply after merge through the `production-infra` GitHub Environment on `main`. A local apply for those stacks requires clean `main` at `origin/main` unless an operator deliberately uses `--force-local-apply`. `peg-policy-publication` permits only local backend-free validation; its plan and apply must use the protected workflow and environment approval.",
+      "evidence": [
+        {
+          "path": "docs/terraform.md",
+          "line_start": 13,
+          "line_count": 13,
+          "supports": "Names the registry and maps each stack to its plan/apply policy."
+        },
+        {
+          "path": "docs/terraform.md",
+          "line_start": 61,
+          "line_count": 19,
+          "supports": "Defines local-apply admission and the stricter manual platform wrapper."
+        },
+        {
+          "path": "docs/terraform.md",
+          "line_start": 91,
+          "line_count": 15,
+          "supports": "Disables local plan/apply for peg-policy-publication and defines its protected workflow path."
+        },
+        {
+          "path": "docs/terraform.md",
+          "line_start": 120,
+          "line_count": 18,
+          "supports": "Identifies the stacks that apply on main through the production-infra environment."
+        }
+      ],
+      "authority_qualifications": [
+        {
+          "path": "docs/terraform.md",
+          "authority": "canonical",
+          "qualification": "",
+          "verified_against": []
+        }
+      ],
+      "loaded_sources": [
+        {
+          "path": "docs/terraform.md",
+          "bytes": 26824,
+          "sha256": "d44ec49b8cd916182617becbdd20a6a8b950925b79f2ea095d2b3319a3da3669"
+        }
+      ]
+    },
+    {
+      "question_id": "deployment-cloudrun-checklist",
+      "chosen_documents": ["docs/pr-checklists/terraform-cloudrun.md"],
+      "answer": "Use `docs/pr-checklists/terraform-cloudrun.md`. It requires ownership lookup and an owning-stack plan with no unintended destruction. For Cloud Run, preserve probe, resource, dependency, image, drift-ignore, and exact-plan invariants. A Terraform-owned template rollout must set the rollout marker and remove only the revision ignore. Pause unrelated platform applies while it is active. After the approved apply and runtime proof, restore steady state in a stabilization PR. If apply or proof fails, complete or explicitly roll back under a new reviewed plan before stabilization. Before apply, inspect every destroy line and recheck the service shape. After apply, verify the public `/health` endpoint returns 200, allowing for the short rollout interval.",
+      "evidence": [
+        {
+          "path": "docs/pr-checklists/terraform-cloudrun.md",
+          "line_start": 21,
+          "line_count": 18,
+          "supports": "Requires moved or removed state handling, owning-stack selection, and review of destructive plan actions."
+        },
+        {
+          "path": "docs/pr-checklists/terraform-cloudrun.md",
+          "line_start": 44,
+          "line_count": 17,
+          "supports": "Defines Cloud Run service-shape, rollout-marker, rollback, exact-plan, probe, and dependency requirements."
+        },
+        {
+          "path": "docs/pr-checklists/terraform-cloudrun.md",
+          "line_start": 62,
+          "line_count": 12,
+          "supports": "Requires retry-safe unique Cloud Run revision suffixes."
+        },
+        {
+          "path": "docs/pr-checklists/terraform-cloudrun.md",
+          "line_start": 147,
+          "line_count": 7,
+          "supports": "Defines mandatory pre-apply plan review and post-apply health verification."
+        }
+      ],
+      "authority_qualifications": [
+        {
+          "path": "docs/pr-checklists/terraform-cloudrun.md",
+          "authority": "canonical",
+          "qualification": "",
+          "verified_against": []
+        }
+      ],
+      "loaded_sources": [
+        {
+          "path": "docs/pr-checklists/terraform-cloudrun.md",
+          "bytes": 12292,
+          "sha256": "a091e39d35a31f0902dd9c4d8cbe9d51d687256d78ded3c6560d8ae22d501633"
+        }
+      ]
+    },
+    {
+      "question_id": "architecture-issues-work-queue",
+      "chosen_documents": ["docs/adr/0006-github-issues-backlog.md"],
+      "answer": "GitHub Issues are canonical because a Markdown bullet cannot be claimed atomically, does not record an active owner, and cannot expose queryable readiness. The issue helpers provide serialized claims, lifecycle labels, ownership snapshots, review transitions, and owner-checked release paths while preserving the human-owned Project Status. `BACKLOG.md` is transition storage only. Migrated tasks must therefore live as labeled issues, and an agent must claim an issue before substantive edits. Deferred PR scope must become a labeled issue rather than returning to or remaining only in BACKLOG.md.",
+      "evidence": [
+        {
+          "path": "docs/adr/0006-github-issues-backlog.md",
+          "line_start": 19,
+          "line_count": 20,
+          "supports": "Explains the atomicity and queryability problem and selects GitHub Issues as the canonical queue."
+        },
+        {
+          "path": "docs/adr/0006-github-issues-backlog.md",
+          "line_start": 47,
+          "line_count": 10,
+          "supports": "Requires exclusive queue labels, claim before edits, and labeled issues for deferred work."
+        }
+      ],
+      "authority_qualifications": [
+        {
+          "path": "docs/adr/0006-github-issues-backlog.md",
+          "authority": "canonical",
+          "qualification": "",
+          "verified_against": []
+        }
+      ],
+      "loaded_sources": [
+        {
+          "path": "docs/adr/0006-github-issues-backlog.md",
+          "bytes": 2378,
+          "sha256": "43f0f71a6d833925fc8a757d89a3ec9fce7ffd78fc4ffd5d2dde2becf153d95b"
+        }
+      ]
+    },
+    {
+      "question_id": "architecture-steth-sampler",
+      "chosen_documents": ["docs/adr/0034-steth-wallet-daily-sampler.md"],
+      "answer": "stETH rewards accrue through rebases, so transfers alone miss quiet-period balance growth. A single midnight read would make the result fragile to one failed historical RPC read and would not preserve the bounded retry and wallet-allocation model. The accepted design establishes a launch-aligned baseline, samples each tracked wallet every 600 Ethereum blocks, and writes wallet-level daily rows. This captures rebasing yield with roughly two-hour observations while keeping the persisted read model daily. It avoids every-block replay cost, keeps earnings assigned to the wallet where they accrued, retries a failed launch baseline, and skips a later incomplete batch instead of writing partial daily actuals.",
+      "evidence": [
+        {
+          "path": "docs/adr/0034-steth-wallet-daily-sampler.md",
+          "line_start": 19,
+          "line_count": 20,
+          "supports": "Explains why event-only accounting fails and defines the sub-daily sampling plus daily persistence design."
+        },
+        {
+          "path": "docs/adr/0034-steth-wallet-daily-sampler.md",
+          "line_start": 40,
+          "line_count": 11,
+          "supports": "Rejects transfer-only and every-block alternatives."
+        },
+        {
+          "path": "docs/adr/0034-steth-wallet-daily-sampler.md",
+          "line_start": 52,
+          "line_count": 12,
+          "supports": "Defines wallet-level consumption and fail-closed or skip-batch behavior for unavailable reads."
+        }
+      ],
+      "authority_qualifications": [
+        {
+          "path": "docs/adr/0034-steth-wallet-daily-sampler.md",
+          "authority": "canonical",
+          "qualification": "",
+          "verified_against": []
+        }
+      ],
+      "loaded_sources": [
+        {
+          "path": "docs/adr/0034-steth-wallet-daily-sampler.md",
+          "bytes": 3987,
+          "sha256": "0aba89ec2a1b7b19233fb867071fd760370b468e51152faf55eac4ed8e412446"
+        }
+      ]
+    },
+    {
+      "question_id": "architecture-bounded-doc-garden",
+      "chosen_documents": [
+        "docs/adr/0040-bounded-documentation-garden-queue.md"
+      ],
+      "answer": "The recurring garden creates one bounded issue because freshness signals do not prove semantic obsolescence, the full corpus is too large for careful review, and an unattended partial edit could remove operating knowledge. A deterministic, credential-free planner selects at most 10 documents or 15,000 source words. The scheduler creates at most one immutable live Agent Task issue and cannot edit repository content, open or merge a PR, deploy, or mutate production. A claimed or blocked packet retains its exact scope and blocks later packets. Semantic changes still require evidence, a claim, a normal reviewed PR, link repair, and catalog verification.",
+      "evidence": [
+        {
+          "path": "docs/adr/0040-bounded-documentation-garden-queue.md",
+          "line_start": 19,
+          "line_count": 12,
+          "supports": "Explains why scheduled direct editing and full-corpus review are unsafe."
+        },
+        {
+          "path": "docs/adr/0040-bounded-documentation-garden-queue.md",
+          "line_start": 32,
+          "line_count": 20,
+          "supports": "Defines deterministic bounded selection and the one-live immutable issue queue."
+        },
+        {
+          "path": "docs/adr/0040-bounded-documentation-garden-queue.md",
+          "line_start": 53,
+          "line_count": 18,
+          "supports": "Limits workflow authority and requires evidence plus normal reviewed-PR handling."
+        },
+        {
+          "path": "docs/adr/0040-bounded-documentation-garden-queue.md",
+          "line_start": 75,
+          "line_count": 16,
+          "supports": "Rejects direct scheduled LLM edits, weekly duplicate issues, and full-repository review."
+        }
+      ],
+      "authority_qualifications": [
+        {
+          "path": "docs/adr/0040-bounded-documentation-garden-queue.md",
+          "authority": "canonical",
+          "qualification": "",
+          "verified_against": []
+        }
+      ],
+      "loaded_sources": [
+        {
+          "path": "docs/adr/0040-bounded-documentation-garden-queue.md",
+          "bytes": 5888,
+          "sha256": "79dd19eee6bbb9b4c93bc8879298b98309b84fcabee3b559bf676c3c1127d37f"
+        }
+      ]
+    },
+    {
+      "question_id": "pr-hazard-stateful-data-ui",
+      "chosen_documents": ["docs/pr-checklists/stateful-data-ui.md"],
+      "answer": "Use `docs/pr-checklists/stateful-data-ui.md`. It is mandatory for an indexer field that crosses into the dashboard. Define invariants first. Audit `schema.graphql`, type and nullability choices, backward compatibility for old rows, every writer, generated artifacts, GraphQL queries, dashboard types, rendering and filter logic, producer tests, consumer tests, and fixtures. Define degraded behavior for missing old-row fields and partial failures. Add interaction tests for stateful controls and browser behavior. Plan rollout compatibility so the old and new schema, writers, readers, fixtures, and UI do not disagree during deployment.",
+      "evidence": [
+        {
+          "path": "docs/pr-checklists/stateful-data-ui.md",
+          "line_start": 13,
+          "line_count": 20,
+          "supports": "Makes the checklist mandatory for cross-layer state and requires invariants, degraded behavior, and interaction tests."
+        },
+        {
+          "path": "docs/pr-checklists/stateful-data-ui.md",
+          "line_start": 53,
+          "line_count": 21,
+          "supports": "Defines schema, writer, generated-artifact, and reader alignment."
+        },
+        {
+          "path": "docs/pr-checklists/stateful-data-ui.md",
+          "line_start": 76,
+          "line_count": 13,
+          "supports": "Requires producer, consumer, and fixture coverage and stops the PR if a layer is missing."
+        },
+        {
+          "path": "docs/pr-checklists/stateful-data-ui.md",
+          "line_start": 155,
+          "line_count": 16,
+          "supports": "Requires explicit degraded behavior for partial failures and old schema rows."
+        },
+        {
+          "path": "docs/pr-checklists/stateful-data-ui.md",
+          "line_start": 308,
+          "line_count": 13,
+          "supports": "Requires cross-layer regression coverage and protects rapid URL-state interactions."
+        }
+      ],
+      "authority_qualifications": [
+        {
+          "path": "docs/pr-checklists/stateful-data-ui.md",
+          "authority": "canonical",
+          "qualification": "",
+          "verified_against": []
+        }
+      ],
+      "loaded_sources": [
+        {
+          "path": "docs/pr-checklists/stateful-data-ui.md",
+          "bytes": 17023,
+          "sha256": "03df5b9013991f72e9f00fe78ca67c1bb833866dbf5b5a0633cf38b9db7db467"
+        }
+      ]
+    },
+    {
+      "question_id": "pr-hazard-ci-workflow-gates",
+      "chosen_documents": ["docs/pr-checklists/ci-workflow-gates.md"],
+      "answer": "Use `docs/pr-checklists/ci-workflow-gates.md`. Keep the ruleset-required `ci` sentinel and every required workflow unconditional at workflow level. Put path routing inside the workflow so a no-op still reports green. Run `pnpm ci:contract:test` when the fixed CI graph or routing changes; it checks exact fan-out, positive and negative path fixtures, permissions, credential access, cache rules, cleanup, and command order. Pin every third-party action to a full commit SHA and run the action-pin checker. Preserve least privilege and run the PR validation-boundary test after permission or credential changes. Add every main-push or scheduled workflow to the Slack failure notifier, or document an advisory exclusion, then run the notifier-coverage checker.",
+      "evidence": [
+        {
+          "path": "docs/pr-checklists/ci-workflow-gates.md",
+          "line_start": 17,
+          "line_count": 20,
+          "supports": "Defines the required-workflow rule and identifies the required CI sentinel."
+        },
+        {
+          "path": "docs/pr-checklists/ci-workflow-gates.md",
+          "line_start": 54,
+          "line_count": 13,
+          "supports": "Requires current PR verification and forbids workflow-level path filters on required checks."
+        },
+        {
+          "path": "docs/pr-checklists/ci-workflow-gates.md",
+          "line_start": 68,
+          "line_count": 21,
+          "supports": "Defines fixed fan-out, path-routing fixtures, and aggregate contracts."
+        },
+        {
+          "path": "docs/pr-checklists/ci-workflow-gates.md",
+          "line_start": 198,
+          "line_count": 8,
+          "supports": "Requires full-SHA third-party action pinning and the pin checker."
+        },
+        {
+          "path": "docs/pr-checklists/ci-workflow-gates.md",
+          "line_start": 339,
+          "line_count": 10,
+          "supports": "Defines Slack notifier coverage and its verification command."
+        },
+        {
+          "path": "docs/pr-checklists/ci-workflow-gates.md",
+          "line_start": 368,
+          "line_count": 18,
+          "supports": "Defines credential-bearing permissions and required trust-boundary validation."
+        }
+      ],
+      "authority_qualifications": [
+        {
+          "path": "docs/pr-checklists/ci-workflow-gates.md",
+          "authority": "canonical",
+          "qualification": "",
+          "verified_against": []
+        }
+      ],
+      "loaded_sources": [
+        {
+          "path": "docs/pr-checklists/ci-workflow-gates.md",
+          "bytes": 30493,
+          "sha256": "e0d4ebec2a643a053ecb3277d5d0b05e8a69de5f05c4492756eff6ed10636c32"
+        }
+      ]
+    },
+    {
+      "question_id": "pr-hazard-package-script-refusal",
+      "chosen_documents": ["docs/notes/quick-commands.md"],
+      "answer": "Before any changed package script or lockfile is allowed to install or execute, inspect its lifecycle and install effects. For root scripts, run `node scripts/check-agent-quality-gate-package-scripts.mjs` before installation. Run the no-install fail-closed checks `pnpm lockfile:lint` and `pnpm skew:check`. Only after review and validation, run `CI=true pnpm install --frozen-lockfile`. Normal delivery then uses the direct author checks; the retired legacy quality gate is not the execution path.",
+      "evidence": [
+        {
+          "path": "docs/notes/quick-commands.md",
+          "line_start": 49,
+          "line_count": 8,
+          "supports": "Requires lifecycle review, the root package-script validator, and frozen installation in that order."
+        },
+        {
+          "path": "docs/notes/quick-commands.md",
+          "line_start": 89,
+          "line_count": 10,
+          "supports": "Lists the fail-closed lockfile and dependency-skew checks."
+        }
+      ],
+      "authority_qualifications": [
+        {
+          "path": "docs/notes/quick-commands.md",
+          "authority": "canonical",
+          "qualification": "",
+          "verified_against": []
+        }
+      ],
+      "loaded_sources": [
+        {
+          "path": "docs/notes/quick-commands.md",
+          "bytes": 14903,
+          "sha256": "4457efed67a4d5dfc483651a8f040ffbea236bb1df87105eb4d3f8d960798c35"
+        }
+      ]
+    },
+    {
+      "question_id": "commands-documentation-tooling",
+      "chosen_documents": ["docs/notes/quick-commands.md"],
+      "answer": "Run `pnpm docs:index --write` to regenerate the catalog and `pnpm docs:index --check` to verify catalog classification, drift, and internal Markdown links. Run `pnpm docs:audit --dry-run` to print the bounded semantic-review packet without mutation. Run `pnpm docs:garden --dry-run --json` to read the queue and preview the exact weekly issue decision without mutation.",
+      "evidence": [
+        {
+          "path": "docs/notes/quick-commands.md",
+          "line_start": 60,
+          "line_count": 8,
+          "supports": "Lists the catalog regeneration and verification commands plus the two non-mutating documentation previews."
+        }
+      ],
+      "authority_qualifications": [
+        {
+          "path": "docs/notes/quick-commands.md",
+          "authority": "canonical",
+          "qualification": "",
+          "verified_against": []
+        }
+      ],
+      "loaded_sources": [
+        {
+          "path": "docs/notes/quick-commands.md",
+          "bytes": 14903,
+          "sha256": "4457efed67a4d5dfc483651a8f040ffbea236bb1df87105eb4d3f8d960798c35"
+        }
+      ]
+    },
+    {
+      "question_id": "commands-issue-lifecycle",
+      "chosen_documents": ["docs/notes/quick-commands.md"],
+      "answer": "Claim ready work with `pnpm issue:claim --issue <issue> --agent <agent>` or the bounded count form. Move claimed work to review with `pnpm issue:review --pr <pr> --issue <issue>`; add `--claim-id <id> --rebind-branch` when binding a PR branch created after the claim. Release an owned claim back to ready with `pnpm issue:release --issue <issue> --claim-id <id>`. Add `--needs-grooming` when work cannot continue and the issue must return for grooming. Use `--closed-unmerged-pr` when the stored PR closed without merge. Use `--merged-pr --needs-grooming` when a still-open issue needs follow-up after its stored PR merged.",
+      "evidence": [
+        {
+          "path": "docs/notes/quick-commands.md",
+          "line_start": 124,
+          "line_count": 15,
+          "supports": "Lists the canonical claim, review, rebind, ready-release, closed-PR release, and needs-grooming commands."
+        }
+      ],
+      "authority_qualifications": [
+        {
+          "path": "docs/notes/quick-commands.md",
+          "authority": "canonical",
+          "qualification": "",
+          "verified_against": []
+        }
+      ],
+      "loaded_sources": [
+        {
+          "path": "docs/notes/quick-commands.md",
+          "bytes": 14903,
+          "sha256": "4457efed67a4d5dfc483651a8f040ffbea236bb1df87105eb4d3f8d960798c35"
+        }
+      ]
+    },
+    {
+      "question_id": "commands-pr-readiness",
+      "chosen_documents": ["docs/notes/quick-commands.md"],
+      "answer": "Run `pnpm --silent pr:feedback-state --pr <number> --json` first. The exact shared final probe is `pnpm pr:ready-state --pr <number> --json`. All-clear also requires a current-head Codex PR-description `+1`, or the exact-head human break-glass comment `/pr-ready-override gate=codex-description-approval head=<full-head-sha> reason=<why this is safe>`. A separate `base-red` break-glass form applies only when red `main` is the blocker.",
+      "evidence": [
+        {
+          "path": "docs/notes/quick-commands.md",
+          "line_start": 82,
+          "line_count": 9,
+          "supports": "Defines feedback-first ordering, the exact current-head Codex approval override, the base-red override, and the final readiness probe."
+        }
+      ],
+      "authority_qualifications": [
+        {
+          "path": "docs/notes/quick-commands.md",
+          "authority": "canonical",
+          "qualification": "",
+          "verified_against": []
+        }
+      ],
+      "loaded_sources": [
+        {
+          "path": "docs/notes/quick-commands.md",
+          "bytes": 14903,
+          "sha256": "4457efed67a4d5dfc483651a8f040ffbea236bb1df87105eb4d3f8d960798c35"
+        }
+      ]
+    },
+    {
+      "question_id": "operator-alerts-stack-boundary",
+      "chosen_documents": ["alerts/AGENTS.md"],
+      "answer": "The `alerts-delivery` Terraform stack rooted at `alerts/infra/` owns QuickNode webhooks, on-chain delivery functions, the Sentry-to-Slack bridge, Slack channel lifecycle, Splunk On-Call rotation announcements, and related GCP resources. Keep it separate from `alerts-rules` and `peg-policy-publication`. Plan before every apply and require explicit human approval. Treat even cosmetic edits as potentially live because the modules call Slack, Sentry, and QuickNode APIs. Preserve the chain-scoped QuickNode state-management contract. Keep each standalone Cloud Function lockfile and workspace policy synchronized. Run `pnpm tf validate alerts-delivery`, require `pnpm alerts:infra:plan` to show only intended changes, run affected function lint, typecheck, and tests, and run the webhook-state test when its parser or repair path changes.",
+      "evidence": [
+        {
+          "path": "alerts/AGENTS.md",
+          "line_start": 17,
+          "line_count": 13,
+          "supports": "Defines the three alert stacks and assigns event delivery, Sentry, QuickNode, and on-call announcements to alerts/infra."
+        },
+        {
+          "path": "alerts/AGENTS.md",
+          "line_start": 31,
+          "line_count": 18,
+          "supports": "Defines apply approval, live-API, QuickNode state, lockfile, and delivery-path safety rules."
+        },
+        {
+          "path": "alerts/AGENTS.md",
+          "line_start": 50,
+          "line_count": 11,
+          "supports": "Defines Terraform, plan, package, webhook-state, and Cloud Function verification requirements."
+        }
+      ],
+      "authority_qualifications": [
+        {
+          "path": "alerts/AGENTS.md",
+          "authority": "canonical",
+          "qualification": "",
+          "verified_against": []
+        }
+      ],
+      "loaded_sources": [
+        {
+          "path": "alerts/AGENTS.md",
+          "bytes": 5289,
+          "sha256": "2253659ea93c91d0eec1e36e284feaed0bc4e4849f16cc1295a76715f86b5522"
+        }
+      ]
+    },
+    {
+      "question_id": "operator-worktree-bootstrap",
+      "chosen_documents": ["docs/notes/worktree-and-web-setup.md"],
+      "answer": "For a trusted fresh clone or manually created worktree, run `./scripts/setup.sh`. It configures the pre-commit hook, installs dependencies, builds shared-config, generates the Envio type facade, and attempts to install Playwright Chromium. Worktrunk runs the same script automatically as a blocking `pre-start` hook. Disable automatic setup before checking out any untrusted, fork, or cross-repository head. Hosted Claude Code does not use the local shell environment or personal skills. Its remote-start-only SessionStart hook runs `./scripts/bootstrap/claude-code-web-setup.sh`, which installs dependencies, prewarms Trunk, checks context, builds and code-generates required packages, configures available GitHub or MCP integration, and attempts a nonfatal Chromium setup. It writes diagnostics to `.claude/logs/web-setup.log`; it does not rerun the heavy bootstrap for local sessions, resume, or compact.",
+      "evidence": [
+        {
+          "path": "docs/notes/worktree-and-web-setup.md",
+          "line_start": 15,
+          "line_count": 8,
+          "supports": "Defines the bootstrap trust boundary for untrusted heads."
+        },
+        {
+          "path": "docs/notes/worktree-and-web-setup.md",
+          "line_start": 23,
+          "line_count": 21,
+          "supports": "Defines the local setup command, its work, and automatic Worktrunk use."
+        },
+        {
+          "path": "docs/notes/worktree-and-web-setup.md",
+          "line_start": 63,
+          "line_count": 20,
+          "supports": "Defines the hosted SessionStart bootstrap and its remote-only behavior."
+        },
+        {
+          "path": "docs/notes/worktree-and-web-setup.md",
+          "line_start": 84,
+          "line_count": 11,
+          "supports": "Defines environment persistence limits and the hosted setup log."
+        }
+      ],
+      "authority_qualifications": [
+        {
+          "path": "docs/notes/worktree-and-web-setup.md",
+          "authority": "canonical",
+          "qualification": "",
+          "verified_against": []
+        }
+      ],
+      "loaded_sources": [
+        {
+          "path": "docs/notes/worktree-and-web-setup.md",
+          "bytes": 8540,
+          "sha256": "af220c190200bcfb9d31ffdbaf7cae38767aafa0e4b76152089f739da14e4b91"
+        }
+      ]
+    },
+    {
+      "question_id": "operator-doc-garden-recovery",
+      "chosen_documents": ["docs/notes/documentation-gardening.md"],
+      "answer": "The read-only planner deterministically selects one lane per UTC week and advances shards after each six-lane cycle. Each packet contains at most 10 documents and 15,000 words; an empty lane produces no issue. The weekly workflow creates one fully specified Agent Task and stops. An `agent-ready` occurrence remains immutable until claimed. An `agent-active` or `in-pr` occurrence keeps its scope. A `needs-grooming` occurrence remains the single blocked packet until a human resolves or closes it. Duplicate markers or conflicting lifecycle labels fail closed for manual recovery. Before changing, demoting, or deleting a document, give it an evidence-backed disposition. Age alone is not evidence. Verify claims against owning code, workflows, provider contracts, or current canonical sources. Preserve ADR history, repair inbound links, and escalate conflicting authority. Semantic edits require a claimed issue and a normal reviewed PR. Finish with `pnpm docs:index --check`, regenerating and reviewing the catalog if classification changed.",
+      "evidence": [
+        {
+          "path": "docs/notes/documentation-gardening.md",
+          "line_start": 21,
+          "line_count": 21,
+          "supports": "Defines deterministic weekly lane and shard selection plus packet bounds."
+        },
+        {
+          "path": "docs/notes/documentation-gardening.md",
+          "line_start": 52,
+          "line_count": 17,
+          "supports": "Defines the issue-only scheduler and claim boundary."
+        },
+        {
+          "path": "docs/notes/documentation-gardening.md",
+          "line_start": 67,
+          "line_count": 15,
+          "supports": "Defines behavior for ready, claimed, blocked, closed, duplicate, conflicting, and empty states."
+        },
+        {
+          "path": "docs/notes/documentation-gardening.md",
+          "line_start": 109,
+          "line_count": 5,
+          "supports": "Defines manual recovery for duplicate markers and lifecycle labels."
+        },
+        {
+          "path": "docs/notes/documentation-gardening.md",
+          "line_start": 115,
+          "line_count": 17,
+          "supports": "Requires evidence-backed dispositions and verification against current owning authority before edits or deletion."
+        },
+        {
+          "path": "docs/notes/documentation-gardening.md",
+          "line_start": 133,
+          "line_count": 11,
+          "supports": "Defines incomplete-packet recovery and final catalog checks."
+        }
+      ],
+      "authority_qualifications": [
+        {
+          "path": "docs/notes/documentation-gardening.md",
+          "authority": "canonical",
+          "qualification": "",
+          "verified_against": []
+        }
+      ],
+      "loaded_sources": [
+        {
+          "path": "docs/notes/documentation-gardening.md",
+          "bytes": 8421,
+          "sha256": "1ed536b68b636c639fe25ca00c5322cc2f03ee3bf5ba9f8483b62304f9a16d07"
+        }
+      ]
+    }
+  ]
+}
