@@ -1805,6 +1805,17 @@ and the stage stays inert. `CLAUDE_CODE_OAUTH_TOKEN` remains a repo-level secret
 new Sentry-pipeline secret means: add its `github_actions_environment_secret`
 here, and add `environment: sentry-pipeline` to every job that reads it.
 
+**Transition (phase 1 of #2464).** `PLATFORM_SETTINGS_AUDIT_TOKEN` is also
+mirrored into the new `platform-settings-drift` GitHub Environment as
+`github_actions_environment_secret.platform_settings_drift_audit_token`, from
+the same `platform_settings_audit_token` tfvar. `platform-settings-drift.yml`
+still reads the `sentry-pipeline` copy until #2465 repoints it. When you apply
+this phase, read the platform-stack plan for the new environment, its
+deployment policy and that secret as **1 to create** each, then confirm the
+environment exists with `gh api repos/mento-protocol/monitoring-monorepo/environments/platform-settings-drift`
+before #2465 merges. Phase 2 (#2465) deletes `sentry-pipeline`, its Sentry
+secrets and the old copy of the audit token, and this runbook with them.
+
 To change a stage:
 
 1. update only the relevant tfvars;

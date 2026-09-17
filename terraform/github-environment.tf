@@ -1,3 +1,13 @@
+# PHASE 1 of the ADR 0050 two-phase environment rollout for issue #2464 and
+# PR #2465. This change is purely additive. It creates the protected
+# `platform-settings-drift` Environment and mirrors PLATFORM_SETTINGS_AUDIT_TOKEN
+# into it. `sentry-pipeline`, its deployment policy and its five secrets stay
+# exactly as they are, and the workflow keeps reading the copy it holds today.
+# Phase 2 (PR #2465) repoints `.github/workflows/platform-settings-drift.yml` at
+# the new environment and deletes `sentry-pipeline`. Applying this file BEFORE
+# that workflow reference reaches `main` is what stops GitHub auto-creating the
+# environment unprotected — see docs/terraform.md "GitHub Environments".
+#
 # GitHub Environment that gates the Sentry triage/autofix pipeline secrets.
 #
 # THREAT (issue #1289). Repo-level GitHub Actions secrets are readable by ANY
@@ -84,6 +94,57 @@ resource "github_repository_environment" "sentry_pipeline" {
 resource "github_repository_environment_deployment_policy" "sentry_pipeline_main" {
   repository     = "monitoring-monorepo"
   environment    = github_repository_environment.sentry_pipeline.environment
+  branch_pattern = "main"
+}
+
+# `platform-settings-drift` holds exactly one secret, the Administration:Read
+# PAT that `.github/workflows/platform-settings-drift.yml` reads. It mirrors the
+# `production-infra` shape but carries NO required reviewers (the audit is
+# unattended; a reviewer gate would stall every scheduled run) and NO wait
+# timer. The explicit main-only branch pattern is the whole control.
+resource "github_repository_environment" "platform_settings_drift" {
+  repository  = "monitoring-monorepo"
+  environment = "platform-settings-drift"
+
+  # `can_admins_bypass = false` keeps repo admins subject to whatever protection
+  # rules this environment declares. It does NOT bound the deployment-branch
+  # policy on its own (it governs the reviewer / wait-timer rules, which this
+  # environment does not declare) — the branch pattern below is what restricts
+  # access to `main`.
+  can_admins_bypass = false
+
+  # CUSTOM branch policy, NOT `protected_branches` (issue #1649). This is the
+  # correction that makes the #1289 gate actually work:
+  #
+  #   `protected_branches = true` restricts deployments to branches covered by
+  #   CLASSIC branch protection. This repo protects `main` with a RULESET, and
+  #   has no classic protection (`GET /repos/:o/:r/branches/main/protection`
+  #   returns 404 "Branch not protected"), so the policy matched nothing and
+  #   FAILED OPEN. Verified empirically: with that shape live, an admin
+  #   `workflow_dispatch`, a non-admin `workflow_dispatch`, and a non-admin
+  #   `push` all reached the environment's secrets from a non-main branch.
+  #   `GET /repos/:o/:r/branches/main` reporting `"protected": true` (rulesets
+  #   count there, but the deployment policy does not read that field) is what
+  #   made the broken config look correct.
+  #
+  # An explicit branch pattern does not depend on classic protection, so it
+  # evaluates regardless of which protection mechanism the repo uses. The
+  # matching pattern lives in the companion
+  # `github_repository_environment_deployment_policy` resource below —
+  # `custom_branch_policies = true` with no pattern would deny every deployment.
+  deployment_branch_policy {
+    protected_branches     = false
+    custom_branch_policies = true
+  }
+}
+
+# The one branch allowed to deploy to `platform-settings-drift`. Exact name, no
+# glob: `main` matches only `main`. Without this resource the custom policy above
+# has an empty allow-list and every deployment is refused, so the two must land
+# in the same apply.
+resource "github_repository_environment_deployment_policy" "platform_settings_drift_main" {
+  repository     = "monitoring-monorepo"
+  environment    = github_repository_environment.platform_settings_drift.environment
   branch_pattern = "main"
 }
 
@@ -239,6 +300,26 @@ resource "github_actions_environment_secret" "platform_settings_audit_token" {
 
   repository  = "monitoring-monorepo"
   environment = github_repository_environment.sentry_pipeline.environment
+  secret_name = "PLATFORM_SETTINGS_AUDIT_TOKEN"
+  value       = var.platform_settings_audit_token
+}
+
+# PLATFORM_SETTINGS_AUDIT_TOKEN, held on the `platform-settings-drift`
+# environment. Fine-grained GitHub PAT (Administration: Read on this repo only),
+# consumed only by the `check` job in
+# `.github/workflows/platform-settings-drift.yml`. It stays `count`-gated on
+# `var.platform_settings_audit_token`, so `terraform apply` still succeeds while
+# the value is unset and the audit stays inert until the operator provisions it.
+# `value` (not the deprecated `plaintext_value`) matches the repo-level secrets'
+# attribute on the `integrations/github ~> 6.12` provider. `environment` is wired
+# to the resource above so Terraform creates the Environment before its secret.
+resource "github_actions_environment_secret" "platform_settings_drift_audit_token" {
+  # checkov:skip=CKV_GIT_4: same state-backed plaintext trade-off as the
+  # repo-level mirrors; see the threat-model note in github-secrets.tf.
+  count = var.platform_settings_audit_token == "" ? 0 : 1
+
+  repository  = "monitoring-monorepo"
+  environment = github_repository_environment.platform_settings_drift.environment
   secret_name = "PLATFORM_SETTINGS_AUDIT_TOKEN"
   value       = var.platform_settings_audit_token
 }

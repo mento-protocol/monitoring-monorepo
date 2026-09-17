@@ -51,9 +51,12 @@ variable "platform_settings_audit_token" {
     by `.github/workflows/platform-settings-drift.yml` to read
     `GET /repos/{owner}/{repo}/actions/permissions/workflow` and assert the repo
     default workflow-token permission stays read-only (issues #1564, #1557).
-    Mirrors into the `PLATFORM_SETTINGS_AUDIT_TOKEN` environment secret on the
-    `sentry-pipeline` GitHub Environment (`github-environment.tf`, issue #1289),
-    count-gated so `terraform apply` succeeds while unset and the drift check
+    Mirrors into the `PLATFORM_SETTINGS_AUDIT_TOKEN` environment secret on BOTH
+    the `sentry-pipeline` and the `platform-settings-drift` GitHub Environments
+    (`github-environment.tf`, issue #1289) for the issue #2464 transition; the
+    workflow reads the `sentry-pipeline` copy until PR #2465 repoints it and
+    deletes that environment. Both mirrors are count-gated so `terraform apply`
+    succeeds while unset and the drift check
     no-ops. Read-only by design: it can never CHANGE a
     setting. Deliberately SEPARATE from `github_token` (Administration:
     Read/write, kept local-only, never a CI secret) and from the autofix App
