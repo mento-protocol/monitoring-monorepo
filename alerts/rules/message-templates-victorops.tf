@@ -61,14 +61,14 @@ resource "grafana_message_template" "victorops_oracle_relayer_low_balance_alert_
   template = <<-EOT
 {{ define "victorops.oracle_relayer_low_balance_alert_message" }}
 {{ range .Alerts.Firing }}
-{{ $pair := reReplaceAll "^RelayerSigner([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.owner }}
+{{ $pair := reReplaceAll "^RelayerSigner([A-Z]{3,}?)(XAUT|[A-Z]{3})$" "$1/$2" .Labels.owner }}
 Low {{ .Labels.token }} balance for {{ $pair }} Relayer on {{ .Labels.chain | title }} — {{ .Annotations.currentBalance }} {{ .Labels.token }} left
 Wallet: https://{{ .Labels.explorer }}/address/{{ .Labels.ownerValue }}
-- This relayer wallet is below ~5 days of relaying. The daily refill-relayers function tops signers up below 7 days, so check its latest "Refill failed" log and the refiller wallet balance
+- This relayer wallet is below ~{{ .Annotations.runwayDays }} days of relaying. The daily refill-relayers function tops signers up below 7 days, so check its latest "Refill failed" log and the refiller wallet balance
 - To top up by hand, run the relayer refill script (https://github.com/mento-protocol/oracle-relayer?tab=readme-ov-file#refilling-relayer-signer-accounts) or send at least {{ .Annotations.threshold }} {{ .Labels.token }} to the wallet
 {{ end }}
 {{ range .Alerts.Resolved }}
-{{ $pair := reReplaceAll "^RelayerSigner([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.owner }}
+{{ $pair := reReplaceAll "^RelayerSigner([A-Z]{3,}?)(XAUT|[A-Z]{3})$" "$1/$2" .Labels.owner }}
 Sufficient {{ .Labels.token }} balance restored for the {{ $pair }} Relayer on {{ .Labels.chain | title }} — {{ .Annotations.currentBalance }} {{ .Labels.token }}
 {{ end }}
 {{ end }}
@@ -90,7 +90,7 @@ resource "grafana_message_template" "victorops_relayer_refiller_low_balance_aler
 Low {{ .Labels.token }} balance in the relayer refiller wallet on {{ .Labels.chain | title }} — {{ .Annotations.currentBalance }} {{ .Labels.token }} left, about {{ .Annotations.runwayDays }} days of refills
 Wallet: https://{{ .Labels.explorer }}/address/{{ .Labels.ownerValue }}
 - Send {{ .Labels.token }} to the refiller wallet. One month of relaying on this chain costs about {{ .Annotations.monthlyBurn }} {{ .Labels.token }}; this alert clears above {{ .Annotations.threshold }} {{ .Labels.token }}
-- Relays are not at risk yet: every signer still holds at least 7 days of its own
+- If this wallet runs dry, the daily refill-relayers function logs "Refill failed" and signers stop being topped up. Signers are normally refilled below 7 days of runway, so check the signer low-balance alerts for any that are already short
 {{ end }}
 {{ range .Alerts.Resolved }}
 Relayer refiller wallet on {{ .Labels.chain | title }} is funded again — {{ .Annotations.currentBalance }} {{ .Labels.token }}

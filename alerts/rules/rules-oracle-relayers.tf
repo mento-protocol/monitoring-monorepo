@@ -101,6 +101,8 @@ resource "grafana_rule_group" "oracle_relayers" {
         summary        = "Low ${rule.value.chain.symbol} balance for {{ $labels.owner }} on {{ $labels.chain | title }}: {{ with (index $values \"balance\") }}{{ humanize .Value }}{{ else }}unknown{{ end }} ${rule.value.chain.symbol}"
         currentBalance = "{{ with (index $values \"balance\") }}{{ humanize .Value }}{{ else }}unknown{{ end }}"
         threshold      = tostring(rule.value.threshold)
+        # Days of relaying the threshold stands for; differs per signer class.
+        runwayDays = tostring(rule.value.runway_days)
       }
 
       labels = {
@@ -174,8 +176,9 @@ resource "grafana_rule_group" "oracle_relayers" {
 
   # Refiller wallet: the account the daily refill-relayers cloud functions pay
   # signer top-ups from (oracle-relayer repo). Fires below ~14 days of the
-  # chain's relay burn (see local.refiller_balance_rules). Signers hold at
-  # least 7 days each, so relays are not at risk when this first fires.
+  # chain's relay burn (see local.refiller_balance_rules). It is the early
+  # warning: signers are refilled below 7 days, so an empty refiller does not
+  # stop relays at once, but this rule cannot see the signers' own balances.
   dynamic "rule" {
     for_each = local.refiller_balance_rules
 

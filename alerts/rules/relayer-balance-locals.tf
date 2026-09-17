@@ -113,6 +113,7 @@ locals {
           # in the rule's PromQL so the alert-rules linter can parse it.
           exclude   = length(local.relayer_burn[k].signer_classes) == 0 ? "^$" : "^RelayerSigner(${join("|", flatten([for cls in values(local.relayer_burn[k].signer_classes) : cls.feeds]))})$"
           threshold = tonumber(format("%.2f", local.relayer_burn[k].signer_daily_burn * local.signer_alert_runway_days))
+          runway_days = local.signer_alert_runway_days
         }
       },
       {
@@ -123,6 +124,7 @@ locals {
           include   = "^RelayerSigner(${join("|", cls.feeds)})$"
           exclude   = "^$"
           threshold = tonumber(format("%.2f", cls.daily_burn * cls.runway_days))
+          runway_days = cls.runway_days
         }
       },
     )

@@ -180,7 +180,7 @@ oracle-relayer refill script; update both together.
 
 The daily `refill-relayers-<chain>` cloud function tops a signer up once it
 drops below 7 days, paying from the refiller wallet. So the refiller alert is
-the early warning (fund the wallet; relays are not at risk yet), and a signer
+the early warning (fund the wallet; it says nothing about the signers' own balances), and a signer
 alert means the automation is not keeping up: check the function's
 `Refill failed` log lines (`labels.rateFeed="refill-relayers"`) and the
 refiller balance. Both route to `#alerts-oracles` (prod) or `#alerts-testnet`

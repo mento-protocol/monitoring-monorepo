@@ -70,6 +70,17 @@ run "relayer_balance_alerts_follow_the_runway_policy" {
   }
 
   assert {
+    condition = alltrue([
+      for rule in grafana_rule_group.oracle_relayers.rule :
+      rule.annotations.runwayDays == tostring(local.signer_balance_rules[
+        one([for k, r in local.signer_balance_rules : k if r.name == rule.name])
+      ].runway_days)
+      if startswith(rule.name, "Low ") && !startswith(rule.name, "Low Refiller Balance")
+    ]) && local.signer_balance_rules["celo/gas"].runway_days == 20
+    error_message = "Signer alert copy reads the runway from the rule, so each rule must publish its own class's runway days."
+  }
+
+  assert {
     condition = alltrue(flatten([
       for k, c in local.relayer_burn : [
         for class_key, cls in c.signer_classes : [
