@@ -549,7 +549,13 @@ test("prompt is deterministic and never leaks routes or qualification traps", ()
   assert.equal(first, second);
   assert.match(first, /fresh, read-only repository agent/);
   assert.match(first, /Do not use network access/);
-  assert.match(first, /at most 21 lines/);
+  assert.match(first, /`line_start` plus `line_count`/);
+  assert.match(
+    first,
+    new RegExp(
+      `\`line_count\` is at most\\s+${NAVIGATION_EVAL_MAX_EVIDENCE_LINES}\\.`,
+    ),
+  );
   assert.match(first, /45,000 UTF-8 bytes/);
   assert.match(
     first,
@@ -624,7 +630,79 @@ test("evidence line spans are targeted and bounded", () => {
     NAVIGATION_EVAL_MAX_EVIDENCE_LINES + 1;
   const scored = score(result);
   assert.match(scored.errors.join("\n"), /invalid line evidence/);
+  const oversize = result.answers[0];
+  assert.ok(
+    scored.errors.includes(
+      `answer ${oversize.question_id} has invalid line evidence for ${oversize.evidence[0].path}: lines 1-${NAVIGATION_EVAL_MAX_EVIDENCE_LINES + 1} span ${NAVIGATION_EVAL_MAX_EVIDENCE_LINES + 1} lines; the cap is ${NAVIGATION_EVAL_MAX_EVIDENCE_LINES}`,
+    ),
+    `the oversize span error must name the span and the cap: ${scored.errors.join("\n")}`,
+  );
+  const outOfRange = result.answers[1];
+  outOfRange.evidence[0].line_start = 0;
+  assert.ok(
+    score(result).errors.includes(
+      `answer ${outOfRange.question_id} has invalid line evidence for ${outOfRange.evidence[0].path}`,
+    ),
+    "another line-evidence cause keeps the bare message",
+  );
   assert.equal(scored.report.passed, false);
+});
+
+test("line_count entries are accepted and capped like line_end entries", () => {
+  const result = validResult();
+  const evidence = result.answers[0].evidence[0];
+  delete evidence.line_end;
+  evidence.line_count = NAVIGATION_EVAL_MAX_EVIDENCE_LINES;
+  assert.deepEqual(score(result).errors, []);
+  evidence.line_count = NAVIGATION_EVAL_MAX_EVIDENCE_LINES + 1;
+  assert.ok(
+    score(result).errors.includes(
+      `answer ${result.answers[0].question_id} has invalid line evidence for ${evidence.path}: lines 1-${NAVIGATION_EVAL_MAX_EVIDENCE_LINES + 1} span ${NAVIGATION_EVAL_MAX_EVIDENCE_LINES + 1} lines; the cap is ${NAVIGATION_EVAL_MAX_EVIDENCE_LINES}`,
+    ),
+    "a line_count over the cap is rejected with the span message",
+  );
+  evidence.line_end = 1;
+  evidence.line_count = 1;
+  assert.match(
+    validateNavigationResultShape(result).join("\n"),
+    /must carry exactly one of line_end or line_count/,
+  );
+  delete evidence.line_end;
+  delete evidence.line_count;
+  assert.match(
+    validateNavigationResultShape(result).join("\n"),
+    /must carry exactly one of line_end or line_count/,
+  );
+});
+
+test("the request schema caps line_count at the evidence-line constant", () => {
+  const schema = JSON.parse(
+    readFileSync(
+      new URL(
+        "../../docs/evals/documentation-navigation-result.schema.json",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+  );
+  assert.equal(
+    schema.properties.answers.items.properties.evidence.items.properties
+      .line_count.maximum,
+    NAVIGATION_EVAL_MAX_EVIDENCE_LINES,
+  );
+});
+
+test("duplicate chosen documents and verification targets are rejected", () => {
+  const result = validResult();
+  const answer = result.answers[0];
+  answer.chosen_documents.push(answer.chosen_documents[0]);
+  answer.authority_qualifications[0].verified_against = [
+    "docs/notes/pr-ready-state.md",
+    "docs/notes/pr-ready-state.md",
+  ];
+  const errors = validateNavigationResultShape(result).join("\n");
+  assert.match(errors, /chosen_documents must contain unique strings/);
+  assert.match(errors, /verified_against must contain unique strings/);
 });
 
 test("wrong source bytes or hashes are rejected", () => {

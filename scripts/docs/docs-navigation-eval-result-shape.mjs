@@ -19,6 +19,17 @@ export function uniqueStrings(values) {
   );
 }
 
+// An evidence entry carries the request schema's `line_count` or the legacy
+// `line_end`. Resolve either to the inclusive end line every span check reads.
+export function evidenceLineEnd(evidence) {
+  if (!isObject(evidence)) return null;
+  if (Object.hasOwn(evidence, "line_end")) return evidence.line_end;
+  return Number.isSafeInteger(evidence.line_start) &&
+    Number.isSafeInteger(evidence.line_count)
+    ? evidence.line_start + evidence.line_count - 1
+    : null;
+}
+
 function validateObjectContract(value, label, required, allowed, errors) {
   if (!isObject(value)) {
     errors.push(`${label} must be an object`);
@@ -198,8 +209,8 @@ export function validateNavigationResultShape(
           !validateObjectContract(
             evidence,
             evidenceLabel,
-            ["path", "line_start", "line_end", "supports"],
-            ["path", "line_start", "line_end", "supports"],
+            ["path", "line_start", "supports"],
+            ["path", "line_start", "line_end", "line_count", "supports"],
             errors,
           )
         ) {
@@ -208,7 +219,14 @@ export function validateNavigationResultShape(
         if (typeof evidence.path !== "string") {
           errors.push(`${evidenceLabel}.path must be a string`);
         }
-        for (const field of ["line_start", "line_end"]) {
+        const hasLineEnd = Object.hasOwn(evidence, "line_end");
+        if (hasLineEnd === Object.hasOwn(evidence, "line_count")) {
+          errors.push(
+            `${evidenceLabel} must carry exactly one of line_end or line_count`,
+          );
+        }
+        const spanField = hasLineEnd ? "line_end" : "line_count";
+        for (const field of ["line_start", spanField]) {
           if (!Number.isSafeInteger(evidence[field])) {
             errors.push(`${evidenceLabel}.${field} must be an integer`);
           }

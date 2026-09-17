@@ -13,6 +13,7 @@ import {
   NAVIGATION_EVAL_SCHEMA_VERSION,
 } from "./docs-navigation-eval-helpers.mjs";
 import {
+  evidenceLineEnd,
   isObject,
   uniqueStrings,
   validateNavigationResultShape,
@@ -568,18 +569,22 @@ export function scoreNavigationResult({
             `answer ${question.id} cites ${evidence.path} without loading it`,
           );
         }
+        const lineEnd = evidenceLineEnd(evidence);
+        const spannedLines = lineEnd - evidence.line_start + 1;
         if (
           !Number.isSafeInteger(evidence.line_start) ||
-          !Number.isSafeInteger(evidence.line_end) ||
+          !Number.isSafeInteger(lineEnd) ||
           evidence.line_start < 1 ||
-          evidence.line_end < evidence.line_start ||
-          evidence.line_end - evidence.line_start + 1 >
-            NAVIGATION_EVAL_MAX_EVIDENCE_LINES ||
+          lineEnd < evidence.line_start ||
           (availableLineCounts.has(evidence.path) &&
-            evidence.line_end > availableLineCounts.get(evidence.path))
+            lineEnd > availableLineCounts.get(evidence.path))
         ) {
           errors.push(
             `answer ${question.id} has invalid line evidence for ${evidence.path}`,
+          );
+        } else if (spannedLines > NAVIGATION_EVAL_MAX_EVIDENCE_LINES) {
+          errors.push(
+            `answer ${question.id} has invalid line evidence for ${evidence.path}: lines ${evidence.line_start}-${lineEnd} span ${spannedLines} lines; the cap is ${NAVIGATION_EVAL_MAX_EVIDENCE_LINES}`,
           );
         }
         if (

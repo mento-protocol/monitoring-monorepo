@@ -408,8 +408,8 @@ Rules:
   claim against a canonical document before relying on it.
 - Report every additional Markdown source you read for each question, its
   exact UTF-8 byte count, and its SHA-256. Report targeted one-based line
-  evidence; each evidence entry may span at most ${NAVIGATION_EVAL_MAX_EVIDENCE_LINES} lines, inclusive. Split wider support
-  into multiple targeted entries.
+  evidence as \`line_start\` plus \`line_count\`; \`line_count\` is at most
+  ${NAVIGATION_EVAL_MAX_EVIDENCE_LINES}. Split wider support into multiple targeted entries.
 - Keep the additional sources for every single question within
   ${suite.targets.max_question_source_bytes.toLocaleString("en-US")} UTF-8 bytes. Keep the union of bootstrap and additional
   sources for the complete run within

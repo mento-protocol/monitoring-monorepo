@@ -67,7 +67,6 @@
           "chosen_documents": {
             "type": "array",
             "minItems": 1,
-            "uniqueItems": true,
             "items": { "type": "string", "minLength": 1 }
           },
           "answer": { "type": "string", "minLength": 1 },
@@ -76,13 +75,17 @@
             "minItems": 1,
             "items": {
               "type": "object",
-              "description": "One targeted evidence span. line_end - line_start + 1 must be at most 21; split wider support across entries.",
+              "description": "One targeted evidence span, given as its first line and its length. The validator also accepts the legacy line_end form.",
               "additionalProperties": false,
-              "required": ["path", "line_start", "line_end", "supports"],
+              "required": ["path", "line_start", "line_count", "supports"],
               "properties": {
                 "path": { "type": "string", "minLength": 1 },
                 "line_start": { "type": "integer", "minimum": 1 },
-                "line_end": { "type": "integer", "minimum": 1 },
+                "line_count": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 21
+                },
                 "supports": { "type": "string", "minLength": 1 }
               }
             }
@@ -107,7 +110,6 @@
                 "qualification": { "type": "string" },
                 "verified_against": {
                   "type": "array",
-                  "uniqueItems": true,
                   "items": { "type": "string", "minLength": 1 }
                 }
               }
