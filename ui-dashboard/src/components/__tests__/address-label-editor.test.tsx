@@ -429,6 +429,29 @@ describe("AddressLabelEditor — tablist keyboard contract", () => {
     expect(tabbable[0]!.id).toBe("al-tab-report");
   });
 
+  it("keeps the tab stop with selection when a click carries no focus transition", () => {
+    // CodeRabbit on PR 2484: Safari does not always focus a button on click,
+    // and `element.click()` never does. Activation would then move
+    // `aria-selected` while the helper kept the tab stop on the still-focused
+    // tab, breaking the focus/selection sync that automatic activation
+    // promises. The click handler focuses the tab before activating it.
+    render({ address: VALID_ADDR, onClose: () => undefined });
+    const label = tabById("al-tab-label");
+    label.focus();
+    expect(document.activeElement).toBe(label);
+
+    act(() => {
+      tabById("al-tab-report").click();
+    });
+
+    const report = tabById("al-tab-report");
+    expect(report.getAttribute("aria-selected")).toBe("true");
+    expect(document.activeElement).toBe(report);
+    const tabbable = tabs().filter((t) => t.tabIndex === 0);
+    expect(tabbable).toHaveLength(1);
+    expect(tabbable[0]!.id).toBe("al-tab-report");
+  });
+
   it("has no axe violations on the tablist and its panels", async () => {
     render({ address: VALID_ADDR, onClose: () => undefined });
     const dialogMarkup = container.querySelector("dialog")?.innerHTML;

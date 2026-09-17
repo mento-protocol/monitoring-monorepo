@@ -272,7 +272,18 @@ export function AddressLabelEditor({
               aria-controls={`al-tab-${tab.id}-panel`}
               tabIndex={rovingProps.tabIndex}
               onFocus={rovingProps.onFocus}
-              onClick={() => setActiveTab(tab.id)}
+              // Focus first, then activate. Under automatic activation the
+              // roving tab stop must land on the tab that just became
+              // selected, and the helper moves it from the focus event. A
+              // click that does not carry a focus transition — Safari's
+              // button behaviour, or a programmatic `element.click()` —
+              // would otherwise leave the tab stop on the previously
+              // focused tab. Re-focusing an already-focused button is a
+              // no-op, so this costs nothing on browsers that do focus it.
+              onClick={(event) => {
+                event.currentTarget.focus();
+                setActiveTab(tab.id);
+              }}
               className={`px-3 py-2 text-xs font-medium transition-colors ${
                 isActive
                   ? "border-b-2 border-indigo-500 text-white"
