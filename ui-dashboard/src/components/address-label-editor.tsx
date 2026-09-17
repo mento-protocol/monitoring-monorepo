@@ -8,6 +8,7 @@ import {
 import { AddressReportEditor } from "@/components/address-report-editor";
 import { useAddressLabels } from "@/components/address-labels-provider";
 import type { AddressEntry } from "@/lib/address-labels-shared";
+import { useRovingTabIndex } from "@/lib/use-roving-tab-index";
 
 // Re-export pure helpers so existing test imports
 // (`address-label-editor.test.ts`) keep working without churn.
@@ -18,6 +19,11 @@ export {
 } from "@/components/address-label-form";
 
 type EditorTab = "label" | "report";
+
+const EDITOR_TABS: ReadonlyArray<{ id: EditorTab; label: string }> = [
+  { id: "label", label: "Label & Tags" },
+  { id: "report", label: "Forensic Report" },
+];
 
 type AddressDraftState = {
   sourceAddress: string;
@@ -135,6 +141,34 @@ export function AddressLabelEditor({
   const [draftAddress, setDraftAddress] = useAddressDraft(address);
   const { isCustom } = useAddressLabels();
 
+  // Roving tabindex for the tab strip: one tab stop that follows local focus,
+  // Left/Right/Home/End to move it. Activation is **automatic** (selection
+  // follows arrow focus) because switching tabs here only flips a `hidden`
+  // attribute on two panels that are already mounted — no `router.replace`,
+  // no fetch. The WAI-ARIA APG reserves manual activation for tablists whose
+  // panels load content on activation
+  // (https://www.w3.org/WAI/ARIA/apg/patterns/tabs/); this one does not, so
+  // the spec default applies. See
+  // `docs/pr-checklists/keyboard-a11y-controlled-widgets.md`.
+  const activeTabIndex = Math.max(
+    0,
+    EDITOR_TABS.findIndex((tab) => tab.id === activeTab),
+  );
+  const {
+    groupRef: tablistRef,
+    getItemProps,
+    handleKeyDown,
+  } = useRovingTabIndex({
+    activeIndex: activeTabIndex,
+    itemCount: EDITOR_TABS.length,
+    activation: "automatic",
+    arrowKeys: "horizontal",
+    onActivate: (index) => {
+      const next = EDITOR_TABS[index];
+      if (next) setActiveTab(next.id);
+    },
+  });
+
   // Mount-only effect — every caller passes an inline `() => setX(false)`
   // arrow as `onClose`, so depending on it would re-fire `showModal()` on
   // every parent re-render and throw `InvalidStateError` on the
@@ -213,40 +247,42 @@ export function AddressLabelEditor({
           long-form forensic report so each has its own save action and the
           markdown body doesn't share scope with a 200-char Name input. */}
       <div
+        ref={tablistRef}
         role="tablist"
         aria-label="Address detail tabs"
+        onKeyDown={handleKeyDown}
+        // The roving tabindex keeps the single tab stop on a `role="tab"`
+        // child, so the wrapper stays out of the tab order. `tabIndex={-1}`
+        // still satisfies `jsx-a11y/interactive-supports-focus`, which
+        // requires an element with an interactive role to be focusable.
+        tabIndex={-1}
         className="flex border-b border-slate-800 px-3"
       >
-        <button
-          type="button"
-          role="tab"
-          id="al-tab-label"
-          aria-selected={activeTab === "label"}
-          aria-controls="al-tab-label-panel"
-          onClick={() => setActiveTab("label")}
-          className={`px-3 py-2 text-xs font-medium transition-colors ${
-            activeTab === "label"
-              ? "border-b-2 border-indigo-500 text-white"
-              : "text-slate-400 hover:text-slate-200"
-          }`}
-        >
-          Label &amp; Tags
-        </button>
-        <button
-          type="button"
-          role="tab"
-          id="al-tab-report"
-          aria-selected={activeTab === "report"}
-          aria-controls="al-tab-report-panel"
-          onClick={() => setActiveTab("report")}
-          className={`px-3 py-2 text-xs font-medium transition-colors ${
-            activeTab === "report"
-              ? "border-b-2 border-indigo-500 text-white"
-              : "text-slate-400 hover:text-slate-200"
-          }`}
-        >
-          Forensic Report
-        </button>
+        {EDITOR_TABS.map((tab, index) => {
+          const rovingProps = getItemProps(index);
+          const isActive = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              id={`al-tab-${tab.id}`}
+              ref={rovingProps.ref}
+              aria-selected={isActive}
+              aria-controls={`al-tab-${tab.id}-panel`}
+              tabIndex={rovingProps.tabIndex}
+              onFocus={rovingProps.onFocus}
+              onClick={() => setActiveTab(tab.id)}
+              className={`px-3 py-2 text-xs font-medium transition-colors ${
+                isActive
+                  ? "border-b-2 border-indigo-500 text-white"
+                  : "text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              {tab.label}
+            </button>
+          );
+        })}
       </div>
 
       {/* Both tab panels stay mounted — toggling visibility via `hidden`
