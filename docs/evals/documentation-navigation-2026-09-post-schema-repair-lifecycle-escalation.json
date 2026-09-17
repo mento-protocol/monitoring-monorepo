@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "suite_id": "documentation-navigation-v1",
+  "fixture_digest": "15f3f3c6ac36b7e81a4128b861ef06f6805516f23b27abe71a6321a5897dd3ec",
+  "run": {
+    "agent": "Codex",
+    "model": "gpt-5.6-sol",
+    "effort": "medium",
+    "executed_at": "2026-09-17T13:52:27+02:00",
+    "repository_base_commit": "db5ef44143d4b915b3d9b16a07f159f84606edf8",
+    "fresh_context": true,
+    "read_only": true,
+    "bootstrap_sources": [
+      {
+        "path": "AGENTS.md",
+        "bytes": 8066,
+        "sha256": "6dc8eabe3efb53bdbab9717da8f995ec69e493e8784933918d0cdbc1beee12c5"
+      },
+      {
+        "path": "docs/README.md",
+        "bytes": 27951,
+        "sha256": "a6c407ecaf3cec6ea41493f00f5fba40702ffd6bac88c06fd952ebb46ed8364c"
+      }
+    ]
+  },
+  "answers": [
+    {
+      "question_id": "commands-issue-lifecycle",
+      "chosen_documents": ["docs/notes/agent-issue-workflow.md"],
+      "answer": "Claim agent-ready work with `pnpm issue:claim --count <n> --agent <name>`; use the explicit `--issue` form when selecting one issue. When the PR opens, run `pnpm issue:review --pr <pr> --issue <issue>`; add `--claim-id <claim-id> --rebind-branch` if the PR branch was created after the claim. If work cannot continue, run `pnpm issue:release --issue <issue> --claim-id <claim-id>` to return it to `agent-ready`, or add `--needs-grooming` when the remaining work is unclear. Add `--closed-unmerged-pr` after a stored PR closes unmerged. For an open issue after a partial merge, use `--merged-pr --needs-grooming`.",
+      "evidence": [
+        {
+          "path": "docs/notes/agent-issue-workflow.md",
+          "line_start": 110,
+          "line_count": 16,
+          "supports": "Defines the ready and unclear states, the claim command, the review command, and the rebind variant."
+        },
+        {
+          "path": "docs/notes/agent-issue-workflow.md",
+          "line_start": 184,
+          "line_count": 13,
+          "supports": "Lists the claim, review, normal release, needs-grooming release, closed-unmerged release, and partial-merge release command forms."
+        }
+      ],
+      "authority_qualifications": [
+        {
+          "path": "docs/notes/agent-issue-workflow.md",
+          "authority": "canonical",
+          "qualification": "",
+          "verified_against": []
+        }
+      ],
+      "loaded_sources": [
+        {
+          "path": "docs/notes/agent-issue-workflow.md",
+          "bytes": 13232,
+          "sha256": "26652f72efc5405690540dc43e8028c6de7432e42251b861494bbe704aa5e4a7"
+        }
+      ]
+    }
+  ]
+}

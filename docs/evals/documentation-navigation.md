@@ -318,3 +318,36 @@ The result passed all 18 routes and used the retained
 `package-indexer-add-contract`. The deterministic fixture regression separately
 proves that the README-only route is accepted as the shortest valid path. The
 fresh run does not claim that the evaluator chose that shorter alternative.
+
+### 2026-09 result
+
+The monthly run is
+[`documentation-navigation-2026-09-post-schema-repair.json`](documentation-navigation-2026-09-post-schema-repair.json).
+It evaluated default-branch commit
+`db5ef44143d4b915b3d9b16a07f159f84606edf8` with `gpt-5.6-sol` at low effort
+against current fixture digest `15f3f3c6…`. The month issue's marker still pins
+the pre-#2463 digest `bb037131…`, so this is a current-contract run.
+
+| Measure                             | 2026-08 post-route |           2026-09 |
+| ----------------------------------- | -----------------: | ----------------: |
+| Routing accuracy                    |               100% |             94.4% |
+| Unqualified non-canonical sources   |                  0 |                 0 |
+| Answer evidence                     |               100% |              100% |
+| Shortest useful path                |              88.9% |             88.9% |
+| Bootstrap bytes                     |             28,161 |            36,017 |
+| Unique suite bytes                  |  258,542 / 262,000 | 251,231 / 262,000 |
+| Questions over the per-question cap |                  0 |                 0 |
+
+The first attempt validated nothing: the request schema rejected every evidence
+span. PR #2478 repaired it with `line_start` plus `line_count` bounded to 21
+lines, and both later runs validated with zero errors. The sole miss was
+`commands-issue-lifecycle`, where the run answered correctly from
+`docs/notes/quick-commands.md`, which restates the command block owned by
+`docs/notes/agent-issue-workflow.md` and never links to it. Independent review
+confirmed a documentation defect; the
+[medium-effort escalation](documentation-navigation-2026-09-post-schema-repair-lifecycle-escalation.json)
+routed to that authority at 100% routing, evidence, and shortest route with
+13,232 question-source bytes. Its generated prompt told it to self-validate, so
+treat it as a route check, not blind evidence. `package-indexer-add-contract`
+routed correctly through the retained chain; its false shortest route is the
+documented non-failing outcome.
