@@ -111,19 +111,19 @@ locals {
           # Feeds a class below already covers. "^$" matches no owner, so a
           # chain without classes excludes nothing. Both matchers stay literal
           # in the rule's PromQL so the alert-rules linter can parse it.
-          exclude   = length(local.relayer_burn[k].signer_classes) == 0 ? "^$" : "^RelayerSigner(${join("|", flatten([for cls in values(local.relayer_burn[k].signer_classes) : cls.feeds]))})$"
-          threshold = tonumber(format("%.2f", local.relayer_burn[k].signer_daily_burn * local.signer_alert_runway_days))
+          exclude     = length(local.relayer_burn[k].signer_classes) == 0 ? "^$" : "^RelayerSigner(${join("|", flatten([for cls in values(local.relayer_burn[k].signer_classes) : cls.feeds]))})$"
+          threshold   = tonumber(format("%.2f", local.relayer_burn[k].signer_daily_burn * local.signer_alert_runway_days))
           runway_days = local.signer_alert_runway_days
         }
       },
       {
         for class_key, cls in local.relayer_burn[k].signer_classes : "${k}/${class_key}" => {
-          chain_key = k
-          chain     = c
-          name      = "Low ${c.symbol} Balance [${c.title}, ${cls.label}]"
-          include   = "^RelayerSigner(${join("|", cls.feeds)})$"
-          exclude   = "^$"
-          threshold = tonumber(format("%.2f", cls.daily_burn * cls.runway_days))
+          chain_key   = k
+          chain       = c
+          name        = "Low ${c.symbol} Balance [${c.title}, ${cls.label}]"
+          include     = "^RelayerSigner(${join("|", cls.feeds)})$"
+          exclude     = "^$"
+          threshold   = tonumber(format("%.2f", cls.daily_burn * cls.runway_days))
           runway_days = cls.runway_days
         }
       },
