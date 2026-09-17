@@ -38,6 +38,12 @@ global:
     RelayerSignerXOFUSD: '0x2C5dB0140b6B25CA6a37304198095B23E2604dF2'
     RelayerSignerZARUSD: '0xc0342D31Cc875f3dC85E3Ab352e60698444197AE'
 
+    # Wallet the daily `refill-relayers-<chain>` cloud functions (oracle-relayer
+    # repo) top the relayer signers up from. Same address on every chain.
+    # Deliberately NOT named `RelayerSigner…`: the signer low-balance alert
+    # selects on that prefix and applies per-signer thresholds.
+    RelayerRefiller: '0x0cde6e6CfeEb7433948aF4B2CE1084125c703925'
+
 tokens:
   USDm:
     decimals: 18
@@ -630,6 +636,8 @@ metrics:
       - [RelayerSignerUSDTUSD]
       - [RelayerSignerXOFUSD]
       - [RelayerSignerZARUSD]
+      # Does the refiller wallet hold enough CELO to keep topping the signers up?
+      - [RelayerRefiller]
       - [Reserve]
 
   - source: CELOToken.balanceOf(address owner)(uint256)
@@ -671,6 +679,7 @@ metrics:
       - [RelayerSignerUSDTUSD]
       - [RelayerSignerXOFUSD]
       - [RelayerSignerZARUSD]
+      - [RelayerRefiller]
 
   # Native gas-token balance for non-ERC20 native tokens (e.g. MON on Monad).
   # Uses eth_getBalance under the hood instead of an ERC20 balanceOf call.
@@ -686,6 +695,7 @@ metrics:
       - [RelayerSignerUSDTUSD]
       - [RelayerSignerCHFUSD]
       - [RelayerSignerJPYUSD]
+      - [RelayerRefiller]
 
   # Native gas-token balance (POL) for Polygon relayer signers.
   # Uses eth_getBalance under the hood instead of an ERC20 balanceOf call.
@@ -697,6 +707,7 @@ metrics:
     variants:
       - [RelayerSignerUSDCUSD]
       - [RelayerSignerEURUSD]
+      - [RelayerRefiller]
 
   # Does the reserve have enough USDC for swap operations?
   - source: USDC.balanceOf(address owner)(uint256)

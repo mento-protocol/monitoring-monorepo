@@ -166,6 +166,26 @@ Limits tab; a limit no VirtualPool indexes gets a short explanation rather than
 a 404. The Slack and VictorOps trading-limit templates print the link only
 when the annotation is present.
 
+## Relayer wallet balances
+
+Both rules live in `rules-oracle-relayers.tf` and take their numbers from the
+`chains` registry in `protocol-routing-locals.tf`, in days of runway rather than
+flat token amounts. The burn figures mirror the `DAILY_COST` table in the
+oracle-relayer refill script; update both together.
+
+| Rule                             | Fires when                                                                                                                                                                                                                              |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Low <token> Balance [<chain>]`  | A relayer signer holds less than ~5 days of its relay burn. One rule per chain, plus one per `signer_classes` entry for feeds that burn at a different pace (two-aggregator Celo feeds, Celo gas feeds, hourly Monad stablecoin feeds). |
+| `Low Refiller Balance [<chain>]` | The refiller wallet (`owner="RelayerRefiller"`) holds less than 14 days of the chain's relay burn. Testnets use a floor of one full round of top-ups instead.                                                                           |
+
+The daily `refill-relayers-<chain>` cloud function tops a signer up once it
+drops below 7 days, paying from the refiller wallet. So the refiller alert is
+the early warning (fund the wallet; relays are not at risk yet), and a signer
+alert means the automation is not keeping up: check the function's
+`Refill failed` log lines (`labels.rateFeed="refill-relayers"`) and the
+refiller balance. Both route to `#alerts-oracles` (prod) or `#alerts-testnet`
+at warning/info severity and never page.
+
 ## Bridge transfers
 
 The [bridge alert runbook](../../docs/notes/bridge-transfer-alerting.md) owns

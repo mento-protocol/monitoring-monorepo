@@ -14,7 +14,15 @@ locals {
   #                     ("CELOToken_balanceOf" for Celo, "Native_balanceOf" for chains
   #                     whose gas token isn't ERC20-compatible, e.g. MON)
   #   symbol          → gas-token ticker shown in alert copy (e.g. "CELO", "MON")
-  #   threshold       → low-balance alert threshold, in whole tokens
+  #   signer_daily_burn     → native tokens one relayer signer burns per weekday on
+  #                           this chain (the oracle-relayer refill script's
+  #                           DAILY_COST table is the source; keep them in step)
+  #   signer_classes        → feeds that burn at a different pace than
+  #                           signer_daily_burn; each gets its own low-balance rule
+  #   refiller_monthly_burn → native tokens the refiller wallet pays out per month,
+  #                           i.e. the whole chain's relay burn
+  #   refiller_min_threshold → floor for the refiller alert; on testnets burn is so
+  #                           small that one round of top-ups is the real need
   #   explorer        → block-explorer host for address links in alert copy
   #   chain_id            → EVM chain ID; used to build pool URLs like
   #                         `monitoring.mento.org/pool/<chain_id>-<pool_address>`
@@ -33,68 +41,172 @@ locals {
       env                 = "prod"
       metric              = "CELOToken_balanceOf"
       symbol              = "CELO"
-      threshold           = 10
       explorer            = "celoscan.io"
       chain_id            = "42220"
       aegis_chain         = "celo"
       chainlink_feed_path = "celo/mainnet"
+      signer_daily_burn   = 15
+      signer_classes = {
+        # Built from two Chainlink aggregators; they relay on every new round
+        # of either one, so roughly twice as often.
+        composite = {
+          label       = "two-aggregator feeds"
+          feeds       = ["EUROCEUR", "EURXOF"]
+          daily_burn  = 26
+          runway_days = 5
+        }
+        # Scheduled once a day, so ~0.05 CELO/day. Five days of that is a
+        # fraction of a relay, so use 20 days (1 CELO), which still sits below
+        # the refill script's 30-day top-up line for these feeds.
+        gas = {
+          label       = "gas feeds"
+          feeds       = ["CELOAUD", "CELOBRL", "CELOCAD", "CELOCHF", "CELOCOP", "CELOETH", "CELOEUR", "CELOGBP", "CELOGHS", "CELOJPY", "CELOKES", "CELONGN", "CELOPHP", "CELOXAUT", "CELOXOF", "CELOZAR"]
+          daily_burn  = 0.05
+          runway_days = 20
+        }
+      }
+      refiller_monthly_burn  = 7200
+      refiller_min_threshold = 0
     }
     "celo-sepolia" = {
       title               = "Celo-Sepolia"
       env                 = "staging"
       metric              = "CELOToken_balanceOf"
       symbol              = "CELO"
-      threshold           = 10
       explorer            = "sepolia.celoscan.io"
       chain_id            = "11142220"
       aegis_chain         = "celoSepolia"
       chainlink_feed_path = ""
+      # Testnet relayers are scheduled once a day: ~0.01 tokens/day each.
+      signer_daily_burn = 0.01
+      signer_classes    = {}
+      # 34 signers x 0.01/day. The refill script rounds every top-up up to 2
+      # tokens, so the floor is one full round of top-ups.
+      refiller_monthly_burn  = 10
+      refiller_min_threshold = 70
     }
     "monad" = {
       title               = "Monad"
       env                 = "prod"
       metric              = "Native_balanceOf"
       symbol              = "MON"
-      threshold           = 50
       explorer            = "monadscan.com"
       chain_id            = "143"
       aegis_chain         = "monad"
       chainlink_feed_path = "monad/monad"
+      signer_daily_burn   = 22
+      signer_classes = {
+        # Their Chainlink aggregators only publish hourly: 24 relays a day.
+        hourly = {
+          label       = "hourly stablecoin feeds"
+          feeds       = ["AUSDUSD", "USDCUSD", "USDTUSD"]
+          daily_burn  = 1.5
+          runway_days = 5
+        }
+      }
+      refiller_monthly_burn  = 2100
+      refiller_min_threshold = 0
     }
     "polygon" = {
-      title               = "Polygon"
-      env                 = "prod"
-      metric              = "Native_balanceOf"
-      symbol              = "POL"
-      threshold           = 500
-      explorer            = "polygonscan.com"
-      chain_id            = "137"
-      aegis_chain         = "polygon"
-      chainlink_feed_path = "polygon/mainnet"
+      title                  = "Polygon"
+      env                    = "prod"
+      metric                 = "Native_balanceOf"
+      symbol                 = "POL"
+      explorer               = "polygonscan.com"
+      chain_id               = "137"
+      aegis_chain            = "polygon"
+      chainlink_feed_path    = "polygon/mainnet"
+      signer_daily_burn      = 135
+      signer_classes         = {}
+      refiller_monthly_burn  = 7000
+      refiller_min_threshold = 0
     }
     "monad-testnet" = {
-      title               = "Monad-Testnet"
-      env                 = "staging"
-      metric              = "Native_balanceOf"
-      symbol              = "MON"
-      threshold           = 50
-      explorer            = "testnet.monadscan.com"
-      chain_id            = "10143"
-      aegis_chain         = "monadTestnet"
-      chainlink_feed_path = ""
+      title                  = "Monad-Testnet"
+      env                    = "staging"
+      metric                 = "Native_balanceOf"
+      symbol                 = "MON"
+      explorer               = "testnet.monadscan.com"
+      chain_id               = "10143"
+      aegis_chain            = "monadTestnet"
+      chainlink_feed_path    = ""
+      signer_daily_burn      = 0.01
+      signer_classes         = {}
+      refiller_monthly_burn  = 2
+      refiller_min_threshold = 15
     }
     "polygon-testnet" = {
-      title = "Polygon-Testnet"
-      env   = "staging"
-      # Testnet threshold matching monad-testnet's 50, not mainnet's 500 —
-      # Amoy signers are manually topped up (~84 POL each as of 2026-07-16).
-      metric              = "Native_balanceOf"
-      symbol              = "POL"
-      threshold           = 50
-      explorer            = "amoy.polygonscan.com"
-      chain_id            = "80002"
-      aegis_chain         = "polygonTestnet"
-      chainlink_feed_path = ""
+      title                  = "Polygon-Testnet"
+      env                    = "staging"
+      metric                 = "Native_balanceOf"
+      symbol                 = "POL"
+      explorer               = "amoy.polygonscan.com"
+      chain_id               = "80002"
+      aegis_chain            = "polygonTestnet"
+      chainlink_feed_path    = ""
+      signer_daily_burn      = 0.01
+      signer_classes         = {}
+      refiller_monthly_burn  = 1
+      refiller_min_threshold = 5
+    }
+  }
+
+  # Low-balance policy for the relayer wallets, in days of runway.
+  #
+  # The refiller wallet pays every signer top-up, so its outflow is the whole
+  # chain's relay burn. Signers are topped up in bursts (a group that crosses
+  # the 7-day refill line together is paid in one run), so the refiller alert
+  # has to sit well above the largest burst: 14 days of burn covers it at least
+  # 1.5x on every chain and still leaves a week or more before a refill could
+  # fail. The daily refill tops a signer up once it drops below 7 days, so a
+  # signer below 5 days means the automation is not keeping up.
+  refiller_alert_runway_days = 14
+  signer_alert_runway_days   = 5
+
+  # Products are rounded via format() so float noise (0.01 * 5 = 0.04999…) never
+  # reaches the PromQL or the alert copy.
+  #
+  # One low-balance rule per chain, plus one per signer class. The default rule
+  # keeps the historical name and excludes every feed a class already covers.
+  signer_balance_rules = merge([
+    for k, c in local.chains : merge(
+      {
+        "${k}/default" = {
+          chain_key = k
+          chain     = c
+          name      = "Low ${c.symbol} Balance [${c.title}]"
+          include   = "^RelayerSigner.*$"
+          # Feeds a class below already covers. "^$" matches no owner, so a
+          # chain without classes excludes nothing. Both matchers stay literal
+          # in the rule's PromQL so the alert-rules linter can parse it.
+          exclude   = length(c.signer_classes) == 0 ? "^$" : "^RelayerSigner(${join("|", flatten([for cls in values(c.signer_classes) : cls.feeds]))})$"
+          threshold = tonumber(format("%.2f", c.signer_daily_burn * local.signer_alert_runway_days))
+        }
+      },
+      {
+        for class_key, cls in c.signer_classes : "${k}/${class_key}" => {
+          chain_key = k
+          chain     = c
+          name      = "Low ${c.symbol} Balance [${c.title}, ${cls.label}]"
+          include   = "^RelayerSigner(${join("|", cls.feeds)})$"
+          exclude   = "^$"
+          threshold = tonumber(format("%.2f", cls.daily_burn * cls.runway_days))
+        }
+      },
+    )
+  ]...)
+
+  refiller_balance_rules = {
+    for k, c in local.chains : k => {
+      chain = c
+      name  = "Low Refiller Balance [${c.title}]"
+      # Tokens the refiller pays out per day, used to express the balance as
+      # days of refills in the alert copy.
+      daily_burn = tonumber(format("%.4f", c.refiller_monthly_burn / 30))
+      threshold = max(
+        ceil(c.refiller_monthly_burn * local.refiller_alert_runway_days / 30),
+        c.refiller_min_threshold,
+      )
     }
   }
 
@@ -406,16 +518,26 @@ locals {
       victorops_message_template = "victorops.oracle_stale_price_alert_message"
     },
     oracle_relayer_low_balance = {
-      # One alert name per chain, e.g. "Low CELO Balance [Celo]",
-      # "Low MON Balance [Monad]". Generated from the chains registry so a new
-      # chain's alert routes through this dispatcher automatically.
+      # One alert name per chain and signer class, e.g. "Low CELO Balance
+      # [Celo]", "Low CELO Balance [Celo, gas feeds]". Generated from the same
+      # map as the rules so every rule name has a dispatcher branch.
       names = [
-        for k, c in local.chains : "Low ${c.symbol} Balance [${c.title}]"
+        for k, r in local.signer_balance_rules : r.name
       ],
       slack_title_template       = "slack.oracle_relayer_low_balance_alert_title",
       slack_message_template     = "slack.oracle_relayer_low_balance_alert_message",
       victorops_title_template   = "victorops.oracle_relayer_low_balance_alert_title",
       victorops_message_template = "victorops.oracle_relayer_low_balance_alert_message"
+    },
+    relayer_refiller_low_balance = {
+      # One alert name per chain, e.g. "Low Refiller Balance [Celo]".
+      names = [
+        for k, r in local.refiller_balance_rules : r.name
+      ],
+      slack_title_template       = "slack.relayer_refiller_low_balance_alert_title",
+      slack_message_template     = "slack.relayer_refiller_low_balance_alert_message",
+      victorops_title_template   = "victorops.relayer_refiller_low_balance_alert_title",
+      victorops_message_template = "victorops.relayer_refiller_low_balance_alert_message"
     },
     low_reserve_balance = {
       names = [
