@@ -90,6 +90,9 @@ handoff, publisher workflow, broker, or external service:
   write repository content or satisfy a required ruleset context. The upload
   step skips `sentry-autofix/*`. GitHub withholds the repository secret from
   forks and Dependabot.
+  _Superseded Sep 2026 by issue #2486: the `sentry-autofix/*` skip is retired
+  because ADR 0106 removed the branch it named. The fork and Dependabot
+  withholding is unchanged, and it is what bounds this exposure._
 - Terraform PR plans execute candidate HCL with a read-only GCP plan identity.
   That identity can read cleartext Terraform state. It cannot apply changes.
 - Lighthouse passes the Vercel preview bypass value to candidate configuration
@@ -101,7 +104,9 @@ handoff, publisher workflow, broker, or external service:
 
 The Codecov token is absent on forks and Dependabot, and its step skips
 `sentry-autofix/*`. Terraform, Lighthouse, and automatic Claude review exclude
-all three contexts. An `OWNER` or `MEMBER` can explicitly invoke on-demand
+all three contexts. _Superseded Sep 2026 by issue #2486: the `sentry-autofix/*`
+context is retired throughout, so each of these now excludes forks and
+Dependabot only._ An `OWNER` or `MEMBER` can explicitly invoke on-demand
 Claude review on otherwise excluded content. On 2026-08-30, the human operator
 accepted that invocation boundary and the four automatic exposures exactly as
 listed above. The repository accepts them under the trusted-contributor model

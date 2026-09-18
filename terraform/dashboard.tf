@@ -190,10 +190,6 @@ removed {
 #   2. Git fork protection prevents fork PR preview deployments.
 #   3. CRON_SECRET is explicitly scoped to production (see below).
 #
-# ui-dashboard/vercel.json also suppresses ordinary sentry-autofix/* previews.
-# That branch-controlled rule is workflow hygiene and defense in depth, not a
-# trust boundary; provider-owned controls must reject untrusted code.
-#
 # Verify the first two provider-owned controls with:
 #   vercel project protection monitoring-dashboard --scope mentolabs --format json
 #
