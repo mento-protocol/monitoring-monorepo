@@ -166,6 +166,17 @@ Limits tab; a limit no VirtualPool indexes gets a short explanation rather than
 a 404. The Slack and VictorOps trading-limit templates print the link only
 when the annotation is present.
 
+## Message template cap
+
+Grafana Cloud stops accepting new notification templates once 30 exist.
+Creation then fails at apply time with an empty HTTP 429, while updates to
+existing templates keep working, so it reads like rate limiting but never
+clears. `pnpm alerts:rules:lint` counts the `grafana_message_template`
+resources in this stack and fails above the cap, so the limit shows up on the
+PR rather than as a half-applied production change. A template can hold
+several `define` blocks: put a title and its message in one resource instead of
+two, and reuse an existing title where the rendering is identical.
+
 ## Relayer wallet balances
 
 Both rules live in `rules-oracle-relayers.tf` and take their numbers from the

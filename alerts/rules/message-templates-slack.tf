@@ -102,13 +102,10 @@ resource "grafana_message_template" "slack_oracle_relayer_low_balance_alert_mess
 EOT
 }
 
-resource "grafana_message_template" "slack_relayer_refiller_low_balance_alert_title" {
-  name     = "Slack - Low Relayer Refiller Balance Alert Title"
-  template = <<-EOT
-{{ define "slack.relayer_refiller_low_balance_alert_title" }}{{ if (len .Alerts.Firing) }}🔴{{ else }}✅{{ end }}{{ end }}
-EOT
-}
-
+# The refiller alert has no title template of its own: it reuses
+# `slack.oracle_relayer_low_balance_alert_title`, which renders the same
+# firing/resolved marker. Grafana Cloud rejects template creation once 30
+# exist (HTTP 429), so this stack does not spend a slot on a duplicate.
 resource "grafana_message_template" "slack_relayer_refiller_low_balance_alert_message" {
   name     = "Slack - Low Relayer Refiller Balance Alert Message"
   template = <<-EOT

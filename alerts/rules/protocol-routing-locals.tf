@@ -415,7 +415,9 @@ locals {
       names = [
         for k, r in local.refiller_balance_rules : r.name
       ],
-      slack_title_template       = "slack.relayer_refiller_low_balance_alert_title",
+      # Same firing/resolved marker as the signer alert; see the template-count
+      # note in message-templates-slack.tf.
+      slack_title_template       = "slack.oracle_relayer_low_balance_alert_title",
       slack_message_template     = "slack.relayer_refiller_low_balance_alert_message",
       victorops_title_template   = "victorops.relayer_refiller_low_balance_alert_title",
       victorops_message_template = "victorops.relayer_refiller_low_balance_alert_message"
