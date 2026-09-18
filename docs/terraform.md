@@ -325,13 +325,13 @@ All three Environments are Terraform-managed in
 > cloud auth, and reads the deployment-branch-policy allow-list itself so an
 > empty or over-broad pattern set cannot pass.
 
-`production-infra` has a required reviewer, self-review allowed, and admin
-bypass disabled; its workflows verify that state before cloud auth. With one
-maintainer this is operator acknowledgement, not independent or exact-plan
-review. [ADR 0029](adr/0029-ci-apply-production-infra-gate.md) records the
+`production-infra` has two required reviewers, either of whom can approve,
+self-review allowed, and admin bypass disabled; its workflows verify that state
+before cloud auth. With self-review allowed this is operator acknowledgement,
+not independent or exact-plan review. [ADR 0029](adr/0029-ci-apply-production-infra-gate.md) records the
 decision against a same-owner `CODEOWNERS` gate; revisit PR approval,
-latest-push approval, and disabled Environment self-review when a second active
-maintainer exists. The reviewer rule is enforced independently of the branch
+latest-push approval, and disabled Environment self-review now that a second
+active maintainer exists. The reviewer rule is enforced independently of the branch
 policy, so it held even while that policy was inert.
 
 `production-services` records routine deploys from `main` without a reviewer.
