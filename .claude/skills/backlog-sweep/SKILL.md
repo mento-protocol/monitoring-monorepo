@@ -305,21 +305,21 @@ print it before claiming it and give it the same abort window as the original
 batch.
 
 **Resolve the paths the body names before the claim.** Fetch main again in the
-same breath as the body re-read — `git fetch origin main` then `oid="$(git
-rev-parse FETCH_HEAD)"` — and read each path the body names as `git rev-parse
-"$oid:<path>"`, the same primitive the grooming pass uses. A pin taken at
-Preflight is stale by now: ranking and the dwell leave minutes in which a
-deletion can merge. Read against that OID, never the session checkout, which
-may sit on a branch. Look up only paths the body names as existing files or
-directories to edit; a path the body says it will add, and any glob, is an
+same breath as the body re-read — `git fetch origin main` then
+`oid="$(git rev-parse FETCH_HEAD)"` — and read each path the body names as
+`git rev-parse "$oid:<path>"`, the same primitive the grooming pass uses. A
+pin taken at Preflight is stale by now: ranking and the dwell leave minutes in
+which a deletion can merge. Read against that OID, never the session checkout,
+which may sit on a branch. Look up only paths the body names as existing files
+or directories to edit; a path the body says it will add, and any glob, is an
 intended output and proves nothing when absent. An edit target that no longer
 resolves means the issue's target is gone: do not claim it, and record it in
 the report. A merged PR can delete the target without naming the issue, so
 neither the body re-read nor a PR search sees it — sweep 2026-09-17 claimed
-#2444 and burned a worker clone and setup before the worker found that PR #2465
-had removed `scripts/sentry/**` that morning; #2022 and #1698 were obsolete the
-same way, and the operator closed all three. A replacement follows the
-replacement rule below, as after any pre-claim skip.
+issue #2444 and burned a worker clone and setup before the worker found that
+PR #2465 had removed `scripts/sentry/**` that morning; #2022 and #1698 were
+obsolete the same way, and the operator closed all three. A replacement
+follows the replacement rule below, as after any pre-claim skip.
 
 Capture and print that read once, then hash the exact body from the same JSON:
 
@@ -595,8 +595,10 @@ Then spawn one worker subagent per issue. Give each a brief containing:
   Poll the PR in-turn with a bounded loop; never end the turn on an armed
   monitor or a background job of your own — nothing re-invokes a worker that
   has stopped. Re-run `pnpm agent:closeout-review` on the final head after
-  review fixes: a clean closeout on an earlier commit does not cover the head
-  that merges.
+  review fixes, with the same preflight-bound `--base`: the tool reviews local
+  `HEAD`, so first fetch the PR head and require `git rev-parse HEAD` to equal
+  the PR's `headRefOid`; a clean closeout on an earlier commit does not cover
+  the head that merges.
 - **The report-back.** End the last turn — at READY, at a release, or at a
   block — with one message to the orchestrator carrying every fact the report
   needs and only the worker can see: the PR URL; the final
