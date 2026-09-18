@@ -35,6 +35,11 @@ const CODERABBIT_IGNORED_FILES_BLOCK =
   /<summary>\s*:no_entry:\s*Files ignored due to path filters\s*\((\d+)\)<\/summary>([\s\S]*?)<\/details>/gi;
 const CODERABBIT_IGNORED_FILE =
   /^\s*>\s*\*\s+`([^`\r\n]+)`\s+is excluded by\s+`[^`\r\n]+`\s*$/gim;
+const CODERABBIT_COMMAND_REPLY_MARKER =
+  /<!--\s*CodeRabbit review command invocation:[^\r\n>]*-->/i;
+const CODERABBIT_COMMAND_NOT_COMPLETED =
+  /<summary>[^<\r\n]*Action not completed[^<\r\n]*<\/summary>/i;
+const CODERABBIT_RATE_LIMIT_REFUSAL = /^\s*Review rate limited\.?\s*$/m;
 
 export function parseTimestamp(value) {
   const timestamp = Date.parse(value ?? "");
@@ -130,6 +135,67 @@ function codeRabbitCommentTimestamp(comment) {
   );
 }
 
+function isCodeRabbitAuthored(comment) {
+  const author = comment.user?.login ?? comment.author?.login ?? null;
+  return CODERABBIT_AUTHORS.has(String(author ?? "").toLowerCase());
+}
+
+/**
+ * The epoch-ms time CodeRabbit refused the current head's own review request
+ * over the rate limit, or `null` when no such refusal stands.
+ *
+ * CodeRabbit answers each `@coderabbitai review` comment with one
+ * auto-generated reply carrying its invocation marker. The reply names no
+ * request id, so it binds to the first such reply after the newest trusted
+ * head-marked request. Later replies belong to other commands and leave the
+ * outcome alone; only another request supersedes it — which is how the
+ * accepted retry clears a refusal. Only a CodeRabbit-authored reply and a
+ * trusted head-marked request participate, so refusal text an untrusted author
+ * posts cannot flip the state.
+ */
+export function codeRabbitRateLimitRefusalTime({
+  issueComments = [],
+  currentHeadOid = null,
+} = {}) {
+  const currentHead = String(currentHeadOid ?? "").toLowerCase();
+  if (!currentHead) return null;
+
+  const ordered = issueComments
+    .map((comment) => ({
+      comment,
+      at: parseTimestamp(comment.created_at ?? comment.createdAt),
+    }))
+    .filter((entry) => entry.at !== null)
+    .sort((left, right) => left.at - right.at);
+
+  let awaitingReply = false;
+  let refusedAt = null;
+  for (const { comment, at } of ordered) {
+    const body = String(comment.body ?? "");
+    if (
+      isTrustedCodeRabbitReviewRequestComment(comment) &&
+      CODERABBIT_REVIEW_REQUEST_COMMAND.test(body)
+    ) {
+      awaitingReply =
+        codeRabbitFinalHeadReviewRequestHead(body)?.toLowerCase() ===
+        currentHead;
+      refusedAt = null;
+      continue;
+    }
+    if (!awaitingReply || !isCodeRabbitAuthored(comment)) continue;
+    if (!CODERABBIT_COMMAND_REPLY_MARKER.test(body)) continue;
+    // This reply answered the request. A later one answers another command, so
+    // it must not clear a standing refusal and strand the retry.
+    awaitingReply = false;
+    refusedAt =
+      CODERABBIT_COMMAND_NOT_COMPLETED.test(body) &&
+      CODERABBIT_RATE_LIMIT_REFUSAL.test(body)
+        ? at
+        : null;
+  }
+  return refusedAt;
+}
+
 function singleMatch(body, pattern) {
   const flags = pattern.flags.includes("g")
     ? pattern.flags
@@ -149,10 +215,7 @@ function matchesInCanonicalOrder(matches) {
 }
 
 function pathFilterSkipCandidate(comment, headUpdatedAt) {
-  const author = comment.user?.login ?? comment.author?.login ?? null;
-  if (!CODERABBIT_AUTHORS.has(String(author ?? "").toLowerCase())) {
-    return null;
-  }
+  if (!isCodeRabbitAuthored(comment)) return null;
   if (
     headUpdatedAt === null ||
     !isAtOrAfter(codeRabbitCommentTimestamp(comment), headUpdatedAt)
@@ -409,6 +472,7 @@ export function classifyCodeRabbitReviewSignal({
   currentHeadOid = null,
   headUpdatedAt = null,
   pathFilterSkip = null,
+  refusedAt = null,
 } = {}) {
   const currentHead = String(currentHeadOid ?? "").toLowerCase();
   let hasHistoricalSignal = false;
@@ -431,8 +495,7 @@ export function classifyCodeRabbitReviewSignal({
   }
 
   for (const comment of issueComments) {
-    const author = comment.user?.login ?? comment.author?.login ?? null;
-    if (!CODERABBIT_AUTHORS.has(String(author ?? "").toLowerCase())) continue;
+    if (!isCodeRabbitAuthored(comment)) continue;
 
     const reviewedHeads = codeRabbitCompletedCleanReviewHeads(comment.body);
     if (reviewedHeads.size === 0) continue;
@@ -466,7 +529,9 @@ export function classifyCodeRabbitReviewSignal({
     }
   }
 
-  if (hasCurrentRequest) return "requested";
+  // A refused request is spent without producing a review, so it must not read
+  // as a review on the way.
+  if (hasCurrentRequest) return refusedAt === null ? "requested" : "refused";
   if (hasHistoricalSignal) return "stale";
   return "missing";
 }

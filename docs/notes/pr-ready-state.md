@@ -162,10 +162,10 @@ stuck bot review verdict: dismiss it with
 `gh api repos/<owner>/<repo>/pulls/<pr>/reviews/<review_id>/dismissals -X PUT -f message='<why>' -f event=DISMISS`.
 
 The JSON projections expose `gates.codeRabbitReviewSignal` with `missing`,
-`requested`, `stale`, `reviewed`, or `not_applicable`. A `reviewed` signal
-requires either a CodeRabbit review body with its `**Run ID**` marker and a
-review commit equal to the full current head, or a trusted CodeRabbit top-level
-clean-run block enclosed by `<!-- recent_review_start -->` and
+`requested`, `refused`, `stale`, `reviewed`, or `not_applicable`. A `reviewed`
+signal requires either a CodeRabbit review body with its `**Run ID**` marker
+and a review commit equal to the full current head, or a trusted CodeRabbit
+top-level clean-run block enclosed by `<!-- recent_review_start -->` and
 `<!-- recent_review_end -->`. The clean-run block must contain the Run ID and a
 reviewed commit range that ends at the full current head. Its comment update
 time must be at or after the head update time. Empty review records, skipped
@@ -245,21 +245,19 @@ The closeout request follows one order, on every surface:
 2. **Batch every fix commit into one push** before requesting.
 3. **Post at most one marked request per accepted head, and at most two per
    PR** — the opening closeout and one after review fixes. A request CodeRabbit
-   refused does not use up the head (the refusal rule below allows one retry),
-   but it does use up one of the two. Follow
+   refused does not use up the head, but it does use up one of the two. Follow
    `gates.codeRabbitReviewSignal.fallbackAction` rather than re-deriving the
    decision, after the two rules the gate cannot read: the stack rule and the
-   head-config rule named in the list below. When the signal is `missing` or
-   `stale`, re-resolve `headRefOid`
+   head-config rule named in the list below. Whenever the gate asks for a
+   request, re-resolve `headRefOid`
    immediately before posting and require it to equal the marker head. A
-   `requested`, `reviewed`, or `not_applicable` signal suppresses another post,
-   except for the rate-limit refusal case described below.
+   `requested`, `reviewed`, or `not_applicable` signal suppresses another post.
 4. **Never post while a CodeRabbit check is running on the current head.** The
    request supersedes that review, and the vendor charges the review it then
    discards.
 
-For a missing or stale signal the gate reports `fallbackAction` in this
-precedence:
+For a missing, stale, or refused signal the gate reports `fallbackAction` in
+this precedence:
 
 - `merge_base_first` — the PR is DIRTY (merge conflicts), or BEHIND while
   `requiredStatusChecksStrict` is not confirmed `false` (unknown or `true`).
@@ -283,6 +281,10 @@ precedence:
 - `request_budget_exhausted` — the PR already carries two trusted
   `@coderabbitai review` or `full review` requests. Post no more; the gate
   stays advisory.
+- `wait_for_refusal_window` — CodeRabbit refused this head's own request over
+  the rate limit less than 30 minutes ago, or the probe cannot read when it
+  refused. The shared quota refills on a rolling window, so an earlier retry
+  is refused again and spends the last request for nothing.
 - `request_review_once_for_head` — none of the above applies. Post the one
   marked request for this head. The head-config rule above still governs: on a
   head whose `.coderabbit.yaml` still enables incremental review, wait for the
@@ -296,14 +298,13 @@ request counts against the budget like a marked one.
 
 A request the vendor refuses is spent, not queued. When CodeRabbit answers the
 request comment with "Action not completed — Review rate limited", no review
-runs, the marker still counts against `requestBudget`, and the gate keeps
-reporting `requested`. This is the one case where a `requested` signal does not
-mean a review is coming, and so the one exception to the rule that a `requested`
-signal suppresses another post: when the refusal reply answers the current head's
-own request, the window the rate-limit notice names has passed, and
-`requestCount` is still below `requestBudget`, post the one remaining marked
-request for that head. Never beyond that — the budget of 2 is unchanged, and a
-second refusal is optional lag, not a reason to keep posting.
+runs and the marker still counts against `requestBudget`, so the signal reads
+`refused` and the gate offers the one remaining request 30 minutes later. The
+cooldown runs from the refusal because that reply names no window: the notice
+that does name one belongs to the automatic review and is often absent. Only
+CodeRabbit's own reply to a trusted head-marked request counts — the same
+refusal text from any other author changes nothing. The budget of 2 is
+unchanged, and a second refusal is optional lag, not a reason to keep posting.
 
 **Then wait for the closeout attempt before the final sweep.** Once the request
 is posted, the signal sits at `requested` and readiness will not hold it —
@@ -604,20 +605,21 @@ BEHIND`. Never treat a `notes[]` entry as a blocker.
   top-level result. `approved` means the final PR-description `+1` gate is
   present. `stale` means only older-head Codex signals exist.
 - `codeRabbitReviewSignal`: current-head CodeRabbit review state. Values are
-  `missing`, `requested`, `stale`, `reviewed`, and `not_applicable`. A
-  CodeRabbit review with a run marker and review commit equal to the current
+  `missing`, `requested`, `refused`, `stale`, `reviewed`, and `not_applicable`.
+  A CodeRabbit review with a run marker and review commit equal to the current
   head is `reviewed`. A trusted top-level clean-run block also counts when
   `<!-- recent_review_start -->` and `<!-- recent_review_end -->` enclose it, it
   contains a Run ID, its full commit range ends at the current head, and its
   comment update time is at or after the current head update time. Empty
   reply-only reviews, skipped runs, and rate-limit notices do not count. A
-  head-bound request is `requested` until a real run lands. A validated
+  head-bound request is `requested` until a real run lands, and `refused` once
+  CodeRabbit answers it with a rate-limit refusal. A validated
   path-filter skip is `not_applicable`; its gate includes `reason`, `sourceUrl`,
   and `ignoredPaths` as described above. The gate also carries `requestCount`,
-  `requestBudget` (2), and `fallbackAction`. For a missing or stale signal,
-  `fallbackAction` is `merge_base_first`, `wait_for_running_review`,
-  `wait_for_head_grace`, `request_budget_exhausted`, or
-  `request_review_once_for_head`, in that
+  `requestBudget` (2), and `fallbackAction`. For a missing, stale, or refused
+  signal, `fallbackAction` is `merge_base_first`, `wait_for_running_review`,
+  `wait_for_head_grace`, `request_budget_exhausted`, `wait_for_refusal_window`,
+  or `request_review_once_for_head`, in that
   precedence; act on it instead of re-deriving the decision. Human output
   prints `CodeRabbit review signal: <state> (fallback: <action>)`, and the
   compact line adds `coderabbit_fallback=<value>`.
@@ -732,12 +734,11 @@ requests and returns `PENDING` when reached.
    the request, never after: an ordinary PR by local merge of the fetched base,
    a native stack layer by the history-change procedure in
    [`stacked-pull-requests.md`](stacked-pull-requests.md). Then, if
-   `gates.codeRabbitReviewSignal.state` is `missing` or `stale`, recheck the
-   head and follow the gate's `fallbackAction`: post the one marked closeout
-   request for that head only on `request_review_once_for_head`. Do not post
-   when the state is `requested`, `reviewed`, or `not_applicable` (unless
-   that `requested` marker is a request the vendor refused with a rate-limit
-   reply and the named window has passed), when a CodeRabbit check is still
+   `gates.codeRabbitReviewSignal.state` is `missing`, `stale`, or `refused`,
+   recheck the head and follow the gate's `fallbackAction`: post the one marked
+   closeout request for that head only on `request_review_once_for_head`. Do
+   not post when the state is `requested`, `reviewed`, or `not_applicable`,
+   when a CodeRabbit check is still
    running on the current head, or when the PR already carries two requests. After
    posting, wait for that closeout attempt to become terminal before step 10's
    sweep, bounded by the babysit deadline. A CodeRabbit check that never starts

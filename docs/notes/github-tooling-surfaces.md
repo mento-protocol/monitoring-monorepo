@@ -321,10 +321,8 @@ polled. Do not foreground-poll and never sleep-poll.
      is stated once, in [`pr-ready-state.md`](pr-ready-state.md). When the
      probe cannot run here, derive the same answer by hand from that list —
      do not restate or re-derive it on this surface — and post only when it
-     says `request_review_once_for_head`, or when the current head's own
-     request was refused with a rate-limit reply, the named window has passed,
-     and the budget still has room (the refusal rule in that note; a
-     `requested` signal otherwise waits): use `add_issue_comment` to post
+     says `request_review_once_for_head`, which now covers the refused-request
+     retry too (a `requested` signal waits): use `add_issue_comment` to post
      `@coderabbitai review`, a blank line, and
      `<!-- coderabbit-final-head-review:<full-head-sha> -->`, after
      re-resolving the full head immediately before the write. The stack rule

@@ -2,6 +2,7 @@ import {
   BOT_APPROVER,
   classifyCodeRabbitReviewSignal,
   classifyCodexReviewSignal,
+  codeRabbitRateLimitRefusalTime,
   countTrustedCodeRabbitReviewRequests,
   hasCodexApprovalReaction,
   hasCodexInFlightReaction,
@@ -25,6 +26,7 @@ export {
   BOT_APPROVER,
   classifyCodeRabbitReviewSignal,
   classifyCodexReviewSignal,
+  codeRabbitRateLimitRefusalTime,
   countTrustedCodeRabbitReviewRequests,
   hasCodexApprovalReaction,
   hasCodexInFlightReaction,
@@ -485,12 +487,17 @@ export function summarizeReadyState({
     codexApprovalReaction,
     codexInFlightReaction,
   });
+  const codeRabbitRefusedAt = codeRabbitRateLimitRefusalTime({
+    issueComments,
+    currentHeadOid,
+  });
   const codeRabbitReviewSignal = classifyCodeRabbitReviewSignal({
     issueComments,
     reviews: pr.reviews ?? [],
     headUpdatedAt,
     currentHeadOid,
     pathFilterSkip: codeRabbitPathFilterSkip,
+    refusedAt: codeRabbitRefusedAt,
   });
   const activeReadinessOverrides = findActiveReadinessOverrides(
     issueComments,
@@ -698,6 +705,7 @@ export function summarizeReadyState({
         requestCount: countTrustedCodeRabbitReviewRequests(issueComments),
         headUpdatedAt,
         observedAt: now,
+        refusedAt: codeRabbitRefusedAt,
       },
     ),
     reviewCommentReplies: {
