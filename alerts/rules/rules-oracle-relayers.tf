@@ -83,29 +83,35 @@ resource "grafana_rule_group" "oracle_relayers" {
     }
   }
 
+  # Relayer signer wallets: one rule per chain, plus one per signer class whose
+  # burn differs from the chain default (see local.signer_balance_rules). The
+  # threshold is ~5 days of that class's relay burn. The daily refill tops a
+  # signer up below 7 days, so this firing means the automation is not keeping up.
   dynamic "rule" {
-    for_each = local.chains
+    for_each = local.signer_balance_rules
 
     content {
-      name           = "Low ${rule.value.symbol} Balance [${rule.value.title}]"
+      name           = rule.value.name
       condition      = "belowThreshold"
-      for            = "1m" // Alert if balance is low for at least 1 minutes
+      for            = "1m"
       exec_err_state = "Error"
       no_data_state  = "NoData"
 
       annotations = {
-        summary        = "Low ${rule.value.symbol} balance for {{ $labels.owner }} on {{ $labels.chain | title }}: {{ with (index $values \"balance\") }}{{ humanize .Value }}{{ else }}unknown{{ end }} ${rule.value.symbol}"
+        summary        = "Low ${rule.value.chain.symbol} balance for {{ $labels.owner }} on {{ $labels.chain | title }}: {{ with (index $values \"balance\") }}{{ humanize .Value }}{{ else }}unknown{{ end }} ${rule.value.chain.symbol}"
         currentBalance = "{{ with (index $values \"balance\") }}{{ humanize .Value }}{{ else }}unknown{{ end }}"
         threshold      = tostring(rule.value.threshold)
+        # Days of relaying the threshold stands for; differs per signer class.
+        runwayDays = tostring(rule.value.runway_days)
       }
 
       labels = {
         service  = "oracle-relayers"
-        severity = rule.value.env == "prod" ? "warning" : "info"
+        severity = rule.value.chain.env == "prod" ? "warning" : "info"
         # Consumed by the Slack/VictorOps templates to render
         # token-aware copy and per-chain explorer links.
-        token    = rule.value.symbol
-        explorer = rule.value.explorer
+        token    = rule.value.chain.symbol
+        explorer = rule.value.chain.explorer
       }
 
       data {
@@ -117,8 +123,7 @@ resource "grafana_rule_group" "oracle_relayers" {
         }
         model = jsonencode({
           # NOTE: Grafana syntax is a bit confusing here in that 'expr' and 'expression' mean different things
-          # PromQL query fetching the native gas-token balance for all RelayerSigner accounts on this chain
-          expr  = "${rule.value.metric}{chain=\"${rule.key}\", owner=~\"^RelayerSigner.*\"}"
+          expr  = "${rule.value.chain.metric}{chain=\"${rule.value.chain_key}\", owner=~\"${rule.value.include}\", owner!~\"${rule.value.exclude}\"}"
           refId = "balanceOfRaw"
         })
       }
@@ -135,6 +140,133 @@ resource "grafana_rule_group" "oracle_relayers" {
           type       = "reduce",
           reducer    = "last",
           refId      = "balance"
+        })
+      }
+      data {
+        ref_id         = "belowThreshold"
+        datasource_uid = "__expr__"
+        relative_time_range {
+          from = 0
+          to   = 0
+        }
+        model = jsonencode({
+          type       = "threshold",
+          expression = "balance",
+          refId      = "belowThreshold"
+          conditions = [
+            {
+              evaluator = {
+                params = [rule.value.threshold],
+                type   = "lt",
+              },
+              operator = {
+                type = "and",
+              },
+              reducer = {
+                params = [],
+                type   = "last",
+              },
+              type = "query",
+            },
+          ],
+        })
+      }
+    }
+  }
+
+  # Refiller wallet: the account the daily refill-relayers cloud functions pay
+  # signer top-ups from (oracle-relayer repo). Fires below ~14 days of the
+  # chain's relay burn (see local.refiller_balance_rules). It is the early
+  # warning: signers are refilled below 7 days, so an empty refiller does not
+  # stop relays at once, but this rule cannot see the signers' own balances.
+  dynamic "rule" {
+    for_each = local.refiller_balance_rules
+
+    content {
+      name           = rule.value.name
+      condition      = "belowThreshold"
+      for            = "5m"
+      exec_err_state = "Error"
+      # NoData alerts, like the signer rules: if this chain's RelayerRefiller
+      # series ever disappears (variant removed, balance call stops publishing)
+      # the wallet would otherwise go unwatched in silence. The Aegis liveness
+      # alerts do not cover that, since they pass on any successful call. The
+      # cost is rollout order: approve this stack's apply only after the Aegis
+      # deploy that adds the owner has succeeded (see README.md).
+      no_data_state = "NoData"
+
+      annotations = {
+        summary        = "Low ${rule.value.chain.symbol} balance in the relayer refiller wallet on {{ $labels.chain | title }}: {{ with (index $values \"balance\") }}{{ humanize .Value }}{{ else }}unknown{{ end }} ${rule.value.chain.symbol}"
+        currentBalance = "{{ with (index $values \"balance\") }}{{ humanize .Value }}{{ else }}unknown{{ end }}"
+        threshold      = tostring(rule.value.threshold)
+        runwayDays     = "{{ with (index $values \"runwayDays\") }}{{ printf \"%.0f\" .Value }}{{ else }}unknown{{ end }}"
+        monthlyBurn    = tostring(rule.value.monthly_burn)
+      }
+
+      labels = {
+        service  = "oracle-relayers"
+        severity = rule.value.chain.env == "prod" ? "warning" : "info"
+        # Consumed by the Slack/VictorOps templates to render
+        # token-aware copy and per-chain explorer links.
+        token    = rule.value.chain.symbol
+        explorer = rule.value.chain.explorer
+      }
+
+      data {
+        ref_id         = "balanceOfRaw"
+        datasource_uid = "grafanacloud-prom"
+        relative_time_range {
+          from = 600
+          to   = 0
+        }
+        model = jsonencode({
+          # NOTE: Grafana syntax is a bit confusing here in that 'expr' and 'expression' mean different things
+          expr  = "${rule.value.chain.metric}{chain=\"${rule.key}\", owner=\"RelayerRefiller\"}"
+          refId = "balanceOfRaw"
+        })
+      }
+      data {
+        ref_id         = "balance"
+        datasource_uid = "__expr__"
+        relative_time_range {
+          from = 0
+          to   = 0
+        }
+        model = jsonencode({
+          # Reduce the per-owner balance series to a single value per alert instance
+          expression = "balanceOfRaw",
+          type       = "reduce",
+          reducer    = "last",
+          refId      = "balance"
+        })
+      }
+      data {
+        ref_id         = "runwayDaysRaw"
+        datasource_uid = "grafanacloud-prom"
+        relative_time_range {
+          from = 600
+          to   = 0
+        }
+        model = jsonencode({
+          # Annotation only: the balance expressed as days of refills. Derived
+          # from the same series as the alert query, so it cannot go NoData
+          # while the base query still has data.
+          expr  = "${rule.value.chain.metric}{chain=\"${rule.key}\", owner=\"RelayerRefiller\"} / ${rule.value.daily_burn}"
+          refId = "runwayDaysRaw"
+        })
+      }
+      data {
+        ref_id         = "runwayDays"
+        datasource_uid = "__expr__"
+        relative_time_range {
+          from = 0
+          to   = 0
+        }
+        model = jsonencode({
+          expression = "runwayDaysRaw",
+          type       = "reduce",
+          reducer    = "last",
+          refId      = "runwayDays"
         })
       }
       data {

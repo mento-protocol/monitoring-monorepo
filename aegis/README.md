@@ -130,7 +130,8 @@ Testnet, or Polygon Amoy polling stops or records repeated view-call errors. See
    - Add the new rate feed IDs and relayer signer wallets to `global.vars`
    - Add the new rate feeds as variants to the `SortedOracles.isOldestReportExpired()` metric
    - Add the new rate feeds as variants to the `BreakerBox.getRateFeedTradingMode()` metric only for chains where the feed backs a live tradable pool or exchange. A feed can exist in SortedOracles or BreakerBox without being a production trading-halt alert target.
-   - Add the new relayer signer as variants to the `CELOToken.balanceOf()` metric
+   - Add the new relayer signer as variants to the `CELOToken.balanceOf()` metric (`Native.balanceOf()` on Monad and Polygon)
+   - If the feed relays at a different pace than its chain's default, add it to a `signer_classes` entry in [alerts/rules/relayer-balance-locals.tf](../alerts/rules/relayer-balance-locals.tf) so its low-balance threshold matches its burn
 1. [optional] If it's an FX rate feed with disabled trading on weekends because we don't get new price data on weekends:
    - Add the rate feed name to the `weekend_disabled_feeds` array in [alerts/rules/protocol-routing-locals.tf](../alerts/rules/protocol-routing-locals.tf)
 1. Test the new config locally by running `pnpm start` and checking for any errors in the logs
@@ -449,7 +450,8 @@ The protocol alert groups below are owned by `alerts/rules`, not by Aegis:
 **Oracle Relayer Alerts** (`service=oracle-relayers`):
 
 - Stale price feeds (oldest report expired)
-- Low CELO balance for relayer wallets
+- Low native-token balance for relayer signer wallets: below ~5 days of that signer's relay burn. The daily `refill-relayers` cloud function (oracle-relayer repo) tops signers up below 7 days, so this means the automation is not keeping up
+- Low native-token balance in the relayer refiller wallet (`RelayerRefiller`, the wallet that function pays top-ups from): below ~14 days of the chain's relay burn, on every chain
 - Routed to: Slack `#alerts-oracles`; page-severity alerts also route to `#alerts-critical` + VictorOps/Splunk.
 
 **Reserve Balance Alerts** (`service=reserve`):
