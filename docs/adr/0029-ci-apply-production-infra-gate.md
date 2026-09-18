@@ -128,6 +128,13 @@ approval requirement until a second active maintainer can satisfy it.
   The required reviewer, enforced independently of the branch policy, is what
   actually gated applies. Deployment is now restricted by an explicit `main`
   branch pattern.
+- **Amended 2026-09-18:** a second required reviewer was added to
+  `production-infra`, so an apply no longer waits on one person's
+  availability. Either reviewer can approve and self-review stays allowed, so
+  the gate is still operator acknowledgement, not four-eyes review. This does
+  not settle whether the repository now has the second active maintainer that
+  the decision above makes the condition for `CODEOWNERS`, independent
+  approval, or disabling self-review. That question is open.
 - Live `main` ruleset verified through the GitHub API on 2026-07-24: zero
   required approvals, no code-owner or latest-push approval, required thread
   resolution and status checks, and organization-administrator bypass.
