@@ -364,21 +364,51 @@ jobs:
               return { touched: files.some(touchesDashboardPath), source: `${parent}...${sha}`, files };
             }
 
-            async function findPriorSuccessfulPreviewForCurrentDashboard() {
-              const pullRequest = context.payload.pull_request;
-              const deploymentArgs = {
+            // Vercel registers every Preview deployment with `ref` set to the
+            // deployed commit SHA, never the branch name, so filtering the
+            // deployment list by the PR's head ref matches nothing. Look the
+            // deployments up per candidate commit instead. Every candidate is
+            // an ancestor of the head, so the compare below cannot hit a
+            // diverged base, and the answer does not depend on how many
+            // unrelated previews the repository registered in the meantime.
+            // The 30 newest commits bound the walk; an older one yields no
+            // candidate, which leaves the conservative "cannot prove it"
+            // outcome. Walk backward from the head rather than reversing
+            // `pulls.listCommits`: that endpoint caps at 250 commits in
+            // chronological order, so on a longer PR its tail is commits
+            // 221-250, not the newest 30.
+            async function priorBranchPreviewDeployments() {
+              const { data: recentCommits } = await github.rest.repos.listCommits({
                 owner,
                 repo,
-                environment: "Preview",
-                per_page: 30,
-              };
-              if (pullRequest?.head?.ref) {
-                deploymentArgs.ref = pullRequest.head.ref;
+                sha,
+                per_page: 31,
+              });
+              const branchShas = recentCommits
+                .map(commit => commit.sha)
+                .filter(candidate => candidate && candidate !== sha)
+                .slice(0, 30);
+              const deployments = [];
+              for (const candidateSha of branchShas) {
+                // A SHA can carry more than one Preview deployment (a Vercel
+                // redeploy makes a second one). Take them all: the newest is
+                // not necessarily the one that succeeded.
+                const candidates = await github.paginate(github.rest.repos.listDeployments, {
+                  owner,
+                  repo,
+                  sha: candidateSha,
+                  environment: "Preview",
+                  per_page: 100,
+                });
+                deployments.push(...candidates);
               }
-              const { data: deployments } = await github.rest.repos.listDeployments(deploymentArgs);
+              return deployments;
+            }
+
+            async function findPriorSuccessfulPreviewForCurrentDashboard() {
+              const deployments = await priorBranchPreviewDeployments();
 
               for (const deployment of deployments) {
-                if (!deployment.sha || deployment.sha === sha) continue;
                 const previewUrl = await successfulPreviewUrl(deployment);
                 if (!previewUrl) continue;
                 const files = await changedFilesBetween(deployment.sha, sha);
@@ -399,6 +429,13 @@ jobs:
             }
 
             core.info(`Waiting for Vercel preview deployment for SHA ${sha}...`);
+
+            // Probe the prior-preview proof at most once per run: the walk
+            // costs one deployment list plus a compare per candidate, so
+            // repeating it every poll would burn the job's API budget. A later
+            // probe could only turn "no proof" into "proof", and refusing to
+            // skip is the conservative outcome.
+            let machineryProofProbe = null;
 
             while (Date.now() - start < maxWaitMs) {
               const { data: deployments } = await github.rest.repos.listDeployments({
@@ -443,13 +480,20 @@ jobs:
                 // the PR modifies the machinery, that modified script is what
                 // Vercel runs for every subsequent head, so no head in the PR
                 // may vouch for its own skip — even a later push that only
-                // touches unrelated files. Falls through to the polling/
-                // timeout path, which fails loudly and forces the change to
-                // prove itself.
+                // touches unrelated files. One proof is still admissible
+                // because it never runs that script:
+                // findPriorSuccessfulPreviewForCurrentDashboard() asks GitHub
+                // compare whether an earlier branch SHA Vercel really built
+                // has the same dashboard inputs as this head. When it names
+                // one, the skip verdict is correct whatever the edited script
+                // does, so honor it and log the vouching SHA. Without that
+                // proof, fall through to the polling/timeout path, which fails
+                // loudly and forces the change to prove itself.
                 const ignoreMachineryPaths = [
                   "ui-dashboard/scripts/vercel-ignore-build.sh",
                   "ui-dashboard/vercel.json",
                 ];
+                let vouchingPreview = null;
                 try {
                   const pullNumber = context.payload.pull_request?.number;
                   const pullRequestFiles =
@@ -460,14 +504,25 @@ jobs:
                     ignoreMachineryPaths.includes(f),
                   );
                   if (touchedMachinery.length > 0) {
-                    core.warning(
-                      `Vercel reported "Canceled by Ignored Build Step" for ${sha}, but this ` +
-                        `push touches the ignore machinery (${touchedMachinery.join(", ")}) — ` +
-                        "not trusting the verdict; continuing to poll (will fail loudly on timeout).",
+                    machineryProofProbe ??= findPriorSuccessfulPreviewForCurrentDashboard();
+                    vouchingPreview = await machineryProofProbe;
+                    if (!vouchingPreview) {
+                      core.warning(
+                        `Vercel reported "Canceled by Ignored Build Step" for ${sha}, but this ` +
+                          `PR touches the ignore machinery (${touchedMachinery.join(", ")}) and no ` +
+                          "prior branch preview proves the current dashboard inputs — not trusting " +
+                          "the verdict; continuing to poll (will fail loudly on timeout).",
+                      );
+                      core.info(`No active preview yet — retrying in ${pollIntervalMs / 1000}s...`);
+                      await new Promise(r => setTimeout(r, pollIntervalMs));
+                      continue;
+                    }
+                    core.notice(
+                      `This PR touches the ignore machinery (${touchedMachinery.join(", ")}), but ` +
+                        `prior successful preview ${vouchingPreview.previewUrl} at ${vouchingPreview.sha} ` +
+                        `has the same dashboard inputs as ${sha} (${vouchingPreview.source}), proven by ` +
+                        "GitHub compare without running the ignore script — honoring the skip verdict.",
                     );
-                    core.info(`No active preview yet — retrying in ${pollIntervalMs / 1000}s...`);
-                    await new Promise(r => setTimeout(r, pollIntervalMs));
-                    continue;
                   }
                 } catch (error) {
                   core.warning(
@@ -485,7 +540,8 @@ jobs:
                     "dashboard bundle to audit. Skipping Lighthouse.",
                 );
                 try {
-                  const priorPreview = await findPriorSuccessfulPreviewForCurrentDashboard();
+                  const priorPreview =
+                    vouchingPreview ?? (await findPriorSuccessfulPreviewForCurrentDashboard());
                   core.info(
                     priorPreview
                       ? `Prior successful preview ${priorPreview.previewUrl} at ${priorPreview.sha} still covers the current dashboard bundle.`
