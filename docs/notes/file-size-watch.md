@@ -20,8 +20,11 @@ files. One replacement row was added in the same change:
 `scripts/workflows/ci-sentinel-core.mjs`, which holds the eight `ci` sentinel
 predicates relocated out of `scripts/sentry/ci-wiring/`. It carries its
 2026-09-16 counts, so the monthly run has a baseline to diff against instead of
-reporting an existing file as new every month. Every other count is still the
-2026-09-04 measurement. This is
+reporting an existing file as new every month. The
+`scripts/bootstrap/codex-cloud-setup.sh` row was struck on 2026-09-17: its
+GitHub CLI provisioning moved to `scripts/bootstrap/codex-cloud-github-cli.sh`,
+which left 564 raw lines, below the soft cap that earns a row. Every other count
+is still the 2026-09-04 measurement. This is
 passive guidance, not an active-work queue. Refresh it with
 `node scripts/repo-health/file-size-watchlist.mjs`; use `--format issue` when a
 concrete
@@ -139,7 +142,6 @@ Use `--format issue` for GitHub Issues; do not append this report to `BACKLOG.md
 |   511 |   725 |     0 | watch         | `ui-dashboard/src/components/volume-over-time-chart.tsx`                                  |
 |   503 |   724 |     0 | watch         | `ui-dashboard/src/components/time-series-chart-card.tsx`                                  |
 |   500 |   654 |     0 | watch         | `indexer-envio/src/handlers/wormhole/nttManager.ts`                                       |
-|   497 |   608 |   -24 | watch         | `scripts/bootstrap/codex-cloud-setup.sh`                                                  |
 |   487 |   644 |     0 | watch         | `ui-dashboard/src/lib/queries/liquity.ts`                                                 |
 |   476 |   610 |     0 | watch         | `ui-dashboard/src/lib/address-labels/snapshot.ts`                                         |
 |   468 |   607 |     0 | watch         | `ui-dashboard/src/app/stables/_lib/aggregate.ts`                                          |

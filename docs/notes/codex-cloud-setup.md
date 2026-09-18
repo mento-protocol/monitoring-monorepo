@@ -45,7 +45,15 @@ dedicated Cloud container rather than a developer workstation.
 Setup expects `GH_TOKEN` (preferred) or `GITHUB_TOKEN` with repository Contents
 read/write and pull-request read/write access. If `gh` is absent on an
 apt-based image, it first tries the configured apt sources and then adds the
-official GitHub CLI repository as a fallback. It verifies `gh` auth before
+official GitHub CLI repository as a fallback. Setup then probes
+`gh pr edit --attach`, the flag that uploads the Before/After screenshots
+`dashboard-verification.md` requires and that the distro package can predate.
+A `gh` without it is upgraded through an already-configured GitHub CLI apt
+source, or through that same official repository when none is configured, so an
+apt-based image can add the repository even when `gh` was already present. This
+step never fails setup: when the upgrade cannot run, setup removes an apt source
+it added itself, warns that dashboard UI pull requests cannot publish visual
+evidence here, and continues. It verifies `gh` auth before
 configuring fetch/push credentials. Setup then reads the repository and pull
 request APIs and creates and deletes a unique temporary branch. This final
 probe fails early when a token can fetch but cannot publish commits. GitHub
@@ -64,7 +72,8 @@ The setup path needs HTTPS access to the hosts below when the corresponding
 tool is not already present in the image or cache:
 
 - `github.com` and `api.github.com` for Git transport and API capability probes;
-- `cli.github.com` for the GitHub CLI apt fallback;
+- `cli.github.com` for the GitHub CLI apt fallback and for the `--attach`
+  capability upgrade above;
 - `registry.npmjs.org` for workspace and tool packages;
 - `trunk.io` plus GitHub release hosts for Trunk and its managed tools;
 - `foundry.paradigm.xyz` plus GitHub release hosts for Foundry;

@@ -226,6 +226,29 @@ done
 ! grep -Fq -- "agent.qualityGate.cloudPrePushRequireFresh" \
   .claude/hooks/session-start.sh ||
   fail ".claude/hooks/session-start.sh restored hosted pre-push freshness"
+
+# gh 2.99.0 added `gh pr edit --attach`, which docs/notes/dashboard-verification.md
+# uses to upload Before/After screenshots. Both hosted setups must probe that
+# flag and name the blocker, so a hosted session on an older gh learns at setup
+# time instead of stalling at the visual-evidence step.
+for attach_owner in \
+  scripts/bootstrap/claude-code-web-setup.sh \
+  scripts/bootstrap/codex-cloud-github-cli.sh; do
+  grep -Fq -- "gh pr edit --help" "$attach_owner" ||
+    fail "$attach_owner no longer probes 'gh pr edit --help' for --attach support"
+  grep -Fq -- "docs/notes/dashboard-verification.md" "$attach_owner" ||
+    fail "$attach_owner no longer names the visual-evidence contract its --attach blocker serves"
+done
+grep -Fq -- "gh_supports_api_slurp && gh_supports_pr_edit_attach" \
+  scripts/bootstrap/claude-code-web-setup.sh ||
+  fail "scripts/bootstrap/claude-code-web-setup.sh no longer upgrades gh when 'gh pr edit --attach' is missing"
+grep -Fqx "ensure_github_cli_attach_support" scripts/bootstrap/codex-cloud-setup.sh ||
+  fail "scripts/bootstrap/codex-cloud-setup.sh no longer runs the gh --attach capability step"
+# Match the literal variable reference.
+# shellcheck disable=SC2016
+grep -q 'source "\$REPO_ROOT/scripts/bootstrap/codex-cloud-github-cli.sh"' \
+  scripts/bootstrap/codex-cloud-setup.sh ||
+  fail "scripts/bootstrap/codex-cloud-setup.sh no longer sources its GitHub CLI helpers"
 ! grep -Fq -- "Before every push from a server/worktree" scripts/setup.sh ||
   fail "scripts/setup.sh restored the mandatory manual pre-push checklist"
 ! grep -Eq -- '/usr/bin/xcrun|xcode-select' scripts/setup.sh ||

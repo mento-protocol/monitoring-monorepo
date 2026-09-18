@@ -90,6 +90,9 @@ Move each pin class together.
   `bootstrap/codex-cloud-{setup,maintenance}.sh`; Claude Code web pins
   `bootstrap/claude-code-web-setup.sh` through `.claude/hooks/session-start.sh`.
   Moves need operator updates.
+- **Hosted gh capability pin.** `codex-cloud-setup.sh` sources
+  `bootstrap/codex-cloud-github-cli.sh`, and `agent-setup-contract.test.sh`
+  names that path. A move updates both.
 - **Reviewed-artifact byte pins.** `.gitattributes` pins the Upstash launcher
   EOL; `UPSTASH_MCP_LAUNCHER_SHA256` hashes it. Moves change both. See
   [`docs/notes/upstash-mcp-operator.md`](../docs/notes/upstash-mcp-operator.md).
