@@ -366,16 +366,18 @@ jobs:
 
             // Vercel registers every Preview deployment with `ref` set to the
             // deployed commit SHA, never the branch name, so filtering the
-            // deployment list by the PR's head ref matches nothing. Intersect
-            // this PR's own commits with the repository's recent Preview
-            // deployments instead. Every candidate is then an ancestor of the
-            // head, so the compare below cannot hit a diverged base. A preview
-            // older than that page of deployments yields no candidate, which
-            // leaves the conservative "cannot prove it" outcome.
+            // deployment list by the PR's head ref matches nothing. Look the
+            // deployments up per candidate commit instead. Every candidate is
+            // an ancestor of the head, so the compare below cannot hit a
+            // diverged base, and the answer does not depend on how many
+            // unrelated previews the repository registered in the meantime.
+            // The 30 newest commits bound the walk; an older one yields no
+            // candidate, which leaves the conservative "cannot prove it"
+            // outcome.
             async function priorBranchPreviewDeployments() {
               const pullNumber = context.payload.pull_request?.number;
               if (typeof pullNumber !== "number") return [];
-              const branchShas = new Set();
+              const branchShas = [];
               const pages = github.paginate.iterator(github.rest.pulls.listCommits, {
                 owner,
                 repo,
@@ -384,16 +386,21 @@ jobs:
               });
               for await (const response of pages) {
                 for (const commit of response.data ?? []) {
-                  if (commit.sha) branchShas.add(commit.sha);
+                  if (commit.sha && commit.sha !== sha) branchShas.push(commit.sha);
                 }
               }
-              const { data: deployments } = await github.rest.repos.listDeployments({
-                owner,
-                repo,
-                environment: "Preview",
-                per_page: 100,
-              });
-              return deployments.filter(d => d.sha && d.sha !== sha && branchShas.has(d.sha));
+              const deployments = [];
+              for (const candidateSha of branchShas.reverse().slice(0, 30)) {
+                const { data } = await github.rest.repos.listDeployments({
+                  owner,
+                  repo,
+                  sha: candidateSha,
+                  environment: "Preview",
+                  per_page: 1,
+                });
+                if (data[0]) deployments.push(data[0]);
+              }
+              return deployments;
             }
 
             async function findPriorSuccessfulPreviewForCurrentDashboard() {
