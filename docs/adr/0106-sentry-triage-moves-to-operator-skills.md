@@ -20,6 +20,9 @@ garden_lane: adrs-architecture
 [ADR 0062](0062-sentry-suites-self-run-gate.md) and
 [ADR 0070](0070-sentry-requeue-settlement-sentinel.md).
 **Scope:** ci/process
+**Status note (Sep 2026):** issue #2486 completed the follow-up this ADR left
+open — the inert `sentry-autofix/*` CI-trust guards and their checker are gone,
+and the `pull_request_target` refusal moved to `check-ci-contract.mjs`.
 
 ## Context
 
@@ -169,6 +172,9 @@ only the thing holding the credentials changed.
   the repo-wide `pull_request_target` refusal that has nothing to do with
   Sentry. Removing the guards to land this change would mean weakening the
   control that refuses it. Retiring the namespace is its own claimed task.
+  _Superseded Sep 2026 by issue #2486, which did that task: the guards and
+  `check-autofix-ci-trust.mjs` are gone, and `check-ci-contract.mjs` carries the
+  `pull_request_target` refusal._
 
 ## Evidence
 

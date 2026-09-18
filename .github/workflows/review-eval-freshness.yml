@@ -84,11 +84,9 @@ jobs:
         run: pnpm review:eval -- --check-ledger --require-base --revalidate-appended
 
   freshness:
-    # autofix-ci-trust: this job runs only on `schedule` — the `if:` below
-    # refuses every other event, including `pull_request`. A machine-authored
-    # sentry-autofix PR therefore cannot reach it, and it holds no secret
-    # beyond the workflow-scoped GITHUB_TOKEN it uses to synchronize one issue.
-    # See scripts/workflows/check-autofix-ci-trust.mjs.
+    # This job runs only on `schedule` — the `if:` below refuses every other
+    # event, including `pull_request` — and it holds no secret beyond the
+    # workflow-scoped GITHUB_TOKEN it uses to synchronize one issue.
     name: Synchronize the staleness issue
     needs: contract
     # Schedule only; `workflow_dispatch` also runs the contract job above but

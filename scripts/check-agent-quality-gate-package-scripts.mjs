@@ -27,7 +27,7 @@ const expectedScripts = {
   "docs:navigation-eval:test":
     "node scripts/docs/docs-navigation-eval.test.mjs",
   "ci:contract:test":
-    "node scripts/workflows/check-ci-contract.mjs && node scripts/workflows/check-no-skip-audit.mjs && node --test scripts/workflows/check-ci-contract.test.mjs scripts/workflows/check-no-skip-audit.test.mjs scripts/workflows/check-pr-validation-boundary.test.mjs scripts/workflows/check-workflow-permissions-drift.test.mjs",
+    "node scripts/workflows/check-ci-contract.mjs && node scripts/workflows/check-no-skip-audit.mjs && node --test scripts/workflows/check-ci-contract.test.mjs scripts/workflows/check-no-skip-audit.test.mjs scripts/workflows/check-pr-validation-boundary.test.mjs scripts/workflows/check-workflow-permissions-drift.test.mjs scripts/workflows/workflow-credentials.test.mjs",
   "adr:check": "node scripts/pr/check-adr-reminder.mjs",
   "adr:check:test": "node scripts/pr/check-adr-reminder.test.mjs",
   "agent:closeout-review": "node scripts/pr/closeout-review.mjs",

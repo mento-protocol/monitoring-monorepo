@@ -23,8 +23,11 @@ predicates relocated out of `scripts/sentry/ci-wiring/`. It carries its
 reporting an existing file as new every month. The
 `scripts/bootstrap/codex-cloud-setup.sh` row was struck on 2026-09-17: its
 GitHub CLI provisioning moved to `scripts/bootstrap/codex-cloud-github-cli.sh`,
-which left 564 raw lines, below the soft cap that earns a row. Every other count
-is still the 2026-09-04 measurement. This is
+which left 564 raw lines, below the soft cap that earns a row. The
+`scripts/workflows/check-autofix-ci-trust.mjs` row was struck on 2026-09-18:
+issue #2486 deleted that checker, and the credential predicates it kept moved
+to `scripts/workflows/workflow-credentials.mjs`, which is below the soft cap.
+Every other count is still the 2026-09-04 measurement. This is
 passive guidance, not an active-work queue. Refresh it with
 `node scripts/repo-health/file-size-watchlist.mjs`; use `--format issue` when a
 concrete
@@ -152,4 +155,3 @@ Use `--format issue` for GitHub Issues; do not append this report to `BACKLOG.md
 |   368 |   611 |    +3 | watch         | `scripts/pr/pr-feedback-state-claude.mjs`                                                 |
 |   338 |   610 |     0 | watch         | `scripts/supply-chain/override-prune-report.mjs`                                          |
 |   333 |   632 |     0 | watch         | `ui-dashboard/src/lib/volume-hero.ts`                                                     |
-|   294 |   651 |    +3 | watch         | `scripts/workflows/check-autofix-ci-trust.mjs`                                            |

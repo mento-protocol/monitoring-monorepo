@@ -422,11 +422,13 @@ boundary are fixed by
 `ui-dashboard/vercel.json` suppresses ordinary deployments for
 `sentry-autofix/*` through `git.deploymentEnabled` (issue #1452). Nothing
 creates that branch since [ADR 0106](adr/0106-sentry-triage-moves-to-operator-skills.md)
-retired the autofix leg, so the rule is inert; it is retained with the CI-trust
-guards that name the same namespace. Treat this source-controlled rule as workflow hygiene, not a secret
+retired the autofix leg, so the rule is inert. Issue #2486 retired the CI-trust
+guards that named the same namespace; this rule stayed, because it belongs to a
+separate Vercel control and retiring it is its own decision. Treat this
+source-controlled rule as workflow hygiene, not a secret
 boundary: branch code can change it. Provider-owned deployment eligibility and
 protection must reject untrusted code, and operators must not manually deploy
-autofix branches. See [ADR 0019](adr/0019-vercel-path-aware-deploys.md).
+machine-authored branches. See [ADR 0019](adr/0019-vercel-path-aware-deploys.md).
 
 The project is named `monitoring-dashboard` and lives at [monitoring.mento.org](https://monitoring.mento.org).
 

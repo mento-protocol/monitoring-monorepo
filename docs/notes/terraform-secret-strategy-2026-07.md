@@ -30,18 +30,15 @@ binary `terraform plan -out` artifacts: Terraform plan files can include full
 configuration, variable values, and sensitive values in cleartext even when
 terminal output redacts them.
 
-Machine-authored Sentry-autofix PRs (head branch `sentry-autofix/*`) are
-excluded from every Terraform plan job outright (issue #1388): even the
-placeholder/read-only PR posture is too much for them, because `terraform
-plan` executes PR-head HCL (`data "external"` runs programs at plan time)
-while the job holds the read-only plan SA — whose state-bucket
-`storage.objectViewer` access includes cleartext secret values in state.
-[ADR 0106](../adr/0106-sentry-triage-moves-to-operator-skills.md) deleted the
-autofix leg and the diff guard that forbade `*.tf`/`*.hcl`/`*.tfvars` at any
-depth, so the plan-job `if:` exclusion is now the only remaining control, and it
-is inert: nothing creates a `sentry-autofix/*` branch any more. It stays because
-`scripts/workflows/check-autofix-ci-trust.mjs` enforces the pattern structurally
-and still governs where a new secret-bearing lane may go.
+Treat a machine-authored PR as untrusted whatever branch it arrives on.
+`terraform plan` executes PR-head HCL (`data "external"` runs programs at plan
+time) while the job holds the read-only plan SA — whose state-bucket
+`storage.objectViewer` access includes cleartext secret values in state. Issue
+#1388 excluded the `sentry-autofix/*` branch namespace from every plan job for
+that reason; [ADR 0106](../adr/0106-sentry-triage-moves-to-operator-skills.md)
+deleted the autofix leg and issue #2486 retired the now-inert exclusion. The
+live controls are the plan jobs' fork and Dependabot exclusions, the read-only
+plan identity, and the `production-infra` environment gate on apply.
 
 ## CI identity boundaries
 

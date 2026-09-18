@@ -132,17 +132,10 @@ jobs:
     # GCP auth step would resolve empty and fail every time.
     # Skip the job in those contexts — the plan is only meaningful when
     # secrets are available. Internal PRs + main pushes run.
-    # Machine-authored Sentry-autofix PRs (head branch sentry-autofix/*) are
-    # also skipped: `terraform plan` executes PR-head HCL (data "external"
-    # runs programs at plan time) while this job holds the read-only plan SA —
-    # whose state-bucket access includes cleartext secret values — so an
-    # untrusted-in-effect autofix diff must never reach it. Defense in depth
-    # behind the autofix diff guard, which already forbids *.tf/*.hcl edits.
     if: >-
       (github.event_name == 'pull_request'
         && github.event.pull_request.head.repo.fork == false
-        && github.event.pull_request.user.login != 'dependabot[bot]'
-        && !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/'))
+        && github.event.pull_request.user.login != 'dependabot[bot]')
       || (github.ref == 'refs/heads/main'
         && (github.event_name == 'push' || github.event_name == 'workflow_dispatch'))
     runs-on: ubuntu-24.04-arm
@@ -429,10 +422,9 @@ jobs:
   apply:
     name: Terraform Apply (governance-watchdog/infra)
     needs: plan
-    # autofix-ci-trust: this job's if: requires github.ref == main plus a
-    # push/workflow_dispatch event, so it can never run for ANY pull_request
-    # (autofix or otherwise) — its production secrets are unreachable from
-    # PR context. See scripts/workflows/check-autofix-ci-trust.mjs.
+    # This job's if: requires github.ref == main plus a push/workflow_dispatch
+    # event, so it can never run for a pull_request — its production secrets
+    # are unreachable from PR context.
     # Apply when (a) on main, (b) push or dispatch event, (c) plan said
     # there are real changes, AND (d) the stack root changed or a maintainer
     # explicitly dispatched the workflow. Workflow/notifier-only edits can

@@ -79,8 +79,8 @@ jobs:
           node scripts/alerts/check-peg-policy-publication.mjs
 
   plan:
-    # autofix-ci-trust: this job only runs for manual main dispatches, never a
-    # pull-request event, so autofix branch code cannot receive refresh credentials.
+    # This job only runs for manual main dispatches, never a pull-request
+    # event, so pull-request code cannot receive refresh credentials.
     name: Read-only Peg policy publication plan
     needs: validate
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
@@ -137,8 +137,8 @@ jobs:
           fi
 
   apply:
-    # autofix-ci-trust: this job only runs for manual main dispatches and also
-    # requires the protected production-infra Environment before credentials.
+    # This job only runs for manual main dispatches and also requires the
+    # protected production-infra Environment before credentials.
     name: Protected Peg policy publication apply
     needs: plan
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.operation == 'apply' && needs.plan.outputs.has-changes == 'true'

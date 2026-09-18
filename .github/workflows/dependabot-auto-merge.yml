@@ -41,9 +41,8 @@ concurrency:
 jobs:
   auto-merge:
     name: auto-merge
-    # autofix-ci-trust: the job excludes the full sentry-autofix namespace and
-    # revalidates the upstream bot, branch, head, commits, and files. It never
-    # checks out or executes upstream content.
+    # The job revalidates the upstream bot, branch, head, commits, and files.
+    # It never checks out or executes upstream content.
     if: >-
       github.repository == 'mento-protocol/monitoring-monorepo' &&
       github.event.workflow_run.head_repository.full_name == github.repository &&
@@ -53,8 +52,7 @@ jobs:
       github.event.workflow_run.actor.login == 'dependabot[bot]' &&
       github.event.workflow_run.triggering_actor.login == 'dependabot[bot]' &&
       github.event.workflow_run.run_attempt == 1 &&
-      startsWith(github.event.workflow_run.head_branch, 'dependabot/github_actions/actions-minor-patch-') &&
-      !startsWith(github.event.workflow_run.head_branch, 'sentry-autofix/')
+      startsWith(github.event.workflow_run.head_branch, 'dependabot/github_actions/actions-minor-patch-')
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:

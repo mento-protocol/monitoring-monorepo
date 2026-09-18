@@ -32,8 +32,7 @@ jobs:
       github.event.pull_request.base.repo.full_name == github.repository &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       github.event.pull_request.head.label == format('mento-protocol:{0}', github.event.pull_request.head.ref) &&
-      startsWith(github.event.pull_request.head.ref, 'dependabot/github_actions/actions-minor-patch-') &&
-      !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/')
+      startsWith(github.event.pull_request.head.ref, 'dependabot/github_actions/actions-minor-patch-')
     runs-on: ubuntu-latest
     timeout-minutes: 2
     permissions:

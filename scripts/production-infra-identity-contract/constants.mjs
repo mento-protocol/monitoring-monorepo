@@ -41,8 +41,7 @@ export const TRUSTED_REFRESH_CONDITION =
   "github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')";
 export const PLAN_JOB_CONDITION = `(github.event_name == 'pull_request'
   && github.event.pull_request.head.repo.fork == false
-  && github.event.pull_request.user.login != 'dependabot[bot]'
-  && !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/'))
+  && github.event.pull_request.user.login != 'dependabot[bot]')
 || (github.ref == 'refs/heads/main'
   && (github.event_name == 'push' || github.event_name == 'workflow_dispatch'))`;
 export const DRIFT_REFRESH_CONDITION =

@@ -3,8 +3,8 @@
  * Platform-settings drift check (issue #1564): assert the repo's default GitHub
  * Actions workflow-token permission has not been reverted out-of-band.
  *
- * WHY THIS EXISTS. `scripts/workflows/check-autofix-ci-trust.mjs` treats a job
- * with no explicit `permissions:` as having no write scope — an assumption that
+ * WHY THIS EXISTS. `scripts/workflows/check-pr-validation-boundary.mjs` treats
+ * a job with no explicit `permissions:` as having no write scope — an assumption that
  * ONLY holds while the repo default workflow-token permission is `read`. #1557
  * pinned that default to `read` in Terraform
  * (`terraform/github-actions-permissions.tf` →
@@ -81,7 +81,7 @@ export function evaluateWorkflowPermissions(api) {
     violations.push(
       `default_workflow_permissions is "${perms}" — expected "read". ` +
         `#1557 pins the repo default workflow-token permission to read-only; ` +
-        `check-autofix-ci-trust.mjs treats a job with no explicit permissions: ` +
+        `check-pr-validation-boundary.mjs treats a job with no explicit permissions: ` +
         `as having no write scope, which holds only while this stays "read".`,
     );
   }

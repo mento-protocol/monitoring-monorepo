@@ -80,7 +80,8 @@ Move each pin class together.
   the PR base tip. After a move, keep dual probes until the new path reaches
   the base (issue 1904; ADR 0064).
 - **PR validation boundary pins.** Move
-  `workflows/check-pr-validation-boundary{,.test}.mjs` with `ci.yml` and
+  `workflows/check-pr-validation-boundary{,.test}.mjs` and its credential
+  helper `workflows/workflow-credentials{,.test}.mjs` with `ci.yml` and
   `trunk.yml`. ADR 0078 defines it.
 - **Production identity pins.** In `production-infra-identity-contract/`, align
   `workflow-inventory.mjs`, `workflow.test.mjs`,
