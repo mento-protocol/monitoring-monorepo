@@ -204,8 +204,10 @@ resource "github_repository_environment" "production_infra" {
   # Human approval for production Terraform applies (ADR 0029). Either reviewer
   # can approve, and self-review stays allowed, so this is still operator
   # acknowledgement rather than independent review: a reviewer can approve the
-  # apply their own merge triggered. A second maintainer now exists, which is
-  # the point at which ADR 0029 says to revisit disabling self-review.
+  # apply their own merge triggered. The second reviewer was added so an apply
+  # does not wait on one person's availability. Whether that also makes this a
+  # two-maintainer repository, which is when ADR 0029 says to revisit
+  # self-review and independent approval, is left open there.
   reviewers {
     users = [
       117495,  # chapati23
