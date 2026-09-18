@@ -391,14 +391,17 @@ jobs:
               }
               const deployments = [];
               for (const candidateSha of branchShas.reverse().slice(0, 30)) {
-                const { data } = await github.rest.repos.listDeployments({
+                // A SHA can carry more than one Preview deployment (a Vercel
+                // redeploy makes a second one). Take them all: the newest is
+                // not necessarily the one that succeeded.
+                const candidates = await github.paginate(github.rest.repos.listDeployments, {
                   owner,
                   repo,
                   sha: candidateSha,
                   environment: "Preview",
-                  per_page: 1,
+                  per_page: 100,
                 });
-                if (data[0]) deployments.push(data[0]);
+                deployments.push(...candidates);
               }
               return deployments;
             }
