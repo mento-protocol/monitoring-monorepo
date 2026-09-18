@@ -7,8 +7,11 @@ import { tmpdir } from "node:os";
 import path, { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  GRAFANA_MESSAGE_TEMPLATE_CAP,
+  countMessageTemplates,
   extractExpressions,
   lintPromql,
+  messageTemplateCapFailures,
   neutralize,
   pegPolicyVersionDigest,
   referencedMetricNames,
@@ -2822,6 +2825,45 @@ test("bridge dependencies route exact checks and protected apply eligibility", (
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("message template cap counts resources and fails only above the Grafana Cloud limit", () => {
+  const twoTemplates = stripComments(`
+resource "grafana_message_template" "a" {
+  name = "A"
+}
+# resource "grafana_message_template" "commented_out" {}
+  resource "grafana_message_template" "b" {
+  name = "B"
+}
+resource "grafana_contact_point" "not_a_template" {}
+`);
+  assert(
+    countMessageTemplates(twoTemplates) === 2,
+    "expected two template resources, ignoring the commented one and other types",
+  );
+  assert(
+    messageTemplateCapFailures(GRAFANA_MESSAGE_TEMPLATE_CAP).length === 0,
+    "a stack exactly at the cap must pass",
+  );
+  const failures = messageTemplateCapFailures(GRAFANA_MESSAGE_TEMPLATE_CAP + 1);
+  assert(failures.length === 1, "one template over the cap must fail");
+  assert(
+    /message template cap/.test(failures[0]) &&
+      /two define blocks/.test(failures[0]),
+    "the failure must name the cap and the remedy",
+  );
+});
+
+test("the committed alert rules stack stays within the message template cap", () => {
+  const { status, stdout } = runCli();
+  assert(status === 0, "the linter must pass on the committed stack");
+  const match = /(\d+)\/(\d+) message templates/.exec(stdout);
+  assert(match !== null, "the linter summary must report the template count");
+  assert(
+    Number(match[1]) <= Number(match[2]),
+    "the committed stack must stay within the message template cap",
+  );
 });
 
 if (failed > 0) {
