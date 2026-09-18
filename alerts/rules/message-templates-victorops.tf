@@ -56,6 +56,11 @@ EOT
 }
 
 
+# This template also carries the refiller alert's title and message. Grafana
+# Cloud rejects template creation once 30 exist (HTTP 429) while updates keep
+# working, and this stack is at that cap, so the refiller definitions ride on
+# an existing template rather than needing a slot of their own. A template may
+# hold several `define` blocks; the dispatcher refers to them by define name.
 resource "grafana_message_template" "victorops_oracle_relayer_low_balance_alert_message" {
   name     = "VictorOps - Low Relayer Balance Alert Message"
   template = <<-EOT
@@ -72,19 +77,7 @@ Wallet: https://{{ .Labels.explorer }}/address/{{ .Labels.ownerValue }}
 Sufficient {{ .Labels.token }} balance restored for the {{ $pair }} Relayer on {{ .Labels.chain | title }} — {{ .Annotations.currentBalance }} {{ .Labels.token }}
 {{ end }}
 {{ end }}
-EOT
-}
-
-resource "grafana_message_template" "victorops_relayer_refiller_low_balance_alert_title" {
-  name     = "VictorOps - Low Relayer Refiller Balance Alert Title"
-  template = <<-EOT
 {{ define "victorops.relayer_refiller_low_balance_alert_title" }}Low relayer refiller balance on {{ .CommonLabels.chain | title }}{{ end }}
-EOT
-}
-
-resource "grafana_message_template" "victorops_relayer_refiller_low_balance_alert_message" {
-  name     = "VictorOps - Low Relayer Refiller Balance Alert Message"
-  template = <<-EOT
 {{ define "victorops.relayer_refiller_low_balance_alert_message" }}
 {{ range .Alerts.Firing }}
 Low {{ .Labels.token }} balance in the relayer refiller wallet on {{ .Labels.chain | title }} — {{ .Annotations.currentBalance }} {{ .Labels.token }} left, about {{ .Annotations.runwayDays }} days of refills

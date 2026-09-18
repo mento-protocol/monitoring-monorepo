@@ -10,6 +10,10 @@
  *    matches the service registry exactly, and keeps every peg PromQL selector
  *    bound to the accepted policy version set.
  *
+ * 4. Message template cap: Grafana Cloud rejects template creation beyond
+ *    GRAFANA_MESSAGE_TEMPLATE_CAP, which only shows up as a failed production
+ *    apply, so the count is checked here instead.
+ *
  * This file owns the gauge cross-check and the run. Extraction, parsing, and
  * the ALERT_RULES_LINT_MIN_* floors live in alert-rules-lint-extract.mjs; the
  * peg policy rules live in alert-rules-lint-peg-policy.mjs. Both are re-exported
@@ -83,10 +87,32 @@ function readJson(file, label, failures) {
   }
 }
 
+// Grafana Cloud stops accepting new notification templates once this many
+// exist: creation fails with an empty HTTP 429 while updates keep working.
+// Observed on 2026-09-18, when the 31st and 32nd templates of this stack were
+// rejected across four applies, however long the gap between them. A template
+// may hold several `define` blocks, so put a title and its message in one
+// resource rather than adding a slot.
+export const GRAFANA_MESSAGE_TEMPLATE_CAP = 30;
+
+export function countMessageTemplates(cleanedTf) {
+  return (
+    cleanedTf.match(/^\s*resource\s+"grafana_message_template"\s+"/gm) ?? []
+  ).length;
+}
+
+export function messageTemplateCapFailures(count) {
+  if (count <= GRAFANA_MESSAGE_TEMPLATE_CAP) return [];
+  return [
+    `message template cap: alerts/rules defines ${count} grafana_message_template resources, but Grafana Cloud rejects creation beyond ${GRAFANA_MESSAGE_TEMPLATE_CAP} (HTTP 429 at apply time). Merge a title and its message into one resource with two define blocks.`,
+  ];
+}
+
 function main() {
   const failures = [];
   const referenced = new Set();
   let expressions = [];
+  let messageTemplates = 0;
 
   const pegPolicy = readJson(pegPolicyPath, "peg policy", failures);
   const pegRegistry = readJson(pegRegistryPath, "peg registry", failures);
@@ -102,6 +128,7 @@ function main() {
       readFileSync(path.join(rulesDir, file), "utf8"),
     );
     expressions.push(...extractExpressions(file, cleaned));
+    messageTemplates += countMessageTemplates(cleaned);
     for (const name of referencedMetricNames(cleaned)) referenced.add(name);
   }
 
@@ -132,6 +159,8 @@ function main() {
     }
   }
 
+  failures.push(...messageTemplateCapFailures(messageTemplates));
+
   failures.push(
     ...extractionFloorFailures({
       expressions: expressions.length,
@@ -142,7 +171,7 @@ function main() {
 
   console.log(
     `alert-rules-lint: ${expressions.length} PromQL expressions parsed, ` +
-      `${referenced.size} referenced metric names checked against ${registered.size} registered gauges, peg policy validated`,
+      `${referenced.size} referenced metric names checked against ${registered.size} registered gauges, peg policy validated, ${messageTemplates}/${GRAFANA_MESSAGE_TEMPLATE_CAP} message templates`,
   );
 
   if (failures.length > 0) {
