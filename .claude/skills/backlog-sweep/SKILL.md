@@ -304,22 +304,25 @@ Record the change. Any replacement must follow the replacement rule below:
 print it before claiming it and give it the same abort window as the original
 batch.
 
-**Resolve the paths the body names before the claim.** Fetch main again in the
-same breath as the body re-read — `git fetch origin main` then
-`oid="$(git rev-parse FETCH_HEAD)"` — and read each path the body names as
-`git rev-parse "$oid:<path>"`, the same primitive the grooming pass uses. A
-pin taken at Preflight is stale by now: ranking and the dwell leave minutes in
-which a deletion can merge. Read against that OID, never the session checkout,
-which may sit on a branch. Look up only paths the body names as existing files
-or directories to edit; a path the body says it will add, and any glob, is an
-intended output and proves nothing when absent. An edit target that no longer
-resolves means the issue's target is gone: do not claim it, and record it in
-the report. A merged PR can delete the target without naming the issue, so
-neither the body re-read nor a PR search sees it — sweep 2026-09-17 claimed
-issue #2444 and burned a worker clone and setup before the worker found that
-PR #2465 had removed `scripts/sentry/**` that morning; #2022 and #1698 were
-obsolete the same way, and the operator closed all three. A replacement
-follows the replacement rule below, as after any pre-claim skip.
+**Resolve the paths the body names before the claim.** Take the paths from the
+`issue_json` snapshot captured below, the one `--body-sha256` binds, never
+from a separate read: a body edited between two reads would let a target the
+check never saw ride into the claim. Then fetch main again —
+`git fetch origin main` then `oid="$(git rev-parse FETCH_HEAD)"` — and read
+each of those paths as `git rev-parse "$oid:<path>"`, the same primitive the
+grooming pass uses. A pin taken at Preflight is stale by now: ranking and the
+dwell leave minutes in which a deletion can merge. Read against that OID,
+never the session checkout, which may sit on a branch. Look up only paths the
+body names as existing files or directories to edit; a path the body says it
+will add, and any glob, is an intended output and proves nothing when absent.
+An edit target that no longer resolves means the issue's target is gone: do
+not claim it, and record it in the report. A merged PR can delete the target
+without naming the issue, so neither the body re-read nor a PR search sees it
+— sweep 2026-09-17 claimed issue #2444 and burned a worker clone and setup
+before the worker found that PR #2465 had removed `scripts/sentry/**` that
+morning; #2022 and #1698 were obsolete the same way, and the operator closed
+all three. A replacement follows the replacement rule below, as after any
+pre-claim skip.
 
 Capture and print that read once, then hash the exact body from the same JSON:
 
