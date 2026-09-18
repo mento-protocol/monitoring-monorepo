@@ -174,8 +174,9 @@ existing templates keep working, so it reads like rate limiting but never
 clears. `pnpm alerts:rules:lint` counts the `grafana_message_template`
 resources in this stack and fails above the cap, so the limit shows up on the
 PR rather than as a half-applied production change. A template can hold
-several `define` blocks: put a title and its message in one resource instead of
-two, and reuse an existing title where the rendering is identical.
+several `define` blocks, so new definitions can ride on a related existing
+template (the refiller alert's Splunk title and message live in the signer
+low-balance template) instead of taking a slot of their own.
 
 ## Relayer wallet balances
 

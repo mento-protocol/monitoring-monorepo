@@ -56,6 +56,11 @@ EOT
 }
 
 
+# This template also carries the refiller alert's title and message. Grafana
+# Cloud rejects template creation once 30 exist (HTTP 429) while updates keep
+# working, and this stack is at that cap, so the refiller definitions ride on
+# an existing template rather than needing a slot of their own. A template may
+# hold several `define` blocks; the dispatcher refers to them by define name.
 resource "grafana_message_template" "victorops_oracle_relayer_low_balance_alert_message" {
   name     = "VictorOps - Low Relayer Balance Alert Message"
   template = <<-EOT
@@ -72,28 +77,6 @@ Wallet: https://{{ .Labels.explorer }}/address/{{ .Labels.ownerValue }}
 Sufficient {{ .Labels.token }} balance restored for the {{ $pair }} Relayer on {{ .Labels.chain | title }} — {{ .Annotations.currentBalance }} {{ .Labels.token }}
 {{ end }}
 {{ end }}
-EOT
-}
-
-# Title and message share one template resource. Grafana Cloud rejects template
-# creation once 30 exist (HTTP 429), and a template may hold several `define`
-# blocks, so the pair costs one slot instead of two.
-#
-# The tenant was already at 30 when this was added, with the retired Slack
-# refiller title holding the slot this template needs. Dropping that resource
-# and adding this one would be two unrelated operations, and Terraform could
-# attempt the create first and hit the cap again. The `moved` block makes them
-# one resource instead: Terraform renames or replaces it in place, and a
-# replacement destroys before it creates, so the count never exceeds 30.
-# Remove the block once this has been applied to production.
-moved {
-  from = grafana_message_template.slack_relayer_refiller_low_balance_alert_title
-  to   = grafana_message_template.victorops_relayer_refiller_low_balance_alert
-}
-
-resource "grafana_message_template" "victorops_relayer_refiller_low_balance_alert" {
-  name     = "VictorOps - Low Relayer Refiller Balance Alert"
-  template = <<-EOT
 {{ define "victorops.relayer_refiller_low_balance_alert_title" }}Low relayer refiller balance on {{ .CommonLabels.chain | title }}{{ end }}
 {{ define "victorops.relayer_refiller_low_balance_alert_message" }}
 {{ range .Alerts.Firing }}
