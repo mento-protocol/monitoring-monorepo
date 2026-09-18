@@ -15,6 +15,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { axe } from "vitest-axe";
 
 const VALID_ADDR = "0x" + "a".repeat(40);
 
@@ -39,8 +40,12 @@ vi.mock("@/components/tag-input", () => ({
     tags: string[];
     onChange: (tags: string[]) => void;
   }) => (
+    // `aria-label` keeps the stub as accessible as the real `TagInput`
+    // (a labelled combobox), so the axe assertion below measures the
+    // editor's own markup rather than the stub's missing label.
     <input
       data-testid="tag-input-stub"
+      aria-label="Tags"
       value={tags.join(",")}
       onChange={(e) =>
         onChange(
@@ -141,6 +146,30 @@ function clickTab(name: "Label & Tags" | "Forensic Report"): void {
   if (!tab) throw new Error(`tab ${name} not found`);
   act(() => {
     tab.click();
+  });
+}
+
+function tabs(): HTMLButtonElement[] {
+  return Array.from(
+    container.querySelectorAll<HTMLButtonElement>("button[role=tab]"),
+  );
+}
+
+function tabById(id: string): HTMLButtonElement {
+  const el = container.querySelector<HTMLButtonElement>(`#${id}`);
+  if (!el) throw new Error(`#${id} not found`);
+  return el;
+}
+
+function panelHidden(tab: "label" | "report"): boolean {
+  const panel = container.querySelector(`#al-tab-${tab}-panel`);
+  if (!panel) throw new Error(`#al-tab-${tab}-panel not found`);
+  return panel.hasAttribute("hidden");
+}
+
+function dispatchKey(el: HTMLElement, key: string): void {
+  act(() => {
+    el.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
   });
 }
 
@@ -286,6 +315,173 @@ describe("AddressLabelEditor — tab panels", () => {
     rerender({ address: secondAddress, onClose: () => undefined });
     stub = container.querySelector('[data-testid="report-editor-stub"]');
     expect(stub?.getAttribute("data-address")).toBe(secondAddress);
+  });
+});
+
+describe("AddressLabelEditor — tablist keyboard contract", () => {
+  // Issue #1540: the tab strip rendered two plain buttons, so both sat in the
+  // page tab order and arrow keys did nothing. The strip now uses the shared
+  // `useRovingTabIndex` helper with **automatic** activation — switching tabs
+  // only flips `hidden` on two already-mounted panels, so there is no
+  // router.replace or fetch that would justify the manual variant. Contract:
+  // `docs/pr-checklists/keyboard-a11y-controlled-widgets.md`.
+
+  it("single tab stop: exactly one tabIndex=0 (the active tab); the other is -1", () => {
+    render({ address: VALID_ADDR, onClose: () => undefined });
+    const tabbable = tabs().filter((t) => t.tabIndex === 0);
+    const untabbable = tabs().filter((t) => t.tabIndex === -1);
+    expect(tabs()).toHaveLength(2);
+    expect(tabbable).toHaveLength(1);
+    expect(untabbable).toHaveLength(1);
+    expect(tabbable[0]!.id).toBe("al-tab-label");
+  });
+
+  it("ArrowRight moves focus AND activates the next tab (automatic activation)", () => {
+    render({ address: VALID_ADDR, onClose: () => undefined });
+    const start = tabById("al-tab-label");
+    start.focus();
+    dispatchKey(start, "ArrowRight");
+
+    expect(document.activeElement).toBe(tabById("al-tab-report"));
+    expect(tabById("al-tab-report").getAttribute("aria-selected")).toBe("true");
+    expect(tabById("al-tab-label").getAttribute("aria-selected")).toBe("false");
+    expect(panelHidden("report")).toBe(false);
+    expect(panelHidden("label")).toBe(true);
+  });
+
+  it("ArrowLeft wraps from the first tab to the last one and activates it", () => {
+    render({ address: VALID_ADDR, onClose: () => undefined });
+    const start = tabById("al-tab-label");
+    start.focus();
+    dispatchKey(start, "ArrowLeft");
+
+    expect(document.activeElement).toBe(tabById("al-tab-report"));
+    expect(tabById("al-tab-report").getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("End activates the last tab and Home returns to the first", () => {
+    render({ address: VALID_ADDR, onClose: () => undefined });
+    const start = tabById("al-tab-label");
+    start.focus();
+
+    dispatchKey(start, "End");
+    expect(document.activeElement).toBe(tabById("al-tab-report"));
+    expect(tabById("al-tab-report").getAttribute("aria-selected")).toBe("true");
+
+    dispatchKey(tabById("al-tab-report"), "Home");
+    expect(document.activeElement).toBe(tabById("al-tab-label"));
+    expect(tabById("al-tab-label").getAttribute("aria-selected")).toBe("true");
+    expect(panelHidden("label")).toBe(false);
+  });
+
+  it("keeps focus, selection, and the single tab stop synchronized after an arrow key", () => {
+    // Under automatic activation the roving tab stop and `aria-selected`
+    // must land on the same tab; a stale tab stop would let the user Tab
+    // back into the group instead of leaving it.
+    render({ address: VALID_ADDR, onClose: () => undefined });
+    const start = tabById("al-tab-label");
+    start.focus();
+    dispatchKey(start, "ArrowRight");
+
+    const tabbable = tabs().filter((t) => t.tabIndex === 0);
+    expect(tabbable).toHaveLength(1);
+    expect(tabbable[0]!.id).toBe("al-tab-report");
+    expect(tabById("al-tab-label").tabIndex).toBe(-1);
+    expect(document.activeElement).toBe(tabbable[0]);
+  });
+
+  it("does not move the tab stop off the active tab while focus is outside the group", () => {
+    // The helper re-syncs to the controlled prop only when focus is outside
+    // the group. On open, focus goes to the form's first field, so the tab
+    // stop must sit on the active tab, not on a stale index.
+    render({ address: VALID_ADDR, onClose: () => undefined });
+    container.querySelector<HTMLInputElement>("#al-name")?.focus();
+    const tabbable = tabs().filter((t) => t.tabIndex === 0);
+    expect(tabbable).toHaveLength(1);
+    expect(tabbable[0]!.id).toBe("al-tab-label");
+  });
+
+  it("keyboard tab switching preserves typed label state (both panels stay mounted)", () => {
+    render({ address: VALID_ADDR, onClose: () => undefined });
+    setInputValue("al-name", "Whale Alice");
+
+    const start = tabById("al-tab-label");
+    start.focus();
+    dispatchKey(start, "ArrowRight");
+    expect(panelHidden("label")).toBe(true);
+    expect(container.querySelector<HTMLInputElement>("#al-name")?.value).toBe(
+      "Whale Alice",
+    );
+
+    dispatchKey(tabById("al-tab-report"), "ArrowLeft");
+    expect(panelHidden("label")).toBe(false);
+    expect(container.querySelector<HTMLInputElement>("#al-name")?.value).toBe(
+      "Whale Alice",
+    );
+  });
+
+  it("clicking a tab still activates it and moves the tab stop", () => {
+    render({ address: VALID_ADDR, onClose: () => undefined });
+    clickTab("Forensic Report");
+    expect(tabById("al-tab-report").getAttribute("aria-selected")).toBe("true");
+    const tabbable = tabs().filter((t) => t.tabIndex === 0);
+    expect(tabbable).toHaveLength(1);
+    expect(tabbable[0]!.id).toBe("al-tab-report");
+  });
+
+  it("keeps the tab stop with selection when a click carries no focus transition", () => {
+    // CodeRabbit on PR 2484: Safari does not always focus a button on click,
+    // and `element.click()` never does. Activation would then move
+    // `aria-selected` while the helper kept the tab stop on the still-focused
+    // tab, breaking the focus/selection sync that automatic activation
+    // promises. The click handler focuses the tab before activating it.
+    render({ address: VALID_ADDR, onClose: () => undefined });
+    const label = tabById("al-tab-label");
+    label.focus();
+    expect(document.activeElement).toBe(label);
+
+    act(() => {
+      tabById("al-tab-report").click();
+    });
+
+    const report = tabById("al-tab-report");
+    expect(report.getAttribute("aria-selected")).toBe("true");
+    expect(document.activeElement).toBe(report);
+    const tabbable = tabs().filter((t) => t.tabIndex === 0);
+    expect(tabbable).toHaveLength(1);
+    expect(tabbable[0]!.id).toBe("al-tab-report");
+  });
+
+  it("has no axe violations on the tablist and its panels", async () => {
+    render({ address: VALID_ADDR, onClose: () => undefined });
+    const dialogMarkup = container.querySelector("dialog")?.innerHTML;
+    expect(dialogMarkup).toBeTruthy();
+
+    // jsdom's `showModal` polyfill only sets the `open` attribute, and
+    // axe-core then returns every ARIA rule under a native `<dialog>` as
+    // `incomplete` instead of pass/fail — an assertion on `violations`
+    // inside the dialog stays green even for an invalid tablist. Re-host
+    // the same markup in a plain container so the rules produce real
+    // results. Detach the React container first so the copied ids stay
+    // unique in the document.
+    container.remove();
+    const probe = document.createElement("div");
+    probe.innerHTML = dialogMarkup!;
+    document.body.appendChild(probe);
+    try {
+      const results = await axe(probe);
+      expect(results.violations).toEqual([]);
+      // Guard the guard: `aria-required-children` is the rule that catches a
+      // non-`role="tab"` child of the tablist. If it ever stops running here,
+      // the assertion above would be vacuous again.
+      const evaluated = [...results.passes, ...results.violations].map(
+        (r) => r.id,
+      );
+      expect(evaluated).toContain("aria-required-children");
+    } finally {
+      probe.remove();
+      document.body.appendChild(container);
+    }
   });
 });
 
