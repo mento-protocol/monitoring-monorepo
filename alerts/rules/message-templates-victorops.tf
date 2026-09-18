@@ -61,16 +61,39 @@ resource "grafana_message_template" "victorops_oracle_relayer_low_balance_alert_
   template = <<-EOT
 {{ define "victorops.oracle_relayer_low_balance_alert_message" }}
 {{ range .Alerts.Firing }}
-{{ $pair := reReplaceAll "^RelayerSigner([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.owner }}
+{{ $pair := reReplaceAll "^RelayerSigner([A-Z]{3,}?)(XAUT|[A-Z]{3})$" "$1/$2" .Labels.owner }}
 Low {{ .Labels.token }} balance for {{ $pair }} Relayer on {{ .Labels.chain | title }} — {{ .Annotations.currentBalance }} {{ .Labels.token }} left
 Wallet: https://{{ .Labels.explorer }}/address/{{ .Labels.ownerValue }}
-- Top up the relayer wallet to keep the relayer running
-- Run the relayer refill script (https://github.com/mento-protocol/oracle-relayer?tab=readme-ov-file#refilling-relayer-signer-accounts), or top up from the dev wallet until the balance is at least {{ .Annotations.threshold }} {{ .Labels.token }}
-- Get the dev wallet private key from the Eng vault in 1Password
+- This relayer wallet is below ~{{ .Annotations.runwayDays }} days of relaying. The daily refill-relayers function tops signers up below 7 days, so check its latest "Refill failed" log and the refiller wallet balance
+- To top up by hand, run the relayer refill script (https://github.com/mento-protocol/oracle-relayer?tab=readme-ov-file#refilling-relayer-signer-accounts) or send at least {{ .Annotations.threshold }} {{ .Labels.token }} to the wallet
 {{ end }}
 {{ range .Alerts.Resolved }}
-{{ $pair := reReplaceAll "^RelayerSigner([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.owner }}
+{{ $pair := reReplaceAll "^RelayerSigner([A-Z]{3,}?)(XAUT|[A-Z]{3})$" "$1/$2" .Labels.owner }}
 Sufficient {{ .Labels.token }} balance restored for the {{ $pair }} Relayer on {{ .Labels.chain | title }} — {{ .Annotations.currentBalance }} {{ .Labels.token }}
+{{ end }}
+{{ end }}
+EOT
+}
+
+resource "grafana_message_template" "victorops_relayer_refiller_low_balance_alert_title" {
+  name     = "VictorOps - Low Relayer Refiller Balance Alert Title"
+  template = <<-EOT
+{{ define "victorops.relayer_refiller_low_balance_alert_title" }}Low relayer refiller balance on {{ .CommonLabels.chain | title }}{{ end }}
+EOT
+}
+
+resource "grafana_message_template" "victorops_relayer_refiller_low_balance_alert_message" {
+  name     = "VictorOps - Low Relayer Refiller Balance Alert Message"
+  template = <<-EOT
+{{ define "victorops.relayer_refiller_low_balance_alert_message" }}
+{{ range .Alerts.Firing }}
+Low {{ .Labels.token }} balance in the relayer refiller wallet on {{ .Labels.chain | title }} — {{ .Annotations.currentBalance }} {{ .Labels.token }} left, about {{ .Annotations.runwayDays }} days of refills
+Wallet: https://{{ .Labels.explorer }}/address/{{ .Labels.ownerValue }}
+- Send {{ .Labels.token }} to the refiller wallet. One month of relaying on this chain costs about {{ .Annotations.monthlyBurn }} {{ .Labels.token }}; this alert clears above {{ .Annotations.threshold }} {{ .Labels.token }}
+- If this wallet runs dry, the daily refill-relayers function logs "Refill failed" and signers stop being topped up. Signers are normally refilled below 7 days of runway, so check the signer low-balance alerts for any that are already short
+{{ end }}
+{{ range .Alerts.Resolved }}
+Relayer refiller wallet on {{ .Labels.chain | title }} is funded again — {{ .Annotations.currentBalance }} {{ .Labels.token }}
 {{ end }}
 {{ end }}
 EOT

@@ -14,7 +14,7 @@ locals {
   #                     ("CELOToken_balanceOf" for Celo, "Native_balanceOf" for chains
   #                     whose gas token isn't ERC20-compatible, e.g. MON)
   #   symbol          → gas-token ticker shown in alert copy (e.g. "CELO", "MON")
-  #   threshold       → low-balance alert threshold, in whole tokens
+  #                     (low-balance thresholds live in relayer-balance-locals.tf)
   #   explorer        → block-explorer host for address links in alert copy
   #   chain_id            → EVM chain ID; used to build pool URLs like
   #                         `monitoring.mento.org/pool/<chain_id>-<pool_address>`
@@ -33,7 +33,6 @@ locals {
       env                 = "prod"
       metric              = "CELOToken_balanceOf"
       symbol              = "CELO"
-      threshold           = 10
       explorer            = "celoscan.io"
       chain_id            = "42220"
       aegis_chain         = "celo"
@@ -44,7 +43,6 @@ locals {
       env                 = "staging"
       metric              = "CELOToken_balanceOf"
       symbol              = "CELO"
-      threshold           = 10
       explorer            = "sepolia.celoscan.io"
       chain_id            = "11142220"
       aegis_chain         = "celoSepolia"
@@ -55,7 +53,6 @@ locals {
       env                 = "prod"
       metric              = "Native_balanceOf"
       symbol              = "MON"
-      threshold           = 50
       explorer            = "monadscan.com"
       chain_id            = "143"
       aegis_chain         = "monad"
@@ -66,7 +63,6 @@ locals {
       env                 = "prod"
       metric              = "Native_balanceOf"
       symbol              = "POL"
-      threshold           = 500
       explorer            = "polygonscan.com"
       chain_id            = "137"
       aegis_chain         = "polygon"
@@ -77,20 +73,16 @@ locals {
       env                 = "staging"
       metric              = "Native_balanceOf"
       symbol              = "MON"
-      threshold           = 50
       explorer            = "testnet.monadscan.com"
       chain_id            = "10143"
       aegis_chain         = "monadTestnet"
       chainlink_feed_path = ""
     }
     "polygon-testnet" = {
-      title = "Polygon-Testnet"
-      env   = "staging"
-      # Testnet threshold matching monad-testnet's 50, not mainnet's 500 —
-      # Amoy signers are manually topped up (~84 POL each as of 2026-07-16).
+      title               = "Polygon-Testnet"
+      env                 = "staging"
       metric              = "Native_balanceOf"
       symbol              = "POL"
-      threshold           = 50
       explorer            = "amoy.polygonscan.com"
       chain_id            = "80002"
       aegis_chain         = "polygonTestnet"
@@ -406,16 +398,27 @@ locals {
       victorops_message_template = "victorops.oracle_stale_price_alert_message"
     },
     oracle_relayer_low_balance = {
-      # One alert name per chain, e.g. "Low CELO Balance [Celo]",
-      # "Low MON Balance [Monad]". Generated from the chains registry so a new
-      # chain's alert routes through this dispatcher automatically.
+      # One alert name per chain and signer class, e.g. "Low CELO Balance
+      # [Celo]", "Low CELO Balance [Celo, gas feeds]". Generated from the same
+      # map as the rules (relayer-balance-locals.tf) so every rule name has a
+      # dispatcher branch.
       names = [
-        for k, c in local.chains : "Low ${c.symbol} Balance [${c.title}]"
+        for k, r in local.signer_balance_rules : r.name
       ],
       slack_title_template       = "slack.oracle_relayer_low_balance_alert_title",
       slack_message_template     = "slack.oracle_relayer_low_balance_alert_message",
       victorops_title_template   = "victorops.oracle_relayer_low_balance_alert_title",
       victorops_message_template = "victorops.oracle_relayer_low_balance_alert_message"
+    },
+    relayer_refiller_low_balance = {
+      # One alert name per chain, e.g. "Low Refiller Balance [Celo]".
+      names = [
+        for k, r in local.refiller_balance_rules : r.name
+      ],
+      slack_title_template       = "slack.relayer_refiller_low_balance_alert_title",
+      slack_message_template     = "slack.relayer_refiller_low_balance_alert_message",
+      victorops_title_template   = "victorops.relayer_refiller_low_balance_alert_title",
+      victorops_message_template = "victorops.relayer_refiller_low_balance_alert_message"
     },
     low_reserve_balance = {
       names = [
