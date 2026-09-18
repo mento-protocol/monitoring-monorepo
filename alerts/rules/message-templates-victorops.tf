@@ -78,6 +78,19 @@ EOT
 # Title and message share one template resource. Grafana Cloud rejects template
 # creation once 30 exist (HTTP 429), and a template may hold several `define`
 # blocks, so the pair costs one slot instead of two.
+#
+# The tenant was already at 30 when this was added, with the retired Slack
+# refiller title holding the slot this template needs. Dropping that resource
+# and adding this one would be two unrelated operations, and Terraform could
+# attempt the create first and hit the cap again. The `moved` block makes them
+# one resource instead: Terraform renames or replaces it in place, and a
+# replacement destroys before it creates, so the count never exceeds 30.
+# Remove the block once this has been applied to production.
+moved {
+  from = grafana_message_template.slack_relayer_refiller_low_balance_alert_title
+  to   = grafana_message_template.victorops_relayer_refiller_low_balance_alert
+}
+
 resource "grafana_message_template" "victorops_relayer_refiller_low_balance_alert" {
   name     = "VictorOps - Low Relayer Refiller Balance Alert"
   template = <<-EOT
