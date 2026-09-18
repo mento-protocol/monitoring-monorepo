@@ -149,12 +149,8 @@ for (const [from, to] of [
     "github.event.workflow_run.run_attempt > 0 &&",
   ],
   [
-    "startsWith(github.event.workflow_run.head_branch, 'dependabot/github_actions/actions-minor-patch-') &&",
-    "startsWith(github.event.workflow_run.head_branch, 'dependabot/') &&",
-  ],
-  [
-    "!startsWith(github.event.workflow_run.head_branch, 'sentry-autofix/')",
-    "!startsWith(github.event.workflow_run.head_branch, 'sentry/')",
+    "startsWith(github.event.workflow_run.head_branch, 'dependabot/github_actions/actions-minor-patch-')",
+    "startsWith(github.event.workflow_run.head_branch, 'dependabot/')",
   ],
 ]) {
   expectFailure(

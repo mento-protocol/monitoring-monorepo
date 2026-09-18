@@ -15,6 +15,9 @@ garden_lane: adrs-architecture
 
 **Status:** Accepted (Aug 2026), in force.
 **Scope:** ci/process
+**Status note (Sep 2026):** issue #2486 retired the `sentry-autofix/*` clauses
+this ADR cites; `check-ci-contract.mjs` now carries the `pull_request_target`
+refusal, and the pinned workflow-pair inventory still gates the writer.
 
 ## Context
 
@@ -104,7 +107,9 @@ The writer never checks out code, downloads artifacts, restores caches, or
 executes pull-request content. `pnpm tf:test` pins the parsed semantics of both
 workflows. The autofix trust checker continues to reject every
 `pull_request_target` workflow and requires the writer's explicit
-`sentry-autofix/*` exclusion.
+`sentry-autofix/*` exclusion. _Superseded Sep 2026 by issue #2486:
+`check-ci-contract.mjs` carries the `pull_request_target` refusal, and the
+`sentry-autofix/*` exclusion is retired._
 
 The writer uses the repository's built-in `GITHUB_TOKEN` for authoritative
 reads and the final merge write. The workflow passes that token through
@@ -218,7 +223,9 @@ operator step after the cutover is complete.
   pairs.
 - `scripts/workflows/check-autofix-ci-trust.mjs` rejects
   `pull_request_target` and checks the writer's `workflow_run` autofix
-  exclusion.
+  exclusion. _Superseded Sep 2026 by issue #2486:
+  `scripts/workflows/check-ci-contract.mjs` rejects `pull_request_target`; the
+  autofix exclusion is retired._
 - Historical PR #1872 showed that a Dependabot `pull_request` run can have an
   empty `pull_requests` list while its run head SHA still matches the PR head.
   The writer therefore performs a strict owner-and-head PR lookup instead of

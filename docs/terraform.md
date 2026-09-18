@@ -131,7 +131,7 @@ post-apply plan, and final IAM/WIF audit completed the cutover. Live
 `org-terraform` Token Creator now contains only `production-infra-applier`.
 
 Eligible same-repo human PR plans use safe placeholder `TF_VAR_*` values or
-guarded targets; fork, Dependabot, and `sentry-autofix/*` plans are skipped.
+guarded targets; fork and Dependabot plans are skipped.
 Trusted push/dispatch refresh and gated apply remain authoritative for
 full-stack, third-party-provider, and secret-value diffs. Alerts-rules and
 alerts-delivery PR plans are intentionally partial.

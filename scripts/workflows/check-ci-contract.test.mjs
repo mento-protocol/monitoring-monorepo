@@ -21,6 +21,7 @@ import {
   forceAllForChanges,
   loadCi,
   matchedFiles,
+  pullRequestTargetViolations,
   runnerLabelViolations,
   workflowViolations,
 } from "./check-ci-contract.mjs";
@@ -618,6 +619,46 @@ test("contextOwnershipViolations rejects a decoy ci job, an unevaluable name, an
   rmSync(dir, { recursive: true, force: true });
 });
 
+test("pullRequestTargetViolations is clean on the live repo", () => {
+  assert.deepEqual(pullRequestTargetViolations(), []);
+});
+
+test("pullRequestTargetViolations rejects pull_request_target in every on: shape", () => {
+  const dir = mkdtempSync(join(tmpdir(), "pr-target-test-"));
+  mkdirSync(join(dir, ".github/workflows"), { recursive: true });
+  // prettier-ignore
+  writeFileSync(join(dir, ".github/workflows/ci.yml"), "name: CI\non:\n  pull_request:\n    branches: [main]\njobs:\n  ci:\n    runs-on: ubuntu-latest\n    steps: []\n");
+  assert.deepEqual(pullRequestTargetViolations(dir), []);
+
+  // A mapping, a sequence and a scalar `on:` are three legal spellings of the
+  // same trigger; each must be refused.
+  for (const on of [
+    "on:\n  pull_request_target:\n    branches: [main]\n",
+    "on: [push, pull_request_target]\n",
+    "on: pull_request_target\n",
+  ]) {
+    // prettier-ignore
+    writeFileSync(join(dir, ".github/workflows/target.yml"), `name: Target\n${on}jobs:\n  a:\n    runs-on: ubuntu-latest\n    steps: []\n`);
+    assert.match(
+      pullRequestTargetViolations(dir).join("\n"),
+      /target\.yml uses pull_request_target/u,
+      `pull_request_target must be rejected as: ${on.trim()}`,
+    );
+  }
+  rmSync(join(dir, ".github/workflows/target.yml"));
+  assert.deepEqual(pullRequestTargetViolations(dir), []);
+
+  // prettier-ignore
+  writeFileSync(join(dir, ".github/workflows/broken.yml"), "jobs:\n  a:\n    runs-on: ubuntu-latest\n    runs-on: evil\n");
+  assert.match(
+    pullRequestTargetViolations(dir).join("\n"),
+    /broken\.yml could not be parsed/u,
+    "a workflow that fails to parse must fail closed",
+  );
+
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test("the replacement checker and tests stay within their size budgets", () => {
   const implementation = readFileSync(
     fileURLToPath(new URL("./check-ci-contract.mjs", import.meta.url)),
@@ -634,9 +675,12 @@ test("the replacement checker and tests stay within their size budgets", () => {
   // EXPECTED_TIMEOUTS/EXPECTED_RUNNERS growth (#2412) landed on top of it;
   // raised to 400/680 by ADR 0106, which moved the `ci` trigger, pin-order and
   // cross-workflow context-ownership checks here from the deleted Sentry
-  // CI-wiring suite rather than letting them lapse.
-  assert.ok(implementation < 400, `${implementation} implementation lines`);
-  assert.ok(tests < 680, `${tests} test lines`);
+  // CI-wiring suite rather than letting them lapse;
+  // raised to 440/730 by issue #2486, which moved the repo-wide
+  // `pull_request_target` refusal here from the retired autofix CI-trust
+  // checker, again rather than letting it lapse.
+  assert.ok(implementation < 440, `${implementation} implementation lines`);
+  assert.ok(tests < 730, `${tests} test lines`);
   assert.ok(
     tests < implementation * 2,
     `${tests} tests vs ${implementation} implementation`,

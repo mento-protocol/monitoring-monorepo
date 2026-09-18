@@ -343,6 +343,35 @@ export function contextOwnershipViolations(root = ROOT) {
   return errors;
 }
 
+// Repository-wide negative control: no workflow may use `pull_request_target`,
+// which runs base-branch workflow code with the base repository's secrets and a
+// write token while the PR chooses what that code builds and tests. The
+// Dependabot lane uses an unprivileged `pull_request` classifier and a
+// default-branch `workflow_run` writer instead (ADR 0081). This outlived the
+// autofix CI-trust checker that used to carry it (issue #2486).
+//
+// Parsed here rather than imported, for the same reason runnerLabelViolations
+// parses locally: this protected, admission-pinned file takes no dependency
+// edge onto an unpinned sibling. Every `on:` shape is covered — a scalar, a
+// sequence, a mapping, and the YAML `on`→`true` key coercion — and a workflow
+// that cannot be parsed is an error, not a pass.
+// prettier-ignore
+export function pullRequestTargetViolations(root = ROOT) {
+  const errors = [];
+  const dir = join(root, ".github/workflows");
+  for (const name of readdirSync(dir).filter((n) => /\.ya?ml$/u.test(n))) {
+    let workflow;
+    try {
+      workflow = yaml.load(readFileSync(join(dir, name), "utf8"), { schema: yaml.CORE_SCHEMA });
+    } catch (error) { errors.push(`${name} could not be parsed as YAML: ${error.message}`); continue; }
+    if (!isMapping(workflow)) { errors.push(`${name} has no top-level workflow mapping`); continue; }
+    const on = "on" in workflow ? workflow.on : workflow[true];
+    const events = typeof on === "string" ? [on] : Array.isArray(on) ? on : isMapping(on) ? Object.keys(on) : [];
+    if (events.includes("pull_request_target")) errors.push(`${name} uses pull_request_target, which hands secrets to PR-controlled context by design — use pull_request with an explicit trust gate, or split read-only classification from a default-branch workflow_run writer`);
+  }
+  return errors;
+}
+
 // Negative control: no workflow may name a runs-on label outside the frozen
 // allow-list, and the two actionlint self-hosted-runner allow-lists (which
 // exist only to acknowledge those same labels to actionlint) must agree.
@@ -352,9 +381,9 @@ export function runnerLabelViolations(root = ROOT) {
   if (!readFileSync(join(root, ".github/actionlint.yaml")).equals(readFileSync(join(root, ".trunk/configs/actionlint.yaml")))) errors.push(".github/actionlint.yaml and .trunk/configs/actionlint.yaml must be byte-identical");
   const dir = join(root, ".github/workflows");
   for (const name of readdirSync(dir).filter((n) => /\.ya?ml$/u.test(n))) {
-    // Parsed locally (not via check-autofix-ci-trust.mjs's parseWorkflow) so
-    // this protected, admission-pinned file has no dependency edge onto an
-    // unpinned sibling a sampled candidate could rewrite underneath it.
+    // Parsed locally (not via a shared helper) so this protected,
+    // admission-pinned file has no dependency edge onto an unpinned sibling a
+    // sampled candidate could rewrite underneath it.
     let workflow;
     try {
       workflow = yaml.load(readFileSync(join(dir, name), "utf8"), { schema: yaml.CORE_SCHEMA });
@@ -378,6 +407,7 @@ async function main() {
   const errors = [
     ...workflowViolations(workflow, filters),
     ...contextOwnershipViolations(),
+    ...pullRequestTargetViolations(),
     ...runnerLabelViolations(),
   ];
   if (errors.length > 0) {

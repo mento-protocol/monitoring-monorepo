@@ -6,12 +6,12 @@
 # `permissions:` (verified: no job falls through to the repo default), so this
 # is behaviorally a no-op for existing workflows — it closes a DRIFT surface.
 #
-# Why it matters (issue #1557, found reviewing #1554): the autofix CI-trust
-# checker (`scripts/workflows/check-autofix-ci-trust.mjs`) treats a job with no
-# explicit `permissions:` as having no write scope
+# Why it matters (issue #1557, found reviewing #1554): the PR validation
+# boundary (`scripts/workflows/check-pr-validation-boundary.mjs`) treats a job
+# with no explicit `permissions:` as having no write scope
 # (effectivePermissions=undefined -> hasWritePermission=false -> not flagged).
 # That assumption is only sound when the REPO DEFAULT is read-only. The default
-# was `write`, so a future no-`permissions` autofix-reachable job running
+# was `write`, so a future no-`permissions` PR-reachable job running
 # `actions/checkout` would persist a write-scoped token the checker would NOT
 # flag. Pinning the default to `read` makes the checker's assumption hold.
 #

@@ -22,11 +22,9 @@ permissions: read-all
 
 jobs:
   claude:
-    # autofix-ci-trust: this job only fires on @claude mentions from
-    # OWNER/MEMBER authors (issue_comment / review events) — never
-    # automatically on a pull_request, so a machine-authored autofix PR
-    # cannot reach its secret without a maintainer explicitly invoking it.
-    # See scripts/workflows/check-autofix-ci-trust.mjs.
+    # This job only fires on @claude mentions from OWNER/MEMBER authors
+    # (issue_comment / review events) — never automatically on a pull_request,
+    # so its secret is unreachable without a maintainer explicitly invoking it.
     if: |
       (
         github.event_name == 'issue_comment' &&
@@ -100,12 +98,6 @@ jobs:
     # secrets (CLAUDE_CODE_OAUTH_TOKEN by default), so the action would fail
     # with an empty token. To re-enable on Dependabot PRs, mirror the secret
     # under Settings → Secrets and variables → Dependabot.
-    # Also skip machine-authored Sentry-autofix PRs (head sentry-autofix/*):
-    # their diffs derive from untrusted Sentry input, and auto-reviewing one
-    # feeds that untrusted content to an LLM holding pull-requests:write — an
-    # injected diff could steer the reviewer into posting misleading
-    # commentary, which is worse than no review. Codex review and the human
-    # merge gate still cover autofix PRs.
     # A later step skips review-skill evaluation PRs only after it verifies that
     # every changed path is generated score evidence. The branch name alone is
     # author-controlled and cannot grant a review exemption.
@@ -113,8 +105,7 @@ jobs:
       github.event_name == 'pull_request' &&
       github.event.pull_request.draft != true &&
       github.event.pull_request.head.repo.full_name == github.repository &&
-      github.actor != 'dependabot[bot]' &&
-      !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/')
+      github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     concurrency:

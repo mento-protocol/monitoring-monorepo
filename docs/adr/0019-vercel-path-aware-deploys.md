@@ -15,6 +15,8 @@ garden_lane: adrs-architecture
 
 **Status:** Accepted (Mar 2026), in force.
 **Scope:** ui-dashboard
+**Status note (Sep 2026):** issue #2486 removed the `git.deploymentEnabled`
+entry described below; ADR 0106 had already retired the branch it named.
 
 ## Context
 
@@ -55,6 +57,9 @@ forces a preview build because the required browser audit targets that preview.
   never _creates_ a deployment for a machine-authored autofix branch (which would
   otherwise run untrusted code with the dashboard's production secrets). That is
   strictly earlier than the skip script — the build never starts.
+  _Superseded Sep 2026 by issue #2486: ADR 0106 retired the autofix leg, so
+  nothing creates that branch and the entry was removed. Vercel SSO Deployment
+  Protection and Git fork protection remain the trust boundary._
 
 ## Evidence
 

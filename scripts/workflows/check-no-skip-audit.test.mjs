@@ -144,7 +144,7 @@ const MUTATIONS = [
   ["Playwright cache save", CI, "if: ${{ !inputs.no_skip_audit && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.playwright-cache", "if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.playwright-cache", /Playwright cache/u],
   ["Foundry cache", CI, "          cache: ${{ !inputs.no_skip_audit && github.event_name", "          cache: ${{ github.event_name", /Foundry cache/u],
   ["Turbo cold policy", CI, "TURBO_CACHE_POLICY: ${{ inputs.no_skip_audit && 'local:,remote:' || 'local:rw' }}", "TURBO_CACHE_POLICY: local:rw", /Turbo cache/u],
-  ["Codecov audit skip", CI, "if: ${{ !inputs.no_skip_audit && !startsWith(github.event.pull_request.head.ref", "if: ${{ !startsWith(github.event.pull_request.head.ref", /Codecov/u],
+  ["Codecov audit skip", CI, "codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0\n        if: ${{ !inputs.no_skip_audit }}", "codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0\n        if: ${{ always() }}", /Codecov/u],
   ["UI artifact audit skip", CI, "        if: failure() && !inputs.no_skip_audit", "        if: failure()", /UI failure artifacts/u],
   ["timeline audit skip", CI, "        if: always() && !inputs.no_skip_audit", "        if: always()", /timeline actions/u],
   ["audit allowed skip", CI, "        with:\n          jobs: ${{ toJSON(needs) }}\n      - uses: Kesin11/actions-timeline", "        with:\n          jobs: ${{ toJSON(needs) }}\n          allowed-skips: ui\n      - uses: Kesin11/actions-timeline", /reject every skipped/u],

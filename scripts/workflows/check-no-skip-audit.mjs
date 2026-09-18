@@ -24,13 +24,13 @@ const TRUST_REASON = "# GitHub resolves $/ from the running commit; actionlint l
 // prettier-ignore
 const FORCE_ALL = "${{ inputs.no_skip_audit || steps.filter.outputs.controlPlane == 'true' || steps.filter.outputs.all_count != steps.filter.outputs.routed_count || steps.filter.outputs.all_count != steps.filter.outputs.ordinary_count || (github.event_name == 'pull_request' && github.event.pull_request.changed_files >= 3000) }}";
 // prettier-ignore
-const CODECOV_IF = "${{ !inputs.no_skip_audit && !startsWith(github.event.pull_request.head.ref, 'sentry-autofix/') }}", WRITE_CACHE = "${{ !inputs.no_skip_audit && github.event_name == 'push' && github.ref == 'refs/heads/main' }}";
+const CODECOV_IF = "${{ !inputs.no_skip_audit }}", WRITE_CACHE = "${{ !inputs.no_skip_audit && github.event_name == 'push' && github.ref == 'refs/heads/main' }}";
 // prettier-ignore
 const READ_SCOPES = Object.freeze({ actions: "read", contents: "read", "pull-requests": "read" });
 // prettier-ignore
 const ADMISSION_STEP_HASH = "18f1c3741064363a488462c96fd34772c3b66eeee4a3f4bd2fb2a86275c3a203", CHECKOUT_STEP_HASH = "2d39e2e5293845e1c63f0f2e95ab8eb7e3d65360955c5b2c54ea1bddff57c22d", PROTECTED_DRIFT_STEP_HASH = "019ce295d3b3b50fe6684a65a93a2387a8a29d7c6c62db83cdc00bf1e8cf7a04", SUMMARY_STEP_HASH = "b6def63e8f5ccb7e13a6460f546cb391bf0e86350876470a787f038ea7cebb10";
 const CI_GRAPH_HASH =
-    "2dfc6c1c3d2a0b73c1385d1cc5ad00f38a4d52de4d9f276cbc21186136eea58c",
+    "559d653bb7e3a27c44080a0bce23f7ca6e38aa62216b0931f3402e2e64fa9416",
   BASELINE_HASH =
     "467641beda8b2b45d49d0c62429d8e95f62b05c1db96f6665b106012a09cef12";
 // prettier-ignore

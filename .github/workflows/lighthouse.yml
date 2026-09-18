@@ -75,15 +75,10 @@ jobs:
     # `decide` computes the local-fixture and trusted-preview lanes separately:
     #   - fixture=true/filter failure  → run the local fixture (fail-closed)
     #   - preview=true + trusted PR    → also run the secret-bearing preview
-    #   - workflow-only/fork/Dependabot/autofix → local fixture only
+    #   - workflow-only/fork/Dependabot → local fixture only
     #   - fixture=false                → no-op skip
-    # autofix-ci-trust: this job cannot use an if:-level exclusion (the
-    # secretless fixture lane must still run on autofix PRs so the required
-    # check stays meaningful). Instead the `decide` step's lane router sends
-    # sentry-autofix/* heads down the fixture lane with preview=false, and
-    # every bypass-secret step is gated on `decide.outputs.preview == 'true'`
-    # — so the VERCEL_AUTOMATION_BYPASS_SECRET steps never run for autofix
-    # PRs. The checkout is persist-credentials:false, so the fixture build of
+    # Every bypass-secret step is gated on `decide.outputs.preview == 'true'`,
+    # and the checkout is persist-credentials:false, so the fixture build of
     # PR-head code finds no token in .git/config either.
     # Preview assertions warn/error per .lighthouserc.cjs; the deterministic
     # fixture owns the blocking pool-detail LCP contract.
@@ -174,12 +169,6 @@ jobs:
           # would fail with missing secrets. These PRs still run the secretless
           # deterministic fixture.
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
-          # Sentry-autofix PRs are same-repo and non-dependabot, but their
-          # diffs are MACHINE-AUTHORED from untrusted Sentry input, so they are
-          # untrusted-in-effect. The branch namespace is the reliable
-          # identifier (the App slug is operator-chosen). Passed via env and
-          # compared quoted — a branch name never reaches shell interpolation.
-          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
           if [[ "$FILTER_OUTCOME" != "success" ]]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
@@ -197,15 +186,6 @@ jobs:
           if [[ "$PR_AUTHOR" == "dependabot[bot]" ]]; then
             echo "preview=false" >> "$GITHUB_OUTPUT"
             echo "PR from dependabot[bot] — running the secretless fixture and skipping the Vercel preview lane."
-          elif [[ "$PR_HEAD_REF" == sentry-autofix/* ]]; then
-            # Autofix PRs must NEVER reach the Vercel preview lane: the lane
-            # sends VERCEL_AUTOMATION_BYPASS_SECRET as a request header to the
-            # preview, which serves the PR's OWN server code — an injected
-            # autofix diff could read the header server-side and exfiltrate
-            # the secret before any human review. The secretless deterministic
-            # fixture still runs, so the required check stays meaningful.
-            echo "preview=false" >> "$GITHUB_OUTPUT"
-            echo "Machine-authored autofix PR (sentry-autofix/*) — running the secretless fixture and skipping the Vercel preview lane."
           elif [[ -z "$PR_HEAD_REPO" ]]; then
             echo "preview=false" >> "$GITHUB_OUTPUT"
             echo "PR head repository is unavailable — failing closed to the secretless fixture lane."
