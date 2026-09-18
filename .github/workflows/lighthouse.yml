@@ -373,24 +373,23 @@ jobs:
             // unrelated previews the repository registered in the meantime.
             // The 30 newest commits bound the walk; an older one yields no
             // candidate, which leaves the conservative "cannot prove it"
-            // outcome.
+            // outcome. Walk backward from the head rather than reversing
+            // `pulls.listCommits`: that endpoint caps at 250 commits in
+            // chronological order, so on a longer PR its tail is commits
+            // 221-250, not the newest 30.
             async function priorBranchPreviewDeployments() {
-              const pullNumber = context.payload.pull_request?.number;
-              if (typeof pullNumber !== "number") return [];
-              const branchShas = [];
-              const pages = github.paginate.iterator(github.rest.pulls.listCommits, {
+              const { data: recentCommits } = await github.rest.repos.listCommits({
                 owner,
                 repo,
-                pull_number: pullNumber,
-                per_page: 100,
+                sha,
+                per_page: 31,
               });
-              for await (const response of pages) {
-                for (const commit of response.data ?? []) {
-                  if (commit.sha && commit.sha !== sha) branchShas.push(commit.sha);
-                }
-              }
+              const branchShas = recentCommits
+                .map(commit => commit.sha)
+                .filter(candidate => candidate && candidate !== sha)
+                .slice(0, 30);
               const deployments = [];
-              for (const candidateSha of branchShas.reverse().slice(0, 30)) {
+              for (const candidateSha of branchShas) {
                 // A SHA can carry more than one Preview deployment (a Vercel
                 // redeploy makes a second one). Take them all: the newest is
                 // not necessarily the one that succeeded.
