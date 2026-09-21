@@ -217,6 +217,26 @@ resource "grafana_notification_policy" "all" {
 
     }
 
+    # Refiller early warnings → same channels as below, but once a day. "Top up
+    # this week" does not need the tree's 4h repeat, which trains people to
+    # ignore it. Matched by exact alert name so the urgent level ("Refiller
+    # Cannot Cover Refills"), which should keep nagging, falls through to the
+    # generic oracle-relayer routes. Must stay ahead of those routes: the first
+    # matching policy wins.
+    dynamic "policy" {
+      for_each = local.refiller_balance_rules
+      content {
+        contact_point   = policy.value.chain.env == "prod" ? grafana_contact_point.slack_alerts_oracles.name : grafana_contact_point.slack_alerts_testnet.name
+        repeat_interval = "24h"
+
+        matcher {
+          label = "alertname"
+          match = "="
+          value = policy.value.name
+        }
+      }
+    }
+
     # Oracle Relayer warning alerts → #alerts-oracles (prod chains, non-weekend FX)
     dynamic "policy" {
       for_each = local.prod_chains
