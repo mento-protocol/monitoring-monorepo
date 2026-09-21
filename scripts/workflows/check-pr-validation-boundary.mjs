@@ -175,7 +175,7 @@ function checkCi(root, violations) {
       if (!String(step.uses ?? "").startsWith("codecov/codecov-action@")) return;
       uploads.push([job, step.with?.flags, step.with?.directory].join("|"));
       uploadsSafe &&= jobSteps.slice(0, index).some((prior) => /(?:coverage|test:cov)/u.test(String(prior.run ?? "")));
-      uploadsSafe &&= step.uses === "codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f" && step.with?.token === "${{ secrets.CODECOV_TOKEN }}" && step.with?.fail_ci_if_error === false && expr(step.if) === "!inputs.no_skip_audit";
+      uploadsSafe &&= step.uses === "codecov/codecov-action@0b35c9ecc4f0529d0eb674914510c22f85b196b4" && step.with?.token === "${{ secrets.CODECOV_TOKEN }}" && step.with?.fail_ci_if_error === false && expr(step.if) === "!inputs.no_skip_audit";
     });
   }
   add(violations, uploadsSafe && JSON.stringify(uploads) === JSON.stringify(CODECOV), "Codecov count, order, upload decision, or exclusion changed");
