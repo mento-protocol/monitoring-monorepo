@@ -411,9 +411,11 @@ locals {
       victorops_message_template = "victorops.oracle_relayer_low_balance_alert_message"
     },
     relayer_refiller_low_balance = {
-      # One alert name per chain, e.g. "Low Refiller Balance [Celo]".
+      # Both refiller levels per chain, e.g. "Low Refiller Balance [Celo]" and
+      # "Refiller Cannot Cover Refills [Celo]". They share templates; the
+      # `urgency` label picks the wording.
       names = [
-        for k, r in local.refiller_balance_rules : r.name
+        for k, r in local.refiller_rules : r.name
       ],
       slack_title_template       = "slack.relayer_refiller_low_balance_alert_title",
       slack_message_template     = "slack.relayer_refiller_low_balance_alert_message",
