@@ -84,7 +84,7 @@
     "@trunkio/launcher": "1.3.4",
     "@types/jest": "30.0.0",
     "@types/js-yaml": "4.0.9",
-    "@types/node": "24.10.1",
+    "@types/node": "26.4.0",
     "@typescript-eslint/eslint-plugin": "8.47.0",
     "@typescript-eslint/parser": "8.47.0",
     "eslint": "9.39.1",
@@ -98,7 +98,7 @@
     "ts-jest": "29.4.5",
     "ts-node": "10.9.2",
     "tsconfig-paths": "4.2.0",
-    "typescript": "5.9.3"
+    "typescript": "7.0.2"
   },
   "engines": {
     "node": ">=24"
