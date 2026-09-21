@@ -83,9 +83,15 @@ jobs:
         # The `check:shell` and `check:shell:test` aliases are pinned in
         # scripts/check-agent-quality-gate-package-scripts.mjs for the author
         # commands, which run them.
+        #
+        # A pull request ratchets against its own base. A run with no base_ref
+        # on a branch other than main is a manual dispatch, which publishes the
+        # same required check context, so it ratchets against origin/main
+        # rather than skipping the comparison. Only main itself compares with
+        # nothing.
         if: ${{ !cancelled() && steps.validation-boundary.outcome == 'success' }}
         env:
-          SHELL_SIZE_BASE: "${{ github.base_ref && format('origin/{0}', github.base_ref) || '' }}"
+          SHELL_SIZE_BASE: "${{ github.base_ref && format('origin/{0}', github.base_ref) || (github.ref != 'refs/heads/main' && 'origin/main' || '') }}"
         run: node scripts/repo-health/check-shell-size.mjs
       - name: Save Trunk artifacts
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.trunk-cache.outputs.cache-hit != 'true'

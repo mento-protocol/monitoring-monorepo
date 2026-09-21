@@ -111,6 +111,9 @@ reason that still holds: `eslint.config.mjs` reaches no `.sh` file.
   that already shrank below its row may grow back up to it: the row, not the
   base branch's measurement, is the bound. Lower the row in the change that
   shrinks the subject to hold the ground.
+- A manual `workflow_dispatch` run on a branch publishes the same required
+  check context, so it ratchets against `origin/main`. Only a run on `main`
+  itself compares with no base.
 - A renamed or moved function is a new function to the baseline, so a rename
   that keeps a 200-line body fails. Split it in the same change.
 - `scripts/review/review-eval.test.mjs` caps review-eval JavaScript modules
