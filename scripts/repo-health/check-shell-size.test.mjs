@@ -25,14 +25,38 @@ const CHECKER_RELATIVE = "scripts/repo-health/check-shell-size.mjs";
 const BASELINE_RELATIVE = "scripts/repo-health/shell-size-baseline.txt";
 const BASELINE_HEADER = "# fixture baseline\n";
 
-// Git inherits GIT_DIR and friends from the parent process, which would point
-// every fixture command back at this checkout.
+// Both programs read the caller's environment. Git inherits GIT_DIR and
+// friends, which would point every fixture command back at this checkout, and
+// the checker reads its base ref and both limits from there, so an exported
+// one would change what a case measures. `extra` is applied last, because a
+// case sets SHELL_SIZE_BASE on purpose.
+const INHERITED = [
+  "GIT_DIR",
+  "GIT_WORK_TREE",
+  "GIT_INDEX_FILE",
+  "SHELL_SIZE_BASE",
+  "MAX_FILE_LINES",
+  "MAX_FUNCTION_LINES",
+];
+
 function fixtureEnvironment(extra = {}) {
-  const env = { ...process.env, ...extra };
-  for (const name of ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"])
-    delete env[name];
-  return env;
+  const env = { ...process.env };
+  for (const name of INHERITED) delete env[name];
+  return { ...env, ...extra };
 }
+
+// A fixture commit would otherwise run under the caller's Git configuration: a
+// signing key it has to prompt for, or whatever hooks are installed globally.
+const COMMIT_CONFIG = [
+  "-c",
+  "user.name=fixture",
+  "-c",
+  "user.email=fixture@example.invalid",
+  "-c",
+  "commit.gpgSign=false",
+  "-c",
+  "core.hooksPath=/dev/null",
+];
 
 function runGit(root, args) {
   const result = spawnSync("git", args, {
@@ -73,15 +97,7 @@ function makeFixture(t, files) {
     writeFileSync(join(root, path), contents);
   }
   runGit(root, ["add", "-A"]);
-  runGit(root, [
-    "-c",
-    "user.name=fixture",
-    "-c",
-    "user.email=fixture@example.invalid",
-    "commit",
-    "-qm",
-    "fixture",
-  ]);
+  runGit(root, [...COMMIT_CONFIG, "commit", "-qm", "fixture"]);
   assert.equal(runGit(root, ["rev-parse", "--show-toplevel"]), root);
   return root;
 }
