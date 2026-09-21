@@ -151,6 +151,6 @@
     "picomatch": "4.0.7",
     "smol-toml": "1.8.0",
     "turbo": "^2.10.12",
-    "typescript": "7.0.2"
+    "typescript": "5.9.3"
   }
 }
