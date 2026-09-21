@@ -226,8 +226,10 @@ resource "grafana_notification_policy" "all" {
     dynamic "policy" {
       for_each = local.refiller_balance_rules
       content {
-        contact_point   = policy.value.chain.env == "prod" ? grafana_contact_point.slack_alerts_oracles.name : grafana_contact_point.slack_alerts_testnet.name
-        repeat_interval = "24h"
+        contact_point = policy.value.chain.env == "prod" ? grafana_contact_point.slack_alerts_oracles.name : grafana_contact_point.slack_alerts_testnet.name
+        # "1d", not "24h": Grafana normalises the duration to its largest unit and
+        # returns "1d", so "24h" would show as a change on every plan.
+        repeat_interval = "1d"
 
         matcher {
           label = "alertname"
