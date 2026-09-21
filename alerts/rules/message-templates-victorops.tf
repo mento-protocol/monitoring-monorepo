@@ -77,16 +77,17 @@ Wallet: https://{{ .Labels.explorer }}/address/{{ .Labels.ownerValue }}
 Sufficient {{ .Labels.token }} balance restored for the {{ $pair }} Relayer on {{ .Labels.chain | title }} — {{ .Annotations.currentBalance }} {{ .Labels.token }}
 {{ end }}
 {{ end }}
-{{ define "victorops.relayer_refiller_low_balance_alert_title" }}Low relayer refiller balance on {{ .CommonLabels.chain | title }}{{ end }}
+{{ define "victorops.relayer_refiller_low_balance_alert_title" }}{{ if eq .CommonLabels.urgency "urgent" }}Relayer refiller cannot cover refills on {{ .CommonLabels.chain | title }}{{ else }}Low relayer refiller balance on {{ .CommonLabels.chain | title }}{{ end }}{{ end }}
 {{ define "victorops.relayer_refiller_low_balance_alert_message" }}
 {{ range .Alerts.Firing }}
-Low {{ .Labels.token }} balance in the relayer refiller wallet on {{ .Labels.chain | title }} — {{ .Annotations.currentBalance }} {{ .Labels.token }} left, about {{ .Annotations.runwayDays }} days of refills
-Wallet: https://{{ .Labels.explorer }}/address/{{ .Labels.ownerValue }}
-- Send {{ .Labels.token }} to the refiller wallet. One month of relaying on this chain costs about {{ .Annotations.monthlyBurn }} {{ .Labels.token }}; this alert clears above {{ .Annotations.threshold }} {{ .Labels.token }}
-- If this wallet runs dry, the daily refill-relayers function logs "Refill failed" and signers stop being topped up. Signers are normally refilled below 7 days of runway, so check the signer low-balance alerts for any that are already short
+{{ if eq .Labels.urgency "urgent" }}Refiller wallet on {{ .Labels.chain | title }} can't cover the next refills. Top up now.
+Balance: {{ .Annotations.currentBalance }} {{ .Labels.token }}, about {{ .Annotations.runwayDays }} days of refills. Send about {{ .Annotations.topUpAmount }} {{ .Labels.token }} to {{ .Labels.ownerValue }}. Until then the daily refill job can fail and relayer signers stop being topped up.
+{{ else }}Refiller wallet on {{ .Labels.chain | title }} is running low. Top up this week.
+Balance: {{ .Annotations.currentBalance }} {{ .Labels.token }}, about {{ .Annotations.runwayDays }} days of refills. Send about {{ .Annotations.topUpAmount }} {{ .Labels.token }} to {{ .Labels.ownerValue }} to cover a month.
+{{ end }}Wallet: https://{{ .Labels.explorer }}/address/{{ .Labels.ownerValue }}
 {{ end }}
 {{ range .Alerts.Resolved }}
-Relayer refiller wallet on {{ .Labels.chain | title }} is funded again — {{ .Annotations.currentBalance }} {{ .Labels.token }}
+Refiller wallet on {{ .Labels.chain | title }} {{ if eq .Labels.urgency "urgent" }}can cover refills again{{ else }}is funded again{{ end }} — {{ .Annotations.currentBalance }} {{ .Labels.token }}
 {{ end }}
 {{ end }}
 EOT

@@ -27,6 +27,11 @@ locals {
   #   refiller_monthly_burn  → native tokens the refiller pays out per month
   #   refiller_min_threshold → floor for the refiller alert; on testnets burn is
   #                            so small that one round of top-ups is the real need
+  #   refiller_urgent_threshold → below this the refiller cannot pay the largest
+  #                            plausible single run of top-ups (signers that cross
+  #                            the refill line together are paid in one run), so
+  #                            the next refill may fail. 0 disables the urgent
+  #                            rule; testnets only get the early warning
   relayer_burn = {
     "celo" = {
       signer_daily_burn = 15
@@ -51,6 +56,8 @@ locals {
       }
       refiller_monthly_burn  = 7200
       refiller_min_threshold = 0
+      # ~10 standard signers sit at nearly the same balance and cross together
+      refiller_urgent_threshold = 1500
     }
     "celo-sepolia" = {
       # Testnet relayers are scheduled once a day: ~0.01 tokens/day each.
@@ -58,8 +65,9 @@ locals {
       signer_classes    = {}
       # 34 signers x 0.01/day. The refill script rounds every top-up up to 2
       # tokens, so the floor is one full round of top-ups.
-      refiller_monthly_burn  = 10
-      refiller_min_threshold = 70
+      refiller_monthly_burn     = 10
+      refiller_min_threshold    = 70
+      refiller_urgent_threshold = 0
     }
     "monad" = {
       signer_daily_burn = 22
@@ -74,24 +82,30 @@ locals {
       }
       refiller_monthly_burn  = 2100
       refiller_min_threshold = 0
+      # the four fiat signers cross together: 4 x ~160
+      refiller_urgent_threshold = 700
     }
     "polygon" = {
       signer_daily_burn      = 135
       signer_classes         = {}
       refiller_monthly_burn  = 7000
       refiller_min_threshold = 0
+      # both feeds topping up in one run: 2 x ~950
+      refiller_urgent_threshold = 2000
     }
     "monad-testnet" = {
-      signer_daily_burn      = 0.01
-      signer_classes         = {}
-      refiller_monthly_burn  = 2
-      refiller_min_threshold = 15
+      signer_daily_burn         = 0.01
+      signer_classes            = {}
+      refiller_monthly_burn     = 2
+      refiller_min_threshold    = 15
+      refiller_urgent_threshold = 0
     }
     "polygon-testnet" = {
-      signer_daily_burn      = 0.01
-      signer_classes         = {}
-      refiller_monthly_burn  = 1
-      refiller_min_threshold = 5
+      signer_daily_burn         = 0.01
+      signer_classes            = {}
+      refiller_monthly_burn     = 1
+      refiller_min_threshold    = 5
+      refiller_urgent_threshold = 0
     }
   }
 
@@ -144,4 +158,28 @@ locals {
       )
     }
   }
+
+  # Second level, prod only: the wallet can no longer cover the next round of
+  # top-ups. It is a separate rule with its own name rather than a label on the
+  # early-warning rule. Grafana identifies a firing alert by rule plus labels,
+  # so relabelling the early warning would resolve and re-fire whatever is
+  # firing at deploy time and post a false "funded again" message.
+  refiller_urgent_rules = {
+    for k, c in local.chains : k => {
+      chain        = c
+      name         = "Refiller Cannot Cover Refills [${c.title}]"
+      monthly_burn = local.relayer_burn[k].refiller_monthly_burn
+      daily_burn   = tonumber(format("%.4f", local.relayer_burn[k].refiller_monthly_burn / 30))
+      threshold    = local.relayer_burn[k].refiller_urgent_threshold
+    } if local.relayer_burn[k].refiller_urgent_threshold > 0
+  }
+
+  # Both levels, in the order the rule group lists them. The provider tracks a
+  # rule's UID by its position in the group, so the early-warning rules must
+  # keep their positions: the "~" prefix sorts the urgent keys after every
+  # chain key, which appends them instead of interleaving them.
+  refiller_rules = merge(
+    { for k, r in local.refiller_balance_rules : k => merge(r, { chain_key = k, urgent = false }) },
+    { for k, r in local.refiller_urgent_rules : "~urgent/${k}" => merge(r, { chain_key = k, urgent = true }) },
+  )
 }

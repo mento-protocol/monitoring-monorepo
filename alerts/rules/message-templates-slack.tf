@@ -105,7 +105,7 @@ EOT
 resource "grafana_message_template" "slack_relayer_refiller_low_balance_alert_title" {
   name     = "Slack - Low Relayer Refiller Balance Alert Title"
   template = <<-EOT
-{{ define "slack.relayer_refiller_low_balance_alert_title" }}{{ if (len .Alerts.Firing) }}🔴{{ else }}✅{{ end }}{{ end }}
+{{ define "slack.relayer_refiller_low_balance_alert_title" }}{{ if (len .Alerts.Firing) }}{{ if eq .CommonLabels.urgency "urgent" }}🔴{{ else }}🟡{{ end }}{{ else }}✅{{ end }}{{ end }}
 EOT
 }
 
@@ -114,13 +114,20 @@ resource "grafana_message_template" "slack_relayer_refiller_low_balance_alert_me
   template = <<-EOT
 {{ define "slack.relayer_refiller_low_balance_alert_message" }}
 {{ range .Alerts.Firing -}}
-*<https://{{ .Labels.explorer }}/address/{{ .Labels.ownerValue }}|Low {{ .Labels.token }} balance in the relayer refiller wallet on {{ .Labels.chain | title }}> — {{ .Annotations.currentBalance }} {{ .Labels.token }} left, about {{ .Annotations.runwayDays }} days of refills*
-- Send {{ .Labels.token }} to the <https://{{ .Labels.explorer }}/address/{{ .Labels.ownerValue }}|refiller wallet>. One month of relaying on this chain costs about {{ .Annotations.monthlyBurn }} {{ .Labels.token }}; this alert clears above {{ .Annotations.threshold }} {{ .Labels.token }}
-- If this wallet runs dry, the daily `refill-relayers` function logs `Refill failed` and signers stop being topped up. Signers are normally refilled below 7 days of runway, so check the signer low-balance alerts for any that are already short
-
+{{ if eq .Labels.urgency "urgent" -}}
+*<https://{{ .Labels.explorer }}/address/{{ .Labels.ownerValue }}|Refiller wallet on {{ .Labels.chain | title }} can't cover the next refills. Top up now.>*
+Balance: {{ .Annotations.currentBalance }} {{ .Labels.token }}, about {{ .Annotations.runwayDays }} days of refills. Send about {{ .Annotations.topUpAmount }} {{ .Labels.token }} to `{{ .Labels.ownerValue }}`. Until then the daily refill job can fail and relayer signers stop being topped up.
+{{ else -}}
+*<https://{{ .Labels.explorer }}/address/{{ .Labels.ownerValue }}|Refiller wallet on {{ .Labels.chain | title }} is running low. Top up this week.>*
+Balance: {{ .Annotations.currentBalance }} {{ .Labels.token }}, about {{ .Annotations.runwayDays }} days of refills. Send about {{ .Annotations.topUpAmount }} {{ .Labels.token }} to `{{ .Labels.ownerValue }}` to cover a month.
+{{ end }}
 {{ end -}}
 {{ range .Alerts.Resolved -}}
-*<https://{{ .Labels.explorer }}/address/{{ .Labels.ownerValue }}|Relayer refiller wallet on {{ .Labels.chain | title }} is funded again> — {{ .Annotations.currentBalance }} {{ .Labels.token }}*
+{{ if eq .Labels.urgency "urgent" -}}
+*<https://{{ .Labels.explorer }}/address/{{ .Labels.ownerValue }}|Refiller wallet on {{ .Labels.chain | title }} can cover refills again> — {{ .Annotations.currentBalance }} {{ .Labels.token }}*
+{{ else -}}
+*<https://{{ .Labels.explorer }}/address/{{ .Labels.ownerValue }}|Refiller wallet on {{ .Labels.chain | title }} is funded again> — {{ .Annotations.currentBalance }} {{ .Labels.token }}*
+{{ end -}}
 {{ end -}}
 {{ end }}
 EOT
