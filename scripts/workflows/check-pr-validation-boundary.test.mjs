@@ -370,8 +370,8 @@ test("structural mutations fail closed at each M2 boundary", () => {
   mutateOnce(
     root,
     ".github/workflows/ci.yml",
-    "codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f",
-    "example/no-upload@fb8b3582c8e4def4969c97caa2f19720cb33a72f",
+    "codecov/codecov-action@0b35c9ecc4f0529d0eb674914510c22f85b196b4",
+    "example/no-upload@0b35c9ecc4f0529d0eb674914510c22f85b196b4",
     /Codecov count/u,
   );
   mutateOnce(
