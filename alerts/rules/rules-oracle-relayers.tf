@@ -175,12 +175,16 @@ resource "grafana_rule_group" "oracle_relayers" {
   }
 
   # Refiller wallet: the account the daily refill-relayers cloud functions pay
-  # signer top-ups from (oracle-relayer repo). Fires below ~14 days of the
-  # chain's relay burn (see local.refiller_balance_rules). It is the early
-  # warning: signers are refilled below 7 days, so an empty refiller does not
-  # stop relays at once, but this rule cannot see the signers' own balances.
+  # signer top-ups from (oracle-relayer repo). Two levels share this block (see
+  # local.refiller_rules):
+  #   - "Low Refiller Balance": early warning below ~14 days of the chain's
+  #     relay burn. Top up this week. Repeats daily (notification-policies.tf).
+  #   - "Refiller Cannot Cover Refills" (prod only, label urgency=urgent): the
+  #     wallet is below the largest plausible single run of top-ups, so the
+  #     next refill may fail. Top up now.
+  # Neither rule can see the signers' own balances; the signer rules above do.
   dynamic "rule" {
-    for_each = local.refiller_balance_rules
+    for_each = local.refiller_rules
 
     content {
       name           = rule.value.name
@@ -196,21 +200,32 @@ resource "grafana_rule_group" "oracle_relayers" {
       no_data_state = "NoData"
 
       annotations = {
-        summary        = "Low ${rule.value.chain.symbol} balance in the relayer refiller wallet on {{ $labels.chain | title }}: {{ with (index $values \"balance\") }}{{ humanize .Value }}{{ else }}unknown{{ end }} ${rule.value.chain.symbol}"
-        currentBalance = "{{ with (index $values \"balance\") }}{{ humanize .Value }}{{ else }}unknown{{ end }}"
+        summary = "Low ${rule.value.chain.symbol} balance in the relayer refiller wallet on {{ $labels.chain | title }}: {{ with (index $values \"balance\") }}{{ humanize .Value }}{{ else }}unknown{{ end }} ${rule.value.chain.symbol}"
+        # Whole tokens rather than humanize: "2k" hides too much when deciding
+        # how much to send.
+        currentBalance = "{{ with (index $values \"balance\") }}{{ printf \"%.0f\" .Value }}{{ else }}unknown{{ end }}"
         threshold      = tostring(rule.value.threshold)
-        runwayDays     = "{{ with (index $values \"runwayDays\") }}{{ printf \"%.0f\" .Value }}{{ else }}unknown{{ end }}"
-        monthlyBurn    = tostring(rule.value.monthly_burn)
+        # Tokens that bring the wallet back to its top-up target.
+        topUpAmount = "{{ with (index $values \"topUp\") }}{{ printf \"%.0f\" .Value }}{{ else }}unknown{{ end }}"
+        runwayDays  = "{{ with (index $values \"runwayDays\") }}{{ printf \"%.0f\" .Value }}{{ else }}unknown{{ end }}"
+        monthlyBurn = tostring(rule.value.monthly_burn)
       }
 
-      labels = {
-        service  = "oracle-relayers"
-        severity = rule.value.chain.env == "prod" ? "warning" : "info"
-        # Consumed by the Slack/VictorOps templates to render
-        # token-aware copy and per-chain explorer links.
-        token    = rule.value.chain.symbol
-        explorer = rule.value.chain.explorer
-      }
+      # The early-warning rule's labels must not change: Grafana identifies a
+      # firing alert by rule plus labels, so a new label there would resolve
+      # and re-fire anything firing at deploy time. Only the urgent rule
+      # carries `urgency`, which the templates use to pick their wording.
+      labels = merge(
+        {
+          service  = "oracle-relayers"
+          severity = rule.value.chain.env == "prod" ? "warning" : "info"
+          # Consumed by the Slack/VictorOps templates to render
+          # token-aware copy and per-chain explorer links.
+          token    = rule.value.chain.symbol
+          explorer = rule.value.chain.explorer
+        },
+        rule.value.urgent ? { urgency = "urgent" } : {},
+      )
 
       data {
         ref_id         = "balanceOfRaw"
@@ -221,7 +236,7 @@ resource "grafana_rule_group" "oracle_relayers" {
         }
         model = jsonencode({
           # NOTE: Grafana syntax is a bit confusing here in that 'expr' and 'expression' mean different things
-          expr  = "${rule.value.chain.metric}{chain=\"${rule.key}\", owner=\"RelayerRefiller\"}"
+          expr  = "${rule.value.chain.metric}{chain=\"${rule.value.chain_key}\", owner=\"RelayerRefiller\"}"
           refId = "balanceOfRaw"
         })
       }
@@ -251,7 +266,7 @@ resource "grafana_rule_group" "oracle_relayers" {
           # Annotation only: the balance expressed as days of refills. Derived
           # from the same series as the alert query, so it cannot go NoData
           # while the base query still has data.
-          expr  = "${rule.value.chain.metric}{chain=\"${rule.key}\", owner=\"RelayerRefiller\"} / ${rule.value.daily_burn}"
+          expr  = "${rule.value.chain.metric}{chain=\"${rule.value.chain_key}\", owner=\"RelayerRefiller\"} / ${rule.value.daily_burn}"
           refId = "runwayDaysRaw"
         })
       }
@@ -267,6 +282,35 @@ resource "grafana_rule_group" "oracle_relayers" {
           type       = "reduce",
           reducer    = "last",
           refId      = "runwayDays"
+        })
+      }
+      data {
+        ref_id         = "topUpRaw"
+        datasource_uid = "grafanacloud-prom"
+        relative_time_range {
+          from = 600
+          to   = 0
+        }
+        model = jsonencode({
+          # Annotation only: tokens to send to reach the top-up target (see
+          # local.refiller_balance_rules). Same series as the alert query, so
+          # it cannot go NoData on its own.
+          expr  = "clamp_min(${rule.value.top_up_target} - ${rule.value.chain.metric}{chain=\"${rule.value.chain_key}\", owner=\"RelayerRefiller\"}, 0)"
+          refId = "topUpRaw"
+        })
+      }
+      data {
+        ref_id         = "topUp"
+        datasource_uid = "__expr__"
+        relative_time_range {
+          from = 0
+          to   = 0
+        }
+        model = jsonencode({
+          expression = "topUpRaw",
+          type       = "reduce",
+          reducer    = "last",
+          refId      = "topUp"
         })
       }
       data {
