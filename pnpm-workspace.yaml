@@ -15,7 +15,7 @@ catalog:
   # handler are also built as standalone source roots outside this workspace,
   # so they keep literal pins; scripts/supply-chain/version-skew-check.mjs
   # enforces they stay equal to this entry.
-  viem: 2.56.3
+  viem: 2.56.5
 
 # pnpm-workspace.yaml overrides carry bounded undici security pins for root
 # workspace consumers such as @vercel/blob/jsdom. Keep them bounded: unbounded
@@ -67,6 +67,9 @@ packageConfigs:
     saveExact: true
 
 overrides:
+  # react-doctor 0.1.6 scores the dashboard with Knip 6.12.2. Newer Knip
+  # releases change its dead-code result and lower the required score to 99.
+  "react-doctor>knip": 6.12.2
   # The Envio CLI renders its terminal UI with Ink. Its react-dom arrives as a
   # peer of @rescript/react and resolves from the hoisted copy, so this pin must
   # track the dashboard's react version or react-dom's own `react: ^x` peer
@@ -157,6 +160,7 @@ patchedDependencies:
 # pnpm 11 records dependency build-script policy explicitly.
 allowBuilds:
   "@nestjs/core": true
+  "@parcel/watcher": false
   "@sentry/cli": true
   "envio-cloud": true
   "es5-ext": true
