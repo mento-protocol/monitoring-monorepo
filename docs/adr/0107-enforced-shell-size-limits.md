@@ -45,8 +45,13 @@ parser rejects fails the check rather than passing unmeasured.
 ## Decision
 
 **Every tracked `*.sh` file holds at most 500 lines and every shell function
-at most 50.** The gate runs repository-wide on every pull request, through
-`pnpm check:shell` in the `Code Quality` job of `.github/workflows/trunk.yml`.
+at most 50.** The gate runs repository-wide in the `Code Quality` job of
+`.github/workflows/trunk.yml`, on every pull request into `main`. That job
+runs `node scripts/repo-health/check-shell-size.mjs` directly, like the audits
+beside it, because it runs no package-script pin validator, and a `pnpm` alias
+there would be redefinable by the pull request under test. Authors run the
+same checker through `pnpm check:shell`, an alias
+`scripts/check-agent-quality-gate-package-scripts.mjs` pins.
 Tests are included: a shell test file is shell, and splitting one costs what
 splitting any other shell file costs.
 
@@ -108,6 +113,11 @@ reason that still holds: `eslint.config.mjs` reaches no `.sh` file.
 - `scripts/review/review-eval.test.mjs` caps review-eval JavaScript modules
   through `validationModuleLineLimits`. That map holds `.mjs` names only, so
   the two mechanisms cover disjoint files and cannot contradict each other.
+- The same suite pins `run-eval.sh`, `run-eval-source-snapshot.sh`,
+  `run-eval-lifecycle.sh`, `run-eval-runtime.sh` and `run-eval-matrix.sh` by
+  name in `ORCHESTRATOR_FILES` and by `orchestratorSourceDigest`. All five
+  carry a baseline row, so a split of any of them updates that list and that
+  digest in the same change.
 - The baseline rows were measured against one commit of `main`. A shell change
   that lands first moves them, and the adoption re-measures rather than
   merging a stale row.

@@ -100,7 +100,7 @@ Move each pin class together.
 
 - **Shell size gate pins.** `repo-health/check-shell-size{,.test}.mjs` and
   `repo-health/shell-size-baseline.txt` move together; the checker reads the
-  baseline beside it, and `trunk.yml`'s `Shell size gate` step pins both.
+  baseline beside it, and `trunk.yml` runs the checker and its test by path.
 
 **List new `scripts/` path pins here.**
 
@@ -134,7 +134,7 @@ in one PR.
   excluding tests. It reports and never blocks. No exemptions remain:
   [ADR 0065](../docs/adr/0065-scripts-file-size-watchlist-scope.md).
 - Shell size is enforced repository-wide, tests included: 500 lines per `*.sh`
-  file, 50 per shell function, through `pnpm check:shell` in required CI
+  file, 50 per shell function, by `pnpm check:shell` and by required CI
   ([ADR 0107](../docs/adr/0107-enforced-shell-size-limits.md)).
   `repo-health/shell-size-baseline.txt` exempts what predates the limits and
   documents its own row format. A row is an upper bound keyed by path and

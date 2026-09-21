@@ -69,6 +69,12 @@ const expectedScripts = {
   "override:prune-report:test":
     "node scripts/supply-chain/override-prune-report.test.mjs",
   "sanitize:test": "node scripts/sanitize-terraform-output.test.mjs",
+  // The shell size gate (ADR 0107). Required CI calls the checker directly, so
+  // these two aliases carry the author-side command the checklists name. Pinning
+  // them keeps a local `pnpm check:shell` from passing on a drifted command.
+  "check:shell": "node scripts/repo-health/check-shell-size.mjs",
+  "check:shell:test":
+    "node --test scripts/repo-health/check-shell-size.test.mjs",
 };
 
 for (const [name, expected] of Object.entries(expectedScripts)) {
