@@ -80,7 +80,7 @@
     "eslint-plugin-unused-imports": "^4.2.0",
     "globals": "^17.4.0",
     "jsdom": "^29.0.1",
-    "knip": "6.35.1",
+    "knip": "6.12.2",
     "react-doctor": "0.1.6",
     "size-limit": "^12.1.0",
     "tailwindcss": "^4.3.3",
