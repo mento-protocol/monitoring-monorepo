@@ -121,6 +121,9 @@ importers:
       mdast-util-from-markdown:
         specifier: 2.0.3
         version: 2.0.3(supports-color@5.5.0)
+      mvdan-sh:
+        specifier: 0.10.1
+        version: 0.10.1
       picomatch:
         specifier: 4.0.7
         version: 4.0.7
@@ -8449,6 +8452,10 @@ packages:
   mute-stream@3.0.0:
     resolution: {integrity: sha512-dkEJPVvun4FryqBmZ5KhDo0K9iDXAwn08tMLDinNdRBNPcYEDiWYysLcc6k3mjTMlbP9KyylvRpd4wFtwrT9rw==}
     engines: {node: ^20.17.0 || >=22.9.0}
+
+  mvdan-sh@0.10.1:
+    resolution: {integrity: sha512-kMbrH0EObaKmK3nVRKUIIya1dpASHIEusM13S4V1ViHFuxuNxCo+arxoa6j/dbV22YBGjl7UKJm9QQKJ2Crzhg==}
+    deprecated: See https://github.com/mvdan/sh/issues/1145
 
   nanoid@3.3.18:
     resolution: {integrity: sha512-DTg4MJbGMWkfi6VZFdNt2/caMbQy4Ou+Op/hJQvGEWcnVfoA1QA+xzRKAzw9jD6+GVOOeYr/mIcuDSdug6F6+w==}
@@ -19647,6 +19654,8 @@ snapshots:
   mute-stream@2.0.0: {}
 
   mute-stream@3.0.0: {}
+
+  mvdan-sh@0.10.1: {}
 
   nanoid@3.3.18: {}
 

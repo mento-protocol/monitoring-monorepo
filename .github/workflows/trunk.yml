@@ -68,6 +68,18 @@ jobs:
       - name: pnpm audit handler deploy lockfile (high+ only)
         if: ${{ !cancelled() && steps.validation-boundary.outcome == 'success' }}
         run: node scripts/supply-chain/pnpm-audit-high-gate.mjs --dir alerts/infra/onchain-event-handler --label alerts/infra/onchain-event-handler
+      - name: Shell size gate self-tests
+        if: ${{ !cancelled() && steps.validation-boundary.outcome == 'success' }}
+        run: pnpm check:shell:test
+      - name: Shell size gate
+        # Repository-wide, so it rides this unfiltered required workflow rather
+        # than ci.yml's path-gated scripts job. The checkout above uses
+        # fetch-depth: 0, which creates origin/<base_ref>, so the ratchet needs
+        # no extra fetch step.
+        if: ${{ !cancelled() && steps.validation-boundary.outcome == 'success' }}
+        env:
+          SHELL_SIZE_BASE: "${{ github.base_ref && format('origin/{0}', github.base_ref) || '' }}"
+        run: pnpm check:shell
       - name: Save Trunk artifacts
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.trunk-cache.outputs.cache-hit != 'true'
         continue-on-error: true
