@@ -185,18 +185,27 @@ Both rules live in `rules-oracle-relayers.tf` and take their numbers from the
 flat token amounts. The burn figures mirror the `DAILY_COST` table in the
 oracle-relayer refill script; update both together.
 
-| Rule                             | Fires when                                                                                                                                                                                                                              |
-| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Low <token> Balance [<chain>]`  | A relayer signer holds less than ~5 days of its relay burn. One rule per chain, plus one per `signer_classes` entry for feeds that burn at a different pace (two-aggregator Celo feeds, Celo gas feeds, hourly Monad stablecoin feeds). |
-| `Low Refiller Balance [<chain>]` | The refiller wallet (`owner="RelayerRefiller"`) holds less than 14 days of the chain's relay burn. Testnets use a floor of one full round of top-ups instead.                                                                           |
+| Rule                                      | Fires when                                                                                                                                                                                                                              |
+| ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Low <token> Balance [<chain>]`           | A relayer signer holds less than ~5 days of its relay burn. One rule per chain, plus one per `signer_classes` entry for feeds that burn at a different pace (two-aggregator Celo feeds, Celo gas feeds, hourly Monad stablecoin feeds). |
+| `Low Refiller Balance [<chain>]`          | Early warning, yellow, repeats once a day: the refiller wallet (`owner="RelayerRefiller"`) holds less than 14 days of the chain's relay burn. Top up this week. Testnets use a floor of one full round of top-ups instead.              |
+| `Refiller Cannot Cover Refills [<chain>]` | Urgent, red, prod only, repeats every 4h: the wallet is below the largest plausible single run of top-ups (1,500 CELO, 2,000 POL, 700 MON), so the next refill may fail. Top up now.                                                    |
 
 The daily `refill-relayers-<chain>` cloud function tops a signer up once it
-drops below 7 days, paying from the refiller wallet. So the refiller alert is
+drops below 7 days, paying from the refiller wallet. So the refiller alerts are
 the early warning (fund the wallet; it says nothing about the signers' own balances), and a signer
 alert means the automation is not keeping up: check the function's
 `Refill failed` log lines (`labels.rateFeed="refill-relayers"`) and the
 refiller balance. Both route to `#alerts-oracles` (prod) or `#alerts-testnet`
 at warning/info severity and never page.
+
+Both refiller levels come from one rule block and share their templates; the
+`urgency` label, present only on the urgent rule, picks the wording and the
+title colour. Two things are easy to break here. The early-warning rule's label
+set is its identity in Grafana, so adding a label to it resolves and re-fires
+whatever is firing at deploy time. And the provider tracks rule UIDs by
+position in the group, so new rules are appended, never interleaved.
+`relayer-balance-alerts.tftest.hcl` pins both.
 
 **Rollout order.** These rules alert on missing data, so a new owner (a new
 signer, or the refiller on a new chain) must be published by Aegis before the
