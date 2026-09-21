@@ -150,7 +150,7 @@ run "relayer_balance_alerts_follow_the_runway_policy" {
     condition = (
       length([
         for p in grafana_notification_policy.all.policy[0].policy : p
-        if p.repeat_interval == "24h" && length([for m in p.matcher : m if m.label == "alertname" && startswith(m.value, "Low Refiller Balance [")]) == 1
+        if p.repeat_interval == "1d" && length([for m in p.matcher : m if m.label == "alertname" && startswith(m.value, "Low Refiller Balance [")]) == 1
       ]) == length(local.chains) &&
       length([
         for p in grafana_notification_policy.all.policy[0].policy : p
