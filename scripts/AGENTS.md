@@ -98,6 +98,10 @@ Move each pin class together.
   EOL; `UPSTASH_MCP_LAUNCHER_SHA256` hashes it. Moves change both. See
   [`docs/notes/upstash-mcp-operator.md`](../docs/notes/upstash-mcp-operator.md).
 
+- **Shell size gate pins.** `repo-health/check-shell-size{,.test}.mjs` and
+  `repo-health/shell-size-baseline.txt` move together; the checker reads the
+  baseline beside it, and `trunk.yml`'s `Shell size gate` step pins both.
+
 **List new `scripts/` path pins here.**
 
 ## Sweep Checklist for a Move
@@ -126,9 +130,18 @@ in one PR.
 - Run `pnpm lint:scripts` for new Node root scripts and `bash -n` for new shell
   scripts. Add focused tests beyond lint and syntax. Add required CI wiring if
   unowned.
-- The file-size watchlist replaces ESLint `max-lines` here, excluding tests.
-  No exemptions remain:
+- The file-size watchlist replaces ESLint `max-lines` for JavaScript here,
+  excluding tests. It reports and never blocks. No exemptions remain:
   [ADR 0065](../docs/adr/0065-scripts-file-size-watchlist-scope.md).
+- Shell size is enforced repository-wide, tests included: 500 lines per `*.sh`
+  file, 50 per shell function, through `pnpm check:shell` in required CI
+  ([ADR 0107](../docs/adr/0107-enforced-shell-size-limits.md)).
+  `repo-health/shell-size-baseline.txt` exempts what predates the limits and
+  documents its own row format. A row is an upper bound keyed by path and
+  name, so renaming or moving an exempt function drops its exemption; split it
+  in that change. `SHELL_SIZE_BASE=<resolved-pr-base>` adds the ratchet: no new
+  row, no higher count. `check-shell-size.mjs` is a byte-identical copy from
+  `mento-protocol/agents`; change it there, then copy it. Never edit the copy.
 - `pnpm tf plan/apply platform` owns one private saved plan. Never accept a
   caller plan path, or print, upload, or cache either plan form. Mechanism and
   deploy-only bootstrap exception:
@@ -143,6 +156,6 @@ in one PR.
 
 Apply [PR operating card step 3](../docs/notes/pr-operating-card.md) to each
 changed root tool: `bash -n <changed-shell-script>`, `pnpm lint:scripts`, and
-its focused test. The legacy diagnostic and its self-tests are retired. Deploy wrappers also run
+its focused test. A changed `*.sh` file also runs `pnpm check:shell`. The legacy diagnostic and its self-tests are retired. Deploy wrappers also run
 `node scripts/check-deploy-root-anchors.test.mjs`. After a move, run
 `pnpm agent:context-check` and `pnpm docs:index --check`.

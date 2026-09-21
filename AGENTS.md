@@ -109,6 +109,14 @@ Before reviews touching recurring hazard classes, read
 Apply the repo's explicit do-not-flag layer in
 [`docs/pr-checklists/review-prompt-exclusions.md`](docs/pr-checklists/review-prompt-exclusions.md).
 
+## Shell Files
+
+Every tracked `*.sh` file holds at most 500 lines and every shell function at
+most 50, tests included; `pnpm check:shell` enforces it repository-wide. The
+baseline rows and the upstream-copy rule are in
+[`scripts/AGENTS.md`](scripts/AGENTS.md)
+([ADR 0107](docs/adr/0107-enforced-shell-size-limits.md)).
+
 ## Quick Commands
 
 The canonical command reference is

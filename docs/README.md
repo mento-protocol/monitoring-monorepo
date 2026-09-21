@@ -219,6 +219,7 @@ Authority: canonical
 - [`adr/0104-non-strict-required-status-checks.md`](adr/0104-non-strict-required-status-checks.md) — Non-strict required status checks for main
 - [`adr/0105-replayed-events-are-handler-layer-no-ops.md`](adr/0105-replayed-events-are-handler-layer-no-ops.md) — Replayed SortedOracles events are handler-layer no-ops; the pure guards stay fail-closed
 - [`adr/0106-sentry-triage-moves-to-operator-skills.md`](adr/0106-sentry-triage-moves-to-operator-skills.md) — Sentry triage and autofix move from a CI pipeline to operator-run skills
+- [`adr/0107-enforced-shell-size-limits.md`](adr/0107-enforced-shell-size-limits.md) — Shell file and function size limits are enforced with a closed baseline
 
 Authority: non-canonical
 
