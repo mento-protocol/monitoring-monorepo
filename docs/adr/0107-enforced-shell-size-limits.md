@@ -106,8 +106,11 @@ reason that still holds: `eslint.config.mjs` reaches no `.sh` file.
 
 ## Consequences
 
-- A shell change that grows a baselined subject fails required CI. The fix is
-  a split, and the baseline row goes down with it.
+- A shell change that pushes a baselined subject past its row fails required
+  CI. The fix is a split, and the baseline row goes down with it. A subject
+  that already shrank below its row may grow back up to it: the row, not the
+  base branch's measurement, is the bound. Lower the row in the change that
+  shrinks the subject to hold the ground.
 - A renamed or moved function is a new function to the baseline, so a rename
   that keeps a 200-line body fails. Split it in the same change.
 - `scripts/review/review-eval.test.mjs` caps review-eval JavaScript modules
