@@ -10,6 +10,7 @@ import {
   mkdirSync,
   mkdtempSync,
   realpathSync,
+  rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -51,9 +52,12 @@ function shellFunction(name, lines) {
 
 // A throwaway repository holding the checker at its real relative path, this
 // checkout's node_modules, and the given files. Everything is committed, so
-// `git ls-files` sees the shell files the checker measures.
-function makeFixture(files) {
+// `git ls-files` sees the shell files the checker measures. The case removes
+// it afterwards; recursive removal unlinks the node_modules symlink rather
+// than following it.
+function makeFixture(t, files) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "check-shell-size-")));
+  t.after(() => rmSync(root, { force: true, recursive: true }));
   runGit(root, ["init", "-q", "-b", "main"]);
   mkdirSync(join(root, dirname(CHECKER_RELATIVE)), { recursive: true });
   copyFileSync(
@@ -91,8 +95,8 @@ function runChecker(root, extraEnvironment = {}) {
   return { status: result.status, out: result.stdout, error: result.stderr };
 }
 
-test("a tree inside both limits passes", () => {
-  const root = makeFixture({
+test("a tree inside both limits passes", (t) => {
+  const root = makeFixture(t, {
     "tools/small.sh": `${shellFunction("small_one", 20)}\n`,
   });
   const run = runChecker(root);
@@ -100,8 +104,8 @@ test("a tree inside both limits passes", () => {
   assert.match(run.out, /check-shell-size: ok/u);
 });
 
-test("a function over the limit fails and names the function", () => {
-  const root = makeFixture({
+test("a function over the limit fails and names the function", (t) => {
+  const root = makeFixture(t, {
     "tools/big.sh": `${shellFunction("big_one", 60)}\n`,
   });
   const run = runChecker(root);
@@ -109,8 +113,8 @@ test("a function over the limit fails and names the function", () => {
   assert.match(run.error, /tools\/big\.sh:1: function big_one is 60 lines/u);
 });
 
-test("a function row exempts that function", () => {
-  const root = makeFixture({
+test("a function row exempts that function", (t) => {
+  const root = makeFixture(t, {
     "tools/big.sh": `${shellFunction("big_one", 60)}\n`,
     [BASELINE_RELATIVE]: `${BASELINE_HEADER}tools/big.sh big_one 60\n`,
   });
@@ -119,8 +123,8 @@ test("a function row exempts that function", () => {
   assert.match(run.out, /check-shell-size: ok/u);
 });
 
-test("a row the base ref lacks is refused", () => {
-  const root = makeFixture({
+test("a row the base ref lacks is refused", (t) => {
+  const root = makeFixture(t, {
     "tools/big.sh": `${shellFunction("big_one", 60)}\n`,
     [BASELINE_RELATIVE]: BASELINE_HEADER,
   });
@@ -133,8 +137,8 @@ test("a row the base ref lacks is refused", () => {
   assert.match(run.error, /big_one is not listed in HEAD/u);
 });
 
-test("a function below its row passes with an advisory line", () => {
-  const root = makeFixture({
+test("a function below its row passes with an advisory line", (t) => {
+  const root = makeFixture(t, {
     "tools/big.sh": `${shellFunction("big_one", 55)}\n`,
     [BASELINE_RELATIVE]: `${BASELINE_HEADER}tools/big.sh big_one 60\n`,
   });
