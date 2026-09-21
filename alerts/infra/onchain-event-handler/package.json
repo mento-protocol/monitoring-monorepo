@@ -41,7 +41,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@types/node": "^24.10.1",
+    "@types/node": "^26.4.0",
     "@vitest/coverage-v8": "^5.0.0",
     "eslint": "^10.9.1",
     "knip": "^6.35.1",
