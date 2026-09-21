@@ -47,12 +47,15 @@ every batch started by an operator who is no longer there.
 
 Claims are sequential. Immediately before each claim, the orchestrator repeats
 the live issue read and checks the body for a new external dependency. It skips
-the claim when that body-only blocker appears. Any replacement follows the
-print-and-wait rule below. It computes `--body-sha256` from the body in that same
-JSON snapshot. Each claim then uses `--sweep-eligible`, so the helper
-revalidates the open queue state, risk label, package label, native blockers,
-and the selected Project item's ID-bound `Blocked` status around its label and
-ownership transition. It rejects every
+the claim when that body-only blocker appears. It also fetches `origin/main`
+again and resolves every existing edit target the body names against that fresh
+OID, and skips an issue whose target is already gone — the case that put #2444
+into a worker before anyone saw that its tree had been deleted that morning.
+Any replacement follows the print-and-wait rule below. It computes
+`--body-sha256` from the body in that same JSON snapshot. Each claim then uses
+`--sweep-eligible`, so the helper revalidates the open queue state, risk label,
+package label, native blockers, and the selected Project item's ID-bound
+`Blocked` status around its label and ownership transition. It rejects every
 missing, changed, or `Blocked` Status it observes. It never writes Status.
 Project Status is human-owned, so a human change after the final observation
 remains visible and linearizes after the claim. The receipt still owns the fit
