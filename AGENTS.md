@@ -112,7 +112,8 @@ Apply the repo's explicit do-not-flag layer in
 ## Shell Files
 
 Every tracked `*.sh` file holds at most 500 lines and every shell function at
-most 50, tests included; `pnpm check:shell` enforces it repository-wide. The
+most 50, tests included, unless a baseline row records a higher count that may
+shrink but never grow. `pnpm check:shell` enforces it repository-wide. The
 baseline rows and the upstream-copy rule are in
 [`scripts/AGENTS.md`](scripts/AGENTS.md)
 ([ADR 0107](docs/adr/0107-enforced-shell-size-limits.md)).
