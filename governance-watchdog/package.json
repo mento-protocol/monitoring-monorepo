@@ -50,7 +50,7 @@
     "@google-cloud/secret-manager": "7.0.0",
     "@discordjs/builders": "1.14.1",
     "env-schema": "8.0.0",
-    "viem": "2.56.3"
+    "viem": "2.56.5"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
