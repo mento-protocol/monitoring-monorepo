@@ -551,8 +551,8 @@ importers:
         specifier: ^17.4.0
         version: 17.4.0
       knip:
-        specifier: 6.35.1
-        version: 6.35.1
+        specifier: 6.12.2
+        version: 6.12.2
       tsx:
         specifier: ^4.19.0
         version: 4.21.0
