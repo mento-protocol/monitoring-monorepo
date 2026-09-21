@@ -205,7 +205,7 @@ resource "grafana_rule_group" "oracle_relayers" {
         # how much to send.
         currentBalance = "{{ with (index $values \"balance\") }}{{ printf \"%.0f\" .Value }}{{ else }}unknown{{ end }}"
         threshold      = tostring(rule.value.threshold)
-        # Tokens that bring the wallet back to one month of relay burn.
+        # Tokens that bring the wallet back to its top-up target.
         topUpAmount = "{{ with (index $values \"topUp\") }}{{ printf \"%.0f\" .Value }}{{ else }}unknown{{ end }}"
         runwayDays  = "{{ with (index $values \"runwayDays\") }}{{ printf \"%.0f\" .Value }}{{ else }}unknown{{ end }}"
         monthlyBurn = tostring(rule.value.monthly_burn)
@@ -224,7 +224,7 @@ resource "grafana_rule_group" "oracle_relayers" {
           token    = rule.value.chain.symbol
           explorer = rule.value.chain.explorer
         },
-        { for k, v in { urgency = "urgent" } : k => v if rule.value.urgent },
+        rule.value.urgent ? { urgency = "urgent" } : {},
       )
 
       data {
@@ -292,9 +292,10 @@ resource "grafana_rule_group" "oracle_relayers" {
           to   = 0
         }
         model = jsonencode({
-          # Annotation only: tokens to send to get back to one month of burn.
-          # Same series as the alert query, so it cannot go NoData on its own.
-          expr  = "clamp_min(${rule.value.monthly_burn} - ${rule.value.chain.metric}{chain=\"${rule.value.chain_key}\", owner=\"RelayerRefiller\"}, 0)"
+          # Annotation only: tokens to send to reach the top-up target (see
+          # local.refiller_balance_rules). Same series as the alert query, so
+          # it cannot go NoData on its own.
+          expr  = "clamp_min(${rule.value.top_up_target} - ${rule.value.chain.metric}{chain=\"${rule.value.chain_key}\", owner=\"RelayerRefiller\"}, 0)"
           refId = "topUpRaw"
         })
       }

@@ -83,7 +83,7 @@ Sufficient {{ .Labels.token }} balance restored for the {{ $pair }} Relayer on {
 {{ if eq .Labels.urgency "urgent" }}Refiller wallet on {{ .Labels.chain | title }} can't cover the next refills. Top up now.
 Balance: {{ .Annotations.currentBalance }} {{ .Labels.token }}, about {{ .Annotations.runwayDays }} days of refills. Send about {{ .Annotations.topUpAmount }} {{ .Labels.token }} to {{ .Labels.ownerValue }}. Until then the daily refill job can fail and relayer signers stop being topped up.
 {{ else }}Refiller wallet on {{ .Labels.chain | title }} is running low. Top up this week.
-Balance: {{ .Annotations.currentBalance }} {{ .Labels.token }}, about {{ .Annotations.runwayDays }} days of refills. Send about {{ .Annotations.topUpAmount }} {{ .Labels.token }} to {{ .Labels.ownerValue }} to cover a month.
+Balance: {{ .Annotations.currentBalance }} {{ .Labels.token }}, about {{ .Annotations.runwayDays }} days of refills. Send about {{ .Annotations.topUpAmount }} {{ .Labels.token }} to {{ .Labels.ownerValue }}, which covers at least a month.
 {{ end }}Wallet: https://{{ .Labels.explorer }}/address/{{ .Labels.ownerValue }}
 {{ end }}
 {{ range .Alerts.Resolved }}

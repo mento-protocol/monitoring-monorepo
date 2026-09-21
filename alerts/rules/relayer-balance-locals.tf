@@ -156,6 +156,18 @@ locals {
         ceil(local.relayer_burn[k].refiller_monthly_burn * local.refiller_alert_runway_days / 30),
         local.relayer_burn[k].refiller_min_threshold,
       )
+      # Balance the "send about X" figure aims for: a month of burn, but never
+      # less than twice the alert threshold. On testnets the threshold is a
+      # floor far above the monthly burn (70 vs 10 on Celo Sepolia), so aiming
+      # for a month alone would tell the operator to send nothing while the
+      # alert keeps firing. Twice the threshold clears it with room to spare.
+      top_up_target = max(
+        local.relayer_burn[k].refiller_monthly_burn,
+        2 * max(
+          ceil(local.relayer_burn[k].refiller_monthly_burn * local.refiller_alert_runway_days / 30),
+          local.relayer_burn[k].refiller_min_threshold,
+        ),
+      )
     }
   }
 
@@ -171,6 +183,8 @@ locals {
       monthly_burn = local.relayer_burn[k].refiller_monthly_burn
       daily_burn   = tonumber(format("%.4f", local.relayer_burn[k].refiller_monthly_burn / 30))
       threshold    = local.relayer_burn[k].refiller_urgent_threshold
+      # Same target as the early warning: one top-up should clear both levels.
+      top_up_target = local.refiller_balance_rules[k].top_up_target
     } if local.relayer_burn[k].refiller_urgent_threshold > 0
   }
 

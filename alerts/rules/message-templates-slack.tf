@@ -119,7 +119,7 @@ resource "grafana_message_template" "slack_relayer_refiller_low_balance_alert_me
 Balance: {{ .Annotations.currentBalance }} {{ .Labels.token }}, about {{ .Annotations.runwayDays }} days of refills. Send about {{ .Annotations.topUpAmount }} {{ .Labels.token }} to `{{ .Labels.ownerValue }}`. Until then the daily refill job can fail and relayer signers stop being topped up.
 {{ else -}}
 *<https://{{ .Labels.explorer }}/address/{{ .Labels.ownerValue }}|Refiller wallet on {{ .Labels.chain | title }} is running low. Top up this week.>*
-Balance: {{ .Annotations.currentBalance }} {{ .Labels.token }}, about {{ .Annotations.runwayDays }} days of refills. Send about {{ .Annotations.topUpAmount }} {{ .Labels.token }} to `{{ .Labels.ownerValue }}` to cover a month.
+Balance: {{ .Annotations.currentBalance }} {{ .Labels.token }}, about {{ .Annotations.runwayDays }} days of refills. Send about {{ .Annotations.topUpAmount }} {{ .Labels.token }} to `{{ .Labels.ownerValue }}`, which covers at least a month.
 {{ end }}
 {{ end -}}
 {{ range .Alerts.Resolved -}}

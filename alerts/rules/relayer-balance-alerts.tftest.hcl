@@ -159,4 +159,15 @@ run "relayer_balance_alerts_follow_the_runway_policy" {
     )
     error_message = "Every early-warning refiller alert needs its own daily-repeat route, and the urgent level must not have one: it keeps the tree's 4h repeat."
   }
+  assert {
+    condition = alltrue([
+      for k, r in local.refiller_rules :
+      r.top_up_target >= r.monthly_burn &&
+      r.top_up_target >= 2 * local.refiller_balance_rules[r.chain_key].threshold
+      ]) && (
+      local.refiller_balance_rules["polygon"].top_up_target == 7000 &&
+      local.refiller_balance_rules["celo-sepolia"].top_up_target == 140
+    )
+    error_message = "Sending the amount the alert recommends must clear the alert: the top-up target has to be at least a month of burn and at least twice the early-warning threshold, which matters on testnets where the threshold is a floor above the monthly burn."
+  }
 }
