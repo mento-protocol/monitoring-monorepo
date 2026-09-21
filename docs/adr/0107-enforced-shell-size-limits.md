@@ -133,6 +133,7 @@ reason that still holds: `eslint.config.mjs` reaches no `.sh` file.
 
 ## Evidence
 
+- The pull request that adopts this decision: #2505
 - The gate and its limits:
   [`scripts/repo-health/check-shell-size.mjs`](../../scripts/repo-health/check-shell-size.mjs)
 - The recorded subjects:
