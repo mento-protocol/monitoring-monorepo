@@ -20,14 +20,9 @@ governance-watchdog/bin/get-logs.sh get_function_logs 62
 scripts/bootstrap/codex-cloud-github-cli.sh ensure_github_cli_attach_support 51
 scripts/bootstrap/codex-cloud-setup.test.sh 615
 scripts/review/build-fixture.sh verify_fixture 58
-scripts/review/run-eval-lifecycle.sh 598
 scripts/review/run-eval-lifecycle.sh acquire_one_lock 102
-scripts/review/run-eval-lifecycle.sh publish_row 62
 scripts/review/run-eval-matrix.sh run_matrix 70
-scripts/review/run-eval-runtime.sh 599
-scripts/review/run-eval-runtime.sh run_cell 193
 scripts/review/run-eval-source-snapshot.sh run_eval_source_snapshot_restart 57
-scripts/review/run-eval.sh 599
 ui-dashboard/scripts/intel-marathon/upload-drafts.sh upload_one 84
 ui-dashboard/scripts/vercel-ignore-build.sh github_changed_files 121
 ui-dashboard/scripts/vercel-ignore-build.test.sh start_mock_github_api 128
