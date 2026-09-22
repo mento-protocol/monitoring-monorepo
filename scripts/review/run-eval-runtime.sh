@@ -237,7 +237,9 @@ fixture_path() {
   FIXTURE_PRS+=("$pr")
   FIXTURE_PATHS+=("$built")
   FIXTURE_HEADS+=("$head")
+  # shellcheck disable=SC2034 # read by run-eval-cell.sh
   FIXTURE_PATH="$built"
+  # shellcheck disable=SC2034 # read by run-eval-cell.sh
   FIXTURE_HEAD="$head"
 }
 
@@ -294,11 +296,12 @@ if [[ ${#FINDER_ARGV[@]} -gt 0 ]]; then
   else
     log "no codex auth.json at $CODEX_AUTH; codex must authenticate from the environment (a keyring store is not carried into the run-private home)"
   fi
+  # shellcheck disable=SC2034 # read by run-eval-cell.sh
   CODEX_ENV=(env -u OPENAI_BASE_URL HOME="$CODEX_ISO" CODEX_HOME="$CODEX_ISO/.codex")
 fi
 
 # The fingerprint a cached cell must carry: an aborted run leaves cells behind.
-# shellcheck disable=SC2016  # the single-quoted block is node source
+# shellcheck disable=SC2016,SC2034 # node source; FINGERPRINT_JSON read by run-eval-cell.sh
 FINGERPRINT_JSON="$(node --input-type=module -e '
   const [spec, planPath] = process.argv.slice(1);
   (async () => {
@@ -358,207 +361,15 @@ fi
 
 # --- one cell ----------------------------------------------------------------
 
+# shellcheck disable=SC2034 # read by run-eval-cell.sh
 CLAUDE_TOOLS=(Read Write Edit Bash Grep Glob Agent TodoWrite)
 
 # The cell writer, and the stream parser it imports, are sealed beside the shell
 # in the private source snapshot and bound by the plan's orchestrator digest.
 # Loading either live from `$SPEC` let the parser change between two cells with
 # every fingerprint unchanged. Only the frozen harness takes the fallback below.
+# shellcheck disable=SC2034 # read by run-eval-cell.sh
 CELL_WRITER="${RUN_EVAL_SCRIPT_DIR:-$SPEC/scripts/review}/review-eval-cell-writer.mjs"
-
-run_cell() {
-  local cell_id="$1" pr="$2" condition="$3" draw="$4" model="$5" effort="$6"
-  local finder="$7" finder_report="$8" prompt_kind="$9"
-  local tool="${10:-claude}"
-  # Only a probe plans a tool; the `else` below would run claude for any other.
-  if [[ $tool != claude && $tool != codex ]]; then
-    log "  $cell_id FAILED — unknown cell tool $tool; not cached"
-    return 1
-  fi
-  local out_dir="$RUN_DIR/cells/$cell_id"
-
-  if [[ -f "$out_dir/result.json" ]]; then
-    local refusal
-    if refusal="$(cell_reuse_refusal "$out_dir/result.json")"; then
-      log "  $cell_id not reused — $refusal; re-running"
-      rm -rf "$out_dir"
-    else
-      log "  $cell_id reused"
-      return 0
-    fi
-  fi
-
-  # `--preflight` imports the writer before the paid call, so a load fault is free.
-  if ! node "$CELL_WRITER" --preflight; then
-    log "  $cell_id FAILED — harness fault before any cost; $CELL_WRITER did not load"
-    return 1
-  fi
-
-  local fixture fixture_head
-  fixture_path "$pr" || {
-    log "  $cell_id FAILED — fixture"
-    return 1
-  }
-  fixture="$FIXTURE_PATH"
-  fixture_head="$FIXTURE_HEAD"
-
-  local started other_review="" codex_chars=0
-  started="$(date +%s)"
-  purge_skill "$fixture"
-  # Without this a cell reviews the previous cell's edits, and control reviews
-  # a mutated tree. The pinned commit is named rather than implied; see
-  # `reset_fixture`.
-  if ! reset_fixture "$fixture" "$fixture_head"; then
-    log "  $cell_id FAILED — the fixture could not be reset to $fixture_head"
-    return 1
-  fi
-
-  if [[ $condition == "pipeline" ]]; then
-    if [[ ${#FINDER_ARGV[@]} -eq 0 ]]; then
-      log "  $cell_id FAILED — the plan carries no finder argv"
-      return 1
-    fi
-    # The finder writes to a file so the run deadline can bound it (a stalled
-    # finder inside a command substitution never returns). A finder that hits
-    # its session limit still writes a partial report, which is not a review:
-    # cached, it would score forever. Fail on a bad exit, the deadline, or empty.
-    local finder_out finder_status=0
-    finder_out="$(mktemp "$TMPROOT/review-eval-finder.XXXXXX")"
-    run_bounded "$finder_out" "$(remaining_seconds "$MATRIX_DEADLINE")" \
-      run_in_fixture "$fixture" "${CODEX_ENV[@]}" "${FINDER_ARGV[@]}" || finder_status=$?
-    other_review="$(tail -c 30000 "$finder_out")"
-    if [[ $finder_status -eq 124 ]]; then
-      log "  $cell_id FAILED — the finder hit the run deadline; not cached"
-      log_stderr_tail "$finder_out.err"
-      rm -f "$finder_out" "$finder_out.err"
-      return 1
-    fi
-    if [[ $finder_status -ne 0 ]]; then
-      log "  $cell_id FAILED — the finder exited $finder_status; not cached"
-      log_stderr_tail "$finder_out.err"
-      rm -f "$finder_out" "$finder_out.err"
-      return 1
-    fi
-    if [[ -z ${other_review//[[:space:]]/} ]]; then
-      log "  $cell_id FAILED — the finder produced nothing; not cached"
-      log_stderr_tail "$finder_out.err"
-      rm -f "$finder_out" "$finder_out.err"
-      return 1
-    fi
-    rm -f "$finder_out" "$finder_out.err"
-  elif [[ $condition == "replay" ]]; then
-    # The frozen report is the whole treatment for this condition. Reading it
-    # is verified once by --check-fixtures, but under --skill-ref the spec
-    # worktree is the live checkout and a candidate run can outlive the branch
-    # it was planned on. An unreadable or empty report here would hand the
-    # model an empty handoff and score that as a review of the change.
-    if ! other_review="$(cat "$SPEC/$finder_report")" ||
-      [[ -z ${other_review//[[:space:]]/} ]]; then
-      log "  $cell_id FAILED — frozen finder report $finder_report is unreadable or empty; not cached"
-      return 1
-    fi
-  fi
-  codex_chars="${#other_review}"
-
-  local prompt
-  if [[ $prompt_kind == "handoff" ]]; then
-    # shellcheck disable=SC2016  # the single-quoted block is node source
-    prompt="$(REVIEW_EVAL_OTHER="$other_review" node -e '
-      const fs = require("node:fs");
-      const template = fs.readFileSync(process.argv[1], "utf8");
-      // The replacement is a function on purpose. A string replacement gives
-      // the finder output its own dollar-sign patterns, so a review that
-      // happens to contain one would silently rewrite the prompt around it.
-      process.stdout.write(
-        template.replace("{{OTHER_REVIEW}}", () => process.env.REVIEW_EVAL_OTHER),
-      );
-    ' "$SPEC/scripts/review/prompts/handoff.md")"
-  else
-    prompt="$(cat "$SPEC/scripts/review/prompts/request.md")"
-  fi
-
-  local raw other_file last_message="" claude_status=0 envelope_status=0
-  raw="$(mktemp "$TMPROOT/review-eval-cell.XXXXXX")"
-  other_file="$(mktemp "$TMPROOT/review-eval-other.XXXXXX")"
-  printf '%s' "$other_review" >"$other_file"
-  # Bounded by the rest of the matrix budget, as the finder is: a stalled
-  # contestant would hold the run past its advertised deadline.
-  if [[ $tool == codex ]]; then
-    # Codex verifier: bare model, same prompt, no skill or user config, read-only.
-    last_message="$(mktemp "$TMPROOT/review-eval-last.XXXXXX")"
-    run_bounded "$raw" "$(remaining_seconds "$MATRIX_DEADLINE")" \
-      run_stream_capped "$CELL_STREAM_MAX_BYTES" "$fixture" \
-      "${CODEX_ENV[@]}" codex exec \
-      --sandbox read-only --skip-git-repo-check --ephemeral \
-      --ignore-user-config --ignore-rules -m "$model" \
-      -c "model_reasoning_effort=\"$effort\"" \
-      --json -o "$last_message" "$prompt" || claude_status=$?
-    if [[ $(wc -c <"$raw" | tr -d " ") -gt $CELL_STREAM_MAX_BYTES ]]; then
-      claude_status=25
-    fi
-  else
-    # `stream-json`: a cell is scored on every message it wrote, not the last.
-    local -a claude_args=(-p "$prompt" --model "$model" --effort "$effort"
-      --setting-sources "" --output-format stream-json --verbose
-      --permission-mode bypassPermissions
-      --allowed-tools "${CLAUDE_TOOLS[@]}" --max-turns 80)
-    if [[ $condition != "control" ]]; then
-      local preamble
-      if ! preamble="$(stage_skill "$fixture")"; then
-        log "  $cell_id FAILED — the skill did not stage into the fixture; not cached"
-        purge_skill "$fixture"
-        rm -f "$raw" "$other_file"
-        return 1
-      fi
-      claude_args+=(--append-system-prompt "$preamble")
-    fi
-    run_bounded "$raw" "$(remaining_seconds "$MATRIX_DEADLINE")" \
-      run_capped_in_fixture "$fixture" claude "${claude_args[@]}" || claude_status=$?
-  fi
-  if [[ $claude_status -ne 0 ]]; then
-    purge_skill "$fixture"
-    if [[ $claude_status -eq 124 ]]; then
-      log "  $cell_id FAILED — $tool hit the run deadline; not cached"
-    else
-      log "  $cell_id FAILED — $tool exited $claude_status; not cached"
-    fi
-    log_stderr_tail "$raw.err"
-    rm -f "$raw" "$raw.err" "$other_file" ${last_message:+"$last_message"}
-    return 1
-  fi
-  purge_skill "$fixture"
-
-  mkdir -p "$out_dir"
-  REVIEW_EVAL_CELL="$cell_id" REVIEW_EVAL_PR="$pr" \
-    REVIEW_EVAL_CONDITION="$condition" REVIEW_EVAL_DRAW="$draw" \
-    REVIEW_EVAL_MODEL="$model" REVIEW_EVAL_EFFORT="$effort" \
-    REVIEW_EVAL_TOOL="$tool" REVIEW_EVAL_LAST_MESSAGE="$last_message" \
-    REVIEW_EVAL_FINDER="$finder" REVIEW_EVAL_FIXTURE="$fixture" \
-    REVIEW_EVAL_SECONDS="$(($(date +%s) - started))" \
-    REVIEW_EVAL_FINDER_CHARS="$codex_chars" \
-    REVIEW_EVAL_FINGERPRINT="$FINGERPRINT_JSON" \
-    node "$CELL_WRITER" "$raw" "$other_file" "$out_dir/result.json" ||
-    envelope_status=$?
-  if [[ $envelope_status -ne 0 ]]; then
-    log_stderr_tail "$raw.err"
-    if [[ $envelope_status -eq 4 ]]; then
-      # Exit 4 is the harness failing to load its own stream parser: nothing the
-      # cell did, so its directory survives and the paid stream moves into it
-      # rather than being deleted. Re-running the cell is the retry.
-      mv "$raw" "$out_dir/stream.jsonl" || true
-      mv "$raw.err" "$out_dir/stream.err" || true
-      log "  $cell_id FAILED — harness fault, cell kept with its stream; the stream parser did not load"
-    else
-      rm -rf "$out_dir"
-      log "  $cell_id FAILED — $tool reported an error; not cached"
-    fi
-    rm -f "$raw" "$raw.err" "$other_file" ${last_message:+"$last_message"}
-    return 1
-  fi
-  rm -f "$raw" "$raw.err" "$other_file" ${last_message:+"$last_message"}
-  log "  $cell_id ok $(($(date +%s) - started))s"
-  return 0
-}
 
 # --- the matrix --------------------------------------------------------------
 

@@ -150,6 +150,9 @@ const runEvalSourcePaths = new Map([
   ["lifecycle", path.join(repoRoot, "scripts/review/run-eval-lifecycle.sh")],
   ["runtime", path.join(repoRoot, "scripts/review/run-eval-runtime.sh")],
   ["matrix", path.join(repoRoot, "scripts/review/run-eval-matrix.sh")],
+  ["plan", path.join(repoRoot, "scripts/review/run-eval-plan.sh")],
+  ["publish", path.join(repoRoot, "scripts/review/run-eval-publish.sh")],
+  ["cell", path.join(repoRoot, "scripts/review/run-eval-cell.sh")],
 ]);
 
 function runEvalSource(owner) {
@@ -243,10 +246,13 @@ test("the shell split no longer reconstructs the pre-split cell runtime", () => 
     .update(reconstructLegacyOrchestrator())
     .digest("hex");
   // The split markers still splice the helper payloads back into the wrapper,
-  // so this pin still catches an unintended shell edit.
+  // so this pin still catches an unintended shell edit. It covers the wrapper,
+  // the lifecycle payloads and the cell runtime only; run-eval-plan.sh,
+  // run-eval-publish.sh and run-eval-cell.sh are pinned by
+  // `orchestratorSourceDigest` instead, and are not spliced back in here.
   assert.equal(
     reconstructed,
-    "af03795ad2589933dab079ba91170a24d54ae0da416ecf9890304860caedc277",
+    "d9716ca7449df6b0405e6aafa77c3a8c2f6668486e630299bf2d7f174673b319",
   );
   // It is no longer the pre-split monolith. Capturing the whole session instead
   // of the CLI's last-message envelope changed what a cell records, so the 24
@@ -908,7 +914,7 @@ test("comparabilityKey moves with the contract, the prompts, and the scorer", ()
 
 test("orchestratorSourceDigest binds the shell and the cell modules", () => {
   const expected =
-    "4690f218cf55604bb20d4e7bd3ddd3ce6a96fa590af5bd0b239a7fb7ca50c647";
+    "ad640f4e09fb95a1377f3f996dc32ed72415a6de3076ce7f4c878609985ebe5c";
   assert.equal(orchestratorSourceDigest(), expected);
   // The cell writer and the stream parser are in the digest for the same
   // reason the shell is: the writer decides what a paid cell records and the
@@ -923,6 +929,9 @@ test("orchestratorSourceDigest binds the shell and the cell modules", () => {
       "run-eval-lifecycle.sh",
       "run-eval-runtime.sh",
       "run-eval-matrix.sh",
+      "run-eval-plan.sh",
+      "run-eval-publish.sh",
+      "run-eval-cell.sh",
       "review-eval-cell-writer.mjs",
       "review-eval-stream.mjs",
     ],
@@ -948,6 +957,78 @@ test("orchestratorSourceDigest binds the shell and the cell modules", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   }
+});
+
+test("every sealed source list names the same files", () => {
+  // Sixteen code sites name the sealed set. The digest fails closed when one is
+  // missed, but only after a run starts; `cleanup_source_snapshot` and the
+  // bootstrap trap instead leak a file and fail their `rmdir`. Cross-check the
+  // lists against `ORCHESTRATOR_FILES` here, where it costs nothing.
+  const expected = ORCHESTRATOR_FILES.map((file) => path.basename(file));
+  const snapshot = runEvalSource("sourceSnapshot");
+  const wrapper = runEvalSource("wrapper");
+  const lifecycle = runEvalSource("lifecycle");
+  const names = (text) =>
+    text.match(/(?:run|review)-eval[a-z-]*\.(?:sh|mjs)/g) ?? [];
+
+  const cleanupList = snapshot.match(
+    /local source_paths=\(\n([\s\S]*?)\n {2}\)\n/,
+  )?.[1];
+  assert.ok(cleanupList, "the snapshot cleanup list is missing");
+  assert.deepEqual(names(cleanupList), expected);
+
+  const acceptList = snapshot.match(
+    /run_eval_source_snapshot_accept\(\)[\s\S]*?for source_name in \\\n([\s\S]*?); do/,
+  )?.[1];
+  assert.ok(acceptList, "the snapshot accept list is missing");
+  assert.deepEqual(names(acceptList), expected);
+
+  const restartList = snapshot.match(
+    /run_eval_source_snapshot_restart\(\)[\s\S]*?for source_name in \\\n([\s\S]*?); do/,
+  )?.[1];
+  assert.ok(restartList, "the snapshot copy list is missing");
+  // The wrapper copies the helper itself before the restart, so it is the one
+  // name this loop does not carry.
+  assert.deepEqual(
+    names(restartList),
+    expected.filter((name) => name !== "run-eval-source-snapshot.sh"),
+  );
+
+  const digestList = snapshot.match(
+    /run_eval_source_snapshot_verify_plan\(\)[\s\S]*?' \\\n([\s\S]*?)\)"/,
+  )?.[1];
+  assert.ok(digestList, "the snapshot digest list is missing");
+  assert.deepEqual(names(digestList), expected);
+
+  const verifyList = lifecycle.match(
+    /RUN_EVAL_SOURCE_NAMES=\(\n([\s\S]*?)\n {4}\)\n/,
+  )?.[1];
+  assert.ok(verifyList, "the verify-stage source list is missing");
+  assert.deepEqual(
+    names(verifyList),
+    expected.filter((name) => name.endsWith(".sh")),
+  );
+
+  const bootstrapList = wrapper.match(
+    /cleanup_source_snapshot_bootstrap\(\) \{([\s\S]*?)\n\}\n/,
+  )?.[1];
+  assert.ok(bootstrapList, "the bootstrap cleanup list is missing");
+  const shellSuffixes = expected
+    .filter((name) => name.endsWith(".sh"))
+    .map((name) => name.replace(/^run-eval/, "").replace(/\.sh$/, ""))
+    .join(",");
+  const moduleSuffixes = expected
+    .filter((name) => name.endsWith(".mjs"))
+    .map((name) => name.replace(/^review-eval-/, "").replace(/\.mjs$/, ""))
+    .join(",");
+  assert.ok(
+    bootstrapList.includes(`/run-eval{${shellSuffixes}}.sh`),
+    `the bootstrap trap removes a different shell set: ${bootstrapList}`,
+  );
+  assert.ok(
+    bootstrapList.includes(`/review-eval-{${moduleSuffixes}}.mjs`),
+    `the bootstrap trap removes a different module set: ${bootstrapList}`,
+  );
 });
 
 test("resolveKind picks full only when the last full run is past cadence", () => {
@@ -1970,9 +2051,9 @@ test("run-eval.sh publishes the appended row when the report fails", () => {
   // refuses to start against the dirty ledger it left behind.
   const shell = runEvalSourceSet();
   const block = shell.match(
-    /\nREPORT="\$RUN_DIR\/report\.md"\n[\s\S]*?\nlog "verdict \$VERDICT"\n/,
+    /\npublish_build_report\(\) \{\n[\s\S]*?\n {2}log "verdict \$VERDICT"\n\}\n/,
   )?.[0];
-  assert.ok(block, "the report step was not found in run-eval.sh");
+  assert.ok(block, "the report step was not found in run-eval-publish.sh");
   const dir = mkdtempSync(path.join(tmpdir(), "review-eval-report-"));
   try {
     const runDir = path.join(dir, "run");
@@ -1996,6 +2077,7 @@ test("run-eval.sh publishes the appended row when the report fails", () => {
       // shellcheck-clean stand-in for the real reader, which spawns node.
       `json_field() { node -e 'process.stdout.write(String(JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8"))[process.argv[2]]))' "$1" "$2"; }`,
       block,
+      "publish_build_report",
       'printf "reached-publish %s\\n" "$VERDICT"',
     ].join("\n");
     const run = spawnSync("bash", ["-c", harness], { encoding: "utf8" });
@@ -5681,6 +5763,7 @@ test("the cell writer tells a harness fault from a broken stream", () => {
   // under a candidate run, so a parser read from there could change between two
   // cells while every cell fingerprint stayed identical.
   const runtime = runEvalSource("runtime");
+  const cell = runEvalSource("cell");
   // The sealed snapshot first. The pre-split path is the fallback for the
   // frozen equivalence harness, which sources the cell runtime with no wrapper
   // around it; the wrapper sets the variable before every paid run.
@@ -5688,7 +5771,7 @@ test("the cell writer tells a harness fault from a broken stream", () => {
     runtime,
     /CELL_WRITER="\$\{RUN_EVAL_SCRIPT_DIR:-\$SPEC\/scripts\/review\}\/review-eval-cell-writer\.mjs"/,
   );
-  const writer = runtime.slice(runtime.indexOf('mkdir -p "$out_dir"'));
+  const writer = cell.slice(cell.indexOf('mkdir -p "$out_dir"'));
   assert.match(
     writer,
     /node "\$CELL_WRITER" "\$raw" "\$other_file" "\$out_dir\/result\.json"/,
@@ -5696,7 +5779,7 @@ test("the cell writer tells a harness fault from a broken stream", () => {
   assert.equal(writer.includes("$SPEC"), false);
   // The pre-flight is the same load, before the cell has paid for anything.
   assertBefore(
-    runtime,
+    cell,
     'node "$CELL_WRITER" --preflight',
     'run_bounded "$raw"',
     "the cell writer pre-flight runs after the paid contestant call",
@@ -5805,11 +5888,18 @@ test("the cell writer tells a harness fault from a broken stream", () => {
 test("a harness fault keeps the stream the cell already paid for", () => {
   // The exit-4 branch kept `$out_dir` and then deleted the only capture of the
   // session, so the retry had to buy the same review again.
-  const runtime = runEvalSource("runtime");
-  const branch = runtime.match(
-    /\n {2}if \[\[ \$envelope_status -ne 0 \]\]; then\n[\s\S]*?\n {2}fi\n/,
+  const cell = runEvalSource("cell");
+  // The whole tail of `cell_write_result`: the failure branch, the scratch
+  // removal both paths share, and the `return 0` that keeps the bare call from
+  // tripping errexit. `run_cell` reads `envelope_status` afterwards.
+  const branch = cell.match(
+    /\n {2}if \[\[ \$envelope_status -ne 0 \]\]; then\n[\s\S]*?\n {2}rm -f "\$raw"[^\n]*\n {2}return 0\n/,
   )?.[0];
   assert.ok(branch, "the cell writer's failure branch moved");
+  assert.match(
+    cell,
+    /\n {2}cell_write_result\n {2}\(\(envelope_status == 0\)\) \|\| return 1\n/,
+  );
   const dir = mkdtempSync(path.join(tmpdir(), "review-eval-cell-fault-"));
   try {
     const harness = (status) => {
@@ -5836,10 +5926,9 @@ test("a harness fault keeps the stream the cell already paid for", () => {
         `envelope_status=${status}`,
         "cell_tail() {",
         branch,
-        "  return 0",
         "}",
         "cell_tail",
-        'printf "returned=%s\\n" "$?"',
+        'printf "returned=%s\\n" "$envelope_status"',
       ].join("\n");
       const run = spawnSync("bash", ["-c", script], { encoding: "utf8" });
       assert.equal(run.status, 0, run.stderr);
@@ -5847,7 +5936,7 @@ test("a harness fault keeps the stream the cell already paid for", () => {
     };
 
     const fault = harness(4);
-    assert.match(fault.run.stdout, /returned=1/);
+    assert.match(fault.run.stdout, /returned=4/);
     assert.match(fault.run.stdout, /harness fault, cell kept/);
     assert.equal(existsSync(fault.outDir), true);
     assert.equal(
@@ -5864,7 +5953,7 @@ test("a harness fault keeps the stream the cell already paid for", () => {
 
     // A stream the cell broke is still its own failure: nothing is cached.
     const broken = harness(3);
-    assert.match(broken.run.stdout, /returned=1/);
+    assert.match(broken.run.stdout, /returned=3/);
     assert.match(broken.run.stdout, /not cached/);
     assert.equal(existsSync(broken.outDir), false);
     assert.equal(existsSync(broken.raw), false);
@@ -5882,7 +5971,7 @@ test("the shell cell path caps the contestant stream like the node path", () => 
   const runtime = runEvalSource("runtime");
   const lifecycle = runEvalSource("lifecycle");
   assert.match(
-    runtime,
+    runEvalSource("cell"),
     /run_capped_in_fixture "\$fixture" claude "\$\{claude_args\[@\]\}"/,
   );
   assert.match(
@@ -6635,6 +6724,9 @@ test("publishing a failed run keeps the cells a retry would reuse", () => {
         `json_field() { printf '%s' ${JSON.stringify(detail)}; }`,
         "require_safe_detail() { :; }",
         `log() { printf '%s\\n' "$*"; }`,
+        shellFunction("publish_stage_detail"),
+        shellFunction("publish_print_commands"),
+        shellFunction("publish_open_pr"),
         shellFunction("publish_row"),
         "publish_row INCOMPLETE failure.md",
       ].join("\n");
@@ -6707,6 +6799,9 @@ test("the ledger commit leaves the operator's other staged work alone", () => {
       "require_safe_detail() { :; }",
       "keep_baseline_copy() { :; }",
       `log() { printf '%s\\n' "$*"; }`,
+      shellFunction("publish_stage_detail"),
+      shellFunction("publish_print_commands"),
+      shellFunction("publish_open_pr"),
       shellFunction("publish_row"),
       "publish_row GREEN report.md",
     ].join("\n");
@@ -6935,12 +7030,19 @@ test("one review eval at a time may hold the shared run state", async () => {
 test("the run lock is taken before anything touches the fixtures", () => {
   const script = reconstructLegacyOrchestrator();
   const lifecycle = runEvalSource("lifecycle");
-  // Taken before the spec worktree, the plan and the matrix, and released by
-  // the EXIT trap so an interrupted run does not wedge the next one.
+  // Taken before the plan module is sourced, before the spec worktree it adds,
+  // and before the plan and the matrix, and released by the EXIT trap so an
+  // interrupted run does not wedge the next one.
   assertBefore(
     script,
     "\nacquire_run_lock\n",
-    "# --- the spec worktree",
+    'source "$RUN_EVAL_SCRIPT_DIR/run-eval-plan.sh"',
+    "the run lock is taken after the plan module is sourced",
+  );
+  assertBefore(
+    script,
+    "\nacquire_run_lock\n",
+    "\nplan_prepare_spec\n",
     "the run lock is taken after the spec worktree is added",
   );
   assert.match(lifecycle, /\nacquire_run_lock\n/);
@@ -6987,8 +7089,15 @@ test("the orchestrator carries one baseline through plan, score, validate and re
   // exclude. The same argument reaches both plans and all three later commands
   // so the plan, row, revalidation and PR body cannot disagree about what it
   // was ranked on.
+  // `plan_build_args` in run-eval-plan.sh carries the optional flags for both
+  // plan calls, so one `--against` branch now serves the pair and the second
+  // plan cannot drift from the first.
   assert.equal(
     script.match(/PLAN_ARGS\+=\(--against "\$AGAINST"\)/g)?.length,
+    1,
+  );
+  assert.equal(
+    runEvalSource("plan").match(/^ {2}plan_build_args$/gm)?.length,
     2,
   );
   assert.match(script, /AGAINST_ARGS=\(--against "\$AGAINST"\)/);
@@ -7003,61 +7112,50 @@ test("the orchestrator carries one baseline through plan, score, validate and re
 });
 
 test("the orchestrator rejects an ineligible baseline before paid work", () => {
+  // The two node preflights moved into run-eval-plan.sh; the wrapper calls the
+  // phases that hold them, and both calls still precede the run deadline.
   const script = reconstructLegacyOrchestrator();
-  assert.equal(script.match(/baselineEligibility\(row\)/g)?.length, 2);
+  const plan = runEvalSource("plan");
+  assert.equal(plan.match(/baselineEligibility\(row\)/g)?.length, 2);
   assertBefore(
     script,
-    "baselineEligibility(row)",
+    "\nplan_resolve_against\n",
     "# --- the run deadline",
     "baseline eligibility is checked after the run deadline starts",
   );
   assert.ok(
-    script.lastIndexOf("baselineEligibility(row)") <
-      script.indexOf("writeFileSync(snapshot"),
+    plan.lastIndexOf("baselineEligibility(row)") <
+      plan.indexOf("writeFileSync(snapshot"),
   );
-  assert.match(script, /baselinePreflightProblems\(\{/);
-  assert.match(script, /planComparabilityKey: plan\.comparability_key/);
-  assert.match(script, /baselinePlanIdentity\(row\)/);
+  assert.match(plan, /baselinePreflightProblems\(\{/);
+  assert.match(plan, /planComparabilityKey: plan\.comparability_key/);
+  assert.match(plan, /baselinePlanIdentity\(row\)/);
   assert.match(
-    script,
+    plan,
     /JSON\.stringify\(plannedBaseline\) !== JSON\.stringify\(currentBaseline\)/,
   );
   assertBefore(
     script,
-    "baselinePreflightProblems({",
+    "\nplan_snapshot_baseline\n",
     "# --- the run deadline",
     "baseline preflight runs after the run deadline starts",
   );
-  assertBefore(
-    script,
-    "baselinePlanIdentity(row)",
-    "# --- the run deadline",
-    "baseline identity is checked after the run deadline starts",
-  );
   assert.match(
-    script,
+    plan,
     /writeFileSync\(snapshot, `\$\{JSON\.stringify\(row\)\}\\n`\)/,
   );
   assert.match(
-    script,
+    plan,
     /BASELINE_SNAPSHOT="\$\(mktemp "\$LOCK_ROOT\/review-eval-baseline/,
   );
   assert.equal(
-    /BASELINE_SNAPSHOT="\$\(mktemp "\$TMPROOT\/review-eval-baseline/.test(
-      script,
-    ),
+    /BASELINE_SNAPSHOT="\$\(mktemp "\$TMPROOT\/review-eval-baseline/.test(plan),
     false,
   );
-  assert.match(script, /AGAINST="\$BASELINE_SNAPSHOT"/);
-  assertBefore(
-    script,
-    'AGAINST="$BASELINE_SNAPSHOT"',
-    "# --- the run deadline",
-    "the baseline snapshot is selected after the run deadline starts",
-  );
+  assert.match(plan, /AGAINST="\$BASELINE_SNAPSHOT"/);
   assert.match(script, /rm -f "\$BASELINE_SNAPSHOT"/);
-  assert.match(script, /eligible complete full baseline row/);
-  assert.match(script, /malformed or incompatible with the generated plan/);
+  assert.match(plan, /eligible complete full baseline row/);
+  assert.match(plan, /malformed or incompatible with the generated plan/);
 });
 
 test("the installed baseline survives the checkout the candidate needs", () => {
@@ -7316,6 +7414,9 @@ test("the orchestrator refuses to run bytes the row would not record", () => {
     "run-eval-lifecycle.sh",
     "run-eval-runtime.sh",
     "run-eval-matrix.sh",
+    "run-eval-plan.sh",
+    "run-eval-publish.sh",
+    "run-eval-cell.sh",
   ]) {
     assert.match(
       wrapper,
@@ -7335,6 +7436,9 @@ test("the orchestrator refuses to run bytes the row would not record", () => {
     "run-eval-lifecycle.sh",
     "run-eval-runtime.sh",
     "run-eval-matrix.sh",
+    "run-eval-plan.sh",
+    "run-eval-publish.sh",
+    "run-eval-cell.sh",
   ]) {
     assert.match(
       verify,
@@ -7482,6 +7586,13 @@ test("the orchestrator keeps every helper stage on one private source snapshot",
         path.join(live, "run-eval-matrix.sh"),
         "SNAPSHOT_MATRIX=old\n",
       );
+      for (const name of [
+        "run-eval-plan.sh",
+        "run-eval-publish.sh",
+        "run-eval-cell.sh",
+      ]) {
+        writeFileSync(path.join(live, name), "SNAPSHOT_MODULE=old\n");
+      }
       // The cell writer and the stream parser it imports are snapshotted with
       // the shell: the wrapper loads them from the sealed directory, so the
       // restart must copy and seal them too.
@@ -7713,15 +7824,7 @@ test("the persistent plan must bind the private source snapshot", () => {
     const changed = path.join(dir, "changed");
     mkdirSync(snapshot);
     mkdirSync(changed);
-    const names = [
-      "run-eval.sh",
-      "run-eval-source-snapshot.sh",
-      "run-eval-lifecycle.sh",
-      "run-eval-runtime.sh",
-      "run-eval-matrix.sh",
-      "review-eval-cell-writer.mjs",
-      "review-eval-stream.mjs",
-    ];
+    const names = ORCHESTRATOR_FILES.map((file) => path.basename(file));
     for (const name of names) {
       writeFileSync(path.join(snapshot, name), "snapshotted " + name + "\n");
       writeFileSync(path.join(changed, name), "changed " + name + "\n");
@@ -10684,9 +10787,9 @@ test("a malformed stored verifier_override is refused before any judge call", as
     }),
     /--verifier must be TOOL:MODEL@EFFORT/,
   );
-  // And the runtime fails the cell rather than taking the claude branch.
+  // And the cell path fails the cell rather than taking the claude branch.
   assert.match(
-    runEvalSource("runtime"),
+    runEvalSource("cell"),
     /if \[\[ \$tool != claude && \$tool != codex \]\]; then/,
   );
 });
@@ -10762,34 +10865,43 @@ test("every codex spawn runs under a run-private home", () => {
     /\n\s+CODEX_ENV=\(env -u OPENAI_BASE_URL HOME="\$CODEX_ISO" CODEX_HOME="\$CODEX_ISO\/\.codex"\)\nfi\n/,
   );
   assert.match(
-    runtime,
+    runEvalSource("cell"),
     /run_in_fixture "\$fixture" "\$\{CODEX_ENV\[@\]\}" "\$\{FINDER_ARGV\[@\]\}" \|\| finder_status=\$\?/,
   );
   // The claude contestant keeps the operator's home: its credentials and the
   // skill under test live there.
-  assert.equal(runtime.includes('"${CODEX_ENV[@]}" claude'), false);
+  assert.equal(
+    `${runtime}${runEvalSource("cell")}`.includes('"${CODEX_ENV[@]}" claude'),
+    false,
+  );
 });
 
 test("the matrix carries the tool and the runtime spawns codex bare", () => {
   const runtime = runEvalSource("runtime");
+  const cell = runEvalSource("cell");
   // The TSV gains a column rather than reusing one, and it defaults, so a full
   // or canary matrix line is what it was before the probe lane took a verifier.
   assert.match(runtime, /cell\.tool \?\? "claude"/);
-  assert.match(runtime, /local tool="\$\{10:-claude\}"/);
+  assert.match(cell, /local tool="\$\{10:-claude\}"/);
   // The codex spawn: bare model, read-only sandbox, JSONL events on stdout and
   // the final message in a file. No skill is staged on this path.
-  const codex = runtime.slice(runtime.indexOf("if [[ $tool == codex ]]; then"));
+  const codex = cell.match(/\ncell_run_codex\(\) \{\n[\s\S]*?\n\}\n/)?.[0];
+  assert.ok(codex, "the codex spawn moved");
   assert.match(
     codex,
     /run_stream_capped "\$CELL_STREAM_MAX_BYTES" "\$fixture" \\\n\s+"\$\{CODEX_ENV\[@\]\}" codex exec \\\n\s+--sandbox read-only --skip-git-repo-check --ephemeral \\\n\s+--ignore-user-config --ignore-rules -m "\$model" \\\n\s+-c "model_reasoning_effort=\\"\$effort\\"" \\\n\s+--json -o "\$last_message" "\$prompt"/,
   );
-  const codexBranch = codex.slice(0, codex.indexOf("\n  else\n"));
-  assert.equal(codexBranch.includes("stage_skill"), false);
-  assert.equal(codexBranch.includes("append-system-prompt"), false);
+  assert.equal(codex.includes("stage_skill"), false);
+  assert.equal(codex.includes("append-system-prompt"), false);
+  // The dispatch takes the codex branch only for a codex cell.
+  assert.match(
+    cell,
+    /if \[\[ \$tool == codex \]\]; then\n {4}cell_run_codex\n {2}else\n {4}cell_run_claude\n {2}fi/,
+  );
   // The writer is told which tool wrote the stream, and where the final
   // message is; without both it would parse a codex session as a claude one.
-  assert.match(runtime, /REVIEW_EVAL_TOOL="\$tool"/);
-  assert.match(runtime, /REVIEW_EVAL_LAST_MESSAGE="\$last_message"/);
+  assert.match(cell, /REVIEW_EVAL_TOOL="\$tool"/);
+  assert.match(cell, /REVIEW_EVAL_LAST_MESSAGE="\$last_message"/);
   // The matrix reads the column and passes it on.
   const matrix = runEvalSource("matrix");
   assert.match(matrix, /finder_report prompt_kind tool <<<"\$row"/);

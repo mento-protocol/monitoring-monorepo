@@ -142,6 +142,15 @@ RUN_DIR="$STATE/generated/shell-run"
 LEDGER="$STATE/docs/evals/review-skill-ledger.jsonl"
 CONTRACT="$STATE/docs/evals/review-skill-fixtures.json"
 SPEC="$SOURCE_ROOT"
+# The publication and cell modules left the marked payloads in the shell split,
+# so the harness sources them to keep reaching clear_scoring_artifacts,
+# require_safe_detail and run_cell. Editing this string changes exactly one
+# value in testdata/review-eval-split-equivalence/expected.json:
+# files["generated/shell-harness.sh"].sha256. Every processes[*] entry and every
+# other files[*] digest must stay byte-identical; a second changed value means
+# the split changed behavior.
+source "$SOURCE_ROOT/scripts/review/run-eval-publish.sh"
+source "$SOURCE_ROOT/scripts/review/run-eval-cell.sh"
 TMPROOT="$STATE/tmp"
 DEADLINE=40
 STARTED="$(date +%s)"
