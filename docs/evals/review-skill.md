@@ -388,7 +388,7 @@ complete owner record atomically. A process also claims a stale lock before it
 removes the lock, so two starters cannot both reclaim one killed run. The runner
 creates one private directory under the checkout's physical git directory. It
 copies and sources `run-eval-source-snapshot.sh` from that directory first. The
-helper copies the wrapper, the other three sourced helpers, and the two node
+helper copies the wrapper, the other six sourced helpers, and the two node
 modules the cell path loads — `review-eval-cell-writer.mjs` and the
 dependency-free `review-eval-stream.mjs` it imports — creates a PID-bound
 random owner marker, seals the directory, and restarts the wrapper. Those two
@@ -398,13 +398,13 @@ orchestrator digest hashes them and the snapshot copies them, so a move
 updates both lists in the same PR. The
 restarted process accepts only that sealed, non-symlink direct child. The
 read-only directory and files prevent in-place writes and entry replacement
-before a later helper source. Cleanup unlinks only the seven fixed source files
+before a later helper source. Cleanup unlinks only the ten fixed source files
 and the authenticated marker, then removes the empty directory. Every later
 helper stage uses the same snapshot, and the cell writer runs from it: reading
 the stream parser out of the spec worktree instead let it change between two
 cells of one run while every cell fingerprint stayed identical. Before a paid
 cell starts, the snapshot helper recomputes the framed source digest over all
-seven and requires the persistent plan to record the same digest. An edit during
+ten and requires the persistent plan to record the same digest. An edit during
 planning makes the run stop instead of
 executing bytes outside its recorded provenance. The skill
 under test is snapshotted once, before the first cell, and every cell stages
@@ -963,10 +963,12 @@ reviews and carries the checks that verify it, so an edit to either moves what
 was reviewed or what it was scored against. `orchestrator_digest` is a
 length-framed digest over `run-eval.sh`,
 `run-eval-source-snapshot.sh`, `run-eval-lifecycle.sh`,
-`run-eval-runtime.sh`, and `run-eval-matrix.sh`. Together they fix source
-authentication, sealing, restart and cleanup, plus the contestant's allowed
-tools, turn limit, skill staging, finder-report truncation, cell environment,
-and what the matrix may run at the same time. They shape the
+`run-eval-runtime.sh`, `run-eval-matrix.sh`, `run-eval-plan.sh`,
+`run-eval-publish.sh`, and `run-eval-cell.sh`. Together they fix source
+authentication, sealing, restart and cleanup, the spec worktree and the run
+plan, the contestant's allowed tools, turn limit, skill staging,
+finder-report truncation, cell environment, what the matrix may run at the
+same time, and how a run is scored and published. They shape the
 transcript every number is derived from as directly as a prompt does. An edit
 to any of them re-anchors the series, which is the conservative direction: a
 refused comparison is visible, a silently paired one is not.
@@ -1257,9 +1259,12 @@ path must exist on `main` before the first run after the moving commit.
 | `scripts/review/review-eval-split-equivalence.test.mjs`     | frozen pre-split entry-point equivalence                 |
 | `scripts/review/run-eval.sh`                                | the orchestrator that spends model quota                 |
 | `scripts/review/run-eval-source-snapshot.sh`                | source authentication, sealing, restart, and cleanup     |
-| `scripts/review/run-eval-lifecycle.sh`                      | locks, deadlines, failure traces, and publication        |
-| `scripts/review/run-eval-runtime.sh`                        | skill staging, fixtures, cache, and cell runtime         |
+| `scripts/review/run-eval-lifecycle.sh`                      | locks, deadlines, and bounded subprocesses               |
+| `scripts/review/run-eval-runtime.sh`                        | skill staging, fixtures, and the resume cache            |
 | `scripts/review/run-eval-matrix.sh`                         | the PR-group matrix scheduler                            |
+| `scripts/review/run-eval-plan.sh`                           | the spec worktree and the run plan                       |
+| `scripts/review/run-eval-publish.sh`                        | failure traces, the scoring tail, and publication        |
+| `scripts/review/run-eval-cell.sh`                           | one cell, phase by phase                                 |
 | `scripts/review/build-fixture.sh`                           | leak-proof fixture materialization                       |
 | `scripts/review/launchd/`                                   | the monthly scheduler                                    |
 | `.github/workflows/review-eval-freshness.yml`               | the LLM-free contract and freshness guard                |

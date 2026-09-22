@@ -119,11 +119,18 @@ reason that still holds: `eslint.config.mjs` reaches no `.sh` file.
 - `scripts/review/review-eval.test.mjs` caps review-eval JavaScript modules
   through `validationModuleLineLimits`. That map holds `.mjs` names only, so
   the two mechanisms cover disjoint files and cannot contradict each other.
-- The same suite pins `run-eval.sh`, `run-eval-source-snapshot.sh`,
-  `run-eval-lifecycle.sh`, `run-eval-runtime.sh` and `run-eval-matrix.sh` by
-  name in `ORCHESTRATOR_FILES` and by `orchestratorSourceDigest`. All five
-  carry a baseline row, so a split of any of them updates that list and that
-  digest in the same change.
+- The same suite pins the sealed orchestrator source set by name in
+  `ORCHESTRATOR_FILES` and by `orchestratorSourceDigest`. A split of any of
+  those files updates that list and that digest in the same change, and a new
+  module joins the sealed set rather than sitting outside it;
+  [ADR 0108](0108-sealed-orchestrator-source-set.md) records why. The set was
+  five shell files and two node modules when this ADR landed. Splitting
+  `run-eval.sh`, `run-eval-lifecycle.sh` and `run-eval-runtime.sh` into
+  `run-eval-plan.sh`, `run-eval-publish.sh` and `run-eval-cell.sh` made it
+  eight shell files and retired their three file rows, plus the
+  `publish_row` and `run_cell` function rows. What is left of the review-eval
+  family is three function rows: `acquire_one_lock`, `run_matrix` and
+  `run_eval_source_snapshot_restart`.
 - The baseline rows were measured against one commit of `main`. A shell change
   that lands first moves them, and the adoption re-measures rather than
   merging a stale row.
