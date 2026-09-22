@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
 # gh `--attach` capability and apt installer cases for codex-cloud-setup.test.sh.
-# This file is sourced by codex-cloud-setup.test.sh. Do not execute it directly.
+# This file is sourced by codex-cloud-setup.test.sh. The guard below refuses
+# direct execution.
 # Case subshells intentionally isolate environment mutations. The runner owns
 # suite_tmp, setup_script and every case_* global read below (SC2154).
 # shellcheck disable=SC2030,SC2031,SC2154
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  echo "codex-cloud-setup-gh-attach.test.sh: source this file from codex-cloud-setup.test.sh; do not run it directly." >&2
+  exit 1
+fi
 
 # `gh pr edit --attach` (gh 2.99.0 or later) uploads the Before/After
 # screenshots docs/notes/dashboard-verification.md requires. This mock gh

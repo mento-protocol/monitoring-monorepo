@@ -94,6 +94,10 @@ Move each pin class together.
 - **Hosted gh capability pin.** `codex-cloud-setup.sh` sources
   `bootstrap/codex-cloud-github-cli.sh`, and `agent-setup-contract.test.sh`
   names that path. A move updates both.
+- **Codex Cloud suite topic pins.** `codex-cloud-setup.test.sh` sources
+  `bootstrap/codex-cloud-setup-{foundry,playwright,github-probes,gh-attach}.test.sh`
+  from its own directory by basename, and names each one in a
+  `# shellcheck source=` directive. Move the five files together.
 - **Reviewed-artifact byte pins.** `.gitattributes` pins the Upstash launcher
   EOL; `UPSTASH_MCP_LAUNCHER_SHA256` hashes it. Moves change both. See
   [`docs/notes/upstash-mcp-operator.md`](../docs/notes/upstash-mcp-operator.md).
