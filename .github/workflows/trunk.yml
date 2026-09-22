@@ -68,6 +68,31 @@ jobs:
       - name: pnpm audit handler deploy lockfile (high+ only)
         if: ${{ !cancelled() && steps.validation-boundary.outcome == 'success' }}
         run: node scripts/supply-chain/pnpm-audit-high-gate.mjs --dir alerts/infra/onchain-event-handler --label alerts/infra/onchain-event-handler
+      - name: Shell size gate self-tests
+        if: ${{ !cancelled() && steps.validation-boundary.outcome == 'success' }}
+        run: node --test scripts/repo-health/check-shell-size.test.mjs
+      - name: Shell size gate
+        # Repository-wide, so it rides this unfiltered required workflow rather
+        # than ci.yml's path-gated scripts job. The checkout above uses
+        # fetch-depth: 0, which creates origin/<base_ref>, so the ratchet needs
+        # no extra fetch step.
+        #
+        # Both steps call node directly, like the audits above them. This job
+        # runs no package-script pin validator, so a `pnpm <alias>` here would
+        # let the pull request under test redefine the gate in package.json.
+        # The `check:shell` and `check:shell:test` aliases are pinned in
+        # scripts/check-agent-quality-gate-package-scripts.mjs for the author
+        # commands, which run them.
+        #
+        # A pull request ratchets against its own base. A run with no base_ref
+        # on a branch other than main is a manual dispatch, which publishes the
+        # same required check context, so it ratchets against origin/main
+        # rather than skipping the comparison. Only main itself compares with
+        # nothing.
+        if: ${{ !cancelled() && steps.validation-boundary.outcome == 'success' }}
+        env:
+          SHELL_SIZE_BASE: "${{ github.base_ref && format('origin/{0}', github.base_ref) || (github.ref != 'refs/heads/main' && 'origin/main' || '') }}"
+        run: node scripts/repo-health/check-shell-size.mjs
       - name: Save Trunk artifacts
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.trunk-cache.outputs.cache-hit != 'true'
         continue-on-error: true

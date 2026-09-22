@@ -13,8 +13,15 @@ garden_lane: adrs-architecture
 
 # ADR 0065 — scripts/ is inside the file-size watchlist, with named-mechanism exemptions
 
-**Status:** Accepted (Aug 2026), amended 2026-09-16, in force.
+**Status:** Accepted (Aug 2026), amended 2026-09-16 and 2026-09-21, in force.
 **Scope:** ci/process
+
+Amended 2026-09-21: [ADR 0107](0107-enforced-shell-size-limits.md) supersedes
+this record for `*.sh` files. Shell files and shell functions are now enforced
+repository-wide at 500 lines per file and 50 per function, tests included, with
+a closed baseline for what predates the limits. The rest of this record stands:
+`scripts/` is a watchlist scope at any depth, the 600/1000 caps stay advisory
+for its JavaScript, and shell files keep their rows in the monthly report.
 
 Amended 2026-09-16: [ADR 0106](0106-sentry-triage-moves-to-operator-skills.md)
 deleted `scripts/sentry/**`, including the three subsystem-local test gates this

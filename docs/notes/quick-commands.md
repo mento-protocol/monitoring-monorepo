@@ -46,6 +46,9 @@ pnpm code-health:history           # CodeScene-style git history → reports/cod
 pnpm code-health:duplication       # jscpd duplication → reports/jscpd/; advisory, never blocks
 pnpm code-health:schema-diff       # GraphQL breaking-change diff vs origin/main; advisory, never blocks
 pnpm code-health                   # Run knip + deps; exclude history + duplication
+pnpm check:shell                   # Enforce 500 lines per *.sh file and 50 per shell function; blocking
+SHELL_SIZE_BASE="$BASE_REMOTE/$baseRefName" pnpm check:shell  # Same, plus the baseline ratchet against the resolved PR base
+pnpm check:shell:test              # Smoke test for the copied shell size checker
 # Normal delivery uses the direct author checks in pr-operating-card step 3.
 # Review lifecycle/install effects before changed package scripts or lockfiles run.
 node scripts/check-agent-quality-gate-package-scripts.mjs  # Validate root scripts before installation

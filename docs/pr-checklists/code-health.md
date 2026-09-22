@@ -178,7 +178,11 @@ Treat these as a shrinking ceiling, not a target.
 - `node scripts/repo-health/file-size-watchlist.mjs` reports files over the
   600-line soft cap and 1,000-line hard cap. It covers the package `src/` trees
   that set `max-lines` plus `scripts/` JavaScript, shell, and native C sources,
-  where no lint rule enforces a cap; tests are excluded outside Aegis. A
+  where no lint rule enforces a cap; tests are excluded outside Aegis. Shell is
+  the one scope this report does not own alone: `pnpm check:shell` blocks a
+  tracked `*.sh` file over 500 lines or a shell function over 50 lines in
+  required CI, unless a baseline row records a higher count
+  ([ADR 0107](../adr/0107-enforced-shell-size-limits.md)). A
   `scripts/` file whose
   split would change a named mechanism rather than refactor a file prints in a
   separate exempt table with its reason
