@@ -23,7 +23,11 @@ predicates relocated out of `scripts/sentry/ci-wiring/`. It carries its
 reporting an existing file as new every month. The
 `scripts/bootstrap/codex-cloud-setup.sh` row was struck on 2026-09-17: its
 GitHub CLI provisioning moved to `scripts/bootstrap/codex-cloud-github-cli.sh`,
-which left 564 raw lines, below the soft cap that earns a row. The
+which left 564 raw lines, below the soft cap that earns a row. Its two
+`scripts/repo-health/shell-size-baseline.txt` rows were struck on 2026-09-22:
+the Trunk provisioning moved to `scripts/bootstrap/codex-cloud-trunk.sh` and
+`install_foundry` split, which left 411 lines in the entry point and 179 in the
+new sibling, so both files are checked at the full ADR 0107 limits. The
 `scripts/workflows/check-autofix-ci-trust.mjs` row was struck on 2026-09-18:
 issue #2486 deleted that checker, and the credential predicates it kept moved
 to `scripts/workflows/workflow-credentials.mjs`, which is below the soft cap.

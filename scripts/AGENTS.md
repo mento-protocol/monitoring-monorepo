@@ -90,7 +90,9 @@ Move each pin class together.
 - **External console pins.** Codex Cloud pins
   `bootstrap/codex-cloud-{setup,maintenance}.sh`; Claude Code web pins
   `bootstrap/claude-code-web-setup.sh` through `.claude/hooks/session-start.sh`.
-  Moves need operator updates.
+  The Codex Cloud setup entry point sources the siblings
+  `bootstrap/codex-cloud-{git-helpers,github-cli,trunk}.sh` by repository-root
+  path; move them with it. Moves need operator updates.
 - **Hosted gh capability pin.** `codex-cloud-setup.sh` sources
   `bootstrap/codex-cloud-github-cli.sh`, and `agent-setup-contract.test.sh`
   names that path. A move updates both.
