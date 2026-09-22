@@ -55,7 +55,12 @@ Move each pin class together.
   `install-review-eval-launchd*`, `review-eval-*publication*`,
   `ORCHESTRATOR_FILES` cells, `SCORING_MODULES` and
   `validationModuleLineLimits` scorers (incl. `review-eval-schedule-issue.mjs`),
-  `review-eval-experiment*.mjs`.
+  `review-eval-experiment*.mjs`. The sealed set is ten files in a fixed order:
+  `run-eval{,-source-snapshot,-lifecycle,-runtime,-matrix,-plan,-publish,-cell}.sh`
+  plus `review-eval-{cell-writer,stream}.mjs`. Adding or moving one updates
+  `ORCHESTRATOR_FILES`, the four lists in `run-eval-source-snapshot.sh`, the
+  bootstrap trap in `run-eval.sh`, the verify list in `run-eval-lifecycle.sh`
+  and the digest in `review-eval.test.mjs`. ADR 0108 states the rule.
 - **Navigation-eval pin.** `forbidden_sources` in
   `docs/evals/documentation-navigation-fixtures.json` names its source.
 - **Verification evidence.** `.gitattributes` pins
@@ -90,7 +95,9 @@ Move each pin class together.
 - **External console pins.** Codex Cloud pins
   `bootstrap/codex-cloud-{setup,maintenance}.sh`; Claude Code web pins
   `bootstrap/claude-code-web-setup.sh` through `.claude/hooks/session-start.sh`.
-  Moves need operator updates.
+  The Codex Cloud setup entry point sources the siblings
+  `bootstrap/codex-cloud-{git-helpers,github-cli,trunk}.sh` by repository-root
+  path; move them with it. Moves need operator updates.
 - **Hosted gh capability pin.** `codex-cloud-setup.sh` sources
   `bootstrap/codex-cloud-github-cli.sh`, and `agent-setup-contract.test.sh`
   names that path. A move updates both.

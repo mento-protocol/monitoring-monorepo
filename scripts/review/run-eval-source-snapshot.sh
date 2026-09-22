@@ -44,6 +44,9 @@ cleanup_source_snapshot() {
     "$RUN_EVAL_SOURCE_SNAPSHOT/run-eval-lifecycle.sh"
     "$RUN_EVAL_SOURCE_SNAPSHOT/run-eval-runtime.sh"
     "$RUN_EVAL_SOURCE_SNAPSHOT/run-eval-matrix.sh"
+    "$RUN_EVAL_SOURCE_SNAPSHOT/run-eval-plan.sh"
+    "$RUN_EVAL_SOURCE_SNAPSHOT/run-eval-publish.sh"
+    "$RUN_EVAL_SOURCE_SNAPSHOT/run-eval-cell.sh"
     "$RUN_EVAL_SOURCE_SNAPSHOT/review-eval-cell-writer.mjs"
     "$RUN_EVAL_SOURCE_SNAPSHOT/review-eval-stream.mjs"
   )
@@ -98,6 +101,7 @@ run_eval_source_snapshot_accept() {
   for source_name in \
     run-eval.sh run-eval-source-snapshot.sh \
     run-eval-lifecycle.sh run-eval-runtime.sh run-eval-matrix.sh \
+    run-eval-plan.sh run-eval-publish.sh run-eval-cell.sh \
     review-eval-cell-writer.mjs review-eval-stream.mjs; do
     source_path="$RUN_EVAL_SOURCE_SNAPSHOT/$source_name"
     [[ -f $source_path && ! -L $source_path && ! -w $source_path ]] || return 1
@@ -128,12 +132,12 @@ run_eval_source_snapshot_restart() {
   [[ $live_dir == "$(run_eval_physical_dir "$live_dir")" ]] ||
     run_eval_source_snapshot_fail "the live orchestrator source directory is not physical"
   # The two node modules travel with the shell: the cell writer and the stream
-  # parser it imports decide what a paid cell records, and the wrapper loads
-  # them from this snapshot rather than from the live checkout, which a run can
-  # outlive. `verify_plan` below digests all seven against the persistent plan.
+  # parser it imports decide what a paid cell records, and the wrapper loads them
+  # from this snapshot, not the live checkout. `verify_plan` digests all ten.
   for source_name in \
-    run-eval.sh run-eval-lifecycle.sh run-eval-runtime.sh \
-    run-eval-matrix.sh review-eval-cell-writer.mjs review-eval-stream.mjs; do
+    run-eval.sh run-eval-lifecycle.sh run-eval-runtime.sh run-eval-matrix.sh \
+    run-eval-plan.sh run-eval-publish.sh run-eval-cell.sh \
+    review-eval-cell-writer.mjs review-eval-stream.mjs; do
     live_source="$live_dir/$source_name"
     source_path="$RUN_EVAL_SOURCE_SNAPSHOT/$source_name"
     [[ -f $live_source && ! -L $live_source ]] ||
@@ -200,6 +204,9 @@ run_eval_source_snapshot_verify_plan() {
     "$script_dir/run-eval-lifecycle.sh" \
     "$script_dir/run-eval-runtime.sh" \
     "$script_dir/run-eval-matrix.sh" \
+    "$script_dir/run-eval-plan.sh" \
+    "$script_dir/run-eval-publish.sh" \
+    "$script_dir/run-eval-cell.sh" \
     "$script_dir/review-eval-cell-writer.mjs" \
     "$script_dir/review-eval-stream.mjs")" ||
     run_eval_source_snapshot_fail "could not digest the immutable orchestrator snapshot"

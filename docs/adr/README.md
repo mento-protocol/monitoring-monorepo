@@ -112,6 +112,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0104](0104-non-strict-required-status-checks.md)           | `main` no longer requires a PR to be caught up once aggregate strictness confirms off; checks must be green and a real conflict still blocks |
 | [0106](0106-sentry-triage-moves-to-operator-skills.md)      | Sentry triage and autofix move from a CI pipeline to operator-run skills                                                                     |
 | [0107](0107-enforced-shell-size-limits.md)                  | Shell files and functions are enforced at 500/50 lines with a closed, shrinking baseline                                                     |
+| [0108](0108-sealed-orchestrator-source-set.md)              | Every run-eval shell module joins the sealed orchestrator source set                                                                         |
 
 ### shared-config
 

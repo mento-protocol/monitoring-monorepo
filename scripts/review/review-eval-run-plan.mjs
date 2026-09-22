@@ -61,6 +61,9 @@ export const ORCHESTRATOR_FILES = Object.freeze([
   fileURLToPath(new URL("./run-eval-lifecycle.sh", import.meta.url)),
   fileURLToPath(new URL("./run-eval-runtime.sh", import.meta.url)),
   fileURLToPath(new URL("./run-eval-matrix.sh", import.meta.url)),
+  fileURLToPath(new URL("./run-eval-plan.sh", import.meta.url)),
+  fileURLToPath(new URL("./run-eval-publish.sh", import.meta.url)),
+  fileURLToPath(new URL("./run-eval-cell.sh", import.meta.url)),
   fileURLToPath(new URL("./review-eval-cell-writer.mjs", import.meta.url)),
   fileURLToPath(new URL("./review-eval-stream.mjs", import.meta.url)),
 ]);
