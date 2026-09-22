@@ -30,6 +30,7 @@ cell_reuse_cached() {
     return 1
   fi
   log "  $cell_id reused"
+  return 0
 }
 
 cell_preflight_writer() {

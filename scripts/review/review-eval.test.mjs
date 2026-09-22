@@ -914,7 +914,7 @@ test("comparabilityKey moves with the contract, the prompts, and the scorer", ()
 
 test("orchestratorSourceDigest binds the shell and the cell modules", () => {
   const expected =
-    "ad640f4e09fb95a1377f3f996dc32ed72415a6de3076ce7f4c878609985ebe5c";
+    "e9483007d17728621acbbde235dac7a5b4dcab2aec0f330bc764612fbd11fa7d";
   assert.equal(orchestratorSourceDigest(), expected);
   // The cell writer and the stream parser are in the digest for the same
   // reason the shell is: the writer decides what a paid cell records and the
@@ -960,7 +960,7 @@ test("orchestratorSourceDigest binds the shell and the cell modules", () => {
 });
 
 test("every sealed source list names the same files", () => {
-  // Sixteen code sites name the sealed set. The digest fails closed when one is
+  // Ten code sites name the sealed set. The digest fails closed when one is
   // missed, but only after a run starts; `cleanup_source_snapshot` and the
   // bootstrap trap instead leak a file and fail their `rmdir`. Cross-check the
   // lists against `ORCHESTRATOR_FILES` here, where it costs nothing.
