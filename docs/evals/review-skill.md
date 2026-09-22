@@ -964,11 +964,13 @@ was reviewed or what it was scored against. `orchestrator_digest` is a
 length-framed digest over `run-eval.sh`,
 `run-eval-source-snapshot.sh`, `run-eval-lifecycle.sh`,
 `run-eval-runtime.sh`, `run-eval-matrix.sh`, `run-eval-plan.sh`,
-`run-eval-publish.sh`, and `run-eval-cell.sh`. Together they fix source
+`run-eval-publish.sh`, `run-eval-cell.sh`, `review-eval-cell-writer.mjs` and
+`review-eval-stream.mjs`. Together they fix source
 authentication, sealing, restart and cleanup, the spec worktree and the run
 plan, the contestant's allowed tools, turn limit, skill staging,
 finder-report truncation, cell environment, what the matrix may run at the
-same time, and how a run is scored and published. They shape the
+same time, how a cell's transcript is parsed and written, and how a run is
+scored and published. They shape the
 transcript every number is derived from as directly as a prompt does. An edit
 to any of them re-anchors the series, which is the conservative direction: a
 refused comparison is visible, a silently paired one is not.
@@ -1032,7 +1034,7 @@ older one is refused; pass `--contract` with the archived contract to read it.
 | reviewed model    | isolated by the `control` condition; model id and CLI version recorded                                                                 |
 | skill text        | `skill_digest` over every file in the skill directory, symlinks refused — this is the treatment                                        |
 | finder command    | `argv` pinned in the contract; `finder_argv_digest` records what a cell spawned                                                        |
-| orchestrator      | length-framed digest over the wrapper, its three helpers, the cell writer and the stream parser: in the key and every cell fingerprint |
+| orchestrator      | length-framed digest over the wrapper, its seven helpers, the cell writer and the stream parser: in the key and every cell fingerprint |
 | machine and shell | host, CLI versions, `--setting-sources ""`, clean worktree of `origin/main`                                                            |
 | CLI upgrade       | versions in every cell fingerprint; a pair across one is labelled in the verdict, not in the key                                       |
 
