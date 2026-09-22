@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
 # GitHub origin and API probe cases for codex-cloud-setup.test.sh.
-# This file is sourced by codex-cloud-setup.test.sh. The guard below refuses
-# direct execution.
-# Case subshells intentionally isolate environment mutations. The runner owns
-# suite_tmp, setup_script and every case_* global read below (SC2154).
-# shellcheck disable=SC2030,SC2031,SC2154
+# This file is sourced by codex-cloud-setup.test.sh. Do not execute it directly.
+# Case subshells intentionally isolate environment mutations.
+# shellcheck disable=SC2030,SC2031,SC2154 # the runner assigns suite_tmp, setup_script and the case_* globals
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
   echo "codex-cloud-setup-github-probes.test.sh: source this file from codex-cloud-setup.test.sh; do not run it directly." >&2
