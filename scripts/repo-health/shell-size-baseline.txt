@@ -18,8 +18,6 @@ alerts/infra/scripts/set-up-terraform.sh check_gcloud_iam_permissions 94
 governance-watchdog/bin/deploy-quicknode-filter.sh deploy_webhook 100
 governance-watchdog/bin/get-logs.sh get_function_logs 62
 scripts/bootstrap/codex-cloud-github-cli.sh ensure_github_cli_attach_support 51
-scripts/bootstrap/codex-cloud-setup.sh 564
-scripts/bootstrap/codex-cloud-setup.sh install_foundry 56
 scripts/bootstrap/codex-cloud-setup.test.sh 615
 scripts/review/build-fixture.sh verify_fixture 58
 scripts/review/run-eval-lifecycle.sh 598
