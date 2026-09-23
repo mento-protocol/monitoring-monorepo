@@ -348,14 +348,15 @@ are not production proof.
   `x-vercel-cache`: `HIT`, `STALE`, and `PRERENDER` are cache-served. A first
   `MISS` with an absent or zero `Age` is expected but proves nothing, because
   a deployment that never caches returns the same. The CDN cache is per
-  region, so compare the first region in each `x-vercel-id`; repeat a
-  cross-region pair. If the route's source header allows shared caching,
+  region, so compare the first region in each `x-vercel-id`. Repeat a
+  cross-region pair at most three times, then report the step inconclusive.
+  If the source header gives shared caches a positive freshness lifetime,
   require a same-region cache-served repeat whose `Age` is present and not
-  lower than the first response's, unless a first `STALE` triggered
-  revalidation; a same-region repeat `MISS` fails the step. Then compare
-  `Cache-Control` with the route's source header: Vercel can strip
-  `s-maxage` and `stale-while-revalidate` from client responses. For metadata
-  that can become private, prevent stale shared caching or test
+  lower than the first response's (absent counts as zero), unless a first
+  `STALE` triggered revalidation; a same-region repeat `MISS` fails the step.
+  Then compare `Cache-Control` with the route's source header: Vercel can
+  strip `s-maxage` and `stale-while-revalidate` from client responses. For
+  metadata that can become private, prevent stale shared caching or test
   public-to-private revocation.
 - If hydration affects metadata, compare raw tags with the DOM. The DOM alone
   is not crawler proof.
