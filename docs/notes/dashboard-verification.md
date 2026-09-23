@@ -344,10 +344,16 @@ are not production proof.
   expected absence for optional tags.
 - Test an explicit record in each public and private metadata state. Require
   the safe private fallback and no restricted label, tag, or source.
-- Verify `Cache-Control` and `Age` on document and image against the route's
-  source header: Vercel can strip `s-maxage` and `stale-while-revalidate` from
-  client responses. For metadata that can become private, prevent stale
-  shared caching or test public-to-private revocation.
+- Request the document and the image twice each. Classify each response by
+  `x-vercel-cache`: `HIT`, `STALE`, and `PRERENDER` are cache-served. A first
+  `MISS` with an absent or zero `Age` is expected but proves nothing, because
+  a deployment that never caches returns the same. If the route's source
+  header allows shared caching, require a cache-served repeat whose `Age` is
+  present and not lower than the first response's, unless a first `STALE`
+  triggered revalidation; a repeat `MISS` fails the step. Then compare `Cache-Control` with the route's source header: Vercel
+  can strip `s-maxage` and `stale-while-revalidate` from client responses.
+  For metadata that can become private, prevent stale shared caching or test
+  public-to-private revocation.
 - If hydration affects metadata, compare raw tags with the DOM. The DOM alone
   is not crawler proof.
 - Fetch the exact image URL cookie-free with browser caching disabled. For an
