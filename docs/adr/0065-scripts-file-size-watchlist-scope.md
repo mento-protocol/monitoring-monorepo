@@ -35,7 +35,7 @@ gate the watchlist's own code comment now names is
 `scripts/workflows/check-no-skip-audit.mjs`. Dated measurement rows are left as
 recorded.
 
-Retirement amendment: [ADR 0101](0101-legacy-gate-retirement.md) removes local gate routing and its pins. Retained package policy and indexer contracts remain; their current paths are listed in `scripts/AGENTS.md`. The Sentry supervision and CI-wiring pins it retained are gone with ADR 0106. Gate-only path lists below are historical.
+Retirement amendment: [ADR 0101](0101-legacy-gate-retirement.md) removes local gate routing and its pins. Retained package policy and indexer contracts remain; their current paths are listed in `scripts/AGENTS.md`. The Sentry supervision and CI-wiring pins it retained are gone with ADR 0106. Gate-only path lists below are historical. #2428 deleted `scripts/agent-quality-gate.sh` and `scripts/gate/`, so the statements below that the gate's row stays measured, stands, and resurfaces monthly are history; the watch list no longer carries those rows.
 
 ## Context
 
