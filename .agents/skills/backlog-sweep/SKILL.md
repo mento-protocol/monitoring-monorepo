@@ -1033,7 +1033,7 @@ board.
    the body already deserves. `Rule basis` names the Low-risk rule clause behind
    the risk verdict, and on a skipped or re-groomed row it carries the reason
    instead. `Veto ends` says when the window closes, not
-   when the issue becomes selectable: an unapplied proposal, a `risk:medium`, or
+   when the issue becomes selectable: an unapplied proposal, a `risk:high`, or
    several `pkg:*` labels keep it ineligible whatever the clock says. Name the
    remaining requirement beside the time whenever one applies. List candidates
    skipped against their last marker with the reason, and candidates re-groomed

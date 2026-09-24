@@ -905,7 +905,7 @@ deserves. `Rule basis` names the Low-risk rule clause behind the risk verdict,
 and on a skipped or re-groomed row it carries the reason instead.
 `Veto ends` is the end of that issue's 12-hour window, and it says when the
 window closes rather than when the issue becomes selectable — a proposal nobody
-has applied, a `risk:medium`, or several `pkg:*` labels all keep it ineligible
+has applied, a `risk:high`, or several `pkg:*` labels all keep it ineligible
 whatever the clock says. Name the remaining requirement beside the time whenever
 one applies. Zero groomed issues is a valid line and gets written rather than
 omitted — an empty candidate set and a pass that never ran read identically once

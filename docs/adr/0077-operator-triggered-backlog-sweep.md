@@ -211,6 +211,11 @@ predicate. Grooming keeps its rule of never writing a label that completes
 eligibility: it now proposes a completing `risk:medium` the same way it proposes
 `risk:low`, and writes only `risk:high` itself.
 
+Scheduled jobs that file `agent-ready` issues at `risk:medium` with one
+`pkg:*` — the file-size watchlist (ADR 0059) and the docs garden — now feed the
+sweep without a human label. The operator accepted that: those issues are agent
+tasks by design, and the merge boundary still holds.
+
 ## Alternatives considered
 
 **Shared checkout for all workers.** Cheaper to set up and avoids repeated

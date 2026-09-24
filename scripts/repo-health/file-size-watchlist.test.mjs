@@ -331,11 +331,8 @@ test("the live scan never produces a sweep-claimable label set", () => {
     return;
   }
   const labels = actionableLabels(actionable);
-  // The sweep predicate is `agent-ready` plus exactly one `risk:*` equal to
-  // `risk:low` plus exactly one `pkg:*` (`hasSweepRouting`,
-  // scripts/pr/issue-board-state.mjs). This job writes `agent-ready`, so the
-  // risk label is the only thing keeping its own issue out of the unattended
-  // sweep. docs/notes/backlog-sweep.md reserves that `risk:low` for a human.
+  // This job writes `agent-ready` and never the `risk:low` a row's path cannot
+  // prove. docs/notes/backlog-sweep.md reserves `risk:low` for a human.
   assert.ok(labels.includes("agent-ready"));
   assert.deepEqual(
     labels.filter((label) => label.startsWith("risk:")),
@@ -348,7 +345,7 @@ test("a lone production-data writer still files at the risk floor", () => {
   // sentry-triage-archive.mjs is a live actionable row and it archives the
   // underlying Sentry issue under a write-scoped token. Any per-row risk rule
   // that misses the low-risk rule's production-data clause reads this single
-  // scripts/ row as `risk:low` and hands the issue to the unattended sweep.
+  // scripts/ row as `risk:low`.
   const rows = [
     {
       path: "scripts/sentry/triage/sentry-triage-archive.mjs",
@@ -359,8 +356,8 @@ test("a lone production-data writer still files at the risk floor", () => {
   assert.deepEqual(packageLabelsForRows(rows), ["pkg:tooling"]);
   assert.equal(riskLabelForIssue([]), "risk:medium");
   // The fixture, not the live scan, is what pins the contract: one package, one
-  // risk label, and never the `risk:low` that would complete the sweep
-  // predicate. This holds whether or not the tree has drift today.
+  // risk label, and never `risk:low`. This holds whether or not the tree has
+  // drift today.
   assert.ok(labels.includes("agent-ready"));
   assert.deepEqual(
     labels.filter((label) => label.startsWith("risk:")),
