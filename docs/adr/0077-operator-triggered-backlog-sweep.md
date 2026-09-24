@@ -110,8 +110,10 @@ authorization twelve hours later, on an issue no human read. The rule is stated
 against the eligibility predicate rather than against a list of labels, because
 which label completes it depends on what the issue already carries: for an issue
 holding `risk:low` and no package area it is the `pkg:*`; for one holding a
-package area and no risk label it is the `risk:low`. Narrowing labels —
-`risk:medium`, `risk:high`, several `pkg:*` areas — are written freely. Anything
+package area and no risk label it is the `risk:low`, or since the 2026-09-24
+amendment below also a `risk:medium`. Narrowing labels — `risk:high`, several
+`pkg:*` areas, and a `risk:medium` that leaves the issue ineligible — are
+written freely. Anything
 that would complete the predicate goes in the marker's `proposed` list with the
 rule clause behind it, and one human label supplies the acknowledgement that
 ordering cannot. State labels are withheld for a different reason:
@@ -209,16 +211,20 @@ unchanged: every PR stops at READY for a human merge.
 set, so `issue:claim --sweep-eligible` and the `issue:groom` refusal read one
 predicate. Grooming keeps its rule of never writing a label that completes
 eligibility: it now proposes a completing `risk:medium` the same way it proposes
-`risk:low`, and writes only `risk:high` itself.
+`risk:low`. It still writes `risk:high`, and writes `risk:medium` only where the
+issue stays ineligible.
 
 Scheduled jobs that file `agent-ready` issues at `risk:medium` with one
 `pkg:*` — the file-size watchlist (ADR 0059) and the docs garden — now satisfy
 the sweep label predicate without a human label. The operator accepted that:
 those issues are agent tasks by design, and the merge boundary still holds. The
 label predicate alone does not make an issue claimable: `--sweep-eligible` also
-requires a Project item with a present non-`Blocked` Status. Project Status is
-human-owned and neither job writes it, so a human still sets that Status before
-the sweep can claim such an issue.
+requires a Project item with a present non-`Blocked` Status, and neither job
+writes Status. That is not a per-occurrence human gate: the file-size watchlist
+reopens its one owned issue when drift returns, the reopened issue keeps its
+earlier Status, and any non-`Blocked` value, `Done` included, passes the claim
+check. A recurring watchlist issue can therefore be claimed again with no new
+human action, which the operator decision above accepts.
 
 ## Alternatives considered
 
