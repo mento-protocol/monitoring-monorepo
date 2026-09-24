@@ -279,6 +279,16 @@ describe("fetchPoolDetailForSSR", () => {
       volumeUsdWei: "42000000000000000000",
       swapCount: 3,
     });
+    // The serialized day key is the exact `since` the volume query used.
+    const volumeCall = requestMock.mock.calls.find(
+      ([request]) =>
+        (request as { document: string }).document ===
+        BROKER_EXCHANGE_DAILY_SNAPSHOTS_24H,
+    );
+    expect(result?.brokerExchange24hSince).toBeGreaterThan(0);
+    expect(result?.brokerExchange24hSince).toBe(
+      (volumeCall?.[0] as { variables: { since: number } }).variables.since,
+    );
     // Virtual pools skip POOL_BREAKER_CONFIG (mirrors the client query gate),
     // so no breaker fallback is prefetched and the request count stays 7.
     expect(result?.breakerConfig).toBeUndefined();

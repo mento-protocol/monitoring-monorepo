@@ -17,6 +17,10 @@ export type PoolDetailInitialData = {
   vpLifecycleDeprecation?: PoolVpLifecycleDeprecationExtResponse | undefined;
   v2Exchange?: PoolV2ExchangeResponse | undefined;
   brokerExchange24h?: BrokerExchangeDailySnapshots24hResponse | undefined;
+  /** UTC-day start (seconds) the server used as `since` for
+   *  `brokerExchange24h`. The client uses it as its hydration day key and
+   *  threads the fallback only while its live key still matches. */
+  brokerExchange24hSince?: number | undefined;
   /** Per-feed breaker config (trip-able breaker + MARKET_HOURS rows). Threaded
    *  to `<BreakerPanel />` and `<MarketHoursPill />` as `fallbackData` so both
    *  know their resolved shape on first paint. Only populated for FPMM pools

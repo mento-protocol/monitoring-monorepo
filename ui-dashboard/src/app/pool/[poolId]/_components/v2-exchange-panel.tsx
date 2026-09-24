@@ -285,7 +285,7 @@ function formatSpreadBps(spread: string): number {
 function formatBucket(rawWei: string, decimals: number): string {
   if (!rawWei || rawWei === "0") return "0";
   const whole = toHumanUnits(BigInt(rawWei), decimals);
-  return whole.toLocaleString(undefined, { maximumFractionDigits: 0 });
+  return whole.toLocaleString("en-US", { maximumFractionDigits: 0 });
 }
 
 const V2_EXCHANGE_SKELETON_SHIMMER = "animate-pulse rounded bg-slate-800/50";

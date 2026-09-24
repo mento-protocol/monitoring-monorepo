@@ -678,6 +678,7 @@ describe("Pool detail LPs tab", () => {
       },
       v2Exchange: V2_EXCHANGE_RESPONSE,
       brokerExchange24h: BROKER_EXCHANGE_24H_RESPONSE,
+      brokerExchange24hSince: 1778457600,
     };
 
     mockUseGQL.mockImplementation((query: string | null) => {

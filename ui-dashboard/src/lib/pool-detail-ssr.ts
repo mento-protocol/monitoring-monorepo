@@ -90,7 +90,12 @@ async function fetchVirtualPoolHeaderInitialData(
   chainId: number,
   pool: Pool,
   signal: AbortSignal,
-): Promise<Pick<PoolDetailInitialData, "v2Exchange" | "brokerExchange24h">> {
+): Promise<
+  Pick<
+    PoolDetailInitialData,
+    "v2Exchange" | "brokerExchange24h" | "brokerExchange24hSince"
+  >
+> {
   if (!isVirtualPool(pool)) return {};
   const v2Exchange = await requestOptional<PoolV2ExchangeResponse>(
     client,
@@ -107,6 +112,7 @@ async function fetchVirtualPoolHeaderInitialData(
     .toLowerCase()
     .trim();
   if (!exchangeId || !exchangeProvider) return { v2Exchange };
+  const since = currentUtcDayStartSeconds();
   const brokerExchange24h =
     await requestOptional<BrokerExchangeDailySnapshots24hResponse>(
       client,
@@ -115,12 +121,16 @@ async function fetchVirtualPoolHeaderInitialData(
         chainId,
         exchangeProvider,
         exchangeId,
-        since: currentUtcDayStartSeconds(),
+        since,
       },
       signal,
       BrokerExchangeDailySnapshots24hSchema,
     );
-  return { v2Exchange, brokerExchange24h };
+  return {
+    v2Exchange,
+    brokerExchange24h,
+    brokerExchange24hSince: brokerExchange24h ? since : undefined,
+  };
 }
 
 // Prefetch the per-feed breaker config so `<BreakerPanel />` and
@@ -234,7 +244,8 @@ async function fetchPoolDetailUncached(
     fetchVirtualPoolHeaderInitialData(client, chainId, poolRow, signal),
     fetchPoolBreakerConfig(client, chainId, poolRow, signal),
   ]);
-  const { v2Exchange, brokerExchange24h } = headerInitialData;
+  const { v2Exchange, brokerExchange24h, brokerExchange24hSince } =
+    headerInitialData;
 
   return {
     pool,
@@ -244,6 +255,7 @@ async function fetchPoolDetailUncached(
     vpLifecycleDeprecation,
     v2Exchange,
     brokerExchange24h,
+    brokerExchange24hSince,
     breakerConfig,
     // Stamp fetch-completion time so the consumer can age-gate the cached
     // breaker fallback (below). Rides in the cached payload (plain number).
