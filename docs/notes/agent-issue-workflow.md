@@ -64,8 +64,11 @@ eligible. It also refuses an issue a live claim owns, and a label the repository
 does not define. It never writes a state label. The monthly file-size watchlist job
 (`scripts/repo-health/file-size-watchlist-issue.mjs`) is the other unattended
 writer of these labels: it replaces the whole label set of the issues it owns
-outside the mutex, and holds itself to a `risk:medium` floor so it cannot hand
-its own issue to the sweep.
+outside the mutex, and holds itself to a `risk:medium` floor. It never writes
+`risk:low`, but since the sweep also admits `risk:medium`
+([ADR 0077](../adr/0077-operator-triggered-backlog-sweep.md)), its
+single-package issues at `risk:medium` satisfy the sweep label predicate. An
+issue that kept a stricter `risk:high` does not.
 
 An issue may carry `agent-ready` only with exactly one `risk:*` and at least one
 `pkg:*`. An `agent-ready` issue missing either is **incompletely groomed**:

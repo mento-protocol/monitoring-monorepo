@@ -128,7 +128,7 @@ gh issue view <n> --repo mento-protocol/monitoring-monorepo \
   --json number,title,state,labels,body,projectItems,blockedBy
 ```
 
-`labels` settles `agent-ready`, `risk:low`, and the `pkg:*` area;
+`labels` settles `agent-ready`, the `risk:*` set, and the `pkg:*` area;
 `projectItems[].status.name` settles `Blocked`; `body` is where an external
 dependency is named; `blockedBy` is GitHub's own blocked-by relationship, and a
 non-empty `blockedBy.nodes` is a rejection on its own. Read all three
@@ -150,13 +150,16 @@ Take the top N — default 2 — that satisfy **all** of:
 - **`agent-ready`.** Never `needs-grooming`. `rank-backlog` ranks grooming
   issues and never Selects one; a sweep that claimed one would be doing the
   grooming itself, unattended, on the operator's behalf.
-- **Exactly one `risk:*` label, and it is `risk:low`.** The batch runs without
-  a human reading the diff before it is pushed. `risk:medium` and `risk:high`
-  issues are exactly the ones where that gap matters, and the label is the
-  repo's own judgement of which those are. Test for the whole set, not for the
-  presence of `risk:low`: only state labels are mutually exclusive
+- **Exactly one `risk:*` label, and it is `risk:low` or `risk:medium`.** The
+  batch runs without a human reading the diff before it is pushed. `risk:high`
+  issues — secrets, IAM, a production apply, deploy identity — are the ones
+  where that gap matters most, and the label is the repo's own judgement of
+  which those are. The operator admitted `risk:medium` on 2026-09-24 because
+  `risk:low` alone left almost the whole queue ineligible; every PR still stops
+  at READY for a human merge. Test for the whole set, not for the presence of
+  an allowed label: only state labels are mutually exclusive
   ([`agent-issue-workflow.md`](../../../docs/notes/agent-issue-workflow.md)),
-  so an issue can carry `risk:low` and `risk:high` together, and a
+  so an issue can carry `risk:medium` and `risk:high` together, and a
   presence-only check would admit it while the sentence above excludes it. Two
   risk labels is also a grooming signal, not a tie to break.
 - **Fit not authority-capped.** `rank-backlog` caps fit and names the cap when
@@ -335,7 +338,7 @@ body_sha256="$(printf '%s' "$issue_json" | jq -rj '.body // ""' | \
 ```
 
 **Let the helper revalidate its part of eligibility.** `--sweep-eligible`
-rechecks the open queue state, the exact `risk:low` and `pkg:*` sets, native
+rechecks the open queue state, the exact `risk:*` and `pkg:*` sets, native
 blockers, and the selected Project item's ID-bound `Blocked` status around the
 label and ownership transition. It rejects every missing, changed, or `Blocked`
 Status it observes. It never writes Status. Project Status is human-owned, so a
@@ -769,20 +772,22 @@ The full procedure is
      would complete eligibility is proposed, not written.
    - Before every write, work out the label set it would produce. When that set
      satisfies the sweep predicate — `agent-ready`, exactly one `risk:*` equal
-     to `risk:low`, exactly one `pkg:*` — put the label in `proposed` instead
-     and let a human apply it. Which label completes eligibility depends on what
-     the issue already carries: the `pkg:*` for an issue already holding
-     `risk:low`, the `risk:low` for one already holding a package area.
-   - `risk:*` — one, only when the issue carries none. Write `risk:medium`, or
-     `risk:high` for secrets, IAM, a production apply, or deploy identity; both
-     narrow. `risk:low` is always proposed, with the
+     to `risk:low` or `risk:medium`, exactly one `pkg:*` — put the label in
+     `proposed` instead and let a human apply it. Which label completes
+     eligibility depends on what the issue already carries: the `pkg:*` for an
+     issue already holding `risk:low` or `risk:medium`, the risk label for one
+     already holding a package area.
+   - `risk:*` — one, only when the issue carries none. Write `risk:high` for
+     secrets, IAM, a production apply, or deploy identity; it narrows.
+     `risk:low` is always proposed, and `risk:medium` is proposed whenever
+     writing it would complete eligibility, each with the
      [Low-risk rule](../../../docs/notes/agent-issue-workflow.md#low-risk-rule)
      clause behind it. Read that rule at its anchor, never from memory; when it
      cannot be read, propose nothing and say so. Never remove or downgrade an
      existing risk label. Write nothing at all on two issues, naming the reason
      in the marker: one already carrying two risk labels, and one carrying
-     `risk:low` whose verified paths touch secrets, IAM, a production apply, or
-     deploy identity — completing its `pkg:*` routing would hand a worker the
+     `risk:low` or `risk:medium` whose verified paths touch secrets, IAM, a
+     production apply, or deploy identity — completing its `pkg:*` routing would hand a worker the
      issue that label misdescribes.
    - `kind:*` — one, when the work type is obvious.
    - State — write none. Queue-state labels are serialized behind the ADR 0082
@@ -814,7 +819,8 @@ The full procedure is
    `kind:*`, and queue-state labels as read, before this pass writes anything —
    every class the pass can write, so the skip key compares like with like.
    `applied` lists the labels the next call writes; `proposed` lists everything
-   the pass judged right and will not write itself — a `risk:low`, the state
+   the pass judged right and will not write itself — a `risk:low` or completing
+   `risk:medium`, the state
    label the mutex owns, the `agent-ready` promotion, workboard enrollment, and
    a risk label withheld from a contradicted or double-labeled issue. `at`
    records when the pass ran, for a human reading the comment; the veto window
@@ -1022,12 +1028,12 @@ board.
    candidates the walk examined. Each is one value a run, so neither is a
    column. The table is
    `Issue | Labels applied | Proposed for a human | Rule basis | Veto ends`.
-   `Proposed for a human` is the column an operator acts on — a `risk:low` the pass may not write, the
+   `Proposed for a human` is the column an operator acts on — a `risk:low` or completing `risk:medium` the pass may not write, the
    state label the mutex owns, workboard enrollment, an `agent-ready` promotion
    the body already deserves. `Rule basis` names the Low-risk rule clause behind
    the risk verdict, and on a skipped or re-groomed row it carries the reason
    instead. `Veto ends` says when the window closes, not
-   when the issue becomes selectable: an unapplied proposal, a `risk:medium`, or
+   when the issue becomes selectable: an unapplied proposal, a `risk:high`, or
    several `pkg:*` labels keep it ineligible whatever the clock says. Name the
    remaining requirement beside the time whenever one applies. List candidates
    skipped against their last marker with the reason, and candidates re-groomed

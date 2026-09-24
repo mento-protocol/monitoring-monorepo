@@ -3,7 +3,7 @@ title: Operator-triggered backlog sweep with isolated workers
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-03
+last_verified: 2026-09-24
 scope: process
 date: 2026-08
 doc_type: adr
@@ -13,7 +13,8 @@ garden_lane: adrs-architecture
 
 # ADR 0077 — Operator-triggered backlog sweep with isolated workers
 
-**Status:** Accepted (Aug 2026), amended by M5 and retirement in 2026-09.
+**Status:** Accepted (Aug 2026), amended by M5 and retirement in 2026-09, and
+by the `risk:medium` admission of 2026-09-24.
 **Scope:** process
 
 ## Context
@@ -109,8 +110,10 @@ authorization twelve hours later, on an issue no human read. The rule is stated
 against the eligibility predicate rather than against a list of labels, because
 which label completes it depends on what the issue already carries: for an issue
 holding `risk:low` and no package area it is the `pkg:*`; for one holding a
-package area and no risk label it is the `risk:low`. Narrowing labels —
-`risk:medium`, `risk:high`, several `pkg:*` areas — are written freely. Anything
+package area and no risk label it is the `risk:low`, or since the 2026-09-24
+amendment below also a `risk:medium`. Narrowing labels — `risk:high`, several
+`pkg:*` areas, and a `risk:medium` that leaves the issue ineligible — are
+written freely. Anything
 that would complete the predicate goes in the marker's `proposed` list with the
 rule clause behind it, and one human label supplies the acknowledgement that
 ordering cannot. State labels are withheld for a different reason:
@@ -195,6 +198,34 @@ marker is `sweep-groomed:v2` and the skip key matches that prefix literally:
 every `v1` marker is invalid by construction and re-grooms once. The veto window
 alone still reads any version, because it asks whether a human saw the labels.
 
+## Amendment — 2026-09-24: sweeps admit `risk:medium`
+
+The sweep of 2026-09-23 found 3 `risk:low` issues among 59 open, and only one of
+them was ready. Most workable `agent-ready` issues carried `risk:medium`, so a
+batch of four shipped one PR. The operator decided that an unattended batch may
+take `risk:low` and `risk:medium` issues. `risk:high` — secrets, IAM, a
+production apply, deploy identity — stays manual. The merge boundary is
+unchanged: every PR stops at READY for a human merge.
+
+`hasSweepRoutingNames` in `scripts/pr/issue-board-state.mjs` holds the allowed
+set, so `issue:claim --sweep-eligible` and the `issue:groom` refusal read one
+predicate. Grooming keeps its rule of never writing a label that completes
+eligibility: it now proposes a completing `risk:medium` the same way it proposes
+`risk:low`. It still writes `risk:high`, and writes `risk:medium` only where the
+issue stays ineligible.
+
+Scheduled jobs that file `agent-ready` issues at `risk:medium` with one
+`pkg:*` — the file-size watchlist (ADR 0059) and the docs garden — now satisfy
+the sweep label predicate without a human label. The operator accepted that:
+those issues are agent tasks by design, and the merge boundary still holds. The
+label predicate alone does not make an issue claimable: `--sweep-eligible` also
+requires a Project item with a present non-`Blocked` Status, and neither job
+writes Status. That is not a per-occurrence human gate: the file-size watchlist
+reopens its one owned issue when drift returns, the reopened issue keeps its
+earlier Status, and any non-`Blocked` value, `Done` included, passes the claim
+check. A recurring watchlist issue can therefore be claimed again with no new
+human action, which the operator decision above accepts.
+
 ## Alternatives considered
 
 **Shared checkout for all workers.** Cheaper to set up and avoids repeated
@@ -225,7 +256,7 @@ The operator's review points are unchanged: they see the batch before it starts
 and every PR before anything merges.
 
 Eligibility is deliberately narrower than the ranking that feeds it —
-`agent-ready`, exactly one `risk:*` label equal to `risk:low`, a `pkg:*` area,
+`agent-ready`, exactly one `risk:*` label equal to `risk:low` or `risk:medium`, a `pkg:*` area,
 fit not authority-capped, not blocked, and mutually independent within a batch.
 Issues outside that set stay manual, which is the intended cost. The amendment
 above adds the pass that keeps that set from being empty, and bounds the delay

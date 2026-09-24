@@ -306,7 +306,8 @@ comment. Success and partial errors include the Claim ID.
 requirement. The digest binds the exact body snapshot that the orchestrator
 classified for external dependencies. The helper checks that digest while it
 holds the issue mutex. It also checks that the issue is open and `agent-ready`,
-has exactly `risk:low` and one `pkg:*` label, has no native blocker, and has a
+has exactly one `risk:*` label equal to `risk:low` or `risk:medium` (since
+2026-09-24) and exactly one `pkg:*` label, has no native blocker, and has a
 present non-`Blocked` Project Status. It repeats the body and ID-bound Status
 checks at the points described below.
 
@@ -444,7 +445,7 @@ unknown label only after the write is attempted, where this module keeps
 from the mutex entirely. It re-reads the issue's labels inside the
 serialized section and refuses the write when the resulting set would satisfy
 the backlog-sweep label predicate: `agent-ready`, exactly one `risk:*` equal to
-`risk:low`, and exactly one `pkg:*`. The mutex serializes helpers, not people,
+`risk:low` or `risk:medium` (since 2026-09-24), and exactly one `pkg:*`. The mutex serializes helpers, not people,
 so the helper re-reads the labels after the write, and treats any addition
 missing from that read as an ambiguous outcome rather than a success — a
 concurrent actor can remove this call's own addition in the same window. When a

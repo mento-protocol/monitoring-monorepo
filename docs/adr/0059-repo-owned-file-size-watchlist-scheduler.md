@@ -48,11 +48,15 @@ The repository owns one monthly, issue-only file-size schedule:
 - An actionable issue carries `agent-ready`, `kind:refactor`, `priority:p2`, one
   `pkg:*` per package area its actionable rows touch, and one `risk:*`. Risk is
   `risk:medium` unless the issue already carries a stricter label, which the
-  upsert keeps. The job never writes `risk:low`: `agent-ready` plus one
-  `risk:low` plus one `pkg:*` is the sweep predicate, and
-  [`docs/notes/backlog-sweep.md`](../notes/backlog-sweep.md) reserves that last
-  label for a human, so an unattended job cannot route its own issue into the
-  unattended sweep.
+  upsert keeps. The job never writes `risk:low`, which
+  [`docs/notes/backlog-sweep.md`](../notes/backlog-sweep.md) reserves for a
+  human. Since the 2026-09-24 amendment to
+  [ADR 0077](0077-operator-triggered-backlog-sweep.md), the sweep also admits
+  `risk:medium`, so a single-package issue from this job at `risk:medium`
+  satisfies the sweep label predicate; one that kept `risk:high` does not. A
+  sweep claim also needs a Project item with a present
+  non-`Blocked` Status, which this job does not write. A reopened issue keeps
+  its earlier Status, so it can be claimed again with no new human action.
 - Reruns never overwrite an issue carrying `agent-active`, `in-pr`, or
   `needs-grooming`. An unclaimed issue closes when the actionable rows clear and
   reopens if drift returns.

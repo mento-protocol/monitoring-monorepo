@@ -45,13 +45,12 @@ const ACTIONABLE_BASE_LABELS = [
 /**
  * The risk label this job may write, and the order it ranks them in.
  *
- * The floor is `risk:medium` and this job never writes `risk:low`. The sweep
- * predicate is `agent-ready` plus exactly one `risk:*` equal to `risk:low` plus
- * exactly one `pkg:*` (`hasSweepRouting`, scripts/pr/issue-board-state.mjs), so
- * a `risk:low` write here would let a monthly unattended job hand its own issue
- * to the unattended sweep. docs/notes/backlog-sweep.md forbids exactly that for
- * the automated grooming pass: `risk:low` is proposed and a human applies it.
- * That rule binds every unattended writer of the predicate, not only the pass.
+ * The floor is `risk:medium` and this job never writes `risk:low`, because a
+ * row's path cannot prove the Low-risk rule's clauses. Since 2026-09-24 the
+ * sweep predicate (`hasSweepRouting`, scripts/pr/issue-board-state.mjs) admits
+ * `risk:medium`, so a single-package issue from this job is sweep-eligible; the
+ * operator accepted that in ADR 0077's 2026-09-24 amendment. Every sweep PR
+ * still stops at READY for a human merge.
  *
  * Deciding the floor per row was the alternative, and it needs a list of the
  * control surfaces a row can reach. Such a list under-scans: it missed the

@@ -198,12 +198,14 @@ An issue enters a batch only when all of the following hold:
 - **`agent-ready`** — never `needs-grooming`. Ranking scores grooming issues
   and never Selects one; a sweep that claimed one would be grooming unattended
   on the operator's behalf.
-- **Exactly one `risk:*` label, and it is `risk:low`** — the batch is
-  implemented and pushed with no human reading the diff first, and the risk
-  label is this repo's own judgement about where that gap matters. Only state
-  labels are mutually exclusive, so an issue can carry `risk:low` beside
-  `risk:high`; testing the set rather than the presence of `risk:low` is what
-  keeps that issue out.
+- **Exactly one `risk:*` label, and it is `risk:low` or `risk:medium`** — the
+  batch is implemented and pushed with no human reading the diff first, and the
+  risk label is this repo's own judgement about where that gap matters.
+  `risk:high` stays out; the operator admitted `risk:medium` on 2026-09-24
+  ([ADR 0077](../adr/0077-operator-triggered-backlog-sweep.md)). Only state
+  labels are mutually exclusive, so an issue can carry `risk:medium` beside
+  `risk:high`; testing the set rather than the presence of an allowed label is
+  what keeps that issue out.
 - **Fit not authority-capped** — ranking caps fit and names the cap when an
   issue needs a product decision, a credential the loop cannot reach, or an
   issue-specific human approval before the work is even ready to review. A
@@ -442,7 +444,7 @@ gap that made the pass necessary.
 **It runs after the batch is claimed and every worker is spawned, and before the
 report.** That position is the whole safety argument. This run's eligibility
 step has already finished, so no label the pass writes can select work for this
-run. An unattended agent that labels an issue `risk:low` and then works it in
+run. An unattended agent that labels an issue `risk:low` or `risk:medium` and then works it in
 the same run has no risk gate at all, which is the root
 [`AGENTS.md`](../../AGENTS.md) rule against weakening a control that blocks your
 own work, applied to the sweep's own gate. Never move the pass earlier and never
@@ -555,7 +557,7 @@ wrote would strand the issue permanently.
 
 The `labels` snapshot is what makes a human's correction reopen the candidate.
 The pass stops without writing on an issue carrying two `risk:*` labels and on a
-`risk:low` its verified paths contradict, and both stops write `applied: []`.
+`risk:low` or `risk:medium` its verified paths contradict, and both stops write `applied: []`.
 Against an empty list the third condition succeeds vacuously, so a human who
 removes one of the two risk labels — the fix the stop was asking for — leaves
 the body and the path map unchanged and the issue skipped for ever. The snapshot
@@ -595,12 +597,13 @@ happen once, at the start of the pass, under Candidates above.
 
 **The pass never writes a label that leaves an issue sweep-eligible.** Work out
 the label set the write would produce; when that set satisfies the sweep
-predicate — `agent-ready`, exactly one `risk:*` equal to `risk:low`, exactly one
-`pkg:*` — the label goes in the marker's `proposed` list instead, and a human
-applies it. This is one rule rather than a list of labels because which label
-completes eligibility depends on what the issue already carries: for an issue
-holding `risk:low` and no package area it is the `pkg:*`, and for one holding a
-package area and no risk label it is the `risk:low`. The pass may narrow
+predicate — `agent-ready`, exactly one `risk:*` equal to `risk:low` or
+`risk:medium`, exactly one `pkg:*` — the label goes in the marker's `proposed`
+list instead, and a human applies it. This is one rule rather than a list of
+labels because which label completes eligibility depends on what the issue
+already carries: for an issue holding an eligible risk label and no package area
+it is the `pkg:*`, and for one holding a package area and no risk label it is
+the risk label. The pass may narrow
 eligibility freely and may never widen it.
 
 The run boundary alone does not cover this. The veto is passive, the next run is
@@ -614,9 +617,10 @@ it is the same click the `agent-ready` promotion already needs.
   written freely: they narrow. A single area that would complete eligibility is
   proposed. When the body names no path, apply none and say so in the marker.
 - **`risk:*`** — one, and only when the issue carries none. The pass writes
-  `risk:medium`, or `risk:high` when the issue touches secrets, IAM, a
-  production apply, or deploy identity; both narrow. `risk:low` is proposed,
-  never written, citing the
+  `risk:high` when the issue touches secrets, IAM, a production apply, or
+  deploy identity; it narrows. `risk:low` is proposed, never written, and
+  `risk:medium` is proposed whenever writing it would complete eligibility;
+  each cites the
   [Low-risk rule](agent-issue-workflow.md#low-risk-rule) clause it relied on.
 
   Read that rule at its anchor rather than from memory, and when it cannot be
@@ -627,7 +631,7 @@ it is the same click the `agent-ready` promotion already needs.
   never downgrades one. Two cases stop the pass on that issue instead, with the
   reason in the marker and no label written at all: an issue already carrying
   two risk labels, because removing one is the human judgement the pass is not
-  making; and an issue carrying `risk:low` whose verified paths touch secrets,
+  making; and an issue carrying `risk:low` or `risk:medium` whose verified paths touch secrets,
   IAM, a production apply, or deploy identity, because completing its `pkg:*`
   routing would hand an unattended worker exactly the issue the risk label
   misdescribes.
@@ -753,7 +757,7 @@ with like. Together with `applied` those four fields are the skip key above.
 `applied` lists the labels the pass writes immediately after posting this
 comment; the comment is written first, so the field names an intent that the
 label call then carries out. `proposed` lists everything the pass judged right
-and will not write itself: a `risk:low` it is not allowed to apply, the state
+and will not write itself: a `risk:low` or completing `risk:medium` it is not allowed to apply, the state
 label the mutex owns, the `agent-ready` promotion only an operator can make,
 workboard enrollment, and a risk label withheld from an issue already carrying
 two or contradicted by its own paths.
@@ -895,13 +899,13 @@ a column.
 
 The table itself is `Issue | Labels applied | Proposed for a human | Rule basis
 | Veto ends`. `Proposed for a human` is the
-column an operator acts on: a `risk:low` the pass may not write, the state label
+column an operator acts on: a `risk:low` or completing `risk:medium` the pass may not write, the state label
 the mutex owns, workboard enrollment, an `agent-ready` promotion the body already
 deserves. `Rule basis` names the Low-risk rule clause behind the risk verdict,
 and on a skipped or re-groomed row it carries the reason instead.
 `Veto ends` is the end of that issue's 12-hour window, and it says when the
 window closes rather than when the issue becomes selectable — a proposal nobody
-has applied, a `risk:medium`, or several `pkg:*` labels all keep it ineligible
+has applied, a `risk:high`, or several `pkg:*` labels all keep it ineligible
 whatever the clock says. Name the remaining requirement beside the time whenever
 one applies. Zero groomed issues is a valid line and gets written rather than
 omitted — an empty candidate set and a pass that never ran read identically once

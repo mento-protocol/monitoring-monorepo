@@ -321,7 +321,7 @@ async function groomLocked(options, number, labels, dependencies, lease) {
     const postWrite = new Set([...current, ...additions]);
     if (satisfiesSweepLabelEligibility(postWrite)) {
       throw new IssueGroomEligibilityRefusedError(
-        `Issue #${number} groom refused: adding ${additions.join(", ")} would leave ${eligibilityText(postWrite)}, which satisfies the sweep predicate (agent-ready, exactly one risk:* equal to risk:low, exactly one pkg:*). Propose the label for a human instead of writing it.`,
+        `Issue #${number} groom refused: adding ${additions.join(", ")} would leave ${eligibilityText(postWrite)}, which satisfies the sweep predicate (agent-ready, exactly one risk:* equal to risk:low or risk:medium, exactly one pkg:*). Propose the label for a human instead of writing it.`,
         {
           issue: number,
           requested: labels,

@@ -281,11 +281,15 @@ function namesWithPrefix(labels, prefix) {
   return [...labels].filter((label) => label.startsWith(prefix));
 }
 
+// risk:high stays out: an unattended batch never works secrets, IAM, a
+// production apply, or deploy identity.
+const SWEEP_RISK_LABELS = new Set(["risk:low", "risk:medium"]);
+
 function hasSweepRoutingNames(labels) {
   const riskLabels = namesWithPrefix(labels, "risk:");
   return (
     riskLabels.length === 1 &&
-    riskLabels[0] === "risk:low" &&
+    SWEEP_RISK_LABELS.has(riskLabels[0]) &&
     namesWithPrefix(labels, "pkg:").length === 1
   );
 }
