@@ -309,7 +309,7 @@ test("actionable labels span every package the rows touch", () => {
   ]);
 });
 
-test("the live scan never produces a sweep-claimable label set", () => {
+test("the live scan writes agent-ready, risk:medium, and complete pkg routing", () => {
   const report = JSON.parse(
     execFileSync(
       process.execPath,

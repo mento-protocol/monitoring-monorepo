@@ -306,7 +306,8 @@ comment. Success and partial errors include the Claim ID.
 requirement. The digest binds the exact body snapshot that the orchestrator
 classified for external dependencies. The helper checks that digest while it
 holds the issue mutex. It also checks that the issue is open and `agent-ready`,
-has exactly `risk:low` and one `pkg:*` label, has no native blocker, and has a
+has exactly one `risk:*` label equal to `risk:low` or `risk:medium` (since
+2026-09-24) and exactly one `pkg:*` label, has no native blocker, and has a
 present non-`Blocked` Project Status. It repeats the body and ID-bound Status
 checks at the points described below.
 

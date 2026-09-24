@@ -212,9 +212,13 @@ eligibility: it now proposes a completing `risk:medium` the same way it proposes
 `risk:low`, and writes only `risk:high` itself.
 
 Scheduled jobs that file `agent-ready` issues at `risk:medium` with one
-`pkg:*` — the file-size watchlist (ADR 0059) and the docs garden — now feed the
-sweep without a human label. The operator accepted that: those issues are agent
-tasks by design, and the merge boundary still holds.
+`pkg:*` — the file-size watchlist (ADR 0059) and the docs garden — now satisfy
+the sweep label predicate without a human label. The operator accepted that:
+those issues are agent tasks by design, and the merge boundary still holds. The
+label predicate alone does not make an issue claimable: `--sweep-eligible` also
+requires a Project item with a present non-`Blocked` Status. Project Status is
+human-owned and neither job writes it, so a human still sets that Status before
+the sweep can claim such an issue.
 
 ## Alternatives considered
 

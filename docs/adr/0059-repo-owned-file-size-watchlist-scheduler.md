@@ -52,7 +52,9 @@ The repository owns one monthly, issue-only file-size schedule:
   [`docs/notes/backlog-sweep.md`](../notes/backlog-sweep.md) reserves for a
   human. Since the 2026-09-24 amendment to
   [ADR 0077](0077-operator-triggered-backlog-sweep.md), the sweep also admits
-  `risk:medium`, so a single-package issue from this job is sweep-eligible.
+  `risk:medium`, so a single-package issue from this job satisfies the sweep
+  label predicate. A sweep claim also needs a Project item with a present
+  non-`Blocked` Status, which this job does not write.
 - Reruns never overwrite an issue carrying `agent-active`, `in-pr`, or
   `needs-grooming`. An unclaimed issue closes when the actionable rows clear and
   reopens if drift returns.
