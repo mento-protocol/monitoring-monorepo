@@ -3,7 +3,7 @@ title: Backlog transition storage
 status: active
 owner: eng
 canonical: false
-last_verified: 2026-07-24
+last_verified: 2026-09-24
 doc_type: tracker
 scope: repo-wide
 review_interval_days: 90

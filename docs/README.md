@@ -270,7 +270,6 @@ Authority: canonical
 Authority: non-canonical
 
 - [`BACKLOG.md`](../BACKLOG.md)
-- [`docs/metrics/review-process-after-1045-comparison-2026-07-07.md`](metrics/review-process-after-1045-comparison-2026-07-07.md) (archived)
 - [`docs/metrics/verification-redesign-m4-shadow-evidence.md`](metrics/verification-redesign-m4-shadow-evidence.md) (archived)
 - [`docs/notes/indexer-spec-followups.md`](notes/indexer-spec-followups.md) (archived)
 - [`docs/notes/react-compiler-annotation-pilot.md`](notes/react-compiler-annotation-pilot.md) (archived)

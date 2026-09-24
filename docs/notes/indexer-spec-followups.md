@@ -3,7 +3,7 @@ title: Parked indexer metric ideas
 status: archived
 owner: eng
 canonical: false
-last_verified: 2026-07-24
+last_verified: 2026-09-24
 archived: 2026-05-29
 archived_reason: "Unprioritized metric ideas moved from BACKLOG.md; promote only after current-source verification and concrete demand."
 doc_type: note
