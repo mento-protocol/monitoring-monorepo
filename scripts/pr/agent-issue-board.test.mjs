@@ -14557,7 +14557,7 @@ function lockCommitStates(server) {
 }
 
 test("groom applies routing labels under the per-issue mutex", async () => {
-  const board = createGroomBoard({ labels: ["agent-ready", "risk:medium"] });
+  const board = createGroomBoard({ labels: ["agent-ready", "risk:high"] });
   const results = await groom(
     groomOptions(["pkg:tooling", "kind:workflow"]),
     board.dependencies,
@@ -14570,7 +14570,7 @@ test("groom applies routing labels under the per-issue mutex", async () => {
     "agent-ready",
     "kind:workflow",
     "pkg:tooling",
-    "risk:medium",
+    "risk:high",
   ]);
   assertEqual(results.length, 1, "groom result count");
   assertEqual(results[0].state, "groomed", "groom result state");
@@ -15138,13 +15138,15 @@ test("groom parses one issue and its routing labels", () => {
 });
 
 test("sweep label eligibility is the conjunction the grooming rule names", () => {
-  assert(
-    satisfiesSweepLabelEligibility(["agent-ready", "risk:low", "pkg:tooling"]),
-    "agent-ready with one risk:low and one pkg:* is eligible",
-  );
+  for (const risk of ["risk:low", "risk:medium"]) {
+    assert(
+      satisfiesSweepLabelEligibility(["agent-ready", risk, "pkg:tooling"]),
+      `agent-ready with one ${risk} and one pkg:* is eligible`,
+    );
+  }
   for (const labels of [
     ["risk:low", "pkg:tooling"],
-    ["agent-ready", "risk:medium", "pkg:tooling"],
+    ["agent-ready", "risk:high", "pkg:tooling"],
     ["agent-ready", "risk:low", "risk:medium", "pkg:tooling"],
     ["agent-ready", "risk:low", "pkg:tooling", "pkg:alerts"],
     ["agent-ready", "risk:low"],

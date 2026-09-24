@@ -3,7 +3,7 @@ title: Operator-triggered backlog sweep with isolated workers
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-03
+last_verified: 2026-09-24
 scope: process
 date: 2026-08
 doc_type: adr
@@ -13,7 +13,8 @@ garden_lane: adrs-architecture
 
 # ADR 0077 — Operator-triggered backlog sweep with isolated workers
 
-**Status:** Accepted (Aug 2026), amended by M5 and retirement in 2026-09.
+**Status:** Accepted (Aug 2026), amended by M5 and retirement in 2026-09, and
+by the `risk:medium` admission of 2026-09-24.
 **Scope:** process
 
 ## Context
@@ -195,6 +196,21 @@ marker is `sweep-groomed:v2` and the skip key matches that prefix literally:
 every `v1` marker is invalid by construction and re-grooms once. The veto window
 alone still reads any version, because it asks whether a human saw the labels.
 
+## Amendment — 2026-09-24: sweeps admit `risk:medium`
+
+The sweep of 2026-09-23 found 3 `risk:low` issues among 59 open, and only one of
+them was ready. Most workable `agent-ready` issues carried `risk:medium`, so a
+batch of four shipped one PR. The operator decided that an unattended batch may
+take `risk:low` and `risk:medium` issues. `risk:high` — secrets, IAM, a
+production apply, deploy identity — stays manual. The merge boundary is
+unchanged: every PR stops at READY for a human merge.
+
+`hasSweepRoutingNames` in `scripts/pr/issue-board-state.mjs` holds the allowed
+set, so `issue:claim --sweep-eligible` and the `issue:groom` refusal read one
+predicate. Grooming keeps its rule of never writing a label that completes
+eligibility: it now proposes a completing `risk:medium` the same way it proposes
+`risk:low`, and writes only `risk:high` itself.
+
 ## Alternatives considered
 
 **Shared checkout for all workers.** Cheaper to set up and avoids repeated
@@ -225,7 +241,7 @@ The operator's review points are unchanged: they see the batch before it starts
 and every PR before anything merges.
 
 Eligibility is deliberately narrower than the ranking that feeds it —
-`agent-ready`, exactly one `risk:*` label equal to `risk:low`, a `pkg:*` area,
+`agent-ready`, exactly one `risk:*` label equal to `risk:low` or `risk:medium`, a `pkg:*` area,
 fit not authority-capped, not blocked, and mutually independent within a batch.
 Issues outside that set stay manual, which is the intended cost. The amendment
 above adds the pass that keeps that set from being empty, and bounds the delay

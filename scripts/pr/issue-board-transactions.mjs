@@ -267,7 +267,7 @@ async function assertSweepStatusUnchanged(
 function claimabilityError(options, issue) {
   if (options.sweepEligible) {
     return new IssueClaimCandidateLossError(
-      `Issue #${issue.number} is not sweep-eligible; expected open agent-ready, exactly risk:low, exactly one pkg:* label, no native blocker, and an exact non-Blocked selected Project Status`,
+      `Issue #${issue.number} is not sweep-eligible; expected open agent-ready, exactly one risk:* equal to risk:low or risk:medium, exactly one pkg:* label, no native blocker, and an exact non-Blocked selected Project Status`,
     );
   }
   return new IssueClaimCandidateLossError(
