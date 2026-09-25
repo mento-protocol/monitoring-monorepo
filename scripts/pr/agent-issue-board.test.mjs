@@ -8236,6 +8236,53 @@ test("mutex acquire retries reconciliation reads after an applied CAS", async ()
   await releaseIssueMutationLock(lease);
 });
 
+test("unreadable reconciliation payloads still report an unknown acquire as stale", async () => {
+  const server = createFakeLockServer();
+  const setup = await acquireIssueMutationLock(
+    LOCK_TEST_OPTIONS,
+    2122,
+    { operation: "sync", agent: "setup" },
+    server.operations,
+  );
+  await releaseIssueMutationLock(setup);
+
+  let acquireApplied = false;
+  const error = await assertRejects(
+    () =>
+      acquireIssueMutationLock(
+        LOCK_TEST_OPTIONS,
+        2122,
+        { operation: "claim", agent: "codex", claimId: "claim-2122" },
+        server.withOperations({
+          compareAndSwapLockRef: async (...args) => {
+            const commit = server.commits.get(args[4]);
+            if (commit.payload.state === "LOCK") {
+              await server.compareAndSwapLockRef(...args);
+              acquireApplied = true;
+              throw new Error("acquire response lost");
+            }
+            return server.compareAndSwapLockRef(...args);
+          },
+          readLockRef: async (...args) => {
+            if (acquireApplied) {
+              // The shape the package's payload parser raises for a
+              // payload it cannot read.
+              const invalid = new Error("commit has an invalid JSON payload");
+              invalid.code = "ISSUE_OWNERSHIP_CONFLICT";
+              invalid.refInvalid = true;
+              throw invalid;
+            }
+            return server.operations.readLockRef(...args);
+          },
+        }),
+      ),
+    /outcome is unknown[\s\S]*candidate LOCK[\s\S]*do not retry or mutate the board/,
+  );
+  assert(error instanceof IssueMutationLockStaleError);
+  assertEqual(error.cause.code, "ISSUE_MUTATION_LOCK_RECONCILIATION_UNKNOWN");
+  assertEqual(error.lease.lockOid, server.refOid);
+});
+
 test("unknown acquire outcome reports the candidate LOCK and recovery evidence", async () => {
   const server = createFakeLockServer();
   const setup = await acquireIssueMutationLock(

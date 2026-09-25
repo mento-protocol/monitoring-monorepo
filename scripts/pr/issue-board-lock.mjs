@@ -918,8 +918,16 @@ function engine(options, operations) {
         operations.createStateCommit(ctx.options, ...args),
       readDefaultBranchCommit: (ctx) =>
         operations.readDefaultBranchCommit(ctx.options),
-      readClaimRef: (ctx, ...args) =>
-        operations.readLockRef(ctx.options, ...args),
+      // A read the package sees as `refInvalid` would end reconciliation with
+      // a stale code outside the lease wrapper. The board treats an unreadable
+      // head as an unknown outcome, so the flag never reaches the package.
+      readClaimRef: async (ctx, ...args) => {
+        try {
+          return await operations.readLockRef(ctx.options, ...args);
+        } catch (err) {
+          throw boardError(err);
+        }
+      },
       sleep: (ms) => operations.sleep(ms),
     },
   };
