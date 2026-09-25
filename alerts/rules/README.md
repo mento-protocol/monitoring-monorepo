@@ -196,6 +196,11 @@ title define next to its message define. The separate `*_alert_title`
 templates are gone, which freed 13 slots. Put a new alert type's title in its
 message template, not in a template of its own.
 
+The peg titles are in the middle of the same move. Each peg message template
+in `peg-message-templates.tf` also carries its title define, copied by
+reference from the title template. After that change is applied, a follow-up
+inlines both title defines and deletes the two peg title templates.
+
 ## Relayer wallet balances
 
 Both rules live in `rules-oracle-relayers.tf` and take their numbers from the
