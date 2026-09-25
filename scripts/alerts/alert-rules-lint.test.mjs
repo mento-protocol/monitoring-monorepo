@@ -1214,12 +1214,12 @@ test("Peg Slack pages mention @support-engineer only while critical alerts are f
       'resource "grafana_message_template" "peg_slack_message"',
     ),
     templates.indexOf(
-      'resource "grafana_message_template" "peg_victorops_title"',
+      'resource "grafana_message_template" "peg_victorops_message"',
     ),
   );
   const victorOpsTemplates = templates.slice(
     templates.indexOf(
-      'resource "grafana_message_template" "peg_victorops_title"',
+      'resource "grafana_message_template" "peg_victorops_message"',
     ),
   );
   const supportMention = "<!subteam^${var.oncall_support_usergroup_id}>";
@@ -1258,20 +1258,18 @@ test("Peg Grafana and Slack copy leads with the concrete cause", () => {
     path.join(rulesDir, "peg-message-templates.tf"),
     "utf8",
   );
-  const slackTitleStart = templates.indexOf(
-    'resource "grafana_message_template" "peg_slack_title"',
-  );
+  const slackTitleStart = templates.indexOf('{{ define "peg.slack.title" -}}');
   const slackMessageStart = templates.indexOf(
-    'resource "grafana_message_template" "peg_slack_message"',
+    '{{ define "peg.slack.message" }}',
   );
-  const victorOpsTitleStart = templates.indexOf(
-    'resource "grafana_message_template" "peg_victorops_title"',
+  const victorOpsMessageStart = templates.indexOf(
+    'resource "grafana_message_template" "peg_victorops_message"',
   );
   assert(
     slackTitleStart >= 0 &&
       slackMessageStart > slackTitleStart &&
-      victorOpsTitleStart > slackMessageStart,
-    "Peg notification template resources must exist in the expected order",
+      victorOpsMessageStart > slackMessageStart,
+    "Peg notification template defines must exist in the expected order",
   );
   const slackTitleTemplate = templates.slice(
     slackTitleStart,
@@ -1279,7 +1277,7 @@ test("Peg Grafana and Slack copy leads with the concrete cause", () => {
   );
   const slackMessageTemplate = templates.slice(
     slackMessageStart,
-    victorOpsTitleStart,
+    victorOpsMessageStart,
   );
 
   assert(
@@ -1387,15 +1385,7 @@ test("Peg Grafana consumers use a literal source activation guard", () => {
     ["main.tf", 'resource "grafana_folder" "peg_monitoring"'],
     [
       "peg-message-templates.tf",
-      'resource "grafana_message_template" "peg_slack_title"',
-    ],
-    [
-      "peg-message-templates.tf",
       'resource "grafana_message_template" "peg_slack_message"',
-    ],
-    [
-      "peg-message-templates.tf",
-      'resource "grafana_message_template" "peg_victorops_title"',
     ],
     [
       "peg-message-templates.tf",
@@ -1452,8 +1442,8 @@ test("Peg Grafana consumers use a literal source activation guard", () => {
     "peg alert instances must be one stable singleton map derived from the literal source switch",
   );
   assert(
-    guardedResources.length === 9,
-    `expected exactly nine Peg Grafana consumers, found ${guardedResources.length}`,
+    guardedResources.length === 7,
+    `expected exactly seven Peg Grafana consumers, found ${guardedResources.length}`,
   );
   for (const [file, marker] of guardedResources) {
     assertGuardedResource(file, marker, sourceForFile(file));

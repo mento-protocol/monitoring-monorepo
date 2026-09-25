@@ -11,7 +11,6 @@ resource "grafana_contact_point" "peg_market_warning" {
   }
 
   depends_on = [
-    grafana_message_template.peg_slack_title["peg-monitoring"],
     grafana_message_template.peg_slack_message["peg-monitoring"],
   ]
 }
@@ -29,7 +28,6 @@ resource "grafana_contact_point" "peg_ops_warning" {
   }
 
   depends_on = [
-    grafana_message_template.peg_slack_title["peg-monitoring"],
     grafana_message_template.peg_slack_message["peg-monitoring"],
   ]
 }
@@ -53,9 +51,7 @@ resource "grafana_contact_point" "peg_page" {
   }
 
   depends_on = [
-    grafana_message_template.peg_slack_title["peg-monitoring"],
     grafana_message_template.peg_slack_message["peg-monitoring"],
-    grafana_message_template.peg_victorops_title["peg-monitoring"],
     grafana_message_template.peg_victorops_message["peg-monitoring"],
   ]
 }

@@ -245,7 +245,7 @@ const RESOURCE_DATA_BLOCK_KEY_GROUPS = [
   "alerts/rules/mute-timings.tf|grafana_mute_timing.weekend_mute",
   "alerts/rules/notification-policies.tf|grafana_notification_policy.all",
   "alerts/rules/peg-contact-points.tf|grafana_contact_point.peg_market_warning,grafana_contact_point.peg_ops_warning,grafana_contact_point.peg_page",
-  "alerts/rules/peg-message-templates.tf|grafana_message_template.peg_slack_message,grafana_message_template.peg_slack_title,grafana_message_template.peg_victorops_message,grafana_message_template.peg_victorops_title",
+  "alerts/rules/peg-message-templates.tf|grafana_message_template.peg_slack_message,grafana_message_template.peg_victorops_message",
   "alerts/rules/pr-plan-guard.tf|terraform_data.pr_plan_secretless_guard",
   "alerts/rules/protocol-contact-points.tf|grafana_contact_point.slack_alerts_critical,grafana_contact_point.slack_alerts_infra,grafana_contact_point.slack_alerts_oracles,grafana_contact_point.slack_alerts_pools,grafana_contact_point.slack_alerts_reserve,grafana_contact_point.slack_alerts_testnet,grafana_contact_point.splunk_on_call",
   "alerts/rules/rules-aegis-service.tf|grafana_rule_group.aegis_service_alerts",
