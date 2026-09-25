@@ -456,7 +456,8 @@ The protocol alert groups below are owned by `alerts/rules`, not by Aegis:
 
 **Reserve Balance Alerts** (`service=reserve`):
 
-- Low reserve balances for CELO, USDC, USDT, EUROC
+- Low reserve balances for Celo USDC, USDT and axlUSDC (warning floors)
+- Monad USDC, USDT0 and AUSD and Polygon USDC: a warning floor and a lower critical floor, one level per breach
 - Routed to: Slack `#alerts-reserve`
 
 **Trading Mode Alerts** (`service=exchanges`):

@@ -107,7 +107,7 @@ Please top up the {{ $token }} balance of the {{ .Labels.owner }} ({{ $reserveAd
   {{ range .Alerts.Resolved -}}
   {{ $token := .Labels.token -}}
   {{ $reserveAddress := .Labels.ownerValue -}}
-RESOLVED: Sufficient {{ $token }} balance restored for the {{ .Labels.owner }} ({{ $reserveAddress }}) — {{ .Annotations.currentBalance }}
+RESOLVED: {{ $token }} balance for the {{ .Labels.owner }} ({{ $reserveAddress }}) is above zero again. The low-balance floor alerts in Slack keep tracking it.
   {{ end -}}
   {{ end -}}
   EOT
