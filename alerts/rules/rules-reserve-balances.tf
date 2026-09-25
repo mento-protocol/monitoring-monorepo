@@ -203,8 +203,9 @@ resource "grafana_rule_group" "reserve_balances" {
   # Nonzero ReserveV2 floors for Monad and Polygon (#1332), two levels per
   # token. The warning predicate is `critical <= balance < warning`, so one
   # breach notifies at one level only; this stack has no inhibition rules.
-  # When a balance falls from the warning band into the critical band, the
-  # warning resolves and the critical alert waits its own 60m `for`.
+  # When a balance moves between bands, one rule resolves and the other waits
+  # its own 60m `for`. The `band` annotation makes the Slack resolve copy
+  # neutral instead of claiming a recovery.
   dynamic "rule" {
     for_each = local.reserve_floor_rules
 
@@ -219,6 +220,9 @@ resource "grafana_rule_group" "reserve_balances" {
         summary        = "${rule.value.name}: {{ with (index $values \"balance\") }}{{ humanize .Value }}{{ else }}unknown{{ end }} ${rule.value.token}"
         threshold      = "{{ humanize (${rule.value.threshold}) }}"
         currentBalance = "{{ with (index $values \"balance\") }}{{ humanize .Value }}{{ else }}unknown{{ end }} ${rule.value.token}"
+        # Static on purpose: Grafana can carry the alerting values into a
+        # resolved alert, so the resolve copy must not classify by balance.
+        band = rule.value.severity
       }
       labels = {
         service  = "reserve"

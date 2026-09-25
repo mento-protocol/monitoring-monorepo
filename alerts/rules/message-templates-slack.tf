@@ -124,19 +124,24 @@ EOT
 resource "grafana_message_template" "slack_reserve_balance_alert_message" {
   name     = "Slack - Reserve Balance Alert Message"
   template = <<-EOT
-{{ define "slack.reserve_balance_alert_title" }}{{ if (len .Alerts.Firing) }}🔴{{ else }}✅{{ end }}{{ end }}
+{{ define "slack.reserve_balance_alert_title" }}{{ $icon := "✅" }}{{ range .Alerts.Resolved }}{{ if .Annotations.band }}{{ $icon = "🟡" }}{{ end }}{{ end }}{{ if (len .Alerts.Firing) }}🔴{{ else }}{{ $icon }}{{ end }}{{ end }}
 
 {{ define "slack.reserve_balance_alert_message" }}
 {{ range .Alerts.Firing -}}
 {{ $token := .Labels.token -}}
 {{ $reserveAddress := .Labels.ownerValue -}}
-*<https://{{ .Labels.explorer }}/address/{{ $reserveAddress }}|Low {{ $token }} balance in the {{ .Labels.owner }}> — {{ .Annotations.currentBalance }} left*
+*<https://{{ .Labels.explorer }}/address/{{ $reserveAddress }}|Low {{ $token }} balance in the {{ .Labels.owner }}{{ with .Labels.chain }} on {{ . | title }}{{ end }}> — {{ .Annotations.currentBalance }} left*
 - Top up the {{ .Labels.owner }} above the alert threshold of {{ .Annotations.threshold }} {{ $token }}
 {{ end -}}
 {{ range .Alerts.Resolved -}}
 {{ $token := .Labels.token -}}
 {{ $reserveAddress := .Labels.ownerValue -}}
-*<https://{{ .Labels.explorer }}/address/{{ $reserveAddress }}|Sufficient {{ $token }} balance restored in the {{ .Labels.owner }}> — {{ .Annotations.currentBalance }}*
+{{ if .Annotations.band -}}
+*<https://{{ .Labels.explorer }}/address/{{ $reserveAddress }}|{{ $token }} balance in the {{ .Labels.owner }}{{ with .Labels.chain }} on {{ . | title }}{{ end }} left the {{ .Annotations.band }} band>*
+- It recovered or moved to the other band, whose alert fires after 60 minutes there
+{{ else -}}
+*<https://{{ .Labels.explorer }}/address/{{ $reserveAddress }}|Sufficient {{ $token }} balance restored in the {{ .Labels.owner }}{{ with .Labels.chain }} on {{ . | title }}{{ end }}> — {{ .Annotations.currentBalance }}*
+{{ end -}}
 {{ end -}}
 {{ end }}
 EOT
