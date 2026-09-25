@@ -88,7 +88,9 @@ object and input (`rpc/median-timestamp-effect.ts:75-76`).
    reader requests each of rows 1-4 when that row's gate holds for that
    `pool`; row 4 also requires a `Rebalanced` event and keeps the `-2`
    unsupported-getter skip. If `pool` is undefined, it requests rows 1 and 3,
-   plus row 4 for `Rebalanced` (event-keyed only).
+   plus row 4 for `Rebalanced` (event-keyed only). Whenever the reader
+   requests row 3 and it returns a feed, the reader then requests row 2 with
+   that feed, as processing does (`handlers/fpmm/state-sync.ts:116-134`).
 2. One key builder per effect produces the input for the reader and for the
    existing call site. Identical keys are then true by construction.
 3. Preload returns after the reader and the Pool and breach warm-up. Preload
@@ -123,8 +125,10 @@ this design keeps preload to effect requests and entity reads.
 | `envio_preload_handler_seconds`, `envio_processing_handler_seconds`, `envio_effect_call_total`, `envio_progress_events` | Envio metrics (`.agents/skills/envio/performance.md:48`) | Phase-split throughput                                 |
 
 The summary prints only the top five entries per table
-(`performance.ts:101`). If rows 1-4 fall outside the top five, stage 1 prints
-them explicitly.
+(`performance.ts:101`), so the counters for rows 1-11 may not appear. One
+throwaway benchmark commit therefore prints `req` and `exec` for every row
+and every counter the success rules use. Both runs carry that commit (see
+Range).
 
 - **Source.** Two hosted debug deployments of `config.multichain.mainnet.yaml`
   with `INDEXER_PERF=1` and `INDEXER_PERF_LOG_INTERVAL_EVENTS=10000`
@@ -133,22 +137,23 @@ them explicitly.
   metrics with `pnpm deploy:indexer:perf <commit>`
   (`indexer-envio/README.md:205-208`). That script keeps only `error,warn`
   logs (`scripts/deploy/deploy-indexer-perf.mjs:193-205`), but the `[perf]`
-  summary is an info log (`performance.ts:147-152`). Stage 1 therefore adds
+  summary is an info log (`performance.ts:147-152`). The benchmark run therefore adds
   an info-level retrieval of the `[perf]` lines, for example
   `envio-cloud deployment logs` with `--level info`.
 - **Range.** Each chain's configured start block to one fixed end block per
   chain, recorded before the baseline starts. `config.multichain.mainnet.yaml`
   sets no end block, and hosted builds load it through the pinned
   `config.yaml` alias (`scripts/indexer-handler-invariant-contract.test.mjs:157-167`).
-  So one throwaway commit adds the `end_block` values to that file. Apply it
-  on top of the merge base and on top of the stage-1 head, and deploy those
-  two benchmark commits. Never merge them.
+  So the throwaway benchmark commit also adds the `end_block` values to that
+  file. Apply the same commit on top of the merge base and on top of the
+  stage-1 head, and deploy those two benchmark commits. Never merge them.
 - **Success.** Processed `UpdateReserves` + `Rebalanced` calls per processing
   handler second is at least 1.30× the baseline. Whole-replay time to the end
   blocks is not slower. Executions of rows 1 and 4 are at most 1.10× the
   baseline. If executions of rows 6-8, 10 and 11 exceed 5% of all effect
-  executions in the baseline, stage 1 also preloads them with phase-local
-  gates before it claims success.
+  executions in the baseline, stage 1 stops and reports the numbers. It does
+  not claim success, and it does not preload those rows; that needs its own
+  design and operator decision.
 - **No correctness regression.** Over the range, a paged row export (no
   aggregates) shows zero differences between runs in `DeviationThresholdBreach`
   (`id`, `endedByEvent`, `endedByStrategy`, `durationSeconds`),
@@ -169,11 +174,13 @@ them explicitly.
 
 **Stage-1 files.** `handlers/fpmm/state-sync.ts` (reader, key builders,
 handler bodies exported for tests), `pool.ts` (breach warm-up through
-`getWhere`), and `performance.ts` only if rows 1-4 need explicit output.
+`getWhere`). The benchmark commit is throwaway and is not part of stage 1.
 
 **Stage-1 tests.** A new `test/stateSyncPreload.test.ts` on the
-`test/susds.test.ts:805-869` pattern: preload writes no entity; each preload
-key appears among processing keys for the same event; the two-`UpdateReserves`
+`test/susds.test.ts:805-869` pattern: preload writes no entity; with the same
+Pool state in both phases, every processing key for rows 1-4 was requested in
+preload (extra preload keys are allowed); a separate case opens a gate only
+in processing and shows the one serialized fallback read; the two-`UpdateReserves`
 → `Rebalanced` sequence with preload first closes the breach as `"rebalance"`
 and keeps pre-rebalance deltas; a pool seeded earlier in the batch derives
 without the preloaded RPC; a preloaded Pool with `rebalanceReward === -2`
@@ -202,7 +209,7 @@ commit on `main`.
 ## Open Questions
 
 - Envio metrics labels: confirm that `envio_processing_handler_seconds` splits
-  per handler. If it does not, stage 1 adds per-phase time to the
+  per handler. If it does not, the benchmark commit adds per-phase time to the
   `INDEXER_PERF` summary (`performance.ts:8-14` already counts calls per
   phase).
 - Confirm that `INDEXER_PERF` can be set on a hosted debug deployment before
