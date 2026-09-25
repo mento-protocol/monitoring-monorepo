@@ -8,6 +8,7 @@ import {
   classifyStalledRuns,
   formatDuration,
   isDeployQueueCandidate,
+  main,
   summarizeJobs,
 } from "./check-terraform-deploy-queue.mjs";
 
@@ -163,5 +164,84 @@ assert.match(JSON.stringify(payload.blocks), /abcdef1/);
 assert.match(JSON.stringify(payload.blocks), /chapati23/);
 assert.match(JSON.stringify(payload.blocks), /zero started jobs/);
 assert.match(JSON.stringify(payload.blocks), /cancel-in-progress: false/);
+
+// main(): fake GitHub + Slack transport. One stale run on the first deploy
+// workflow, none on the rest; jobs list is empty (nothing started). main()
+// uses the real clock (it takes no injectable `now`), so anchor to
+// Date.now() rather than the fixture `now` above.
+function createFakeFetch({ jobs = [], slackOk = true } = {}) {
+  const staleRun = {
+    ...staleQueuedRun,
+    id: 201,
+    run_number: 7,
+    created_at: new Date(Date.now() - 2 * 60 * 60000).toISOString(),
+  };
+  let slackCalls = 0;
+
+  const fetchImpl = async (url) => {
+    const target = url instanceof URL ? url : new URL(url);
+    if (target.hostname === "slack.com") {
+      slackCalls += 1;
+      return {
+        ok: true,
+        json: async () => ({
+          ok: slackOk,
+          error: slackOk ? undefined : "channel_not_found",
+        }),
+      };
+    }
+    const runsMatch = target.pathname.match(
+      /\/actions\/workflows\/([^/]+)\/runs$/,
+    );
+    if (runsMatch) {
+      const runs = runsMatch[1] === workflow.workflowFile ? [staleRun] : [];
+      return { ok: true, json: async () => ({ workflow_runs: runs }) };
+    }
+    if (/\/actions\/runs\/\d+\/jobs$/.test(target.pathname)) {
+      return { ok: true, json: async () => ({ jobs }) };
+    }
+    throw new Error(`unexpected fetch ${target.pathname}`);
+  };
+
+  return { fetchImpl, getSlackCalls: () => slackCalls };
+}
+
+const mainEnv = {
+  GITHUB_REPOSITORY: "mento-protocol/monitoring-monorepo",
+  GITHUB_TOKEN: "gh-test-token",
+  SLACK_BOT_TOKEN: "xoxb-test",
+};
+
+// main(): a successful --dry-run report of a stalled run leaves the exit code
+// untouched and never calls Slack.
+{
+  const beforeExitCode = process.exitCode;
+  const { fetchImpl, getSlackCalls } = createFakeFetch();
+  const result = await main(mainEnv, ["--dry-run"], fetchImpl);
+  assert.equal(result.stalledRuns.length, 1);
+  assert.equal(getSlackCalls(), 0);
+  assert.equal(process.exitCode, beforeExitCode);
+}
+
+// main(): a successful normal-mode report of a stalled run posts to Slack
+// once and leaves the exit code untouched.
+{
+  const beforeExitCode = process.exitCode;
+  const { fetchImpl, getSlackCalls } = createFakeFetch();
+  const result = await main(mainEnv, [], fetchImpl);
+  assert.equal(result.stalledRuns.length, 1);
+  assert.equal(getSlackCalls(), 1);
+  assert.equal(process.exitCode, beforeExitCode);
+}
+
+// main(): a Slack `ok: false` response still rejects (genuine delivery
+// failures must stay a hard error).
+{
+  const { fetchImpl } = createFakeFetch({ slackOk: false });
+  await assert.rejects(
+    main(mainEnv, [], fetchImpl),
+    /Slack chat\.postMessage failed: channel_not_found/,
+  );
+}
 
 console.log("check-terraform-deploy-queue tests passed");
