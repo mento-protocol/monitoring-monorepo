@@ -82,8 +82,9 @@ object and input (`rpc/median-timestamp-effect.ts:75-76`).
 
 1. Both phases call one reader, `readStateSyncEffects(context, event, pool)`,
    before `maybePreloadPool`. `pool` is that phase's own `Pool.get` result. The
-   reader requests rows 1-4 when each row's gate holds for that `pool`. If
-   `pool` is undefined, the reader requests rows 1, 3 and 4 (event-keyed only).
+   reader requests rows 1-3 when each row's gate holds for that `pool`, and
+   row 4 only for `Rebalanced`. If `pool` is undefined, it requests rows 1 and
+   3, plus row 4 for `Rebalanced` (event-keyed only).
 2. One key builder per effect produces the input for the reader and for the
    existing call site. Identical keys are then true by construction.
 3. Preload returns after the reader and the Pool and breach warm-up. Preload
@@ -124,8 +125,13 @@ them explicitly.
 - **Source.** Two hosted debug deployments of `config.multichain.mainnet.yaml`
   with `INDEXER_PERF=1` and `INDEXER_PERF_LOG_INTERVAL_EVENTS=10000`
   (`indexer-envio/README.md:192-203`), neither promoted. The baseline is the
-  stage-1 merge base; the candidate is the stage-1 head. Capture each with
-  `pnpm deploy:indexer:perf <commit>` (`indexer-envio/README.md:205-208`).
+  stage-1 merge base; the candidate is the stage-1 head. Capture status and
+  metrics with `pnpm deploy:indexer:perf <commit>`
+  (`indexer-envio/README.md:205-208`). That script keeps only `error,warn`
+  logs (`scripts/deploy/deploy-indexer-perf.mjs:193-205`), but the `[perf]`
+  summary is an info log (`performance.ts:147-152`). Stage 1 therefore adds
+  an info-level retrieval of the `[perf]` lines, for example
+  `envio-cloud deployment logs` with `--level info`.
 - **Range.** Each chain's configured start block to one fixed end block per
   chain, recorded when the baseline starts. Both runs stop at those blocks.
 - **Success.** Processed `UpdateReserves` + `Rebalanced` calls per processing
@@ -134,9 +140,12 @@ them explicitly.
   baseline.
 - **No correctness regression.** Over the range, a paged row export (no
   aggregates) shows zero differences between runs in `DeviationThresholdBreach`
-  (`id`, `endedByEvent`, `endedByStrategy`, `durationSeconds`) and
+  (`id`, `endedByEvent`, `endedByStrategy`, `durationSeconds`),
   `RebalanceEvent` (`id`, `amount0Delta`, `amount1Delta`, `rewardBps`,
-  `rewardUsd`).
+  `rewardUsd`), and every other entity the two handlers write: `Pool`,
+  `OracleSnapshot`, `ReserveUpdate`, `PoolSnapshot` and `PoolDailySnapshot`
+  (`handlers/fpmm/state-sync.ts:203`, `:227`, `:415`;
+  `pool/snapshots.ts:72`, `:76`, `:157`). Compare all fields.
 
 ## Stage Split
 
