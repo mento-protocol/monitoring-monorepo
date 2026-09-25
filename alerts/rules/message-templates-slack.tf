@@ -124,7 +124,7 @@ EOT
 resource "grafana_message_template" "slack_reserve_balance_alert_message" {
   name     = "Slack - Reserve Balance Alert Message"
   template = <<-EOT
-{{ define "slack.reserve_balance_alert_title" }}{{ $icon := "✅" }}{{ range .Alerts.Resolved }}{{ if .Annotations.band }}{{ $icon = "🟡" }}{{ end }}{{ end }}{{ if (len .Alerts.Firing) }}🔴{{ else }}{{ $icon }}{{ end }}{{ end }}
+{{ define "slack.reserve_balance_alert_title" }}{{ $icon := "✅" }}{{ range .Alerts.Resolved }}{{ if or .Annotations.band (eq .Labels.severity "page") }}{{ $icon = "🟡" }}{{ end }}{{ end }}{{ if (len .Alerts.Firing) }}🔴{{ else }}{{ $icon }}{{ end }}{{ end }}
 
 {{ define "slack.reserve_balance_alert_message" }}
 {{ range .Alerts.Firing -}}
