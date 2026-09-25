@@ -2,13 +2,13 @@
 # VictorOps renders raw text — no markdown survives. Selected by the
 # `local.alert_config_victorops` dispatcher in locals.tf.
 #
-# Each `*_alert_message` template also carries its alert type's title define,
-# copied from the title template by reference. This is step 1 of freeing
-# message template slots: a later change deletes the `*_alert_title`
-# resources. See "Message template cap" in README.md before editing.
+# Each `*_alert_message` template holds two defines: the alert type's title
+# and its message. Keep them in one resource; a separate title template takes
+# a slot under the Grafana Cloud template cap. See "Message template cap" in
+# README.md before editing.
 
-resource "grafana_message_template" "victorops_oracle_stale_price_alert_title" {
-  name     = "VictorOps - Stale Price Alert Title"
+resource "grafana_message_template" "victorops_oracle_stale_price_alert_message" {
+  name     = "VictorOps - Stale Price Alert Message"
   template = <<-EOT
 {{ define "victorops.oracle_stale_price_alert_title" }}
 {{ if (len .Alerts.Firing) -}}
@@ -22,14 +22,7 @@ RESOLVED {{ range $i, $alert := .Alerts.Resolved -}}{{ if $i }}, {{ end -}}{{ $s
 Oracle report status unknown
 {{ end -}}
 {{ end }}
-EOT
-}
 
-
-resource "grafana_message_template" "victorops_oracle_stale_price_alert_message" {
-  name     = "VictorOps - Stale Price Alert Message"
-  template = <<-EOT
-${grafana_message_template.victorops_oracle_stale_price_alert_title.template}
 {{ define "victorops.oracle_stale_price_alert_message" }}
 {{ range .Alerts.Firing -}}
 {{ $slash := reReplaceAll "^([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}
@@ -54,23 +47,16 @@ Resolved: {{ .EndsAt.Format "Mon Jan 02 15:04 UTC" }}
 EOT
 }
 
-resource "grafana_message_template" "victorops_oracle_relayer_low_balance_alert_title" {
-  name     = "VictorOps - Low Relayer Balance Alert Title"
-  template = <<-EOT
-{{ define "victorops.oracle_relayer_low_balance_alert_title" }}Low Relayer Balance{{ end }}
-EOT
-}
-
-
 # This template also carries the refiller alert's title and message. Grafana
-# Cloud rejects template creation once 30 exist (HTTP 429) while updates keep
-# working, and this stack is at that cap, so the refiller definitions ride on
-# an existing template rather than needing a slot of their own. A template may
-# hold several `define` blocks; the dispatcher refers to them by define name.
+# Cloud rejects template creation once 30 exist (HTTP 429), and the lint keeps
+# this stack at 25 or fewer, so the refiller definitions ride on an existing
+# template rather than taking a slot of their own. A template may hold several
+# `define` blocks; the dispatcher refers to them by define name.
 resource "grafana_message_template" "victorops_oracle_relayer_low_balance_alert_message" {
   name     = "VictorOps - Low Relayer Balance Alert Message"
   template = <<-EOT
-${grafana_message_template.victorops_oracle_relayer_low_balance_alert_title.template}
+{{ define "victorops.oracle_relayer_low_balance_alert_title" }}Low Relayer Balance{{ end }}
+
 {{ define "victorops.oracle_relayer_low_balance_alert_message" }}
 {{ range .Alerts.Firing }}
 {{ $pair := reReplaceAll "^RelayerSigner([A-Z]{3,}?)(XAUT|[A-Z]{3})$" "$1/$2" .Labels.owner }}
@@ -100,21 +86,15 @@ Refiller wallet on {{ .Labels.chain | title }} {{ if eq .Labels.urgency "urgent"
 EOT
 }
 
-resource "grafana_message_template" "victorops_reserve_balance_alert_title" {
-  name     = "VictorOps - Reserve Balance Alert Title"
-  template = <<-EOT
-  {{ define "victorops.reserve_balance_alert_title" }}
-  [{{ if (len .Alerts.Firing) -}}{{ len .Alerts.Firing }} FIRING{{ end -}}
-  {{ if and (len .Alerts.Firing) (len .Alerts.Resolved) -}} | {{ end -}}
-  {{ if (len .Alerts.Resolved) -}}{{ len .Alerts.Resolved }} RESOLVED{{ end -}}] {{ .CommonLabels.alertname -}}
-  {{ end -}}
-  EOT
-}
-
 resource "grafana_message_template" "victorops_reserve_balance_alert_message" {
   name     = "VictorOps - Reserve Balance Alert Message"
   template = <<-EOT
-${grafana_message_template.victorops_reserve_balance_alert_title.template}
+{{ define "victorops.reserve_balance_alert_title" }}
+[{{ if (len .Alerts.Firing) -}}{{ len .Alerts.Firing }} FIRING{{ end -}}
+{{ if and (len .Alerts.Firing) (len .Alerts.Resolved) -}} | {{ end -}}
+{{ if (len .Alerts.Resolved) -}}{{ len .Alerts.Resolved }} RESOLVED{{ end -}}] {{ .CommonLabels.alertname -}}
+{{ end -}}
+
   {{ define "victorops.reserve_balance_alert_message" }}
   {{ if eq (len .Alerts.Firing) 0 }}No alerts are currently firing.{{ end }}
   {{ range .Alerts.Firing -}}
@@ -133,8 +113,8 @@ RESOLVED: Sufficient {{ $token }} balance restored for the {{ .Labels.owner }} (
   EOT
 }
 
-resource "grafana_message_template" "victorops_trading_mode_alert_title" {
-  name     = "VictorOps - Trading Mode Alert Title"
+resource "grafana_message_template" "victorops_trading_mode_alert_message" {
+  name     = "VictorOps - Trading Mode Alert Message"
   template = <<-EOT
 {{ define "victorops.trading_mode_alert_title" -}}
 {{ if (len .Alerts.Firing) -}}
@@ -145,13 +125,7 @@ resource "grafana_message_template" "victorops_trading_mode_alert_title" {
 Trading mode alert
 {{ end -}}
 {{ end -}}
-  EOT
-}
 
-resource "grafana_message_template" "victorops_trading_mode_alert_message" {
-  name     = "VictorOps - Trading Mode Alert Message"
-  template = <<-EOT
-${grafana_message_template.victorops_trading_mode_alert_title.template}
 {{ define "victorops.trading_mode_alert_message" }}
 {{ $firingCount := len .Alerts.Firing -}}
 {{ $resolvedCount := len .Alerts.Resolved -}}
@@ -238,21 +212,15 @@ Resolved at: {{ .EndsAt.Format "Mon Jan 02 15:04 UTC" }}
 EOT
 }
 
-resource "grafana_message_template" "victorops_trading_limits_alert_title" {
-  name     = "VictorOps - Trading Limits Alert Title"
-  template = <<-EOT
-  {{ define "victorops.trading_limits_alert_title" }}
-  [{{ if (len .Alerts.Firing) -}}{{ len .Alerts.Firing }} FIRING{{ end -}}
-  {{ if and (len .Alerts.Firing) (len .Alerts.Resolved) -}} | {{ end -}}
-  {{ if (len .Alerts.Resolved) -}}{{ len .Alerts.Resolved }} RESOLVED{{ end -}}] {{ .CommonLabels.alertname -}}
-  {{ end -}}
-  EOT
-}
-
 resource "grafana_message_template" "victorops_trading_limits_alert_message" {
   name     = "VictorOps - Trading Limits Alert Message"
   template = <<-EOT
-${grafana_message_template.victorops_trading_limits_alert_title.template}
+{{ define "victorops.trading_limits_alert_title" }}
+[{{ if (len .Alerts.Firing) -}}{{ len .Alerts.Firing }} FIRING{{ end -}}
+{{ if and (len .Alerts.Firing) (len .Alerts.Resolved) -}} | {{ end -}}
+{{ if (len .Alerts.Resolved) -}}{{ len .Alerts.Resolved }} RESOLVED{{ end -}}] {{ .CommonLabels.alertname -}}
+{{ end -}}
+
 {{ define "victorops.trading_limits_alert_message" }}
 {{ range .Alerts.Firing -}}
 {{ $chain := .Labels.chain | title -}}
@@ -275,8 +243,8 @@ Trading Limit {{ $limitType }} at {{ with index .Values "utilization" }}{{ . }}{
 EOT
 }
 
-resource "grafana_message_template" "victorops_aegis_service_alert_title" {
-  name     = "VictorOps - Aegis Service Alert Title"
+resource "grafana_message_template" "victorops_aegis_service_alert_message" {
+  name     = "VictorOps - Aegis Service Alert Message"
   template = <<-EOT
 {{ define "victorops.aegis_service_alert_title" -}}
 {{ if and (len .Alerts.Firing) (len .Alerts.Resolved) -}}
@@ -287,13 +255,7 @@ resource "grafana_message_template" "victorops_aegis_service_alert_title" {
 {{ range $i, $alert := .Alerts.Resolved -}}{{ if $i }}, {{ end -}}{{ if eq $alert.Labels.alertname "Aegis view-call failures [production]" -}}{{ $chain := $alert.Labels.chain | title -}}{{ $chain }}: Aegis view calls recovered for {{ $alert.Labels.contract }}.{{ $alert.Labels.functionName }}{{ else if eq $alert.Labels.alertname "Aegis does not report new data" -}}Aegis data reporting recovered{{ else -}}{{ $alert.Labels.alertname }} resolved{{ end -}}{{ end -}}
 {{ end -}}
 {{ end -}}
-EOT
-}
 
-resource "grafana_message_template" "victorops_aegis_service_alert_message" {
-  name     = "VictorOps - Aegis Service Alert Message"
-  template = <<-EOT
-${grafana_message_template.victorops_aegis_service_alert_title.template}
 {{ define "victorops.aegis_service_alert_message" }}
 {{ $firingCount := len .Alerts.Firing -}}
 {{ $mixedState := and (len .Alerts.Firing) (len .Alerts.Resolved) -}}
