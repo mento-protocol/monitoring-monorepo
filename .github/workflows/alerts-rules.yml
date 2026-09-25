@@ -480,6 +480,7 @@ jobs:
         # This step creates and applies a later plan, then records what landed.
         # `-lock-timeout=10m`: apply must wait for any in-progress state
         # lock rather than failing the deploy.
+        # `-parallelism=1`: Grafana returns 409 on concurrent message-template writes.
         # `-no-color`: keep the output free of ANSI escapes so the apply
         # summary step renders cleanly in the job summary markdown.
         # Apply output is captured raw, sanitized, then written to
@@ -488,7 +489,7 @@ jobs:
         # so never tee raw Terraform output to GitHub logs.
         run: |
           set +e
-          terraform apply -auto-approve -no-color -input=false -lock-timeout=10m > /tmp/tf-apply.raw 2>&1
+          terraform apply -auto-approve -no-color -input=false -lock-timeout=10m -parallelism=1 > /tmp/tf-apply.raw 2>&1
           EXITCODE=$?
           set -e
           "${GITHUB_WORKSPACE}/scripts/sanitize-terraform-output.sh" /tmp/tf-apply.raw /tmp/tf-apply.txt

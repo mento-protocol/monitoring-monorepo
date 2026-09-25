@@ -8,16 +8,17 @@ const PRODUCTION_CONSOLE_URL =
   "https://console.cloud.google.com/home/dashboard?project=mento-terraform-seed-ffac";
 const AUTOMATIC_GITHUB_CREDENTIAL = ["${{ github.", "token }}"].join("");
 
-const APPLY_OUTPUT_COMMAND = [
-  "set +e",
-  "terraform apply -auto-approve -no-color -input=false -lock-timeout=10m > /tmp/tf-apply.raw 2>&1",
-  "EXITCODE=$?",
-  "set -e",
-  '"${GITHUB_WORKSPACE}/scripts/sanitize-terraform-output.sh" /tmp/tf-apply.raw /tmp/tf-apply.txt',
-  "cat /tmp/tf-apply.txt",
-  'exit "$EXITCODE"',
-  "",
-].join("\n");
+const applyOutputCommand = (extraFlags = "") =>
+  [
+    "set +e",
+    `terraform apply -auto-approve -no-color -input=false -lock-timeout=10m${extraFlags} > /tmp/tf-apply.raw 2>&1`,
+    "EXITCODE=$?",
+    "set -e",
+    '"${GITHUB_WORKSPACE}/scripts/sanitize-terraform-output.sh" /tmp/tf-apply.raw /tmp/tf-apply.txt',
+    "cat /tmp/tf-apply.txt",
+    'exit "$EXITCODE"',
+    "",
+  ].join("\n");
 
 const STRIP_REFRESH_NOISE_COMMAND = [
   "if [ -f tf-apply.txt ]; then",
@@ -34,6 +35,7 @@ const APPLY_CONFIG_BY_WORKFLOW = {
   ".github/workflows/alerts-rules.yml": {
     name: "Terraform Apply (alerts/rules)",
     workingDirectory: "alerts/rules",
+    applyFlags: " -parallelism=1",
     summaryRoot: "alerts/rules/",
     environmentVariables: {
       TF_VAR_grafana_service_account_token:
@@ -285,7 +287,7 @@ function postAuthApplySteps(config) {
     {
       name: "Apply",
       id: "apply",
-      run: APPLY_OUTPUT_COMMAND,
+      run: applyOutputCommand(config.applyFlags),
     },
     {
       name: "Strip refresh noise from apply output",
