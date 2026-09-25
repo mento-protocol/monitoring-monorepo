@@ -139,6 +139,9 @@ resource "grafana_message_template" "slack_reserve_balance_alert_message" {
 {{ if .Annotations.band -}}
 *<https://{{ .Labels.explorer }}/address/{{ $reserveAddress }}|{{ $token }} balance in the {{ .Labels.owner }}{{ with .Labels.chain }} on {{ . | title }}{{ end }} left the {{ .Annotations.band }} band>*
 - It recovered or moved to the other band, whose alert fires after 60 minutes there
+{{ else if eq .Labels.severity "page" -}}
+*<https://{{ .Labels.explorer }}/address/{{ $reserveAddress }}|{{ $token }} balance in the {{ .Labels.owner }}{{ with .Labels.chain }} on {{ . | title }}{{ end }} is above zero again>*
+- The low-balance floor alerts keep tracking it
 {{ else -}}
 *<https://{{ .Labels.explorer }}/address/{{ $reserveAddress }}|Sufficient {{ $token }} balance restored in the {{ .Labels.owner }}{{ with .Labels.chain }} on {{ . | title }}{{ end }}> — {{ .Annotations.currentBalance }}*
 {{ end -}}

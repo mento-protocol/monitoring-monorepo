@@ -302,9 +302,11 @@ locals {
           token      = token
         }
         "${chain}-${token}-critical" = {
-          name       = "Critical ${token} Reserve Balance Alert [${local.chains[chain].title}]"
-          severity   = "critical"
-          threshold  = floor.critical
+          name     = "Critical ${token} Reserve Balance Alert [${local.chains[chain].title}]"
+          severity = "critical"
+          # The Slack copy says "top up above" this value. Point it at the
+          # warning floor so a top-up does not stop inside the warning band.
+          threshold  = floor.warning
           expression = "$balance < ${floor.critical}"
           chain      = chain
           token      = token
