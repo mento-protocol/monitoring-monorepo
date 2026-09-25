@@ -164,12 +164,12 @@ Range).
 
 ## Stage Split
 
-| Stage | Scope                                                                     | Marker sites (all cite #1394 today)                                                          |
-| ----- | ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| 1     | `FPMM.UpdateReserves`, `FPMM.Rebalanced`: rows 1-4 and the breach warm-up | `handlers/fpmm/state-sync.ts:251-255`, `:433-437`, `:490`, `:517`, `:684`, `:720`, `:737`    |
-| 2     | Swaps and liquidity: `FPMM.Swap`, `Mint`, `Burn`, `VirtualPool.Swap`      | `handlers/fpmm.ts:70`, `handlers/fpmm/liquidity.ts:19`, `:72`, `handlers/virtualPool.ts:157` |
-| 3     | `MedianUpdated` and the Broker path                                       | `handlers/broker.ts:542`, `handlers/biPoolManager.ts:546`                                    |
-| none  | `RebalanceThresholdUpdated` (governance cardinality)                      | `handlers/fpmm/limits-and-fees.ts:379`: retarget only                                        |
+| Stage | Scope                                                                            | Marker sites (all cite #1394 today)                                                          |
+| ----- | -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| 1     | `FPMM.UpdateReserves`, `FPMM.Rebalanced`: rows 1-4 and the breach warm-up        | `handlers/fpmm/state-sync.ts:251-255`, `:433-437`, `:490`, `:517`, `:684`, `:720`, `:737`    |
+| 2     | Swaps and liquidity: `FPMM.Swap`, `Mint`, `Burn`, `VirtualPool.Swap`             | `handlers/fpmm.ts:70`, `handlers/fpmm/liquidity.ts:19`, `:72`, `handlers/virtualPool.ts:157` |
+| 3     | `MedianUpdated` (no marker today), `Broker.Swap`, `BiPoolManager.BucketsUpdated` | `handlers/broker.ts:542`, `handlers/biPoolManager.ts:546`                                    |
+| none  | `RebalanceThresholdUpdated` (governance cardinality)                             | `handlers/fpmm/limits-and-fees.ts:379`: retarget only                                        |
 
 **Stage-1 files.** `handlers/fpmm/state-sync.ts` (reader, key builders,
 handler bodies exported for tests), `pool.ts` (breach warm-up through
@@ -197,10 +197,13 @@ preload hook, so these tests call the exported handlers directly.
 | `handlers/fpmm/state-sync.ts:517`                         | Remove `preload-effect-exempt`; processing consumes the reader result                                  |
 | `handlers/fpmm/state-sync.ts:251-252`, `:433-434`         | Narrow the note: rows 1-4 are awaited in preload; helpers stay processing-only for ordered Pool writes |
 | `handlers/fpmm/state-sync.ts:253-255`, `:435-437`         | Keep `preload-effect-helpers`; helpers still run after the guard                                       |
-| `handlers/fpmm/state-sync.ts:490`, `:684`, `:720`, `:737` | Keep; retarget from #1394 to the implementation issue                                                  |
+| `handlers/fpmm/state-sync.ts:490`, `:684`, `:720`, `:737` | Keep; retarget from #1394 to an open follow-up issue for the same-tx reserve scratch                   |
 
 Stage 1 also retargets every other `#1394` marker in the table above, because
-this note's PR closes #1394.
+this note's PR closes #1394. Each marker points to an open issue for the stage
+that removes it (stage 2, stage 3, or the scratch follow-up), so no marker
+cites a closed issue after stage 1 ships. The governance marker keeps a durable
+exemption reason instead. The operator decides when those issues are filed.
 
 **Rollback.** No schema change and no new entity. Before promotion, do not
 promote the candidate. After promotion, follow `docs/deployment.md:170-191`:
