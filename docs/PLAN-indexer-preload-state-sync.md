@@ -134,7 +134,8 @@ Range).
   with `INDEXER_PERF=1` and `INDEXER_PERF_LOG_INTERVAL_EVENTS=10000`
   (`indexer-envio/README.md:192-203`), neither promoted. The baseline is the
   stage-1 merge base; the candidate is the stage-1 head. Capture status and
-  metrics with `pnpm deploy:indexer:perf <commit>`
+  metrics with `pnpm deploy:indexer:perf <commit> --json`; only the JSON output
+  includes the metrics (`scripts/deploy/deploy-indexer-perf.mjs:299-319`)
   (`indexer-envio/README.md:205-208`). That script keeps only `error,warn`
   logs (`scripts/deploy/deploy-indexer-perf.mjs:193-205`), but the `[perf]`
   summary is an info log (`performance.ts:147-152`). The benchmark run therefore adds
@@ -156,12 +157,10 @@ Range).
   design and operator decision.
 - **No correctness regression.** Over the range, a paged row export (no
   aggregates) shows zero differences between runs in `DeviationThresholdBreach`
-  (`id`, `endedByEvent`, `endedByStrategy`, `durationSeconds`),
-  `RebalanceEvent` (`id`, `amount0Delta`, `amount1Delta`, `rewardBps`,
-  `rewardUsd`), and every other entity the two handlers write: `Pool`,
+  and in every other entity the two handlers write: `RebalanceEvent`, `Pool`,
   `OracleSnapshot`, `ReserveUpdate`, `PoolSnapshot` and `PoolDailySnapshot`
-  (`handlers/fpmm/state-sync.ts:203`, `:227`, `:415`;
-  `pool/snapshots.ts:72`, `:76`, `:157`). Compare all fields.
+  (`handlers/fpmm/state-sync.ts:203`, `:227`, `:415`, `:653`;
+  `pool/snapshots.ts:72`, `:76`, `:157`). Compare all fields of every row.
 
 ## Stage Split
 
@@ -174,7 +173,9 @@ Range).
 
 **Stage-1 files.** `handlers/fpmm/state-sync.ts` (reader, key builders,
 handler bodies exported for tests), `pool.ts` (breach warm-up through
-`getWhere`). The benchmark commit is throwaway and is not part of stage 1.
+`getWhere`), plus a comment-only retarget of the `#1394` markers in the stage
+2, stage 3 and governance files in the table above. The benchmark commit is
+throwaway and is not part of stage 1.
 
 **Stage-1 tests.** A new `test/stateSyncPreload.test.ts` on the
 `test/susds.test.ts:805-869` pattern: preload writes no entity; with the same
@@ -202,9 +203,9 @@ Stage 1 also retargets every other `#1394` marker in the table above, because
 this note's PR closes #1394.
 
 **Rollback.** No schema change and no new entity. Before promotion, do not
-promote the candidate. After promotion, run `pnpm deploy:indexer:rollback`
-to the last good commit (`docs/deployment.md:170-191`), then revert the stage-1
-commit on `main`.
+promote the candidate. After promotion, follow `docs/deployment.md:170-191`:
+run `pnpm deploy:indexer:rollback <last-good-sha> --dry-run`, then the same
+command without `--dry-run`, then revert the stage-1 commit on `main`.
 
 ## Open Questions
 
