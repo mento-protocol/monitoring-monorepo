@@ -4,6 +4,11 @@
 # resources explicitly because their template calls are plain strings. Grafana
 # hardcodes the Slack attachment title_link to its alert detail page. Keep that
 # title to one status icon. Render the linked human title in the message body.
+#
+# Each peg message template also carries its title define, copied from the
+# title template by reference. This is step 1 of freeing two message template
+# slots: a later change deletes the title resources. See "Message template
+# cap" in README.md before editing.
 
 resource "grafana_message_template" "peg_slack_title" {
   for_each = local.peg_alert_instances
@@ -21,6 +26,7 @@ resource "grafana_message_template" "peg_slack_message" {
 
   name     = "Peg - Slack Message"
   template = <<-EOT
+${grafana_message_template.peg_slack_title[each.key].template}
 {{ define "peg.slack.message" }}
 {{ if and (len .Alerts.Firing) (eq .CommonLabels.severity "critical") -}}
 <!subteam^${var.oncall_support_usergroup_id}> Please investigate.
@@ -77,6 +83,7 @@ resource "grafana_message_template" "peg_victorops_message" {
 
   name     = "Peg - VictorOps Message"
   template = <<-EOT
+${grafana_message_template.peg_victorops_title[each.key].template}
 {{ define "peg.victorops.message" }}
 {{ range .Alerts.Firing -}}
 PROBLEM: {{ with .Annotations.summary }}{{ . }}{{ else }}A peg page is firing.{{ end }}
