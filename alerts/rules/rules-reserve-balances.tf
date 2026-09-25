@@ -290,6 +290,10 @@ locals {
     }
   }
 
+  # Tokens whose exact-zero balance already pages (the Polygon rule above).
+  # Their critical band starts above zero so one breach alerts once.
+  reserve_zero_paged = { polygon = ["USDC"] }
+
   reserve_floor_rules = merge(flatten([
     for chain, tokens in local.reserve_balance_floors : [
       for token, floor in tokens : {
@@ -307,7 +311,7 @@ locals {
           # Slack shows `threshold` as the top-up target, not the trigger.
           # Use the warning floor so a top-up clears both bands.
           threshold  = floor.warning
-          expression = "$balance < ${floor.critical}"
+          expression = contains(lookup(local.reserve_zero_paged, chain, []), token) ? "$balance > 0 && $balance < ${floor.critical}" : "$balance < ${floor.critical}"
           chain      = chain
           token      = token
         }
