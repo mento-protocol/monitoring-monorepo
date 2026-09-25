@@ -4,10 +4,23 @@
  * The fixed custom ref is a LOCK and UNLOCK commit chain. Each commit keeps
  * the previous tree. GitHub's updateRefs mutation
  * applies an exact before-OID compare-and-swap to each transition.
+ *
+ * The ref name, payload, commit, and compare-and-swap engine come from
+ * `@mento-protocol/issues/claims` through `issueBoardProfile()`, which writes
+ * the same bytes this module wrote before it adopted the package. This module
+ * keeps the lease shape, the recovery text, and the Projects V2 owner proofs.
  */
 
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 
+import {
+  advanceRef,
+  buildClaimPayload,
+  initializeClaimRef,
+  issueBoardProfile,
+  operationsFor as claimOperationsFor,
+  readClaimRefFromGitHub,
+} from "@mento-protocol/issues/claims";
 import { Kind, parse as parseGraphql, stripIgnoredCharacters } from "graphql";
 
 import {
@@ -15,20 +28,12 @@ import {
   OPTIONAL_PROJECT_FIELDS,
   PROSPECTIVE_PROJECT_ITEM_ID,
   splitRepo,
-  validateClaimId,
 } from "./issue-board-state.mjs";
-import { ghGraphql, ghJson, sleep } from "./issue-board-transport.mjs";
+import { ghGraphql, runGh } from "./issue-board-transport.mjs";
 
-const LOCK_KIND = "mento-issue-board-mutex";
-const LOCK_VERSION = 1;
-const LOCK_REF_PREFIX = "refs/mento-issue-board-locks/v1";
-const ZERO_OID = "0000000000000000000000000000000000000000";
-const LOCK_RECONCILE_ATTEMPTS = 3;
-const LOCK_RECONCILE_DELAY_MS = 200;
-const LOCK_AUTHOR = {
-  name: "Mento issue board",
-  email: "issue-board@users.noreply.github.com",
-};
+// No overrides and no lease: the profile is ADR 0082's mutex as written.
+const BOARD_PROFILE = issueBoardProfile();
+const GITHUB_OPERATIONS = claimOperationsFor();
 
 const OWNER_FIELDS_BY_OPERATION = Object.freeze({
   claim: Object.freeze(Object.values(OPTIONAL_PROJECT_FIELDS)),
@@ -97,24 +102,7 @@ export class IssueMutationLockStaleError extends Error {
 }
 
 function canonicalScope(options, issueNumber) {
-  if (!Number.isInteger(issueNumber) || issueNumber <= 0) {
-    throw new Error(
-      `Issue number must be a positive integer, got: ${issueNumber}`,
-    );
-  }
-  const projectOwner = String(options.projectOwner ?? "")
-    .trim()
-    .toLowerCase();
-  if (!projectOwner) throw new Error("Project owner must not be empty");
-  if (!Number.isInteger(options.projectNumber) || options.projectNumber <= 0) {
-    throw new Error("Project number must be a positive integer");
-  }
-  return {
-    repo: splitRepo(options.repo).nameWithOwner.toLowerCase(),
-    projectOwner,
-    projectNumber: options.projectNumber,
-    issue: issueNumber,
-  };
+  return BOARD_PROFILE.canonicalScope(options, issueNumber);
 }
 
 function ownerTargetProofError(issueNumber, message, details = {}) {
@@ -776,24 +764,7 @@ function closureCauses(closure, mutationFailed, mutationError) {
 }
 
 export function issueMutationLockRef(options, issueNumber) {
-  const scope = canonicalScope(options, issueNumber);
-  const key = [scope.repo, String(scope.issue)].join("\n");
-  const digest = createHash("sha256").update(key).digest("hex");
-  return `${LOCK_REF_PREFIX}/${digest}`;
-}
-
-function sameLockIdentity(left, right) {
-  return left?.repo === right.repo && left?.issue === right.issue;
-}
-
-function validRecordedScope(observed, expected) {
-  return (
-    sameLockIdentity(observed, expected) &&
-    typeof observed?.projectOwner === "string" &&
-    observed.projectOwner.length > 0 &&
-    Number.isInteger(observed.projectNumber) &&
-    observed.projectNumber > 0
-  );
+  return BOARD_PROFILE.refName(canonicalScope(options, issueNumber));
 }
 
 function lockRecoveryText(lease) {
@@ -846,195 +817,75 @@ function conflict(scope, refName, observed, reason, options = {}) {
   );
 }
 
-function parseLockPayload(message, scope, refName, oid) {
-  let payload;
-  try {
-    payload = JSON.parse(message);
-  } catch (err) {
-    throw conflict(
-      scope,
-      refName,
-      { oid, payload: null },
-      `commit ${oid} has an invalid JSON payload`,
-      { cause: err },
-    );
-  }
+// The package raises its own conflict class with this profile's code.
+// `isRecoverableClaimRaceError` matches the board's class, so a lost race must
+// keep reaching callers as `IssueOwnershipConflictError`.
+function boardError(err) {
   if (
-    payload?.kind !== LOCK_KIND ||
-    payload?.version !== LOCK_VERSION ||
-    !["LOCK", "UNLOCK"].includes(payload?.state) ||
-    !validRecordedScope(payload.scope, scope)
+    err?.code !== BOARD_PROFILE.errorCodes.conflict ||
+    err instanceof IssueOwnershipConflictError
   ) {
-    throw conflict(
-      scope,
-      refName,
-      { oid, payload },
-      `commit ${oid} is not a valid mutex state for this issue`,
-    );
+    return err;
   }
-  return payload;
+  return new IssueOwnershipConflictError(
+    err.message,
+    err.details,
+    err.cause === undefined ? {} : { cause: err.cause },
+  );
 }
 
-async function readDefaultBranchCommit(options) {
-  const { owner, name } = splitRepo(options.repo);
-  const response = await ghGraphql(
-    `query($owner:String!,$name:String!){
-      repository(owner:$owner,name:$name){
-        id
-        defaultBranchRef {
-          target {
-            ... on Commit {
-              oid
-              tree { oid }
-            }
-          }
-        }
-      }
-    }`,
-    { owner, name },
-  );
-  const commit = response?.data?.repository?.defaultBranchRef?.target;
-  if (!commit?.oid || !commit?.tree?.oid) {
-    throw new Error(`Repository ${options.repo} has no default-branch commit`);
-  }
+// The package's `gh` wrappers run through this repository's runner, which pins
+// the GitHub host and prints the Contents and `project` scope hints.
+function githubContext(options) {
   return {
-    oid: commit.oid,
-    treeOid: commit.tree.oid,
-    repositoryId: response.data.repository.id,
+    profile: BOARD_PROFILE,
+    options: { repo: options.repo, dryRun: options.dryRun, run: runGh },
   };
 }
 
 // GraphQL `repository.ref(qualifiedName:)` returns null for refs outside
-// `refs/heads` and `refs/tags`, so the retained lock ref is read through the
-// Git data REST API and its commit through GraphQL `repository.object`.
-export async function readLockRef(
-  options,
-  refName,
-  scope,
-  { json = ghJson, graphql = ghGraphql } = {},
-) {
-  const matches = await json([
-    "api",
-    `repos/${options.repo}/git/matching-refs/${refName.slice("refs/".length)}`,
-  ]);
-  const match = (matches ?? []).find((entry) => entry?.ref === refName);
-  if (!match) return null;
-  const oid = match.object?.sha ?? null;
-  const { owner, name } = splitRepo(options.repo);
-  const response = oid
-    ? await graphql(
-        `
-          query ($owner: String!, $name: String!, $oid: GitObjectID!) {
-            repository(owner: $owner, name: $name) {
-              id
-              object(oid: $oid) {
-                __typename
-                oid
-                ... on Commit {
-                  message
-                  tree {
-                    oid
-                  }
-                }
-              }
-            }
-          }
-        `,
-        { owner, name, oid },
-      )
-    : null;
-  const target = response?.data?.repository?.object;
-  if (
-    match.object?.type !== "commit" ||
-    target?.__typename !== "Commit" ||
-    !target?.oid ||
-    !target?.tree?.oid
-  ) {
-    throw conflict(
-      scope,
+// `refs/heads` and `refs/tags`, so the package reads the retained lock ref
+// through the Git data REST API and its commit through `repository.object`.
+export async function readLockRef(options, refName, scope, transport = {}) {
+  try {
+    return await readClaimRefFromGitHub(
+      githubContext(options),
       refName,
-      { oid, payload: null },
-      "the ref does not target a commit",
+      scope,
+      transport,
     );
+  } catch (err) {
+    throw boardError(err);
   }
-  return {
-    oid: target.oid,
-    treeOid: target.tree.oid,
-    repositoryId: response.data.repository.id,
-    payload: parseLockPayload(target.message, scope, refName, target.oid),
-  };
 }
 
-async function createStateCommit(options, parent, payload, timestamp) {
-  const response = await ghJson(
-    [
-      "api",
-      "--method",
-      "POST",
-      `repos/${options.repo}/git/commits`,
-      "-f",
-      `message=${JSON.stringify(payload)}`,
-      "-f",
-      `tree=${parent.treeOid}`,
-      "-f",
-      `parents[]=${parent.oid}`,
-      "-f",
-      `author[name]=${LOCK_AUTHOR.name}`,
-      "-f",
-      `author[email]=${LOCK_AUTHOR.email}`,
-      "-f",
-      `author[date]=${timestamp}`,
-      "-f",
-      `committer[name]=${LOCK_AUTHOR.name}`,
-      "-f",
-      `committer[email]=${LOCK_AUTHOR.email}`,
-      "-f",
-      `committer[date]=${timestamp}`,
-    ],
-    { dryRun: options.dryRun, mutates: true },
+function readDefaultBranchCommit(options) {
+  return GITHUB_OPERATIONS.readDefaultBranchCommit(githubContext(options));
+}
+
+function createStateCommit(options, parent, payload, timestamp) {
+  return GITHUB_OPERATIONS.createStateCommit(
+    githubContext(options),
+    parent,
+    payload,
+    timestamp,
   );
-  if (!response?.sha)
-    throw new Error("GitHub did not return a mutex commit SHA");
-  return { oid: response.sha, treeOid: response.tree?.sha ?? parent.treeOid };
 }
 
-async function compareAndSwapLockRef(
+function compareAndSwapLockRef(
   options,
   repositoryId,
   refName,
   beforeOid,
   afterOid,
 ) {
-  const response = await ghGraphql(
-    `mutation(
-      $repository:ID!
-      $name:GitRefname!
-      $before:GitObjectID!
-      $after:GitObjectID!
-    ) {
-      updateRefs(input:{
-        repositoryId:$repository
-        refUpdates:[{
-          name:$name
-          beforeOid:$before
-          afterOid:$after
-          force:false
-        }]
-      }) {
-        clientMutationId
-      }
-    }`,
-    {
-      repository: repositoryId,
-      name: refName,
-      before: beforeOid,
-      after: afterOid,
-    },
-    { dryRun: options.dryRun, mutates: true },
+  return GITHUB_OPERATIONS.compareAndSwapRef(
+    githubContext(options),
+    repositoryId,
+    refName,
+    beforeOid,
+    afterOid,
   );
-  if (!options.dryRun && !response?.data?.updateRefs) {
-    throw new Error("GitHub did not confirm the mutex ref compare-and-swap");
-  }
 }
 
 function operationsFor(overrides = {}) {
@@ -1051,27 +902,34 @@ function operationsFor(overrides = {}) {
       readIssueOwnerTarget(options, issueNumber, {
         graphql: ownerTargetGraphql,
       }),
-    sleep: overrides.sleep ?? sleep,
+    sleep: overrides.sleep ?? GITHUB_OPERATIONS.sleep,
   };
 }
 
-function basePayload(scope, state, operation, operationId, metadata) {
-  const claimId = metadata.claimId ?? null;
-  if (claimId != null) validateClaimId(claimId);
+// The package engine calls `(ctx, ...)`. Each call reads the board operation
+// at call time, so a lease's operations stay replaceable after acquire.
+function engine(options, operations) {
   return {
-    kind: LOCK_KIND,
-    version: LOCK_VERSION,
-    state,
-    scope,
-    operation,
-    operationId,
-    agent: metadata.agent ?? null,
-    claimId,
-    branch: metadata.branch ?? null,
-    previousBranch: metadata.previousBranch ?? null,
-    claimedAt: metadata.claimedAt ?? null,
-    pr: metadata.pr ?? null,
-    previousPr: metadata.previousPr ?? null,
+    ctx: { profile: BOARD_PROFILE, options },
+    operations: {
+      compareAndSwapRef: (ctx, ...args) =>
+        operations.compareAndSwapLockRef(ctx.options, ...args),
+      createStateCommit: (ctx, ...args) =>
+        operations.createStateCommit(ctx.options, ...args),
+      readDefaultBranchCommit: (ctx) =>
+        operations.readDefaultBranchCommit(ctx.options),
+      // A read the package sees as `refInvalid` would end reconciliation with
+      // a stale code outside the lease wrapper. The board treats an unreadable
+      // head as an unknown outcome, so the flag never reaches the package.
+      readClaimRef: async (ctx, ...args) => {
+        try {
+          return await operations.readLockRef(ctx.options, ...args);
+        } catch (err) {
+          throw boardError(err);
+        }
+      },
+      sleep: (ms) => operations.sleep(ms),
+    },
   };
 }
 
@@ -1083,122 +941,22 @@ async function initializeLockRef(
   operationId,
   timestamp,
 ) {
-  let observed = await operations.readLockRef(options, refName, scope);
-  if (observed) return observed;
-  const base = await operations.readDefaultBranchCommit(options);
-  const payload = {
-    ...basePayload(scope, "UNLOCK", "initialize", operationId, {}),
-    parentLock: null,
-    completedAt: timestamp,
-  };
-  const initial = await operations.createStateCommit(
-    options,
-    base,
-    payload,
-    timestamp,
-  );
-  const expected = {
-    ...initial,
-    repositoryId: base.repositoryId,
-    payload,
-  };
-  let lastError = null;
-  for (let attempt = 1; attempt <= LOCK_RECONCILE_ATTEMPTS; attempt += 1) {
-    try {
-      await operations.compareAndSwapLockRef(
-        options,
-        base.repositoryId,
-        refName,
-        ZERO_OID,
-        expected.oid,
-      );
-      return expected;
-    } catch (err) {
-      lastError = err;
-    }
-    const reconciliation = await reconcileLockRefRead(
-      options,
+  const { ctx, operations: claimOperations } = engine(options, operations);
+  try {
+    return await initializeClaimRef(
+      ctx,
       scope,
       refName,
-      operations,
-      lastError,
-      "initialize",
-      expected,
+      claimOperations,
+      operationId,
+      timestamp,
     );
-    observed = reconciliation.observed;
-    if (observed?.oid === expected.oid) return observed;
-    if (observed?.payload?.state === "UNLOCK") return observed;
-    if (observed) {
-      throw conflict(
-        scope,
-        refName,
-        observed,
-        `initialize expected an absent ref or ${expected.oid}, but found ${observed.oid}`,
-        { cause: lastError },
-      );
-    }
-    if (attempt < LOCK_RECONCILE_ATTEMPTS) {
-      await operations.sleep(LOCK_RECONCILE_DELAY_MS);
-    }
+  } catch (err) {
+    throw boardError(err);
   }
-  throw new Error(
-    `Issue #${scope.issue} mutex ref ${refName} read as absent after ${LOCK_RECONCILE_ATTEMPTS} create-from-absent compare-and-swap attempts; last compare-and-swap error: ${String(lastError?.message ?? lastError).split("\n")[0]}`,
-    { cause: lastError },
-  );
 }
 
-async function reconcileLockRefRead(
-  options,
-  scope,
-  refName,
-  operations,
-  updateError,
-  action,
-  expected,
-) {
-  const readErrors = [];
-  for (let attempt = 1; attempt <= LOCK_RECONCILE_ATTEMPTS; attempt += 1) {
-    try {
-      return {
-        observed: await operations.readLockRef(options, refName, scope),
-      };
-    } catch (err) {
-      readErrors.push(err);
-      if (attempt < LOCK_RECONCILE_ATTEMPTS) {
-        await operations.sleep(LOCK_RECONCILE_DELAY_MS);
-      }
-    }
-  }
-  const error = new Error(
-    `Issue #${scope.issue} mutex ${action} outcome is unknown at ${refName}; candidate ${expected.payload?.state ?? "state"} ${expected.oid} has payload ${JSON.stringify(expected.payload ?? null)}`,
-    {
-      cause: new AggregateError(
-        [updateError, ...readErrors],
-        `Mutex ${action} compare-and-swap and reconciliation reads failed`,
-      ),
-    },
-  );
-  error.code = "ISSUE_MUTATION_LOCK_RECONCILIATION_UNKNOWN";
-  throw error;
-}
-
-function unknownRefAdvanceError(
-  scope,
-  refName,
-  action,
-  parent,
-  expected,
-  updateError,
-) {
-  const error = new Error(
-    `Issue #${scope.issue} mutex ${action} outcome is unknown at ${refName}; candidate ${expected.payload?.state ?? "state"} ${expected.oid} has payload ${JSON.stringify(expected.payload ?? null)}. The last reconciliation still reported parent ${parent.oid}; do not retry because the candidate update can still complete or already be hidden by a stale read.`,
-    { cause: updateError },
-  );
-  error.code = "ISSUE_MUTATION_LOCK_RECONCILIATION_UNKNOWN";
-  return error;
-}
-
-async function advanceRef(
+async function advanceLockRef(
   options,
   scope,
   refName,
@@ -1207,48 +965,19 @@ async function advanceRef(
   operations,
   action,
 ) {
-  for (let attempt = 1; attempt <= LOCK_RECONCILE_ATTEMPTS; attempt += 1) {
-    try {
-      await operations.compareAndSwapLockRef(
-        options,
-        parent.repositoryId,
-        refName,
-        parent.oid,
-        expected.oid,
-      );
-      return expected;
-    } catch (lastError) {
-      const { observed } = await reconcileLockRefRead(
-        options,
-        scope,
-        refName,
-        operations,
-        lastError,
-        action,
-        expected,
-      );
-      if (observed?.oid === expected.oid) return observed;
-      if (observed?.oid !== parent.oid) {
-        throw conflict(
-          scope,
-          refName,
-          observed,
-          `${action} expected ${parent.oid} or ${expected.oid}, but found ${observed?.oid ?? "<absent>"}`,
-          { cause: lastError },
-        );
-      }
-      if (attempt >= LOCK_RECONCILE_ATTEMPTS) {
-        throw unknownRefAdvanceError(
-          scope,
-          refName,
-          action,
-          parent,
-          expected,
-          lastError,
-        );
-      }
-    }
-    await operations.sleep(LOCK_RECONCILE_DELAY_MS);
+  const { ctx, operations: claimOperations } = engine(options, operations);
+  try {
+    return await advanceRef(
+      ctx,
+      scope,
+      refName,
+      parent,
+      expected,
+      claimOperations,
+      action,
+    );
+  } catch (err) {
+    throw boardError(err);
   }
 }
 
@@ -1282,17 +1011,16 @@ export async function acquireIssueMutationLock(
   const preparedMetadata = overrides.prepareMetadata
     ? await overrides.prepareMetadata(metadata)
     : metadata;
-  const payload = {
-    ...basePayload(
-      scope,
-      "LOCK",
-      preparedMetadata.operation,
-      operationId,
-      preparedMetadata,
-    ),
+  const payload = buildClaimPayload({
+    profile: BOARD_PROFILE,
+    scope,
+    state: "LOCK",
+    operation: preparedMetadata.operation,
+    operationId,
+    metadata: preparedMetadata,
     parentUnlock: current.oid,
     startedAt: timestamp,
-  };
+  });
   const lock = await operations.createStateCommit(
     options,
     current,
@@ -1318,7 +1046,7 @@ export async function acquireIssueMutationLock(
     },
   };
   try {
-    await advanceRef(
+    await advanceLockRef(
       options,
       scope,
       refName,
@@ -1343,18 +1071,17 @@ export async function acquireIssueMutationLock(
 export async function releaseIssueMutationLock(lease) {
   const timestamp = new Date().toISOString();
   const operationId = `unlock-${randomUUID()}`;
-  const payload = {
-    ...basePayload(
-      lease.scope,
-      "UNLOCK",
-      "complete",
-      operationId,
-      lease.payload,
-    ),
+  const payload = buildClaimPayload({
+    profile: BOARD_PROFILE,
+    scope: lease.scope,
+    state: "UNLOCK",
+    operation: "complete",
+    operationId,
+    metadata: lease.payload,
     parentLock: lease.lockOid,
     completedAt: timestamp,
     outcome: lease.safeReason ?? "completed",
-  };
+  });
   const parent = {
     oid: lease.lockOid,
     treeOid: lease.treeOid,
@@ -1370,7 +1097,7 @@ export async function releaseIssueMutationLock(lease) {
   unlocked.payload = payload;
   lease.candidateUnlock = { oid: unlocked.oid, payload };
   try {
-    await advanceRef(
+    await advanceLockRef(
       lease.options,
       lease.scope,
       lease.refName,

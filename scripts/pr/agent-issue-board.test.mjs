@@ -16,7 +16,7 @@ import { dirname, extname, join, posix, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { TextDecoder } from "node:util";
 
-import { Kind, parse as parseGraphql } from "graphql";
+import { Kind, parse as parseGraphql, stripIgnoredCharacters } from "graphql";
 import { load as parseYaml } from "js-yaml";
 import ts from "typescript";
 
@@ -2069,8 +2069,10 @@ test("mutex ref read resolves the retained custom ref through REST", async () =>
     json: async (args) => {
       jsonCalls.push(args);
       return [
-        { ref: `${refName}0`, object: { sha: "decoy", type: "commit" } },
-        { ref: refName, object: { sha: "lock-oid", type: "commit" } },
+        [
+          { ref: `${refName}0`, object: { sha: "decoy", type: "commit" } },
+          { ref: refName, object: { sha: "lock-oid", type: "commit" } },
+        ],
       ];
     },
     graphql: async (query, variables) => {
@@ -2100,6 +2102,8 @@ test("mutex ref read resolves the retained custom ref through REST", async () =>
   assertDeepEqual(jsonCalls, [
     [
       "api",
+      "--paginate",
+      "--slurp",
       `repos/mento-protocol/monitoring-monorepo/git/matching-refs/${refName.slice("refs/".length)}`,
     ],
   ]);
@@ -2120,6 +2124,152 @@ test("mutex ref read resolves the retained custom ref through REST", async () =>
     },
   });
   assertEqual(absent, null);
+});
+
+// Bytes captured from the pre-package mutex (origin/main 54728356) with the
+// clock and UUIDs pinned. A live LOCK or UNLOCK written by either
+// implementation must stay readable by the other, so these must never drift.
+const PINNED_MUTEX_REF =
+  "refs/mento-issue-board-locks/v1/fa354fab2a6fe12ed217282c12191b27a0fdaa359d5b7883c1d84d42173cb03d";
+const PINNED_MUTEX_SCOPE =
+  '"scope":{"repo":"mento-protocol/monitoring-monorepo","projectOwner":"mento-protocol","projectNumber":12,"issue":2343}';
+const PINNED_MUTEX_OWNER =
+  '"agent":"claude","claimId":"claim-2343","branch":"refactor/2343-adopt-issues-mutex","previousBranch":null,"claimedAt":"2026-09-25","pr":null,"previousPr":null';
+const PINNED_MUTEX_TIME = "2026-09-25T12:00:00.123Z";
+const PINNED_CAS_DOCUMENT =
+  "mutation($repository:ID!$name:GitRefname!$before:GitObjectID!$after:GitObjectID!){updateRefs(input:{repositoryId:$repository refUpdates:[{name:$name beforeOid:$before afterOid:$after force:false}]}){clientMutationId}}";
+
+function pinnedCommitArgs(message, parent) {
+  return [
+    "api",
+    "--method",
+    "POST",
+    "repos/mento-protocol/monitoring-monorepo/git/commits",
+    "-f",
+    `message=${message}`,
+    "-f",
+    `tree=${"b".repeat(40)}`,
+    "-f",
+    `parents[]=${parent}`,
+    "-f",
+    "author[name]=Mento issue board",
+    "-f",
+    "author[email]=issue-board@users.noreply.github.com",
+    "-f",
+    `author[date]=${PINNED_MUTEX_TIME}`,
+    "-f",
+    "committer[name]=Mento issue board",
+    "-f",
+    "committer[email]=issue-board@users.noreply.github.com",
+    "-f",
+    `committer[date]=${PINNED_MUTEX_TIME}`,
+  ];
+}
+
+function pinnedCasArgs(before, after) {
+  return [
+    "api",
+    "graphql",
+    "-f",
+    `query=${PINNED_CAS_DOCUMENT}`,
+    "-f",
+    "repository=R_repository",
+    "-f",
+    `name=${PINNED_MUTEX_REF}`,
+    "-f",
+    `before=${before}`,
+    "-f",
+    `after=${after}`,
+  ];
+}
+
+test("mutex bootstrap, acquire, and release write the pinned gh bytes", () => {
+  const fixtureDir = mkdtempSync(join(tmpdir(), "issue-board-mutex-bytes-"));
+  const log = join(fixtureDir, "gh.log");
+  writeFileSync(log, "");
+  writeFileSync(
+    join(fixtureDir, "gh"),
+    [
+      `#!${process.execPath}`,
+      'const fs = require("node:fs");',
+      "const args = process.argv.slice(2);",
+      'fs.appendFileSync(process.env.FAKE_GH_LOG, JSON.stringify(args) + "\\n");',
+      'const calls = fs.readFileSync(process.env.FAKE_GH_LOG, "utf8").trim().split("\\n").length;',
+      'if (args.some((arg) => arg.endsWith("/git/commits"))) {',
+      '  process.stdout.write(JSON.stringify({ sha: String(calls).padStart(40, "c"), tree: { sha: "b".repeat(40) } }));',
+      "} else {",
+      "  process.stdout.write(JSON.stringify({ data: { updateRefs: { clientMutationId: null } } }));",
+      "}",
+      "",
+    ].join("\n"),
+  );
+  chmodSync(join(fixtureDir, "gh"), 0o755);
+  const lockUrl = new URL("./issue-board-lock.mjs", import.meta.url).href;
+  const probe = `
+    import crypto from "node:crypto";
+    import { syncBuiltinESMExports } from "node:module";
+    let uuid = 0;
+    crypto.randomUUID = () => "00000000-0000-4000-8000-" + String(++uuid).padStart(12, "0");
+    syncBuiltinESMExports();
+    const RealDate = Date;
+    const fixed = RealDate.parse(${JSON.stringify(PINNED_MUTEX_TIME)});
+    globalThis.Date = class extends RealDate {
+      constructor(...args) { super(...(args.length ? args : [fixed])); }
+      static now() { return fixed; }
+    };
+    const { acquireIssueMutationLock, releaseIssueMutationLock } = await import(${JSON.stringify(lockUrl)});
+    const lease = await acquireIssueMutationLock(
+      { repo: "mento-protocol/monitoring-monorepo", projectOwner: "mento-protocol", projectNumber: 12, agent: "claude", dryRun: false },
+      2343,
+      { operation: "claim", projectId: "PVT_project", agent: "claude", claimId: "claim-2343", branch: "refactor/2343-adopt-issues-mutex", claimedAt: "2026-09-25" },
+      {
+        readLockRef: async () => null,
+        readDefaultBranchCommit: async () => ({ oid: "a".repeat(40), treeOid: "b".repeat(40), repositoryId: "R_repository" }),
+        sleep: async () => {},
+      },
+    );
+    await releaseIssueMutationLock(lease);
+  `;
+  try {
+    execFileSync(process.execPath, ["--input-type=module", "--eval", probe], {
+      encoding: "utf8",
+      env: { FAKE_GH_LOG: log, PATH: fixtureDir },
+    });
+    const calls = readFileSync(log, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line))
+      .map((args) =>
+        args.map((arg) =>
+          arg.startsWith("query=")
+            ? `query=${stripIgnoredCharacters(arg.slice("query=".length))}`
+            : arg,
+        ),
+      );
+    const zero = "0".repeat(40);
+    const [initial, lock, unlock] = ["1", "3", "5"].map((n) =>
+      n.padStart(40, "c"),
+    );
+    assertDeepEqual(calls, [
+      pinnedCommitArgs(
+        `{"kind":"mento-issue-board-mutex","version":1,"state":"UNLOCK",${PINNED_MUTEX_SCOPE},"operation":"initialize","operationId":"lock-00000000-0000-4000-8000-000000000001","agent":null,"claimId":null,"branch":null,"previousBranch":null,"claimedAt":null,"pr":null,"previousPr":null,"parentLock":null,"completedAt":"${PINNED_MUTEX_TIME}"}`,
+        "a".repeat(40),
+      ),
+      pinnedCasArgs(zero, initial),
+      pinnedCommitArgs(
+        `{"kind":"mento-issue-board-mutex","version":1,"state":"LOCK",${PINNED_MUTEX_SCOPE},"operation":"claim","operationId":"lock-00000000-0000-4000-8000-000000000001",${PINNED_MUTEX_OWNER},"parentUnlock":"${initial}","startedAt":"${PINNED_MUTEX_TIME}"}`,
+        initial,
+      ),
+      pinnedCasArgs(initial, lock),
+      pinnedCommitArgs(
+        `{"kind":"mento-issue-board-mutex","version":1,"state":"UNLOCK",${PINNED_MUTEX_SCOPE},"operation":"complete","operationId":"unlock-00000000-0000-4000-8000-000000000002",${PINNED_MUTEX_OWNER},"parentLock":"${lock}","completedAt":"${PINNED_MUTEX_TIME}","outcome":"completed"}`,
+        lock,
+      ),
+      pinnedCasArgs(lock, unlock),
+    ]);
+  } finally {
+    rmSync(fixtureDir, { force: true, recursive: true });
+  }
 });
 
 test("open PR branch proof filters the repository and fails closed at its cap", async () => {
@@ -8084,6 +8234,53 @@ test("mutex acquire retries reconciliation reads after an applied CAS", async ()
   assertEqual(failedReads, 2);
   assertEqual(lease.lockOid, server.refOid);
   await releaseIssueMutationLock(lease);
+});
+
+test("unreadable reconciliation payloads still report an unknown acquire as stale", async () => {
+  const server = createFakeLockServer();
+  const setup = await acquireIssueMutationLock(
+    LOCK_TEST_OPTIONS,
+    2122,
+    { operation: "sync", agent: "setup" },
+    server.operations,
+  );
+  await releaseIssueMutationLock(setup);
+
+  let acquireApplied = false;
+  const error = await assertRejects(
+    () =>
+      acquireIssueMutationLock(
+        LOCK_TEST_OPTIONS,
+        2122,
+        { operation: "claim", agent: "codex", claimId: "claim-2122" },
+        server.withOperations({
+          compareAndSwapLockRef: async (...args) => {
+            const commit = server.commits.get(args[4]);
+            if (commit.payload.state === "LOCK") {
+              await server.compareAndSwapLockRef(...args);
+              acquireApplied = true;
+              throw new Error("acquire response lost");
+            }
+            return server.compareAndSwapLockRef(...args);
+          },
+          readLockRef: async (...args) => {
+            if (acquireApplied) {
+              // The shape the package's payload parser raises for a
+              // payload it cannot read.
+              const invalid = new Error("commit has an invalid JSON payload");
+              invalid.code = "ISSUE_OWNERSHIP_CONFLICT";
+              invalid.refInvalid = true;
+              throw invalid;
+            }
+            return server.operations.readLockRef(...args);
+          },
+        }),
+      ),
+    /outcome is unknown[\s\S]*candidate LOCK[\s\S]*do not retry or mutate the board/,
+  );
+  assert(error instanceof IssueMutationLockStaleError);
+  assertEqual(error.cause.code, "ISSUE_MUTATION_LOCK_RECONCILIATION_UNKNOWN");
+  assertEqual(error.lease.lockOid, server.refOid);
 });
 
 test("unknown acquire outcome reports the candidate LOCK and recovery evidence", async () => {

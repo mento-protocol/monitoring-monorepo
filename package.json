@@ -139,6 +139,7 @@
     "@lezer/highlight": "^1.2.3",
     "@lezer/lr": "^1.4.10",
     "@lhci/cli": "^0.15.1",
+    "@mento-protocol/issues": "0.2.0",
     "@prometheus-io/lezer-promql": "0.313.3",
     "@upstash/mcp-server": "0.3.0",
     "dependency-cruiser": "18.2.0",
