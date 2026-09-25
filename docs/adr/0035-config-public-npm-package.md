@@ -82,5 +82,9 @@ published `@mento-protocol/config@0.2.0` with provenance
 - `shared-config/package.json`
 - `.github/workflows/publish-config.yml`
 - [`shared-config/AGENTS.md`](../../shared-config/AGENTS.md)
-- Failed `config-v0.2.0` publish run `29831994804`; live npm version check on
-  2026-08-11; recovery issue [#1573](https://github.com/mento-protocol/monitoring-monorepo/issues/1573)
+- Failed `config-v0.2.0` publish run `29831994804` (2026-07-21); recovery
+  issue [#1573](https://github.com/mento-protocol/monitoring-monorepo/issues/1573)
+- Successful `config-v0.2.0` publish run `36133204471` (2026-09-25), whose log
+  shows the signed provenance statement and `+ @mento-protocol/config@0.2.0`;
+  `https://registry.npmjs.org/@mento-protocol/config/0.2.0` returned HTTP 200
+  on 2026-09-25
