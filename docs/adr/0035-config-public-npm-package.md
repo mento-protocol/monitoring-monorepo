@@ -3,7 +3,7 @@ title: shared-config publishes as the public @mento-protocol/config package
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-11
+last_verified: 2026-09-25
 scope: shared-config
 date: 2026-07
 doc_type: adr
@@ -36,13 +36,14 @@ and pack the artifact; untagged workflow runs do not publish.
 
 ## Current operational status
 
-The decision remains in force, but the release path is not healthy end to end.
-As verified on 2026-08-11, npm still serves `0.1.0` while the repository and tag
-`config-v0.2.0` identify `0.2.0`. Workflow run `29831994804` built and verified
-the package, signed provenance, then failed at `npm publish` with npm `E404` /
-missing permission. Issue [#1573](https://github.com/mento-protocol/monitoring-monorepo/issues/1573)
-tracks the trusted-publisher repair and `0.2.0` release. Until it closes, do not
-claim that every matching tag publishes successfully.
+The decision remains in force, and the release path works end to end. The
+first `0.2.0` attempt (workflow run `29831994804`, 2026-07-21) failed at
+`npm publish` with npm `E404`, because no trusted publisher was linked to the
+package. On 2026-09-25 a maintainer configured the trusted publisher, the
+`config-v0.2.0` tag was moved to a `main` commit whose package version is still
+`0.2.0` (that version had never published), and workflow run `36133204471`
+published `@mento-protocol/config@0.2.0` with provenance
+([#1573](https://github.com/mento-protocol/monitoring-monorepo/issues/1573)).
 
 ## Alternatives considered
 
@@ -81,5 +82,9 @@ claim that every matching tag publishes successfully.
 - `shared-config/package.json`
 - `.github/workflows/publish-config.yml`
 - [`shared-config/AGENTS.md`](../../shared-config/AGENTS.md)
-- Failed `config-v0.2.0` publish run `29831994804`; live npm version check on
-  2026-08-11; recovery issue [#1573](https://github.com/mento-protocol/monitoring-monorepo/issues/1573)
+- Failed `config-v0.2.0` publish run `29831994804` (2026-07-21); recovery
+  issue [#1573](https://github.com/mento-protocol/monitoring-monorepo/issues/1573)
+- Successful `config-v0.2.0` publish run `36133204471` (2026-09-25), whose log
+  shows the signed provenance statement and `+ @mento-protocol/config@0.2.0`;
+  `https://registry.npmjs.org/@mento-protocol/config/0.2.0` returned HTTP 200
+  on 2026-09-25
