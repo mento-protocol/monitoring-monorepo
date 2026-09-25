@@ -146,9 +146,10 @@ Polygon-specific coverage and delivery decisions are:
 | Polygon ReserveV2 EUROP balance equals exactly zero                            | 5 minutes                                    | page to `#alerts-critical`, Splunk On-Call, and `#alerts-reserve` | EURm/EUROP reserve expansion is unavailable                                                |
 | Reserve Safe or Migration multisig executes or changes ownership/threshold     | event-driven                                 | Slack multisig channel                                            | Governance/treasury control-plane activity must not wait for a scrape cycle                |
 
-The reserve predicates are deliberately exact-zero only. Operational nonzero
-floors need treasury-owned SLOs and are tracked in #1332; the monitoring stack
-must not guess them. Stuck bridge-transfer paging is tracked in #1362.
+The page-severity reserve predicates are exact-zero only. Polygon USDC also has
+nonzero floors from #1332: a warning below 100k and a critical below 60k, each
+held 60 minutes and routed to `#alerts-reserve`. Stuck bridge-transfer paging
+is tracked in #1362.
 
 ## Rollout order and proof
 
