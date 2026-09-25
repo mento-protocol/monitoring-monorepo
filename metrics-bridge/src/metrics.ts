@@ -131,7 +131,10 @@ export type PollErrorKind =
   | "mark_healthy"
   | "rebalance_probe"
   | "cdp_query"
-  | "cdp_update";
+  | "cdp_update"
+  | "capa_withdrawal"
+  | "capa_withdrawal_query"
+  | "capa_withdrawal_rpc";
 const pollErrorLabels = ["kind"] as const;
 
 export const gauges = {
@@ -329,6 +332,12 @@ export const gauges = {
     help: "Unix timestamp of the last completed rebalance-reason probe cycle. 0 before the first cycle.",
     registers: [register],
   }),
+  capaWithdrawal: new Gauge({
+    name: "mento_pool_capa_polygon_eurm_usdm_withdrawal_timestamp",
+    help: "Unix timestamp of a receipt-verified LP withdrawal from the Polygon EURm/USDm pool. At most ten recent burns are checked for one configured owner.",
+    labelNames: ["event_id", "tx_hash", "owner", "eurm", "usdm"] as const,
+    registers: [register],
+  }),
 };
 
 export const counters = {
@@ -360,6 +369,7 @@ const POLL_PRESERVED_GAUGES = new Set<Gauge>([
   gauges.bridgeLastPoll,
   gauges.rebalanceProbeLastRun,
   gauges.rebalanceBlocked,
+  gauges.capaWithdrawal,
 ]);
 
 export function updateMetrics(

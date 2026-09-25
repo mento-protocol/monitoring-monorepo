@@ -27,7 +27,7 @@ Separate from `terraform/` (platform) and `aegis/terraform`: `gs://mento-terrafo
 
 ## Prerequisites
 
-1. **Slack app with bot token.** The "Grafana Alerts" app needs `chat:write` + `chat:write.public` scopes and must be invited (`/invite @Grafana Alerts`) to every channel it posts to. Current set: `#alerts-bridges`, `#alerts-critical`, `#alerts-oracles`, `#alerts-pools`, `#alerts-cdps`, `#alerts-reserve`, `#alerts-infra`, `#alerts-testnet`, and the deprecated compatibility channel `#alerts-warning`. CDP warnings route to `#alerts-cdps`; CDP criticals route to `#alerts-critical`.
+1. **Slack app with bot token.** The "Grafana Alerts" app needs `chat:write` + `chat:write.public` scopes and must be invited (`/invite @Grafana Alerts`) to every channel it posts to. Current set: `#alerts-bridges`, `#alerts-critical`, `#alerts-oracles`, `#alerts-pools`, `#pool-alerts` (Capa LP withdrawals), `#alerts-cdps`, `#alerts-reserve`, `#alerts-infra`, `#alerts-testnet`, and the deprecated compatibility channel `#alerts-warning`. CDP warnings route to `#alerts-cdps`; CDP criticals route to `#alerts-critical`.
 2. **Grafana Cloud service account token** with `Admin` role in the `clabsmento` stack (Grafana Cloud → Administration → Service accounts).
 3. **Splunk On-Call webhook URL** for page-severity protocol/Aegis routes.
 
@@ -65,6 +65,31 @@ against `metrics-bridge/src/peg/metrics.ts`.
 
 CI runs this in the `CI / Lint + test root scripts` job, along with
 `pnpm alerts:rules:lint:test` for extractor and failure-case coverage.
+
+## Capa Polygon LP withdrawal
+
+`capa-withdrawal.tf` routes a receipt-verified FPMM `Burn` by Capa's Polygon
+LP Safe (`0x3d54f9496bf5bd0afa67c80ee8bc2eeadf306381`) to Slack channel
+`C0B53R34HTN` (`#pool-alerts`). The owner attribution was confirmed by Philip
+on 2026-09-25. Metrics Bridge reads indexed `LiquidityEvent` burns for pool
+`137-0x93e15a22fda39fefccce82d387a09ccf030ead61`, then verifies the
+exact Polygon transaction receipt contains the Safe's LP-token transfer to
+the pool, the LP-token burn, and the matching FPMM `Burn` log. `Burn.sender`
+is the shared Router, and `Burn.to` can also be the Router; neither identifies
+the LP. A same-transaction swap does not suppress the alert. The Slack copy
+reports gross EURm/USDm pool outflows and links the pool, LP Safe, and tx.
+
+The bridge keeps at most ten burns from the last six hours and fails visibly
+through the `capa_withdrawal_query` poll-error kind if the query or cap fails,
+or `capa_withdrawal_rpc` if receipt proof cannot run.
+The Grafana rule fingerprints each indexed event, sends no resolved post, and
+has a repeat interval longer than the six-hour window. This bounds duplicate
+posts during normal polls and restarts; an indexer lag beyond six hours can
+miss a burn and requires operator investigation. The bridge image deploys on
+merge; the alert rules apply through their protected workflow. Neither
+Terraform validation nor unit tests prove that the Grafana Slack app can post
+to the channel; the trusted Gateway
+operator must verify the channel membership and destination read-only.
 
 ## Peg alert ladder
 
