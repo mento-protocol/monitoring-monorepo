@@ -130,7 +130,7 @@ resource "grafana_message_template" "slack_reserve_balance_alert_message" {
 {{ range .Alerts.Firing -}}
 {{ $token := .Labels.token -}}
 {{ $reserveAddress := .Labels.ownerValue -}}
-*<https://{{ .Labels.explorer }}/address/{{ $reserveAddress }}|Low {{ $token }} balance in the {{ .Labels.owner }}{{ with .Labels.chain }} on {{ . | title }}{{ end }}> — {{ .Annotations.currentBalance }} left*
+*<https://{{ .Labels.explorer }}/address/{{ $reserveAddress }}|{{ if eq .Annotations.band "critical" }}Critical{{ else }}Low{{ end }} {{ $token }} balance in the {{ .Labels.owner }}{{ with .Labels.chain }} on {{ . | title }}{{ end }}> — {{ .Annotations.currentBalance }} left*
 - Top up the {{ .Labels.owner }} to more than {{ .Annotations.threshold }} {{ $token }}
 {{ end -}}
 {{ range .Alerts.Resolved -}}
