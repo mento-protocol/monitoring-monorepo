@@ -121,7 +121,7 @@ deploy_webhook() {
 	# templateArgs.abiJson must be a string (not a parsed object).
 	# The internal template ID for PATCH is "evmAbiFilterGo" (evmAbiFilter is the display name).
 	local payload_file
-	payload_file=$(mktemp /tmp/qn_payload.XXXXXX.json)
+	payload_file=$(mktemp "${TMPDIR:-/tmp}/qn_payload.XXXXXX")
 	TMP_FILES+=("${payload_file}")
 
 	# Build templateArgs payload: abiJson must be a raw JSON string (not a parsed object).
