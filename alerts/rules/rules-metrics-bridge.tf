@@ -148,7 +148,7 @@ resource "grafana_rule_group" "metrics_bridge" {
 
     annotations = {
       summary     = "Bridge poll errors ({{ $labels.kind }}) — {{ printf \"%.3f\" $values.A.Value }}/s."
-      description = "Kind is one of hasura_rate_limit (HTTP 429; corroborate shared-quota pressure before acting — see docs/notes/hasura-isolation-trigger.md), hasura_query (schema drift or transport), update_metrics, mark_healthy, rebalance_probe, cdp_query, cdp_update, or capa_withdrawal (indexed burn/Polygon receipt proof). Stale gauges remain; alert-on-change is degraded."
+      description = "Kind is one of hasura_rate_limit (HTTP 429; corroborate shared-quota pressure before acting — see docs/notes/hasura-isolation-trigger.md), hasura_query (schema drift or transport), update_metrics, mark_healthy, rebalance_probe, cdp_query, cdp_update, capa_withdrawal_query (indexed burn/Hasura), capa_withdrawal_rpc (Polygon receipt proof), or capa_withdrawal (other poll error). Stale gauges remain; alert-on-change is degraded."
     }
 
     labels = {

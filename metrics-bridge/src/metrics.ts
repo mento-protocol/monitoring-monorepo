@@ -132,7 +132,9 @@ export type PollErrorKind =
   | "rebalance_probe"
   | "cdp_query"
   | "cdp_update"
-  | "capa_withdrawal";
+  | "capa_withdrawal"
+  | "capa_withdrawal_query"
+  | "capa_withdrawal_rpc";
 const pollErrorLabels = ["kind"] as const;
 
 export const gauges = {

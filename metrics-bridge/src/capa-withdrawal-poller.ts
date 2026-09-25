@@ -6,13 +6,22 @@ import {
   type IndexedBurn,
 } from "./capa-withdrawal.js";
 import { fetchRecentPoolBurns } from "./graphql.js";
-import { counters, gauges } from "./metrics.js";
+import { counters, gauges, type PollErrorKind } from "./metrics.js";
 import { getRpcClient } from "./rpc.js";
 
 // One narrow, six-hour window bounds event labels and keeps a Grafana alert
 // active long enough for normal indexing/scrape lag. The GraphQL query caps
 // the window at ten burns and fails loudly if that assumption is exceeded.
 export const WITHDRAWAL_WINDOW_SECONDS = 6 * 60 * 60;
+
+class CapaPollError extends Error {
+  constructor(
+    readonly kind: PollErrorKind,
+    cause: unknown,
+  ) {
+    super(`Capa withdrawal ${kind} failed`, { cause });
+  }
+}
 
 function amountLabel(wei: string): string {
   const [whole, fraction = ""] = formatUnits(BigInt(wei), 18).split(".");
@@ -23,27 +32,44 @@ export async function refreshCapaWithdrawals(
   owner: string,
   nowSeconds = Math.floor(Date.now() / 1000),
 ): Promise<void> {
-  const client = getRpcClient(137);
-  if (!client)
-    throw new Error("Polygon RPC unavailable for Capa withdrawal proof");
-  const rows = await fetchRecentPoolBurns(
-    nowSeconds - WITHDRAWAL_WINDOW_SECONDS,
-  );
-  const matches = await Promise.all(
-    rows.map(async (row: IndexedBurn) => {
-      const timestamp = Number(row.blockTimestamp);
-      if (
-        !Number.isSafeInteger(timestamp) ||
-        timestamp > nowSeconds + 120 ||
-        timestamp < nowSeconds - WITHDRAWAL_WINDOW_SECONDS
-      )
-        return null;
-      const receipt = await client.getTransactionReceipt({
-        hash: row.txHash as Hex,
-      });
-      return isOwnerWithdrawal(row, receipt, owner) ? row : null;
-    }),
-  );
+  let client;
+  try {
+    client = getRpcClient(137);
+  } catch (error) {
+    throw new CapaPollError("capa_withdrawal_rpc", error);
+  }
+  if (!client) {
+    throw new CapaPollError(
+      "capa_withdrawal_rpc",
+      new Error("Polygon RPC unavailable for Capa withdrawal proof"),
+    );
+  }
+  let rows: IndexedBurn[];
+  try {
+    rows = await fetchRecentPoolBurns(nowSeconds - WITHDRAWAL_WINDOW_SECONDS);
+  } catch (error) {
+    throw new CapaPollError("capa_withdrawal_query", error);
+  }
+  let matches: (IndexedBurn | null)[];
+  try {
+    matches = await Promise.all(
+      rows.map(async (row: IndexedBurn) => {
+        const timestamp = Number(row.blockTimestamp);
+        if (
+          !Number.isSafeInteger(timestamp) ||
+          timestamp > nowSeconds + 120 ||
+          timestamp < nowSeconds - WITHDRAWAL_WINDOW_SECONDS
+        )
+          return null;
+        const receipt = await client.getTransactionReceipt({
+          hash: row.txHash as Hex,
+        });
+        return isOwnerWithdrawal(row, receipt, owner) ? row : null;
+      }),
+    );
+  } catch (error) {
+    throw new CapaPollError("capa_withdrawal_rpc", error);
+  }
 
   const samples = matches
     .filter((row) => row !== null)
@@ -65,13 +91,19 @@ export async function refreshCapaWithdrawals(
   }
 }
 
-async function loop(): Promise<void> {
+export async function pollCapaWithdrawalsOnce(): Promise<void> {
   try {
     await refreshCapaWithdrawals(CAPA_LP_OWNER);
   } catch (error) {
-    counters.pollErrors.inc({ kind: "capa_withdrawal" });
+    counters.pollErrors.inc({
+      kind: error instanceof CapaPollError ? error.kind : "capa_withdrawal",
+    });
     console.error("Capa withdrawal poll failed:", error);
   }
+}
+
+async function loop(): Promise<void> {
+  await pollCapaWithdrawalsOnce();
   setTimeout(() => void loop(), POLL_INTERVAL_MS);
 }
 

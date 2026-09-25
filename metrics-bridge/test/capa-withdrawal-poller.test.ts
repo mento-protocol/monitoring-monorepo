@@ -1,8 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Log } from "viem";
 import receipt from "./fixtures-capa-withdrawal.json";
 import { CAPA_POOL_ID, type IndexedBurn } from "../src/capa-withdrawal.js";
-import { register, gauges } from "../src/metrics.js";
+import { counters, register, gauges } from "../src/metrics.js";
 
 vi.mock("../src/graphql.js", () => ({ fetchRecentPoolBurns: vi.fn() }));
 vi.mock("../src/rpc.js", () => ({ getRpcClient: vi.fn() }));
@@ -11,6 +11,7 @@ import { fetchRecentPoolBurns } from "../src/graphql.js";
 import { getRpcClient } from "../src/rpc.js";
 import {
   refreshCapaWithdrawals,
+  pollCapaWithdrawalsOnce,
   WITHDRAWAL_WINDOW_SECONDS,
 } from "../src/capa-withdrawal-poller.js";
 
@@ -37,7 +38,13 @@ async function published(): Promise<unknown[]> {
   return (await gauges.capaWithdrawal.get()).values;
 }
 
+async function pollErrors(): Promise<unknown[]> {
+  return (await counters.pollErrors.get()).values;
+}
+
 describe("Capa withdrawal poll", () => {
+  afterEach(() => vi.restoreAllMocks());
+
   beforeEach(() => {
     register.resetMetrics();
     vi.clearAllMocks();
@@ -88,11 +95,48 @@ describe("Capa withdrawal poll", () => {
     await refreshCapaWithdrawals(owner, now);
     getReceipt.mockRejectedValueOnce(new Error("RPC unavailable"));
     await expect(refreshCapaWithdrawals(owner, now)).rejects.toThrow(
-      "RPC unavailable",
+      "capa_withdrawal_rpc",
     );
     expect(await published()).toHaveLength(1);
     vi.mocked(fetchRecentPoolBurns).mockResolvedValue([]);
     await refreshCapaWithdrawals(owner, now);
     expect(await published()).toEqual([]);
+  });
+
+  it("records Hasura and Polygon RPC failures as separate poll-error kinds", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(now * 1000);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.mocked(fetchRecentPoolBurns).mockRejectedValueOnce(
+      new Error("Hasura unavailable"),
+    );
+    await pollCapaWithdrawalsOnce();
+
+    vi.mocked(fetchRecentPoolBurns).mockResolvedValue([burn]);
+    getReceipt.mockRejectedValueOnce(new Error("Polygon RPC unavailable"));
+    await pollCapaWithdrawalsOnce();
+
+    expect(await pollErrors()).toEqual([
+      expect.objectContaining({
+        labels: { kind: "capa_withdrawal_query" },
+        value: 1,
+      }),
+      expect.objectContaining({
+        labels: { kind: "capa_withdrawal_rpc" },
+        value: 1,
+      }),
+    ]);
+  });
+
+  it("classifies a missing Polygon RPC client without querying Hasura", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.mocked(getRpcClient).mockReturnValueOnce(null);
+    await pollCapaWithdrawalsOnce();
+    expect(fetchRecentPoolBurns).not.toHaveBeenCalled();
+    expect(await pollErrors()).toEqual([
+      expect.objectContaining({
+        labels: { kind: "capa_withdrawal_rpc" },
+        value: 1,
+      }),
+    ]);
   });
 });

@@ -78,7 +78,8 @@ the LP. A same-transaction swap does not suppress the alert. The Slack copy
 reports gross EURm/USDm pool outflows and links the pool, LP Safe, and tx.
 
 The bridge keeps at most ten burns from the last six hours and fails visibly
-through the `capa_withdrawal` poll-error kind if that cap or an RPC query fails.
+through the `capa_withdrawal_query` poll-error kind if the query or cap fails,
+or `capa_withdrawal_rpc` if receipt proof cannot run.
 The Grafana rule fingerprints each indexed event, sends no resolved post, and
 has a repeat interval longer than the six-hour window. This bounds duplicate
 posts during normal polls and restarts; an indexer lag beyond six hours can
