@@ -62,8 +62,11 @@ cover `resolveRebalanceState`; rows 6-8 cover the three self-heal helpers; rows
 `resolveFeedIdAndBreakerHalt` → `computeFeedHalted`, which reads entities only
 (`breakers.ts:696-721`). `recordBreachTransition` issues no effect.
 
-Rows 6-11 fire only for unhealed pools or hit a `cache: true` row, so their
-count does not scale with replay traffic. Row 5 depends on the ordered
+Rows 6-11 fire only for unhealed pools or hit a `cache: true` row. A healed
+pool pays nothing. While a heal read keeps failing, rows 6-8, 10 and 11 skip
+the cache and leave the sentinel unchanged, so they retry on every event and
+scale with traffic. Stage 1 keeps them processing-only as a measured
+degraded path (see Benchmark). Row 5 depends on the ordered
 same-transaction scratch map, so it stays exempt. Rows 1-4 are the hot
 block-scoped reads that stage 1 moves.
 
@@ -133,11 +136,15 @@ them explicitly.
   an info-level retrieval of the `[perf]` lines, for example
   `envio-cloud deployment logs` with `--level info`.
 - **Range.** Each chain's configured start block to one fixed end block per
-  chain, recorded when the baseline starts. Both runs stop at those blocks.
+  chain, recorded before the baseline starts. `config.multichain.mainnet.yaml`
+  sets no end block, so stage 1 adds a benchmark-only copy of that config
+  with an explicit `end_block` per chain. Both runs deploy that copy.
 - **Success.** Processed `UpdateReserves` + `Rebalanced` calls per processing
   handler second is at least 1.30× the baseline. Whole-replay time to the end
   blocks is not slower. Executions of rows 1 and 4 are at most 1.10× the
-  baseline.
+  baseline. If executions of rows 6-8, 10 and 11 exceed 5% of all effect
+  executions in the baseline, stage 1 also preloads them with phase-local
+  gates before it claims success.
 - **No correctness regression.** Over the range, a paged row export (no
   aggregates) shows zero differences between runs in `DeviationThresholdBreach`
   (`id`, `endedByEvent`, `endedByStrategy`, `durationSeconds`),
@@ -158,7 +165,8 @@ them explicitly.
 
 **Stage-1 files.** `handlers/fpmm/state-sync.ts` (reader, key builders,
 handler bodies exported for tests), `pool.ts` (breach warm-up through
-`getWhere`), and `performance.ts` only if rows 1-4 need explicit output.
+`getWhere`), `performance.ts` only if rows 1-4 need explicit output, and the
+benchmark-only finite-range config.
 
 **Stage-1 tests.** A new `test/stateSyncPreload.test.ts` on the
 `test/susds.test.ts:805-869` pattern: preload writes no entity; each preload
