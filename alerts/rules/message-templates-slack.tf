@@ -1,5 +1,10 @@
 # Slack mrkdwn message templates per Aegis alertname.
 # Selected by the `local.alert_config_slack` dispatcher in locals.tf.
+#
+# Each `*_alert_message` template also carries its alert type's title define,
+# copied from the title template by reference. This is step 1 of freeing
+# message template slots: a later change deletes the `*_alert_title`
+# resources. See "Message template cap" in README.md before editing.
 
 resource "grafana_message_template" "slack_oracle_stale_price_alert_title" {
   name     = "Slack - Stale Price Alert Title"
@@ -31,6 +36,7 @@ resource "grafana_message_template" "slack_oracle_stale_price_alert_message" {
   # builtins (`if`, `eq`, `printf`, assignment) plus `reReplaceAll` (Sprig,
   # already used by the trading-mode and low-balance templates).
   template = <<-EOT
+${grafana_message_template.slack_oracle_stale_price_alert_title.template}
 {{ define "slack.oracle_stale_price_alert_message" }}
 {{ range .Alerts.Firing -}}
 {{ $slash := reReplaceAll "^([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}
@@ -86,6 +92,7 @@ EOT
 resource "grafana_message_template" "slack_oracle_relayer_low_balance_alert_message" {
   name     = "Slack - Low Relayer Balance Alert Message"
   template = <<-EOT
+${grafana_message_template.slack_oracle_relayer_low_balance_alert_title.template}
 {{ define "slack.oracle_relayer_low_balance_alert_message" }}
 {{ range .Alerts.Firing -}}
 {{ $pair := reReplaceAll "^RelayerSigner([A-Z]{3,}?)(XAUT|[A-Z]{3})$" "$1/$2" .Labels.owner -}}
@@ -112,6 +119,7 @@ EOT
 resource "grafana_message_template" "slack_relayer_refiller_low_balance_alert_message" {
   name     = "Slack - Low Relayer Refiller Balance Alert Message"
   template = <<-EOT
+${grafana_message_template.slack_relayer_refiller_low_balance_alert_title.template}
 {{ define "slack.relayer_refiller_low_balance_alert_message" }}
 {{ range .Alerts.Firing -}}
 {{ if eq .Labels.urgency "urgent" -}}
@@ -143,6 +151,7 @@ EOT
 resource "grafana_message_template" "slack_reserve_balance_alert_message" {
   name     = "Slack - Reserve Balance Alert Message"
   template = <<-EOT
+${grafana_message_template.slack_reserve_balance_alert_title.template}
 {{ define "slack.reserve_balance_alert_message" }}
 {{ range .Alerts.Firing -}}
 {{ $token := .Labels.token -}}
@@ -188,6 +197,7 @@ resource "grafana_message_template" "slack_trading_mode_alert_message" {
   # chain path in `protocol-routing-locals.tf` aligned with live Chainlink pages;
   # the per-feed allowlist comes from `reference-data-directory.vercel.app/feeds-<chain>-mainnet.json`.
   template = <<-EOT
+${grafana_message_template.slack_trading_mode_alert_title.template}
 {{ define "slack.trading_mode_alert_message" }}
 {{ $firingCount := len .Alerts.Firing -}}
 {{ $resolvedCount := len .Alerts.Resolved -}}
@@ -258,6 +268,7 @@ resource "grafana_message_template" "slack_trading_limits_alert_title" {
 resource "grafana_message_template" "slack_trading_limits_alert_message" {
   name     = "Slack - Trading Limits Alert Message"
   template = <<-EOT
+${grafana_message_template.slack_trading_limits_alert_title.template}
 {{ define "slack.trading_limits_alert_message" }}
 {{ range .Alerts.Firing -}}
 {{ $chain := .Labels.chain | title -}}
@@ -298,6 +309,7 @@ EOT
 resource "grafana_message_template" "slack_aegis_service_alert_message" {
   name     = "Slack - Aegis Service Alert Message"
   template = <<-EOT
+${grafana_message_template.slack_aegis_service_alert_title.template}
 {{ define "slack.aegis_service_alert_message" }}
 {{ $mixedState := and (len .Alerts.Firing) (len .Alerts.Resolved) -}}
 {{ range .Alerts.Firing -}}
