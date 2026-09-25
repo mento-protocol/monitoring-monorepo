@@ -3,7 +3,7 @@ title: Retire the legacy local quality gate
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-16
+last_verified: 2026-09-25
 scope: ci/process
 date: 2026-09
 doc_type: adr
@@ -13,7 +13,7 @@ garden_lane: adrs-architecture
 
 # ADR 0101 — Retire the legacy local quality gate
 
-**Status:** Accepted (Sep 2026), amended 2026-09-16, in force.
+**Status:** Accepted (Sep 2026), amended 2026-09-16 and 2026-09-25, in force.
 
 Amended 2026-09-16: [ADR 0106](0106-sentry-triage-moves-to-operator-skills.md)
 retired the Sentry triage and autofix pipeline. Two entries in "Retained
@@ -21,6 +21,16 @@ consumers" below asserted that Sentry's self-run gate, CI wiring and broker
 were retained, and that a required broker suite imported the process-identity
 helper tests. Those files are gone; both entries are restated in place. The
 rest of this record, including the rollback obligations, is unchanged.
+
+Amended 2026-09-25: the orphaned coordinator state that "Worktrees and state"
+preserved for explicit recovery is gone. A read-only inspection (#2435) found
+both recorded processes absent and the host rebooted on 2026-09-16, after both
+started, so the journal's drain obligations belonged to processes that no
+longer existed and held no resources. With operator approval the state root
+was archived to a machine-local, gitignored `.investigations/` file and then
+removed; no process was signalled. The receipt's `orphan_disposition` entry in
+`docs/metrics/verification-redesign-retirement.json` records the evidence.
+"Worktrees and state" and rollback step 5 are restated to match.
 
 ## Decision
 
@@ -84,7 +94,7 @@ The refreshed registry contains sixteen worktrees, all descendants of cutover
 and all without a tracked or installed pre-push hook. The initial baseline and
 intermediate observation worktrees have explicit retained/absent dispositions
 in the retirement receipt. Old checkouts remain intact; retirement changes only
-this source tree. An orphaned pre-cutover coordinator still holds a draining request and two drain obligations from September 4; its recorded owner no longer exists. Preserve that process and state for explicit recovery. This source retirement neither claims a clean drain nor signals the process. No runtime state root is removed, reset or repurposed.
+this source tree. An orphaned pre-cutover coordinator still holds a draining request and two drain obligations from September 4; its recorded owner no longer exists. This source retirement neither claimed a clean drain nor signalled the process. Amended 2026-09-25: after #2435 confirmed that the process was gone and the obligations were inert, the operator approved archiving and then removing that state root (see the amendment above).
 
 ## Rollback
 
@@ -108,8 +118,12 @@ manifests also include main integration `71bdfc7d5415ffbd5d5de43122945af66bbddc9
 4. Revert cutover only after step 3. Restore the tracked pre-push hook and
    its Trunk action together. Verify the final #2042 identity/lineage behavior
    and mixed-version lock adoption with the focused tests.
-5. Let the restored coordinator adopt or recover legacy state. Never clear the
-   state root or signal bare PIDs to make recovery pass.
+5. Let the restored coordinator adopt or recover legacy state if any exists.
+   Never clear a state root or signal bare PIDs to make recovery pass.
+   Amended 2026-09-25: the September 4 orphan's state root was removed (#2435),
+   so there is no legacy state to adopt; a restored coordinator starts with an
+   empty state root. The machine-local archive is forensic evidence only; do
+   not restore it into a live state root.
 
 The disposable rollback proof uses local source only. It does not install the
 restored hook in shared Git configuration or change the live ruleset.

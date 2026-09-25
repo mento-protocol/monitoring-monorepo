@@ -834,6 +834,12 @@
       }
     ],
     "orphan": "September4 coordinator with absent owner and unchanged journal; one draining request and two drain obligations remain. Process and all state retained; no clean-drain claim.",
+    "orphan_disposition": {
+      "recorded_at": "2026-09-25",
+      "issue": 2435,
+      "evidence": "State root ~/.cache/agent-quality-gate last written 2026-09-04; coordinator PID 17586 and requester PID 14798 absent; host rebooted 2026-09-16 after both started; journal revision 42 unchanged (one draining request, two drain-required leases with no resources, two unclaimed drain obligations); no code on main reads the state root.",
+      "action": "Operator-approved: archived to the gitignored .investigations/agent-quality-gate-state-2026-09-04.tgz (the dead coordinator.sock socket cannot be archived), then removed the state root. No process was signalled."
+    },
     "rollback_rehearsal": {
       "name": "m6-retirement-rollback",
       "head": "473eb72a5e24e321154e7b92eb7e8a5916d4159d",
