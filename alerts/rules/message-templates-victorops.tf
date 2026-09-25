@@ -48,10 +48,10 @@ EOT
 }
 
 # This template also carries the refiller alert's title and message. Grafana
-# Cloud rejects template creation once 30 exist (HTTP 429) while updates keep
-# working, and this stack is at that cap, so the refiller definitions ride on
-# an existing template rather than needing a slot of their own. A template may
-# hold several `define` blocks; the dispatcher refers to them by define name.
+# Cloud rejects template creation once 30 exist (HTTP 429), and the lint keeps
+# this stack at 25 or fewer, so the refiller definitions ride on an existing
+# template rather than taking a slot of their own. A template may hold several
+# `define` blocks; the dispatcher refers to them by define name.
 resource "grafana_message_template" "victorops_oracle_relayer_low_balance_alert_message" {
   name     = "VictorOps - Low Relayer Balance Alert Message"
   template = <<-EOT
