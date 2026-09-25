@@ -8,6 +8,7 @@ import path, { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   GRAFANA_MESSAGE_TEMPLATE_CAP,
+  MESSAGE_TEMPLATE_BUDGET,
   countMessageTemplates,
   extractExpressions,
   lintPromql,
@@ -1603,10 +1604,10 @@ test("trading-mode notification templates avoid single-alert duplicate headings"
     "utf8",
   );
   const titleStart = source.indexOf(
-    'resource "grafana_message_template" "victorops_trading_mode_alert_title"',
+    '{{ define "victorops.trading_mode_alert_title" -}}',
   );
   const titleEnd = source.indexOf(
-    'resource "grafana_message_template" "victorops_trading_mode_alert_message"',
+    '{{ define "victorops.trading_mode_alert_message" }}',
   );
   assert(titleStart >= 0 && titleEnd > titleStart, "title template not found");
 
@@ -1638,7 +1639,7 @@ test("trading-mode notification templates avoid single-alert duplicate headings"
     'resource "grafana_message_template" "victorops_trading_mode_alert_message"',
   );
   const messageEnd = source.indexOf(
-    'resource "grafana_message_template" "victorops_trading_limits_alert_title"',
+    'resource "grafana_message_template" "victorops_trading_limits_alert_message"',
   );
   assert(
     messageStart >= 0 && messageEnd > messageStart,
@@ -1711,7 +1712,7 @@ test("oracle expiry notifications lead with human impact and action", () => {
     'resource "grafana_message_template" "victorops_oracle_stale_price_alert_message"',
   );
   const staleMessageEnd = victorops.indexOf(
-    'resource "grafana_message_template" "victorops_oracle_relayer_low_balance_alert_title"',
+    'resource "grafana_message_template" "victorops_oracle_relayer_low_balance_alert_message"',
   );
   assert(
     staleMessageStart >= 0 && staleMessageEnd > staleMessageStart,
@@ -2827,7 +2828,7 @@ test("bridge dependencies route exact checks and protected apply eligibility", (
   }
 });
 
-test("message template cap counts resources and fails only above the Grafana Cloud limit", () => {
+test("message template cap counts resources and fails only above the budget", () => {
   const twoTemplates = stripComments(`
 resource "grafana_message_template" "a" {
   name = "A"
@@ -2843,26 +2844,32 @@ resource "grafana_contact_point" "not_a_template" {}
     "expected two template resources, ignoring the commented one and other types",
   );
   assert(
-    messageTemplateCapFailures(GRAFANA_MESSAGE_TEMPLATE_CAP).length === 0,
-    "a stack exactly at the cap must pass",
+    MESSAGE_TEMPLATE_BUDGET === 25 && GRAFANA_MESSAGE_TEMPLATE_CAP === 30,
+    "the budget keeps five slots below the Grafana Cloud cap",
   );
-  const failures = messageTemplateCapFailures(GRAFANA_MESSAGE_TEMPLATE_CAP + 1);
-  assert(failures.length === 1, "one template over the cap must fail");
+  assert(
+    messageTemplateCapFailures(MESSAGE_TEMPLATE_BUDGET).length === 0,
+    "a stack exactly at the budget must pass",
+  );
+  const failures = messageTemplateCapFailures(MESSAGE_TEMPLATE_BUDGET + 1);
+  assert(failures.length === 1, "one template over the budget must fail");
   assert(
     /message template cap/.test(failures[0]) &&
+      /budget of 25/.test(failures[0]) &&
+      /beyond 30/.test(failures[0]) &&
       /two define blocks/.test(failures[0]),
-    "the failure must name the cap and the remedy",
+    "the failure must name the budget, the cap, and the remedy",
   );
 });
 
-test("the committed alert rules stack stays within the message template cap", () => {
+test("the committed alert rules stack stays within the message template budget", () => {
   const { status, stdout } = runCli();
   assert(status === 0, "the linter must pass on the committed stack");
   const match = /(\d+)\/(\d+) message templates/.exec(stdout);
   assert(match !== null, "the linter summary must report the template count");
   assert(
     Number(match[1]) <= Number(match[2]),
-    "the committed stack must stay within the message template cap",
+    "the committed stack must stay within the message template budget",
   );
 });
 
