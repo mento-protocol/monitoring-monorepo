@@ -3,7 +3,7 @@ title: File-size and lint-hygiene watch list
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-16
+last_verified: 2026-09-24
 doc_type: report
 scope: repo-wide
 review_interval_days: 30
@@ -12,30 +12,15 @@ garden_lane: notes-plans-archive
 
 # File-size and lint-hygiene watch list
 
-The table below is a historical pre-retirement snapshot with the counts of
-2026-09-04. Removed gate files are not current split candidates. The ten
-`scripts/sentry/**` rows were struck on 2026-09-16 because
-[ADR 0106](../adr/0106-sentry-triage-moves-to-operator-skills.md) deleted those
-files. One replacement row was added in the same change:
-`scripts/workflows/ci-sentinel-core.mjs`, which holds the eight `ci` sentinel
-predicates relocated out of `scripts/sentry/ci-wiring/`. It carries its
-2026-09-16 counts, so the monthly run has a baseline to diff against instead of
-reporting an existing file as new every month. The
-`scripts/bootstrap/codex-cloud-setup.sh` row was struck on 2026-09-17: its
-GitHub CLI provisioning moved to `scripts/bootstrap/codex-cloud-github-cli.sh`,
-which left 564 raw lines, below the soft cap that earns a row. Its two
-`scripts/repo-health/shell-size-baseline.txt` rows were struck on 2026-09-22:
-the Trunk provisioning moved to `scripts/bootstrap/codex-cloud-trunk.sh` and
-`install_foundry` split, which left 411 lines in the entry point and 179 in the
-new sibling, so both files are checked at the full ADR 0107 limits. The
-`scripts/workflows/check-autofix-ci-trust.mjs` row was struck on 2026-09-18:
-issue #2486 deleted that checker, and the credential predicates it kept moved
-to `scripts/workflows/workflow-credentials.mjs`, which is below the soft cap.
-Every other count is still the 2026-09-04 measurement. This is
-passive guidance, not an active-work queue. Refresh it with
+The table below keeps the 2026-09-04 counts as the reporter's growth
+baseline. Rows for files deleted since then are removed; the reporter matches
+baseline rows by path, so a removal does not change any remaining row's delta.
+`scripts/workflows/ci-sentinel-core.mjs` carries 2026-09-16 counts because
+[ADR 0106](../adr/0106-sentry-triage-moves-to-operator-skills.md) moved its
+predicates out of the deleted `scripts/sentry/ci-wiring/`. This is passive
+guidance, not an active-work queue. Refresh it with
 `node scripts/repo-health/file-size-watchlist.mjs`; use `--format issue` when a
-concrete
-split is ready for GitHub Issues.
+concrete split is ready for GitHub Issues.
 
 `.github/workflows/file-size-watchlist.yml` owns the monthly cadence. It checks
 out current `main`, runs the checked-in reporter, and opens or updates one
@@ -65,97 +50,75 @@ Scope: source files in package configs that enforce `max-lines`, plus `scripts/`
 `raw` is physical lines; `rough` approximates ESLint after `skipBlankLines` and `skipComments`.
 Use `--format issue` for GitHub Issues; do not append this report to `BACKLOG.md`.
 
-| Rough |   Raw | Delta | Status        | File                                                                                      |
-| ----: | ----: | ----: | ------------- | ----------------------------------------------------------------------------------------- |
-|  9737 | 12252 |  +258 | hard cap      | `scripts/agent-quality-gate.sh`                                                           |
-|  2411 |  2496 |   -10 | hard cap      | `scripts/gate/quality-gate-coordinator-environment.mjs`                                   |
-|  2225 |  2326 |   +16 | hard cap      | `scripts/gate/darwin-broker-launch-preflight.mjs`                                         |
-|  1727 |  1793 |     0 | hard cap      | `scripts/gate/quality-gate-coordinator-legacy.mjs`                                        |
-|  1636 |  1704 | (new) | hard cap      | `scripts/pr/issue-board-lock.mjs`                                                         |
-|  1582 |  1712 |  +101 | hard cap      | `scripts/gate/darwin-process-lineage.mjs`                                                 |
-|  1390 |  1466 |     0 | hard cap      | `scripts/gate/darwin-process-lineage-state.mjs`                                           |
-|  1251 |  1311 |     0 | hard cap      | `scripts/gate/darwin-process-identity-helper.mjs`                                         |
-|  1140 |  1178 | (new) | hard cap      | `scripts/pr/issue-board-transactions.mjs`                                                 |
-|   982 |  1054 |     0 | near hard cap | `metrics-bridge/src/peg/poller.ts`                                                        |
-|   946 |  1032 |     0 | soft cap      | `scripts/deploy-staging-callsite-discovery.mjs`                                           |
-|   932 |   997 |     0 | soft cap      | `scripts/gate/quality-gate-coordinator-support.sh`                                        |
-|   862 |   967 |   -15 | soft cap      | `scripts/pr/pr-ready-state.mjs`                                                           |
-|   862 |   904 |     0 | soft cap      | `scripts/deploy-staging-contract.mjs`                                                     |
-|   844 |   901 |     0 | soft cap      | `scripts/alerts/check-peg-registry-integrity.mjs`                                         |
-|   819 |   961 |   +58 | soft cap      | `scripts/review/review-eval-fixtures.mjs`                                                 |
-|   819 |   876 |   +98 | soft cap      | `scripts/production-infra-identity-contract/workflow-inventory.mjs`                       |
-|   814 |  1174 |     0 | soft cap      | `indexer-envio/src/handlers/sortedOracles.ts`                                             |
-|   805 |   866 |     0 | soft cap      | `indexer-envio/src/handlers/liquity/troveManager.ts`                                      |
-|   798 |   880 |   -11 | soft cap      | `scripts/pr/pr-ready-state-core.mjs`                                                      |
-|   788 |  1119 |     0 | soft cap      | `ui-dashboard/src/components/oracle-chart.tsx`                                            |
-|   775 |   814 |     0 | soft cap      | `scripts/gate/quality-gate-coordinator.sh`                                                |
-|   768 |   911 |     0 | soft cap      | `scripts/gate/run-handles.sh`                                                             |
-|   759 |   793 |     0 | soft cap      | `scripts/gate/darwin-process-lineage-model.mjs`                                           |
-|   755 |   800 |     0 | soft cap      | `scripts/gate/agent-quality-gate-scheduler-fixture.mjs`                                   |
-|   753 |   952 |    +7 | soft cap      | `scripts/review/review-eval-ledger.mjs`                                                   |
-|   749 |   865 |     0 | soft cap      | `scripts/review/review-eval.mjs`                                                          |
-|   740 |   995 |     0 | soft cap      | `indexer-envio/src/rpc/effects.ts`                                                        |
-|   727 |   776 |   +11 | soft cap      | `scripts/gate/darwin-process-lineage.sh`                                                  |
-|   720 |   809 |     0 | soft cap      | `scripts/production-infra-identity-contract/fixtures.mjs`                                 |
-|   709 |   772 |     0 | soft cap      | `ui-dashboard/src/app/pool/[poolId]/_components/pool-detail-page-client.tsx`              |
-|   704 |   785 |     0 | soft cap      | `scripts/gate/darwin-process-identity.c`                                                  |
-|   699 |  1051 |     0 | soft cap      | `indexer-envio/src/breakers.ts`                                                           |
-|   669 |   810 |     0 | soft cap      | `ui-dashboard/src/lib/homepage-og.ts`                                                     |
-|   666 |   700 | (new) | soft cap      | `scripts/pr/issue-board-projects.mjs`                                                     |
-|   659 |   718 |     0 | soft cap      | `scripts/tf-stacks.mjs`                                                                   |
-|   651 |   744 |     0 | soft cap      | `indexer-envio/src/rpc/oracle-state.ts`                                                   |
-|   651 |   708 | (new) | soft cap      | `scripts/pr/issue-board-transport.mjs`                                                    |
-|   649 |   821 |     0 | soft cap      | `indexer-envio/src/rpc/breakers.ts`                                                       |
-|   644 |   670 |     0 | soft cap      | `scripts/docs/docs-navigation-eval-result.mjs`                                            |
-|   641 |   855 |     0 | soft cap      | `scripts/review/review-eval-report.mjs`                                                   |
-|   641 |   649 |     0 | soft cap      | `scripts/gate/quality-gate-coordinator-core.mjs`                                          |
-|   626 |   655 | (new) | soft cap      | `scripts/pr/issue-board-release.mjs`                                                      |
-|   623 |   839 |   +30 | soft cap      | `scripts/review/review-eval-score.mjs`                                                    |
-|   622 |   748 |     0 | soft cap      | `metrics-bridge/src/metrics.ts`                                                           |
-|   619 |   868 |     0 | soft cap      | `ui-dashboard/src/lib/volume.ts`                                                          |
-|   616 |   630 |     0 | soft cap      | `scripts/gate/quality-gate-coordinator-server.mjs`                                        |
-|   613 |   970 |     0 | soft cap      | `ui-dashboard/src/lib/health.ts`                                                          |
-|   613 |   797 |     0 | soft cap      | `scripts/review/review-eval-result-shape.mjs`                                             |
-|   612 |   689 |     0 | soft cap      | `aegis/src/metric.spec.ts`                                                                |
-|   608 |   799 |     0 | soft cap      | `indexer-envio/src/handlers/fpmm/state-sync.ts`                                           |
-|   608 |   631 | (new) | soft cap      | `scripts/pr/issue-board-commands.mjs`                                                     |
-|   604 |   638 |   +22 | soft cap      | `scripts/gate/routing-table/groups-head.mjs`                                              |
-|   604 |   637 |     0 | soft cap      | `scripts/production-infra-identity-contract/surfaces.mjs`                                 |
-|   603 |   709 |     0 | soft cap      | `indexer-envio/src/volumeSnapshots.ts`                                                    |
-|   601 |   656 |     0 | soft cap      | `scripts/production-infra-identity-contract/workflow.mjs`                                 |
-|   599 |   619 |     0 | watch         | `indexer-envio/src/handlers/liquity/stabilityPool.ts`                                     |
-|   598 |   659 |     0 | watch         | `scripts/alerts/alert-rules-lint-peg-policy.mjs`                                          |
-|   591 |   619 |     0 | watch         | `scripts/docs/docs-navigation-eval-helpers.mjs`                                           |
-|   591 |   607 |     0 | watch         | `scripts/gate/quality-gate-coordinator-journal.mjs`                                       |
-|   590 |   626 |     0 | watch         | `metrics-bridge/src/peg/metrics.ts`                                                       |
-|   589 |   610 |     0 | watch         | `scripts/gate/quality-gate-coordinator.mjs`                                               |
-|   587 |   609 |   -11 | watch         | `scripts/gate/routing-table/arms-tooling-modules.mjs`                                     |
-|   584 |   657 |     0 | watch         | `scripts/gate/darwin-process-identity-runtime.inc.c`                                      |
-|   580 |   642 |     0 | watch         | `ui-dashboard/src/lib/cdp-borrowing-revenue.ts`                                           |
-|   574 |   692 |     0 | watch         | `ui-dashboard/src/app/pool/[poolId]/_tabs/oracle-tab.tsx`                                 |
-|   574 |   682 |     0 | watch         | `ui-dashboard/src/lib/network-fetcher/pagination.ts`                                      |
-|   570 |   606 | (new) | watch         | `scripts/gate/trunk-check-once.sh`                                                        |
-|   569 |   719 |     0 | watch         | `ui-dashboard/src/lib/queries/volume.ts`                                                  |
-|   565 |   617 |     0 | watch         | `scripts/context/docs-index-helpers.mjs`                                                  |
-|   560 |   784 |     0 | watch         | `ui-dashboard/src/app/page-client.tsx`                                                    |
-|   560 |   647 |     0 | watch         | `scripts/lib/hcl.mjs`                                                                     |
-|   560 |   610 | (new) | watch         | `scripts/review/review-eval-experiment-contract.mjs`                                      |
-|   557 |   709 |     0 | watch         | `indexer-envio/src/handlers/broker.ts`                                                    |
-|   546 |   669 |     0 | watch         | `indexer-envio/src/pool/self-heal.ts`                                                     |
-|   543 |   625 |   +11 | watch         | `ui-dashboard/src/app/cdps/[symbol]/troves/[troveId]/_components/trove-balance-chart.tsx` |
-|   536 |   606 |     0 | watch         | `ui-dashboard/src/app/volume/page-client.tsx`                                             |
-|   527 |   638 |     0 | watch         | `ui-dashboard/src/lib/pool-og.ts`                                                         |
-|   526 |   772 |     0 | watch         | `scripts/deploy/deploy-indexer-status.mjs`                                                |
-|   511 |   725 |     0 | watch         | `ui-dashboard/src/components/volume-over-time-chart.tsx`                                  |
-|   503 |   724 |     0 | watch         | `ui-dashboard/src/components/time-series-chart-card.tsx`                                  |
-|   500 |   654 |     0 | watch         | `indexer-envio/src/handlers/wormhole/nttManager.ts`                                       |
-|   487 |   644 |     0 | watch         | `ui-dashboard/src/lib/queries/liquity.ts`                                                 |
-|   476 |   610 |     0 | watch         | `ui-dashboard/src/lib/address-labels/snapshot.ts`                                         |
-|   468 |   607 |     0 | watch         | `ui-dashboard/src/app/stables/_lib/aggregate.ts`                                          |
-|   464 |   606 |     0 | watch         | `scripts/supply-chain/lockfile-lint-override-ranges.mjs`                                  |
-|   457 |   624 |     0 | watch         | `indexer-envio/src/handlers/biPoolManager.ts`                                             |
-|   450 |   618 |     0 | watch         | `ui-dashboard/src/app/peg-monitoring/_lib/peg-board-model.ts`                             |
-|   413 |   700 | (new) | watch         | `scripts/workflows/ci-sentinel-core.mjs`                                                  |
-|   368 |   611 |    +3 | watch         | `scripts/pr/pr-feedback-state-claude.mjs`                                                 |
-|   338 |   610 |     0 | watch         | `scripts/supply-chain/override-prune-report.mjs`                                          |
-|   333 |   632 |     0 | watch         | `ui-dashboard/src/lib/volume-hero.ts`                                                     |
+| Rough |  Raw | Delta | Status        | File                                                                                      |
+| ----: | ---: | ----: | ------------- | ----------------------------------------------------------------------------------------- |
+|  1636 | 1704 | (new) | hard cap      | `scripts/pr/issue-board-lock.mjs`                                                         |
+|  1140 | 1178 | (new) | hard cap      | `scripts/pr/issue-board-transactions.mjs`                                                 |
+|   982 | 1054 |     0 | near hard cap | `metrics-bridge/src/peg/poller.ts`                                                        |
+|   946 | 1032 |     0 | soft cap      | `scripts/deploy-staging-callsite-discovery.mjs`                                           |
+|   862 |  967 |   -15 | soft cap      | `scripts/pr/pr-ready-state.mjs`                                                           |
+|   862 |  904 |     0 | soft cap      | `scripts/deploy-staging-contract.mjs`                                                     |
+|   844 |  901 |     0 | soft cap      | `scripts/alerts/check-peg-registry-integrity.mjs`                                         |
+|   819 |  961 |   +58 | soft cap      | `scripts/review/review-eval-fixtures.mjs`                                                 |
+|   819 |  876 |   +98 | soft cap      | `scripts/production-infra-identity-contract/workflow-inventory.mjs`                       |
+|   814 | 1174 |     0 | soft cap      | `indexer-envio/src/handlers/sortedOracles.ts`                                             |
+|   805 |  866 |     0 | soft cap      | `indexer-envio/src/handlers/liquity/troveManager.ts`                                      |
+|   798 |  880 |   -11 | soft cap      | `scripts/pr/pr-ready-state-core.mjs`                                                      |
+|   788 | 1119 |     0 | soft cap      | `ui-dashboard/src/components/oracle-chart.tsx`                                            |
+|   753 |  952 |    +7 | soft cap      | `scripts/review/review-eval-ledger.mjs`                                                   |
+|   749 |  865 |     0 | soft cap      | `scripts/review/review-eval.mjs`                                                          |
+|   740 |  995 |     0 | soft cap      | `indexer-envio/src/rpc/effects.ts`                                                        |
+|   720 |  809 |     0 | soft cap      | `scripts/production-infra-identity-contract/fixtures.mjs`                                 |
+|   709 |  772 |     0 | soft cap      | `ui-dashboard/src/app/pool/[poolId]/_components/pool-detail-page-client.tsx`              |
+|   699 | 1051 |     0 | soft cap      | `indexer-envio/src/breakers.ts`                                                           |
+|   669 |  810 |     0 | soft cap      | `ui-dashboard/src/lib/homepage-og.ts`                                                     |
+|   666 |  700 | (new) | soft cap      | `scripts/pr/issue-board-projects.mjs`                                                     |
+|   659 |  718 |     0 | soft cap      | `scripts/tf-stacks.mjs`                                                                   |
+|   651 |  744 |     0 | soft cap      | `indexer-envio/src/rpc/oracle-state.ts`                                                   |
+|   651 |  708 | (new) | soft cap      | `scripts/pr/issue-board-transport.mjs`                                                    |
+|   649 |  821 |     0 | soft cap      | `indexer-envio/src/rpc/breakers.ts`                                                       |
+|   644 |  670 |     0 | soft cap      | `scripts/docs/docs-navigation-eval-result.mjs`                                            |
+|   641 |  855 |     0 | soft cap      | `scripts/review/review-eval-report.mjs`                                                   |
+|   626 |  655 | (new) | soft cap      | `scripts/pr/issue-board-release.mjs`                                                      |
+|   623 |  839 |   +30 | soft cap      | `scripts/review/review-eval-score.mjs`                                                    |
+|   622 |  748 |     0 | soft cap      | `metrics-bridge/src/metrics.ts`                                                           |
+|   619 |  868 |     0 | soft cap      | `ui-dashboard/src/lib/volume.ts`                                                          |
+|   613 |  970 |     0 | soft cap      | `ui-dashboard/src/lib/health.ts`                                                          |
+|   613 |  797 |     0 | soft cap      | `scripts/review/review-eval-result-shape.mjs`                                             |
+|   612 |  689 |     0 | soft cap      | `aegis/src/metric.spec.ts`                                                                |
+|   608 |  799 |     0 | soft cap      | `indexer-envio/src/handlers/fpmm/state-sync.ts`                                           |
+|   608 |  631 | (new) | soft cap      | `scripts/pr/issue-board-commands.mjs`                                                     |
+|   604 |  637 |     0 | soft cap      | `scripts/production-infra-identity-contract/surfaces.mjs`                                 |
+|   603 |  709 |     0 | soft cap      | `indexer-envio/src/volumeSnapshots.ts`                                                    |
+|   601 |  656 |     0 | soft cap      | `scripts/production-infra-identity-contract/workflow.mjs`                                 |
+|   599 |  619 |     0 | watch         | `indexer-envio/src/handlers/liquity/stabilityPool.ts`                                     |
+|   598 |  659 |     0 | watch         | `scripts/alerts/alert-rules-lint-peg-policy.mjs`                                          |
+|   591 |  619 |     0 | watch         | `scripts/docs/docs-navigation-eval-helpers.mjs`                                           |
+|   590 |  626 |     0 | watch         | `metrics-bridge/src/peg/metrics.ts`                                                       |
+|   580 |  642 |     0 | watch         | `ui-dashboard/src/lib/cdp-borrowing-revenue.ts`                                           |
+|   574 |  692 |     0 | watch         | `ui-dashboard/src/app/pool/[poolId]/_tabs/oracle-tab.tsx`                                 |
+|   574 |  682 |     0 | watch         | `ui-dashboard/src/lib/network-fetcher/pagination.ts`                                      |
+|   569 |  719 |     0 | watch         | `ui-dashboard/src/lib/queries/volume.ts`                                                  |
+|   565 |  617 |     0 | watch         | `scripts/context/docs-index-helpers.mjs`                                                  |
+|   560 |  784 |     0 | watch         | `ui-dashboard/src/app/page-client.tsx`                                                    |
+|   560 |  647 |     0 | watch         | `scripts/lib/hcl.mjs`                                                                     |
+|   560 |  610 | (new) | watch         | `scripts/review/review-eval-experiment-contract.mjs`                                      |
+|   557 |  709 |     0 | watch         | `indexer-envio/src/handlers/broker.ts`                                                    |
+|   546 |  669 |     0 | watch         | `indexer-envio/src/pool/self-heal.ts`                                                     |
+|   543 |  625 |   +11 | watch         | `ui-dashboard/src/app/cdps/[symbol]/troves/[troveId]/_components/trove-balance-chart.tsx` |
+|   536 |  606 |     0 | watch         | `ui-dashboard/src/app/volume/page-client.tsx`                                             |
+|   527 |  638 |     0 | watch         | `ui-dashboard/src/lib/pool-og.ts`                                                         |
+|   526 |  772 |     0 | watch         | `scripts/deploy/deploy-indexer-status.mjs`                                                |
+|   511 |  725 |     0 | watch         | `ui-dashboard/src/components/volume-over-time-chart.tsx`                                  |
+|   503 |  724 |     0 | watch         | `ui-dashboard/src/components/time-series-chart-card.tsx`                                  |
+|   500 |  654 |     0 | watch         | `indexer-envio/src/handlers/wormhole/nttManager.ts`                                       |
+|   487 |  644 |     0 | watch         | `ui-dashboard/src/lib/queries/liquity.ts`                                                 |
+|   476 |  610 |     0 | watch         | `ui-dashboard/src/lib/address-labels/snapshot.ts`                                         |
+|   468 |  607 |     0 | watch         | `ui-dashboard/src/app/stables/_lib/aggregate.ts`                                          |
+|   464 |  606 |     0 | watch         | `scripts/supply-chain/lockfile-lint-override-ranges.mjs`                                  |
+|   457 |  624 |     0 | watch         | `indexer-envio/src/handlers/biPoolManager.ts`                                             |
+|   450 |  618 |     0 | watch         | `ui-dashboard/src/app/peg-monitoring/_lib/peg-board-model.ts`                             |
+|   413 |  700 | (new) | watch         | `scripts/workflows/ci-sentinel-core.mjs`                                                  |
+|   368 |  611 |    +3 | watch         | `scripts/pr/pr-feedback-state-claude.mjs`                                                 |
+|   338 |  610 |     0 | watch         | `scripts/supply-chain/override-prune-report.mjs`                                          |
+|   333 |  632 |     0 | watch         | `ui-dashboard/src/lib/volume-hero.ts`                                                     |

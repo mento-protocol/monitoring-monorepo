@@ -3,7 +3,7 @@ title: "React Compiler annotation-mode pilot (archived)"
 status: archived
 owner: eng
 canonical: false
-last_verified: 2026-07-24
+last_verified: 2026-09-24
 archived: 2026-07-23
 archived_reason: "Pilot issue #709 closed 2026-06-17; retained as the evaluation record."
 doc_type: note
