@@ -179,8 +179,10 @@ template (the refiller alert's Splunk title and message live in the signer
 low-balance template) instead of taking a slot of their own.
 
 Move a `define` to another template in two applies. Grafana parses every
-template into one set, and a repeated define name replaces the earlier
-definition, so a duplicate is harmless. A missing name fails every
+template into one set and accepts a repeated define name, but either copy may
+be used, so a duplicate is harmless only while both copies are identical.
+Grafana asks for unique names, so keep a duplicate only for the length of a
+move. A missing name fails every
 notification that calls it. Terraform does not order an update against the
 deletion of an unrelated resource. The first apply adds the define to the
 receiving template, and only a later apply deletes the old template.
