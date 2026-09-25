@@ -1,6 +1,11 @@
 # Plain-text message templates per Aegis alertname for Splunk On-Call.
 # VictorOps renders raw text — no markdown survives. Selected by the
 # `local.alert_config_victorops` dispatcher in locals.tf.
+#
+# Each `*_alert_message` template also carries its alert type's title define,
+# copied from the title template by reference. This is step 1 of freeing
+# message template slots: a later change deletes the `*_alert_title`
+# resources. See "Message template cap" in README.md before editing.
 
 resource "grafana_message_template" "victorops_oracle_stale_price_alert_title" {
   name     = "VictorOps - Stale Price Alert Title"
@@ -24,6 +29,7 @@ EOT
 resource "grafana_message_template" "victorops_oracle_stale_price_alert_message" {
   name     = "VictorOps - Stale Price Alert Message"
   template = <<-EOT
+${grafana_message_template.victorops_oracle_stale_price_alert_title.template}
 {{ define "victorops.oracle_stale_price_alert_message" }}
 {{ range .Alerts.Firing -}}
 {{ $slash := reReplaceAll "^([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}
@@ -64,6 +70,7 @@ EOT
 resource "grafana_message_template" "victorops_oracle_relayer_low_balance_alert_message" {
   name     = "VictorOps - Low Relayer Balance Alert Message"
   template = <<-EOT
+${grafana_message_template.victorops_oracle_relayer_low_balance_alert_title.template}
 {{ define "victorops.oracle_relayer_low_balance_alert_message" }}
 {{ range .Alerts.Firing }}
 {{ $pair := reReplaceAll "^RelayerSigner([A-Z]{3,}?)(XAUT|[A-Z]{3})$" "$1/$2" .Labels.owner }}
@@ -107,6 +114,7 @@ resource "grafana_message_template" "victorops_reserve_balance_alert_title" {
 resource "grafana_message_template" "victorops_reserve_balance_alert_message" {
   name     = "VictorOps - Reserve Balance Alert Message"
   template = <<-EOT
+${grafana_message_template.victorops_reserve_balance_alert_title.template}
   {{ define "victorops.reserve_balance_alert_message" }}
   {{ if eq (len .Alerts.Firing) 0 }}No alerts are currently firing.{{ end }}
   {{ range .Alerts.Firing -}}
@@ -143,6 +151,7 @@ Trading mode alert
 resource "grafana_message_template" "victorops_trading_mode_alert_message" {
   name     = "VictorOps - Trading Mode Alert Message"
   template = <<-EOT
+${grafana_message_template.victorops_trading_mode_alert_title.template}
 {{ define "victorops.trading_mode_alert_message" }}
 {{ $firingCount := len .Alerts.Firing -}}
 {{ $resolvedCount := len .Alerts.Resolved -}}
@@ -243,6 +252,7 @@ resource "grafana_message_template" "victorops_trading_limits_alert_title" {
 resource "grafana_message_template" "victorops_trading_limits_alert_message" {
   name     = "VictorOps - Trading Limits Alert Message"
   template = <<-EOT
+${grafana_message_template.victorops_trading_limits_alert_title.template}
 {{ define "victorops.trading_limits_alert_message" }}
 {{ range .Alerts.Firing -}}
 {{ $chain := .Labels.chain | title -}}
@@ -283,6 +293,7 @@ EOT
 resource "grafana_message_template" "victorops_aegis_service_alert_message" {
   name     = "VictorOps - Aegis Service Alert Message"
   template = <<-EOT
+${grafana_message_template.victorops_aegis_service_alert_title.template}
 {{ define "victorops.aegis_service_alert_message" }}
 {{ $firingCount := len .Alerts.Firing -}}
 {{ $mixedState := and (len .Alerts.Firing) (len .Alerts.Resolved) -}}

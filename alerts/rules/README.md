@@ -178,6 +178,21 @@ several `define` blocks, so new definitions can ride on a related existing
 template (the refiller alert's Splunk title and message live in the signer
 low-balance template) instead of taking a slot of their own.
 
+Move a `define` to another template in two applies. Grafana parses every
+template into one set, and a repeated define name replaces the earlier
+definition, so a duplicate is harmless. A missing name fails every
+notification that calls it. Terraform does not order an update against the
+deletion of an unrelated resource. The first apply adds the define to the
+receiving template, and only a later apply deletes the old template.
+
+The alert-type title templates are in the middle of that move. Each
+`*_alert_message` template in `message-templates-slack.tf` and
+`message-templates-victorops.tf` also carries its title define, copied by
+reference from the title template. After that change is applied, a follow-up
+inlines each title define into its message template, byte for byte, and
+deletes the 13 `*_alert_title` resources. That frees 13 slots, and the lint
+cap then drops below 30 to keep a margin.
+
 ## Relayer wallet balances
 
 Both rules live in `rules-oracle-relayers.tf` and take their numbers from the
