@@ -62,6 +62,12 @@ variable "slack_channel_pools" {
   default     = "#alerts-pools"
 }
 
+variable "slack_channel_capa_pool" {
+  type        = string
+  description = "Exact Slack channel ID for the Capa LP-withdrawal event alert."
+  default     = "C0B53R34HTN"
+}
+
 variable "slack_channel_infra" {
   type        = string
   description = "Slack channel for indexer and metrics-bridge warning alerts."

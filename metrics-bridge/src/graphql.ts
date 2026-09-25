@@ -1,5 +1,6 @@
 import { ClientError, GraphQLClient, gql } from "graphql-request";
 import { HASURA_URL } from "./config.js";
+import { CAPA_POOL_ID, type IndexedBurn } from "./capa-withdrawal.js";
 import type {
   BridgePoolsResponse,
   PoolLiquidityStrategyRow,
@@ -274,6 +275,44 @@ type BridgePoolCompanionResponses = {
 };
 
 const client = new GraphQLClient(HASURA_URL);
+
+const RECENT_POOL_BURNS_QUERY = gql`
+  query RecentPoolBurns($poolId: String!, $since: numeric!) {
+    LiquidityEvent(
+      where: {
+        poolId: { _eq: $poolId }
+        kind: { _eq: "BURN" }
+        blockTimestamp: { _gte: $since }
+      }
+      order_by: [{ blockNumber: desc }, { id: desc }]
+      limit: 11
+    ) {
+      id
+      poolId
+      kind
+      amount0
+      amount1
+      liquidity
+      txHash
+      blockNumber
+      blockTimestamp
+    }
+  }
+`;
+
+export async function fetchRecentPoolBurns(
+  since: number,
+): Promise<IndexedBurn[]> {
+  const result = await client.request<{ LiquidityEvent: IndexedBurn[] }>({
+    document: RECENT_POOL_BURNS_QUERY,
+    variables: { poolId: CAPA_POOL_ID, since: String(since) },
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+  // Never silently omit an event when volume exceeds the query cap.
+  if (result.LiquidityEvent.length > 10)
+    throw new Error("Capa burn query cap exceeded");
+  return result.LiquidityEvent;
+}
 
 // Whether a GraphQL error is a Hasura "unknown field" report. Typical shape
 // from a fresh deploy where Hasura hasn't tracked the new columns yet:
