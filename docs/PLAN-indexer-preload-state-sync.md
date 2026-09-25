@@ -85,9 +85,10 @@ object and input (`rpc/median-timestamp-effect.ts:75-76`).
 
 1. Both phases call one reader, `readStateSyncEffects(context, event, pool)`,
    before `maybePreloadPool`. `pool` is that phase's own `Pool.get` result. The
-   reader requests rows 1-3 when each row's gate holds for that `pool`, and
-   row 4 only for `Rebalanced`. If `pool` is undefined, it requests rows 1 and
-   3, plus row 4 for `Rebalanced` (event-keyed only).
+   reader requests each of rows 1-4 when that row's gate holds for that
+   `pool`; row 4 also requires a `Rebalanced` event and keeps the `-2`
+   unsupported-getter skip. If `pool` is undefined, it requests rows 1 and 3,
+   plus row 4 for `Rebalanced` (event-keyed only).
 2. One key builder per effect produces the input for the reader and for the
    existing call site. Identical keys are then true by construction.
 3. Preload returns after the reader and the Pool and breach warm-up. Preload
@@ -137,8 +138,11 @@ them explicitly.
   `envio-cloud deployment logs` with `--level info`.
 - **Range.** Each chain's configured start block to one fixed end block per
   chain, recorded before the baseline starts. `config.multichain.mainnet.yaml`
-  sets no end block, so stage 1 adds a benchmark-only copy of that config
-  with an explicit `end_block` per chain. Both runs deploy that copy.
+  sets no end block, and hosted builds load it through the pinned
+  `config.yaml` alias (`scripts/indexer-handler-invariant-contract.test.mjs:157-167`).
+  So one throwaway commit adds the `end_block` values to that file. Apply it
+  on top of the merge base and on top of the stage-1 head, and deploy those
+  two benchmark commits. Never merge them.
 - **Success.** Processed `UpdateReserves` + `Rebalanced` calls per processing
   handler second is at least 1.30× the baseline. Whole-replay time to the end
   blocks is not slower. Executions of rows 1 and 4 are at most 1.10× the
@@ -165,15 +169,15 @@ them explicitly.
 
 **Stage-1 files.** `handlers/fpmm/state-sync.ts` (reader, key builders,
 handler bodies exported for tests), `pool.ts` (breach warm-up through
-`getWhere`), `performance.ts` only if rows 1-4 need explicit output, and the
-benchmark-only finite-range config.
+`getWhere`), and `performance.ts` only if rows 1-4 need explicit output.
 
 **Stage-1 tests.** A new `test/stateSyncPreload.test.ts` on the
 `test/susds.test.ts:805-869` pattern: preload writes no entity; each preload
 key appears among processing keys for the same event; the two-`UpdateReserves`
 → `Rebalanced` sequence with preload first closes the breach as `"rebalance"`
 and keeps pre-rebalance deltas; a pool seeded earlier in the batch derives
-without the preloaded RPC. `test/rebalancedUsd.test.ts`,
+without the preloaded RPC; a preloaded Pool with `rebalanceReward === -2`
+requests no row 4. `test/rebalancedUsd.test.ts`,
 `test/stateSyncReconcile.test.ts`, `test/deviationBreach.test.ts` and
 `test/code-quality-invariants.test.ts` stay green. The repo harness has no
 preload hook, so these tests call the exported handlers directly.
