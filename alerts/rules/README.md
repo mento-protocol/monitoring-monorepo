@@ -46,6 +46,8 @@ pnpm alerts:rules:plan
 # The `production-infra` GitHub Environment enforces required-reviewer approval before
 # the apply job runs. Do not run `terraform -chdir=alerts/rules apply` locally
 # from a feature branch — it will fight CI on the next merge.
+# An approved local break-glass apply must pass `-parallelism=1`: Grafana
+# returns 409 on concurrent message-template writes.
 ```
 
 All rule/routing inputs that lack safe defaults live in
