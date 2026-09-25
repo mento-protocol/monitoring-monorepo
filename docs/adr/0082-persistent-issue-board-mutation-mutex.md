@@ -3,7 +3,7 @@ title: Persistent Issue-Board Mutation Mutex
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-29
+last_verified: 2026-09-25
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -578,6 +578,31 @@ used head `feat/rank-backlog-skill`. That PR merged at
 the issue to `needs-grooming` 49 seconds later and claimed stage two. This
 settled history requires the explicit review branch rebind and merged-PR
 continuation paths.
+
+## Amendment — 2026-09-25: the primitive is shared
+
+The ref name, payload builder, state commit, bootstrap, compare-and-swap, and
+reconciliation now come from `@mento-protocol/issues/claims` 0.2.0 through
+`issueBoardProfile()`. The package was extracted from this helper. The profile
+fixes the ref namespace, the `mento-issue-board-mutex` payload, the
+`Mento issue board` author, 3 reconciliation reads 200 ms apart, and the
+`ISSUE_OWNERSHIP_CONFLICT`, `ISSUE_MUTATION_LOCK_STALE`, and
+`ISSUE_MUTATION_LOCK_RECONCILIATION_UNKNOWN` codes. It accepts no overrides.
+`scripts/pr/agent-issue-board.test.mjs` pins the `gh` bytes of one bootstrap,
+acquire, and release against the pre-package implementation, so a live `LOCK`
+or `UNLOCK` stays readable by either. The package's `gh` calls run through this
+repository's runner, which pins the GitHub host and prints the scope hints. The
+ref read now paginates `matching-refs`.
+
+The Projects V2 owner proofs, the owner-mutation capability, the lease shape,
+and the recovery text stay in `scripts/pr/issue-board-lock.mjs`.
+
+The package can also write a lease with an expiry. Expiry is opt-in, and it is
+only safe with a fenced write path: a resumed owner must fail every board write
+after a takeover. This repository does not enable it. `issueBoardProfile()` is
+not lease-capable, so a `LOCK` still never expires, and recovery stays the
+operator procedure above. The rejected "Ref TTL or automatic lock stealing"
+alternative still holds for this repository.
 
 ## Alternatives considered
 
