@@ -206,9 +206,11 @@ cites a closed issue after stage 1 ships. The governance marker keeps a durable
 exemption reason instead. The operator decides when those issues are filed.
 
 **Rollback.** No schema change and no new entity. Before promotion, do not
-promote the candidate. After promotion, follow `docs/deployment.md:170-191`:
-run `pnpm deploy:indexer:rollback <last-good-sha> --dry-run`, then the same
-command without `--dry-run`, then revert the stage-1 commit on `main`.
+promote the candidate. After promotion, run every step of "Rollback a Bad
+Promotion" (`docs/deployment.md:170-210`): the `--dry-run` preview, the
+rollback to `<last-good-sha>` and any resync steps it prints, the
+propagation wait, and `pnpm deploy:indexer:verify <last-good-sha> --prod`.
+Revert the stage-1 commit on `main` only after production verifies.
 
 ## Open Questions
 
