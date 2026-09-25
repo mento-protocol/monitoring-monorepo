@@ -5,28 +5,20 @@
 # hardcodes the Slack attachment title_link to its alert detail page. Keep that
 # title to one status icon. Render the linked human title in the message body.
 #
-# Each peg message template also carries its title define, copied from the
-# title template by reference. This is step 1 of freeing two message template
-# slots: a later change deletes the title resources. See "Message template
-# cap" in README.md before editing.
-
-resource "grafana_message_template" "peg_slack_title" {
-  for_each = local.peg_alert_instances
-
-  name     = "Peg - Slack Title"
-  template = <<-EOT
-{{ define "peg.slack.title" -}}
-{{ if (len .Alerts.Firing) }}{{ if eq .CommonLabels.severity "critical" }}🚨{{ else }}🟡{{ end }}{{ else }}✅{{ end }}
-{{- end }}
-EOT
-}
+# Each peg message template holds two defines: the channel's title and its
+# message. Keep them in one resource; a separate title template takes a slot
+# under the Grafana Cloud template cap. See "Message template cap" in
+# README.md before editing.
 
 resource "grafana_message_template" "peg_slack_message" {
   for_each = local.peg_alert_instances
 
   name     = "Peg - Slack Message"
   template = <<-EOT
-${grafana_message_template.peg_slack_title[each.key].template}
+{{ define "peg.slack.title" -}}
+{{ if (len .Alerts.Firing) }}{{ if eq .CommonLabels.severity "critical" }}🚨{{ else }}🟡{{ end }}{{ else }}✅{{ end }}
+{{- end }}
+
 {{ define "peg.slack.message" }}
 {{ if and (len .Alerts.Firing) (eq .CommonLabels.severity "critical") -}}
 <!subteam^${var.oncall_support_usergroup_id}> Please investigate.
@@ -60,10 +52,10 @@ ${grafana_message_template.peg_slack_title[each.key].template}
 EOT
 }
 
-resource "grafana_message_template" "peg_victorops_title" {
+resource "grafana_message_template" "peg_victorops_message" {
   for_each = local.peg_alert_instances
 
-  name     = "Peg - VictorOps Title"
+  name     = "Peg - VictorOps Message"
   template = <<-EOT
 {{ define "peg.victorops.title" -}}
 {{ if (len .Alerts.Firing) -}}
@@ -75,15 +67,7 @@ RESOLVED {{ range $i, $alert := .Alerts.Resolved }}{{ if $i }}, {{ end }}{{ with
 {{- end }}
 {{ if and (eq (len .Alerts.Firing) 0) (eq (len .Alerts.Resolved) 0) }}Peg status unknown{{ end }}
 {{- end }}
-EOT
-}
 
-resource "grafana_message_template" "peg_victorops_message" {
-  for_each = local.peg_alert_instances
-
-  name     = "Peg - VictorOps Message"
-  template = <<-EOT
-${grafana_message_template.peg_victorops_title[each.key].template}
 {{ define "peg.victorops.message" }}
 {{ range .Alerts.Firing -}}
 PROBLEM: {{ with .Annotations.summary }}{{ . }}{{ else }}A peg page is firing.{{ end }}

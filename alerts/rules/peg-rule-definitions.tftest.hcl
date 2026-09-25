@@ -65,12 +65,13 @@ run "peg_rule_definitions_preserve_consumer_guard_invariant" {
 
   assert {
     condition = (
-      strcontains(grafana_message_template.peg_slack_title["peg-monitoring"].template, "🚨") &&
-      strcontains(grafana_message_template.peg_slack_title["peg-monitoring"].template, "🟡") &&
-      strcontains(grafana_message_template.peg_slack_title["peg-monitoring"].template, "✅") &&
-      !strcontains(grafana_message_template.peg_slack_title["peg-monitoring"].template, "Annotations.summary") &&
-      !strcontains(grafana_message_template.peg_slack_title["peg-monitoring"].template, "Annotations.resolved_summary") &&
-      !strcontains(grafana_message_template.peg_slack_title["peg-monitoring"].template, ".CommonLabels.alertname") &&
+      strcontains(split("{{ define \"peg.slack.message\" }}", grafana_message_template.peg_slack_message["peg-monitoring"].template)[0], "{{ define \"peg.slack.title\" -}}") &&
+      strcontains(split("{{ define \"peg.slack.message\" }}", grafana_message_template.peg_slack_message["peg-monitoring"].template)[0], "🚨") &&
+      strcontains(split("{{ define \"peg.slack.message\" }}", grafana_message_template.peg_slack_message["peg-monitoring"].template)[0], "🟡") &&
+      strcontains(split("{{ define \"peg.slack.message\" }}", grafana_message_template.peg_slack_message["peg-monitoring"].template)[0], "✅") &&
+      !strcontains(split("{{ define \"peg.slack.message\" }}", grafana_message_template.peg_slack_message["peg-monitoring"].template)[0], "Annotations.summary") &&
+      !strcontains(split("{{ define \"peg.slack.message\" }}", grafana_message_template.peg_slack_message["peg-monitoring"].template)[0], "Annotations.resolved_summary") &&
+      !strcontains(split("{{ define \"peg.slack.message\" }}", grafana_message_template.peg_slack_message["peg-monitoring"].template)[0], ".CommonLabels.alertname") &&
       strcontains(grafana_message_template.peg_slack_message["peg-monitoring"].template, "<https://monitoring.mento.org/peg-monitoring|{{ . }}>") &&
       strcontains(grafana_message_template.peg_slack_message["peg-monitoring"].template, "Peg monitoring needs attention") &&
       strcontains(grafana_message_template.peg_slack_message["peg-monitoring"].template, "Peg monitoring recovered") &&
