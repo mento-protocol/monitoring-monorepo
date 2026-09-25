@@ -22,10 +22,12 @@ export function parseWei(value: string, decimals = 18): number {
 
 // Number() loses precision beyond ~9,007 tokens (2^53 wei at 18 decimals).
 // Acceptable for display; use BigInt division if sub-wei precision matters.
+// Fixed "en-US" so server-rendered amounts hydrate identically in any browser
+// locale.
 export function formatWei(value: string, decimals = 18, display = 4): string {
   if (!value || value === "0") return "0";
   const num = Number(value) / 10 ** decimals;
-  return num.toLocaleString(undefined, {
+  return num.toLocaleString("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: display,
   });

@@ -507,6 +507,7 @@ function PoolOverview({
         brokerLimits={brokerLimits}
         initialV2Exchange={initialData?.v2Exchange}
         initialExchangeVolume={initialData?.brokerExchange24h}
+        initialExchangeVolumeSince={initialData?.brokerExchange24hSince}
         initialBreakerConfig={breakerFallbackForCurrentFeed(initialData, pool)}
       />
       <HealthPanel pool={pool} />

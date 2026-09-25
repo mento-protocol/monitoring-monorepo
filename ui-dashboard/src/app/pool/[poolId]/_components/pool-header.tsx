@@ -67,6 +67,7 @@ export function PoolHeader({
   brokerLimits,
   initialV2Exchange,
   initialExchangeVolume,
+  initialExchangeVolumeSince,
   initialBreakerConfig,
 }: {
   pool: Pool;
@@ -77,6 +78,8 @@ export function PoolHeader({
   brokerLimits: BrokerLimitsState;
   initialV2Exchange?: PoolV2ExchangeResponse | undefined;
   initialExchangeVolume?: BrokerExchangeDailySnapshots24hResponse | undefined;
+  /** UTC-day `since` the server fetched `initialExchangeVolume` for. */
+  initialExchangeVolumeSince?: number | undefined;
   initialBreakerConfig?: PoolBreakerConfigResponse | undefined;
 }) {
   const { network } = useNetwork();
@@ -104,7 +107,7 @@ export function PoolHeader({
   const exchangeProviderForVolume = (
     v2Config?.exchangeProvider ?? ""
   ).toLowerCase();
-  const volumeSince = useCurrentUtcDayStartSeconds();
+  const volumeSince = useCurrentUtcDayStartSeconds(initialExchangeVolumeSince);
   const {
     data: exchangeVolumeData,
     isLoading: exchangeVolumeLoading,
@@ -122,7 +125,11 @@ export function PoolHeader({
     SNAPSHOT_REFRESH_MS,
     {
       timeoutMs: HASURA_TIMEOUT_MS,
-      fallbackData: initialExchangeVolume,
+      fallbackData: volumeFallbackForDay(
+        initialExchangeVolume,
+        initialExchangeVolumeSince,
+        volumeSince,
+      ),
       schema: BrokerExchangeDailySnapshots24hSchema,
     },
   );
@@ -337,11 +344,24 @@ function subscribeToUtcDayStart(onStoreChange: () => void): () => void {
   return () => clearTimeout(timeoutId);
 }
 
-function useCurrentUtcDayStartSeconds(): number {
+// SWR applies fallbackData to any key, so thread the SSR volume only while the
+// query still targets the UTC day it was fetched for.
+function volumeFallbackForDay(
+  volume: BrokerExchangeDailySnapshots24hResponse | undefined,
+  fetchedSince: number | undefined,
+  since: number,
+): BrokerExchangeDailySnapshots24hResponse | undefined {
+  return fetchedSince === since ? volume : undefined;
+}
+
+// The server and hydration renders share the serialized SSR day key, so the
+// fallback and the first client query use the same `since`. After hydration
+// React re-reads the live UTC day and moves the key if the day has changed.
+function useCurrentUtcDayStartSeconds(serverSince?: number): number {
   return useSyncExternalStore(
     subscribeToUtcDayStart,
     currentUtcDayStartSeconds,
-    currentUtcDayStartSeconds,
+    () => serverSince ?? currentUtcDayStartSeconds(),
   );
 }
 
@@ -427,7 +447,7 @@ function VirtualPoolHeaderTiles({
             />
           </span>
         }
-        value={(pool.swapCount ?? 0).toLocaleString()}
+        value={(pool.swapCount ?? 0).toLocaleString("en-US")}
         mono
       />
       <Stat
@@ -513,7 +533,9 @@ function VirtualPoolVolumeValue({
   );
   const swapCount = rows.reduce((sum, row) => sum + row.swapCount, 0);
   return (
-    <span title={`${swapCount.toLocaleString()} swaps since UTC midnight`}>
+    <span
+      title={`${swapCount.toLocaleString("en-US")} swaps since UTC midnight`}
+    >
       {formatUSD(weiToUsd(volumeUsdWei))}
     </span>
   );
