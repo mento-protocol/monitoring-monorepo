@@ -64,7 +64,10 @@ data "archive_file" "function_source" {
   source_dir  = "${path.module}/.."
   output_path = "${path.module}/../function-source.zip"
 
-  # Not sure if this is strictly necessary when defining a .gcloudignore file, but better safe than sorry
+  # Paired owner: ../.gcloudignore (and the ../.gitignore it includes) excludes
+  # the same generated paths from the break-glass `gcloud functions deploy`
+  # upload. Keep both lists aligned; src/__tests__/deploy-source-excludes.test.ts
+  # fails if either stops excluding `coverage`.
   excludes = [
     ".env",
     ".env.example",
@@ -83,6 +86,7 @@ data "archive_file" "function_source" {
     "DEPLOY_FROM_SCRATCH.md",
     "README.md",
     "dist",
+    "coverage",
     "commitlint.config.mjs",
     "eslint.config.mjs",
     "vitest.hermetic-setup.ts",
