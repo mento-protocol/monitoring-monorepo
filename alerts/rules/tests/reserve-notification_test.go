@@ -38,7 +38,7 @@ func TestReserveResolutionNotifications(t *testing.T) {
 		return limitAlert{
 			Status:      status,
 			Labels:      map[string]string{"token": "USDC", "owner": "Reserve", "ownerValue": "0xabc", "explorer": "polygonscan.com", "chain": "polygon", "severity": severity},
-			Annotations: map[string]string{"band": band, "threshold": "60000", "currentBalance": "12", "grafana_state_reason": reason},
+			Annotations: map[string]string{"band": band, "threshold": "60000", "currentBalance": "12,345.67", "grafana_state_reason": reason},
 		}
 	}
 	input := func(firing, resolved []limitAlert) map[string]any {
@@ -82,6 +82,9 @@ func TestReserveResolutionNotifications(t *testing.T) {
 				t.Fatalf("%s title = %q", reason, got)
 			}
 			for _, output := range []string{render(t, slack, "slack.reserve_balance_alert_message", resolved), render(t, victorops, "victorops.reserve_balance_alert_message", resolved)} {
+				if strings.Contains(output, "12,345.67") {
+					t.Fatalf("%s message shows the carried-forward balance: %q", reason, output)
+				}
 				if !strings.Contains(output, stopped) {
 					t.Fatalf("%s message lacks %q: %q", reason, stopped, output)
 				}
