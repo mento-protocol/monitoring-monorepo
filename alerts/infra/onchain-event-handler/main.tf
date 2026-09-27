@@ -217,12 +217,16 @@ data "archive_file" "function_source" {
   # Terraform's archive provider uses doublestar matching: a single `*` does
   # NOT cross `/`. Use `**/` prefixes to drop test files + state artifacts
   # nested in subdirs (src/**, etc.).
+  # Paired owner: .gcloudignore. src/deploy-source-excludes.test.ts in
+  # onchain-event-handler fails if either drops a generated path.
   excludes = [
     "node_modules",
     "coverage",
     "coverage/**",
     "dist",
     "dist/**",
+    ".turbo",
+    ".turbo/**",
     ".git",
     "**/*.test.ts",
     "**/*.test.js",
