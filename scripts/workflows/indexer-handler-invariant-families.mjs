@@ -359,6 +359,7 @@ export const INDEXER_HANDLER_INVARIANT_FAMILIES = [
       "indexer-envio/test/snapshots.test.ts",
       "indexer-envio/test/stables.test.ts",
       "indexer-envio/test/stablesFeeLeg.test.ts",
+      "indexer-envio/test/stateSyncPreload.test.ts",
       "indexer-envio/test/stateSyncReconcile.test.ts",
       "indexer-envio/test/steth.test.ts",
       "indexer-envio/test/susds.test.ts",
