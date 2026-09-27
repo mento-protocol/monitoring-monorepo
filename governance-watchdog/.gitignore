@@ -19,8 +19,15 @@ function-source.zip
 .env.yaml
 .project_vars_cache
 
-# Vitest coverage output (`pnpm test:coverage`). .gcloudignore includes this
-# file, so this entry keeps coverage out of the break-glass gcloud upload.
+# Generated output that is not a Cloud Function build input: Vitest coverage
+# (`pnpm test:coverage`), the ESLint cache (`pnpm lint`), tsc output (`pnpm
+# build`; Cloud Build reruns it through `gcp-build`), installed dependencies,
+# and Turborepo task logs. .gcloudignore includes this file, so these entries
+# keep them out of the break-glass gcloud upload.
 # Paired owner: the `excludes` list of data.archive_file.function_source in
 # infra/storage.tf. Keep both aligned.
 coverage/
+.eslintcache
+dist/
+node_modules/
+.turbo/

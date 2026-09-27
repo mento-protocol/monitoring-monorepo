@@ -67,7 +67,7 @@ data "archive_file" "function_source" {
   # Paired owner: ../.gcloudignore (and the ../.gitignore it includes) excludes
   # the same generated paths from the break-glass `gcloud functions deploy`
   # upload. Keep both lists aligned; src/__tests__/deploy-source-excludes.test.ts
-  # fails if either stops excluding `coverage`.
+  # fails if either stops excluding a generated path it lists.
   excludes = [
     ".env",
     ".env.example",
@@ -79,6 +79,8 @@ data "archive_file" "function_source" {
     ".cursor",
     ".github",
     ".DS_Store",
+    ".eslintcache",
+    ".turbo",
     ".project_vars_cache",
     "bin",
     "arch-diagram.png",
