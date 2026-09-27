@@ -2,9 +2,17 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-// Both Cloud Function source paths must drop generated `coverage/` output:
-// the Terraform zip (infra/storage.tf) and the break-glass gcloud upload
-// (.gcloudignore, which pulls in .gitignore through `#!include`).
+// Both Cloud Function source paths must drop generated output that is not a
+// build input: the Terraform zip (infra/storage.tf) and the break-glass gcloud
+// upload (.gcloudignore, which pulls in .gitignore through `#!include`).
+// `dist` is safe to drop because Cloud Build reruns `gcp-build`.
+const generatedPaths = [
+  "coverage",
+  ".eslintcache",
+  "dist",
+  "node_modules",
+  ".turbo",
+];
 const packageRoot = join(__dirname, "..", "..");
 const read = (file: string) => readFileSync(join(packageRoot, file), "utf8");
 
@@ -28,14 +36,18 @@ function gcloudIgnorePatterns(file = ".gcloudignore"): string[] {
     });
 }
 
-describe("function deploy inputs exclude coverage output", () => {
-  it("excludes coverage from the Terraform function archive", () => {
-    expect(terraformArchiveExcludes()).toContain("coverage");
+const escapeRegExp = (text: string) =>
+  text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+describe.each(generatedPaths)("function deploy inputs exclude %s", (path) => {
+  it("excludes it from the Terraform function archive", () => {
+    expect(terraformArchiveExcludes()).toContain(path);
   });
 
-  it("excludes coverage from the gcloud upload context", () => {
+  it("excludes it from the gcloud upload context", () => {
+    const pattern = new RegExp(`^/?${escapeRegExp(path)}/?$`);
     expect(gcloudIgnorePatterns()).toEqual(
-      expect.arrayContaining([expect.stringMatching(/^\/?coverage\/?$/)]),
+      expect.arrayContaining([expect.stringMatching(pattern)]),
     );
   });
 });
