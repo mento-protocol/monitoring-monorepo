@@ -120,17 +120,15 @@ async function fetchAuthoritativeRebalanceState(args: {
     poolAddress: args.poolAddress,
   });
   const [rpc, medianTimestamp] = await Promise.all([
-    args.context.effect(rebalancingStateEffect, {
-      chainId: args.chainId,
-      poolAddress: args.poolAddress,
-      blockNumber: args.blockNumber,
-    }),
+    args.context.effect(
+      rebalancingStateEffect,
+      rebalancingStateKey(args.chainId, args.poolAddress, args.blockNumber),
+    ),
     rateFeedID
-      ? args.context.effect(medianTimestampEffectForChain(args.chainId), {
-          chainId: args.chainId,
-          rateFeedID,
-          blockNumber: args.blockNumber,
-        })
+      ? args.context.effect(
+          medianTimestampEffectForChain(args.chainId),
+          medianTimestampKey(args.chainId, rateFeedID, args.blockNumber),
+        )
       : Promise.resolve(null),
   ]);
   const exactMedianTimestamp =
@@ -160,6 +158,114 @@ async function resolveRebalanceState(args: {
     };
   }
   return fetchAuthoritativeRebalanceState(args);
+}
+
+// ---------------------------------------------------------------------------
+// Preload-safe effect reader: rows 1-4 of
+// docs/PLAN-indexer-preload-state-sync.md. Each effect has one key builder
+// (row 3's lives in `oracle-recovery.ts`), so preload and processing request
+// identical inputs and Envio reuses the preload result.
+// ---------------------------------------------------------------------------
+
+export function rebalancingStateKey(
+  chainId: number,
+  poolAddress: string,
+  blockNumber: bigint,
+) {
+  return { chainId, poolAddress, blockNumber };
+}
+
+export function medianTimestampKey(
+  chainId: number,
+  rateFeedID: string,
+  blockNumber: bigint,
+) {
+  return { chainId, rateFeedID, blockNumber };
+}
+
+export function rebalanceIncentiveKey(
+  chainId: number,
+  poolAddress: string,
+  blockNumber: bigint,
+) {
+  return { chainId, poolAddress, blockNumber };
+}
+
+type StateSyncEvent = {
+  chainId: number;
+  srcAddress: string;
+  logIndex: number;
+  block: { number: number; timestamp: number };
+  transaction: { hash: string; from?: string | undefined };
+};
+
+export type UpdateReservesEvent = StateSyncEvent & {
+  params: { reserve0: bigint; reserve1: bigint; blockTimestamp: bigint };
+};
+
+export type RebalancedEvent = StateSyncEvent & {
+  params: {
+    sender: string;
+    priceDifferenceBefore: bigint;
+    priceDifferenceAfter: bigint;
+  };
+};
+
+type StateSyncEffects = {
+  authoritative: AuthoritativeRebalanceState;
+  /** Row 4, `Rebalanced` only: `-2` when the getter is known missing, `null`
+   * on RPC failure and for `UpdateReserves`. */
+  blockScopedIncentive: number | null;
+};
+
+/** Request rows 1-4 for one state-sync event, gated on the caller's own Pool
+ * read. Preload passes its preload Pool; processing passes the ordered,
+ * self-healed Pool and so derives every gate again. It writes no entity. */
+export async function readStateSyncEffects(
+  context: EvmOnEventContext,
+  event: UpdateReservesEvent | RebalancedEvent,
+  pool: Pool | undefined,
+): Promise<StateSyncEffects> {
+  const chainId = event.chainId;
+  const poolAddress = asAddress(event.srcAddress);
+  const blockNumber = asBigInt(event.block.number);
+  const eventTimestamp = asBigInt(event.block.timestamp);
+  // UpdateReserves: `getRebalancingState` reads post-event state on chain,
+  // but `pool.reserves0/1` still hold the prior value until `upsertPool`.
+  const isUpdateReserves = "reserve0" in event.params;
+  const derived = !pool
+    ? null
+    : "reserve0" in event.params
+      ? tryDeriveRebalanceState(pool, {
+          eventTimestamp,
+          reservesOverride: {
+            reserve0: event.params.reserve0,
+            reserve1: event.params.reserve1,
+          },
+        })
+      : tryDeriveRebalanceState(pool, { eventTimestamp });
+  const [authoritative, blockScopedIncentive] = await Promise.all([
+    resolveRebalanceState({
+      blockNumber,
+      chainId,
+      context,
+      derived,
+      existing: pool,
+      poolAddress,
+    }),
+    // Read the reward in force at the event block: `Pool.rebalanceReward`
+    // may carry today's value during a resync. The `-2` sentinel (getter
+    // absent) skips a read that cannot succeed.
+    isUpdateReserves
+      ? Promise.resolve(null)
+      : pool?.rebalanceReward === -2
+        ? Promise.resolve(-2)
+        : context.effect(
+            rebalanceIncentiveAtBlockEffect,
+            rebalanceIncentiveKey(chainId, poolAddress, blockNumber),
+          ),
+  ]);
+  return { authoritative, blockScopedIncentive };
 }
 
 /** Persist the health cursor and optional diagnostic row shared by both
@@ -231,29 +337,38 @@ function recordStateSyncHealth(args: {
   return pool;
 }
 
-// ---------------------------------------------------------------------------
-// FPMM.UpdateReserves
-// ---------------------------------------------------------------------------
+type StateSyncHandlerArgs<E> = { event: E; context: EvmOnEventContext };
 
-indexer.onEvent(
-  { contract: "FPMM", event: "UpdateReserves" },
-  async ({ event, context }) => {
+// Handler bodies are exported so tests can drive the preload pass directly;
+// the test harness has no preload hook. Registration follows the object.
+export const stateSyncHandlers = {
+  // -------------------------------------------------------------------------
+  // FPMM.UpdateReserves
+  // -------------------------------------------------------------------------
+  UpdateReserves: async ({
+    event,
+    context,
+  }: StateSyncHandlerArgs<UpdateReservesEvent>): Promise<void> => {
     const id = eventId(event.chainId, event.block.number, event.logIndex);
     const poolId = makePoolId(event.chainId, event.srcAddress);
-    // Preload phase: signal Pool + open-breach-row dependencies so Envio
-    // preloads them, then bail. All RPC + writes run only in processing.
-    // Envio docs explicitly warn against direct `fetch` in preload — the
-    // calls run twice per event (stale-data risk). Empirically, letting
-    // RPC run in preload also caused in-batch Pool writes to not propagate
-    // between sequential handlers, manifesting as breach rows closing
-    // with `endedByEvent = "unknown"` even when a Rebalanced event fired
-    // right after the UR handlers in the same tx. See `maybePreloadPool`.
-    // preload-handler-note: ordered same-tx Pool writes must reach later events.
-    // Preload-safe redesign is tracked in #1394.
+    // Preload warms the Pool and open breach row, then requests rows 1-4
+    // through the shared reader, keyed from the preload Pool. It writes no
+    // entity, calls no `upsertPool` and leaves the reserve scratch alone:
+    // an earlier attempt that ran handler state logic in preload closed
+    // breach rows with `endedByEvent = "unknown"`. Processing re-derives
+    // every gate from ordered state.
+    // preload-handler-note: rows 1-4 are awaited in preload through readStateSyncEffects; self-heal and upsertPool stay processing-only because ordered same-tx Pool writes must reach later events.
     // preload-effect-helpers: selfHealInvertRateFeed, selfHealTokenDecimals
-    // preload-effect-helpers: selfHealRebalanceThresholds, resolveRebalanceState
+    // preload-effect-helpers: selfHealRebalanceThresholds, readStateSyncEffects
     // preload-effect-helpers: upsertPool
-    if (await maybePreloadPool(context, poolId)) return;
+    if (await maybePreloadPool(context, poolId)) {
+      await readStateSyncEffects(
+        context,
+        event,
+        await context.Pool.get(poolId),
+      );
+      return;
+    }
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
 
@@ -286,30 +401,11 @@ indexer.onEvent(
       blockNumber,
       existing,
     );
-    // Override reserves: `getRebalancingState` reads post-event state on
-    // chain, but `existing.reserves0/1` still hold the prior block's value
-    // until `upsertPool` runs below.
-    const derivedRebalanceState = existing
-      ? tryDeriveRebalanceState(existing, {
-          eventTimestamp: blockTimestamp,
-          reservesOverride: {
-            reserve0: event.params.reserve0,
-            reserve1: event.params.reserve1,
-          },
-        })
-      : null;
     const {
       medianTimestamp: authoritativeMedianTimestamp,
       oracleFreshnessProven,
       resolved,
-    } = await resolveRebalanceState({
-      blockNumber,
-      chainId: event.chainId,
-      context,
-      derived: derivedRebalanceState,
-      existing,
-      poolAddress: asAddress(event.srcAddress),
-    });
+    } = (await readStateSyncEffects(context, event, existing)).authoritative;
 
     let oracleDelta: Partial<typeof DEFAULT_ORACLE_FIELDS> = {};
     const updateReservesDegenerate = degenerateReservesForPool(existing, {
@@ -414,28 +510,33 @@ indexer.onEvent(
 
     context.ReserveUpdate.set(reserveUpdate);
   },
-);
 
-// ---------------------------------------------------------------------------
-// FPMM.Rebalanced
-// ---------------------------------------------------------------------------
-
-indexer.onEvent(
-  { contract: "FPMM", event: "Rebalanced" },
+  // -------------------------------------------------------------------------
+  // FPMM.Rebalanced
+  // -------------------------------------------------------------------------
   // eslint-disable-next-line max-lines-per-function -- Existing handler keeps same-event reserve, breach, and rebalance writes together for ordering parity.
-  async ({ event, context }) => {
+  Rebalanced: async ({
+    event,
+    context,
+  }: StateSyncHandlerArgs<RebalancedEvent>): Promise<void> => {
     const id = eventId(event.chainId, event.block.number, event.logIndex);
     const poolId = makePoolId(event.chainId, event.srcAddress);
-    // See UpdateReserves handler for the full rationale. Critical here
-    // because FPMM emits 2× UR + 1× Rebalanced in the same rebalance tx
-    // and we need sequential in-batch state visibility so Rebalanced sees
-    // the anchor UR held.
-    // preload-handler-note: ordered same-tx Pool writes must reach this event.
-    // Preload-safe redesign is tracked in #1394.
+    // See UpdateReserves for the preload contract. Critical here because
+    // FPMM emits 2× UR + 1× Rebalanced in the same rebalance tx and we need
+    // sequential in-batch state visibility so Rebalanced sees the anchor UR
+    // held. Preload keys row 4 from the preload Pool as well.
+    // preload-handler-note: rows 1-4 are awaited in preload through readStateSyncEffects; self-heal and upsertPool stay processing-only because ordered same-tx Pool writes must reach this event.
     // preload-effect-helpers: selfHealInvertRateFeed, selfHealTokenDecimals
-    // preload-effect-helpers: selfHealRebalanceThresholds, resolveRebalanceState
+    // preload-effect-helpers: selfHealRebalanceThresholds, readStateSyncEffects
     // preload-effect-helpers: upsertPool
-    if (await maybePreloadPool(context, poolId)) return;
+    if (await maybePreloadPool(context, poolId)) {
+      await readStateSyncEffects(
+        context,
+        event,
+        await context.Pool.get(poolId),
+      );
+      return;
+    }
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
 
@@ -459,7 +560,6 @@ indexer.onEvent(
           blockNumber,
         )
       : undefined;
-    const incentiveGetterMissing = initial?.rebalanceReward === -2;
     // Load-bearing invariant: FPMM.rebalance() emits 2× UpdateReserves +
     // 1× Rebalanced in the SAME tx, with Rebalanced at a higher logIndex.
     // Envio processes events in ascending (block, logIndex) order, so by
@@ -471,10 +571,8 @@ indexer.onEvent(
     // Rebalanced before its sibling URs (no known case), the derive
     // would silently use stale reserves; the caller would still fall
     // back to RPC only when derive returns null, so the fix would be to
-    // add an `existing.lastReserveUpdateBlock < blockNumber` guard here.
-    const derivedRebalanceState = existing
-      ? tryDeriveRebalanceState(existing, { eventTimestamp: blockTimestamp })
-      : null;
+    // add an `existing.lastReserveUpdateBlock < blockNumber` guard in
+    // `readStateSyncEffects`, which derives from `existing` below.
 
     // Prefer the in-batch Pool state captured before the first UpdateReserves
     // in this transaction. Sampling `blockNumber - 1` here is only an explicit
@@ -487,40 +585,20 @@ indexer.onEvent(
       blockNumber,
     });
     const preReservesPromise = preReservesOrFallback(txScopedPreReserves, () =>
-      // preload-effect-exempt: ordered same-tx reserves are required; see #1394.
+      // preload-effect-exempt: ordered same-tx reserves are required; see docs/PLAN-indexer-preload-state-sync.md reserve scratch follow-up.
       context.effect(reservesEffect, {
         chainId: event.chainId,
         poolAddress: asAddress(event.srcAddress),
         blockNumber: blockNumber - 1n,
       }),
     );
-    const authoritativeStatePromise = resolveRebalanceState({
-      blockNumber,
-      chainId: event.chainId,
-      context,
-      derived: derivedRebalanceState,
-      existing,
-      poolAddress: asAddress(event.srcAddress),
-    });
-    const [authoritativeState, preReserves, blockScopedIncentive] =
-      await Promise.all([
-        authoritativeStatePromise,
-        preReservesPromise,
-        // Read at the event block — `Pool.rebalanceReward` may carry today's
-        // value during full resync (fetchFees self-heals from `latest`), and
-        // we want the bps that was actually in force when this rebalance
-        // executed. Falls back to `pool.rebalanceReward` below on RPC failure
-        // or block-fallback. Skipped for `-2` sentinel pools per the comment
-        // above — propagate the sentinel so `normalizeRewardBps` sees it.
-        incentiveGetterMissing
-          ? Promise.resolve(-2)
-          : // preload-effect-exempt: block-scoped reward follows ordered Pool state; see #1394.
-            context.effect(rebalanceIncentiveAtBlockEffect, {
-              chainId: event.chainId,
-              poolAddress: asAddress(event.srcAddress),
-              blockNumber,
-            }),
-      ]);
+    const [
+      { authoritative: authoritativeState, blockScopedIncentive },
+      preReserves,
+    ] = await Promise.all([
+      readStateSyncEffects(context, event, existing),
+      preReservesPromise,
+    ]);
 
     const resolved = authoritativeState.resolved;
 
@@ -652,6 +730,18 @@ indexer.onEvent(
 
     context.RebalanceEvent.set(rebalanced);
   },
+};
+
+indexer.onEvent(
+  { contract: "FPMM", event: "UpdateReserves" },
+  async ({ event, context }) =>
+    stateSyncHandlers.UpdateReserves({ event, context }),
+);
+
+indexer.onEvent(
+  { contract: "FPMM", event: "Rebalanced" },
+  async ({ event, context }) =>
+    stateSyncHandlers.Rebalanced({ event, context }),
 );
 
 type ReservePair = {
@@ -681,7 +771,7 @@ function txReserveScratchKey(
 function pruneOldTxPreRebalanceReserves(blockNumber: bigint): void {
   for (const [key, snapshot] of txPreRebalanceReserves) {
     if (snapshot.blockNumber < blockNumber) {
-      // phase-state-exempt: bounded ordered same-tx reserve scratch; remove with #1394.
+      // phase-state-exempt: bounded ordered same-tx reserve scratch; remove with the docs/PLAN-indexer-preload-state-sync.md reserve scratch follow-up (plan: #2528).
       txPreRebalanceReserves.delete(key);
     }
   }
@@ -717,7 +807,7 @@ function captureTxPreRebalanceReserves(args: {
   pruneOldTxPreRebalanceReserves(args.blockNumber);
   const key = txReserveScratchKey(args.chainId, args.poolId, args.txHash);
   if (txPreRebalanceReserves.has(key)) return;
-  // phase-state-exempt: bounded ordered same-tx reserve scratch; remove with #1394.
+  // phase-state-exempt: bounded ordered same-tx reserve scratch; remove with the docs/PLAN-indexer-preload-state-sync.md reserve scratch follow-up (plan: #2528).
   txPreRebalanceReserves.set(key, {
     ...args.reserves,
     blockNumber: args.blockNumber,
@@ -734,7 +824,7 @@ function consumeTxPreRebalanceReserves(args: {
   const key = txReserveScratchKey(args.chainId, args.poolId, args.txHash);
   const snapshot = txPreRebalanceReserves.get(key);
   if (!snapshot) return null;
-  // phase-state-exempt: bounded ordered same-tx reserve scratch; remove with #1394.
+  // phase-state-exempt: bounded ordered same-tx reserve scratch; remove with the docs/PLAN-indexer-preload-state-sync.md reserve scratch follow-up (plan: #2528).
   txPreRebalanceReserves.delete(key);
   return snapshot.blockNumber === args.blockNumber
     ? { reserve0: snapshot.reserve0, reserve1: snapshot.reserve1 }

@@ -67,7 +67,7 @@ indexer.onEvent(
     const poolId = makePoolId(event.chainId, event.srcAddress);
     const blockNumber = asBigInt(event.block.number);
     const blockTimestamp = asBigInt(event.block.timestamp);
-    // preload-handler-note: ordered Pool writes gate self-healing; see #1394.
+    // preload-handler-note: ordered Pool writes gate self-healing; see docs/PLAN-indexer-preload-state-sync.md stage 2.
     // preload-effect-helpers: upsertPool
     if (context.isPreload) {
       const pool = await preloadPoolCache(context, poolId);

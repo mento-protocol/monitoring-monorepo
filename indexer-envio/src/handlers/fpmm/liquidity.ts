@@ -16,7 +16,7 @@ indexer.onEvent(
   async ({ event, context }) => {
     const id = eventId(event.chainId, event.block.number, event.logIndex);
     const poolId = makePoolId(event.chainId, event.srcAddress);
-    // preload-handler-note: ordered Pool writes gate self-healing; see #1394.
+    // preload-handler-note: ordered Pool writes gate self-healing; see docs/PLAN-indexer-preload-state-sync.md stage 2.
     // preload-effect-helpers: upsertPool
     if (await maybePreloadPool(context, poolId)) return;
     const blockNumber = asBigInt(event.block.number);
@@ -69,7 +69,7 @@ indexer.onEvent(
   async ({ event, context }) => {
     const id = eventId(event.chainId, event.block.number, event.logIndex);
     const poolId = makePoolId(event.chainId, event.srcAddress);
-    // preload-handler-note: ordered Pool writes gate self-healing; see #1394.
+    // preload-handler-note: ordered Pool writes gate self-healing; see docs/PLAN-indexer-preload-state-sync.md stage 2.
     // preload-effect-helpers: upsertPool
     if (await maybePreloadPool(context, poolId)) return;
     const blockNumber = asBigInt(event.block.number);
