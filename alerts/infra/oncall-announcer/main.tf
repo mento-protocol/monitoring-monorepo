@@ -149,12 +149,16 @@ data "archive_file" "function_source" {
   type        = "zip"
   source_dir  = path.module
   output_path = "${path.module}/function-source.zip"
+  # Paired owner: .gcloudignore. src/deploy-source-excludes.test.ts in
+  # onchain-event-handler fails if either drops a generated path.
   excludes = [
     "node_modules",
     "coverage",
     "coverage/**",
     "dist",
     "dist/**",
+    ".turbo",
+    ".turbo/**",
     ".git",
     "**/*.test.ts",
     "**/*.test.js",
