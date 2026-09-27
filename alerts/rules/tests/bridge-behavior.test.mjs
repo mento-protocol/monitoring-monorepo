@@ -389,6 +389,14 @@ test(
         victoropsTemplates,
         "victorops_aegis_service_alert_message",
       );
+      contract.reserve_slack = messageTemplate(
+        slackTemplates,
+        "slack_reserve_balance_alert_message",
+      );
+      contract.reserve_victorops = messageTemplate(
+        victoropsTemplates,
+        "victorops_reserve_balance_alert_message",
+      );
       writeFileSync(templates, JSON.stringify(contract));
       command(
         "go",
@@ -396,6 +404,7 @@ test(
           "test",
           join(repo, "alerts/rules/tests/bridge-notification_test.go"),
           join(repo, "alerts/rules/tests/pool-notification_test.go"),
+          join(repo, "alerts/rules/tests/reserve-notification_test.go"),
           join(repo, "alerts/rules/tests/trading-limit-notification_test.go"),
         ],
         {

@@ -107,7 +107,11 @@ Please top up the {{ $token }} balance of the {{ .Labels.owner }} ({{ $reserveAd
   {{ range .Alerts.Resolved -}}
   {{ $token := .Labels.token -}}
   {{ $reserveAddress := .Labels.ownerValue -}}
+{{ if ne (index .Annotations "grafana_state_reason") "" -}}
+RESOLVED: {{ $token }} balance alert for the {{ .Labels.owner }} ({{ $reserveAddress }}) stopped without recovery confirmation. Grafana stopped the alert for a non-threshold state transition. This does not confirm recovery.
+{{ else -}}
 RESOLVED: {{ $token }} balance for the {{ .Labels.owner }} ({{ $reserveAddress }}) is above zero again. The low-balance floor alerts in Slack keep tracking it.
+{{ end -}}
   {{ end -}}
   {{ end -}}
   EOT

@@ -124,7 +124,7 @@ EOT
 resource "grafana_message_template" "slack_reserve_balance_alert_message" {
   name     = "Slack - Reserve Balance Alert Message"
   template = <<-EOT
-{{ define "slack.reserve_balance_alert_title" }}{{ $icon := "✅" }}{{ range .Alerts.Resolved }}{{ if or .Annotations.band (eq .Labels.severity "page") }}{{ $icon = "🟡" }}{{ end }}{{ end }}{{ if (len .Alerts.Firing) }}🔴{{ else }}{{ $icon }}{{ end }}{{ end }}
+{{ define "slack.reserve_balance_alert_title" }}{{ $icon := "✅" }}{{ $stopped := false }}{{ range .Alerts.Resolved }}{{ if or .Annotations.band (eq .Labels.severity "page") }}{{ $icon = "🟡" }}{{ end }}{{ if ne (index .Annotations "grafana_state_reason") "" }}{{ $stopped = true }}{{ end }}{{ end }}{{ if (len .Alerts.Firing) }}🔴{{ else if $stopped }}⚪{{ else }}{{ $icon }}{{ end }}{{ end }}
 
 {{ define "slack.reserve_balance_alert_message" }}
 {{ range .Alerts.Firing -}}
@@ -136,7 +136,10 @@ resource "grafana_message_template" "slack_reserve_balance_alert_message" {
 {{ range .Alerts.Resolved -}}
 {{ $token := .Labels.token -}}
 {{ $reserveAddress := .Labels.ownerValue -}}
-{{ if .Annotations.band -}}
+{{ if ne (index .Annotations "grafana_state_reason") "" -}}
+*<https://{{ .Labels.explorer }}/address/{{ $reserveAddress }}|{{ $token }} balance alert for the {{ .Labels.owner }}{{ with .Labels.chain }} on {{ . | title }}{{ end }} stopped without recovery confirmation>*
+- Grafana stopped the alert for a non-threshold state transition. This does not confirm recovery.
+{{ else if .Annotations.band -}}
 *<https://{{ .Labels.explorer }}/address/{{ $reserveAddress }}|{{ $token }} balance in the {{ .Labels.owner }}{{ with .Labels.chain }} on {{ . | title }}{{ end }} left the {{ .Annotations.band }} band>*
 - It recovered or moved to another band, whose alert fires after its own hold
 {{ else if eq .Labels.severity "page" -}}
