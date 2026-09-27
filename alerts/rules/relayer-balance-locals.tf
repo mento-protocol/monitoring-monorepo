@@ -213,6 +213,11 @@ locals {
   # `receivers/util.go` `ColorAlertFiring`/`ColorAlertResolved`).
   # `urgency = "urgent"` (rules-oracle-relayers.tf) marks the urgent level, so
   # excluding it keeps "Refiller Cannot Cover Refills" red.
+  # Setting `color` makes this template own every branch, including the two
+  # that came free from Grafana's own default. Nothing re-derives `#D63232`/
+  # `#36a64f` from the live provider, so re-check them against
+  # `DefaultMessageColor` whenever the `grafana/grafana` provider version
+  # bumps.
   oracle_relayer_slack_color = format(
     "{{ $alertName := .CommonLabels.alertname }}{{ if and (eq .Status %q) (ne .CommonLabels.urgency %q) (or %s) }}%s{{ else if eq .Status %q }}%s{{ else }}%s{{ end }}",
     "firing",
