@@ -170,4 +170,24 @@ run "relayer_balance_alerts_follow_the_runway_policy" {
     )
     error_message = "Sending the amount the alert recommends must clear the alert: the top-up target has to be at least a month of burn and at least twice the early-warning threshold, which matters on testnets where the threshold is a floor above the monthly burn."
   }
+
+  assert {
+    condition = (
+      one([for s in grafana_contact_point.slack_alerts_oracles.slack : s.color]) == local.oracle_relayer_slack_color &&
+      one([for s in grafana_contact_point.slack_alerts_testnet.slack : s.color]) == local.oracle_relayer_slack_color &&
+      one([for s in grafana_contact_point.slack_alerts_critical.slack : s.color]) == null &&
+      one([for s in grafana_contact_point.slack_alerts_pools.slack : s.color]) == null &&
+      one([for s in grafana_contact_point.slack_alerts_reserve.slack : s.color]) == null &&
+      one([for s in grafana_contact_point.slack_alerts_infra.slack : s.color]) == null
+    )
+    error_message = "The yellow refiller side bar is scoped to #alerts-oracles and #alerts-testnet only; every other Slack contact point must keep Grafana's own default color."
+  }
+
+  assert {
+    condition = alltrue([
+      for name in local.refiller_early_warning_alert_names :
+      strcontains(local.oracle_relayer_slack_color, format("%q", name))
+    ]) && length(local.refiller_early_warning_alert_names) == length(local.chains)
+    error_message = "The color template must match every refiller early-warning alertname, generated from local.refiller_balance_rules."
+  }
 }
