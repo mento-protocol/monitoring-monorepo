@@ -423,12 +423,12 @@ locals {
       victorops_message_template = "victorops.relayer_refiller_low_balance_alert_message"
     },
     low_reserve_balance = {
-      names = [
+      names = concat([
         "Low USDC Reserve Balance Alert",
         "Low USDT Reserve Balance Alert",
         "Low axlUSDC Reserve Balance Alert",
         "Empty USDC Reserve Balance Alert [Polygon]",
-      ],
+      ], [for k, r in local.reserve_floor_rules : r.name]),
       slack_title_template       = "slack.reserve_balance_alert_title",
       slack_message_template     = "slack.reserve_balance_alert_message",
       victorops_title_template   = "victorops.reserve_balance_alert_title",

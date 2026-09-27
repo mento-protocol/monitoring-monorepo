@@ -93,8 +93,8 @@ resource "grafana_rule_group" "reserve_balances" {
 
   # Polygon's Reserve-backed pools cannot expand when their corresponding
   # ReserveV2 collateral balance is exactly zero. Keep this predicate strictly
-  # zero-only; nonzero operational floors still require treasury SLOs and stay
-  # tracked in #1332 rather than being guessed here.
+  # zero-only; the nonzero Polygon floors live in the ReserveV2 floor rules
+  # below.
   dynamic "rule" {
     for_each = {
       USDC = { metric = "USDC_balanceOf", token = "USDC" }
@@ -199,4 +199,123 @@ resource "grafana_rule_group" "reserve_balances" {
       }
     }
   }
+
+  # Nonzero ReserveV2 floors for Monad and Polygon (#1332), two levels per
+  # token. The warning predicate is `critical <= balance < warning`, so one
+  # breach notifies at one level only; this stack has no inhibition rules.
+  # When a balance moves between bands, one rule resolves and the other waits
+  # its own 60m `for`. The `band` annotation makes the Slack resolve copy
+  # neutral instead of claiming a recovery.
+  dynamic "rule" {
+    for_each = local.reserve_floor_rules
+
+    content {
+      name           = rule.value.name
+      condition      = "isLow"
+      for            = "60m"
+      exec_err_state = "Error"
+      no_data_state  = "NoData"
+
+      annotations = {
+        summary        = "${rule.value.name}: {{ with (index $values \"balance\") }}{{ humanize .Value }}{{ else }}unknown{{ end }} ${rule.value.token}"
+        threshold      = "{{ humanize (${rule.value.threshold}) }}"
+        currentBalance = "{{ with (index $values \"balance\") }}{{ humanize .Value }}{{ else }}unknown{{ end }} ${rule.value.token}"
+        # Static on purpose: Grafana can carry the alerting values into a
+        # resolved alert, so the resolve copy must not classify by balance.
+        band = rule.value.severity
+      }
+      labels = {
+        service  = "reserve"
+        severity = rule.value.severity
+        token    = rule.value.token
+        chain    = rule.value.chain
+        explorer = local.chains[rule.value.chain].explorer
+      }
+
+      data {
+        ref_id         = "a"
+        datasource_uid = "grafanacloud-prom"
+        relative_time_range {
+          from = 600
+          to   = 0
+        }
+        model = jsonencode({
+          expr  = "${rule.value.token}_balanceOf{chain=\"${rule.value.chain}\", owner=\"Reserve\"}"
+          refId = "a"
+        })
+      }
+      data {
+        ref_id         = "balance"
+        datasource_uid = "__expr__"
+        relative_time_range {
+          from = 0
+          to   = 0
+        }
+        model = jsonencode({
+          expression = "a"
+          type       = "reduce"
+          reducer    = "last"
+          refId      = "balance"
+        })
+      }
+      data {
+        ref_id         = "isLow"
+        datasource_uid = "__expr__"
+        relative_time_range {
+          from = 0
+          to   = 0
+        }
+        model = jsonencode({
+          type       = "math"
+          expression = rule.value.expression
+          refId      = "isLow"
+        })
+      }
+    }
+  }
+}
+
+locals {
+  # Whole token units: warning ~90% and critical 50% of each token's 30-day
+  # minimum Reserve balance, read 2026-09-25 (#1332). Polygon EUROP reads 0 by
+  # design and has no floor.
+  reserve_balance_floors = {
+    monad = {
+      USDC  = { warning = 70000, critical = 40000 }
+      USDT0 = { warning = 180000, critical = 100000 }
+      AUSD  = { warning = 600000, critical = 300000 }
+    }
+    polygon = {
+      USDC = { warning = 100000, critical = 60000 }
+    }
+  }
+
+  # Tokens whose exact-zero balance already pages (the Polygon rule above).
+  # Their critical band starts above zero so one breach alerts once.
+  reserve_zero_paged = { polygon = ["USDC"] }
+
+  reserve_floor_rules = merge(flatten([
+    for chain, tokens in local.reserve_balance_floors : [
+      for token, floor in tokens : {
+        "${chain}-${token}-warning" = {
+          name       = "Low ${token} Reserve Balance Alert [${local.chains[chain].title}]"
+          severity   = "warning"
+          threshold  = floor.warning
+          expression = "$balance >= ${floor.critical} && $balance < ${floor.warning}"
+          chain      = chain
+          token      = token
+        }
+        "${chain}-${token}-critical" = {
+          name     = "Critical ${token} Reserve Balance Alert [${local.chains[chain].title}]"
+          severity = "critical"
+          # Slack shows `threshold` as the top-up target, not the trigger.
+          # Use the warning floor so a top-up clears both bands.
+          threshold  = floor.warning
+          expression = contains(lookup(local.reserve_zero_paged, chain, []), token) ? "$balance > 0 && $balance < ${floor.critical}" : "$balance < ${floor.critical}"
+          chain      = chain
+          token      = token
+        }
+      }
+    ]
+  ])...)
 }
