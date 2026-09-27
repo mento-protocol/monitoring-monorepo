@@ -9,11 +9,11 @@ import {
   reservesEffect,
 } from "../src/rpc/effects.ts";
 import { medianTimestampEffectForChain } from "../src/rpc/median-timestamp-effect.ts";
-import {
-  stateSyncHandlers,
-  type RebalancedEvent,
-  type UpdateReservesEvent,
-} from "../src/handlers/fpmm/state-sync.ts";
+import { stateSyncHandlers } from "../src/handlers/fpmm/state-sync.ts";
+import type {
+  RebalancedEvent,
+  UpdateReservesEvent,
+} from "../src/handlers/fpmm/state-sync-effects.ts";
 import { makePool } from "./helpers/makePool.ts";
 
 // Stage 1 of docs/PLAN-indexer-preload-state-sync.md. The harness has no

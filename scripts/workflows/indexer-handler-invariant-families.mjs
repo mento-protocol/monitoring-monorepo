@@ -122,6 +122,7 @@ export const INDEXER_HANDLER_INVARIANT_FAMILIES = [
       "indexer-envio/src/handlers/fpmm/limits-and-fees.ts",
       "indexer-envio/src/handlers/fpmm/liquidity.ts",
       "indexer-envio/src/handlers/fpmm/oracle-recovery.ts",
+      "indexer-envio/src/handlers/fpmm/state-sync-effects.ts",
       "indexer-envio/src/handlers/fpmm/state-sync.ts",
       "indexer-envio/src/handlers/liquity/batchReplay.ts",
       "indexer-envio/src/handlers/liquity/bootstrap.ts",

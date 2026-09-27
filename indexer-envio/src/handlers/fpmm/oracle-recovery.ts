@@ -3,7 +3,7 @@ import { referenceRateFeedIDEffect } from "../../rpc/effects.js";
 
 /** Effect input for `referenceRateFeedIDEffect`; every caller builds it here
  * so preload and processing request an identical key. */
-export function referenceRateFeedKey(chainId: number, poolAddress: string) {
+function referenceRateFeedKey(chainId: number, poolAddress: string) {
   return { chainId, poolAddress };
 }
 
