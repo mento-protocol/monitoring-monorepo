@@ -220,11 +220,15 @@ at warning/info severity and never page.
 
 Both refiller levels come from one rule block and share their templates; the
 `urgency` label, present only on the urgent rule, picks the wording and the
-title colour. Two things are easy to break here. The early-warning rule's label
-set is its identity in Grafana, so adding a label to it resolves and re-fires
-whatever is firing at deploy time. And the provider tracks rule UIDs by
-position in the group, so new rules are appended, never interleaved.
-`relayer-balance-alerts.tftest.hcl` pins both.
+title colour. The Slack side bar follows the same level: `slack_alerts_oracles`
+and `slack_alerts_testnet` (`protocol-contact-points.tf`) render it yellow for
+the early warning and Grafana's own default red/green everywhere else,
+including the urgent level (`oracle_relayer_slack_color` in
+`relayer-balance-locals.tf`). Two things are easy to break here. The
+early-warning rule's label set is its identity in Grafana, so adding a label
+to it resolves and re-fires whatever is firing at deploy time. And the
+provider tracks rule UIDs by position in the group, so new rules are appended,
+never interleaved. `relayer-balance-alerts.tftest.hcl` pins both.
 
 **Rollout order.** These rules alert on missing data, so a new owner (a new
 signer, or the refiller on a new chain) must be published by Aegis before the

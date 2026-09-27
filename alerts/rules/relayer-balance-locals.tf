@@ -196,4 +196,31 @@ locals {
     { for k, r in local.refiller_balance_rules : k => merge(r, { chain_key = k, urgent = false }) },
     { for k, r in local.refiller_urgent_rules : "~urgent/${k}" => merge(r, { chain_key = k, urgent = true }) },
   )
+
+  # Every early-warning alertname, e.g. "Low Refiller Balance [Celo]". Used
+  # below to scope the yellow Slack side bar to exactly those alerts.
+  refiller_early_warning_alert_names = [for k, r in local.refiller_balance_rules : r.name]
+
+  # Slack side-bar color for `slack_alerts_oracles` and `slack_alerts_testnet`
+  # (protocol-contact-points.tf) only. Grafana draws every firing alert with a
+  # red bar unless the contact point's `color` field says otherwise, which
+  # buries the early warning's yellow title marker (message-templates-slack.tf,
+  # `slack.relayer_refiller_low_balance_alert_title`) under a red bar that
+  # matches the urgent level. This template turns the bar yellow for exactly
+  # that early warning and reproduces Grafana's own default everywhere else:
+  # `#D63232` firing, `#36a64f` resolved (`grafana/alerting`
+  # `templates/default_template.go` `DefaultMessageColor`, matching
+  # `receivers/util.go` `ColorAlertFiring`/`ColorAlertResolved`).
+  # `urgency = "urgent"` (rules-oracle-relayers.tf) marks the urgent level, so
+  # excluding it keeps "Refiller Cannot Cover Refills" red.
+  oracle_relayer_slack_color = format(
+    "{{ $alertName := .CommonLabels.alertname }}{{ if and (eq .Status %q) (ne .CommonLabels.urgency %q) (or %s) }}%s{{ else if eq .Status %q }}%s{{ else }}%s{{ end }}",
+    "firing",
+    "urgent",
+    join(" ", [for name in local.refiller_early_warning_alert_names : format("(eq $alertName %q)", name)]),
+    "#ECB22E",
+    "firing",
+    "#D63232",
+    "#36a64f",
+  )
 }

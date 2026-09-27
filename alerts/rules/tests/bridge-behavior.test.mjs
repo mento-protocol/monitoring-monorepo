@@ -90,6 +90,50 @@ function evaluateContract(directory, thresholdOverrides = {}) {
   return JSON.parse(JSON.parse(encoded));
 }
 
+// The refiller Slack side-bar color (relayer-balance-locals.tf
+// `oracle_relayer_slack_color`) is generated from `local.refiller_balance_rules`
+// at plan time, so a raw-source regex extraction (like `heredocLocal` above)
+// would only capture the unexpanded `format()`/`join()` call, not the real
+// alertnames. Evaluate it for real instead, in a locals-only module: just
+// `protocol-routing-locals.tf` (for `local.chains`) and
+// `relayer-balance-locals.tf` (the color template and refiller rules). No
+// providers, backend, resources or production inputs — never plan the live
+// root. `reserve_floor_rules` is a cross-file reference from
+// rules-reserve-balances.tf that the color template never reads; stub it so
+// this module stays self-contained instead of pulling in that resource file.
+function evaluateOracleRelayerColorContract() {
+  const directory = mkdtempSync(join(tmpdir(), "oracle-relayer-color-"));
+  try {
+    const module = join(directory, "alerts/rules");
+    mkdirSync(module, { recursive: true });
+    for (const file of [
+      "protocol-routing-locals.tf",
+      "relayer-balance-locals.tf",
+    ])
+      copyFileSync(join(repo, "alerts/rules", file), join(module, file));
+    writeFileSync(
+      join(module, "stub-reserve-floor-rules.tf"),
+      "locals {\n  reserve_floor_rules = {}\n}\n",
+    );
+    const env = { ...process.env, TF_DATA_DIR: join(directory, ".terraform") };
+    for (const key of Object.keys(env))
+      if (key.startsWith("TF_CLI_ARGS")) delete env[key];
+    command(
+      "terraform",
+      [`-chdir=${module}`, "init", "-backend=false", "-input=false"],
+      { env },
+    );
+    const encoded = command("terraform", [`-chdir=${module}`, "console"], {
+      env,
+      input:
+        'jsonencode({color=local.oracle_relayer_slack_color,early_warning=local.refiller_balance_rules["celo"].name,urgent=local.refiller_urgent_rules["celo"].name})\n',
+    });
+    return JSON.parse(JSON.parse(encoded));
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
 function scenarios(contract) {
   const tests = [];
   const names = [
@@ -441,6 +485,11 @@ test(
         ["peg_victorops", pegTemplates, "peg_victorops_message"],
       ])
         contract[key] = messageTemplate(source, resource);
+      const oracleColor = evaluateOracleRelayerColorContract();
+      contract.oracle_relayer_color = oracleColor.color;
+      contract.oracle_relayer_color_early_warning_name =
+        oracleColor.early_warning;
+      contract.oracle_relayer_color_urgent_name = oracleColor.urgent;
       writeFileSync(templates, JSON.stringify(contract));
       command(
         "go",
@@ -451,6 +500,7 @@ test(
           join(repo, "alerts/rules/tests/reserve-notification_test.go"),
           join(repo, "alerts/rules/tests/state-reason-notification_test.go"),
           join(repo, "alerts/rules/tests/trading-limit-notification_test.go"),
+          join(repo, "alerts/rules/tests/refiller-color-notification_test.go"),
         ],
         {
           env: {

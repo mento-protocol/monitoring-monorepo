@@ -30,6 +30,9 @@ resource "grafana_contact_point" "slack_alerts_oracles" {
     recipient = var.slack_channel_oracles
     title     = local.alert_config_slack.title
     text      = local.alert_config_slack.message
+    # Yellow bar for the refiller early warning only; every other alert here
+    # keeps Grafana's own default. See relayer-balance-locals.tf.
+    color = local.oracle_relayer_slack_color
   }
 }
 
@@ -74,5 +77,8 @@ resource "grafana_contact_point" "slack_alerts_testnet" {
     recipient = var.slack_channel_testnet
     title     = local.alert_config_slack.title
     text      = local.alert_config_slack.message
+    # Yellow bar for the refiller early warning only; every other alert here
+    # keeps Grafana's own default. See relayer-balance-locals.tf.
+    color = local.oracle_relayer_slack_color
   }
 }
