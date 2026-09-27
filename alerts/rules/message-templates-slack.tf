@@ -28,7 +28,7 @@ resource "grafana_message_template" "slack_oracle_stale_price_alert_message" {
   # builtins (`if`, `eq`, `printf`, assignment) plus `reReplaceAll` (Sprig,
   # already used by the trading-mode and low-balance templates).
   template = <<-EOT
-{{ define "slack.oracle_stale_price_alert_title" }}{{ if (len .Alerts.Firing) }}🔴{{ else }}✅{{ end }}{{ end }}
+{{ define "slack.oracle_stale_price_alert_title" }}{{ $stopped := false }}{{ range .Alerts.Resolved }}{{ if ne (index .Annotations "grafana_state_reason") "" }}{{ $stopped = true }}{{ end }}{{ end }}{{ if (len .Alerts.Firing) }}🔴{{ else if $stopped }}⚪{{ else }}✅{{ end }}{{ end }}
 
 {{ define "slack.oracle_stale_price_alert_message" }}
 {{ range .Alerts.Firing -}}
@@ -68,7 +68,12 @@ Next action: confirm the relayer is executing, then inspect errors for this feed
 {{ $chain := .Labels.chain | title -}}
 {{ $titleURL := .GeneratorURL -}}
 {{ if eq .Labels.chain "celo" -}}{{ $titleURL = printf "https://data.chain.link/feeds/celo/mainnet/%s" $hyphen -}}{{ end -}}
+{{ if ne (index .Annotations "grafana_state_reason") "" -}}
+*<{{ $titleURL }}|{{ $slash }} oracle report alert on {{ $chain }} stopped without recovery confirmation>*
+- Grafana stopped the alert for a non-threshold state transition. This does not confirm recovery.
+{{ else -}}
 *<{{ $titleURL }}|{{ $slash }} oracle report is fresh again on {{ $chain }}> — swap availability has recovered*
+{{ end -}}
 {{ end -}}
 {{ end }}
 EOT
@@ -77,7 +82,7 @@ EOT
 resource "grafana_message_template" "slack_oracle_relayer_low_balance_alert_message" {
   name     = "Slack - Low Relayer Balance Alert Message"
   template = <<-EOT
-{{ define "slack.oracle_relayer_low_balance_alert_title" }}{{ if (len .Alerts.Firing) }}🔴{{ else }}✅{{ end }}{{ end }}
+{{ define "slack.oracle_relayer_low_balance_alert_title" }}{{ $stopped := false }}{{ range .Alerts.Resolved }}{{ if ne (index .Annotations "grafana_state_reason") "" }}{{ $stopped = true }}{{ end }}{{ end }}{{ if (len .Alerts.Firing) }}🔴{{ else if $stopped }}⚪{{ else }}✅{{ end }}{{ end }}
 
 {{ define "slack.oracle_relayer_low_balance_alert_message" }}
 {{ range .Alerts.Firing -}}
@@ -89,7 +94,12 @@ resource "grafana_message_template" "slack_oracle_relayer_low_balance_alert_mess
 {{ end -}}
 {{ range .Alerts.Resolved -}}
 {{ $pair := reReplaceAll "^RelayerSigner([A-Z]{3,}?)(XAUT|[A-Z]{3})$" "$1/$2" .Labels.owner -}}
+{{ if ne (index .Annotations "grafana_state_reason") "" -}}
+*<https://{{ .Labels.explorer }}/address/{{ .Labels.ownerValue }}|{{ .Labels.token }} balance alert for the {{ $pair }} Relayer on {{ .Labels.chain | title }} stopped without recovery confirmation>*
+- Grafana stopped the alert for a non-threshold state transition. This does not confirm recovery.
+{{ else -}}
 *<https://{{ .Labels.explorer }}/address/{{ .Labels.ownerValue }}|Sufficient {{ .Labels.token }} balance restored for the {{ $pair }} Relayer on {{ .Labels.chain | title }}> — {{ .Annotations.currentBalance }} {{ .Labels.token }}*
+{{ end -}}
 {{ end -}}
 {{ end }}
 EOT
@@ -98,7 +108,7 @@ EOT
 resource "grafana_message_template" "slack_relayer_refiller_low_balance_alert_message" {
   name     = "Slack - Low Relayer Refiller Balance Alert Message"
   template = <<-EOT
-{{ define "slack.relayer_refiller_low_balance_alert_title" }}{{ if (len .Alerts.Firing) }}{{ if eq .CommonLabels.urgency "urgent" }}🔴{{ else }}🟡{{ end }}{{ else }}✅{{ end }}{{ end }}
+{{ define "slack.relayer_refiller_low_balance_alert_title" }}{{ $stopped := false }}{{ range .Alerts.Resolved }}{{ if ne (index .Annotations "grafana_state_reason") "" }}{{ $stopped = true }}{{ end }}{{ end }}{{ if (len .Alerts.Firing) }}{{ if eq .CommonLabels.urgency "urgent" }}🔴{{ else }}🟡{{ end }}{{ else if $stopped }}⚪{{ else }}✅{{ end }}{{ end }}
 
 {{ define "slack.relayer_refiller_low_balance_alert_message" }}
 {{ range .Alerts.Firing -}}
@@ -111,7 +121,10 @@ Balance: {{ .Annotations.currentBalance }} {{ .Labels.token }}, about {{ .Annota
 {{ end }}
 {{ end -}}
 {{ range .Alerts.Resolved -}}
-{{ if eq .Labels.urgency "urgent" -}}
+{{ if ne (index .Annotations "grafana_state_reason") "" -}}
+*<https://{{ .Labels.explorer }}/address/{{ .Labels.ownerValue }}|Refiller wallet alert on {{ .Labels.chain | title }} stopped without recovery confirmation>*
+- Grafana stopped the alert for a non-threshold state transition. This does not confirm recovery.
+{{ else if eq .Labels.urgency "urgent" -}}
 *<https://{{ .Labels.explorer }}/address/{{ .Labels.ownerValue }}|Refiller wallet on {{ .Labels.chain | title }} can cover refills again> — {{ .Annotations.currentBalance }} {{ .Labels.token }}*
 {{ else -}}
 *<https://{{ .Labels.explorer }}/address/{{ .Labels.ownerValue }}|Refiller wallet on {{ .Labels.chain | title }} is funded again> — {{ .Annotations.currentBalance }} {{ .Labels.token }}*
@@ -173,7 +186,7 @@ resource "grafana_message_template" "slack_trading_mode_alert_message" {
 {{ else if (len .Alerts.Firing) -}}
 {{ range $i, $alert := .Alerts.Firing -}}{{ if $i }}, {{ end -}}{{ $rateFeedWithSlash := reReplaceAll "([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}{{ $chain := .Labels.chain | title -}}🚨 {{ $rateFeedWithSlash }} [{{ $chain }}]: Trading halted by breaker{{ end -}}
 {{- else if (len .Alerts.Resolved) -}}
-{{ range $i, $alert := .Alerts.Resolved -}}{{ if $i }}, {{ end -}}{{ $rateFeedWithSlash := reReplaceAll "([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}{{ $chain := .Labels.chain | title -}}✅ {{ $rateFeedWithSlash }} [{{ $chain }}]: Trading resumed{{ end -}}
+{{ range $i, $alert := .Alerts.Resolved -}}{{ if $i }}, {{ end -}}{{ $rateFeedWithSlash := reReplaceAll "([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}{{ $chain := .Labels.chain | title -}}{{ if ne (index .Annotations "grafana_state_reason") "" }}⚪ {{ $rateFeedWithSlash }} [{{ $chain }}]: Breaker alert stopped without recovery confirmation{{ else }}✅ {{ $rateFeedWithSlash }} [{{ $chain }}]: Trading resumed{{ end }}{{ end -}}
 {{- end -}}
 {{ end -}}
 
@@ -223,8 +236,14 @@ Next action: open breaker status and confirm the underlying rate-feed or market 
 {{ range .Alerts.Resolved -}}
 {{ $rateFeedWithSlash := reReplaceAll "([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}
 {{ $chain := .Labels.chain | title -}}
+{{ if ne (index .Annotations "grafana_state_reason") "" -}}
+{{ if or $mixedState (gt $resolvedCount 1) }}*{{ if $mixedState }}⚪ {{ end }}{{ $rateFeedWithSlash }} [{{ $chain }}]: Breaker alert stopped without recovery confirmation*
+{{ end -}}
+- Grafana stopped the alert for a non-threshold state transition. This does not confirm recovery.
+{{ else -}}
 {{ if or $mixedState (gt $resolvedCount 1) -}}
 *{{ if $mixedState }}✅ {{ end }}{{ $rateFeedWithSlash }} [{{ $chain }}]: Trading resumed*
+{{ end -}}
 {{ end -}}
 {{ end -}}
 
@@ -256,7 +275,12 @@ resource "grafana_message_template" "slack_trading_limits_alert_message" {
 {{ range .Alerts.Resolved -}}
 {{ $chain := .Labels.chain | title -}}
 {{ $limitType := .Labels.limitType -}}
+{{ if ne (index .Annotations "grafana_state_reason") "" -}}
+- *⚪ Trading Limit {{ $limitType }} alert for {{ .Labels.limitId }} on {{ $chain }} stopped without recovery confirmation*
+  Grafana stopped the alert for a non-threshold state transition. This does not confirm recovery.
+{{ else -}}
 - *✅ Trading Limit {{ $limitType }} resolved for {{ .Labels.limitId }} on {{ $chain }}*
+{{ end -}}
 {{ end -}}
 
 {{ if eq (len .Alerts.Firing) 0 }}No alerts are currently firing 🙂.{{ end }}
@@ -273,7 +297,7 @@ resource "grafana_message_template" "slack_aegis_service_alert_message" {
 {{ else if (len .Alerts.Firing) -}}
 {{ range $i, $alert := .Alerts.Firing -}}{{ if $i }}, {{ end -}}{{ if eq $alert.Labels.alertname "Aegis view-call failures [production]" -}}{{ $chain := $alert.Labels.chain | title -}}🚨 {{ $chain }}: Aegis view calls failing for {{ $alert.Labels.contract }}.{{ $alert.Labels.functionName }}{{ else if eq $alert.Labels.alertname "Aegis does not report new data" -}}🚨 Aegis has stopped reporting data{{ else -}}🚨 {{ $alert.Labels.alertname }}{{ end -}}{{ end -}}
 {{- else if (len .Alerts.Resolved) -}}
-{{ range $i, $alert := .Alerts.Resolved -}}{{ if $i }}, {{ end -}}{{ if eq $alert.Labels.alertname "Aegis view-call failures [production]" -}}{{ $chain := $alert.Labels.chain | title -}}✅ {{ $chain }}: Aegis view calls recovered for {{ $alert.Labels.contract }}.{{ $alert.Labels.functionName }}{{ else if eq $alert.Labels.alertname "Aegis does not report new data" -}}✅ Aegis data reporting recovered{{ else -}}✅ {{ $alert.Labels.alertname }} resolved{{ end -}}{{ end -}}
+{{ range $i, $alert := .Alerts.Resolved -}}{{ if $i }}, {{ end -}}{{ if ne (index $alert.Annotations "grafana_state_reason") "" -}}⚪ {{ $alert.Labels.alertname }} stopped without recovery confirmation{{ else if eq $alert.Labels.alertname "Aegis view-call failures [production]" -}}{{ $chain := $alert.Labels.chain | title -}}✅ {{ $chain }}: Aegis view calls recovered for {{ $alert.Labels.contract }}.{{ $alert.Labels.functionName }}{{ else if eq $alert.Labels.alertname "Aegis does not report new data" -}}✅ Aegis data reporting recovered{{ else -}}✅ {{ $alert.Labels.alertname }} resolved{{ end -}}{{ end -}}
 {{- end -}}
 {{ end -}}
 
@@ -304,7 +328,10 @@ Next action: check App Engine service health and Aegis logs immediately.
 {{ end }}
 {{ end }}
 {{ range .Alerts.Resolved -}}
-{{ if eq .Labels.alertname "Aegis view-call failures [production]" }}
+{{ if ne (index .Annotations "grafana_state_reason") "" }}
+*{{ if $mixedState }}⚪ {{ end }}{{ .Labels.alertname }}{{ if .Labels.contract }} for {{ .Labels.contract }}.{{ .Labels.functionName }}{{ end }}{{ with .Labels.chain }} on {{ . | title }}{{ end }} stopped without recovery confirmation*
+- Grafana stopped the alert for a non-threshold state transition. This does not confirm recovery.
+{{ else if eq .Labels.alertname "Aegis view-call failures [production]" }}
 {{ $chain := .Labels.chain | title -}}
 *{{ if $mixedState }}✅ {{ end }}Aegis view calls recovered for {{ .Labels.contract }}.{{ .Labels.functionName }} on {{ $chain }}*
 - The per-call error rate is back below 10 failed samples per 5 minutes.

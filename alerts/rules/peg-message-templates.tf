@@ -16,7 +16,7 @@ resource "grafana_message_template" "peg_slack_message" {
   name     = "Peg - Slack Message"
   template = <<-EOT
 {{ define "peg.slack.title" -}}
-{{ if (len .Alerts.Firing) }}{{ if eq .CommonLabels.severity "critical" }}🚨{{ else }}🟡{{ end }}{{ else }}✅{{ end }}
+{{ $stopped := false }}{{ range .Alerts.Resolved }}{{ if ne (index .Annotations "grafana_state_reason") "" }}{{ $stopped = true }}{{ end }}{{ end }}{{ if (len .Alerts.Firing) }}{{ if eq .CommonLabels.severity "critical" }}🚨{{ else }}🟡{{ end }}{{ else if $stopped }}⚪{{ else }}✅{{ end }}
 {{- end }}
 
 {{ define "peg.slack.message" }}
@@ -41,7 +41,9 @@ resource "grafana_message_template" "peg_slack_message" {
 *Alert ID:* `{{ .Fingerprint }}`
 {{ end -}}
 {{ range .Alerts.Resolved -}}
-{{ with .Annotations.resolved_summary }}*<https://monitoring.mento.org/peg-monitoring|{{ . }}>*{{ else }}*<https://monitoring.mento.org/peg-monitoring|Peg monitoring recovered>*{{ end }}
+{{ if ne (index .Annotations "grafana_state_reason") "" }}*<https://monitoring.mento.org/peg-monitoring|Peg alert stopped without recovery confirmation>*
+- Grafana stopped the alert for a non-threshold state transition. This does not confirm recovery.
+{{ else }}{{ with .Annotations.resolved_summary }}*<https://monitoring.mento.org/peg-monitoring|{{ . }}>*{{ else }}*<https://monitoring.mento.org/peg-monitoring|Peg monitoring recovered>*{{ end }}{{ end }}
 {{ with .Annotations.asset_name }}*Asset:* {{ . }}{{ end }}
 {{ with .Annotations.source_name }}*Source:* {{ . }}{{ end }}
 *Ended:* {{ .EndsAt.Format "Mon Jan 02 15:04 UTC" }}
@@ -63,7 +65,7 @@ P1 {{ range $i, $alert := .Alerts.Firing }}{{ if $i }}, {{ end }}{{ with $alert.
 {{- end }}
 {{ if and (len .Alerts.Firing) (len .Alerts.Resolved) }} | {{ end -}}
 {{ if (len .Alerts.Resolved) -}}
-RESOLVED {{ range $i, $alert := .Alerts.Resolved }}{{ if $i }}, {{ end }}{{ with $alert.Annotations.resolved_summary }}{{ . }}{{ else }}Peg monitoring recovered{{ end }}{{ end }}
+RESOLVED {{ range $i, $alert := .Alerts.Resolved }}{{ if $i }}, {{ end }}{{ if ne (index $alert.Annotations "grafana_state_reason") "" }}Peg alert stopped without recovery confirmation{{ else }}{{ with $alert.Annotations.resolved_summary }}{{ . }}{{ else }}Peg monitoring recovered{{ end }}{{ end }}{{ end }}
 {{- end }}
 {{ if and (eq (len .Alerts.Firing) 0) (eq (len .Alerts.Resolved) 0) }}Peg status unknown{{ end }}
 {{- end }}
@@ -86,7 +88,7 @@ Started: {{ .StartsAt.Format "Mon Jan 02 15:04 UTC" }}
 Alert: {{ .GeneratorURL }}
 {{ end -}}
 {{ range .Alerts.Resolved -}}
-RESOLVED: {{ with .Annotations.resolved_summary }}{{ . }}{{ else }}Peg monitoring recovered{{ end }}
+RESOLVED: {{ if ne (index .Annotations "grafana_state_reason") "" }}Peg alert stopped without recovery confirmation. Grafana stopped the alert for a non-threshold state transition. This does not confirm recovery.{{ else }}{{ with .Annotations.resolved_summary }}{{ . }}{{ else }}Peg monitoring recovered{{ end }}{{ end }}
 Ended: {{ .EndsAt.Format "Mon Jan 02 15:04 UTC" }}
 {{ end -}}
 {{ if and (eq (len .Alerts.Firing) 0) (eq (len .Alerts.Resolved) 0) }}Peg status unknown.{{ end }}
