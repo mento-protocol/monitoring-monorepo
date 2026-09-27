@@ -58,9 +58,14 @@ later record afterwards, and `--check-fixtures` refuses a `scorable_ids` or
 same file, its own finding, or another duplicate. A truth file's `counts` is
 the raw harvest total and predates those hand-added marks, so the scorable
 denominator is the contract's `scorable_ids`, not `counts`. The six 2026-08-21
-keys are not re-harvested here, so they still carry findings raised on later
-heads: issue 2289 tracks re-harvesting them and the denominator change that
-would follow.
+keys stay frozen as known noise: PR 1990 still carries later-head ids
+3830259678 and 3830394205, PR 1995 carries 3830695396, PR 1999 carries
+3830416461, and PR 2001 carries 3830513980; PRs 1982 and 1984 carry none. The
+six keys were also never audited for `duplicate_of` marks, so their
+denominator can still count one same-defect bot finding twice. Re-harvesting
+would move `truth_sha256`, `scorable_ids` and the contract digest and force a
+paid canonical run, a cost the #2319 programme's finder variance (19 vs 10
+known defects on identical diffs) already dwarfs.
 
 The answer key never travels with the exam. It lives on `main`; the fixture is
 a detached checkout at a 2026-08 commit and is materialized under
