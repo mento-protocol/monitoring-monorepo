@@ -1,6 +1,12 @@
 import type { EvmOnEventContext } from "envio";
 import { referenceRateFeedIDEffect } from "../../rpc/effects.js";
 
+/** Effect input for `referenceRateFeedIDEffect`; every caller builds it here
+ * so preload and processing request an identical key. */
+function referenceRateFeedKey(chainId: number, poolAddress: string) {
+  return { chainId, poolAddress };
+}
+
 /** Resolve the immutable FPMM feed before an exact block-scoped oracle read.
  * A pool created during a transient RPC failure can have an empty persisted
  * feed even though its contract is fully configured. The cached feed getter
@@ -13,8 +19,8 @@ export async function resolveReferenceRateFeedForOracleRead(args: {
   poolAddress: string;
 }): Promise<string | null> {
   if (args.existingFeedId) return args.existingFeedId;
-  return args.context.effect(referenceRateFeedIDEffect, {
-    chainId: args.chainId,
-    poolAddress: args.poolAddress,
-  });
+  return args.context.effect(
+    referenceRateFeedIDEffect,
+    referenceRateFeedKey(args.chainId, args.poolAddress),
+  );
 }

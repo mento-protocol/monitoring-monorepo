@@ -200,9 +200,10 @@ preload hook, so these tests call the exported handlers directly.
 | `handlers/fpmm/state-sync.ts:490`, `:684`, `:720`, `:737` | Keep; retarget from #1394 to an open follow-up issue for the same-tx reserve scratch                   |
 
 Stage 1 also retargets every other `#1394` marker in the table above, because
-this note's PR closes #1394. Each marker points to an open issue for the stage
-that removes it (stage 2, stage 3, or the scratch follow-up), so no marker
-cites a closed issue after stage 1 ships. The governance marker keeps a durable
+this note's PR closes #1394. By operator decision on 2026-09-27, each marker
+names the stage of this note that removes it (stage 2, stage 3, or the scratch
+follow-up) instead of an issue; the scratch `phase-state-exempt` markers also
+cite #2528 because that rule requires an issue number. The governance marker keeps a durable
 exemption reason instead. The operator decides when those issues are filed.
 
 **Rollback.** No schema change and no new entity. Before promotion, do not
