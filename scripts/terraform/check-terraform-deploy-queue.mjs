@@ -403,7 +403,6 @@ async function main(
     console.log(`Posted Terraform deploy queue warning to ${channel}.`);
   }
 
-  process.exitCode = 1;
   return { stalledRuns, payload };
 }
 

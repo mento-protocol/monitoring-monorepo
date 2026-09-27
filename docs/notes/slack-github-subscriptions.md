@@ -142,10 +142,12 @@ retired `#ci-operations` value to `#deploys`.
 
 It alerts when a `push`/`workflow_dispatch` run on `main` is older than 60
 minutes, remains `queued`, `pending`, `requested`, or `waiting`, and still
-has zero started jobs. It fails its own workflow run after posting so the
-generic `#ci-failures` listener also has a machine-visible failure signal. It
-is observer-only: it does not join the deploy workflows' `*-deploy`
-concurrency groups, cancel runs, approve environments, or apply Terraform.
+has zero started jobs. Posting that warning is a successful run (exit 0); only
+a genuine watcher error — a GitHub API failure, a missing token, or a Slack
+delivery failure — fails the run, which still gives the generic
+`#ci-failures` listener a machine-visible failure signal. It is
+observer-only: it does not join the deploy workflows' `*-deploy` concurrency
+groups, cancel runs, approve environments, or apply Terraform.
 
 ## Out of scope
 
