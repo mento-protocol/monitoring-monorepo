@@ -1738,7 +1738,7 @@ test("Slack trading-mode bodies suppress duplicate single-alert headings", () =>
   );
   assert(
     source.includes(
-      "{{ if or $mixedState (gt $resolvedCount 1) -}}\n*{{ if $mixedState }}✅ {{ end }}{{ $rateFeedWithSlash }} [{{ $chain }}]: Trading resumed*\n{{ end -}}\n{{ end -}}\n\n{{ if eq $firingCount 0 }}No alerts are currently firing",
+      "{{ if or $mixedState (gt $resolvedCount 1) -}}\n*{{ if $mixedState }}✅ {{ end }}{{ $rateFeedWithSlash }} [{{ $chain }}]: Trading resumed*\n{{ end -}}\n{{ end -}}\n{{ end -}}\n\n{{ if eq $firingCount 0 }}No alerts are currently firing",
     ),
     "single resolved Slack bodies should not repeat the resolved title line",
   );

@@ -397,6 +397,50 @@ test(
         victoropsTemplates,
         "victorops_reserve_balance_alert_message",
       );
+      const pegTemplates = readFileSync(
+        join(repo, "alerts/rules/peg-message-templates.tf"),
+        "utf8",
+      );
+      for (const [key, source, resource] of [
+        [
+          "stale_price_slack",
+          slackTemplates,
+          "slack_oracle_stale_price_alert_message",
+        ],
+        [
+          "stale_price_victorops",
+          victoropsTemplates,
+          "victorops_oracle_stale_price_alert_message",
+        ],
+        [
+          "relayer_slack",
+          slackTemplates,
+          "slack_oracle_relayer_low_balance_alert_message",
+        ],
+        [
+          "relayer_victorops",
+          victoropsTemplates,
+          "victorops_oracle_relayer_low_balance_alert_message",
+        ],
+        [
+          "refiller_slack",
+          slackTemplates,
+          "slack_relayer_refiller_low_balance_alert_message",
+        ],
+        [
+          "trading_mode_slack",
+          slackTemplates,
+          "slack_trading_mode_alert_message",
+        ],
+        [
+          "trading_mode_victorops",
+          victoropsTemplates,
+          "victorops_trading_mode_alert_message",
+        ],
+        ["peg_slack", pegTemplates, "peg_slack_message"],
+        ["peg_victorops", pegTemplates, "peg_victorops_message"],
+      ])
+        contract[key] = messageTemplate(source, resource);
       writeFileSync(templates, JSON.stringify(contract));
       command(
         "go",
@@ -405,6 +449,7 @@ test(
           join(repo, "alerts/rules/tests/bridge-notification_test.go"),
           join(repo, "alerts/rules/tests/pool-notification_test.go"),
           join(repo, "alerts/rules/tests/reserve-notification_test.go"),
+          join(repo, "alerts/rules/tests/state-reason-notification_test.go"),
           join(repo, "alerts/rules/tests/trading-limit-notification_test.go"),
         ],
         {

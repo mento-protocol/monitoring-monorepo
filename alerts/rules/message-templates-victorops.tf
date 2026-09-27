@@ -16,7 +16,7 @@ P1 {{ range $i, $alert := .Alerts.Firing -}}{{ if $i }}, {{ end -}}{{ $slash := 
 {{ end -}}
 {{ if and (len .Alerts.Firing) (len .Alerts.Resolved) }} | {{ end -}}
 {{ if (len .Alerts.Resolved) -}}
-RESOLVED {{ range $i, $alert := .Alerts.Resolved -}}{{ if $i }}, {{ end -}}{{ $slash := reReplaceAll "^([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" $alert.Labels.rateFeed -}}{{ $alert.Labels.chain | title }} {{ $slash }} oracle report fresh{{ end -}}
+RESOLVED {{ range $i, $alert := .Alerts.Resolved -}}{{ if $i }}, {{ end -}}{{ $slash := reReplaceAll "^([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" $alert.Labels.rateFeed -}}{{ $alert.Labels.chain | title }} {{ $slash }} {{ if ne (index $alert.Annotations "grafana_state_reason") "" }}oracle report alert stopped without recovery confirmation{{ else }}oracle report fresh{{ end }}{{ end -}}
 {{ end -}}
 {{ if and (eq (len .Alerts.Firing) 0) (eq (len .Alerts.Resolved) 0) -}}
 Oracle report status unknown
@@ -40,7 +40,11 @@ Started: {{ .StartsAt.Format "Mon Jan 02 15:04 UTC" }}
 {{ end -}}
 {{ range .Alerts.Resolved -}}
 {{ $slash := reReplaceAll "^([A-Z]{3,}?)([A-Z]{3})$" "$1/$2" .Labels.rateFeed -}}
+{{ if ne (index .Annotations "grafana_state_reason") "" -}}
+RESOLVED: The {{ $slash }} oracle report alert on {{ .Labels.chain | title }} stopped without recovery confirmation. Grafana stopped the alert for a non-threshold state transition. This does not confirm recovery.
+{{ else -}}
 RESOLVED: The {{ $slash }} oracle report on {{ .Labels.chain | title }} is fresh again.
+{{ end -}}
 Resolved: {{ .EndsAt.Format "Mon Jan 02 15:04 UTC" }}
 {{ end -}}
 {{ end }}
@@ -67,7 +71,9 @@ Wallet: https://{{ .Labels.explorer }}/address/{{ .Labels.ownerValue }}
 {{ end }}
 {{ range .Alerts.Resolved }}
 {{ $pair := reReplaceAll "^RelayerSigner([A-Z]{3,}?)(XAUT|[A-Z]{3})$" "$1/$2" .Labels.owner }}
-Sufficient {{ .Labels.token }} balance restored for the {{ $pair }} Relayer on {{ .Labels.chain | title }} — {{ .Annotations.currentBalance }} {{ .Labels.token }}
+{{ if ne (index .Annotations "grafana_state_reason") "" }}{{ .Labels.token }} balance alert for the {{ $pair }} Relayer on {{ .Labels.chain | title }} stopped without recovery confirmation. Grafana stopped the alert for a non-threshold state transition. This does not confirm recovery.
+{{ else }}Sufficient {{ .Labels.token }} balance restored for the {{ $pair }} Relayer on {{ .Labels.chain | title }} — {{ .Annotations.currentBalance }} {{ .Labels.token }}
+{{ end }}
 {{ end }}
 {{ end }}
 {{ define "victorops.relayer_refiller_low_balance_alert_title" }}{{ if eq .CommonLabels.urgency "urgent" }}Relayer refiller cannot cover refills on {{ .CommonLabels.chain | title }}{{ else }}Low relayer refiller balance on {{ .CommonLabels.chain | title }}{{ end }}{{ end }}
@@ -80,8 +86,9 @@ Balance: {{ .Annotations.currentBalance }} {{ .Labels.token }}, about {{ .Annota
 {{ end }}Wallet: https://{{ .Labels.explorer }}/address/{{ .Labels.ownerValue }}
 {{ end }}
 {{ range .Alerts.Resolved }}
-Refiller wallet on {{ .Labels.chain | title }} {{ if eq .Labels.urgency "urgent" }}can cover refills again{{ else }}is funded again{{ end }} — {{ .Annotations.currentBalance }} {{ .Labels.token }}
-{{ end }}
+Refiller wallet {{ if ne (index .Annotations "grafana_state_reason") "" }}alert on {{ .Labels.chain | title }} stopped without recovery confirmation. Grafana stopped the alert for a non-threshold state transition. This does not confirm recovery.
+{{ else }}on {{ .Labels.chain | title }} {{ if eq .Labels.urgency "urgent" }}can cover refills again{{ else }}is funded again{{ end }} — {{ .Annotations.currentBalance }} {{ .Labels.token }}
+{{ end }}{{ end }}
 {{ end }}
 EOT
 }
@@ -199,10 +206,14 @@ ${local.polygon_chainlink_slug_branches}
 {{ if and $chainId $pool -}}{{ $poolURL = printf "https://monitoring.mento.org/pool/%s-%s?tab=oracle" $chainId $pool }}{{ end -}}
 {{ $chainlinkURL := "" -}}
 {{ if and $chainlinkFeedPath $chainlinkSlug -}}{{ $chainlinkURL = printf "https://data.chain.link/feeds/%s/%s" $chainlinkFeedPath $chainlinkSlug }}{{ end -}}
+{{ if ne (index .Annotations "grafana_state_reason") "" -}}
+{{ if or $mixedState (gt $resolvedCount 1) }}{{ $rateFeedWithSlash }} [{{ $chain }}]: {{ end }}Breaker alert stopped without recovery confirmation. Grafana stopped the alert for a non-threshold state transition. This does not confirm recovery.
+{{ else -}}
 {{ if or $mixedState (gt $resolvedCount 1) -}}
 {{ $rateFeedWithSlash }} [{{ $chain }}]: Trading resumed
 {{ else -}}
 Trading resumed.
+{{ end -}}
 {{ end -}}
 {{ if $chainlinkURL -}}
 - Chainlink data source: {{ $chainlinkURL }}
@@ -239,7 +250,11 @@ Trading Limit {{ $limitType }} at {{ with index .Values "utilization" }}{{ . }}{
 {{ range .Alerts.Resolved -}}
 {{ $chain := .Labels.chain | title -}}
 {{ $limitType := .Labels.limitType -}}
+{{ if ne (index .Annotations "grafana_state_reason") "" -}}
+- RESOLVED: Trading Limit {{ $limitType }} alert for {{ .Labels.limitId }} on {{ $chain }} stopped without recovery confirmation. Grafana stopped the alert for a non-threshold state transition. This does not confirm recovery.
+{{ else -}}
 - RESOLVED: Trading Limit {{ $limitType }} resolved for {{ .Labels.limitId }} on {{ $chain }}
+{{ end -}}
 {{ end -}}
 
 {{ if eq (len .Alerts.Firing) 0 }}No alerts are currently firing.{{ end }}
@@ -256,7 +271,7 @@ resource "grafana_message_template" "victorops_aegis_service_alert_message" {
 {{ else if (len .Alerts.Firing) -}}
 {{ range $i, $alert := .Alerts.Firing -}}{{ if $i }}, {{ end -}}{{ if eq $alert.Labels.alertname "Aegis view-call failures [production]" -}}{{ $chain := $alert.Labels.chain | title -}}{{ $chain }}: Aegis view calls failing for {{ $alert.Labels.contract }}.{{ $alert.Labels.functionName }}{{ else if eq $alert.Labels.alertname "Aegis does not report new data" -}}Aegis has stopped reporting data{{ else -}}{{ $alert.Labels.alertname }}{{ end -}}{{ end -}}
 {{ else if (len .Alerts.Resolved) -}}
-{{ range $i, $alert := .Alerts.Resolved -}}{{ if $i }}, {{ end -}}{{ if eq $alert.Labels.alertname "Aegis view-call failures [production]" -}}{{ $chain := $alert.Labels.chain | title -}}{{ $chain }}: Aegis view calls recovered for {{ $alert.Labels.contract }}.{{ $alert.Labels.functionName }}{{ else if eq $alert.Labels.alertname "Aegis does not report new data" -}}Aegis data reporting recovered{{ else -}}{{ $alert.Labels.alertname }} resolved{{ end -}}{{ end -}}
+{{ range $i, $alert := .Alerts.Resolved -}}{{ if $i }}, {{ end -}}{{ if ne (index $alert.Annotations "grafana_state_reason") "" -}}{{ $alert.Labels.alertname }} stopped without recovery confirmation{{ else if eq $alert.Labels.alertname "Aegis view-call failures [production]" -}}{{ $chain := $alert.Labels.chain | title -}}{{ $chain }}: Aegis view calls recovered for {{ $alert.Labels.contract }}.{{ $alert.Labels.functionName }}{{ else if eq $alert.Labels.alertname "Aegis does not report new data" -}}Aegis data reporting recovered{{ else -}}{{ $alert.Labels.alertname }} resolved{{ end -}}{{ end -}}
 {{ end -}}
 {{ end -}}
 
@@ -288,7 +303,10 @@ FIRING: {{ .Labels.alertname }}
 {{ end }}
 {{ end }}
 {{ range .Alerts.Resolved -}}
-{{ if eq .Labels.alertname "Aegis view-call failures [production]" }}
+{{ if ne (index .Annotations "grafana_state_reason") "" }}
+{{ .Labels.alertname }}{{ if .Labels.contract }} for {{ .Labels.contract }}.{{ .Labels.functionName }}{{ end }}{{ with .Labels.chain }} on {{ . | title }}{{ end }} stopped without recovery confirmation.
+- Grafana stopped the alert for a non-threshold state transition. This does not confirm recovery.
+{{ else if eq .Labels.alertname "Aegis view-call failures [production]" }}
 {{ $chain := .Labels.chain | title -}}
 Aegis view calls recovered for {{ .Labels.contract }}.{{ .Labels.functionName }} on {{ $chain }}.
 - The per-call error rate is back below 10 failed samples per 5 minutes.
