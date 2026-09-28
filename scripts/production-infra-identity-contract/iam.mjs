@@ -366,7 +366,7 @@ const MODULE_BLOCK_SHAPE_SPECIFICATIONS = [
   "aegis/terraform/main.tf:module.grafana_dashboard|e91ec8aba7c7347f74f6896a4eb52e2e8ebb588ea5a582cbb39929333870bcbe",
   "alerts/infra/main.tf:module.oncall_announcer|301aef0a9ea1033e937bd28b68ff7c9f23fc5ba8671e2e4201c5d8d2172bcb07",
   "alerts/infra/main.tf:module.onchain_event_handler|4a9d935f8be2b979b2da133c4c01762813106f1d4ac60b53721f2492918843a1,06500202dc2acb0ac482e4fe1e57f26db0e2ea86baf8a7cb6d158d9e3f8b6940",
-  "alerts/infra/main.tf:module.onchain_event_listeners|a48ff45e601e93a881fa4e87f73f704761de0f6724c1437c70d95f7e231b3f0f,f7536b1891443cbfd0a7c03790e014f68c2826f5a2053b3104d913008e20425e",
+  "alerts/infra/main.tf:module.onchain_event_listeners|a48ff45e601e93a881fa4e87f73f704761de0f6724c1437c70d95f7e231b3f0f,d800db54d23728173818ade1d9675481df909cb2dfca4ea0c897715c5833828d",
   "alerts/infra/main.tf:module.project_factory|d2f60b3af4237c2c4e2135bc15cd026a3be8d5c477e4b31f58d13765f721153c",
   "alerts/infra/main.tf:module.sentry_bridge|86ac2b1628c5579c58defcbd8ef54dc978c6f44cd622ccc488db77b11e7dd225",
   "alerts/infra/main.tf:module.slack_channels|c3eaa2c32b7fbea2e34c5df9baec7a198d39a6fe8a9452e37adb2af7149c096c",
