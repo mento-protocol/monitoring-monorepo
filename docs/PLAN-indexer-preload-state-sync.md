@@ -1,9 +1,9 @@
 ---
 title: Preload-Safe FPMM State-Sync Effects (Stage 1)
-status: active
+status: archived
 owner: eng
 canonical: false
-last_verified: 2026-09-25
+last_verified: 2026-09-28
 doc_type: plan
 scope: indexer-envio
 review_interval_days: 180
@@ -11,6 +11,43 @@ garden_lane: notes-plans-archive
 ---
 
 # Preload-Safe FPMM State-Sync Effects (Stage 1)
+
+## Result (2026-09-27)
+
+**Archived — stopped after the stage-1 benchmark.** Stage 1 shipped in #2537
+and failed the [Benchmark](#benchmark) criteria, so #2537 was reverted. Stages
+2 and 3 are not planned. The rest of this note is the original design.
+
+Two unpromoted hosted debug deployments replayed to the same end blocks
+(Ethereum 26069000, Celo 78615000, Monad 108477000, Polygon 94540000). The
+baseline was merge base `a94fd5a`; the candidate was `a27a7e1`. Both ran a
+never-merged harness that forced the repo profiler on.
+
+| Criterion                                                              | Baseline   | Stage 1  | Result           |
+| ---------------------------------------------------------------------- | ---------- | -------- | ---------------- |
+| UpdateReserves + Rebalanced processed calls per handler-second ≥ 1.30× | 19.3/s     | 0.45/s   | 0.023× — fail    |
+| Whole replay to end blocks not slower                                  | 66.5 min   | 67.4 min | about equal      |
+| Row 1 (`rebalancingState`) executions ≤ 1.10×                          | 99         | 35,771   | 361× — fail      |
+| Row 4 (`rebalanceIncentiveAtBlock`) executions ≤ 1.10×                 | 5,871      | 5,882    | 1.002× — pass    |
+| Row 2 (`medianTimestamp*`) executions                                  | 98         | 35,681   | 364×             |
+| Rows 6-8, 10, 11 share of baseline executions < 5%                     | 18 of ~98k | —        | pass             |
+| Paged row diff, all fields, 7 entities                                 | —          | —        | zero differences |
+
+Handler averages: `FPMM.UpdateReserves` 24.0 ms → 1135.4 ms; `FPMM.Rebalanced`
+39.5 ms → 989.5 ms. The profiler's average mixes preload and processing
+phases, so the per-second figure is approximate. Execution counts are exact.
+Rows compared: OracleSnapshot 2,615,807; ReserveUpdate 43,431; PoolSnapshot
+11,548; PoolDailySnapshot 4,843; RebalanceEvent 5,883;
+DeviationThresholdBreach 4,040; Pool 30.
+
+**Cause.** Stage-1 preload called rows 1-2 for every event. The baseline
+reaches them only when ordered processing's derive returns null.
+
+**Bottleneck.** Baseline FPMM handlers total about 2,500 handler-seconds;
+`StableToken.Transfer` (7.8M events) takes about 95,000 handler-seconds. FPMM
+state sync does not make replay slow, so stages 2 and 3 are not worth doing.
+
+## Original Plan
 
 Stage-1 design for issue #1394: let Envio's concurrent preload pass issue the
 RPC reads of `FPMM.UpdateReserves` and `FPMM.Rebalanced`, and keep every Pool
