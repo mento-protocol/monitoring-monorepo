@@ -38,6 +38,10 @@ locals {
     SLACK_CHANNEL_EVENTS=${local.shared_channel_ids.events}
     POOL_LIQUIDITY_WATCHES=${jsonencode(var.pool_liquidity_watches)}
     POOL_ALERT_CHANNEL_ID=${var.pool_alert_channel_id}
+    # Override with a disposable development bucket before testing delivery.
+    # Never point local runs at the production delivery audit trail.
+    POOL_LIQUIDITY_DELIVERY_BUCKET=local-pool-liquidity-delivery
+    RPC_URL_137=${var.pool_polygon_rpc_url}
   EOT
 }
 

@@ -520,8 +520,30 @@ resource "google_storage_bucket_iam_member" "pool_liquidity_delivery_access_log_
 
 resource "google_storage_bucket_iam_member" "runtime_pool_liquidity_delivery_state" {
   bucket = google_storage_bucket.pool_liquidity_delivery_state.name
-  role   = "roles/storage.objectAdmin"
+  # The public webhook can only claim new event keys. It cannot rewrite or
+  # delete a claimed record; private retry owns proof and delivery updates.
+  role   = "roles/storage.objectCreator"
   member = "serviceAccount:${google_service_account.function_runtime.email}"
+}
+
+resource "google_service_account" "pool_liquidity_retry_runtime" {
+  project      = var.project_id
+  account_id   = "onchain-pool-liq-retry-run"
+  display_name = "Pool liquidity retry runtime"
+  description  = "Private receipt proof and durable pool alert delivery"
+}
+
+resource "google_storage_bucket_iam_member" "retry_pool_liquidity_delivery_state" {
+  bucket = google_storage_bucket.pool_liquidity_delivery_state.name
+  role   = "roles/storage.objectAdmin"
+  member = "serviceAccount:${google_service_account.pool_liquidity_retry_runtime.email}"
+}
+
+resource "google_secret_manager_secret_iam_member" "retry_runtime_slack_bot_token" {
+  project   = var.project_id
+  secret_id = google_secret_manager_secret.slack_bot_token.secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.pool_liquidity_retry_runtime.email}"
 }
 
 ###########################################
@@ -553,19 +575,13 @@ resource "google_cloudfunctions2_function" "pool_liquidity_retry" {
     available_memory      = "${var.memory_mb}M"
     timeout_seconds       = 300
     max_instance_count    = 1
-    service_account_email = google_service_account.function_runtime.email
+    service_account_email = google_service_account.pool_liquidity_retry_runtime.email
     environment_variables = local.all_env_vars
     # Same-project Cloud Scheduler calls the default function URL. Google
     # classifies this source as internal; the OIDC invoker grant still applies.
     ingress_settings               = "ALLOW_INTERNAL_ONLY"
     all_traffic_on_latest_revision = true
 
-    secret_environment_variables {
-      key        = "QUICKNODE_SIGNING_SECRET"
-      project_id = var.project_id
-      secret     = google_secret_manager_secret.quicknode_signing_secret.secret_id
-      version    = "latest"
-    }
     secret_environment_variables {
       key        = "SLACK_BOT_TOKEN"
       project_id = var.project_id
@@ -575,6 +591,8 @@ resource "google_cloudfunctions2_function" "pool_liquidity_retry" {
   }
 
   lifecycle {
+    # Match the public function's Google provider sensitive-env workaround.
+    ignore_changes = [service_config[0].environment_variables]
     replace_triggered_by = [
       google_storage_bucket_object.function_source,
       google_secret_manager_secret_version.slack_bot_token,
@@ -584,8 +602,8 @@ resource "google_cloudfunctions2_function" "pool_liquidity_retry" {
   depends_on = [
     terraform_data.cloudbuild_builder_dependency,
     google_storage_bucket_iam_member.cloud_build_storage_access,
-    google_storage_bucket_iam_member.runtime_pool_liquidity_delivery_state,
-    google_secret_manager_secret_iam_member.runtime_slack_bot_token,
+    google_storage_bucket_iam_member.retry_pool_liquidity_delivery_state,
+    google_secret_manager_secret_iam_member.retry_runtime_slack_bot_token,
   ]
 }
 

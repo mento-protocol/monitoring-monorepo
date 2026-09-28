@@ -30,13 +30,15 @@ differs from the internal `ethereum` and `polygon` chain keys.
 - The function uses the same private GCS bucket for replay nonces and
   dead-lettered Slack payloads.
 - The Polygon listener forwards `Burn` candidates for every configured pool watch. The
-  handler stages each event key in a separate private GCS bucket before
-  querying the Polygon receipt. Only a successful receipt with the watched wallet's
+  public handler only stages each event key in a separate private GCS bucket;
+  its runtime identity cannot rewrite or delete state. The private retry worker
+  queries the Polygon receipt. Only a successful receipt with the watched wallet's
   LP-token transfer to the pool, the matching LP burn, and the exact pool Burn
   can post to the configured `#alerts-pools` channel ID. Router/beneficiary
   fields are not ownership evidence; a same-transaction swap is allowed.
-- A separate private function, invoked by Cloud Scheduler each minute, retries
-  unverified and pending watch records. GCS generation preconditions and a lease
+- A separate private function, invoked by Cloud Scheduler each minute, proves and
+  delivers unverified and pending watch records. Normal delivery can lag staging
+  by one Scheduler interval plus processing time. GCS generation preconditions and a lease
   limit concurrent sends. Every attempt uses the same `client_msg_id`; Slack
   acceptance and GCS completion are not atomic, so a timeout or failed state
   update can still duplicate the message. After durable staging, retries
@@ -104,8 +106,10 @@ After explicit approval for the targeted Terraform state mutation,
 `pnpm run generate:env` regenerates `.env` through the provisioner. The file
 contains `GCP_PROJECT_ID`, `MULTISIG_CONFIG`, `SLACK_BOT_TOKEN`,
 `SLACK_CHANNEL_ALERTS`, `SLACK_CHANNEL_EVENTS`, `QUICKNODE_SIGNING_SECRET`,
-`QUICKNODE_REPLAY_BUCKET`, `POOL_LIQUIDITY_DELIVERY_BUCKET`, `POOL_ALERT_CHANNEL_ID`, and
-`RPC_URL_137`, and `SUPPORTED_CHAINS`. The runtime configuration
+`QUICKNODE_REPLAY_BUCKET`, `POOL_LIQUIDITY_WATCHES`, `POOL_LIQUIDITY_DELIVERY_BUCKET`,
+`POOL_ALERT_CHANNEL_ID`, `RPC_URL_137`, and `SUPPORTED_CHAINS`. The two bucket
+names are local placeholders; set the delivery bucket to a disposable development
+bucket before testing delivery, never the production audit trail. The runtime configuration
 parser requires the multisig, signing-secret, and Slack values. Production also
 needs the replay bucket for nonce reservation and dead-letter storage; local
 development bypasses replay protection. `GCP_PROJECT_ID` and `SUPPORTED_CHAINS`

@@ -2,8 +2,9 @@ import { Request, Response } from "@google-cloud/functions-framework";
 import { buildEventContext } from "./build-event-context";
 import {
   configuredPoolWatches,
+  hasPoolBurnLog,
   poolBurnCandidates,
-  processPoolBurns,
+  stagePoolBurns,
 } from "./pool-liquidity-withdrawal";
 import { checkPayloadSize } from "./check-payload-size";
 import config from "./config";
@@ -98,15 +99,18 @@ export const processQuicknodeWebhook = async (
       return;
     }
 
-    // Start the event-keyed path before nonce reservation, so a signed
-    // replay can still recover it after the Safe nonce is claimed. Do not
-    // await it ahead of Safe processing: a stalled Watched LP dependency must not
-    // consume the Safe route's function budget.
+    // Claim event keys before nonce reservation, so a signed replay can still
+    // recover them after the Safe nonce is claimed. Private Scheduler performs
+    // receipt proof and Slack delivery; the public runtime can only create
+    // records, not rewrite or delete the delivery audit trail.
     const poolDelivery = (async (): Promise<boolean> => {
       try {
+        if (!hasPoolBurnLog(req.body)) return false;
         const poolWatches = configuredPoolWatches();
-        await processPoolBurns(poolBurnCandidates(req.body, poolWatches));
-        return false;
+        const { failures } = await stagePoolBurns(
+          poolBurnCandidates(req.body, poolWatches),
+        );
+        return failures > 0;
       } catch (error) {
         logger.error("Watched LP withdrawal delivery failed", {
           reason: "pool_liquidity_delivery_failed",

@@ -130,6 +130,24 @@ const logNumber = (value: unknown): number | null => {
   return Number.isSafeInteger(n) && n >= 0 ? n : null;
 };
 
+/** Avoid loading Polygon-only watch configuration for Safe-only batches. */
+export function hasPoolBurnLog(body: unknown): boolean {
+  if (!isObject(body)) return false;
+  const logs: unknown[] = [];
+  for (const key of ["result", "data"])
+    if (Array.isArray(body[key])) logs.push(...body[key]);
+  if (Array.isArray(body.matchingReceipts))
+    for (const receipt of body.matchingReceipts)
+      if (isObject(receipt) && Array.isArray(receipt.logs))
+        logs.push(...receipt.logs);
+  return logs.some(
+    (log) =>
+      isObject(log) &&
+      (log.name === "Burn" ||
+        (Array.isArray(log.topics) && log.topics[0] === POOL_BURN_TOPIC)),
+  );
+}
+
 /** Inspect both QuickNode decoded-log and matchingReceipts envelopes. */
 export function poolBurnCandidates(
   body: unknown,
@@ -226,7 +244,12 @@ export function provePoolLiquidityWithdrawal(
     if (logs[i].event.eventName === "Burn") previousBurn = i;
   const transfers = logs
     .slice(previousBurn + 1, burnAt)
-    .filter((log) => log.event.eventName === "Transfer");
+    .filter(
+      (log) =>
+        log.event.eventName === "Transfer" &&
+        (same(log.event.args.from, candidate.watch.poolAddress) ||
+          same(log.event.args.to, candidate.watch.poolAddress)),
+    );
   const destruction = transfers.findIndex((log) =>
     transfer(log, candidate.watch.poolAddress, ZERO, burn.args.liquidity),
   );
@@ -238,8 +261,20 @@ export function provePoolLiquidityWithdrawal(
       candidate.watch.poolAddress,
       burn.args.liquidity,
     )
-  )
+  ) {
+    if (
+      transfers.some((log) =>
+        transfer(
+          log,
+          candidate.watch.lpAddress,
+          candidate.watch.poolAddress,
+          burn.args.liquidity,
+        ),
+      )
+    )
+      throw new Error("Ambiguous watched LP transfer before pool burn");
     return null;
+  }
   return {
     ...candidate,
     amount0: burn.args.amount0,
@@ -367,6 +402,29 @@ export async function stagePoolCandidate(
   await putRecord(fetchImpl, token, bucket, record, "0");
 }
 
+export async function stagePoolBurns(
+  candidates: BurnCandidate[],
+  stage: typeof stagePoolCandidate = stagePoolCandidate,
+): Promise<{ staged: BurnCandidate[]; failures: number }> {
+  const staged: BurnCandidate[] = [];
+  let failures = 0;
+  for (const candidate of candidates) {
+    try {
+      await stage(candidate);
+      staged.push(candidate);
+    } catch (error) {
+      failures++;
+      logger.error("Watched LP candidate staging failed", {
+        reason: "pool_liquidity_staging_failed",
+        transactionHash: candidate.txHash,
+        logIndex: candidate.logIndex,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  return { staged, failures };
+}
+
 export async function ignorePoolCandidate(
   event: BurnCandidate,
   options: { fetchImpl?: Fetch; bucket?: string } = {},
@@ -483,22 +541,11 @@ export async function processPoolBurns(
   // Attempt every durable claim before receipt proof. A failed claim remains
   // fatal to the webhook response, but must not strand successfully claimed
   // siblings or prevent their immediate delivery.
-  const staged: BurnCandidate[] = [];
-  let failures = 0;
-  for (const candidate of candidates) {
-    try {
-      await (options.stage ?? stagePoolCandidate)(candidate);
-      staged.push(candidate);
-    } catch (error) {
-      failures++;
-      logger.error("Watched LP candidate staging failed", {
-        reason: "pool_liquidity_staging_failed",
-        transactionHash: candidate.txHash,
-        logIndex: candidate.logIndex,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
+  const { staged, failures: stagingFailures } = await stagePoolBurns(
+    candidates,
+    options.stage,
+  );
+  let failures = stagingFailures;
   const receiptClient =
     options.receipt ??
     ((hash: Hex) =>

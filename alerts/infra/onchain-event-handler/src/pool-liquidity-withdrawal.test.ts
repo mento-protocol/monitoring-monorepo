@@ -3,6 +3,7 @@ import type { Hex, Log } from "viem";
 import receipt from "./fixtures-pool-liquidity-withdrawal.json";
 import {
   configuredPoolWatches,
+  hasPoolBurnLog,
   poolBurnCandidates,
   poolClientMsgId,
   deliverPoolLiquidityWithdrawal,
@@ -53,6 +54,10 @@ describe("Watched LP Polygon withdrawal", () => {
     ).toThrow("Duplicate pool liquidity watch wallet");
   });
   it("finds the exact Burn in decoded and raw receipt envelopes", () => {
+    expect(hasPoolBurnLog({ result: [{ name: "ExecutionSuccess" }] })).toBe(
+      false,
+    );
+    expect(hasPoolBurnLog({ matchingReceipts: [sourceReceipt] })).toBe(true);
     expect(
       poolBurnCandidates(
         {
@@ -157,12 +162,12 @@ describe("Watched LP Polygon withdrawal", () => {
         logs: sourceReceipt.logs.filter((log) => log.logIndex !== 834),
       }),
     ).toBeNull();
-    expect(
+    expect(() =>
       provePoolLiquidityWithdrawal(candidate, {
         ...sourceReceipt,
         logs: sourceReceipt.logs.filter((log) => log.logIndex !== 835),
       }),
-    ).toBeNull();
+    ).toThrow("Ambiguous watched LP transfer");
     const wrongOwner = structuredClone(sourceReceipt);
     wrongOwner.logs[0].topics[1] = `0x${"00".repeat(32)}`;
     expect(
@@ -171,6 +176,27 @@ describe("Watched LP Polygon withdrawal", () => {
         wrongOwner as typeof sourceReceipt,
       ),
     ).toBeNull();
+  });
+
+  it("allows unrelated LP-token transfers but refuses ambiguous pool custody", () => {
+    const unrelated = structuredClone(sourceReceipt);
+    for (const log of unrelated.logs) if (log.logIndex >= 835) log.logIndex++;
+    unrelated.logs.splice(1, 0, {
+      ...unrelated.logs[0],
+      logIndex: 835,
+      topics: [
+        unrelated.logs[0].topics[0],
+        `0x${"00".repeat(31)}02`,
+        `0x${"00".repeat(31)}03`,
+      ],
+    });
+    expect(
+      provePoolLiquidityWithdrawal({ ...candidate, logIndex: 840 }, unrelated),
+    ).not.toBeNull();
+    unrelated.logs[1].topics[2] = unrelated.logs[0].topics[2];
+    expect(() =>
+      provePoolLiquidityWithdrawal({ ...candidate, logIndex: 840 }, unrelated),
+    ).toThrow("Ambiguous watched LP transfer");
   });
 
   it("does not use decoded event args as proof, and deduplicates receipt fetches per transaction", async () => {

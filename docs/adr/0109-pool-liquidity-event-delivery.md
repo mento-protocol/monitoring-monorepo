@@ -34,11 +34,15 @@ transaction hash, and burn log index). Fetch the Polygon transaction receipt
 and require a successful transaction, the exact pool Burn, a matching LP-token
 transfer from the watched wallet to the pool, and the matching LP-token burn.
 Router and beneficiary fields do not establish LP ownership. A swap in the
-same receipt does not suppress a valid withdrawal.
+same receipt does not suppress a valid withdrawal. Unrelated LP-token transfers
+do not break this proof; a conflicting transfer involving the pool leaves the
+candidate pending and raises a retry error for operator inspection.
 
-Persist each signed candidate in a dedicated private GCS bucket before RPC
-proof. A private Scheduler-invoked function retries unverified and pending
-records each minute after QuickNode's signed retry window. Claim an event with
+The public webhook only creates immutable candidate keys in a dedicated private
+GCS bucket. Its runtime identity has no permission to overwrite or delete them.
+A separate private Scheduler-invoked function proves receipts and delivers
+unverified and pending records each minute, using a distinct runtime identity
+with write access to the delivery state. Claim an event with
 GCS generation preconditions and a lease; mark it delivered only after Slack
 acknowledges `chat.postMessage`. Store the watch details in the record so a
 later config change cannot erase retry proof. Never reuse a watch ID for a
@@ -75,7 +79,9 @@ failures that produce no function log.
 The alert-delivery Terraform stack owns a dedicated pool-liquidity state bucket with
 access logging to a separate private, retention-limited bucket, a retry
 function restricted to same-project internal ingress, Scheduler identity/job,
-and scoped bucket access. The log sink cannot log to itself. The
+and separate runtime identities with scoped bucket access. The webhook-to-Slack
+delay is normally up to one Scheduler interval (one minute) plus processing time.
+The log sink cannot log to itself. The
 public handler's existing Safe replay and dead-letter bucket keeps its current
 permissions. The obsolete Grafana rule and bridge gauge are removed. Production
 activation still requires the protected infrastructure apply and live channel
@@ -86,5 +92,5 @@ delivery pattern; a deposit cannot be inferred from a withdrawal Burn.
 
 ## Evidence
 
-PR #2525; `alerts/infra/onchain-event-handler/src/pool-liquidity-withdrawal.ts` and its
+PR #2548; `alerts/infra/onchain-event-handler/src/pool-liquidity-withdrawal.ts` and its
 receipt fixture; `alerts/infra/onchain-event-handler/main.tf`.
