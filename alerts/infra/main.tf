@@ -164,7 +164,20 @@ module "onchain_event_handler" {
       events_channel_id = module.slack_channels.channel_ids.events
     }
   }
-  slack_bot_token = var.slack_bot_token
+  slack_bot_token       = var.slack_bot_token
+  pool_alert_channel_id = var.pool_alert_channel_id
+  pool_polygon_rpc_url  = var.pool_polygon_rpc_url
+  pool_liquidity_watches = [
+    for watch in var.pool_liquidity_watches : {
+      id             = watch.id
+      poolAddress    = lower(watch.pool_address)
+      lpAddress      = lower(watch.lp_address)
+      token0Symbol   = watch.token0_symbol
+      token1Symbol   = watch.token1_symbol
+      token0Decimals = watch.token0_decimals
+      token1Decimals = watch.token1_decimals
+    }
+  ]
 
   depends_on = [
     module.slack_channels,
@@ -185,7 +198,8 @@ module "onchain_event_listeners" {
   }
 
   webhook_endpoint_url = module.onchain_event_handler.function_url
-  multisig_addresses   = [for k, v in each.value : v.address]
+  multisig_addresses   = concat([for k, v in each.value : v.address], each.key == "polygon" ? distinct([for watch in var.pool_liquidity_watches : watch.pool_address]) : [])
+  extra_event_hashes   = each.key == "polygon" && length(var.pool_liquidity_watches) > 0 ? ["0xd175a80c109434bb89948928ab2475a6647c94244cb70002197896423c883363"] : []
   webhook_name         = "safe-multisig-monitor-${each.key}"
   chain_key            = each.key
   # All multisigs in the same chain group must declare the same

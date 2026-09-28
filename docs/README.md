@@ -221,6 +221,7 @@ Authority: canonical
 - [`adr/0106-sentry-triage-moves-to-operator-skills.md`](adr/0106-sentry-triage-moves-to-operator-skills.md) — Sentry triage and autofix move from a CI pipeline to operator-run skills
 - [`adr/0107-enforced-shell-size-limits.md`](adr/0107-enforced-shell-size-limits.md) — Shell file and function size limits are enforced with a closed baseline
 - [`adr/0108-sealed-orchestrator-source-set.md`](adr/0108-sealed-orchestrator-source-set.md) — Every run-eval shell module joins the sealed orchestrator source set
+- [`adr/0109-pool-liquidity-event-delivery.md`](adr/0109-pool-liquidity-event-delivery.md) — Pool liquidity watches use event-keyed durable alert delivery
 
 Authority: non-canonical
 

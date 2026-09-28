@@ -36,6 +36,8 @@ locals {
     SLACK_BOT_TOKEN=${var.slack_bot_token}
     SLACK_CHANNEL_ALERTS=${local.shared_channel_ids.alerts}
     SLACK_CHANNEL_EVENTS=${local.shared_channel_ids.events}
+    POOL_LIQUIDITY_WATCHES=${jsonencode(var.pool_liquidity_watches)}
+    POOL_ALERT_CHANNEL_ID=${var.pool_alert_channel_id}
   EOT
 }
 

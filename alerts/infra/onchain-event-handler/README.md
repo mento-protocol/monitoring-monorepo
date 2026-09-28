@@ -3,7 +3,7 @@
 # On-chain Event Handler Module
 
 Terraform module and Node.js 24 Cloud Function that verify QuickNode webhook
-payloads and route Safe multisig events to Slack.
+payloads and route Safe multisig and pool LP-withdrawal events to Slack.
 
 ## Ownership and configuration
 
@@ -29,6 +29,27 @@ differs from the internal `ethereum` and `polygon` chain keys.
 - One malformed or failed event does not abort the rest of a webhook batch.
 - The function uses the same private GCS bucket for replay nonces and
   dead-lettered Slack payloads.
+- The Polygon listener forwards `Burn` candidates for every configured pool watch. The
+  handler stages each event key in a separate private GCS bucket before
+  querying the Polygon receipt. Only a successful receipt with the watched wallet's
+  LP-token transfer to the pool, the matching LP burn, and the exact pool Burn
+  can post to the configured `#alerts-pools` channel ID. Router/beneficiary
+  fields are not ownership evidence; a same-transaction swap is allowed.
+- A separate private function, invoked by Cloud Scheduler each minute, retries
+  unverified and pending watch records. GCS generation preconditions and a lease
+  limit concurrent sends. Every attempt uses the same `client_msg_id`; Slack
+  acceptance and GCS completion are not atomic, so a timeout or failed state
+  update can still duplicate the message. After durable staging, retries
+  continue until delivery, a negative receipt proof, or 365-day retention. If GCS cannot stage an event
+  before QuickNode's signed retries expire, use Polygon logs for operator
+  backfill. Retry function errors page through the on-chain infrastructure
+  alert. A separate Scheduler attempt alert pages `#alerts-infra` when OIDC,
+  IAM, timeout, or target failures prevent the retry function from logging.
+- The pool route uses `POOL_LIQUIDITY_DELIVERY_BUCKET`, `POOL_LIQUIDITY_WATCHES`, and `POOL_ALERT_CHANNEL_ID` from
+  Terraform; `RPC_URL_137` is the reviewed Polygon full-node RPC input
+  (default `https://polygon.drpc.org`). These are not secrets. Confirm
+  the bot's membership in the exact channel with the trusted Gateway's
+  allowlisted read-only Slack channel/membership proof before activation.
 
 ## Validate and deploy
 
@@ -83,7 +104,8 @@ After explicit approval for the targeted Terraform state mutation,
 `pnpm run generate:env` regenerates `.env` through the provisioner. The file
 contains `GCP_PROJECT_ID`, `MULTISIG_CONFIG`, `SLACK_BOT_TOKEN`,
 `SLACK_CHANNEL_ALERTS`, `SLACK_CHANNEL_EVENTS`, `QUICKNODE_SIGNING_SECRET`,
-`QUICKNODE_REPLAY_BUCKET`, and `SUPPORTED_CHAINS`. The runtime configuration
+`QUICKNODE_REPLAY_BUCKET`, `POOL_LIQUIDITY_DELIVERY_BUCKET`, `POOL_ALERT_CHANNEL_ID`, and
+`RPC_URL_137`, and `SUPPORTED_CHAINS`. The runtime configuration
 parser requires the multisig, signing-secret, and Slack values. Production also
 needs the replay bucket for nonce reservation and dead-letter storage; local
 development bypasses replay protection. `GCP_PROJECT_ID` and `SUPPORTED_CHAINS`

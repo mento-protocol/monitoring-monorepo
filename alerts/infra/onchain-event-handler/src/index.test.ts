@@ -8,6 +8,9 @@ const mocks = vi.hoisted(() => ({
     size: 2,
     maxSize: 10 * 1024 * 1024,
   })),
+  poolBurnCandidates: vi.fn(),
+  configuredPoolWatches: vi.fn(),
+  processPoolBurns: vi.fn(),
   handleHealthCheck: vi.fn(),
   logger: {
     error: vi.fn(),
@@ -40,6 +43,14 @@ vi.mock("./build-event-context", () => ({
 }));
 vi.mock("./check-payload-size", () => ({
   checkPayloadSize: mocks.checkPayloadSize,
+}));
+vi.mock("./pool-liquidity-withdrawal", () => ({
+  configuredPoolWatches: mocks.configuredPoolWatches,
+  poolBurnCandidates: mocks.poolBurnCandidates,
+  processPoolBurns: mocks.processPoolBurns,
+}));
+vi.mock("./pool-liquidity-retry", () => ({
+  retryPoolLiquidityWithdrawals: vi.fn(),
 }));
 vi.mock("./health-check", () => ({
   handleHealthCheck: mocks.handleHealthCheck,
@@ -103,6 +114,19 @@ describe("processQuicknodeWebhook", () => {
     });
     mocks.reserveQuickNodeNonce.mockResolvedValue({ valid: true });
     mocks.processEvents.mockResolvedValue({ processedEvents: [], skipped: 0 });
+    mocks.poolBurnCandidates.mockReturnValue([]);
+    mocks.configuredPoolWatches.mockReturnValue([
+      {
+        id: "polygon-eurm-usdm-lp-1",
+        poolAddress: "0x93e15a22fda39fefccce82d387a09ccf030ead61",
+        lpAddress: "0x3d54f9496bf5bd0afa67c80ee8bc2eeadf306381",
+        token0Symbol: "EURm",
+        token1Symbol: "USDm",
+        token0Decimals: 18,
+        token1Decimals: 18,
+      },
+    ]);
+    mocks.processPoolBurns.mockResolvedValue(undefined);
   });
 
   it("acknowledges duplicate webhook nonces without processing them", async () => {
@@ -143,6 +167,112 @@ describe("processQuicknodeWebhook", () => {
     expect(mocks.processEvents).not.toHaveBeenCalled();
     expect(res.status).toHaveBeenCalledWith(400);
     expect(res.json).toHaveBeenCalledWith({ error: "bad payload" });
+  });
+
+  it("retries failed Watched LP delivery after processing Safe logs in a mixed batch", async () => {
+    const burns = [{ txHash: `0x${"ab".repeat(32)}`, logIndex: 7 }];
+    const burnLog = {
+      address: "0x93e15a22fda39fefccce82d387a09ccf030ead61",
+      name: "Burn",
+    };
+    const safeLog = {
+      address: "0x0000000000000000000000000000000000000001",
+      name: "ExecutionSuccess",
+    };
+    const body = { result: [burnLog, safeLog] };
+    mocks.validatePayload.mockReturnValue({ valid: true, payload: body });
+    mocks.poolBurnCandidates.mockReturnValue(burns);
+    mocks.processPoolBurns.mockRejectedValue(new Error("Slack 503"));
+    const { processQuicknodeWebhook } = await import("./index");
+    const res = response();
+    await processQuicknodeWebhook(request(body), res);
+    expect(mocks.processPoolBurns).toHaveBeenCalledWith(burns);
+    expect(mocks.reserveQuickNodeNonce).toHaveBeenCalledOnce();
+    expect(mocks.processEvents).toHaveBeenCalledWith(
+      [safeLog],
+      expect.any(Object),
+      expect.any(Object),
+    );
+    expect(res.status).toHaveBeenCalledWith(503);
+    expect(res.send).toHaveBeenCalledWith(
+      "Watched LP withdrawal delivery failed",
+    );
+  });
+
+  it("processes Safe logs while pool delivery is stalled", async () => {
+    let release!: () => void;
+    const stalled = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const burnLog = {
+      address: "0x93e15a22fda39fefccce82d387a09ccf030ead61",
+      name: "Burn",
+    };
+    const safeLog = {
+      address: "0x0000000000000000000000000000000000000001",
+      name: "ExecutionSuccess",
+    };
+    const body = { result: [burnLog, safeLog] };
+    mocks.validatePayload.mockReturnValue({ valid: true, payload: body });
+    mocks.processPoolBurns.mockReturnValue(stalled);
+    const { processQuicknodeWebhook } = await import("./index");
+    const res = response();
+    const running = processQuicknodeWebhook(request(body), res);
+    await vi.waitFor(() =>
+      expect(mocks.processEvents).toHaveBeenCalledWith(
+        [safeLog],
+        expect.any(Object),
+        expect.any(Object),
+      ),
+    );
+    expect(res.status).not.toHaveBeenCalledWith(200);
+    release();
+    await running;
+    expect(res.status).toHaveBeenCalledWith(200);
+  });
+
+  it("processes Safe logs when the pool watch configuration is invalid", async () => {
+    const safeLog = {
+      address: "0x0000000000000000000000000000000000000001",
+      name: "ExecutionSuccess",
+    };
+    const body = { result: [safeLog] };
+    mocks.validatePayload.mockReturnValue({ valid: true, payload: body });
+    mocks.configuredPoolWatches.mockImplementation(() => {
+      throw new Error("Invalid pool watch configuration");
+    });
+    const { processQuicknodeWebhook } = await import("./index");
+    const res = response();
+    await processQuicknodeWebhook(request(body), res);
+    expect(mocks.processEvents).toHaveBeenCalledWith(
+      [safeLog],
+      expect.any(Object),
+      expect.any(Object),
+    );
+    expect(res.status).toHaveBeenCalledWith(503);
+  });
+
+  it("keeps a failed Watched LP event retryable when the Safe nonce was already claimed", async () => {
+    mocks.poolBurnCandidates.mockReturnValue([
+      { txHash: `0x${"ab".repeat(32)}`, logIndex: 7 },
+    ]);
+    mocks.processPoolBurns.mockRejectedValue(new Error("GCS unavailable"));
+    mocks.reserveQuickNodeNonce.mockResolvedValue({
+      valid: false,
+      status: 200,
+      message: "Duplicate webhook nonce already processed",
+      replayed: true,
+    });
+    const { processQuicknodeWebhook } = await import("./index");
+    const res = response();
+
+    await processQuicknodeWebhook(request(), res);
+
+    expect(mocks.processEvents).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(503);
+    expect(res.send).toHaveBeenCalledWith(
+      "Watched LP withdrawal delivery failed",
+    );
   });
 
   it("returns 500 when downstream processing fails after validation claimed the nonce", async () => {

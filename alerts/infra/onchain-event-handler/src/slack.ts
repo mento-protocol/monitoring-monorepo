@@ -285,6 +285,7 @@ export async function sendToSlack(
   channelId: string,
   message: SlackMessage,
   signal?: AbortSignal,
+  clientMsgId?: string,
 ): Promise<void> {
   let lastError: unknown;
 
@@ -294,6 +295,7 @@ export async function sendToSlack(
         "https://slack.com/api/chat.postMessage",
         {
           channel: channelId,
+          ...(clientMsgId ? { client_msg_id: clientMsgId } : {}),
           text: message.text,
           blocks: message.blocks,
           unfurl_links: false,

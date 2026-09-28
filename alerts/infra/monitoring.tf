@@ -44,22 +44,27 @@ resource "google_monitoring_notification_channel" "alerts_infra_slack" {
 # skips are logged and intentionally answered with HTTP 200 so QuickNode does
 # not replay the batch. These metrics and policies make those drops visible.
 
-# Counts drop-path ERROR-level logs from the handler. Pinned to the handler's
-# service name so oncall-announcer errors in the same project do not cross-page;
+# Counts drop-path ERROR-level logs from the handler and its private Watched LP
+# retry worker. Pinned to these services so oncall-announcer does not cross-page;
 # narrowed to per-event drop logs so public auth probes do not page.
 resource "google_logging_metric" "onchain_handler_errors" {
   project     = local.project_id
   name        = "onchain_event_handler_error_logs"
-  description = "Drop-path ERROR-level log entries in the onchain-event-handler Cloud Function (dropped Safe alerts)"
+  description = "ERROR-level Safe drop and Watched LP delivery/retry failures in the on-chain alert functions"
   filter      = <<EOF
     severity>=ERROR
     resource.type="cloud_run_revision"
-    resource.labels.service_name="${module.onchain_event_handler.function_name}"
+    (resource.labels.service_name="${module.onchain_event_handler.function_name}" OR
+     resource.labels.service_name="onchain-pool-liquidity-retry")
     (
       jsonPayload.message.message="Error processing log" OR
       jsonPayload.message="Error processing log" OR
       jsonPayload.message.message="No notification channel found" OR
-      jsonPayload.message="No notification channel found"
+      jsonPayload.message="No notification channel found" OR
+      jsonPayload.message.message="Watched LP withdrawal delivery failed" OR
+      jsonPayload.message="Watched LP withdrawal delivery failed" OR
+      jsonPayload.message.message="Watched LP withdrawal retry failed" OR
+      jsonPayload.message="Watched LP withdrawal retry failed"
     )
   EOF
 }
@@ -104,14 +109,17 @@ resource "google_monitoring_alert_policy" "onchain_handler_errors_policy" {
 
   documentation {
     content   = <<-EOT
-      ## Error in onchain-event-handler (likely a dropped Safe multisig alert)
+      ## On-chain alert delivery error
 
-      The handler logs ERROR and answers HTTP 200 on per-event failures, so
-      QuickNode will NOT redeliver. Check the logs and re-verify the affected
-      Safe transactions manually.
+      Safe per-event failures log ERROR but answer HTTP 200, so QuickNode will
+      not redeliver. Check the logs and re-verify affected Safe transactions.
+
+      Pool withdrawal delivery failures answer HTTP 503; staged records also remain in
+      GCS for the private retry worker. Check both function logs and the
+      `pool-liquidity-withdrawals/137/` records when this policy fires for Watched LP.
 
       **View recent error logs:**
-      https://console.cloud.google.com/logs/query;query=severity%3E%3DERROR%20AND%20resource.labels.service_name%3D%22${module.onchain_event_handler.function_name}%22%20AND%20(jsonPayload.message.message%3D%22Error%20processing%20log%22%20OR%20jsonPayload.message%3D%22Error%20processing%20log%22%20OR%20jsonPayload.message.message%3D%22No%20notification%20channel%20found%22%20OR%20jsonPayload.message%3D%22No%20notification%20channel%20found%22);duration=PT24H
+      https://console.cloud.google.com/logs/query;query=severity%3E%3DERROR%20AND%20resource.type%3D%22cloud_run_revision%22;duration=PT24H
     EOT
     mime_type = "text/markdown"
   }
@@ -146,6 +154,58 @@ resource "google_monitoring_alert_policy" "onchain_handler_errors_policy" {
 
   alert_strategy {
     auto_close = "86400s"
+  }
+
+  depends_on = [module.project_factory]
+}
+
+# The Watched LP retry function cannot log if Scheduler fails to invoke it. Match
+# terminal Scheduler attempts directly so OIDC/IAM, timeout, unreachable-target,
+# and handler 5xx failures all reach #alerts-infra independently of app logs.
+resource "google_monitoring_alert_policy" "pool_liquidity_retry_scheduler_errors_policy" {
+  project      = local.project_id
+  display_name = "onchain-pool-liquidity-retry-scheduler-errors"
+  combiner     = "OR"
+  enabled      = true
+  severity     = "ERROR"
+
+  documentation {
+    content   = <<-EOT
+      ## pool LP-withdrawal retry scheduler failure
+
+      The private Watched LP retry job failed. Staged Polygon EURm/USDm withdrawal
+      records may remain pending even if the retry function has no error log.
+      Check the newest Scheduler attempt for OIDC/IAM, timeout, target, or
+      function errors, then inspect `pool-liquidity-withdrawals/137/` GCS records.
+
+      **View Scheduler errors:**
+      https://console.cloud.google.com/logs/query;query=resource.type%3D%22cloud_scheduler_job%22%20AND%20resource.labels.job_id%3D%22${module.onchain_event_handler.pool_liquidity_retry_scheduler_job_name}%22%20AND%20severity%3E%3DERROR;duration=PT24H
+    EOT
+    mime_type = "text/markdown"
+  }
+
+  conditions {
+    display_name = "Any failed Watched LP retry attempt"
+
+    condition_matched_log {
+      filter = <<-EOT
+        resource.type="cloud_scheduler_job"
+        resource.labels.job_id="${module.onchain_event_handler.pool_liquidity_retry_scheduler_job_name}"
+        resource.labels.location="${var.region}"
+        log_id("cloudscheduler.googleapis.com/executions")
+        severity>=ERROR
+        jsonPayload."@type"="type.googleapis.com/google.cloud.scheduler.logging.AttemptFinished"
+      EOT
+    }
+  }
+
+  notification_channels = [local.alerts_infra_notification_channel]
+
+  alert_strategy {
+    notification_rate_limit {
+      period = "3600s"
+    }
+    auto_close = "1800s"
   }
 
   depends_on = [module.project_factory]
@@ -268,4 +328,3 @@ resource "google_monitoring_alert_policy" "oncall_announcer_scheduler_errors_pol
 
   depends_on = [module.project_factory]
 }
-

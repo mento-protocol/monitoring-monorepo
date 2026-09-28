@@ -90,6 +90,70 @@ variable "slack_bot_token" {
   }
 }
 
+variable "pool_alert_channel_id" {
+  description = "Slack channel ID for #alerts-pools pool withdrawal alerts. Verify bot membership before activation."
+  type        = string
+  default     = "C0B53R34HTN"
+
+  validation {
+    condition     = can(regex("^[CG][A-Z0-9]{8,}$", var.pool_alert_channel_id))
+    error_message = "pool_alert_channel_id must be a Slack channel ID."
+  }
+}
+
+variable "pool_polygon_rpc_url" {
+  description = "Full-node Polygon RPC for pool receipt proof; change only through reviewed Terraform."
+  type        = string
+  default     = "https://polygon.drpc.org"
+
+  validation {
+    condition     = can(regex("^https://", var.pool_polygon_rpc_url))
+    error_message = "pool_polygon_rpc_url must use HTTPS."
+  }
+}
+
+variable "pool_liquidity_watches" {
+  description = "Polygon LP wallets to watch for receipt-proved pool withdrawals. IDs are stable delivery keys; never reuse an ID for a different pool or wallet."
+  type = list(object({
+    id              = string
+    pool_address    = string
+    lp_address      = string
+    token0_symbol   = string
+    token1_symbol   = string
+    token0_decimals = number
+    token1_decimals = number
+  }))
+  default = [{
+    id              = "polygon-eurm-usdm-lp-1"
+    pool_address    = "0x93e15a22fda39fefccce82d387a09ccf030ead61"
+    lp_address      = "0x3d54f9496bf5bd0afa67c80ee8bc2eeadf306381"
+    token0_symbol   = "EURm"
+    token1_symbol   = "USDm"
+    token0_decimals = 18
+    token1_decimals = 18
+  }]
+
+  validation {
+    condition = (
+      length(distinct([for watch in var.pool_liquidity_watches : watch.id])) == length(var.pool_liquidity_watches)
+      && length(distinct([for watch in var.pool_liquidity_watches : "${lower(watch.pool_address)}:${lower(watch.lp_address)}"])) == length(var.pool_liquidity_watches)
+      && alltrue([
+        for watch in var.pool_liquidity_watches :
+        can(regex("^[a-z0-9-]{1,64}$", watch.id))
+        && can(regex("^0x[a-fA-F0-9]{40}$", watch.pool_address))
+        && can(regex("^0x[a-fA-F0-9]{40}$", watch.lp_address))
+        && can(regex("^[A-Za-z0-9]{1,12}$", watch.token0_symbol))
+        && can(regex("^[A-Za-z0-9]{1,12}$", watch.token1_symbol))
+        && floor(watch.token0_decimals) == watch.token0_decimals
+        && floor(watch.token1_decimals) == watch.token1_decimals
+        && watch.token0_decimals >= 0 && watch.token0_decimals <= 36
+        && watch.token1_decimals >= 0 && watch.token1_decimals <= 36
+      ])
+    )
+    error_message = "Each pool watch needs a unique stable ID and pool/wallet pair, valid addresses and token symbols, and integer token decimals from 0 to 36."
+  }
+}
+
 #####################
 # On-call Announcer
 #####################

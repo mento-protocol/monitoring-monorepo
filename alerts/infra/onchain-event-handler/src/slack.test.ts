@@ -139,6 +139,23 @@ describe("sendToSlack", () => {
     );
   });
 
+  it("preserves the supplied stable client_msg_id on every retry", async () => {
+    postMock
+      .mockRejectedValueOnce(new Error("transport timeout"))
+      .mockResolvedValue({ data: { ok: true }, status: 200, statusText: "OK" });
+    const id = "4c6c3cc9-503b-434b-93ab-3a8093cdd88c";
+    await sendToSlack("xoxb-test", "C0B53R34HTN", message, undefined, id);
+    expect(postMock).toHaveBeenCalledTimes(2);
+    expect(postMock.mock.calls[0][1]).toMatchObject({
+      channel: "C0B53R34HTN",
+      client_msg_id: id,
+    });
+    expect(postMock.mock.calls[1][1]).toMatchObject({
+      channel: "C0B53R34HTN",
+      client_msg_id: id,
+    });
+  });
+
   it("does not retry non-retryable Slack API errors", async () => {
     postMock.mockResolvedValue({
       data: { ok: false, error: "invalid_auth" },

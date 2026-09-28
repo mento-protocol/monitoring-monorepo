@@ -8,7 +8,7 @@ locals {
   #   pnpm --filter @mento-protocol/alerts-onchain-event-handler build:event-hashes
   # The handler computes the same set at runtime in `constants.ts` from the
   # same safe-abi.json — both paths stay in lock-step.
-  event_hashes = [for e in jsondecode(file("${path.module}/event-hashes.json")) : e.hash]
+  event_hashes = concat([for e in jsondecode(file("${path.module}/event-hashes.json")) : e.hash], var.extra_event_hashes)
 
   # Normalize the webhook URL to a stable string value for comparison
   # This ensures Terraform compares the actual URL string, not the resource reference
@@ -29,4 +29,3 @@ locals {
     compression     = var.compression
   }))
 }
-
