@@ -204,6 +204,39 @@ describe("processQuicknodeWebhook", () => {
     );
   });
 
+  it("stages valid Burns and processes Safe logs despite a malformed Burn sibling", async () => {
+    const burnLog = {
+      address: "0x93e15a22fda39fefccce82d387a09ccf030ead61",
+      name: "Burn",
+    };
+    const safeLog = {
+      address: "0x0000000000000000000000000000000000000001",
+      name: "ExecutionSuccess",
+    };
+    const body = { result: [burnLog, safeLog] };
+    const valid = [{ txHash: `0x${"ab".repeat(32)}`, logIndex: 7 }];
+    mocks.validatePayload.mockReturnValue({ valid: true, payload: body });
+    mocks.poolBurnCandidates.mockImplementation((_, __, onMalformed) => {
+      onMalformed();
+      return valid;
+    });
+    mocks.stagePoolBurns.mockResolvedValue({ staged: valid, failures: 0 });
+    const { processQuicknodeWebhook } = await import("./index");
+    const res = response();
+    await processQuicknodeWebhook(request(body), res);
+    expect(mocks.stagePoolBurns).toHaveBeenCalledWith(valid);
+    expect(mocks.processEvents).toHaveBeenCalledWith(
+      [safeLog],
+      expect.any(Object),
+      expect.any(Object),
+    );
+    expect(res.status).toHaveBeenCalledWith(503);
+    expect(mocks.logger.error).toHaveBeenCalledWith(
+      "Watched LP Burn missing event key",
+      expect.objectContaining({ reason: "pool_liquidity_malformed_burn" }),
+    );
+  });
+
   it("processes Safe logs while pool staging is stalled", async () => {
     let release!: (value: { staged: []; failures: number }) => void;
     const stalled = new Promise<{ staged: []; failures: number }>((resolve) => {

@@ -30,6 +30,7 @@ differs from the internal `ethereum` and `polygon` chain keys.
 - The function uses the same private GCS bucket for replay nonces and
   dead-lettered Slack payloads.
 - The Polygon listener forwards `Burn` candidates for every configured pool watch. The
+  listener remains configured when no Polygon Safe is present.
   public handler only stages each event key in a candidate GCS bucket;
   its runtime identity cannot access the separate private delivery-state bucket.
   The private retry worker reads candidate names but never trusts candidate

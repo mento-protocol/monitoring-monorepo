@@ -106,10 +106,15 @@ export const processQuicknodeWebhook = async (
       try {
         if (!hasPoolBurnLog(req.body)) return false;
         const poolWatches = configuredPoolWatches();
-        const { failures } = await stagePoolBurns(
-          poolBurnCandidates(req.body, poolWatches),
-        );
-        return failures > 0;
+        let malformed = 0;
+        const candidates = poolBurnCandidates(req.body, poolWatches, () => {
+          malformed++;
+          logger.error("Watched LP Burn missing event key", {
+            reason: "pool_liquidity_malformed_burn",
+          });
+        });
+        const { failures } = await stagePoolBurns(candidates);
+        return failures + malformed > 0;
       } catch (error) {
         logger.error("Watched LP withdrawal delivery failed", {
           reason: "pool_liquidity_delivery_failed",

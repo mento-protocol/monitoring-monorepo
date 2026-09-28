@@ -26,8 +26,9 @@ QuickNode → Cloud Function → Slack plane chosen by [ADR 0004](0004-two-alert
 
 ## Decision
 
-Extend the existing Polygon QuickNode listener with the configured pool
-addresses and their `Burn` topic. A Terraform watch list supplies stable IDs,
+Extend the Polygon QuickNode listener with the configured pool addresses and
+their `Burn` topic. Keep the Polygon listener when watches remain but no Polygon
+Safe is configured. A Terraform watch list supplies stable IDs,
 pool and LP-wallet addresses, token symbols, and token decimals. The first watch
 covers EURm/USDm. The signed webhook only supplies a candidate key (watch ID,
 transaction hash, and burn log index). Fetch the Polygon transaction receipt
@@ -43,6 +44,10 @@ candidate pending and raises a retry error for operator inspection. A prior
 transaction's LP transfer cannot prove ownership of a later Burn from one
 receipt; that case needs separate on-chain investigation or a future stateful
 transfer-correlation design.
+
+If a webhook batch mixes valid Burns with one missing an event key, stage the
+valid candidates and finish Safe processing before returning 503. QuickNode
+may retry the bad sibling, but the good candidates already have durable keys.
 
 The public webhook only creates immutable candidate keys in a dedicated GCS
 intake bucket. Its runtime identity cannot read, overwrite, or delete them and
@@ -63,7 +68,9 @@ channel ID. Grafana's existing pool alerts use the channel name; this direct
 remain production activation checks.
 
 The retry worker scans retained event history in bounded pages and persists a
-generation-checked cursor after each page. It wraps at the end, so a long
+generation-checked cursor after each page. Its 145-second scan window leaves
+headroom for one final bounded delivery attempt and cursor save before the
+300-second function/Scheduler timeout. It wraps at the end, so a long
 history or failed early records cannot permanently hide later keys. A scan
 that reaches its page or time budget logs an ERROR covered by the infrastructure
 alert; a large backlog can delay delivery beyond one Scheduler interval. Old

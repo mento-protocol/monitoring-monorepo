@@ -30,6 +30,9 @@ export type { BurnCandidate, PoolLiquidityWithdrawal };
 
 const LEASE_MS = 60_000;
 const GCS_REQUEST_TIMEOUT_MS = 10_000;
+// The function/Scheduler stop at 300s. Reserve 155s for one final record's
+// bounded RPC/GCS/Slack calls and a cursor checkpoint.
+const RETRY_SCAN_BUDGET_MS = 145_000;
 type EventKey = { txHash: Hex; logIndex: number; watch: { id: string } };
 type Fetch = typeof fetch;
 const CANDIDATE_PREFIX = "pool-liquidity-candidates";
@@ -390,7 +393,7 @@ export async function retryPendingPoolLiquidityWithdrawals(
   );
   const now = options.now ?? Date.now;
   const scanStartedAt = now();
-  const deadline = scanStartedAt + 240_000;
+  const deadline = scanStartedAt + RETRY_SCAN_BUDGET_MS;
   let attempted = 0;
   let failures = 0;
   const scan = await scanPoolDeliveryKeys({

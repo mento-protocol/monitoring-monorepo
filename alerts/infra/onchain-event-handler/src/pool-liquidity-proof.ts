@@ -124,6 +124,7 @@ export function hasPoolBurnLog(body: unknown): boolean {
 export function poolBurnCandidates(
   body: unknown,
   watches = configuredPoolWatches(),
+  onMalformed?: () => void,
 ): BurnCandidate[] {
   if (!isObject(body)) return [];
   const entries: Array<{ log: unknown; receipt?: Record<string, unknown> }> =
@@ -150,8 +151,14 @@ export function poolBurnCandidates(
     const txHash = log.transactionHash ?? receipt?.transactionHash;
     const logIndex = logNumber(log.logIndex);
     // A matching Burn without an event key must not be silently dropped.
-    if (!isHash(txHash) || logIndex === null)
-      throw new Error("Watched LP Burn missing transaction hash or log index");
+    if (!isHash(txHash) || logIndex === null) {
+      if (!onMalformed)
+        throw new Error(
+          "Watched LP Burn missing transaction hash or log index",
+        );
+      onMalformed();
+      continue;
+    }
     for (const watch of matches)
       candidates.set(`${watch.id}:${txHash.toLowerCase()}:${logIndex}`, {
         txHash: txHash.toLowerCase() as Hex,

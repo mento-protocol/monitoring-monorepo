@@ -12,6 +12,7 @@ import {
   provePoolLiquidityWithdrawal,
   retryPendingPoolLiquidityWithdrawals,
   stagePoolCandidate,
+  stagePoolBurns,
   type PoolLiquidityWithdrawal,
 } from "./pool-liquidity-withdrawal";
 
@@ -138,6 +139,32 @@ describe("Watched LP Polygon withdrawal", () => {
         [watch],
       ),
     ).toThrow("missing transaction hash");
+  });
+
+  it("retains valid Burn candidates when another Burn has no event key", async () => {
+    let malformed = 0;
+    const candidates = poolBurnCandidates(
+      {
+        result: [
+          {
+            address: watch.poolAddress,
+            name: "Burn",
+            transactionHash: candidate.txHash,
+            logIndex: candidate.logIndex,
+          },
+          { address: watch.poolAddress, name: "Burn" },
+        ],
+      },
+      [watch],
+      () => malformed++,
+    );
+    const stage = vi.fn(async () => {});
+    expect(await stagePoolBurns(candidates, stage)).toEqual({
+      staged: [candidate],
+      failures: 0,
+    });
+    expect(stage).toHaveBeenCalledWith(candidate);
+    expect(malformed).toBe(1);
   });
 
   it("keeps same-pool wallets as distinct event keys and proves only the LP owner", () => {
@@ -520,6 +547,56 @@ describe("Watched LP Polygon withdrawal", () => {
       }),
     ).toBe(27);
     expect(deliver).toHaveBeenCalledTimes(27);
+  });
+
+  it("checkpoints before starting another record inside function timeout headroom", async () => {
+    let clock = 0;
+    const names = [0, 1].map(
+      (logIndex) =>
+        `pool-liquidity-candidates/137/${watch.id}/${candidate.txHash}-${logIndex}.json`,
+    );
+    const fetchImpl = retryFetch(async (input: string | URL) => {
+      const url = new URL(String(input));
+      if (url.searchParams.has("prefix"))
+        return Response.json({ items: names.map((name) => ({ name })) });
+      if (url.searchParams.get("alt") === "media") {
+        const logIndex = Number(
+          /-(\d+)\.json$/.exec(decodeURIComponent(url.pathname))?.[1],
+        );
+        return Response.json({
+          state: "pending",
+          leaseUntil: 0,
+          event: {
+            ...candidate,
+            logIndex,
+            amount0: "1",
+            amount1: "1",
+            liquidity: "1",
+          },
+          clientMsgId: poolClientMsgId(candidate),
+        });
+      }
+      return Response.json({ generation: "1" });
+    });
+    const seen: number[] = [];
+    const deliver = vi.fn(async (item: PoolLiquidityWithdrawal) => {
+      seen.push(item.logIndex);
+      if (item.logIndex === 0) clock = 145_001;
+      return "delivered" as const;
+    });
+    const options = {
+      fetchImpl: fetchImpl as typeof fetch,
+      candidateBucket: "candidate-bucket",
+      stateBucket: "test-bucket",
+      watches: [watch],
+      deliver,
+      now: () => clock,
+    };
+    expect(await retryPendingPoolLiquidityWithdrawals(options)).toBe(1);
+    expect(seen).toEqual([0]);
+    clock = 200_000;
+    expect(await retryPendingPoolLiquidityWithdrawals(options)).toBe(1);
+    expect(seen).toEqual([0, 1]);
   });
 
   it("continues beyond persistently failing early records", async () => {

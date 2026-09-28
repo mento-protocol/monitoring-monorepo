@@ -191,7 +191,9 @@ module "onchain_event_handler" {
 module "onchain_event_listeners" {
   source = "./onchain-event-listeners"
 
-  for_each = local.multisigs_by_chain
+  # Pool watches must retain a Polygon listener even when the last Polygon
+  # Safe is removed. Do not invent a multisig entry or alter other chains.
+  for_each = merge(local.multisigs_by_chain, length(var.pool_liquidity_watches) > 0 && !contains(keys(local.multisigs_by_chain), "polygon") ? { polygon = {} } : {})
 
   providers = {
     restapi.quicknode = restapi.quicknode
@@ -206,7 +208,7 @@ module "onchain_event_listeners" {
   # quicknode_network_name. local.multisigs_by_chain_network is built from a
   # distinct() check in locals.tf — terraform plan fails with a clear error
   # if an operator mixes networks within one chain.
-  quicknode_network_name   = local.multisigs_by_chain_network[each.key]
+  quicknode_network_name   = each.key == "polygon" && length(each.value) == 0 ? "polygon-mainnet" : local.multisigs_by_chain_network[each.key]
   quicknode_api_key        = var.quicknode_api_key
   quicknode_signing_secret = var.quicknode_signing_secret
   debug_mode               = var.debug_mode
