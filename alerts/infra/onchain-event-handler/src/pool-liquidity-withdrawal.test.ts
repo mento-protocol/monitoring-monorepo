@@ -526,12 +526,13 @@ describe("Watched LP Polygon withdrawal", () => {
     expect(delivered).toEqual([25, 26]);
   });
 
-  it("continues after twenty retained-history pages on the next run", async () => {
+  it("resumes after twenty history pages, including a malformed object", async () => {
     const names = Array.from(
       { length: 21 },
       (_, logIndex) =>
         `pool-liquidity-withdrawals/137/${watch.id}/${candidate.txHash}-${logIndex}.json`,
     );
+    names[19] = `pool-liquidity-withdrawals/137/${watch.id}/malformed.json`;
     const fetchImpl = retryFetch(async (input) => {
       const url = new URL(String(input));
       if (url.searchParams.has("prefix")) {

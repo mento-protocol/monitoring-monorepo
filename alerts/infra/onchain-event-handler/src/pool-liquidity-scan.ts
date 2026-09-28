@@ -1,5 +1,6 @@
 import type { Hex } from "viem";
 import { STORAGE_UPLOAD_BASE_URL } from "./quicknode-replay-protection";
+import { logger } from "./logger";
 
 const PREFIX = "pool-liquidity-withdrawals/137/";
 const CURSOR_NAME = "pool-liquidity-retry-cursor/137.json";
@@ -48,7 +49,9 @@ async function readCursor(fetchImpl: Fetch, token: string, bucket: string) {
   const value = (await content.json()) as { after?: unknown };
   if (
     value.after !== null &&
-    (typeof value.after !== "string" || !KEY_PATTERN.test(value.after))
+    (typeof value.after !== "string" ||
+      !value.after.startsWith(PREFIX) ||
+      Buffer.byteLength(value.after) > 1024)
   )
     throw new Error("Watched LP retry cursor is invalid");
   return { after: value.after as string | null, generation: info.generation };
@@ -99,6 +102,7 @@ export async function scanPoolDeliveryKeys(options: {
   let generation = cursor.generation;
   let pageToken: string | undefined;
   let pages = 0;
+  let malformedReported = false;
   const save = async (next: string | null) => {
     if (next !== after) {
       generation = await writeCursor(
@@ -135,8 +139,21 @@ export async function scanPoolDeliveryKeys(options: {
     for (const item of page.items ?? []) {
       const name = item.name ?? "";
       if (name === after) continue; // startOffset is inclusive.
+      if (!name.startsWith(PREFIX) || Buffer.byteLength(name) > 1024)
+        throw new Error(
+          "Watched LP retry list returned an invalid object name",
+        );
       const match = KEY_PATTERN.exec(name);
-      if (!match) throw new Error("Unexpected Watched LP delivery object name");
+      if (!match) {
+        if (!malformedReported) {
+          logger.error("Watched LP retry skipped malformed object", {
+            reason: "pool_liquidity_retry_malformed_object",
+          });
+          malformedReported = true;
+        }
+        last = name;
+        continue;
+      }
       const processed = await onKey({
         watch: { id: match[1] },
         txHash: match[2] as Hex,

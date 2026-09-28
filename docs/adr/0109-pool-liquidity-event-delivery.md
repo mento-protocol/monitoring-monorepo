@@ -65,6 +65,8 @@ history or failed early records cannot permanently hide later keys. A scan
 that reaches its page or time budget logs an ERROR covered by the infrastructure
 alert; a large backlog can delay delivery beyond one Scheduler interval. Old
 cursor generations expire after seven days while the live cursor remains.
+Malformed object names under the event prefix log one ERROR per scan and are
+skipped so one bad upload cannot block later valid records.
 
 This is at-least-once **after durable staging**, while GCS, RPC, Scheduler, and
 Slack recover and the retry backlog drains within the 365-day state retention.
