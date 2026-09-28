@@ -1,5 +1,11 @@
 import { Request, Response } from "@google-cloud/functions-framework";
 import { buildEventContext } from "./build-event-context";
+import {
+  configuredPoolWatches,
+  hasPoolBurnLog,
+  poolBurnCandidates,
+  stagePoolBurns,
+} from "./pool-liquidity-withdrawal";
 import { checkPayloadSize } from "./check-payload-size";
 import config from "./config";
 import { MULTISIG_CONFIG_ERROR } from "./constants";
@@ -92,6 +98,32 @@ export const processQuicknodeWebhook = async (
       return;
     }
 
+    // Claim event keys before nonce reservation, so a signed replay can still
+    // recover them after the Safe nonce is claimed. Private Scheduler performs
+    // receipt proof and Slack delivery; the public runtime can only create
+    // records, not rewrite or delete the delivery audit trail.
+    const poolDelivery = (async (): Promise<boolean> => {
+      try {
+        if (!hasPoolBurnLog(req.body)) return false;
+        const poolWatches = configuredPoolWatches();
+        let malformed = 0;
+        const candidates = poolBurnCandidates(req.body, poolWatches, () => {
+          malformed++;
+          logger.error("Watched LP Burn missing event key", {
+            reason: "pool_liquidity_malformed_burn",
+          });
+        });
+        const { failures } = await stagePoolBurns(candidates);
+        return failures + malformed > 0;
+      } catch (error) {
+        logger.error("Watched LP withdrawal delivery failed", {
+          reason: "pool_liquidity_delivery_failed",
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return true;
+      }
+    })();
+
     // 4. Reserve the nonce only after the payload is structurally valid. If
     // QuickNode sends an envelope we do not understand, reserving first would
     // make its retry look like a duplicate and permanently hide the producer
@@ -107,13 +139,21 @@ export const processQuicknodeWebhook = async (
           message: replayValidation.message,
           replayed: replayValidation.replayed,
         });
-        res.status(replayValidation.status).send(replayValidation.message);
+        if ((await poolDelivery) && replayValidation.replayed) {
+          res.status(503).send("Watched LP withdrawal delivery failed");
+        } else {
+          res.status(replayValidation.status).send(replayValidation.message);
+        }
         return;
       }
     }
 
     const webhookPayload = payloadValidation.payload;
-    const webhookData = webhookPayload.result;
+    // Safe has no Burn event. Keep Burns out of its formatter even when the
+    // pool watch config is invalid; its error must not block Safe delivery.
+    const webhookData = webhookPayload.result.filter(
+      (log) => !(log && typeof log === "object" && log.name === "Burn"),
+    );
 
     logger.info("Processing webhook", {
       logCount: webhookData.length,
@@ -134,6 +174,13 @@ export const processQuicknodeWebhook = async (
       skipped: results.skipped,
       total: webhookData.length,
     });
+
+    // A 503 asks QuickNode to retry Watched LP while the claimed Safe nonce prevents
+    // duplicate Safe posts. The retry function also recovers staged events.
+    if (await poolDelivery) {
+      res.status(503).send("Watched LP withdrawal delivery failed");
+      return;
+    }
 
     // 7. Return success
     res.status(200).json({
