@@ -64,7 +64,9 @@ resource "google_logging_metric" "onchain_handler_errors" {
         jsonPayload.message.message="Watched LP withdrawal delivery failed" OR
         jsonPayload.message="Watched LP withdrawal delivery failed" OR
         jsonPayload.message.message="Watched LP withdrawal retry failed" OR
-        jsonPayload.message="Watched LP withdrawal retry failed"
+        jsonPayload.message="Watched LP withdrawal retry failed" OR
+        jsonPayload.message.message="Watched LP retry scan incomplete" OR
+        jsonPayload.message="Watched LP retry scan incomplete"
       )) OR
       (resource.labels.service_name="${module.onchain_event_handler.function_name}" AND
        httpRequest.status>=500 AND httpRequest.status<600)

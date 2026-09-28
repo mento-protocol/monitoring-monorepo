@@ -7,6 +7,7 @@ import {
 } from "./quicknode-replay-protection";
 import { logger } from "./logger";
 import { sendToSlack } from "./slack";
+import { scanPoolDeliveryKeys } from "./pool-liquidity-scan";
 import {
   configuredPoolWatches,
   hasPoolBurnLog,
@@ -371,101 +372,58 @@ export async function retryPendingPoolLiquidityWithdrawals(
   const now = options.now ?? Date.now;
   const scanStartedAt = now();
   const deadline = scanStartedAt + 240_000;
-  let pageToken: string | undefined;
-  let pageCount = 0;
   let attempted = 0;
   let failures = 0;
-  let capReached = false;
-  const keys: EventKey[] = [];
-  do {
-    if (++pageCount > 20)
-      throw new Error(
-        "Watched LP retry scan exceeded 20 pages; delivery state needs operator inspection",
-      );
-    const url = new URL(
-      `https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(bucket)}/o`,
-    );
-    url.searchParams.set("prefix", "pool-liquidity-withdrawals/137/");
-    url.searchParams.set("maxResults", "1000");
-    url.searchParams.set("fields", "items(name),nextPageToken");
-    if (pageToken) url.searchParams.set("pageToken", pageToken);
-    const response = await fetchImpl(url, {
-      signal: AbortSignal.timeout(GCS_REQUEST_TIMEOUT_MS),
-      headers: { authorization: `Bearer ${token}` },
+  const scan = await scanPoolDeliveryKeys({
+    fetchImpl,
+    token,
+    bucket,
+    now,
+    deadline,
+    onKey: async (key) => {
+      if (failures >= 25) return false;
+      try {
+        const { record } = await readRecord(fetchImpl, token, bucket, key);
+        if (
+          record.state === "delivered" ||
+          record.state === "ignored" ||
+          record.leaseUntil > now()
+        )
+          return true;
+        if (attempted >= 25) return false;
+        attempted++;
+        if (record.state === "unverified") {
+          await (options.verify ?? processPoolBurns)([
+            { ...key, watch: record.event.watch },
+          ]);
+          return true;
+        }
+        const event: PoolLiquidityWithdrawal = {
+          ...key,
+          watch: record.event.watch,
+          amount0: BigInt(record.event.amount0),
+          amount1: BigInt(record.event.amount1),
+          liquidity: BigInt(record.event.liquidity),
+        };
+        await (options.deliver ?? deliverPoolLiquidityWithdrawal)(event);
+      } catch (error) {
+        failures++;
+        logger.error("Watched LP retry event failed", {
+          reason: "pool_liquidity_retry_event_failed",
+          transactionHash: key.txHash,
+          logIndex: key.logIndex,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      return true;
+    },
+  });
+  if (scan.incomplete)
+    logger.error("Watched LP retry scan incomplete", {
+      reason: "pool_liquidity_retry_scan_incomplete",
+      attempted,
     });
-    if (!response.ok)
-      throw new Error(`Watched LP retry list failed: ${response.status}`);
-    const page = (await response.json()) as {
-      items?: Array<{ name?: string }>;
-      nextPageToken?: string;
-    };
-    for (const item of page.items ?? []) {
-      if (now() >= deadline)
-        throw new Error("Watched LP retry scan reached processing budget");
-      const match =
-        /^pool-liquidity-withdrawals\/137\/([a-z0-9-]{1,64})\/(0x[0-9a-f]{64})-(\d+)\.json$/.exec(
-          item.name ?? "",
-        );
-      if (!match) throw new Error("Unexpected Watched LP delivery object name");
-      keys.push({
-        watch: { id: match[1] },
-        txHash: match[2] as Hex,
-        logIndex: Number(match[3]),
-      });
-    }
-    pageToken = page.nextPageToken;
-  } while (pageToken);
-  // Rotate the bounded attempt window by one batch each Scheduler minute.
-  // Persistently failing early keys must not starve later withdrawals. The
-  // complete name scan is bounded by the page and time budgets above.
-  const start = keys.length
-    ? (Math.floor(scanStartedAt / 60_000) * 25) % keys.length
-    : 0;
-  for (let offset = 0; offset < keys.length; offset++) {
-    if (now() >= deadline)
-      throw new Error("Watched LP retry scan reached processing budget");
-    const key = keys[(start + offset) % keys.length];
-    try {
-      const { record } = await readRecord(fetchImpl, token, bucket, key);
-      if (
-        record.state === "delivered" ||
-        record.state === "ignored" ||
-        record.leaseUntil > now()
-      )
-        continue;
-      if (attempted >= 25) {
-        capReached = true;
-        break;
-      }
-      attempted++;
-      if (record.state === "unverified") {
-        await (options.verify ?? processPoolBurns)([
-          { ...key, watch: record.event.watch },
-        ]);
-        continue;
-      }
-      const event: PoolLiquidityWithdrawal = {
-        ...key,
-        watch: record.event.watch,
-        amount0: BigInt(record.event.amount0),
-        amount1: BigInt(record.event.amount1),
-        liquidity: BigInt(record.event.liquidity),
-      };
-      await (options.deliver ?? deliverPoolLiquidityWithdrawal)(event);
-    } catch (error) {
-      failures++;
-      logger.error("Watched LP retry event failed", {
-        reason: "pool_liquidity_retry_event_failed",
-        transactionHash: key.txHash,
-        logIndex: key.logIndex,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      // Keep scanning so one Slack error does not starve other pending events.
-      if (failures > 25) throw error;
-    }
-    if (capReached) break;
-  }
-  if (capReached)
+  if (scan.deferred)
     throw new Error("Watched LP retry exceeded 25 pending events in one run");
   if (failures)
     throw new Error(`Watched LP retry left ${failures} event(s) pending`);

@@ -474,6 +474,16 @@ resource "google_storage_bucket" "pool_liquidity_delivery_state" {
     action { type = "Delete" }
   }
 
+  # Keep the live scan cursor, but bound old generations from each CAS update.
+  lifecycle_rule {
+    condition {
+      age            = 7
+      with_state     = "ARCHIVED"
+      matches_prefix = ["pool-liquidity-retry-cursor/"]
+    }
+    action { type = "Delete" }
+  }
+
   lifecycle { prevent_destroy = true }
 
   depends_on = [google_storage_bucket_iam_member.pool_liquidity_delivery_access_log_writer]

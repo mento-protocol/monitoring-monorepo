@@ -59,8 +59,17 @@ channel ID. Grafana's existing pool alerts use the channel name; this direct
 `chat.postMessage` route uses its ID. Live bot membership and a test delivery
 remain production activation checks.
 
+The retry worker scans retained event history in bounded pages and persists a
+generation-checked cursor after each page. It wraps at the end, so a long
+history or failed early records cannot permanently hide later keys. A scan
+that reaches its page or time budget logs an ERROR covered by the infrastructure
+alert; a large backlog can delay delivery beyond one Scheduler interval. Old
+cursor generations expire after seven days while the live cursor remains.
+
 This is at-least-once **after durable staging**, while GCS, RPC, Scheduler, and
-Slack recover within the 365-day state retention. Slack and GCS have no atomic
+Slack recover and the retry backlog drains within the 365-day state retention.
+A backlog that outgrows the worker's throughput can expire before delivery and
+requires operator backfill. Slack and GCS have no atomic
 commit: Slack may accept a post whose acknowledgement or subsequent GCS update
 fails, so a retry can post a duplicate. `client_msg_id` is a stable dedupe hint,
 not an exactly-once guarantee. Concurrent attempts are bounded by one GCS

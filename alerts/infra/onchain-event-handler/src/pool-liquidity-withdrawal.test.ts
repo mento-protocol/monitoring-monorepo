@@ -41,6 +41,44 @@ const sourceReceipt = {
 };
 const event = provePoolLiquidityWithdrawal(candidate, sourceReceipt)!;
 
+function retryFetch(handler: (input: string | URL) => Promise<Response>) {
+  let after: string | null = null;
+  let generation = 0;
+  return vi.fn(async (input: string | URL, init?: RequestInit) => {
+    const url = new URL(String(input));
+    const cursorPath = decodeURIComponent(url.pathname).endsWith(
+      "/o/pool-liquidity-retry-cursor/137.json",
+    );
+    if (cursorPath) {
+      if (generation === 0) return new Response("", { status: 404 });
+      if (url.searchParams.get("alt") === "media")
+        return Response.json({ after });
+      return Response.json({ generation: String(generation) });
+    }
+    if (
+      url.searchParams.get("name") === "pool-liquidity-retry-cursor/137.json"
+    ) {
+      if (url.searchParams.get("ifGenerationMatch") !== String(generation))
+        return new Response("", { status: 412 });
+      after = (JSON.parse(String(init?.body)) as { after: string | null })
+        .after;
+      return Response.json({ generation: String(++generation) });
+    }
+    const response = await handler(input);
+    if (!url.searchParams.has("prefix")) return response;
+    const page = (await response.json()) as {
+      items?: Array<{ name: string }>;
+      nextPageToken?: string;
+    };
+    const start = url.searchParams.get("startOffset");
+    if (start && page.items) {
+      const index = page.items.findIndex((item) => item.name === start);
+      page.items = index >= 0 ? page.items.slice(index) : page.items;
+    }
+    return Response.json(page);
+  });
+}
+
 describe("Watched LP Polygon withdrawal", () => {
   it("validates the configured watches and preserves stable IDs", () => {
     expect(configuredPoolWatches(JSON.stringify([watch]))).toEqual([watch]);
@@ -335,7 +373,7 @@ describe("Watched LP Polygon withdrawal", () => {
   });
 
   it("lists persisted pending events for retry after QuickNode's signature window", async () => {
-    const fetchImpl = vi.fn(async (input: string | URL) => {
+    const fetchImpl = retryFetch(async (input: string | URL) => {
       const url = new URL(String(input));
       if (url.searchParams.has("prefix"))
         return Response.json({
@@ -373,7 +411,7 @@ describe("Watched LP Polygon withdrawal", () => {
   });
 
   it("re-proves a staged candidate after an RPC outage", async () => {
-    const fetchImpl = vi.fn(async (input: string | URL) => {
+    const fetchImpl = retryFetch(async (input: string | URL) => {
       const url = new URL(String(input));
       if (url.searchParams.has("prefix"))
         return Response.json({
@@ -404,7 +442,7 @@ describe("Watched LP Polygon withdrawal", () => {
   });
 
   it("stops at 25 pending retries without treating deferred records as failures", async () => {
-    const fetchImpl = vi.fn(async (input: string | URL) => {
+    const fetchImpl = retryFetch(async (input: string | URL) => {
       const url = new URL(String(input));
       if (url.searchParams.has("prefix"))
         return Response.json({
@@ -442,7 +480,7 @@ describe("Watched LP Polygon withdrawal", () => {
 
   it("rotates retry attempts past persistently failing early records", async () => {
     let clock = 0;
-    const fetchImpl = vi.fn(async (input: string | URL) => {
+    const fetchImpl = retryFetch(async (input: string | URL) => {
       const url = new URL(String(input));
       if (url.searchParams.has("prefix"))
         return Response.json({
@@ -484,9 +522,61 @@ describe("Watched LP Polygon withdrawal", () => {
     );
     expect(delivered).toEqual([]);
     clock = 60_000;
-    await expect(retryPendingPoolLiquidityWithdrawals(options)).rejects.toThrow(
-      "exceeded 25 pending events",
-    );
+    expect(await retryPendingPoolLiquidityWithdrawals(options)).toBe(2);
     expect(delivered).toEqual([25, 26]);
+  });
+
+  it("continues after twenty retained-history pages on the next run", async () => {
+    const names = Array.from(
+      { length: 21 },
+      (_, logIndex) =>
+        `pool-liquidity-withdrawals/137/${watch.id}/${candidate.txHash}-${logIndex}.json`,
+    );
+    const fetchImpl = retryFetch(async (input) => {
+      const url = new URL(String(input));
+      if (url.searchParams.has("prefix")) {
+        const pageToken = url.searchParams.get("pageToken");
+        const start = url.searchParams.get("startOffset");
+        const index = pageToken
+          ? Number(pageToken)
+          : start
+            ? names.indexOf(start)
+            : 0;
+        return Response.json({
+          items: [{ name: names[index] }],
+          nextPageToken:
+            index < names.length - 1 ? String(index + 1) : undefined,
+        });
+      }
+      if (url.searchParams.get("alt") === "media") {
+        const index = Number(
+          /-(\d+)\.json$/.exec(decodeURIComponent(url.pathname))?.[1],
+        );
+        return Response.json({
+          state: index === 20 ? "pending" : "delivered",
+          leaseUntil: 0,
+          event: {
+            ...candidate,
+            logIndex: index,
+            amount0: "1",
+            amount1: "1",
+            liquidity: "1",
+          },
+          clientMsgId: poolClientMsgId(candidate),
+        });
+      }
+      return Response.json({ generation: "1" });
+    });
+    const deliver = vi.fn(async () => "delivered" as const);
+    const options = {
+      fetchImpl: fetchImpl as typeof fetch,
+      bucket: "test-bucket",
+      deliver,
+      now: () => 0,
+    };
+    expect(await retryPendingPoolLiquidityWithdrawals(options)).toBe(0);
+    expect(deliver).not.toHaveBeenCalled();
+    expect(await retryPendingPoolLiquidityWithdrawals(options)).toBe(1);
+    expect(deliver).toHaveBeenCalledTimes(1);
   });
 });

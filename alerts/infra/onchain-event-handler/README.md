@@ -45,8 +45,11 @@ differs from the internal `ethereum` and `polygon` chain keys.
   by one Scheduler interval plus processing time. GCS generation preconditions and a lease
   limit concurrent sends. Every attempt uses the same `client_msg_id`; Slack
   acceptance and GCS completion are not atomic, so a timeout or failed state
-  update can still duplicate the message. After durable staging, retries
-  continue until delivery, a negative receipt proof, or 365-day retention. If GCS cannot stage an event
+  update can still duplicate the message. The worker persists a scan cursor
+  between bounded runs and pages `#alerts-infra` when historical volume delays
+  a complete scan. After durable staging, retries continue until delivery, a
+  negative receipt proof, or 365-day retention; a backlog that cannot drain
+  before expiry needs operator backfill. If GCS cannot stage an event
   before QuickNode's signed retries expire, use Polygon logs for operator
   backfill. Retry function errors page through the on-chain infrastructure
   alert. A separate Scheduler attempt alert pages `#alerts-infra` when OIDC,
