@@ -418,4 +418,54 @@ describe("Watched LP Polygon withdrawal", () => {
     ).rejects.toThrow("exceeded 25 pending events");
     expect(deliver).toHaveBeenCalledTimes(25);
   });
+
+  it("rotates retry attempts past persistently failing early records", async () => {
+    let clock = 0;
+    const fetchImpl = vi.fn(async (input: string | URL) => {
+      const url = new URL(String(input));
+      if (url.searchParams.has("prefix"))
+        return Response.json({
+          items: Array.from({ length: 27 }, (_, logIndex) => ({
+            name: `pool-liquidity-withdrawals/137/${watch.id}/${candidate.txHash}-${logIndex}.json`,
+          })),
+        });
+      if (url.searchParams.get("alt") === "media") {
+        const match = /-(\d+)\.json$/.exec(decodeURIComponent(url.pathname));
+        return Response.json({
+          state: "pending",
+          leaseUntil: 0,
+          event: {
+            ...candidate,
+            logIndex: Number(match?.[1]),
+            amount0: "1",
+            amount1: "1",
+            liquidity: "1",
+          },
+          clientMsgId: poolClientMsgId(candidate),
+        });
+      }
+      return Response.json({ generation: "1" });
+    });
+    const delivered: number[] = [];
+    const deliver = vi.fn(async (item: PoolLiquidityWithdrawal) => {
+      if (item.logIndex < 25) throw new Error("persistent RPC failure");
+      delivered.push(item.logIndex);
+      return "delivered" as const;
+    });
+    const options = {
+      fetchImpl: fetchImpl as typeof fetch,
+      bucket: "test-bucket",
+      deliver,
+      now: () => clock,
+    };
+    await expect(retryPendingPoolLiquidityWithdrawals(options)).rejects.toThrow(
+      "exceeded 25 pending events",
+    );
+    expect(delivered).toEqual([]);
+    clock = 60_000;
+    await expect(retryPendingPoolLiquidityWithdrawals(options)).rejects.toThrow(
+      "exceeded 25 pending events",
+    );
+    expect(delivered).toEqual([25, 26]);
+  });
 });

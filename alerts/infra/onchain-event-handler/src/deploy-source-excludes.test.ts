@@ -49,3 +49,9 @@ describe.each(packages)("%s deploy inputs", (pkg) => {
     );
   });
 });
+
+it("keeps the receipt fixture out of both handler deploy sources", () => {
+  const fixture = "src/fixtures-pool-liquidity-withdrawal.json";
+  expect(terraformArchiveExcludes("onchain-event-handler")).toContain(fixture);
+  expect(gcloudIgnorePatterns("onchain-event-handler")).toContain(fixture);
+});

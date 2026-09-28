@@ -62,7 +62,8 @@ lease; ambiguous Slack outcomes and lease expiry still leave a duplicate
 window. If GCS stays unavailable until QuickNode stops retrying, no durable
 record exists; operators must backfill from Polygon logs. A retry scan cap or
 persistent failure emits an error into the on-chain handler's infrastructure
-alert route. A separate Scheduler attempt alert covers invocation and timeout
+alert route. The capped retry window rotates each Scheduler minute so a fixed
+set of failing records does not starve later events. A separate Scheduler attempt alert covers invocation and timeout
 failures that produce no function log.
 
 ## Alternatives considered

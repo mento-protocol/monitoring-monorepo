@@ -607,12 +607,14 @@ export async function retryPendingPoolLiquidityWithdrawals(
     AbortSignal.timeout(GCS_REQUEST_TIMEOUT_MS),
   );
   const now = options.now ?? Date.now;
-  const deadline = now() + 240_000;
+  const scanStartedAt = now();
+  const deadline = scanStartedAt + 240_000;
   let pageToken: string | undefined;
   let pageCount = 0;
   let attempted = 0;
   let failures = 0;
   let capReached = false;
+  const keys: EventKey[] = [];
   do {
     if (++pageCount > 20)
       throw new Error(
@@ -643,53 +645,64 @@ export async function retryPendingPoolLiquidityWithdrawals(
           item.name ?? "",
         );
       if (!match) throw new Error("Unexpected Watched LP delivery object name");
-      const key: EventKey = {
+      keys.push({
         watch: { id: match[1] },
         txHash: match[2] as Hex,
         logIndex: Number(match[3]),
-      };
-      try {
-        const { record } = await readRecord(fetchImpl, token, bucket, key);
-        if (
-          record.state === "delivered" ||
-          record.state === "ignored" ||
-          record.leaseUntil > now()
-        )
-          continue;
-        if (attempted >= 25) {
-          capReached = true;
-          break;
-        }
-        attempted++;
-        if (record.state === "unverified") {
-          await (options.verify ?? processPoolBurns)([
-            { ...key, watch: record.event.watch },
-          ]);
-          continue;
-        }
-        const event: PoolLiquidityWithdrawal = {
-          ...key,
-          watch: record.event.watch,
-          amount0: BigInt(record.event.amount0),
-          amount1: BigInt(record.event.amount1),
-          liquidity: BigInt(record.event.liquidity),
-        };
-        await (options.deliver ?? deliverPoolLiquidityWithdrawal)(event);
-      } catch (error) {
-        failures++;
-        logger.error("Watched LP retry event failed", {
-          reason: "pool_liquidity_retry_event_failed",
-          transactionHash: key.txHash,
-          logIndex: key.logIndex,
-          error: error instanceof Error ? error.message : String(error),
-        });
-        // Keep scanning so one Slack error does not starve other pending events.
-        if (failures > 25) throw error;
-      }
+      });
     }
-    if (capReached) break;
     pageToken = page.nextPageToken;
   } while (pageToken);
+  // Rotate the bounded attempt window by one batch each Scheduler minute.
+  // Persistently failing early keys must not starve later withdrawals. The
+  // complete name scan is bounded by the page and time budgets above.
+  const start = keys.length
+    ? (Math.floor(scanStartedAt / 60_000) * 25) % keys.length
+    : 0;
+  for (let offset = 0; offset < keys.length; offset++) {
+    if (now() >= deadline)
+      throw new Error("Watched LP retry scan reached processing budget");
+    const key = keys[(start + offset) % keys.length];
+    try {
+      const { record } = await readRecord(fetchImpl, token, bucket, key);
+      if (
+        record.state === "delivered" ||
+        record.state === "ignored" ||
+        record.leaseUntil > now()
+      )
+        continue;
+      if (attempted >= 25) {
+        capReached = true;
+        break;
+      }
+      attempted++;
+      if (record.state === "unverified") {
+        await (options.verify ?? processPoolBurns)([
+          { ...key, watch: record.event.watch },
+        ]);
+        continue;
+      }
+      const event: PoolLiquidityWithdrawal = {
+        ...key,
+        watch: record.event.watch,
+        amount0: BigInt(record.event.amount0),
+        amount1: BigInt(record.event.amount1),
+        liquidity: BigInt(record.event.liquidity),
+      };
+      await (options.deliver ?? deliverPoolLiquidityWithdrawal)(event);
+    } catch (error) {
+      failures++;
+      logger.error("Watched LP retry event failed", {
+        reason: "pool_liquidity_retry_event_failed",
+        transactionHash: key.txHash,
+        logIndex: key.logIndex,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      // Keep scanning so one Slack error does not starve other pending events.
+      if (failures > 25) throw error;
+    }
+    if (capReached) break;
+  }
   if (capReached)
     throw new Error("Watched LP retry exceeded 25 pending events in one run");
   if (failures)
