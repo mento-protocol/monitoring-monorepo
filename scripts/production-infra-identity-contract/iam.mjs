@@ -88,6 +88,29 @@ const IAM_MEMBER_EXPRESSION_GROUPS = [
       "alerts/infra/onchain-event-handler/main.tf:google_secret_manager_secret_iam_member.runtime_quicknode_signing_secret",
       "alerts/infra/onchain-event-handler/main.tf:google_secret_manager_secret_iam_member.runtime_slack_bot_token",
       "alerts/infra/onchain-event-handler/main.tf:google_storage_bucket_iam_member.runtime_replay_nonce_creator",
+      "alerts/infra/onchain-event-handler/main.tf:google_storage_bucket_iam_member.runtime_pool_liquidity_delivery_state",
+    ],
+  },
+  {
+    expression:
+      '"serviceAccount:${google_service_account.pool_liquidity_scheduler.email}"',
+    blocks: [
+      "alerts/infra/onchain-event-handler/main.tf:google_cloudfunctions2_function_iam_member.pool_liquidity_scheduler_invoker",
+      "alerts/infra/onchain-event-handler/main.tf:google_cloud_run_v2_service_iam_member.pool_liquidity_scheduler_run_invoker",
+    ],
+  },
+  {
+    expression:
+      '"serviceAccount:${google_service_account.pool_liquidity_retry_runtime.email}"',
+    blocks: [
+      "alerts/infra/onchain-event-handler/main.tf:google_storage_bucket_iam_member.retry_pool_liquidity_delivery_state",
+      "alerts/infra/onchain-event-handler/main.tf:google_secret_manager_secret_iam_member.retry_runtime_slack_bot_token",
+    ],
+  },
+  {
+    expression: '"group:cloud-storage-analytics@google.com"',
+    blocks: [
+      "alerts/infra/onchain-event-handler/main.tf:google_storage_bucket_iam_member.pool_liquidity_delivery_access_log_writer",
     ],
   },
   {
@@ -262,12 +285,18 @@ const IAM_BLOCK_SHAPE_SPECIFICATIONS = [
   "alerts/infra/oncall-announcer/main.tf:google_storage_bucket_iam_member.runtime_rotation_state_object_admin|ca42a486a00996e5d5e764095b7b54431ce599e0bc21ef6d3c98fdb75f65b452",
   "alerts/infra/oncall-announcer/main.tf:google_storage_bucket_iam_member.terraform_refresh_readonly_function_source|eaa0d305087e4047469f000516b1143d9f78701d3c1d43498fd7c9f12aacc951",
   "alerts/infra/onchain-event-handler/main.tf:google_cloud_run_v2_service_iam_member.cloud_run_invoker|de0cac6c6593a02ad957afc61670b01b2c97bb8a127730c98fc9d8a0b59e9b2a",
+  "alerts/infra/onchain-event-handler/main.tf:google_cloud_run_v2_service_iam_member.pool_liquidity_scheduler_run_invoker|7eb3e0fd9fcb2ec28009aea414dbb45e3c5a317b4fd1aaa21ffa1a4a9c3d6cef",
   "alerts/infra/onchain-event-handler/main.tf:google_cloudfunctions2_function_iam_member.cloud_function_invoker|6f908053c986696b71486d30cd3fbdb506366f76d9e3af23f4fb7c30d018ffe8",
+  "alerts/infra/onchain-event-handler/main.tf:google_cloudfunctions2_function_iam_member.pool_liquidity_scheduler_invoker|60a6fc5e2704908d21fb1e062281ddd50b31d8c81ee38fcc782ef900fdf57644",
   "alerts/infra/onchain-event-handler/main.tf:google_secret_manager_secret_iam_member.runtime_quicknode_signing_secret|5af2290c5fe3ae6f82bff10df4bf8bda3a6a08134d991d792fad028454035aa9",
   "alerts/infra/onchain-event-handler/main.tf:google_secret_manager_secret_iam_member.runtime_slack_bot_token|6742758ccd4e2715f0bb9bc7bc7ad9f6b3b0cf60edb96628a670f23d11d450e9",
   "alerts/infra/onchain-event-handler/main.tf:google_secret_manager_secret_iam_member.terraform_refresh_readonly|e81944491c204e9b90deb4121a76fb98a8019c6faa391c0005d5d79c391bebdc,1e60bc675751dce84cc1c6c349452838a1d8d9f3c428287ae4b87db21969d372",
   "alerts/infra/onchain-event-handler/main.tf:google_storage_bucket_iam_member.cloud_build_storage_access|3a4cc296770d3636d5dae0f915528437d136b899d9cb4ec54774f8fb7c1cd05e",
   "alerts/infra/onchain-event-handler/main.tf:google_storage_bucket_iam_member.runtime_replay_nonce_creator|960cee568e9d8c2a3bb4417ecb364c1fd37facddb674dbac47806c2a344832e4",
+  "alerts/infra/onchain-event-handler/main.tf:google_storage_bucket_iam_member.pool_liquidity_delivery_access_log_writer|53b4f1c88735c082ae4b2463d876fb1691c8f6a591b7627302bc2baa38c58862",
+  "alerts/infra/onchain-event-handler/main.tf:google_storage_bucket_iam_member.runtime_pool_liquidity_delivery_state|80e7b96e83445c3e5dd4ed4a91385e37d9c196ba5f3a187eb2380d79a9ba0abf",
+  "alerts/infra/onchain-event-handler/main.tf:google_storage_bucket_iam_member.retry_pool_liquidity_delivery_state|f77ef0e851cc29cb5aa56ee92b98c49e7fd5d7d834e41ea34aa751ef5ad601f3",
+  "alerts/infra/onchain-event-handler/main.tf:google_secret_manager_secret_iam_member.retry_runtime_slack_bot_token|5bde880476b8e05c3f11a445c69604792940b8db5f3eac11610ec586b1a046f5",
   "alerts/infra/onchain-event-handler/main.tf:google_storage_bucket_iam_member.terraform_refresh_readonly_function_source|eaa0d305087e4047469f000516b1143d9f78701d3c1d43498fd7c9f12aacc951",
   "governance-watchdog/infra/cloud_function.tf:google_cloud_run_v2_service_iam_member.cloud_function_invoker|1baacd2d37d9f4329b95dcf03f6a20ea0d8d5c52c1ca8fcdf2f92d09ba42e993",
   "governance-watchdog/infra/cloud_function.tf:google_project_iam_member.secret_accessor|4918cf5acf2e8c25e97db6237fb0d4d015f49ee07b711e397f2387cb3e37fe34",
@@ -334,8 +363,8 @@ const MODULE_BLOCK_SHAPE_SPECIFICATIONS = [
   "alerts/infra/bridge-warning-channel.tf:module.bridge_warning_channel|37c9fce40c64ed7c6662eb042dbf9bfe2d2ee8d51285877a3524a5bff9e23d63",
   "aegis/terraform/main.tf:module.grafana_dashboard|e91ec8aba7c7347f74f6896a4eb52e2e8ebb588ea5a582cbb39929333870bcbe",
   "alerts/infra/main.tf:module.oncall_announcer|301aef0a9ea1033e937bd28b68ff7c9f23fc5ba8671e2e4201c5d8d2172bcb07",
-  "alerts/infra/main.tf:module.onchain_event_handler|4a9d935f8be2b979b2da133c4c01762813106f1d4ac60b53721f2492918843a1",
-  "alerts/infra/main.tf:module.onchain_event_listeners|a48ff45e601e93a881fa4e87f73f704761de0f6724c1437c70d95f7e231b3f0f",
+  "alerts/infra/main.tf:module.onchain_event_handler|4a9d935f8be2b979b2da133c4c01762813106f1d4ac60b53721f2492918843a1,06500202dc2acb0ac482e4fe1e57f26db0e2ea86baf8a7cb6d158d9e3f8b6940",
+  "alerts/infra/main.tf:module.onchain_event_listeners|a48ff45e601e93a881fa4e87f73f704761de0f6724c1437c70d95f7e231b3f0f,f7536b1891443cbfd0a7c03790e014f68c2826f5a2053b3104d913008e20425e",
   "alerts/infra/main.tf:module.project_factory|d2f60b3af4237c2c4e2135bc15cd026a3be8d5c477e4b31f58d13765f721153c",
   "alerts/infra/main.tf:module.sentry_bridge|86ac2b1628c5579c58defcbd8ef54dc978c6f44cd622ccc488db77b11e7dd225",
   "alerts/infra/main.tf:module.slack_channels|c3eaa2c32b7fbea2e34c5df9baec7a198d39a6fe8a9452e37adb2af7149c096c",
@@ -347,6 +376,8 @@ const IDENTITY_SOURCE_BLOCK_SHAPE_SPECIFICATIONS = [
   "alerts/infra/oncall-announcer/main.tf:google_service_account.function_runtime|fa16e6ee0550b30720312a6109ffe44112d0dfe41baef39ce66fdb95825465d4",
   "alerts/infra/oncall-announcer/main.tf:google_service_account.scheduler|098c4d6b3ddac9c9d5451aef0a303140417c56cd4475fc9ff1d17f042856b97e",
   "alerts/infra/onchain-event-handler/main.tf:google_service_account.function_runtime|a3b17fdfa196314caf2c19ac627d5442f254c5d9118d2e207226c32b9b8582f0",
+  "alerts/infra/onchain-event-handler/main.tf:google_service_account.pool_liquidity_scheduler|82241612713e67ccd17991c06e83588d065012d3fc3c59839adf8aa050f2f780",
+  "alerts/infra/onchain-event-handler/main.tf:google_service_account.pool_liquidity_retry_runtime|ddcb5d9b16b8c93feda6d5bc80b4364b678973cb2165acad23f41e62c5d6e3f8",
   "governance-watchdog/infra/scheduler.tf:google_service_account.scheduler_invoker|70e455ebc7e41da7dc0078fb00d6643af9c0634982262d3c5cd340eac7cd227e",
   "terraform/aegis-bootstrap.tf:google_service_account.grafana_agent_builder|5771d741295744c2da543de15ca4c4a6aae93325d52451e0f764c6c83833b5e4",
   "terraform/aegis-bootstrap.tf:google_service_account.grafana_agent_runtime|994b37f38438e2180e0db4d60b1b84e704ea99b16db9dc7da86a8659840951d6",
