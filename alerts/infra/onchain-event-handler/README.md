@@ -33,9 +33,13 @@ differs from the internal `ethereum` and `polygon` chain keys.
   public handler only stages each event key in a separate private GCS bucket;
   its runtime identity cannot rewrite or delete state. The private retry worker
   queries the Polygon receipt. Only a successful receipt with the watched wallet's
-  LP-token transfer to the pool, the matching LP burn, and the exact pool Burn
+  LP-token transfer to the pool (one or more consecutive same-receipt transfers
+  may sum to the burned amount), the matching LP burn, and the exact pool Burn
   can post to the configured `#alerts-pools` channel ID. Router/beneficiary
-  fields are not ownership evidence; a same-transaction swap is allowed.
+  fields are not ownership evidence; a same-transaction swap is allowed. A
+  partial or interleaved watched-wallet transfer pages for inspection rather
+  than silently ignoring the Burn. Transfers in earlier transactions cannot
+  prove ownership of a later Burn from this receipt alone.
 - A separate private function, invoked by Cloud Scheduler each minute, proves and
   delivers unverified and pending watch records. Normal delivery can lag staging
   by one Scheduler interval plus processing time. GCS generation preconditions and a lease
@@ -80,7 +84,9 @@ but is not a deployment input.
 
 Open a PR and review its plan. After merge, the apply runs through
 `.github/workflows/alerts-infra.yml` behind the `production-infra` approval
-gate. Never run a local production-stack apply. The targeted `generate:env`
+gate. Both the public webhook and private retry function must use the same
+reviewed source revision; there is no direct single-function deploy command.
+Never run a local production-stack apply. The targeted `generate:env`
 provisioner below is the sole documented local-development exception and still
 requires explicit approval.
 

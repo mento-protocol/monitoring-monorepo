@@ -40,31 +40,34 @@ resource "google_monitoring_notification_channel" "alerts_infra_slack" {
 }
 
 # Drop-path observability for the onchain-event-handler Cloud Function. The
-# handler is at-most-once by design: per-event failures and processing-budget
-# skips are logged and intentionally answered with HTTP 200 so QuickNode does
-# not replay the batch. These metrics and policies make those drops visible.
+# Safe event handling is at-most-once: per-event failures and budget skips log
+# and answer HTTP 200. Pool staging failures answer 503 for QuickNode retries;
+# a request-log 5xx signal pages even if staging never produced a GCS record.
 
-# Counts drop-path ERROR-level logs from the handler and its private Watched LP
-# retry worker. Pinned to these services so oncall-announcer does not cross-page;
-# narrowed to per-event drop logs so public auth probes do not page.
+# Counts drop-path ERROR logs and public 5xx requests from the handler and its
+# private Watched LP retry worker. The 5xx branch catches failures before a
+# withdrawal can be staged, even when application logging itself fails.
 resource "google_logging_metric" "onchain_handler_errors" {
   project     = local.project_id
   name        = "onchain_event_handler_error_logs"
-  description = "ERROR-level Safe drop and Watched LP delivery/retry failures in the on-chain alert functions"
+  description = "Safe drop and watched LP delivery/retry ERROR logs plus public webhook 5xx requests"
   filter      = <<EOF
-    severity>=ERROR
     resource.type="cloud_run_revision"
     (resource.labels.service_name="${module.onchain_event_handler.function_name}" OR
      resource.labels.service_name="onchain-pool-liquidity-retry")
     (
-      jsonPayload.message.message="Error processing log" OR
-      jsonPayload.message="Error processing log" OR
-      jsonPayload.message.message="No notification channel found" OR
-      jsonPayload.message="No notification channel found" OR
-      jsonPayload.message.message="Watched LP withdrawal delivery failed" OR
-      jsonPayload.message="Watched LP withdrawal delivery failed" OR
-      jsonPayload.message.message="Watched LP withdrawal retry failed" OR
-      jsonPayload.message="Watched LP withdrawal retry failed"
+      (severity>=ERROR AND (
+        jsonPayload.message.message="Error processing log" OR
+        jsonPayload.message="Error processing log" OR
+        jsonPayload.message.message="No notification channel found" OR
+        jsonPayload.message="No notification channel found" OR
+        jsonPayload.message.message="Watched LP withdrawal delivery failed" OR
+        jsonPayload.message="Watched LP withdrawal delivery failed" OR
+        jsonPayload.message.message="Watched LP withdrawal retry failed" OR
+        jsonPayload.message="Watched LP withdrawal retry failed"
+      )) OR
+      (resource.labels.service_name="${module.onchain_event_handler.function_name}" AND
+       httpRequest.status>=500 AND httpRequest.status<600)
     )
   EOF
 }
@@ -114,12 +117,13 @@ resource "google_monitoring_alert_policy" "onchain_handler_errors_policy" {
       Safe per-event failures log ERROR but answer HTTP 200, so QuickNode will
       not redeliver. Check the logs and re-verify affected Safe transactions.
 
-      Pool withdrawal delivery failures answer HTTP 503; staged records also remain in
-      GCS for the private retry worker. Check both function logs and the
-      `pool-liquidity-withdrawals/137/` records when this policy fires for Watched LP.
+      Pool staging failures answer HTTP 503 and require operator backfill if
+      QuickNode's signed retries expire. Check the public function's 5xx request
+      log and Polygon logs for unstaged Burns. Staged records remain in GCS for
+      the private retry worker; check `pool-liquidity-withdrawals/137/` too.
 
-      **View recent error logs:**
-      https://console.cloud.google.com/logs/query;query=severity%3E%3DERROR%20AND%20resource.type%3D%22cloud_run_revision%22;duration=PT24H
+      **View recent function and request logs:**
+      https://console.cloud.google.com/logs/query;query=resource.type%3D%22cloud_run_revision%22;duration=PT24H
     EOT
     mime_type = "text/markdown"
   }

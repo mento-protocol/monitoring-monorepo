@@ -33,10 +33,16 @@ covers EURm/USDm. The signed webhook only supplies a candidate key (watch ID,
 transaction hash, and burn log index). Fetch the Polygon transaction receipt
 and require a successful transaction, the exact pool Burn, a matching LP-token
 transfer from the watched wallet to the pool, and the matching LP-token burn.
+Consecutive watched-wallet transfers in that receipt may sum to the burned LP
+amount. A partial or interleaved watched-wallet contribution keeps the record
+pending and pages an operator; it must not become an ignored event.
 Router and beneficiary fields do not establish LP ownership. A swap in the
 same receipt does not suppress a valid withdrawal. Unrelated LP-token transfers
 do not break this proof; a conflicting transfer involving the pool leaves the
-candidate pending and raises a retry error for operator inspection.
+candidate pending and raises a retry error for operator inspection. A prior
+transaction's LP transfer cannot prove ownership of a later Burn from one
+receipt; that case needs separate on-chain investigation or a future stateful
+transfer-correlation design.
 
 The public webhook only creates immutable candidate keys in a dedicated private
 GCS bucket. Its runtime identity has no permission to overwrite or delete them.

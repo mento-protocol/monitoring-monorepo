@@ -15,7 +15,6 @@ import { processEvents } from "./process-events";
 import { reserveQuickNodeNonce } from "./quicknode-replay-protection";
 import { validatePayload } from "./validate-payload";
 import { validateQuickNodeWebhook } from "./validate-quicknode-webhook";
-export { retryPoolLiquidityWithdrawals } from "./pool-liquidity-retry";
 
 const DEFAULT_FUNCTION_TIMEOUT_SECONDS = 300;
 const RESPONSE_HEADROOM_MS = 30_000;

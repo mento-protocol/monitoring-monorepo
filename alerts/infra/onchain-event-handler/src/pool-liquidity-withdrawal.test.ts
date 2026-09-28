@@ -199,6 +199,27 @@ describe("Watched LP Polygon withdrawal", () => {
     ).toThrow("Ambiguous watched LP transfer");
   });
 
+  it("proves split same-transaction contributions and keeps partial contributions pending", () => {
+    const split = structuredClone(sourceReceipt);
+    const total = BigInt(split.logs[0].data);
+    const first = total / 2n;
+    const encode = (value: bigint) =>
+      `0x${value.toString(16).padStart(64, "0")}`;
+    split.logs[0].data = encode(first);
+    split.logs.splice(1, 0, {
+      ...split.logs[0],
+      logIndex: 835,
+      data: encode(total - first),
+    });
+    split.logs[2].logIndex = 836;
+    expect(provePoolLiquidityWithdrawal(candidate, split)).not.toBeNull();
+
+    split.logs.splice(1, 1);
+    expect(() => provePoolLiquidityWithdrawal(candidate, split)).toThrow(
+      "Ambiguous watched LP transfer",
+    );
+  });
+
   it("does not use decoded event args as proof, and deduplicates receipt fetches per transaction", async () => {
     const getReceipt = vi.fn(async () => sourceReceipt);
     const send = vi.fn(async () => "delivered" as const);
