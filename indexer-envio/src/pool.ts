@@ -86,31 +86,18 @@ type PreloadPoolContext = {
   Pool: { get: (id: string) => Promise<Pool | undefined> };
   DeviationThresholdBreach: {
     get: (id: string) => Promise<unknown>;
-    getWhere?: (where: {
-      poolId: { _eq: string };
-      startedAt: { _eq: bigint };
-    }) => Promise<unknown>;
   };
 };
 
-/** Warm the open breach row with the same lookup `recordBreachTransition`
- * makes in processing. New rows carry event entropy in their id, so only the
- * `getWhere` form finds them; the legacy id `get` remains the fallback for
- * contexts without `getWhere`, matching `getOpenBreach`. */
 async function preloadPoolAndOpenBreach(
   context: PreloadPoolContext,
   id: string,
 ): Promise<Pool | undefined> {
   const pool = await context.Pool.get(id);
   if (pool && pool.deviationBreachStartedAt > 0n) {
-    const breaches = context.DeviationThresholdBreach;
-    const startedAt = pool.deviationBreachStartedAt;
-    await (breaches.getWhere
-      ? breaches.getWhere({
-          poolId: { _eq: id },
-          startedAt: { _eq: startedAt },
-        })
-      : breaches.get(`${id}-${startedAt}`));
+    await context.DeviationThresholdBreach.get(
+      `${id}-${pool.deviationBreachStartedAt}`,
+    );
   }
   return pool;
 }

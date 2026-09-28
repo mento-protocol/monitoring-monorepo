@@ -543,7 +543,7 @@ indexer.onEvent(
     // VP linked in the same processing batch could be missed by the cold
     // getWhere read. The cache:false `poolExchangeEffect` is intentionally
     // NOT called here (RPC stays in processing only).
-    // preload-handler-note: preload warms link reads, but high-frequency self-healing needs ordered exchange state; see docs/PLAN-indexer-preload-state-sync.md stage 3.
+    // preload-handler-note: preload warms link reads, but high-frequency self-healing needs ordered exchange state; see #1394.
     // preload-effect-helpers: ensureBiPoolExchange
     if (context.isPreload) {
       await preloadBiPoolExchangeLink(context, event.chainId, exchangeId);
