@@ -32,6 +32,9 @@ const LEASE_MS = 60_000;
 const GCS_REQUEST_TIMEOUT_MS = 10_000;
 type EventKey = { txHash: Hex; logIndex: number; watch: { id: string } };
 type Fetch = typeof fetch;
+const CANDIDATE_PREFIX = "pool-liquidity-candidates";
+const STATE_PREFIX = "pool-liquidity-withdrawals";
+class MissingRecordError extends Error {}
 type DeliveryRecord = {
   state: "unverified" | "pending" | "delivered" | "ignored";
   leaseUntil: number;
@@ -59,20 +62,29 @@ export function poolClientMsgId(event: BurnCandidate): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-function recordName(event: EventKey): string {
-  return `pool-liquidity-withdrawals/137/${event.watch.id}/${event.txHash.toLowerCase()}-${event.logIndex}.json`;
+function recordName(event: EventKey, prefix = STATE_PREFIX): string {
+  return `${prefix}/137/${event.watch.id}/${event.txHash.toLowerCase()}-${event.logIndex}.json`;
 }
-function objectUrl(bucket: string, event: EventKey): URL {
+function objectUrl(
+  bucket: string,
+  event: EventKey,
+  prefix = STATE_PREFIX,
+): URL {
   return new URL(
-    `https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(recordName(event))}`,
+    `https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(recordName(event, prefix))}`,
   );
 }
-function uploadUrl(bucket: string, event: EventKey, generation: string): URL {
+function uploadUrl(
+  bucket: string,
+  event: EventKey,
+  generation: string,
+  prefix = STATE_PREFIX,
+): URL {
   const url = new URL(
     `${STORAGE_UPLOAD_BASE_URL}/${encodeURIComponent(bucket)}/o`,
   );
   url.searchParams.set("uploadType", "media");
-  url.searchParams.set("name", recordName(event));
+  url.searchParams.set("name", recordName(event, prefix));
   url.searchParams.set("ifGenerationMatch", generation);
   return url;
 }
@@ -82,9 +94,10 @@ async function putRecord(
   bucket: string,
   record: DeliveryRecord,
   generation: string,
+  prefix = STATE_PREFIX,
 ): Promise<string | null> {
   const response = await fetchImpl(
-    uploadUrl(bucket, record.event, generation),
+    uploadUrl(bucket, record.event, generation, prefix),
     {
       method: "POST",
       signal: AbortSignal.timeout(GCS_REQUEST_TIMEOUT_MS),
@@ -114,6 +127,8 @@ async function readRecord(
     signal: AbortSignal.timeout(GCS_REQUEST_TIMEOUT_MS),
     headers: { authorization: `Bearer ${token}` },
   });
+  if (metadataResponse.status === 404)
+    throw new MissingRecordError("Delivery state missing");
   if (!metadataResponse.ok)
     throw new Error(
       `Watched LP GCS metadata read failed: ${metadataResponse.status}`,
@@ -149,8 +164,8 @@ export async function stagePoolCandidate(
   event: BurnCandidate,
   options: { fetchImpl?: Fetch; bucket?: string } = {},
 ): Promise<void> {
-  const bucket = options.bucket ?? process.env.POOL_LIQUIDITY_DELIVERY_BUCKET;
-  if (!bucket) throw new Error("Watched LP delivery bucket missing");
+  const bucket = options.bucket ?? process.env.POOL_LIQUIDITY_CANDIDATE_BUCKET;
+  if (!bucket) throw new Error("Watched LP candidate bucket missing");
   const fetchImpl = options.fetchImpl ?? fetch;
   const token = await getMetadataAccessToken(
     fetchImpl,
@@ -162,7 +177,7 @@ export async function stagePoolCandidate(
     event: { ...event, amount0: "0", amount1: "0", liquidity: "0" },
     clientMsgId: poolClientMsgId(event),
   };
-  await putRecord(fetchImpl, token, bucket, record, "0");
+  await putRecord(fetchImpl, token, bucket, record, "0", CANDIDATE_PREFIX);
 }
 
 export async function stagePoolBurns(
@@ -199,22 +214,19 @@ export async function ignorePoolCandidate(
     fetchImpl,
     AbortSignal.timeout(GCS_REQUEST_TIMEOUT_MS),
   );
-  const { record, generation } = await readRecord(
-    fetchImpl,
-    token,
-    bucket,
-    event,
-  );
-  if (record.state !== "unverified") return;
-  const updated = await putRecord(
-    fetchImpl,
-    token,
-    bucket,
-    { ...record, state: "ignored" },
-    generation,
-  );
-  if (updated === null)
+  const record: DeliveryRecord = {
+    state: "ignored",
+    leaseUntil: 0,
+    event: { ...event, amount0: "0", amount1: "0", liquidity: "0" },
+    clientMsgId: poolClientMsgId(event),
+  };
+  const updated = await putRecord(fetchImpl, token, bucket, record, "0");
+  if (updated === null) {
+    const prior = await readRecord(fetchImpl, token, bucket, event);
+    if (prior.record.state === "ignored" || prior.record.state === "delivered")
+      return;
     throw new Error("Watched LP ignored-event state changed concurrently");
+  }
 }
 
 export async function deliverPoolLiquidityWithdrawal(
@@ -356,14 +368,21 @@ export async function processPoolBurns(
 export async function retryPendingPoolLiquidityWithdrawals(
   options: {
     fetchImpl?: Fetch;
-    bucket?: string;
+    candidateBucket?: string;
+    stateBucket?: string;
+    watches?: PoolWatch[];
     deliver?: typeof deliverPoolLiquidityWithdrawal;
     verify?: typeof processPoolBurns;
     now?: () => number;
   } = {},
 ): Promise<number> {
-  const bucket = options.bucket ?? process.env.POOL_LIQUIDITY_DELIVERY_BUCKET;
-  if (!bucket) throw new Error("Watched LP retry bucket missing");
+  const candidateBucket =
+    options.candidateBucket ?? process.env.POOL_LIQUIDITY_CANDIDATE_BUCKET;
+  const stateBucket =
+    options.stateBucket ?? process.env.POOL_LIQUIDITY_DELIVERY_BUCKET;
+  if (!candidateBucket || !stateBucket)
+    throw new Error("Watched LP retry buckets missing");
+  const watches = options.watches ?? configuredPoolWatches();
   const fetchImpl = options.fetchImpl ?? fetch;
   const token = await getMetadataAccessToken(
     fetchImpl,
@@ -377,27 +396,39 @@ export async function retryPendingPoolLiquidityWithdrawals(
   const scan = await scanPoolDeliveryKeys({
     fetchImpl,
     token,
-    bucket,
+    candidateBucket,
+    stateBucket,
     now,
     deadline,
     onKey: async (key) => {
-      if (failures >= 25) return false;
       try {
-        const { record } = await readRecord(fetchImpl, token, bucket, key);
+        let record: DeliveryRecord | null;
+        try {
+          record = (await readRecord(fetchImpl, token, stateBucket, key))
+            .record;
+        } catch (error) {
+          if (!(error instanceof MissingRecordError)) throw error;
+          record = null;
+        }
+        if (!record) {
+          const watch = watches.find((item) => item.id === key.watch.id);
+          if (!watch)
+            throw new Error("Watched LP candidate has no configured watch");
+          attempted++;
+          await (options.verify ?? processPoolBurns)([{ ...key, watch }], {
+            stage: async () => {},
+          });
+          return;
+        }
         if (
           record.state === "delivered" ||
           record.state === "ignored" ||
           record.leaseUntil > now()
         )
-          return true;
-        if (attempted >= 25) return false;
+          return;
         attempted++;
-        if (record.state === "unverified") {
-          await (options.verify ?? processPoolBurns)([
-            { ...key, watch: record.event.watch },
-          ]);
-          return true;
-        }
+        if (record.state === "unverified")
+          throw new Error("Unverified state in private delivery bucket");
         const event: PoolLiquidityWithdrawal = {
           ...key,
           watch: record.event.watch,
@@ -415,7 +446,6 @@ export async function retryPendingPoolLiquidityWithdrawals(
           error: error instanceof Error ? error.message : String(error),
         });
       }
-      return true;
     },
   });
   if (scan.incomplete)
@@ -423,8 +453,6 @@ export async function retryPendingPoolLiquidityWithdrawals(
       reason: "pool_liquidity_retry_scan_incomplete",
       attempted,
     });
-  if (scan.deferred)
-    throw new Error("Watched LP retry exceeded 25 pending events in one run");
   if (failures)
     throw new Error(`Watched LP retry left ${failures} event(s) pending`);
   return attempted;

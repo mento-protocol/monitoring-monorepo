@@ -44,15 +44,18 @@ transaction's LP transfer cannot prove ownership of a later Burn from one
 receipt; that case needs separate on-chain investigation or a future stateful
 transfer-correlation design.
 
-The public webhook only creates immutable candidate keys in a dedicated private
-GCS bucket. Its runtime identity has no permission to overwrite or delete them.
-A separate private Scheduler-invoked function proves receipts and delivers
-unverified and pending records each minute, using a distinct runtime identity
-with write access to the delivery state. Claim an event with
+The public webhook only creates immutable candidate keys in a dedicated GCS
+intake bucket. Its runtime identity cannot read, overwrite, or delete them and
+has no access to the separate private delivery-state bucket. The private
+Scheduler worker reads candidate **names**, never candidate contents or
+asserted states, and checks each watch ID against its own configuration before
+receipt proof. It alone creates ignored, pending, and delivered records in the
+delivery-state bucket. Claim an event with
 GCS generation preconditions and a lease; mark it delivered only after Slack
 acknowledges `chat.postMessage`. Store the watch details in the record so a
-later config change cannot erase retry proof. Never reuse a watch ID for a
-different pool or wallet. Use a deterministic `client_msg_id` from chain,
+later config change cannot erase proof for an already-pending delivery. A
+candidate with a removed watch ID instead pages for operator backfill. Never
+reuse a watch ID for a different pool or wallet. Use a deterministic `client_msg_id` from chain,
 watch ID, transaction hash, and log index on every send attempt. A negative receipt proof
 marks the event ignored. The delivery route uses the confirmed `#alerts-pools`
 channel ID. Grafana's existing pool alerts use the channel name; this direct
@@ -77,10 +80,12 @@ fails, so a retry can post a duplicate. `client_msg_id` is a stable dedupe hint,
 not an exactly-once guarantee. Concurrent attempts are bounded by one GCS
 lease; ambiguous Slack outcomes and lease expiry still leave a duplicate
 window. If GCS stays unavailable until QuickNode stops retrying, no durable
-record exists; operators must backfill from Polygon logs. A retry scan cap or
+record exists; operators must backfill from Polygon logs. A retry scan budget or
 persistent failure emits an error into the on-chain handler's infrastructure
-alert route. The capped retry window rotates each Scheduler minute so a fixed
-set of failing records does not starve later events. A separate Scheduler attempt alert covers invocation and timeout
+alert route. The worker scans to its time or page budget without a fixed
+25-event admission cap and advances its cursor past failing records. Sustained
+Burn traffic can still exceed finite worker capacity; operators must monitor
+scan lag and backfill before retention expires. A separate Scheduler attempt alert covers invocation and timeout
 failures that produce no function log.
 
 ## Alternatives considered
@@ -94,8 +99,8 @@ failures that produce no function log.
 
 ## Consequences
 
-The alert-delivery Terraform stack owns a dedicated pool-liquidity state bucket with
-access logging to a separate private, retention-limited bucket, a retry
+The alert-delivery Terraform stack owns distinct candidate and private delivery-state
+buckets with access logging to a separate private, retention-limited bucket, a retry
 function restricted to same-project internal ingress, Scheduler identity/job,
 and separate runtime identities with scoped bucket access. The webhook-to-Slack
 delay is normally up to one Scheduler interval (one minute) plus processing time.

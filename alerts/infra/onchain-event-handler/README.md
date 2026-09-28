@@ -30,8 +30,10 @@ differs from the internal `ethereum` and `polygon` chain keys.
 - The function uses the same private GCS bucket for replay nonces and
   dead-lettered Slack payloads.
 - The Polygon listener forwards `Burn` candidates for every configured pool watch. The
-  public handler only stages each event key in a separate private GCS bucket;
-  its runtime identity cannot rewrite or delete state. The private retry worker
+  public handler only stages each event key in a candidate GCS bucket;
+  its runtime identity cannot access the separate private delivery-state bucket.
+  The private retry worker reads candidate names but never trusts candidate
+  contents or states; it matches the watch ID to its own configuration before
   queries the Polygon receipt. Only a successful receipt with the watched wallet's
   LP-token transfer to the pool (one or more consecutive same-receipt transfers
   may sum to the burned amount), the matching LP burn, and the exact pool Burn
@@ -40,8 +42,8 @@ differs from the internal `ethereum` and `polygon` chain keys.
   partial or interleaved watched-wallet transfer pages for inspection rather
   than silently ignoring the Burn. Transfers in earlier transactions cannot
   prove ownership of a later Burn from this receipt alone.
-- A separate private function, invoked by Cloud Scheduler each minute, proves and
-  delivers unverified and pending watch records. Normal delivery can lag staging
+- A separate private function, invoked by Cloud Scheduler each minute, proves
+  candidate keys and retries pending delivery records. Normal delivery can lag staging
   by one Scheduler interval plus processing time. GCS generation preconditions and a lease
   limit concurrent sends. Every attempt uses the same `client_msg_id`; Slack
   acceptance and GCS completion are not atomic, so a timeout or failed state
@@ -54,7 +56,7 @@ differs from the internal `ethereum` and `polygon` chain keys.
   backfill. Retry function errors page through the on-chain infrastructure
   alert. A separate Scheduler attempt alert pages `#alerts-infra` when OIDC,
   IAM, timeout, or target failures prevent the retry function from logging.
-- The pool route uses `POOL_LIQUIDITY_DELIVERY_BUCKET`, `POOL_LIQUIDITY_WATCHES`, and `POOL_ALERT_CHANNEL_ID` from
+- The pool route uses `POOL_LIQUIDITY_CANDIDATE_BUCKET`, `POOL_LIQUIDITY_DELIVERY_BUCKET`, `POOL_LIQUIDITY_WATCHES`, and `POOL_ALERT_CHANNEL_ID` from
   Terraform; `RPC_URL_137` is the reviewed Polygon full-node RPC input
   (default `https://polygon.drpc.org`). These are not secrets. Confirm
   the bot's membership in the exact channel with the trusted Gateway's
@@ -115,10 +117,10 @@ After explicit approval for the targeted Terraform state mutation,
 `pnpm run generate:env` regenerates `.env` through the provisioner. The file
 contains `GCP_PROJECT_ID`, `MULTISIG_CONFIG`, `SLACK_BOT_TOKEN`,
 `SLACK_CHANNEL_ALERTS`, `SLACK_CHANNEL_EVENTS`, `QUICKNODE_SIGNING_SECRET`,
-`QUICKNODE_REPLAY_BUCKET`, `POOL_LIQUIDITY_WATCHES`, `POOL_LIQUIDITY_DELIVERY_BUCKET`,
+`QUICKNODE_REPLAY_BUCKET`, `POOL_LIQUIDITY_WATCHES`, `POOL_LIQUIDITY_CANDIDATE_BUCKET`, `POOL_LIQUIDITY_DELIVERY_BUCKET`,
 `POOL_ALERT_CHANNEL_ID`, `RPC_URL_137`, and `SUPPORTED_CHAINS`. The two bucket
-names are local placeholders; set the delivery bucket to a disposable development
-bucket before testing delivery, never the production audit trail. The runtime configuration
+names are local placeholders; set both pool buckets to disposable development
+buckets before testing delivery, never the production audit trail. The runtime configuration
 parser requires the multisig, signing-secret, and Slack values. Production also
 needs the replay bucket for nonce reservation and dead-letter storage; local
 development bypasses replay protection. `GCP_PROJECT_ID` and `SUPPORTED_CHAINS`

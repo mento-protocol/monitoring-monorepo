@@ -4,6 +4,7 @@ import receipt from "./fixtures-pool-liquidity-withdrawal.json";
 import {
   configuredPoolWatches,
   hasPoolBurnLog,
+  ignorePoolCandidate,
   poolBurnCandidates,
   poolClientMsgId,
   deliverPoolLiquidityWithdrawal,
@@ -347,11 +348,6 @@ describe("Watched LP Polygon withdrawal", () => {
       send,
       now: () => 1_000,
     };
-    await stagePoolCandidate(candidate, {
-      fetchImpl: fetchImpl as typeof fetch,
-      bucket: "test-bucket",
-    });
-    expect(stored?.record.state).toBe("unverified");
     await expect(
       deliverPoolLiquidityWithdrawal(event, options),
     ).rejects.toThrow("Slack 503");
@@ -372,6 +368,43 @@ describe("Watched LP Polygon withdrawal", () => {
     expect(stored?.record.state).toBe("delivered");
   });
 
+  it("stages only in the public candidate namespace", async () => {
+    const fetchImpl = vi.fn(async (input: string | URL) => {
+      const url = new URL(String(input));
+      if (url.pathname.includes("/upload/")) {
+        expect(url.pathname).toContain("candidate-bucket");
+        expect(url.searchParams.get("name")).toBe(
+          `pool-liquidity-candidates/137/${watch.id}/${candidate.txHash}-${candidate.logIndex}.json`,
+        );
+        return Response.json({ generation: "1" });
+      }
+      throw new Error("Unexpected GCS request");
+    });
+    await stagePoolCandidate(candidate, {
+      fetchImpl: fetchImpl as typeof fetch,
+      bucket: "candidate-bucket",
+    });
+  });
+
+  it("writes a negative proof only to private delivery state", async () => {
+    const fetchImpl = vi.fn(async (input: string | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      expect(url.pathname).toContain("state-bucket");
+      expect(url.pathname).toContain("/upload/");
+      expect(url.searchParams.get("name")).toBe(
+        `pool-liquidity-withdrawals/137/${watch.id}/${candidate.txHash}-${candidate.logIndex}.json`,
+      );
+      expect(url.searchParams.get("ifGenerationMatch")).toBe("0");
+      expect(JSON.parse(String(init?.body)).state).toBe("ignored");
+      return Response.json({ generation: "1" });
+    });
+    await ignorePoolCandidate(candidate, {
+      fetchImpl: fetchImpl as typeof fetch,
+      bucket: "state-bucket",
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   it("lists persisted pending events for retry after QuickNode's signature window", async () => {
     const fetchImpl = retryFetch(async (input: string | URL) => {
       const url = new URL(String(input));
@@ -379,7 +412,7 @@ describe("Watched LP Polygon withdrawal", () => {
         return Response.json({
           items: [
             {
-              name: `pool-liquidity-withdrawals/137/${watch.id}/${candidate.txHash}-${candidate.logIndex}.json`,
+              name: `pool-liquidity-candidates/137/${watch.id}/${candidate.txHash}-${candidate.logIndex}.json`,
             },
           ],
         });
@@ -403,7 +436,9 @@ describe("Watched LP Polygon withdrawal", () => {
     expect(
       await retryPendingPoolLiquidityWithdrawals({
         fetchImpl: fetchImpl as typeof fetch,
-        bucket: "test-bucket",
+        candidateBucket: "candidate-bucket",
+        stateBucket: "test-bucket",
+        watches: [watch],
         deliver,
       }),
     ).toBe(1);
@@ -411,43 +446,50 @@ describe("Watched LP Polygon withdrawal", () => {
   });
 
   it("re-proves a staged candidate after an RPC outage", async () => {
+    let candidateContentReads = 0;
     const fetchImpl = retryFetch(async (input: string | URL) => {
       const url = new URL(String(input));
       if (url.searchParams.has("prefix"))
         return Response.json({
           items: [
             {
-              name: `pool-liquidity-withdrawals/137/${watch.id}/${candidate.txHash}-${candidate.logIndex}.json`,
+              name: `pool-liquidity-candidates/137/${watch.id}/${candidate.txHash}-${candidate.logIndex}.json`,
             },
           ],
         });
-      if (url.searchParams.get("alt") === "media")
+      if (url.pathname.includes("candidate-bucket")) {
+        candidateContentReads++;
         return Response.json({
-          state: "unverified",
-          leaseUntil: 0,
-          event: { ...candidate, amount0: "0", amount1: "0", liquidity: "0" },
-          clientMsgId: poolClientMsgId(event),
+          generation: "1",
+          state: "delivered",
+          event: { ...candidate, amount0: "999999999999" },
         });
-      return Response.json({ generation: "1" });
+      }
+      return new Response("", { status: 404 });
     });
     const verify = vi.fn(async () => {});
     expect(
       await retryPendingPoolLiquidityWithdrawals({
         fetchImpl: fetchImpl as typeof fetch,
-        bucket: "test-bucket",
+        candidateBucket: "candidate-bucket",
+        stateBucket: "test-bucket",
+        watches: [watch],
         verify,
       }),
     ).toBe(1);
-    expect(verify).toHaveBeenCalledWith([candidate]);
+    expect(verify).toHaveBeenCalledWith([candidate], {
+      stage: expect.any(Function),
+    });
+    expect(candidateContentReads).toBe(0);
   });
 
-  it("stops at 25 pending retries without treating deferred records as failures", async () => {
+  it("processes more than 25 pending records in one run", async () => {
     const fetchImpl = retryFetch(async (input: string | URL) => {
       const url = new URL(String(input));
       if (url.searchParams.has("prefix"))
         return Response.json({
           items: Array.from({ length: 27 }, (_, logIndex) => ({
-            name: `pool-liquidity-withdrawals/137/${watch.id}/${candidate.txHash}-${logIndex}.json`,
+            name: `pool-liquidity-candidates/137/${watch.id}/${candidate.txHash}-${logIndex}.json`,
           })),
         });
       if (url.searchParams.get("alt") === "media") {
@@ -468,24 +510,25 @@ describe("Watched LP Polygon withdrawal", () => {
       return Response.json({ generation: "1" });
     });
     const deliver = vi.fn(async () => "delivered" as const);
-    await expect(
-      retryPendingPoolLiquidityWithdrawals({
+    expect(
+      await retryPendingPoolLiquidityWithdrawals({
         fetchImpl: fetchImpl as typeof fetch,
-        bucket: "test-bucket",
+        candidateBucket: "candidate-bucket",
+        stateBucket: "test-bucket",
+        watches: [watch],
         deliver,
       }),
-    ).rejects.toThrow("exceeded 25 pending events");
-    expect(deliver).toHaveBeenCalledTimes(25);
+    ).toBe(27);
+    expect(deliver).toHaveBeenCalledTimes(27);
   });
 
-  it("rotates retry attempts past persistently failing early records", async () => {
-    let clock = 0;
+  it("continues beyond persistently failing early records", async () => {
     const fetchImpl = retryFetch(async (input: string | URL) => {
       const url = new URL(String(input));
       if (url.searchParams.has("prefix"))
         return Response.json({
           items: Array.from({ length: 27 }, (_, logIndex) => ({
-            name: `pool-liquidity-withdrawals/137/${watch.id}/${candidate.txHash}-${logIndex}.json`,
+            name: `pool-liquidity-candidates/137/${watch.id}/${candidate.txHash}-${logIndex}.json`,
           })),
         });
       if (url.searchParams.get("alt") === "media") {
@@ -513,16 +556,15 @@ describe("Watched LP Polygon withdrawal", () => {
     });
     const options = {
       fetchImpl: fetchImpl as typeof fetch,
-      bucket: "test-bucket",
+      candidateBucket: "candidate-bucket",
+      stateBucket: "test-bucket",
+      watches: [watch],
       deliver,
-      now: () => clock,
+      now: () => 0,
     };
     await expect(retryPendingPoolLiquidityWithdrawals(options)).rejects.toThrow(
-      "exceeded 25 pending events",
+      "left 25 event(s) pending",
     );
-    expect(delivered).toEqual([]);
-    clock = 60_000;
-    expect(await retryPendingPoolLiquidityWithdrawals(options)).toBe(2);
     expect(delivered).toEqual([25, 26]);
   });
 
@@ -530,9 +572,9 @@ describe("Watched LP Polygon withdrawal", () => {
     const names = Array.from(
       { length: 21 },
       (_, logIndex) =>
-        `pool-liquidity-withdrawals/137/${watch.id}/${candidate.txHash}-${logIndex}.json`,
+        `pool-liquidity-candidates/137/${watch.id}/${candidate.txHash}-${logIndex}.json`,
     );
-    names[19] = `pool-liquidity-withdrawals/137/${watch.id}/malformed.json`;
+    names[19] = `pool-liquidity-candidates/137/${watch.id}/malformed.json`;
     const fetchImpl = retryFetch(async (input) => {
       const url = new URL(String(input));
       if (url.searchParams.has("prefix")) {
@@ -571,7 +613,9 @@ describe("Watched LP Polygon withdrawal", () => {
     const deliver = vi.fn(async () => "delivered" as const);
     const options = {
       fetchImpl: fetchImpl as typeof fetch,
-      bucket: "test-bucket",
+      candidateBucket: "candidate-bucket",
+      stateBucket: "test-bucket",
+      watches: [watch],
       deliver,
       now: () => 0,
     };

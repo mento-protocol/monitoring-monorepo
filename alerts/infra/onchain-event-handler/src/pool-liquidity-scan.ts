@@ -2,10 +2,10 @@ import type { Hex } from "viem";
 import { STORAGE_UPLOAD_BASE_URL } from "./quicknode-replay-protection";
 import { logger } from "./logger";
 
-const PREFIX = "pool-liquidity-withdrawals/137/";
+const PREFIX = "pool-liquidity-candidates/137/";
 const CURSOR_NAME = "pool-liquidity-retry-cursor/137.json";
 const KEY_PATTERN =
-  /^pool-liquidity-withdrawals\/137\/([a-z0-9-]{1,64})\/(0x[0-9a-f]{64})-(\d+)\.json$/;
+  /^pool-liquidity-candidates\/137\/([a-z0-9-]{1,64})\/(0x[0-9a-f]{64})-(\d+)\.json$/;
 const PAGE_LIMIT = 20;
 const REQUEST_TIMEOUT_MS = 10_000;
 
@@ -91,13 +91,22 @@ async function writeCursor(
 export async function scanPoolDeliveryKeys(options: {
   fetchImpl: Fetch;
   token: string;
-  bucket: string;
+  candidateBucket: string;
+  stateBucket: string;
   now: () => number;
   deadline: number;
-  onKey: (key: ScanKey) => Promise<boolean>;
-}): Promise<{ deferred: boolean; incomplete: boolean }> {
-  const { fetchImpl, token, bucket, now, deadline, onKey } = options;
-  const cursor = await readCursor(fetchImpl, token, bucket);
+  onKey: (key: ScanKey) => Promise<void>;
+}): Promise<{ incomplete: boolean }> {
+  const {
+    fetchImpl,
+    token,
+    candidateBucket,
+    stateBucket,
+    now,
+    deadline,
+    onKey,
+  } = options;
+  const cursor = await readCursor(fetchImpl, token, stateBucket);
   let after = cursor.after;
   let generation = cursor.generation;
   let pageToken: string | undefined;
@@ -108,7 +117,7 @@ export async function scanPoolDeliveryKeys(options: {
       generation = await writeCursor(
         fetchImpl,
         token,
-        bucket,
+        stateBucket,
         next,
         generation,
       );
@@ -118,7 +127,7 @@ export async function scanPoolDeliveryKeys(options: {
 
   while (pages++ < PAGE_LIMIT && now() < deadline) {
     const url = new URL(
-      `https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(bucket)}/o`,
+      `https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(candidateBucket)}/o`,
     );
     url.searchParams.set("prefix", PREFIX);
     url.searchParams.set("maxResults", "1000");
@@ -144,7 +153,8 @@ export async function scanPoolDeliveryKeys(options: {
           "Watched LP retry list returned an invalid object name",
         );
       const match = KEY_PATTERN.exec(name);
-      if (!match) {
+      const logIndex = match ? Number(match[3]) : NaN;
+      if (!match || !Number.isSafeInteger(logIndex)) {
         if (!malformedReported) {
           logger.error("Watched LP retry skipped malformed object", {
             reason: "pool_liquidity_retry_malformed_object",
@@ -154,25 +164,21 @@ export async function scanPoolDeliveryKeys(options: {
         last = name;
         continue;
       }
-      const processed = await onKey({
+      await onKey({
         watch: { id: match[1] },
         txHash: match[2] as Hex,
-        logIndex: Number(match[3]),
+        logIndex,
       });
-      if (!processed) {
-        await save(last);
-        return { deferred: true, incomplete: false };
-      }
       last = name;
       if (now() >= deadline) break;
     }
     await save(last);
-    if (now() >= deadline) return { deferred: false, incomplete: true };
+    if (now() >= deadline) return { incomplete: true };
     if (!page.nextPageToken) {
       await save(null); // Wrap so new keys before the cursor are seen next run.
-      return { deferred: false, incomplete: false };
+      return { incomplete: false };
     }
     pageToken = page.nextPageToken;
   }
-  return { deferred: false, incomplete: true };
+  return { incomplete: true };
 }

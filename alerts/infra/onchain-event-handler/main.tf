@@ -99,7 +99,7 @@ resource "google_cloudfunctions2_function" "onchain_event_handler" {
     google_secret_manager_secret_iam_member.runtime_quicknode_signing_secret,
     google_secret_manager_secret_iam_member.runtime_slack_bot_token,
     google_storage_bucket_iam_member.runtime_replay_nonce_creator,
-    google_storage_bucket_iam_member.runtime_pool_liquidity_delivery_state,
+    google_storage_bucket_iam_member.runtime_pool_liquidity_candidates,
   ]
 
   timeouts {
@@ -446,9 +446,42 @@ resource "google_storage_bucket_iam_member" "runtime_replay_nonce_creator" {
   member = "serviceAccount:${google_service_account.function_runtime.email}"
 }
 
-# Watched LP event-keyed delivery uses GCS generation preconditions to claim and
-# finish records. Keep objectAdmin off the replay/dead-letter bucket: this
-# public webhook handler must not gain deletion rights over Safe alert state.
+# The public webhook only creates immutable candidate keys. Private delivery
+# state must live in a separate bucket so public objectCreator cannot forge a
+# pending, ignored, or delivered transition at an event key.
+resource "google_storage_bucket" "pool_liquidity_candidates" {
+  project                     = var.project_id
+  name                        = "${var.project_id}-pool-liquidity-candidates-${random_id.bucket_suffix.hex}"
+  location                    = var.region
+  uniform_bucket_level_access = true
+  public_access_prevention    = "enforced"
+  force_destroy               = false
+  labels                      = var.common_labels
+
+  versioning { enabled = true }
+
+  logging {
+    log_bucket        = google_storage_bucket.pool_liquidity_delivery_access_logs.name
+    log_object_prefix = "pool-liquidity-candidates/"
+  }
+
+  lifecycle_rule {
+    condition {
+      age            = 365
+      with_state     = "ANY"
+      matches_prefix = ["pool-liquidity-candidates/"]
+    }
+    action { type = "Delete" }
+  }
+
+  lifecycle { prevent_destroy = true }
+
+  depends_on = [google_storage_bucket_iam_member.pool_liquidity_delivery_access_log_writer]
+}
+
+# Receipt-proved delivery uses generation preconditions to claim and finish
+# state. Keep objectAdmin off the replay/dead-letter bucket too: this public
+# webhook must not gain deletion rights over Safe alert state.
 resource "google_storage_bucket" "pool_liquidity_delivery_state" {
   project                     = var.project_id
   name                        = "${var.project_id}-pool-liquidity-delivery-${random_id.bucket_suffix.hex}"
@@ -528,12 +561,16 @@ resource "google_storage_bucket_iam_member" "pool_liquidity_delivery_access_log_
   member = "group:cloud-storage-analytics@google.com"
 }
 
-resource "google_storage_bucket_iam_member" "runtime_pool_liquidity_delivery_state" {
-  bucket = google_storage_bucket.pool_liquidity_delivery_state.name
-  # The public webhook can only claim new event keys. It cannot rewrite or
-  # delete a claimed record; private retry owns proof and delivery updates.
+resource "google_storage_bucket_iam_member" "runtime_pool_liquidity_candidates" {
+  bucket = google_storage_bucket.pool_liquidity_candidates.name
   role   = "roles/storage.objectCreator"
   member = "serviceAccount:${google_service_account.function_runtime.email}"
+}
+
+resource "google_storage_bucket_iam_member" "retry_pool_liquidity_candidates" {
+  bucket = google_storage_bucket.pool_liquidity_candidates.name
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_service_account.pool_liquidity_retry_runtime.email}"
 }
 
 resource "google_service_account" "pool_liquidity_retry_runtime" {
@@ -613,6 +650,7 @@ resource "google_cloudfunctions2_function" "pool_liquidity_retry" {
     terraform_data.cloudbuild_builder_dependency,
     google_storage_bucket_iam_member.cloud_build_storage_access,
     google_storage_bucket_iam_member.retry_pool_liquidity_delivery_state,
+    google_storage_bucket_iam_member.retry_pool_liquidity_candidates,
     google_secret_manager_secret_iam_member.retry_runtime_slack_bot_token,
   ]
 }

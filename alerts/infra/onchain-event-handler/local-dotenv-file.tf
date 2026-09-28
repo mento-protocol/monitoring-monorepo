@@ -41,6 +41,7 @@ locals {
     # Override with a disposable development bucket before testing delivery.
     # Never point local runs at the production delivery audit trail.
     POOL_LIQUIDITY_DELIVERY_BUCKET=local-pool-liquidity-delivery
+    POOL_LIQUIDITY_CANDIDATE_BUCKET=local-pool-liquidity-candidates
     RPC_URL_137=${var.pool_polygon_rpc_url}
   EOT
 }
