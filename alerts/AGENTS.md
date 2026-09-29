@@ -3,7 +3,7 @@ title: Alerts Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-02
+last_verified: 2026-09-27
 doc_type: agent-instructions
 scope: alerts
 review_interval_days: 90
@@ -19,7 +19,7 @@ garden_lane: agent-entry-points
 `alerts/` is the domain folder for all alert plumbing. Three independent Terraform stacks live here:
 
 - **`alerts/rules/`** — protocol Grafana metric alert rules + global Grafana notification policy/contact points/templates/mute timings. Grafana provider only. Changes daily (threshold tuning).
-- **`alerts/infra/`** — event-driven alert delivery: QuickNode webhooks → Cloud Function (TS) → Slack channels (on-chain multisig events) + Sentry → Slack bridge (app errors) + Splunk On-Call rotation announcer → Slack #eng / @support-engineer + GCP project. Multi-provider. Changes monthly.
+- **`alerts/infra/`** — event-driven alert delivery: QuickNode webhooks → Cloud Function (TS) → Slack channels (on-chain multisig events and pool LP withdrawals) + Sentry → Slack bridge (app errors) + Splunk On-Call rotation announcer → Slack #eng / @support-engineer + GCP project. Multi-provider. Changes monthly.
 - **`alerts/peg-policy-publication/`** — publishes `rules/peg-thresholds.json` as one immutable, private GCS generation through a manual `production-infra`-gated workflow. It owns no Cloud Run configuration or Grafana resources.
 
 Separate GCS state (`prefix=alerts-rules` for rules, `prefix=alerts-infra` for infra, and `prefix=peg-policy-publication` for policy publication). Keep them separate roots — cadence + blast-radius asymmetry. Stack ownership is registered in `terraform.stacks.json` and summarized in `docs/terraform.md`.
@@ -35,7 +35,7 @@ routing.
 - **QuickNode state-management hack** in `alerts/infra/onchain-event-listeners/main.tf` is scoped to the current chain via `var.chain_key`. Renaming the `module "onchain_event_listeners"` block in `alerts/infra/main.tf` would silently break the state-rm grep.
 - **Cloud Function lockfiles**: Cloud Build deploys `alerts/infra/onchain-event-handler/` and `alerts/infra/oncall-announcer/` as standalone source roots, so keep each package-local `pnpm-lock.yaml` in sync when its deps change. Regenerate with `cd <function-dir> && pnpm install --lockfile-only --lockfile-dir .`. Each package-local `pnpm-workspace.yaml` mirrors the root release-age guard and carries standalone Cloud Build overrides; keep it in the function source hash. CI installs from package-local locks before function checks, and supply-chain CI audits/lints root plus both function lockfiles.
 - **Slack delivery is the active path.** `alerts/rules/` owns Grafana Slack contact points plus Splunk routing for page-severity protocol and Aegis service-health alerts. `alerts/infra/`: Sentry alerts go to Slack via `sentry-bridge`; on-chain multisig events route to Slack via `slack-channels` + the Cloud Function; Splunk On-Call rotations route to Slack via `oncall-announcer` and reconcile @support-engineer.
-- **GCP operational failures route to `#alerts-infra`.** `alerts/infra/monitoring.tf` creates the Slack notification channel with the existing bot token unless an existing same-project channel ID is explicitly supplied. The on-call announcer policy matches failed Cloud Scheduler attempts directly so function 5xx, IAM, timeout, and unreachable-target failures cannot leave `@support-engineer` stale without a notification.
+- **GCP operational failures route to `#alerts-infra`.** `alerts/infra/monitoring.tf` creates the Slack notification channel with the existing bot token unless an existing same-project channel ID is explicitly supplied. Both the on-call announcer and Watched LP retry policies match failed Cloud Scheduler attempts directly; function 5xx, IAM, timeout, and unreachable-target failures must not depend on function logs to page.
 - **Annotation queries must stay evaluable.** In Grafana alert rules,
   annotation/helper queries can propagate `NoData` through the whole rule even
   when the base alert query is firing. Do not let annotation-only series

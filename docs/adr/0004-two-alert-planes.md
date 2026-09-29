@@ -3,7 +3,7 @@ title: Two alert planes — Grafana metric thresholds and event-driven delivery
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-09-27
 scope: repo-wide
 date: 2026-04
 doc_type: adr
@@ -20,9 +20,10 @@ garden_lane: adrs-architecture
 
 Two fundamentally different things need alerting. Some signals are **continuous
 metrics** crossing thresholds (pool health, oracle staleness, TCR/ICR, rebalancer
-liveness, service health). Others are **discrete on-chain events** that must fire
-exactly once when they happen (multisig actions, governance events). One
-mechanism cannot serve both well: thresholds need a metrics store and evaluation;
+liveness, service health). Others are **discrete on-chain events** that need
+event-scoped delivery (multisig actions, governance events, LP withdrawals).
+Slack delivery cannot be atomically committed with event state, so retries can
+duplicate. One mechanism cannot serve both well: thresholds need a metrics store and evaluation;
 events need a webhook that reacts to a specific log.
 
 ## Decision
@@ -33,7 +34,7 @@ Run **two alert planes**:
    (via Aegis for v2 and metrics-bridge for v3) and Grafana alert rules evaluate
    thresholds and route to Slack/Splunk On-Call.
 2. **Event-driven plane** — QuickNode webhooks → Cloud Function → Slack for
-   on-chain multisig events, a Sentry→Slack bridge for app errors, and an on-call
+   on-chain multisig and LP-withdrawal events, a Sentry→Slack bridge for app errors, and an on-call
    rotation announcer; governance-watchdog delivers to Discord/Telegram.
 
 ## Alternatives considered

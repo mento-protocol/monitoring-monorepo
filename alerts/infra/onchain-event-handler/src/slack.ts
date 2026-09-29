@@ -3,10 +3,10 @@
  */
 
 import axios, { AxiosError } from "axios";
-import { SLACK_WEB_API_TIMEOUT_MS } from "./constants";
 import { logger } from "./logger";
-import { formatNotificationContent } from "./notifier";
 import type { NotificationContent, QuickNodeDecodedLog } from "./types";
+
+const SLACK_WEB_API_TIMEOUT_MS = 10_000;
 
 interface SlackBlock {
   type: "section" | "divider" | "context";
@@ -45,6 +45,7 @@ export async function formatSlackMessage(
   txHashMap: Map<string, string>,
   signal?: AbortSignal,
 ): Promise<SlackMessage> {
+  const { formatNotificationContent } = await import("./notifier");
   const content = await formatNotificationContent(
     eventName,
     log,
@@ -285,6 +286,7 @@ export async function sendToSlack(
   channelId: string,
   message: SlackMessage,
   signal?: AbortSignal,
+  clientMsgId?: string,
 ): Promise<void> {
   let lastError: unknown;
 
@@ -294,6 +296,7 @@ export async function sendToSlack(
         "https://slack.com/api/chat.postMessage",
         {
           channel: channelId,
+          ...(clientMsgId ? { client_msg_id: clientMsgId } : {}),
           text: message.text,
           blocks: message.blocks,
           unfurl_links: false,

@@ -164,7 +164,20 @@ module "onchain_event_handler" {
       events_channel_id = module.slack_channels.channel_ids.events
     }
   }
-  slack_bot_token = var.slack_bot_token
+  slack_bot_token       = var.slack_bot_token
+  pool_alert_channel_id = var.pool_alert_channel_id
+  pool_polygon_rpc_url  = var.pool_polygon_rpc_url
+  pool_liquidity_watches = [
+    for watch in var.pool_liquidity_watches : {
+      id             = watch.id
+      poolAddress    = lower(watch.pool_address)
+      lpAddress      = lower(watch.lp_address)
+      token0Symbol   = watch.token0_symbol
+      token1Symbol   = watch.token1_symbol
+      token0Decimals = watch.token0_decimals
+      token1Decimals = watch.token1_decimals
+    }
+  ]
 
   depends_on = [
     module.slack_channels,
@@ -178,21 +191,24 @@ module "onchain_event_handler" {
 module "onchain_event_listeners" {
   source = "./onchain-event-listeners"
 
-  for_each = local.multisigs_by_chain
+  # Pool watches must retain a Polygon listener even when the last Polygon
+  # Safe is removed. Do not invent a multisig entry or alter other chains.
+  for_each = merge(local.multisigs_by_chain, length(var.pool_liquidity_watches) > 0 && !contains(keys(local.multisigs_by_chain), "polygon") ? { polygon = {} } : {})
 
   providers = {
     restapi.quicknode = restapi.quicknode
   }
 
   webhook_endpoint_url = module.onchain_event_handler.function_url
-  multisig_addresses   = [for k, v in each.value : v.address]
+  multisig_addresses   = concat([for k, v in each.value : v.address], each.key == "polygon" ? distinct([for watch in var.pool_liquidity_watches : watch.pool_address]) : [])
+  extra_event_hashes   = each.key == "polygon" && length(var.pool_liquidity_watches) > 0 ? ["0xd175a80c109434bb89948928ab2475a6647c94244cb70002197896423c883363"] : []
   webhook_name         = "safe-multisig-monitor-${each.key}"
   chain_key            = each.key
   # All multisigs in the same chain group must declare the same
   # quicknode_network_name. local.multisigs_by_chain_network is built from a
   # distinct() check in locals.tf — terraform plan fails with a clear error
   # if an operator mixes networks within one chain.
-  quicknode_network_name   = local.multisigs_by_chain_network[each.key]
+  quicknode_network_name   = each.key == "polygon" && length(each.value) == 0 ? "polygon-mainnet" : local.multisigs_by_chain_network[each.key]
   quicknode_api_key        = var.quicknode_api_key
   quicknode_signing_secret = var.quicknode_signing_secret
   debug_mode               = var.debug_mode

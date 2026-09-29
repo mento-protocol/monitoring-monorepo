@@ -31,6 +31,7 @@ dist
 # Test files — bundled-into-prod-zip noise + leak the test fixture.
 **/*.test.ts
 **/*.test.js
+src/fixtures-pool-liquidity-withdrawal.json
 
 # Operator scripts, formatter configs, vitest config. None needed at runtime;
 # shipping `scripts/test-payload.json` leaks the canonical webhook payload
