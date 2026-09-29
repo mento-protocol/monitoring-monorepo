@@ -51,6 +51,17 @@ variable "multisig_addresses" {
   }
 }
 
+variable "extra_event_hashes" {
+  description = "Additional event topics for a chain-scoped discrete alert."
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition     = alltrue([for hash in var.extra_event_hashes : can(regex("^0x[a-fA-F0-9]{64}$", hash))])
+    error_message = "Each extra event hash must be a 32-byte hex topic."
+  }
+}
+
 variable "compression" {
   description = "Compression method for webhook payloads ('gzip' or 'none')"
   type        = string

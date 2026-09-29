@@ -249,11 +249,6 @@ export const NOTIFICATION_COLORS = {
 } as const;
 
 /**
- * Slack Web API timeout in milliseconds (10 seconds)
- */
-export const SLACK_WEB_API_TIMEOUT_MS = 10000;
-
-/**
  * Default token decimals (most EVM chains use 18)
  */
 export const DEFAULT_TOKEN_DECIMALS = 18;

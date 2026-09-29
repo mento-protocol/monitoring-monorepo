@@ -376,7 +376,7 @@ indexer.onEvent(
     // optimization we'd otherwise run `recordBreachTransition`
     // (inside `upsertPool`) twice per event.
     // preload-handler-note: ordered Pool and breach writes must stay sequential.
-    // Durable exemption: governance-rate event, so its processing-only reads stay bounded.
+    // Preload-safe redesign is tracked in #1394.
     // preload-effect-helpers: selfHealInvertRateFeed, selfHealTokenDecimals
     // preload-effect-helpers: resolveThresholdRecompute, upsertPool
     // preload-effect-helpers: resolveBreakerFieldsForFeedAtBlock

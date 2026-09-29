@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "description": "Routes QuickNode webhook events to Slack for Safe multisig monitoring",
-  "main": "dist/index.js",
+  "main": "dist/entry.js",
   "packageManager": "pnpm@11.9.0",
   "engines": {
     "node": ">=24",
@@ -12,7 +12,6 @@
   "scripts": {
     "build": "rimraf dist && tsc",
     "build:event-hashes": "node scripts/build-event-hashes.mjs",
-    "deploy": "./scripts/deploy.sh",
     "dev": "nodemon --ext ts --ignore dist --exec \"pnpm run start\"",
     "format": "prettier --write \"src/**/*.{ts,js,json}\"",
     "format:check": "prettier --check \"src/**/*.{ts,js,json}\"",
