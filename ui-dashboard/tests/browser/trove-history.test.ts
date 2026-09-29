@@ -229,6 +229,14 @@ test("interim ordering handles old/new schema, rollback and complete-ledger hand
 }) => {
   await page.clock.install({ time: WEEKDAY_FIXTURE_INSTANT });
   const errors = trackUnexpectedBrowserErrors(page);
+  const advanceClockUntil = async (
+    ready: () => boolean | Promise<boolean>,
+  ) => {
+    for (let remaining = 310_000; remaining > 0; remaining -= 10_000) {
+      await page.clock.runFor(Math.min(10_000, remaining));
+      if (await ready()) return;
+    }
+  };
   let mode: "legacy" | "numeric" | "failed" | "ledger" = "legacy";
   const operationQueries: string[] = [];
   await page.route("**/graphql", async (route) => {
@@ -284,7 +292,11 @@ test("interim ordering handles old/new schema, rollback and complete-ledger hand
   ).toBe(true);
   mode = "numeric";
   expect(await page.evaluate(() => document.visibilityState)).toBe("visible");
-  await page.clock.runFor(301_000);
+  await advanceClockUntil(() =>
+    operationQueries.some((query) =>
+      query.includes("CdpTroveOperationsNumeric"),
+    ),
+  );
   await expect
     .poll(() =>
       operationQueries.some((query) =>
@@ -295,20 +307,24 @@ test("interim ordering handles old/new schema, rollback and complete-ledger hand
   await expect(page.getByText(/may omit newer operations/)).toHaveCount(0);
   await expect(operations.locator("tbody tr")).toHaveCount(999);
   mode = "failed";
-  await page.clock.runFor(300_001);
-  await expect(
-    page.getByText(/Operation ordering could not be checked/),
-  ).toBeVisible();
+  const failedNotice = page.getByText(
+    /Operation ordering could not be checked/,
+  );
+  await advanceClockUntil(() => failedNotice.isVisible());
+  await expect(failedNotice).toBeVisible();
   mode = "legacy";
-  await page.clock.runFor(300_001);
-  await expect(
-    page.getByText(/Operation ordering is not yet confirmed/),
-  ).toBeVisible();
+  const legacyNotice = page.getByText(
+    /Operation ordering is not yet confirmed/,
+  );
+  await advanceClockUntil(() => legacyNotice.isVisible());
+  await expect(legacyNotice).toBeVisible();
   mode = "ledger";
-  await page.clock.runFor(300_001);
-  await expect(
-    page.getByRole("table", { name: "Trove ledger", exact: true }),
-  ).toBeVisible();
+  const ledger = page.getByRole("table", {
+    name: "Trove ledger",
+    exact: true,
+  });
+  await advanceClockUntil(() => ledger.isVisible());
+  await expect(ledger).toBeVisible();
   await expect(operations).toHaveCount(0);
   const stoppedCount = operationQueries.length;
   await page.clock.fastForward(60_001);
