@@ -204,6 +204,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0063](0063-dashboard-grafana-history-read-access.md)         | The platform stack mints the dashboard's read-only Grafana identity and token                                     |
 | [0067](0067-depletion-alerts.md)                              | Archived: depletion paging                                                                                        |
 | [0097](0097-recovery.md)                                      | Bounded pool-page recovery                                                                                        |
+| [0109](0109-pool-liquidity-event-delivery.md)                 | Pool LP withdrawals use receipt proof and event-keyed at-least-once delivery                                      |
 
 ### governance-watchdog
 

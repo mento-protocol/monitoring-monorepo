@@ -3,13 +3,16 @@
 # On-chain Event Listeners Module
 
 Terraform module for creating one QuickNode `evmContractEvents` webhook per
-configured chain. Each webhook filters Safe logs by contract address and the 17
-topic hashes committed in `event-hashes.json`, then sends signed payloads to the
-shared on-chain event handler.
+configured chain. Safe logs use the 17 topic hashes committed in
+`event-hashes.json`. The Polygon listener also watches every configured pool's
+`Burn` topic; the handler proves LP ownership against the full receipt before
+alerting. Each webhook sends signed payloads to the shared handler.
 
 The parent `alerts/infra` stack currently configures Celo, Ethereum, and Polygon. The
 handler routes eight security events to `#multisig-alerts` and the remaining
 nine operational events to `#multisig-events`.
+Each watched-wallet withdrawal is a separate event-keyed route to `#alerts-pools`, not a
+Safe event or a Grafana metric.
 
 ## Source of truth
 

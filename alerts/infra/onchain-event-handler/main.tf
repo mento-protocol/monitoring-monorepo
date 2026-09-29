@@ -99,6 +99,7 @@ resource "google_cloudfunctions2_function" "onchain_event_handler" {
     google_secret_manager_secret_iam_member.runtime_quicknode_signing_secret,
     google_secret_manager_secret_iam_member.runtime_slack_bot_token,
     google_storage_bucket_iam_member.runtime_replay_nonce_creator,
+    google_storage_bucket_iam_member.runtime_pool_liquidity_candidates,
   ]
 
   timeouts {
@@ -230,6 +231,7 @@ data "archive_file" "function_source" {
     ".git",
     "**/*.test.ts",
     "**/*.test.js",
+    "src/fixtures-pool-liquidity-withdrawal.json",
     "main.tf",
     "local-dotenv-file.tf",
     "locals.tf",
@@ -442,4 +444,276 @@ resource "google_storage_bucket_iam_member" "runtime_replay_nonce_creator" {
   bucket = google_storage_bucket.webhook_replay_nonces.name
   role   = "roles/storage.objectCreator"
   member = "serviceAccount:${google_service_account.function_runtime.email}"
+}
+
+# The public webhook only creates immutable candidate keys. Private delivery
+# state must live in a separate bucket so public objectCreator cannot forge a
+# pending, ignored, or delivered transition at an event key.
+resource "google_storage_bucket" "pool_liquidity_candidates" {
+  project                     = var.project_id
+  name                        = "${var.project_id}-pool-liquidity-candidates-${random_id.bucket_suffix.hex}"
+  location                    = var.region
+  uniform_bucket_level_access = true
+  public_access_prevention    = "enforced"
+  force_destroy               = false
+  labels                      = var.common_labels
+
+  versioning { enabled = true }
+
+  logging {
+    log_bucket        = google_storage_bucket.pool_liquidity_delivery_access_logs.name
+    log_object_prefix = "pool-liquidity-candidates/"
+  }
+
+  lifecycle_rule {
+    condition {
+      age            = 365
+      with_state     = "ANY"
+      matches_prefix = ["pool-liquidity-candidates/"]
+    }
+    action { type = "Delete" }
+  }
+
+  lifecycle { prevent_destroy = true }
+
+  depends_on = [google_storage_bucket_iam_member.pool_liquidity_delivery_access_log_writer]
+}
+
+# Receipt-proved delivery uses generation preconditions to claim and finish
+# state. Keep objectAdmin off the replay/dead-letter bucket too: this public
+# webhook must not gain deletion rights over Safe alert state.
+resource "google_storage_bucket" "pool_liquidity_delivery_state" {
+  project                     = var.project_id
+  name                        = "${var.project_id}-pool-liquidity-delivery-${random_id.bucket_suffix.hex}"
+  location                    = var.region
+  uniform_bucket_level_access = true
+  public_access_prevention    = "enforced"
+  force_destroy               = false
+  labels                      = var.common_labels
+
+  versioning { enabled = true }
+
+  logging {
+    log_bucket        = google_storage_bucket.pool_liquidity_delivery_access_logs.name
+    log_object_prefix = "pool-liquidity-delivery/"
+  }
+
+  lifecycle_rule {
+    condition {
+      age            = 365
+      with_state     = "ANY"
+      matches_prefix = ["pool-liquidity-withdrawals/"]
+    }
+    action { type = "Delete" }
+  }
+
+  # Keep the live scan cursor, but bound old generations from each CAS update.
+  lifecycle_rule {
+    condition {
+      age            = 7
+      with_state     = "ARCHIVED"
+      matches_prefix = ["pool-liquidity-retry-cursor/"]
+    }
+    action { type = "Delete" }
+  }
+
+  lifecycle { prevent_destroy = true }
+
+  depends_on = [google_storage_bucket_iam_member.pool_liquidity_delivery_access_log_writer]
+}
+
+# Access logs cannot be written to their own bucket. Keep the sink private and
+# separate from delivery state so the analytics writer cannot forge alert state.
+# trunk-ignore(checkov/CKV_GCP_62): Cloud Storage cannot write a bucket's access logs to itself
+resource "google_storage_bucket" "pool_liquidity_delivery_access_logs" {
+  project                     = var.project_id
+  name                        = "${var.project_id}-pool-liquidity-delivery-access-logs-${random_id.bucket_suffix.hex}"
+  location                    = var.region
+  uniform_bucket_level_access = true
+  public_access_prevention    = "enforced"
+  force_destroy               = false
+  labels                      = var.common_labels
+
+  versioning { enabled = true }
+
+  lifecycle_rule {
+    condition {
+      age        = 90
+      with_state = "LIVE"
+    }
+    action { type = "Delete" }
+  }
+
+  lifecycle_rule {
+    condition {
+      days_since_noncurrent_time = 30
+      with_state                 = "ARCHIVED"
+    }
+    action { type = "Delete" }
+  }
+
+  lifecycle { prevent_destroy = true }
+}
+
+resource "google_storage_bucket_iam_member" "pool_liquidity_delivery_access_log_writer" {
+  bucket = google_storage_bucket.pool_liquidity_delivery_access_logs.name
+  role   = "roles/storage.objectCreator"
+  member = "group:cloud-storage-analytics@google.com"
+}
+
+resource "google_storage_bucket_iam_member" "runtime_pool_liquidity_candidates" {
+  bucket = google_storage_bucket.pool_liquidity_candidates.name
+  role   = "roles/storage.objectCreator"
+  member = "serviceAccount:${google_service_account.function_runtime.email}"
+}
+
+resource "google_storage_bucket_iam_member" "retry_pool_liquidity_candidates" {
+  bucket = google_storage_bucket.pool_liquidity_candidates.name
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_service_account.pool_liquidity_retry_runtime.email}"
+}
+
+resource "google_service_account" "pool_liquidity_retry_runtime" {
+  project      = var.project_id
+  account_id   = "onchain-pool-liq-retry-run"
+  display_name = "Pool liquidity retry runtime"
+  description  = "Private receipt proof and durable pool alert delivery"
+}
+
+resource "google_storage_bucket_iam_member" "retry_pool_liquidity_delivery_state" {
+  bucket = google_storage_bucket.pool_liquidity_delivery_state.name
+  role   = "roles/storage.objectAdmin"
+  member = "serviceAccount:${google_service_account.pool_liquidity_retry_runtime.email}"
+}
+
+resource "google_secret_manager_secret_iam_member" "retry_runtime_slack_bot_token" {
+  project   = var.project_id
+  secret_id = google_secret_manager_secret.slack_bot_token.secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.pool_liquidity_retry_runtime.email}"
+}
+
+###########################################
+# Private durable Watched LP delivery retry lane #
+###########################################
+
+# Separate from the public QuickNode endpoint: only Scheduler's OIDC identity
+# can invoke this function. The same reviewed source implements both entries.
+resource "google_cloudfunctions2_function" "pool_liquidity_retry" {
+  project     = var.project_id
+  name        = "onchain-pool-liquidity-retry"
+  description = "Retry receipt-proved Watched LP withdrawal alerts persisted in GCS"
+  location    = var.region
+  labels      = var.common_labels
+
+  build_config {
+    runtime         = var.runtime
+    entry_point     = "retryPoolLiquidityWithdrawals"
+    service_account = "projects/${var.project_id}/serviceAccounts/${var.project_service_account_email}"
+    source {
+      storage_source {
+        bucket = google_storage_bucket.function_bucket.name
+        object = google_storage_bucket_object.function_source.name
+      }
+    }
+  }
+
+  service_config {
+    available_memory      = "${var.memory_mb}M"
+    timeout_seconds       = 300
+    max_instance_count    = 1
+    service_account_email = google_service_account.pool_liquidity_retry_runtime.email
+    environment_variables = local.all_env_vars
+    # Same-project Cloud Scheduler calls the default function URL. Google
+    # classifies this source as internal; the OIDC invoker grant still applies.
+    ingress_settings               = "ALLOW_INTERNAL_ONLY"
+    all_traffic_on_latest_revision = true
+
+    secret_environment_variables {
+      key        = "SLACK_BOT_TOKEN"
+      project_id = var.project_id
+      secret     = google_secret_manager_secret.slack_bot_token.secret_id
+      version    = "latest"
+    }
+  }
+
+  lifecycle {
+    # Match the public function's Google provider sensitive-env workaround.
+    ignore_changes = [service_config[0].environment_variables]
+    replace_triggered_by = [
+      google_storage_bucket_object.function_source,
+      google_secret_manager_secret_version.slack_bot_token,
+    ]
+  }
+
+  depends_on = [
+    terraform_data.cloudbuild_builder_dependency,
+    google_storage_bucket_iam_member.cloud_build_storage_access,
+    google_storage_bucket_iam_member.retry_pool_liquidity_delivery_state,
+    google_storage_bucket_iam_member.retry_pool_liquidity_candidates,
+    google_secret_manager_secret_iam_member.retry_runtime_slack_bot_token,
+  ]
+}
+
+resource "google_service_account" "pool_liquidity_scheduler" {
+  project      = var.project_id
+  account_id   = "onchain-pool-liq-retry-sched"
+  display_name = "Watched LP withdrawal retry scheduler"
+}
+
+resource "google_cloudfunctions2_function_iam_member" "pool_liquidity_scheduler_invoker" {
+  project        = var.project_id
+  location       = var.region
+  cloud_function = google_cloudfunctions2_function.pool_liquidity_retry.name
+  role           = "roles/cloudfunctions.invoker"
+  member         = "serviceAccount:${google_service_account.pool_liquidity_scheduler.email}"
+  depends_on     = [google_cloudfunctions2_function.pool_liquidity_retry]
+
+  lifecycle {
+    replace_triggered_by = [google_cloudfunctions2_function.pool_liquidity_retry]
+  }
+}
+
+resource "google_cloud_run_v2_service_iam_member" "pool_liquidity_scheduler_run_invoker" {
+  project    = var.project_id
+  location   = var.region
+  name       = google_cloudfunctions2_function.pool_liquidity_retry.name
+  role       = "roles/run.invoker"
+  member     = "serviceAccount:${google_service_account.pool_liquidity_scheduler.email}"
+  depends_on = [google_cloudfunctions2_function.pool_liquidity_retry]
+
+  lifecycle {
+    replace_triggered_by = [google_cloudfunctions2_function.pool_liquidity_retry]
+  }
+}
+
+resource "google_cloud_scheduler_job" "pool_liquidity_retry" {
+  project          = var.project_id
+  name             = "onchain-pool-liquidity-withdrawal-retry"
+  description      = "Retry pending pool LP withdrawal alerts after QuickNode's signed retry window"
+  region           = var.region
+  schedule         = "* * * * *"
+  time_zone        = "Etc/UTC"
+  attempt_deadline = "300s"
+
+  retry_config {
+    max_retry_duration   = "300s"
+    min_backoff_duration = "5s"
+    max_backoff_duration = "60s"
+    max_doublings        = 3
+  }
+
+  http_target {
+    http_method = "POST"
+    uri         = google_cloudfunctions2_function.pool_liquidity_retry.service_config[0].uri
+    oidc_token {
+      audience              = google_cloudfunctions2_function.pool_liquidity_retry.service_config[0].uri
+      service_account_email = google_service_account.pool_liquidity_scheduler.email
+    }
+  }
+
+  depends_on = [
+    google_cloudfunctions2_function_iam_member.pool_liquidity_scheduler_invoker,
+    google_cloud_run_v2_service_iam_member.pool_liquidity_scheduler_run_invoker,
+  ]
 }

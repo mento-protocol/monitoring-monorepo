@@ -99,6 +99,39 @@ variable "slack_bot_token" {
   }
 }
 
+variable "pool_alert_channel_id" {
+  description = "Slack channel ID for Polygon pool withdrawal alerts."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[CG][A-Z0-9]{8,}$", var.pool_alert_channel_id))
+    error_message = "pool_alert_channel_id must be a Slack channel ID."
+  }
+}
+
+variable "pool_liquidity_watches" {
+  description = "Receipt-proof watch definitions for Polygon pool liquidity alerts."
+  type = list(object({
+    id             = string
+    poolAddress    = string
+    lpAddress      = string
+    token0Symbol   = string
+    token1Symbol   = string
+    token0Decimals = number
+    token1Decimals = number
+  }))
+}
+
+variable "pool_polygon_rpc_url" {
+  description = "Full-node Polygon RPC for receipt proof."
+  type        = string
+
+  validation {
+    condition     = can(regex("^https://", var.pool_polygon_rpc_url))
+    error_message = "pool_polygon_rpc_url must use HTTPS."
+  }
+}
+
 variable "project_service_account_email" {
   description = "Email of the project service account to use for Cloud Build (created by project factory when create_project_sa = true)"
   type        = string
