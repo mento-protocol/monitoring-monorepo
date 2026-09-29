@@ -168,6 +168,10 @@ chain key.
 - Routes security events to alerts channel, operational events to events channel
 - Validates webhook signatures
 - All multisigs share the same two Slack channels
+- Polygon configured pool Burns take a separate receipt-verified watched-wallet
+  route to `#alerts-pools`. Event-keyed GCS state and a private Scheduler
+  worker retry after QuickNode's signed delivery window; see the
+  [handler runbook](onchain-event-handler/README.md) and [ADR 0109](../../docs/adr/0109-pool-liquidity-event-delivery.md).
 
 ### On-call Announcer
 
@@ -188,9 +192,10 @@ chain key.
   `#alerts-infra` with the existing bot token by default
 - `slack_notification_channel_id` is an override for adopting an existing
   notification channel in the same GCP project
-- On-call scheduler failures use a direct log-match policy, notify immediately,
-  rate-limit repeat notifications to one per hour, and auto-close
-  after 30 minutes without another matching failure
+- On-call and Watched LP retry scheduler failures use separate direct log-match
+  policies. They notify on failed terminal attempts, including invocation
+  failures before a function can log, rate-limit repeats to one per hour,
+  and auto-close after 30 minutes without another matching failure
 - On-chain handler drop and processing-budget policies share the same
   `#alerts-infra` destination
 - No policy in this stack alerts on an absent series. The one that did

@@ -221,6 +221,7 @@ Authority: canonical
 - [`adr/0106-sentry-triage-moves-to-operator-skills.md`](adr/0106-sentry-triage-moves-to-operator-skills.md) — Sentry triage and autofix move from a CI pipeline to operator-run skills
 - [`adr/0107-enforced-shell-size-limits.md`](adr/0107-enforced-shell-size-limits.md) — Shell file and function size limits are enforced with a closed baseline
 - [`adr/0108-sealed-orchestrator-source-set.md`](adr/0108-sealed-orchestrator-source-set.md) — Every run-eval shell module joins the sealed orchestrator source set
+- [`adr/0109-pool-liquidity-event-delivery.md`](adr/0109-pool-liquidity-event-delivery.md) — Pool liquidity watches use event-keyed durable alert delivery
 
 Authority: non-canonical
 
@@ -278,6 +279,6 @@ Authority: non-canonical
 - [`docs/notes/ui-dashboard-performance-plan.md`](notes/ui-dashboard-performance-plan.md) (archived)
 - [`docs/notes/verification-redesign-phase-0-evidence.md`](notes/verification-redesign-phase-0-evidence.md)
 - [`docs/PLAN-ai-review-process.md`](PLAN-ai-review-process.md) (archived)
-- [`docs/PLAN-indexer-preload-state-sync.md`](PLAN-indexer-preload-state-sync.md)
+- [`docs/PLAN-indexer-preload-state-sync.md`](PLAN-indexer-preload-state-sync.md) (archived)
 - [`docs/PLAN-progressive-verification-graph.md`](PLAN-progressive-verification-graph.md) (archived)
 - [`docs/PLAN-trove-history-page.md`](PLAN-trove-history-page.md)
