@@ -181,7 +181,8 @@ The two alert planes are intentionally separate:
   expressions; and the same Terraform root owns contact points, routing,
   templates, and mute timings.
 - **Event and incident delivery:** `alerts/infra/` owns QuickNode-to-Slack
-  delivery, the Sentry bridge, and the on-call rotation announcer. Sentry issue
+  delivery, including receipt-proved Watched LP Polygon LP withdrawals with
+  event-keyed GCS retry, the Sentry bridge, and the on-call rotation announcer. Sentry issue
   triage and fix PRs are operator-run and live outside this repository
   ([ADR 0106](./docs/adr/0106-sentry-triage-moves-to-operator-skills.md)).
   `governance-watchdog/` independently owns governance delivery to

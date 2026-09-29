@@ -9,7 +9,7 @@ locals {
   # doesn't flip the hash and force an identical-zip redeploy.
   source_files_relative = [
     for f in fileset(path.module, "src/**") :
-    f if !can(regex("\\.test\\.(ts|js)$", f))
+    f if !can(regex("\\.test\\.(ts|js)$", f)) && f != "src/fixtures-pool-liquidity-withdrawal.json"
   ]
   source_files = [for f in local.source_files_relative : "${path.module}/${f}"]
   package_files = [
@@ -30,7 +30,7 @@ locals {
       for f in sort(concat(local.source_files, local.package_files)) :
       fileexists(f) ? filemd5(f) : ""
     ],
-    [local.multisig_config_hash, local.notification_config_hash],
+    [local.multisig_config_hash, local.notification_config_hash, md5(jsonencode(var.pool_liquidity_watches)), var.pool_alert_channel_id, var.pool_polygon_rpc_url],
   )))
 
   # Extract non-sensitive values from multisig_notifications to avoid provider
@@ -79,11 +79,16 @@ locals {
   all_env_vars = merge(
     {
       # JSON-encoded multisig config for easy lookup in the function
-      MULTISIG_CONFIG          = jsonencode(local.multisig_config_for_json)
-      QUICKNODE_REPLAY_BUCKET  = google_storage_bucket.webhook_replay_nonces.name
-      FUNCTION_TIMEOUT_SECONDS = tostring(var.timeout_seconds)
-      SLACK_CHANNEL_ALERTS     = local.shared_channel_ids.alerts
-      SLACK_CHANNEL_EVENTS     = local.shared_channel_ids.events
+      MULTISIG_CONFIG                 = jsonencode(local.multisig_config_for_json)
+      QUICKNODE_REPLAY_BUCKET         = google_storage_bucket.webhook_replay_nonces.name
+      POOL_LIQUIDITY_DELIVERY_BUCKET  = google_storage_bucket.pool_liquidity_delivery_state.name
+      POOL_LIQUIDITY_CANDIDATE_BUCKET = google_storage_bucket.pool_liquidity_candidates.name
+      FUNCTION_TIMEOUT_SECONDS        = tostring(var.timeout_seconds)
+      SLACK_CHANNEL_ALERTS            = local.shared_channel_ids.alerts
+      SLACK_CHANNEL_EVENTS            = local.shared_channel_ids.events
+      POOL_ALERT_CHANNEL_ID           = var.pool_alert_channel_id
+      POOL_LIQUIDITY_WATCHES          = jsonencode(var.pool_liquidity_watches)
+      RPC_URL_137                     = var.pool_polygon_rpc_url
       # Comma-separated list of supported chains
       SUPPORTED_CHAINS = join(",", local.chains)
     },

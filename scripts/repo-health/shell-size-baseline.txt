@@ -11,7 +11,6 @@
 .claude/babysit-pr.sh babysit_repo_gate 136
 aegis/grafana-agent/deploy.sh main 122
 aegis/grafana-agent/entrypoint.sh activation_is_safe 55
-alerts/infra/onchain-event-handler/scripts/deploy.sh main 193
 alerts/infra/onchain-event-handler/scripts/get-logs.sh get_function_logs 220
 alerts/infra/onchain-event-handler/scripts/get-project-vars.sh set_project_id 68
 alerts/infra/onchain-event-handler/scripts/tail-logs.sh tail_function_logs 214

@@ -1,0 +1,704 @@
+import { describe, expect, it, vi } from "vitest";
+import type { Hex, Log } from "viem";
+import receipt from "./fixtures-pool-liquidity-withdrawal.json";
+import {
+  configuredPoolWatches,
+  hasPoolBurnLog,
+  ignorePoolCandidate,
+  poolBurnCandidates,
+  poolClientMsgId,
+  deliverPoolLiquidityWithdrawal,
+  processPoolBurns,
+  provePoolLiquidityWithdrawal,
+  retryPendingPoolLiquidityWithdrawals,
+  stagePoolCandidate,
+  stagePoolBurns,
+  type PoolLiquidityWithdrawal,
+} from "./pool-liquidity-withdrawal";
+
+vi.mock("./quicknode-replay-protection", () => ({
+  STORAGE_UPLOAD_BASE_URL: "https://storage.googleapis.com/upload/storage/v1/b",
+  getMetadataAccessToken: vi.fn(async () => "test-token"),
+}));
+vi.mock("./slack", () => ({ sendToSlack: vi.fn() }));
+
+const watch = {
+  id: "polygon-eurm-usdm-lp-1",
+  poolAddress: "0x93e15a22fda39fefccce82d387a09ccf030ead61" as const,
+  lpAddress: "0x3d54f9496bf5bd0afa67c80ee8bc2eeadf306381" as const,
+  token0Symbol: "EURm",
+  token1Symbol: "USDm",
+  token0Decimals: 18,
+  token1Decimals: 18,
+};
+const candidate = {
+  txHash: receipt.transactionHash as Hex,
+  logIndex: 839,
+  watch,
+};
+const sourceReceipt = {
+  ...receipt,
+  transactionHash: candidate.txHash,
+  logs: receipt.logs as unknown as Log[],
+};
+const event = provePoolLiquidityWithdrawal(candidate, sourceReceipt)!;
+
+function retryFetch(handler: (input: string | URL) => Promise<Response>) {
+  let after: string | null = null;
+  let generation = 0;
+  return vi.fn(async (input: string | URL, init?: RequestInit) => {
+    const url = new URL(String(input));
+    const cursorPath = decodeURIComponent(url.pathname).endsWith(
+      "/o/pool-liquidity-retry-cursor/137.json",
+    );
+    if (cursorPath) {
+      if (generation === 0) return new Response("", { status: 404 });
+      if (url.searchParams.get("alt") === "media")
+        return Response.json({ after });
+      return Response.json({ generation: String(generation) });
+    }
+    if (
+      url.searchParams.get("name") === "pool-liquidity-retry-cursor/137.json"
+    ) {
+      if (url.searchParams.get("ifGenerationMatch") !== String(generation))
+        return new Response("", { status: 412 });
+      after = (JSON.parse(String(init?.body)) as { after: string | null })
+        .after;
+      return Response.json({ generation: String(++generation) });
+    }
+    const response = await handler(input);
+    if (!url.searchParams.has("prefix")) return response;
+    const page = (await response.json()) as {
+      items?: Array<{ name: string }>;
+      nextPageToken?: string;
+    };
+    const start = url.searchParams.get("startOffset");
+    if (start && page.items) {
+      const index = page.items.findIndex((item) => item.name === start);
+      page.items = index >= 0 ? page.items.slice(index) : page.items;
+    }
+    return Response.json(page);
+  });
+}
+
+describe("Watched LP Polygon withdrawal", () => {
+  it("validates the configured watches and preserves stable IDs", () => {
+    expect(configuredPoolWatches(JSON.stringify([watch]))).toEqual([watch]);
+    expect(() => configuredPoolWatches(JSON.stringify([watch, watch]))).toThrow(
+      "Duplicate",
+    );
+    expect(() =>
+      configuredPoolWatches(
+        JSON.stringify([watch, { ...watch, id: "another-watch" }]),
+      ),
+    ).toThrow("Duplicate pool liquidity watch wallet");
+  });
+  it("finds the exact Burn in decoded and raw receipt envelopes", () => {
+    expect(hasPoolBurnLog({ result: [{ name: "ExecutionSuccess" }] })).toBe(
+      false,
+    );
+    expect(hasPoolBurnLog({ matchingReceipts: [sourceReceipt] })).toBe(true);
+    expect(
+      poolBurnCandidates(
+        {
+          result: [
+            {
+              address: watch.poolAddress,
+              name: "Burn",
+              transactionHash: candidate.txHash,
+              logIndex: "839",
+            },
+          ],
+        },
+        [watch],
+      ),
+    ).toEqual([candidate]);
+    expect(
+      poolBurnCandidates({ matchingReceipts: [sourceReceipt] }, [watch]),
+    ).toEqual([candidate]);
+    expect(
+      poolBurnCandidates(
+        {
+          result: [
+            {
+              address: "0x0000000000000000000000000000000000000001",
+              name: "Burn",
+              transactionHash: candidate.txHash,
+              logIndex: 839,
+            },
+          ],
+        },
+        [watch],
+      ),
+    ).toEqual([]);
+    expect(() =>
+      poolBurnCandidates(
+        {
+          result: [{ address: watch.poolAddress, name: "Burn", logIndex: 839 }],
+        },
+        [watch],
+      ),
+    ).toThrow("missing transaction hash");
+  });
+
+  it("retains valid Burn candidates when another Burn has no event key", async () => {
+    let malformed = 0;
+    const candidates = poolBurnCandidates(
+      {
+        result: [
+          {
+            address: watch.poolAddress,
+            name: "Burn",
+            transactionHash: candidate.txHash,
+            logIndex: candidate.logIndex,
+          },
+          { address: watch.poolAddress, name: "Burn" },
+        ],
+      },
+      [watch],
+      () => malformed++,
+    );
+    const stage = vi.fn(async () => {});
+    expect(await stagePoolBurns(candidates, stage)).toEqual({
+      staged: [candidate],
+      failures: 0,
+    });
+    expect(stage).toHaveBeenCalledWith(candidate);
+    expect(malformed).toBe(1);
+  });
+
+  it("keeps same-pool wallets as distinct event keys and proves only the LP owner", () => {
+    const otherWatch = {
+      ...watch,
+      id: "polygon-eurm-usdm-lp-2",
+      lpAddress: "0x0000000000000000000000000000000000000001" as const,
+    };
+    const candidates = poolBurnCandidates(
+      {
+        result: [
+          {
+            address: watch.poolAddress,
+            name: "Burn",
+            transactionHash: candidate.txHash,
+            logIndex: candidate.logIndex,
+          },
+        ],
+      },
+      [watch, otherWatch],
+    );
+    expect(candidates).toHaveLength(2);
+    expect(
+      provePoolLiquidityWithdrawal(candidates[0], sourceReceipt),
+    ).not.toBeNull();
+    expect(
+      provePoolLiquidityWithdrawal(candidates[1], sourceReceipt),
+    ).toBeNull();
+    expect(poolClientMsgId(candidates[0])).not.toBe(
+      poolClientMsgId(candidates[1]),
+    );
+  });
+
+  it("requires successful receipt, exact burn, and Watched LP Safe LP transfers even when tx swaps", () => {
+    expect(event).toMatchObject({
+      ...candidate,
+      amount0: 11979702533637744148688n,
+      amount1: 31139749333024582544384n,
+    });
+    expect(
+      provePoolLiquidityWithdrawal(candidate, {
+        ...sourceReceipt,
+        status: "reverted",
+      }),
+    ).toBeNull();
+    expect(
+      provePoolLiquidityWithdrawal(
+        { ...candidate, logIndex: 844 },
+        sourceReceipt,
+      ),
+    ).toBeNull();
+    expect(
+      provePoolLiquidityWithdrawal(candidate, {
+        ...sourceReceipt,
+        transactionHash: `0x${"00".repeat(32)}` as Hex,
+      }),
+    ).toBeNull();
+    expect(
+      provePoolLiquidityWithdrawal(candidate, {
+        ...sourceReceipt,
+        logs: sourceReceipt.logs.filter((log) => log.logIndex !== 834),
+      }),
+    ).toBeNull();
+    expect(() =>
+      provePoolLiquidityWithdrawal(candidate, {
+        ...sourceReceipt,
+        logs: sourceReceipt.logs.filter((log) => log.logIndex !== 835),
+      }),
+    ).toThrow("Ambiguous watched LP transfer");
+    const wrongOwner = structuredClone(sourceReceipt);
+    wrongOwner.logs[0].topics[1] = `0x${"00".repeat(32)}`;
+    expect(
+      provePoolLiquidityWithdrawal(
+        candidate,
+        wrongOwner as typeof sourceReceipt,
+      ),
+    ).toBeNull();
+  });
+
+  it("allows unrelated LP-token transfers but refuses ambiguous pool custody", () => {
+    const unrelated = structuredClone(sourceReceipt);
+    for (const log of unrelated.logs) if (log.logIndex >= 835) log.logIndex++;
+    unrelated.logs.splice(1, 0, {
+      ...unrelated.logs[0],
+      logIndex: 835,
+      topics: [
+        unrelated.logs[0].topics[0],
+        `0x${"00".repeat(31)}02`,
+        `0x${"00".repeat(31)}03`,
+      ],
+    });
+    expect(
+      provePoolLiquidityWithdrawal({ ...candidate, logIndex: 840 }, unrelated),
+    ).not.toBeNull();
+    unrelated.logs[1].topics[2] = unrelated.logs[0].topics[2];
+    expect(() =>
+      provePoolLiquidityWithdrawal({ ...candidate, logIndex: 840 }, unrelated),
+    ).toThrow("Ambiguous watched LP transfer");
+  });
+
+  it("proves split same-transaction contributions and keeps partial contributions pending", () => {
+    const split = structuredClone(sourceReceipt);
+    const total = BigInt(split.logs[0].data);
+    const first = total / 2n;
+    const encode = (value: bigint) =>
+      `0x${value.toString(16).padStart(64, "0")}`;
+    split.logs[0].data = encode(first);
+    split.logs.splice(1, 0, {
+      ...split.logs[0],
+      logIndex: 835,
+      data: encode(total - first),
+    });
+    split.logs[2].logIndex = 836;
+    expect(provePoolLiquidityWithdrawal(candidate, split)).not.toBeNull();
+
+    split.logs.splice(1, 1);
+    expect(() => provePoolLiquidityWithdrawal(candidate, split)).toThrow(
+      "Ambiguous watched LP transfer",
+    );
+  });
+
+  it("does not use decoded event args as proof, and deduplicates receipt fetches per transaction", async () => {
+    const getReceipt = vi.fn(async () => sourceReceipt);
+    const send = vi.fn(async () => "delivered" as const);
+    const stage = vi.fn(async () => {});
+    const ignore = vi.fn(async () => {});
+    await processPoolBurns([candidate, candidate], {
+      receipt: getReceipt,
+      deliver: send,
+      stage,
+      ignore,
+    });
+    expect(stage).toHaveBeenCalledTimes(2);
+    expect(getReceipt).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledTimes(2);
+    await processPoolBurns([candidate], {
+      receipt: async () => ({ ...sourceReceipt, status: "reverted" }),
+      deliver: send,
+      stage,
+      ignore,
+    });
+    expect(ignore).toHaveBeenCalledWith(candidate);
+    expect(send).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps staging failures fatal but delivers independently staged siblings", async () => {
+    const stage = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("GCS unavailable"))
+      .mockResolvedValueOnce(undefined);
+    const deliver = vi.fn(async () => "delivered" as const);
+    await expect(
+      processPoolBurns([candidate, candidate], {
+        stage,
+        receipt: async () => sourceReceipt,
+        deliver,
+      }),
+    ).rejects.toThrow("1 candidate(s) pending");
+    expect(stage).toHaveBeenCalledTimes(2);
+    expect(deliver).toHaveBeenCalledTimes(1);
+  });
+
+  it("continues other staged candidates after a delivery failure", async () => {
+    const deliver = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("Slack 503"))
+      .mockResolvedValueOnce("delivered");
+    await expect(
+      processPoolBurns([candidate, candidate], {
+        stage: async () => {},
+        receipt: async () => sourceReceipt,
+        deliver,
+      }),
+    ).rejects.toThrow("1 candidate(s) pending");
+    expect(deliver).toHaveBeenCalledTimes(2);
+  });
+
+  it("uses one stable client_msg_id, GCS generation CAS, and retries a pending Slack failure", async () => {
+    let stored: { record: Record<string, unknown>; generation: string } | null =
+      null;
+    let generation = 0;
+    const fetchImpl = vi.fn(async (input: string | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.pathname.includes("/upload/")) {
+        const expected = url.searchParams.get("ifGenerationMatch");
+        if (expected !== (stored?.generation ?? "0"))
+          return new Response("", { status: 412 });
+        const record = JSON.parse(String(init?.body)) as Record<
+          string,
+          unknown
+        >;
+        stored = { record, generation: String(++generation) };
+        return Response.json({ generation: stored.generation });
+      }
+      if (url.searchParams.get("alt") === "media")
+        return Response.json(stored!.record);
+      return Response.json({ generation: stored!.generation });
+    });
+    const send = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("Slack 503"))
+      .mockResolvedValue(undefined);
+    const options = {
+      fetchImpl: fetchImpl as typeof fetch,
+      bucket: "test-bucket",
+      channel: "C0B53R34HTN",
+      token: "xoxb-test",
+      send,
+      now: () => 1_000,
+    };
+    await expect(
+      deliverPoolLiquidityWithdrawal(event, options),
+    ).rejects.toThrow("Slack 503");
+    expect(stored?.record.state).toBe("pending");
+    expect(await deliverPoolLiquidityWithdrawal(event, options)).toBe("leased");
+    expect(
+      await deliverPoolLiquidityWithdrawal(event, {
+        ...options,
+        now: () => 62_000,
+      }),
+    ).toBe("delivered");
+    expect(await deliverPoolLiquidityWithdrawal(event, options)).toBe(
+      "already-delivered",
+    );
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send.mock.calls[0][4]).toBe(poolClientMsgId(event));
+    expect(send.mock.calls[1][4]).toBe(poolClientMsgId(event));
+    expect(stored?.record.state).toBe("delivered");
+  });
+
+  it("stages only in the public candidate namespace", async () => {
+    const fetchImpl = vi.fn(async (input: string | URL) => {
+      const url = new URL(String(input));
+      if (url.pathname.includes("/upload/")) {
+        expect(url.pathname).toContain("candidate-bucket");
+        expect(url.searchParams.get("name")).toBe(
+          `pool-liquidity-candidates/137/${watch.id}/${candidate.txHash}-${candidate.logIndex}.json`,
+        );
+        return Response.json({ generation: "1" });
+      }
+      throw new Error("Unexpected GCS request");
+    });
+    await stagePoolCandidate(candidate, {
+      fetchImpl: fetchImpl as typeof fetch,
+      bucket: "candidate-bucket",
+    });
+  });
+
+  it("writes a negative proof only to private delivery state", async () => {
+    const fetchImpl = vi.fn(async (input: string | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      expect(url.pathname).toContain("state-bucket");
+      expect(url.pathname).toContain("/upload/");
+      expect(url.searchParams.get("name")).toBe(
+        `pool-liquidity-withdrawals/137/${watch.id}/${candidate.txHash}-${candidate.logIndex}.json`,
+      );
+      expect(url.searchParams.get("ifGenerationMatch")).toBe("0");
+      expect(JSON.parse(String(init?.body)).state).toBe("ignored");
+      return Response.json({ generation: "1" });
+    });
+    await ignorePoolCandidate(candidate, {
+      fetchImpl: fetchImpl as typeof fetch,
+      bucket: "state-bucket",
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("lists persisted pending events for retry after QuickNode's signature window", async () => {
+    const fetchImpl = retryFetch(async (input: string | URL) => {
+      const url = new URL(String(input));
+      if (url.searchParams.has("prefix"))
+        return Response.json({
+          items: [
+            {
+              name: `pool-liquidity-candidates/137/${watch.id}/${candidate.txHash}-${candidate.logIndex}.json`,
+            },
+          ],
+        });
+      if (url.searchParams.get("alt") === "media")
+        return Response.json({
+          state: "pending",
+          leaseUntil: 0,
+          event: {
+            ...candidate,
+            amount0: String(event.amount0),
+            amount1: String(event.amount1),
+            liquidity: String(event.liquidity),
+          },
+          clientMsgId: poolClientMsgId(event),
+        });
+      return Response.json({ generation: "1" });
+    });
+    const deliver = vi.fn(
+      async (_event: PoolLiquidityWithdrawal) => "delivered" as const,
+    );
+    expect(
+      await retryPendingPoolLiquidityWithdrawals({
+        fetchImpl: fetchImpl as typeof fetch,
+        candidateBucket: "candidate-bucket",
+        stateBucket: "test-bucket",
+        watches: [watch],
+        deliver,
+      }),
+    ).toBe(1);
+    expect(deliver).toHaveBeenCalledWith(event);
+  });
+
+  it("re-proves a staged candidate after an RPC outage", async () => {
+    let candidateContentReads = 0;
+    const fetchImpl = retryFetch(async (input: string | URL) => {
+      const url = new URL(String(input));
+      if (url.searchParams.has("prefix"))
+        return Response.json({
+          items: [
+            {
+              name: `pool-liquidity-candidates/137/${watch.id}/${candidate.txHash}-${candidate.logIndex}.json`,
+            },
+          ],
+        });
+      if (url.pathname.includes("candidate-bucket")) {
+        candidateContentReads++;
+        return Response.json({
+          generation: "1",
+          state: "delivered",
+          event: { ...candidate, amount0: "999999999999" },
+        });
+      }
+      return new Response("", { status: 404 });
+    });
+    const verify = vi.fn(async () => {});
+    expect(
+      await retryPendingPoolLiquidityWithdrawals({
+        fetchImpl: fetchImpl as typeof fetch,
+        candidateBucket: "candidate-bucket",
+        stateBucket: "test-bucket",
+        watches: [watch],
+        verify,
+      }),
+    ).toBe(1);
+    expect(verify).toHaveBeenCalledWith([candidate], {
+      stage: expect.any(Function),
+    });
+    expect(candidateContentReads).toBe(0);
+  });
+
+  it("processes more than 25 pending records in one run", async () => {
+    const fetchImpl = retryFetch(async (input: string | URL) => {
+      const url = new URL(String(input));
+      if (url.searchParams.has("prefix"))
+        return Response.json({
+          items: Array.from({ length: 27 }, (_, logIndex) => ({
+            name: `pool-liquidity-candidates/137/${watch.id}/${candidate.txHash}-${logIndex}.json`,
+          })),
+        });
+      if (url.searchParams.get("alt") === "media") {
+        const match = /-(\d+)\.json$/.exec(decodeURIComponent(url.pathname));
+        return Response.json({
+          state: "pending",
+          leaseUntil: 0,
+          event: {
+            ...candidate,
+            logIndex: Number(match?.[1]),
+            amount0: "1",
+            amount1: "1",
+            liquidity: "1",
+          },
+          clientMsgId: poolClientMsgId(candidate),
+        });
+      }
+      return Response.json({ generation: "1" });
+    });
+    const deliver = vi.fn(async () => "delivered" as const);
+    expect(
+      await retryPendingPoolLiquidityWithdrawals({
+        fetchImpl: fetchImpl as typeof fetch,
+        candidateBucket: "candidate-bucket",
+        stateBucket: "test-bucket",
+        watches: [watch],
+        deliver,
+      }),
+    ).toBe(27);
+    expect(deliver).toHaveBeenCalledTimes(27);
+  });
+
+  it("checkpoints before starting another record inside function timeout headroom", async () => {
+    let clock = 0;
+    const names = [0, 1].map(
+      (logIndex) =>
+        `pool-liquidity-candidates/137/${watch.id}/${candidate.txHash}-${logIndex}.json`,
+    );
+    const fetchImpl = retryFetch(async (input: string | URL) => {
+      const url = new URL(String(input));
+      if (url.searchParams.has("prefix"))
+        return Response.json({ items: names.map((name) => ({ name })) });
+      if (url.searchParams.get("alt") === "media") {
+        const logIndex = Number(
+          /-(\d+)\.json$/.exec(decodeURIComponent(url.pathname))?.[1],
+        );
+        return Response.json({
+          state: "pending",
+          leaseUntil: 0,
+          event: {
+            ...candidate,
+            logIndex,
+            amount0: "1",
+            amount1: "1",
+            liquidity: "1",
+          },
+          clientMsgId: poolClientMsgId(candidate),
+        });
+      }
+      return Response.json({ generation: "1" });
+    });
+    const seen: number[] = [];
+    const deliver = vi.fn(async (item: PoolLiquidityWithdrawal) => {
+      seen.push(item.logIndex);
+      if (item.logIndex === 0) clock = 145_001;
+      return "delivered" as const;
+    });
+    const options = {
+      fetchImpl: fetchImpl as typeof fetch,
+      candidateBucket: "candidate-bucket",
+      stateBucket: "test-bucket",
+      watches: [watch],
+      deliver,
+      now: () => clock,
+    };
+    expect(await retryPendingPoolLiquidityWithdrawals(options)).toBe(1);
+    expect(seen).toEqual([0]);
+    clock = 200_000;
+    expect(await retryPendingPoolLiquidityWithdrawals(options)).toBe(1);
+    expect(seen).toEqual([0, 1]);
+  });
+
+  it("continues beyond persistently failing early records", async () => {
+    const fetchImpl = retryFetch(async (input: string | URL) => {
+      const url = new URL(String(input));
+      if (url.searchParams.has("prefix"))
+        return Response.json({
+          items: Array.from({ length: 27 }, (_, logIndex) => ({
+            name: `pool-liquidity-candidates/137/${watch.id}/${candidate.txHash}-${logIndex}.json`,
+          })),
+        });
+      if (url.searchParams.get("alt") === "media") {
+        const match = /-(\d+)\.json$/.exec(decodeURIComponent(url.pathname));
+        return Response.json({
+          state: "pending",
+          leaseUntil: 0,
+          event: {
+            ...candidate,
+            logIndex: Number(match?.[1]),
+            amount0: "1",
+            amount1: "1",
+            liquidity: "1",
+          },
+          clientMsgId: poolClientMsgId(candidate),
+        });
+      }
+      return Response.json({ generation: "1" });
+    });
+    const delivered: number[] = [];
+    const deliver = vi.fn(async (item: PoolLiquidityWithdrawal) => {
+      if (item.logIndex < 25) throw new Error("persistent RPC failure");
+      delivered.push(item.logIndex);
+      return "delivered" as const;
+    });
+    const options = {
+      fetchImpl: fetchImpl as typeof fetch,
+      candidateBucket: "candidate-bucket",
+      stateBucket: "test-bucket",
+      watches: [watch],
+      deliver,
+      now: () => 0,
+    };
+    await expect(retryPendingPoolLiquidityWithdrawals(options)).rejects.toThrow(
+      "left 25 event(s) pending",
+    );
+    expect(delivered).toEqual([25, 26]);
+  });
+
+  it("resumes after twenty history pages, including a malformed object", async () => {
+    const names = Array.from(
+      { length: 21 },
+      (_, logIndex) =>
+        `pool-liquidity-candidates/137/${watch.id}/${candidate.txHash}-${logIndex}.json`,
+    );
+    names[19] = `pool-liquidity-candidates/137/${watch.id}/malformed.json`;
+    const fetchImpl = retryFetch(async (input) => {
+      const url = new URL(String(input));
+      if (url.searchParams.has("prefix")) {
+        const pageToken = url.searchParams.get("pageToken");
+        const start = url.searchParams.get("startOffset");
+        const index = pageToken
+          ? Number(pageToken)
+          : start
+            ? names.indexOf(start)
+            : 0;
+        return Response.json({
+          items: [{ name: names[index] }],
+          nextPageToken:
+            index < names.length - 1 ? String(index + 1) : undefined,
+        });
+      }
+      if (url.searchParams.get("alt") === "media") {
+        const index = Number(
+          /-(\d+)\.json$/.exec(decodeURIComponent(url.pathname))?.[1],
+        );
+        return Response.json({
+          state: index === 20 ? "pending" : "delivered",
+          leaseUntil: 0,
+          event: {
+            ...candidate,
+            logIndex: index,
+            amount0: "1",
+            amount1: "1",
+            liquidity: "1",
+          },
+          clientMsgId: poolClientMsgId(candidate),
+        });
+      }
+      return Response.json({ generation: "1" });
+    });
+    const deliver = vi.fn(async () => "delivered" as const);
+    const options = {
+      fetchImpl: fetchImpl as typeof fetch,
+      candidateBucket: "candidate-bucket",
+      stateBucket: "test-bucket",
+      watches: [watch],
+      deliver,
+      now: () => 0,
+    };
+    expect(await retryPendingPoolLiquidityWithdrawals(options)).toBe(0);
+    expect(deliver).not.toHaveBeenCalled();
+    expect(await retryPendingPoolLiquidityWithdrawals(options)).toBe(1);
+    expect(deliver).toHaveBeenCalledTimes(1);
+  });
+});
