@@ -229,10 +229,10 @@ test("interim ordering handles old/new schema, rollback and complete-ledger hand
 }) => {
   await page.clock.install({ time: WEEKDAY_FIXTURE_INSTANT });
   const errors = trackUnexpectedBrowserErrors(page);
-  const advanceClockUntil = async (
-    ready: () => boolean | Promise<boolean>,
-  ) => {
+  const advanceClockUntil = async (ready: () => boolean | Promise<boolean>) => {
     for (let remaining = 310_000; remaining > 0; remaining -= 10_000) {
+      // Clock steps must finish in order so each poll sees the resulting UI state.
+      // react-doctor-disable-next-line react-doctor/async-await-in-loop
       await page.clock.runFor(Math.min(10_000, remaining));
       if (await ready()) return;
     }
