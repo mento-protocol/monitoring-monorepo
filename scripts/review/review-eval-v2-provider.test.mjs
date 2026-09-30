@@ -41,6 +41,7 @@ function setup(
   const out = mkdtempSync(path.join(tmpdir(), "v2-provider-test-"));
   context.after(() => rmSync(out, { recursive: true, force: true }));
   const authCalls = [];
+  const versionCalls = [];
   const modelCalls = [];
   const options = {
     out,
@@ -48,6 +49,10 @@ function setup(
     version: "test",
     env,
     verifyPolicy: () => {},
+    execVersion: (name, args, settings) => {
+      versionCalls.push({ name, args, settings });
+      return "test";
+    },
     execAuth: (name, args, settings) => {
       authCalls.push({ name, args, settings });
       return JSON.stringify(
@@ -80,6 +85,7 @@ function setup(
   return {
     out,
     authCalls,
+    versionCalls,
     modelCalls,
     options,
     invoke: (provider) => provider.invoke({ ...request, cwd: out }),
@@ -305,6 +311,108 @@ test("failed subscription calls retain incomplete evidence and unknown usage", a
   assert.equal(provider.ledger.calls[0].actual_usd, null);
   assert.equal(provider.ledger.calls[0].charged_usd, null);
   assert.equal(existsSync(path.join(s.out, "calls/0000.json")), true);
+});
+
+test("provider version changes between calls reject the next judge before launch", async (context) => {
+  const s = setup(context);
+  let installedVersion = "test";
+  s.options.execVersion = (name, args, settings) => {
+    s.versionCalls.push({ name, args, settings });
+    return installedVersion;
+  };
+  const provider = createProvider(s.options);
+  const first = await s.invoke(provider);
+  assert.equal(first.version, "test");
+  installedVersion = "upgraded";
+  await assert.rejects(
+    invokeJudge(provider, {
+      ...request,
+      cwd: s.out,
+      allowedTools: [],
+      maxTurns: 1,
+    }),
+    /provider version changed/,
+  );
+  assert.equal(s.modelCalls.length, 1);
+  assert.equal(provider.ledger.calls[1].state, "failed");
+  for (const probe of s.versionCalls) {
+    assert.equal(probe.name, "claude");
+    assert.deepEqual(probe.args, ["--version"]);
+    assert.equal(probe.settings.cwd, s.modelCalls[0].settings.cwd);
+    assert.deepEqual(probe.settings.env, s.modelCalls[0].settings.env);
+  }
+  assert.equal(
+    s.versionCalls.length,
+    3,
+    "before/after the first call and before the refused call",
+  );
+});
+
+test("provider checks its captured version after authentication and before spawn", async (context) => {
+  const s = setup(context);
+  let installedVersion = "test";
+  const originalAuth = s.options.execAuth;
+  const order = [];
+  s.options.execAuth = (...args) => {
+    order.push("auth");
+    installedVersion = "upgraded-during-auth";
+    return originalAuth(...args);
+  };
+  s.options.execVersion = () => {
+    order.push("version");
+    return installedVersion;
+  };
+  const provider = createProvider(s.options);
+  await assert.rejects(s.invoke(provider), /provider version changed/);
+  assert.deepEqual(order, ["auth", "version"]);
+  assert.equal(s.modelCalls.length, 0);
+  const artifact = JSON.parse(
+    readFileSync(path.join(s.out, "calls/0000.json"), "utf8"),
+  );
+  assert.equal(artifact.stdout, "");
+  assert.equal(artifact.call.state, "failed");
+});
+
+test("runtime changes during a call reject its result while retaining stream and known usage", async (context) => {
+  const s = setup(context, { costs: [4] });
+  let installedVersion = "test";
+  s.options.execVersion = () => installedVersion;
+  const originalSpawn = s.options.spawnProcess;
+  s.options.spawnProcess = (...args) => {
+    const child = originalSpawn(...args);
+    installedVersion = "upgraded-during-call";
+    return child;
+  };
+  const provider = createProvider(s.options);
+  await assert.rejects(s.invoke(provider), /provider version changed/);
+  assert.equal(s.modelCalls.length, 1);
+  const artifact = JSON.parse(
+    readFileSync(path.join(s.out, "calls/0000.json"), "utf8"),
+  );
+  assert.ok(artifact.stdout.includes("Final review"));
+  assert.equal(artifact.call.state, "failed");
+  assert.equal(artifact.call.actual_usd, 4);
+});
+
+test("unknown or missing CLI version cannot launch a provider", async (context) => {
+  for (const output of ["", " ", null, new Error("private diagnostic")]) {
+    const s = setup(context);
+    s.options.execVersion = () => {
+      if (output instanceof Error) throw output;
+      return output;
+    };
+    await assert.rejects(s.invoke(createProvider(s.options)), (error) => {
+      assert.match(error.message, /cannot verify provider version/);
+      assert.equal(error.message.includes("private diagnostic"), false);
+      return true;
+    });
+    assert.equal(s.modelCalls.length, 0);
+  }
+  const s = setup(context);
+  assert.throws(
+    () => createProvider({ ...s.options, version: "" }),
+    /expected provider version/,
+  );
 });
 
 test("managed policy redirection and cached policy cannot pass subscription verification", async (context) => {

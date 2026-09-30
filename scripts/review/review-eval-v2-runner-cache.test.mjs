@@ -217,6 +217,7 @@ function providerArguments(c) {
     const invokeJudge = existsSync(judgeFile) ? (await import(${JSON.stringify(c.moduleUrl("review-eval-v2-judge-provider.mjs"))})).invokeJudge : (provider, request) => provider.invoke(request);
     const calls = [];
     const provider = createProvider({out:${JSON.stringify(path.join(c.directory, "argument-probe"))}, repoRoot:${JSON.stringify(c.copy)}, version:'test', env:{}, verifyPolicy:()=>{},
+      execVersion:()=> 'test',
       execAuth:()=>JSON.stringify({loggedIn:true,authMethod:'claude.ai',apiProvider:'firstParty',subscriptionType:'max'}),
       spawnProcess:(name,args)=>{
         calls.push(args);
@@ -234,6 +235,42 @@ function providerArguments(c) {
     ),
   );
 }
+
+test("score-only reuses recorded reviewer prompt identity after a live prompt edit", async (context) => {
+  const c = await cachedCampaign(context);
+  const planBytes = readFileSync(path.join(c.out, "plan.json"), "utf8");
+  const prompt = path.join(c.copy, "scripts/review/prompts/v2/request.md");
+  writeFileSync(
+    prompt,
+    `${readFileSync(prompt, "utf8")}\nRevised reviewer instructions.\n`,
+  );
+  assert.throws(
+    () => c.runner.reviewerPrompt(c.plan, "diff"),
+    /review prompt changed since plan/,
+  );
+  const runFailure = execFileSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `const {runCampaign} = await import(${JSON.stringify(c.moduleUrl("review-eval-v2-runner.mjs"))});
+       try { await runCampaign({out:${JSON.stringify(c.out)}}); }
+       catch (error) { process.stdout.write(error.message); }`,
+    ],
+    { encoding: "utf8", env: process.env },
+  );
+  assert.equal(runFailure, "review prompt changed since plan");
+  const result = freshRescore(c);
+  assert.equal(result.report.status, "completed");
+  assert.equal(result.report.completed_cells, c.plan.cells.length);
+  assert.ok(
+    result.report.rows.every((row) => row.raw_reused && row.score_reused),
+  );
+  assert.deepEqual(result.raws, c.rawDigests);
+  assert.equal(result.digest, c.scoreDigest);
+  assert.equal(readFileSync(path.join(c.out, "plan.json"), "utf8"), planBytes);
+  assert.equal(existsSync(path.join(c.out, "spend.json")), false);
+});
 
 test("judge-only provider changes reuse saved reviews without changing reviewer arguments", async (context) => {
   const c = await cachedCampaign(context);

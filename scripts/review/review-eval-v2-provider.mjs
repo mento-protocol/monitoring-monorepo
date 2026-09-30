@@ -221,9 +221,12 @@ export function createProvider({
   version,
   env = process.env,
   execAuth = execFileSync,
+  execVersion = execFileSync,
   verifyPolicy = verifyUnmanagedPolicy,
   spawnProcess = spawn,
 }) {
+  if (typeof version !== "string" || !version.trim())
+    throw new Error("expected provider version must be nonempty");
   if (limit !== undefined && limit !== null)
     throw new Error(
       "dollar limits are unsupported for subscription runs; create a new plan",
@@ -263,6 +266,7 @@ export function createProvider({
     const callEnv = scrubbedEnv({ env, roots: [repoRoot] });
     verifySubscription({ cwd, env: callEnv, execAuth, verifyPolicy });
     const call = reserveCall(ledger, label);
+    call.expected_cli_version = version;
     writeJson(file, ledger);
     // Provider subprocesses cannot launch more providers, edit fixtures, or post.
     // Restricted mode also confines file access to the fixture directory.
@@ -287,8 +291,30 @@ export function createProvider({
     );
     let stdout = "";
     let stderr = "";
+    const checkVersion = (field) => {
+      let observed;
+      try {
+        observed = execVersion("claude", ["--version"], {
+          cwd,
+          env: callEnv,
+          encoding: "utf8",
+          timeout: 15_000,
+          maxBuffer: 64 * 1024,
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+      } catch {
+        throw new Error("cannot verify provider version");
+      }
+      if (typeof observed !== "string" || !observed.trim())
+        throw new Error("cannot verify provider version");
+      call[field] = observed.trim();
+      if (call[field] !== version)
+        throw new Error("provider version changed since campaign capture");
+    };
     try {
       await new Promise((resolve, reject) => {
+        // Auth can take time. Check the same PATH/cwd immediately before spawn.
+        checkVersion("cli_version_before");
         const child = spawnProcess("claude", args, {
           cwd,
           env: callEnv,
@@ -331,9 +357,17 @@ export function createProvider({
       // The v1 envelope defaults a missing cost to zero. Preserve unknown here.
       envelope.total_cost_usd = terminal?.total_cost_usd ?? null;
       settleCall(call, envelope);
+      // Preserve completed output and known usage, but do not cache a result
+      // when the runtime changed while the child was running.
+      checkVersion("cli_version_after");
       if (envelope.is_error || !envelope.result.trim())
         throw new Error("provider returned an incomplete result");
-      return { stream: stdout, envelope, version, call_id: call.id };
+      return {
+        stream: stdout,
+        envelope,
+        version: call.cli_version_before,
+        call_id: call.id,
+      };
     } catch (error) {
       call.state = "failed";
       call.error = error.message;

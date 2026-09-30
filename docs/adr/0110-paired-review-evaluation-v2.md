@@ -42,6 +42,8 @@ result handling. Keep judge-specific command construction in grading identity;
 pin shared authentication, transport, and restrictions to both identities.
 Pin grading source and prompts for the process lifetime, and
 reject source drift before saving results.
+Rescoring keeps each saved review's recorded skill and prompt identities. Later
+edits to those inputs do not authorize new reviewer calls during scoring.
 
 Use root-cause labels and repaired-root negative controls. A repaired case is
 not a claim that its whole PR has no defects. Keep original and repaired cases
@@ -51,6 +53,7 @@ Alternate arm order by sorted family ID and reverse it for repaired cases.
 This balances first positions within each variant when the family count is even.
 Reject a claim reused across distinct matched roots. Keep uncertain root-linked
 claims out of source-only novelty grading while retaining definite root matches.
+Require an extracted claim for every matched or uncertain root verdict.
 
 A dataset digest establishes identity, not permission to execute its source.
 Restrict executable probes to reviewed source and repair tuples. Verify and copy

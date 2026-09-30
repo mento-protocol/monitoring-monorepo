@@ -152,11 +152,13 @@ function matchesFrom(parsed, defects, claims, finalText) {
         record.claim_ids.every((id) => claimMap.has(id)),
       "matching returned duplicate or unknown claim IDs",
     );
-    if (record.verdict === "matched") {
+    if (record.verdict !== "unmatched") {
       requireValue(
         record.claim_ids.length > 0,
-        "matching returned a hit without a claim",
+        `matching returned ${record.verdict} without a claim`,
       );
+    }
+    if (record.verdict === "matched") {
       requireQuote(record.quote, finalText, "matched defect");
       requireValue(
         record.claim_ids.some((id) =>

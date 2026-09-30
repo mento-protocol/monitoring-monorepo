@@ -69,7 +69,10 @@ can use Read, Grep, and Glob only. They cannot run tests or shell commands.
 
 V2 requires a verified Claude subscription. Before every reviewer or grading
 call, it checks `claude auth status --json` with the same environment, working
-directory, and empty settings sources as the model call. API-key, alternate
+directory, and empty settings sources as the model call. It also verifies the
+CLI version before each model invocation, including later grading calls within
+one cell, and checks again before accepting the result. A version mismatch
+leaves the run incomplete. API-key, alternate
 provider, token override, logged-out, and unknown authentication are refused.
 Managed policy files, cached remote policy, policy redirection, and macOS managed
 preferences are also refused because the auth status probe cannot attest their
@@ -110,6 +113,8 @@ A matched verdict carries a verbatim quote from the final review. Code checks
 quote provenance; the grader still owns the semantic judgment. The scorer
 retains every extracted claim and reports insufficient coverage explicitly.
 Uncertain matches and unverifiable claims remain visible.
+An uncertain root match must name at least one extracted claim. A verdict with
+no supporting claim is invalid grading evidence.
 One extracted claim cannot satisfy two distinct matched roots. Claims linked to
 uncertain root matches skip source-only novelty grading. The unresolved links
 remain visible; a separate definite root match still counts normally.
@@ -124,6 +129,9 @@ pnpm review:eval:v2 report --out /absolute/path/to/eval-run
 
 Rescoring must retain the plan's case IDs. It may reorder cases or revise labels.
 To add or remove cases, create a new plan.
+Score-only runs use each saved review's recorded skill and reviewer-prompt
+identity. Later edits to those reviewer inputs do not prevent rescoring.
+Runs that can invoke the reviewer still reject that drift.
 
 Reviewer identity excludes the answer key and grader. Grading identity includes
 the immutable reviewer artifact, answer key and its selection code, grading
@@ -136,8 +144,9 @@ grading-only modules do not invalidate saved reviewer outputs. A scoring process
 its grading source and prompts at startup and rejects later changes. After a
 grading edit, start a new scoring process to reuse the saved reviews under the
 new grading identity.
-A source, skill, reviewer-prompt, runtime, or execution change requires a compatible new
-execution identity. A grading-only change must not silently buy another review.
+A new reviewer call after a source, skill, reviewer-prompt, runtime, or execution
+change requires a compatible new execution identity. A grading-only change must
+not silently buy another review.
 
 Read paired results by PR family. Inspect serious misses, claims about repaired
 roots, other false or unsupported claims, and model-supported novel defects.

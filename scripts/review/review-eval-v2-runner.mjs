@@ -202,8 +202,9 @@ function readPlan(out, { scoreOnly = false } = {}) {
   if (body.execution_digest !== digestFiles(EXECUTION_FILES))
     throw new Error("execution source changed since plan; create a new plan");
   if (
+    !scoreOnly &&
     body.prompt_sha256 !==
-    sha256Bytes(readFileSync(path.join(REPO_ROOT, PROMPT)))
+      sha256Bytes(readFileSync(path.join(REPO_ROOT, PROMPT)))
   )
     throw new Error("review prompt changed since plan");
   for (const skill of scoreOnly ? [] : Object.values(body.skills)) {

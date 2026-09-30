@@ -300,6 +300,53 @@ test("matcher rejects omitted roots, duplicates, unknown IDs, and fabricated quo
   }
 });
 
+test("uncertain roots without linked claims fail matching before source classification", async () => {
+  const requests = [];
+  const result = await scoreReview({
+    review: review("The null input crashes."),
+    defects: [root],
+    fixturePath: "/unused",
+    sourceDiff: "complete working-tree diff",
+    judge: judgeSequence(
+      [
+        extraction(claim("The null input crashes.")),
+        {
+          defects: [match({ verdict: "uncertain", claim_ids: [], quote: "" })],
+        },
+        {
+          novel: [
+            {
+              claim_id: "c1",
+              verdict: "unsupported",
+              reason: "No verifiable trigger.",
+            },
+          ],
+        },
+      ],
+      requests,
+    ),
+  });
+  assert.equal(result.status, "incomplete");
+  assert.equal(result.coverage.matching, "incomplete");
+  assert.match(result.errors[0]?.message ?? "", /uncertain.*without a claim/);
+  assert.deepEqual(
+    result.defects,
+    [],
+    "invalid uncertainty must not reach the report reducer",
+  );
+  assert.equal(
+    result.claims[0].id,
+    "c1",
+    "retain extracted evidence for diagnosis",
+  );
+  assert.deepEqual(result.novel, []);
+  assert.equal(
+    requests.length,
+    2,
+    "stop before unrelated source-only classification",
+  );
+});
+
 test("a claim cannot satisfy two matched roots; distinct claims can", async () => {
   const text = "The null input crashes.";
   const second = "The empty list hangs.";
