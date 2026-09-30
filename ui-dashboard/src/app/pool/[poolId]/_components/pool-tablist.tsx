@@ -1,12 +1,10 @@
 "use client";
 
-import { LimitSelect } from "@/components/controls";
 import { useRovingTabIndex } from "@/lib/use-roving-tab-index";
-import { TABS_WITHOUT_LIMIT_SELECT, type Tab } from "../_lib/constants";
+import { type Tab } from "../_lib/constants";
 import { getTabLabel } from "../_lib/helpers";
 
-/** Pool-page tablist + the inline LimitSelect that tags along with the
- *  paginated tabs. Extracted so the a11y tests can mount the production
+/** Pool-page tablist. Extracted so the a11y tests can mount the production
  *  markup verbatim — previously the test re-implemented this JSX, which
  *  meant a regression on `role="tablist"` / `aria-controls` / button
  *  ordering would slip past the test silently (Cursor finding on PR #342).
@@ -36,17 +34,10 @@ export function PoolTablist({
   visibleTabs,
   active,
   onSelect,
-  limit,
-  onLimitChange,
 }: {
   visibleTabs: ReadonlyArray<Tab>;
   active: Tab;
   onSelect: (tab: Tab) => void;
-  /** Current page-size for paginated tabs. Drives the tag-along
-   *  `LimitSelect` to its right (hidden when the active tab manages
-   *  its own pagination — see `TABS_WITHOUT_LIMIT_SELECT`). */
-  limit: number;
-  onLimitChange: (limit: number) => void;
 }) {
   const activeIndex = Math.max(0, visibleTabs.indexOf(active));
   const {
@@ -61,12 +52,6 @@ export function PoolTablist({
   });
 
   return (
-    // The `role="tablist"` element MUST only contain `role="tab"`
-    // children (axe rule `aria-required-children`). The LimitSelect
-    // is rendered alongside the tablist as a sibling inside the
-    // shared flex row, NOT inside the tablist itself. Folding the
-    // select into the tablist (as the previous markup did) is a
-    // critical a11y violation.
     <div className="flex w-full min-w-0 gap-1 overflow-x-auto border-b border-slate-800">
       <div
         ref={tablistRef}
@@ -105,12 +90,6 @@ export function PoolTablist({
           );
         })}
       </div>
-      {/* Oracle tab manages its own page size; Limits has no paginated data */}
-      {!TABS_WITHOUT_LIMIT_SELECT.has(active) && (
-        <div className="ml-auto hidden sm:flex items-center">
-          <LimitSelect id="tab-limit" value={limit} onChange={onLimitChange} />
-        </div>
-      )}
     </div>
   );
 }

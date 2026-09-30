@@ -1621,6 +1621,9 @@ export function handleGraphQL(
           (row) => Number(row.timestamp) >= dailySnapshotLowerBound(variables),
         ),
       };
+    case "PoolReserves":
+    case "PoolReserveHistory":
+      return { ReserveUpdate: [] };
     case "PoolDailySnapshotsChart":
     case "PoolOgDailySnapshots":
       return {

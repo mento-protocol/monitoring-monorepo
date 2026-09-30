@@ -2,15 +2,17 @@ export function LimitSelect({
   id,
   value,
   onChange,
+  label = "Show:",
 }: {
   id: string;
   value: number;
   onChange: (n: number) => void;
+  label?: string;
 }) {
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex shrink-0 items-center gap-2 whitespace-nowrap">
       <label htmlFor={id} className="text-sm text-slate-400">
-        Show:
+        {label}
       </label>
       <select
         id={id}

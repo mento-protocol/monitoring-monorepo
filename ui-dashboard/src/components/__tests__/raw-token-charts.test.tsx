@@ -227,4 +227,44 @@ describe("raw token charts", () => {
     expect(html).toBe("");
     expect(capturedPlotProps).toEqual([]);
   });
+
+  it.each([
+    { props: { isLoading: true }, message: "Loading reserve history…" },
+    { props: {}, message: "No reserve updates in this time range." },
+    {
+      props: { error: "upstream unavailable" },
+      message: "Reserve history unavailable: upstream unavailable",
+    },
+  ])(
+    "keeps the chart frame and controls for $message",
+    ({ props, message }) => {
+      const html = renderToStaticMarkup(
+        <ReserveChart
+          rows={[]}
+          token0={null}
+          token1={null}
+          pool={BASE_POOL}
+          controls={<button type="button">All</button>}
+          {...props}
+        />,
+      );
+      expect(html).toContain(message);
+      expect(html).toContain("h-80");
+      expect(html).toContain(">All</button>");
+    },
+  );
+
+  it("discloses capped history beside the plot", () => {
+    const html = renderToStaticMarkup(
+      <ReserveChart
+        rows={[RESERVE]}
+        token0={null}
+        token1={null}
+        pool={BASE_POOL}
+        truncated
+      />,
+    );
+    expect(html).toContain("Later updates may be omitted.");
+    expect(capturedPlotProps).toHaveLength(1);
+  });
 });

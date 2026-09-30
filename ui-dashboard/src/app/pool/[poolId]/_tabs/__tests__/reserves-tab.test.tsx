@@ -5,7 +5,12 @@ import type { Pool, ReserveUpdate } from "@/lib/types";
 
 // Hoist mocks so they're applied before the SUT imports its dependencies.
 const mockUseGQL = vi.fn();
+const mockUseHistory = vi.fn();
 let capturedChartRows: ReserveUpdate[] | null = null;
+
+vi.mock("@/hooks/use-pool-reserve-history", () => ({
+  usePoolReserveHistory: (...args: unknown[]) => mockUseHistory(...args),
+}));
 
 vi.mock("@/lib/graphql", () => ({
   useGQL: (...args: unknown[]) => mockUseGQL(...args),
@@ -58,6 +63,7 @@ vi.mock("@/components/table", () => ({
   Th: ({ children }: { children: ReactNode }) => <th>{children}</th>,
 }));
 
+import { TableControlsContext } from "@/components/table-controls-context";
 import { ReservesTab } from "../reserves-tab";
 
 const POOL: Pool = {
@@ -72,6 +78,7 @@ const POOL: Pool = {
   updatedAtTimestamp: "1700000000",
   token0Decimals: 18,
   token1Decimals: 18,
+  tokenDecimalsKnown: true,
   oraclePrice: "0",
   reserves0: "1",
   reserves1: "1",
@@ -115,11 +122,19 @@ const ROWS_DESC: ReserveUpdate[] = [
 ];
 
 describe("ReservesTab ordering contract", () => {
-  it("feeds the chart chronological (asc) rows and renders the table newest-first (desc)", () => {
+  it("uses independent chart history and renders the table newest-first", () => {
     capturedChartRows = null;
     mockUseGQL.mockReturnValue({
       data: { ReserveUpdate: ROWS_DESC },
       error: null,
+      isLoading: false,
+    });
+    const historyRows = [
+      { ...ROWS_DESC[2]!, id: "older", blockNumber: "1" },
+      ...ROWS_DESC,
+    ].reverse();
+    mockUseHistory.mockReturnValue({
+      data: { rows: historyRows, from: 0, to: 4000, truncated: false },
       isLoading: false,
     });
 
@@ -133,13 +148,8 @@ describe("ReservesTab ordering contract", () => {
       />,
     );
 
-    // Chart contract: chronological (asc) so plotly's x-axis renders left-to-right in time order.
-    expect(capturedChartRows).not.toBeNull();
-    expect(capturedChartRows!.map((r) => r.blockNumber)).toEqual([
-      "10",
-      "20",
-      "30",
-    ]);
+    expect(capturedChartRows).toBe(historyRows);
+    expect(mockUseHistory).toHaveBeenCalledWith("42220-0xpool", "1d", true);
 
     // Table contract: newest-first (desc). The first txHash in document order
     // is the newest row; the last is the oldest.
@@ -159,6 +169,7 @@ describe("ReservesTab loading skeleton", () => {
       error: undefined,
       isLoading: true,
     });
+    mockUseHistory.mockReturnValue({ data: undefined, isLoading: true });
 
     const html = renderToStaticMarkup(
       <ReservesTab
@@ -177,4 +188,45 @@ describe("ReservesTab loading skeleton", () => {
     const rowMatches = html.match(/height:44px/g) ?? [];
     expect(rowMatches).toHaveLength(10);
   });
+});
+
+describe("ReservesTab page-size recovery", () => {
+  it.each([
+    ["loading", { data: undefined, isLoading: true }],
+    [
+      "error",
+      { data: undefined, error: new Error("offline"), isLoading: false },
+    ],
+    ["empty", { data: { ReserveUpdate: [] }, isLoading: false }],
+  ])(
+    "keeps the selector after the chart in the %s state",
+    (_state, response) => {
+      mockUseGQL.mockReturnValue(response);
+      mockUseHistory.mockReturnValue({
+        data: { rows: ROWS_DESC, from: 0, to: 4000, truncated: false },
+        isLoading: false,
+      });
+      const html = renderToStaticMarkup(
+        <TableControlsContext.Provider
+          value={
+            <select aria-label="Rows per page" defaultValue="25">
+              <option value="25">25</option>
+            </select>
+          }
+        >
+          <ReservesTab
+            poolId="42220-0xpool"
+            limit={25}
+            pool={POOL}
+            search=""
+            onSearchChange={() => {}}
+          />
+        </TableControlsContext.Provider>,
+      );
+      expect(html.match(/aria-label="Rows per page"/g)).toHaveLength(1);
+      expect(html.indexOf('aria-label="Rows per page"')).toBeGreaterThan(
+        html.indexOf('data-testid="reserve-chart"'),
+      );
+    },
+  );
 });

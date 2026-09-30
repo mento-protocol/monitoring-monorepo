@@ -4,6 +4,7 @@ import { useAddressLabels } from "@/components/address-labels-provider";
 import { EmptyBox } from "@/components/feedback";
 import type { useNetwork } from "@/components/network-provider";
 import { Pagination } from "@/components/pagination";
+import { TableControlsFallback } from "@/components/table-controls-context";
 import { TableSearch } from "@/components/table-search";
 import {
   ENVIO_MAX_ROWS,
@@ -116,13 +117,15 @@ export function OlsLiquidityEvents({
   const tableProps = { pool, network, limit };
   return (
     <>
-      {events.length > 0 && (
+      {events.length > 0 ? (
         <TableSearch
           value={search}
           onChange={handleSearchChange}
           placeholder="Search OLS events by tx, caller, direction, amount, or token..."
           ariaLabel="Search OLS events"
         />
+      ) : (
+        <TableControlsFallback />
       )}
       {!showMetadata ? (
         <OlsLiquidityTable

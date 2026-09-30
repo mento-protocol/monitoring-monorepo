@@ -39,6 +39,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { axe } from "vitest-axe";
+import { TableSearch } from "@/components/table-search";
+import { TableControlsContext } from "@/components/table-controls-context";
 import { LimitSelect } from "@/components/controls";
 import { ChainFilterControl } from "@/components/chain-filter-control";
 import { BridgeStatusFilter } from "@/components/bridge-status-filter";
@@ -77,6 +79,34 @@ function render(element: React.ReactElement) {
     root.render(element);
   });
 }
+
+describe("Table controls a11y", () => {
+  it("labels the search and page size in the same table toolbar", async () => {
+    render(
+      <TableControlsContext.Provider
+        value={
+          <LimitSelect
+            id="table-rows"
+            label="Rows per page"
+            value={25}
+            onChange={() => undefined}
+          />
+        }
+      >
+        <TableSearch
+          value=""
+          onChange={() => undefined}
+          ariaLabel="Search reserves"
+        />
+      </TableControlsContext.Provider>,
+    );
+    const search = container.querySelector('input[type="search"]');
+    const select = container.querySelector("#table-rows");
+    expect(search?.parentElement).toBe(select?.parentElement?.parentElement);
+    const results = await axe(container);
+    expect(results.violations).toEqual([]);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // LimitSelect — labelled native select
@@ -499,8 +529,6 @@ describe("PoolTablist a11y (real component)", () => {
           visibleTabs={TABS}
           active="rebalances"
           onSelect={() => undefined}
-          limit={50}
-          onLimitChange={() => undefined}
         />
         {/* Stub panel so the tab buttons' `aria-controls` references
             resolve. The page renders this; here we render a minimal
@@ -528,17 +556,13 @@ describe("PoolTablist a11y (real component)", () => {
     expect(results.violations).toEqual([]);
   });
 
-  it("hides the inline LimitSelect when the active tab manages its own pagination", async () => {
-    // `oracle` is in `TABS_WITHOUT_LIMIT_SELECT` — the LimitSelect's
-    // `<select id="tab-limit">` should not be in the DOM.
+  it("renders only navigation when the active tab manages its own pagination", async () => {
     render(
       <>
         <PoolTablist
           visibleTabs={TABS}
           active="oracle"
           onSelect={() => undefined}
-          limit={50}
-          onLimitChange={() => undefined}
         />
         <div role="tabpanel" id="panel-oracle" aria-labelledby="tab-oracle">
           <p>oracle</p>
@@ -550,22 +574,20 @@ describe("PoolTablist a11y (real component)", () => {
     expect(results.violations).toEqual([]);
   });
 
-  it("renders the inline LimitSelect for paginated tabs", async () => {
+  it("keeps the page-size control out of the tab navigation for paginated tabs", async () => {
     render(
       <>
         <PoolTablist
           visibleTabs={TABS}
           active="swaps"
           onSelect={() => undefined}
-          limit={50}
-          onLimitChange={() => undefined}
         />
         <div role="tabpanel" id="panel-swaps" aria-labelledby="tab-swaps">
           <p>swaps</p>
         </div>
       </>,
     );
-    expect(container.querySelector("#tab-limit")).not.toBeNull();
+    expect(container.querySelector("#tab-limit")).toBeNull();
     const results = await axe(container);
     expect(results.violations).toEqual([]);
   });
@@ -605,13 +627,7 @@ describe("PoolTablist a11y (real component)", () => {
     function renderTablist(active: Tab, onSelect: (t: Tab) => void) {
       render(
         <>
-          <PoolTablist
-            visibleTabs={TABS}
-            active={active}
-            onSelect={onSelect}
-            limit={50}
-            onLimitChange={() => undefined}
-          />
+          <PoolTablist visibleTabs={TABS} active={active} onSelect={onSelect} />
           <div
             role="tabpanel"
             id={`panel-${active}`}
