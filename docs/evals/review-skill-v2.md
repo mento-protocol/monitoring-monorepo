@@ -119,12 +119,14 @@ Rescoring must retain the plan's case IDs. It may reorder cases or revise labels
 To add or remove cases, create a new plan.
 
 Reviewer identity excludes the answer key and grader. Grading identity includes
-the immutable reviewer artifact, answer key and its selection code, scorer,
-prompts, and judge settings.
-Answer-key selection lives in a separate grading module. Its changes do not
-invalidate saved reviewer outputs. A scoring process pins its grading source
-and prompts at startup and rejects later changes. After a grading edit, start a
-new scoring process to reuse the saved reviews under the new grading identity.
+the immutable reviewer artifact, answer key and its selection code, grading
+orchestration, scorer, prompts, and judge settings. Grading orchestration covers
+score-cache identity, judge calls, and grading result handling. It lives outside
+the reviewer execution module, as does answer-key selection. Changes to these
+grading modules do not invalidate saved reviewer outputs. A scoring process pins
+its grading source and prompts at startup and rejects later changes. After a
+grading edit, start a new scoring process to reuse the saved reviews under the
+new grading identity.
 A source, skill, reviewer-prompt, runtime, or execution change requires a compatible new
 execution identity. A grading-only change must not silently buy another review.
 

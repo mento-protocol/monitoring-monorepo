@@ -18,6 +18,9 @@ const promptPath = (name) => path.join(directory, "prompts/v2", `${name}.md`);
 function currentScorerDigest() {
   const files = [
     fileURLToPath(import.meta.url),
+    path.join(directory, "review-eval-v2-grading.mjs"),
+    path.join(directory, "review-eval-experiment-contract.mjs"),
+    path.join(directory, "review-eval-run-cell.mjs"),
     path.join(directory, "review-eval-score.mjs"),
     path.join(directory, "review-eval-stream.mjs"),
     // rootsForCase selects the answer-key roots sent to the grader.

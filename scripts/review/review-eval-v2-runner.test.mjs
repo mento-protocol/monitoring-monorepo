@@ -446,18 +446,19 @@ test("execution identity pins host probe code but permits label and grader chang
     [
       "review-eval-v2-dataset.mjs",
       "verifyCaseProbes",
-      "fixturePath, caseId, dataset",
+      "{ fixturePath, caseId, dataset }",
     ],
     [
       "review-eval-v2-probe-trust.mjs",
       "runAuditedProbe",
-      "repo, item, fixturePath, script",
+      "{ repo, item, fixturePath, script }",
     ],
+    ["review-eval-experiment-contract.mjs", "digestObject", "value"],
   ]) {
     await context.test(file, async () => {
       const target = path.join(copy, "scripts/review", file);
       const originalBytes = readFileSync(target, "utf8");
-      const marker = `export function ${symbol}({ ${parameters} }) {`;
+      const marker = `export function ${symbol}(${parameters}) {`;
       const changed = originalBytes.replace(
         marker,
         `${marker}\n  throw new Error("probe fault sentinel");`,
@@ -465,7 +466,7 @@ test("execution identity pins host probe code but permits label and grader chang
       assert.notEqual(
         changed,
         originalBytes,
-        "fault injection must alter a host probe entry point",
+        "fault injection must alter an execution helper",
       );
       writeFileSync(target, changed);
       try {

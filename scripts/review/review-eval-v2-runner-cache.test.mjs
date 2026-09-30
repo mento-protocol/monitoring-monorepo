@@ -169,23 +169,8 @@ test("result-only and separately stored final text are checked before cached gra
   }
 });
 
-test("fresh-process selector changes rescore existing raw without changing execution identity", async (context) => {
-  const c = await cachedCampaign(context);
-  const selectorFile = existsSync(
-    path.join(c.copy, "scripts/review/review-eval-v2-selection.mjs"),
-  )
-    ? "review-eval-v2-selection.mjs"
-    : "review-eval-v2-dataset.mjs";
-  const target = path.join(c.copy, "scripts/review", selectorFile);
-  const before = readFileSync(target, "utf8");
-  const after = before.replace("...item.negative_control_root_ids,", "");
-  assert.notEqual(
-    after,
-    before,
-    "fault must alter grading-only root selection",
-  );
-  writeFileSync(target, after);
-  const result = JSON.parse(
+function freshRescore(c, selectorFile = "review-eval-v2-selection.mjs") {
+  return JSON.parse(
     execFileSync(
       process.execPath,
       [
@@ -214,6 +199,25 @@ test("fresh-process selector changes rescore existing raw without changing execu
       { encoding: "utf8", env: process.env },
     ),
   );
+}
+
+test("fresh-process selector changes rescore existing raw without changing execution identity", async (context) => {
+  const c = await cachedCampaign(context);
+  const selectorFile = existsSync(
+    path.join(c.copy, "scripts/review/review-eval-v2-selection.mjs"),
+  )
+    ? "review-eval-v2-selection.mjs"
+    : "review-eval-v2-dataset.mjs";
+  const target = path.join(c.copy, "scripts/review", selectorFile);
+  const before = readFileSync(target, "utf8");
+  const after = before.replace("...item.negative_control_root_ids,", "");
+  assert.notEqual(
+    after,
+    before,
+    "fault must alter grading-only root selection",
+  );
+  writeFileSync(target, after);
+  const result = freshRescore(c, selectorFile);
   assert.notEqual(result.digest, c.scoreDigest);
   assert.deepEqual(result.repairedRoots, []);
   assert.equal(result.report.status, "completed");
@@ -253,4 +257,50 @@ test("loaded scoring drift replaces a prior completed report with durable incomp
   );
   assert.deepEqual(cacheBytes(), before);
   assert.equal(existsSync(path.join(c.out, "spend.json")), false);
+});
+
+test("grading orchestration and leak-helper changes reuse reviewer artifacts in a fresh process", async (context) => {
+  for (const mode of ["grading row", "leak helper"]) {
+    await context.test(mode, async (child) => {
+      const c = await cachedCampaign(child);
+      const file =
+        mode === "leak helper"
+          ? "review-eval-run-cell.mjs"
+          : existsSync(
+                path.join(c.copy, "scripts/review/review-eval-v2-grading.mjs"),
+              )
+            ? "review-eval-v2-grading.mjs"
+            : "review-eval-v2-runner.mjs";
+      const target = path.join(c.copy, "scripts/review", file);
+      const before = readFileSync(target, "utf8");
+      const after =
+        mode === "leak helper"
+          ? before.replace(
+              "const advisory = [];",
+              'const advisory = ["fault-control"];',
+            )
+          : before.replace(
+              "score_reused: scoreReused,",
+              'score_reused: scoreReused, grading_revision: "fault-control",',
+            );
+      assert.notEqual(after, before, "fault must alter grading behavior");
+      writeFileSync(target, after);
+      const result = freshRescore(c);
+      assert.notEqual(result.digest, c.scoreDigest);
+      assert.equal(result.report.status, "completed");
+      assert.ok(
+        result.report.rows.every(
+          (row) =>
+            row.raw_reused &&
+            row.score_reused &&
+            (mode === "leak helper"
+              ? row.leak.advisory.includes("fault-control")
+              : row.grading_revision === "fault-control"),
+        ),
+      );
+      assert.deepEqual(result.raws, c.rawDigests);
+      assert.equal(result.report.cost.actual_known_usd, 0);
+      assert.equal(existsSync(path.join(c.out, "spend.json")), false);
+    });
+  }
 });

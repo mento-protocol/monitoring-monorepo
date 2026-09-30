@@ -460,6 +460,9 @@ async function copiedScorer(context) {
     "review-eval-stream.mjs",
     "review-eval-v2-selection.mjs",
     "review-eval-v2-report.mjs",
+    "review-eval-v2-grading.mjs",
+    "review-eval-experiment-contract.mjs",
+    "review-eval-run-cell.mjs",
     "prompts/v2",
   ]) {
     cpSync(new URL(file, import.meta.url), path.join(copy, file), {
@@ -639,28 +642,40 @@ test("direct scoring rejects prompt drift before invoking a judge", async (conte
 });
 
 test("source drift during the final judge await invalidates the result", async (context) => {
-  const { copy, scorer } = await copiedScorer(context);
-  const reducer = path.join(copy, "review-eval-v2-report.mjs");
-  let calls = 0;
-  const result = await scorer.scoreReview({
-    review: review("No findings."),
-    defects: [],
-    judge: {
-      model: "stub",
-      effort: "high",
-      exec: async () => {
-        calls++;
-        await Promise.resolve();
-        writeFileSync(
-          reducer,
-          `${readFileSync(reducer, "utf8")}\n// changed during judge\n`,
-        );
-        return JSON.stringify(extraction());
-      },
-    },
-  });
-  assert.equal(calls, 1);
-  assert.equal(result.status, "incomplete");
-  assert.match(result.errors[0].message, /source changed after module load/);
-  assert.deepEqual(result.claims, []);
+  for (const file of [
+    "review-eval-v2-report.mjs",
+    "review-eval-v2-grading.mjs",
+    "review-eval-experiment-contract.mjs",
+    "review-eval-run-cell.mjs",
+  ]) {
+    await context.test(file, async (child) => {
+      const { copy, scorer } = await copiedScorer(child);
+      const source = path.join(copy, file);
+      let calls = 0;
+      const result = await scorer.scoreReview({
+        review: review("No findings."),
+        defects: [],
+        judge: {
+          model: "stub",
+          effort: "high",
+          exec: async () => {
+            calls++;
+            await Promise.resolve();
+            writeFileSync(
+              source,
+              `${readFileSync(source, "utf8")}\n// changed during judge\n`,
+            );
+            return JSON.stringify(extraction());
+          },
+        },
+      });
+      assert.equal(calls, 1);
+      assert.equal(result.status, "incomplete");
+      assert.match(
+        result.errors[0].message,
+        /source changed after module load/,
+      );
+      assert.deepEqual(result.claims, []);
+    });
+  }
 });
