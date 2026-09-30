@@ -3,7 +3,7 @@ in this complete final code review. Interpret each statement in the context of
 the whole report, including its final disposition.
 
 Exclude concerns explicitly cleared, withdrawn, called harmless, or described as
-not disputed. Exclude scope disclosures, execution limitations, unrun checks,
+not defects. Exclude scope disclosures, execution limitations, unrun checks,
 and requests for proof unless they also assert a defect in the changed code.
 Keep uncertain and low-severity concerns, including hardening or documentation
 concerns, when the reviewer still raises them. Preserve qualifications. Never

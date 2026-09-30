@@ -10,6 +10,7 @@ import {
   existsSync,
 } from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import {
   executionIdentity,
@@ -372,4 +373,114 @@ test("retired dollar arguments are rejected explicitly before planning or auth",
     () => makePlan({ out: path.join(tmpdir(), "unused-v2-plan"), budget: 60 }),
     /--budget is retired/,
   );
+});
+
+test("execution identity pins host probe code but permits label and grader changes", async (context) => {
+  const directory = mkdtempSync(
+    path.join(tmpdir(), "review-v2-probe-identity-"),
+  );
+  context.after(() => rmSync(directory, { recursive: true, force: true }));
+  const copy = path.join(directory, "repo");
+  cpSync(
+    path.join(REPO_ROOT, "scripts/review"),
+    path.join(copy, "scripts/review"),
+    { recursive: true },
+  );
+  cpSync(
+    path.join(REPO_ROOT, "docs/evals/review-skill-v2"),
+    path.join(copy, "docs/evals/review-skill-v2"),
+    { recursive: true },
+  );
+  const bin = path.join(directory, "bin");
+  mkdirSync(bin);
+  writeFileSync(
+    path.join(bin, "claude"),
+    '#!/bin/sh\n[ "$#" -eq 1 ] && [ "$1" = "--version" ] || exit 99\nprintf "%s\\n" "claude-test-version"\n',
+    { mode: 0o755 },
+  );
+  const previousPath = process.env.PATH;
+  process.env.PATH = bin;
+  context.after(() => {
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+  });
+  const runner = await import(
+    pathToFileURL(path.join(copy, "scripts/review/review-eval-v2-runner.mjs"))
+  );
+  const skillDir = path.join(directory, "skill");
+  mkdirSync(skillDir);
+  writeFileSync(path.join(skillDir, "SKILL.md"), "Review the code.");
+  const datasetFile = path.join(
+    copy,
+    "docs/evals/review-skill-v2/dataset.json",
+  );
+  const options = { datasetFile, incumbent: skillDir, candidate: skillDir };
+  const out = path.join(directory, "original-plan");
+  const original = runner.makePlan({ ...options, out });
+  const source = JSON.parse(readFileSync(datasetFile, "utf8"));
+  source.roots[0].title += " (revised label)";
+  writeFileSync(datasetFile, JSON.stringify(source));
+  for (const file of [
+    "review-eval-v2-score.mjs",
+    "prompts/v2/judge-match.md",
+  ]) {
+    const target = path.join(copy, "scripts/review", file);
+    writeFileSync(
+      target,
+      `${readFileSync(target, "utf8")}\n// grading-only edit\n`,
+    );
+  }
+  const rescored = runner.makePlan({
+    ...options,
+    out: path.join(directory, "rescored-plan"),
+  });
+  assert.equal(rescored.execution_digest, original.execution_digest);
+  const report = await runner.runCampaign({ out, scoreOnly: true });
+  assert.match(report.failure, /no compatible raw result/);
+  assert.equal(report.cost.actual_known_usd, 0);
+  for (const [file, symbol, parameters] of [
+    [
+      "review-eval-v2-dataset.mjs",
+      "verifyCaseProbes",
+      "fixturePath, caseId, dataset",
+    ],
+    [
+      "review-eval-v2-probe-trust.mjs",
+      "runAuditedProbe",
+      "repo, item, fixturePath, script",
+    ],
+  ]) {
+    await context.test(file, async () => {
+      const target = path.join(copy, "scripts/review", file);
+      const originalBytes = readFileSync(target, "utf8");
+      const marker = `export function ${symbol}({ ${parameters} }) {`;
+      const changed = originalBytes.replace(
+        marker,
+        `${marker}\n  throw new Error("probe fault sentinel");`,
+      );
+      assert.notEqual(
+        changed,
+        originalBytes,
+        "fault injection must alter a host probe entry point",
+      );
+      writeFileSync(target, changed);
+      try {
+        const changedModule = await import(
+          `${pathToFileURL(target).href}?fault`
+        );
+        assert.throws(() => changedModule[symbol]({}), /probe fault sentinel/);
+        await assert.rejects(
+          runner.runCampaign({ out, scoreOnly: true }),
+          /execution source changed since plan/,
+        );
+        const revised = runner.makePlan({
+          ...options,
+          out: path.join(directory, file),
+        });
+        assert.notEqual(revised.execution_digest, original.execution_digest);
+      } finally {
+        writeFileSync(target, originalBytes);
+      }
+    });
+  }
 });

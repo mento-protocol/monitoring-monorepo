@@ -32,6 +32,8 @@ const PROMPT = "scripts/review/prompts/v2/request.md";
 const EXECUTION_FILES = [
   "scripts/review/review-eval-v2-runner.mjs",
   "scripts/review/review-eval-v2-provider.mjs",
+  "scripts/review/review-eval-v2-dataset.mjs",
+  "scripts/review/review-eval-v2-probe-trust.mjs",
   "scripts/review/review-eval-run-execution.mjs",
   "scripts/review/review-eval-stream.mjs",
   "scripts/review/review-eval-experiment-cache.mjs",

@@ -203,6 +203,76 @@ test("extraction rejects invented quotes and explicit incomplete coverage", asyn
   }
 });
 
+test("exact duplicate claims fail extraction before IDs or later grading", async () => {
+  for (const defects of [[root], []]) {
+    const requests = [];
+    const result = await scoreReview({
+      review: review("The null input crashes."),
+      defects,
+      fixturePath: "/unused",
+      sourceDiff: "complete working-tree diff",
+      judge: judgeSequence(
+        [
+          extraction(
+            claim("The null input crashes."),
+            claim("The null input crashes."),
+          ),
+          defects.length
+            ? { defects: [match({ claim_ids: ["c1", "c2"] })] }
+            : {
+                novel: ["c1", "c2"].map((claim_id) => ({
+                  claim_id,
+                  verdict: "unsupported",
+                  reason: "No verifiable trigger.",
+                })),
+              },
+        ],
+        requests,
+      ),
+    });
+    assert.equal(result.status, "incomplete");
+    assert.equal(result.coverage.extraction, "incomplete");
+    assert.match(result.errors[0].message, /duplicate claims/);
+    assert.deepEqual(result.claims, []);
+    assert.deepEqual(result.defects, []);
+    assert.deepEqual(result.novel, []);
+    assert.equal(
+      requests.length,
+      1,
+      "duplicates must not reach matching or novelty",
+    );
+  }
+});
+
+test("distinct claims can share one supporting quote", async () => {
+  const quote = "Null input crashes, and an empty list hangs.";
+  const result = await scoreReview({
+    review: review(quote),
+    defects: [],
+    fixturePath: "/unused",
+    sourceDiff: "complete working-tree diff",
+    judge: judgeSequence([
+      extraction(
+        { text: "Null input crashes.", quote },
+        { text: "An empty list hangs.", quote },
+      ),
+      {
+        novel: ["c1", "c2"].map((claim_id) => ({
+          claim_id,
+          verdict: "unsupported",
+          reason: "No verifiable trigger.",
+        })),
+      },
+    ]),
+  });
+  assert.equal(result.status, "complete");
+  assert.equal(result.claims.length, 2);
+  assert.deepEqual(
+    result.claims.map((claim) => claim.id),
+    ["c1", "c2"],
+  );
+});
+
 test("matcher rejects omitted roots, duplicates, unknown IDs, and fabricated quotes", async () => {
   const invalid = [
     [],
@@ -380,7 +450,7 @@ test("scorer identity is stable and contains a full sha256 digest", () => {
   assert.equal(scorerDigestV2(), scorerDigestV2());
 });
 
-test("scorer identity changes when answer-key selection behavior changes", async (context) => {
+async function copiedScorer(context) {
   const copy = mkdtempSync(path.join(os.tmpdir(), "v2-scorer-identity-"));
   context.after(() => rmSync(copy, { recursive: true, force: true }));
   for (const file of [
@@ -389,6 +459,7 @@ test("scorer identity changes when answer-key selection behavior changes", async
     "review-eval-stream.mjs",
     "review-eval-v2-dataset.mjs",
     "review-eval-v2-probe-trust.mjs",
+    "review-eval-v2-report.mjs",
     "prompts/v2",
   ]) {
     cpSync(new URL(file, import.meta.url), path.join(copy, file), {
@@ -398,6 +469,11 @@ test("scorer identity changes when answer-key selection behavior changes", async
   const scorer = await import(
     pathToFileURL(path.join(copy, "review-eval-v2-score.mjs"))
   );
+  return { copy, scorer };
+}
+
+test("scorer identity changes when answer-key selection behavior changes", async (context) => {
+  const { copy, scorer } = await copiedScorer(context);
   const selectorPath = path.join(copy, "review-eval-v2-dataset.mjs");
   const selectorUrl = pathToFileURL(selectorPath).href;
   const beforeSelector = await import(selectorUrl);
@@ -433,5 +509,32 @@ test("scorer identity changes when answer-key selection behavior changes", async
     scorer.scorerDigestV2(),
     beforeDigest,
     "changing the roots sent to grading must invalidate cached scores",
+  );
+});
+
+test("scorer identity changes when report reduction changes", async (context) => {
+  const { copy, scorer } = await copiedScorer(context);
+  const reducerPath = path.join(copy, "review-eval-v2-report.mjs");
+  const reducerUrl = pathToFileURL(reducerPath).href;
+  const beforeReducer = await import(reducerUrl);
+  assert.equal(beforeReducer.metricSummary([]).arms.incumbent.known_matched, 0);
+  const beforeDigest = scorer.scorerDigestV2();
+  const beforeSource = readFileSync(reducerPath, "utf8");
+  const afterSource = beforeSource.replace(
+    "known_matched: matched,",
+    "known_matched: matched + 1,",
+  );
+  assert.notEqual(
+    afterSource,
+    beforeSource,
+    "fault injection must change the report reducer",
+  );
+  writeFileSync(reducerPath, afterSource);
+  const afterReducer = await import(`${reducerUrl}?changed`);
+  assert.equal(afterReducer.metricSummary([]).arms.incumbent.known_matched, 1);
+  assert.notEqual(
+    scorer.scorerDigestV2(),
+    beforeDigest,
+    "changed headline metrics must not share the previous score identity",
   );
 });

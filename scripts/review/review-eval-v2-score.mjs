@@ -22,6 +22,8 @@ export function scorerDigestV2() {
     path.join(directory, "review-eval-stream.mjs"),
     // rootsForCase selects the answer-key roots sent to the grader.
     path.join(directory, "review-eval-v2-dataset.mjs"),
+    // Cached grades and their headline metrics must share a versioned reducer.
+    path.join(directory, "review-eval-v2-report.mjs"),
     ...promptNames.map(promptPath),
   ];
   const hash = createHash("sha256");
@@ -93,11 +95,19 @@ function claimsFrom(parsed, finalText) {
     parsed.complete === true && Array.isArray(parsed.claims),
     "extraction did not report complete coverage",
   );
-  return parsed.claims.map((claim, index) => {
+  const seen = new Set();
+  for (const claim of parsed.claims) {
     requireValue(nonempty(claim?.text), "extraction returned an empty claim");
     requireQuote(claim.quote, finalText, "claim");
-    return { id: `c${index + 1}`, text: claim.text, quote: claim.quote };
-  });
+    const key = JSON.stringify([claim.text, claim.quote]);
+    requireValue(!seen.has(key), "extraction returned duplicate claims");
+    seen.add(key);
+  }
+  return parsed.claims.map((claim, index) => ({
+    id: `c${index + 1}`,
+    text: claim.text,
+    quote: claim.quote,
+  }));
 }
 
 function matchesFrom(parsed, defects, claims, finalText) {
