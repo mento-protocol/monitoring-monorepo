@@ -74,6 +74,9 @@ CLI version before each model invocation, including later grading calls within
 one cell, and checks again before accepting the result. Planning and model calls
 use the same scrubbed environment for CLI lookup. Surviving relative `PATH`
 entries are refused because planning and model calls use different directories.
+The selected executable resolves to a canonical file outside the source checkouts
+and invocation directory. Authentication, version checks, and the model call use
+that same resolved path. External installation symlinks remain supported.
 A version mismatch leaves the run incomplete. API-key, alternate
 provider, token override, logged-out, and unknown authentication are refused.
 Managed policy files, cached remote policy, policy redirection, and macOS managed

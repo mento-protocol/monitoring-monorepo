@@ -12,6 +12,8 @@ import {
   existsSync,
   mkdirSync,
   readdirSync,
+  symlinkSync,
+  unlinkSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -53,6 +55,7 @@ function setup(
     version: "test",
     env: { PATH: "/usr/bin:/bin", ...env },
     verifyPolicy: () => {},
+    resolveExecutable: () => "/trusted/claude",
     execVersion: (name, args, settings) => {
       versionCalls.push({ name, args, settings });
       return "test";
@@ -95,6 +98,143 @@ function setup(
     invoke: (provider) => provider.invoke({ ...request, cwd: out }),
   };
 }
+
+test("external PATH symlinks into excluded source directories cannot execute", async (context) => {
+  for (const location of ["checkout", "fixture", "source-env"]) {
+    await context.test(location, async (child) => {
+      const root = mkdtempSync(path.join(tmpdir(), "v2-unsafe-cli-"));
+      child.after(() => rmSync(root, { recursive: true, force: true }));
+      const repoRoot = path.join(root, "checkout");
+      const cwd = path.join(root, "fixture");
+      const bin = path.join(root, "external-bin");
+      const laterBin = path.join(root, "later-bin");
+      const source = path.join(root, "source-env");
+      for (const directory of [repoRoot, cwd, bin, laterBin, source])
+        mkdirSync(directory);
+      const log = path.join(root, "executed");
+      const target = path.join(root, location, "cli");
+      writeFileSync(
+        target,
+        '#!/bin/sh\nprintf "%s\\n" "executed" >> "$SHIM_LOG"\nprintf "%s\\n" "test"\n',
+        { mode: 0o755 },
+      );
+      symlinkSync(target, path.join(bin, "claude"));
+      writeFileSync(
+        path.join(laterBin, "claude"),
+        '#!/bin/sh\nprintf "%s\\n" "test"\n',
+        { mode: 0o755 },
+      );
+      const env = {
+        PATH: `${bin}${path.delimiter}${laterBin}`,
+        INIT_CWD: source,
+        SHIM_LOG: log,
+      };
+      assert.throws(
+        () => providerModule.providerVersion({ repoRoot, cwd, env }),
+        /provider executable resolves inside an excluded source directory/,
+      );
+      const out = path.join(root, "evidence");
+      const provider = createProvider({
+        out,
+        repoRoot,
+        version: "test",
+        env,
+        verifyPolicy: () => {},
+      });
+      await assert.rejects(
+        provider.invoke({ ...request, cwd }),
+        /provider executable resolves inside an excluded source directory/,
+      );
+      assert.equal(existsSync(log), false);
+      assert.equal(existsSync(path.join(out, "spend.json")), false);
+    });
+  }
+});
+
+test("safe global symlinks resolve once and stay fixed through auth and model execution", async (context) => {
+  const root = mkdtempSync(path.join(tmpdir(), "v2-safe-cli-"));
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  const repoRoot = path.join(root, "checkout");
+  const cwd = path.join(root, "fixture");
+  const bin = path.join(root, "bin");
+  const nonexecutableBin = path.join(root, "nonexecutable-bin");
+  const directoryBin = path.join(root, "directory-bin");
+  const installation = path.join(root, "installation");
+  for (const directory of [
+    repoRoot,
+    cwd,
+    bin,
+    installation,
+    nonexecutableBin,
+    directoryBin,
+  ])
+    mkdirSync(directory);
+  writeFileSync(path.join(nonexecutableBin, "claude"), "not executable", {
+    mode: 0o644,
+  });
+  mkdirSync(path.join(directoryBin, "claude"));
+  const executable = path.join(installation, "claude-real");
+  const alias = path.join(bin, "claude");
+  const malicious = path.join(repoRoot, "untrusted-cli");
+  writeFileSync(
+    malicious,
+    '#!/bin/sh\nprintf "%s\\n" "untrusted" >> "$SHIM_LOG"\n',
+    { mode: 0o755 },
+  );
+  writeFileSync(
+    executable,
+    `#!/bin/sh
+printf '%s\\n' "$0" >> "$SHIM_LOG"
+if [ "$1" = "--version" ]; then printf '%s\\n' 'test'; exit 0; fi
+if [ "$3" = "auth" ]; then printf '%s\\n' '${JSON.stringify(subscription)}'; exit 0; fi
+printf '%s\\n' '{"type":"result","is_error":false,"result":"safe-global-cli","total_cost_usd":0}'
+`,
+    { mode: 0o755 },
+  );
+  symlinkSync(executable, alias);
+  const log = path.join(root, "executed");
+  const env = {
+    PATH: [nonexecutableBin, directoryBin, bin].join(path.delimiter),
+    SHIM_LOG: log,
+  };
+  const version = providerModule.providerVersion({ repoRoot, cwd, env });
+  const provider = createProvider({
+    out: path.join(root, "evidence"),
+    repoRoot,
+    version,
+    env,
+    verifyPolicy: () => {},
+    execAuth: (...args) => {
+      const result = execFileSync(...args);
+      unlinkSync(alias);
+      symlinkSync(malicious, alias);
+      return result;
+    },
+  });
+  const result = await provider.invoke({ ...request, cwd });
+  assert.equal(result.envelope.result, "safe-global-cli");
+  const paths = readFileSync(log, "utf8").trim().split("\n");
+  assert.equal(paths.length, 5);
+  assert.ok(paths.every((entry) => entry === realpathSync(executable)));
+});
+
+test("direct subscription checks require an explicit resolved executable", () => {
+  let calls = 0;
+  for (const executable of [undefined, "claude"]) {
+    assert.throws(
+      () =>
+        providerModule.verifySubscription({
+          executable,
+          env: {},
+          execAuth: () => {
+            calls++;
+          },
+        }),
+      /requires a resolved provider executable/,
+    );
+  }
+  assert.equal(calls, 0);
+});
 
 test("version capture and provider children select the same CLI after checkout PATH scrubbing", async (context) => {
   const root = mkdtempSync(path.join(tmpdir(), "v2-cli-resolution-"));
@@ -431,7 +571,7 @@ test("provider version changes between calls reject the next judge before launch
   assert.equal(s.modelCalls.length, 1);
   assert.equal(provider.ledger.calls[1].state, "failed");
   for (const probe of s.versionCalls) {
-    assert.equal(probe.name, "claude");
+    assert.equal(probe.name, "/trusted/claude");
     assert.deepEqual(probe.args, ["--version"]);
     assert.equal(probe.settings.cwd, s.modelCalls[0].settings.cwd);
     assert.deepEqual(probe.settings.env, s.modelCalls[0].settings.env);

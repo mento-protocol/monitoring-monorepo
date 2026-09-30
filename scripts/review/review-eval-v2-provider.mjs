@@ -7,12 +7,17 @@ import {
   mkdirSync,
   lstatSync,
   readdirSync,
+  realpathSync,
+  statSync,
+  accessSync,
+  constants,
 } from "node:fs";
 import path from "node:path";
 import { homedir } from "node:os";
 import {
   claudeArgv,
   scrubbedEnv,
+  sourceCheckouts,
   claudeStreamEnvelope,
 } from "./review-eval-run-execution.mjs";
 
@@ -38,10 +43,51 @@ function providerEnvironment({ repoRoot, env }) {
   return callEnv;
 }
 
-function readProviderVersion({ cwd, env, execVersion }) {
+function resolveProviderExecutable({ env, excludedRoots }) {
+  for (const directory of env.PATH.split(path.delimiter)) {
+    let executable;
+    try {
+      executable = realpathSync(path.join(directory, "claude"));
+      if (!statSync(executable).isFile()) continue;
+      accessSync(executable, constants.X_OK);
+    } catch (error) {
+      if (["ENOENT", "ENOTDIR", "EACCES"].includes(error.code)) continue;
+      // eslint-disable-next-line preserve-caught-error -- Filesystem causes can expose excluded source paths.
+      throw new Error("cannot resolve provider executable");
+    }
+    if (
+      excludedRoots.some((root) => {
+        const relative = path.relative(root, executable);
+        return (
+          relative === "" ||
+          (relative !== ".." &&
+            !relative.startsWith(`..${path.sep}`) &&
+            !path.isAbsolute(relative))
+        );
+      })
+    )
+      throw new Error(
+        "provider executable resolves inside an excluded source directory",
+      );
+    return executable;
+  }
+  throw new Error("cannot resolve a regular executable provider from PATH");
+}
+
+function providerRuntime({ repoRoot, cwd, env, resolveExecutable }) {
+  const callCwd = path.resolve(cwd ?? process.cwd());
+  const callEnv = providerEnvironment({ repoRoot, env });
+  const executable = resolveExecutable({
+    env: callEnv,
+    excludedRoots: sourceCheckouts({ env, roots: [repoRoot, callCwd] }),
+  });
+  return { cwd: callCwd, env: callEnv, executable };
+}
+
+function readProviderVersion({ executable, cwd, env, execVersion }) {
   let observed;
   try {
-    observed = execVersion("claude", ["--version"], {
+    observed = execVersion(executable, ["--version"], {
       cwd,
       env,
       encoding: "utf8",
@@ -62,10 +108,10 @@ export function providerVersion({
   cwd = process.cwd(),
   env = process.env,
   execVersion = execFileSync,
+  resolveExecutable = resolveProviderExecutable,
 }) {
   return readProviderVersion({
-    cwd,
-    env: providerEnvironment({ repoRoot, env }),
+    ...providerRuntime({ repoRoot, cwd, env, resolveExecutable }),
     execVersion,
   });
 }
@@ -135,11 +181,16 @@ export function verifyUnmanagedPolicy({
 // Auth and model calls use the same environment, cwd and empty settings sources.
 // Refuse route overrides rather than silently switching billing modes.
 export function verifySubscription({
+  executable,
   cwd,
   env,
   execAuth = execFileSync,
   verifyPolicy = verifyUnmanagedPolicy,
 }) {
+  if (typeof executable !== "string" || !path.isAbsolute(executable))
+    throw new Error(
+      "subscription verification requires a resolved provider executable",
+    );
   if (
     Object.entries(env).some(
       ([name, value]) =>
@@ -158,7 +209,7 @@ export function verifySubscription({
   try {
     status = JSON.parse(
       execAuth(
-        "claude",
+        executable,
         ["--setting-sources", "", "auth", "status", "--json"],
         {
           cwd,
@@ -267,6 +318,7 @@ export function createProvider({
   env = process.env,
   execAuth = execFileSync,
   execVersion = execFileSync,
+  resolveExecutable = resolveProviderExecutable,
   verifyPolicy = verifyUnmanagedPolicy,
   spawnProcess = spawn,
 }) {
@@ -308,10 +360,18 @@ export function createProvider({
       { prompt, model, effort, allowedTools: readTools, maxTurns },
       buildArguments,
     );
-    const callEnv = providerEnvironment({ repoRoot, env });
-    verifySubscription({ cwd, env: callEnv, execAuth, verifyPolicy });
+    const runtime = providerRuntime({ repoRoot, cwd, env, resolveExecutable });
+    const { env: callEnv, executable } = runtime;
+    verifySubscription({
+      executable,
+      cwd: runtime.cwd,
+      env: callEnv,
+      execAuth,
+      verifyPolicy,
+    });
     const call = reserveCall(ledger, label);
     call.expected_cli_version = version;
+    call.executable = executable;
     writeJson(file, ledger);
     // Provider subprocesses cannot launch more providers, edit fixtures, or post.
     // Restricted mode also confines file access to the fixture directory.
@@ -337,7 +397,7 @@ export function createProvider({
     let stdout = "";
     let stderr = "";
     const checkVersion = (field) => {
-      call[field] = readProviderVersion({ cwd, env: callEnv, execVersion });
+      call[field] = readProviderVersion({ ...runtime, execVersion });
       if (call[field] !== version)
         throw new Error("provider version changed since campaign capture");
     };
@@ -345,8 +405,8 @@ export function createProvider({
       await new Promise((resolve, reject) => {
         // Auth can take time. Check the same PATH/cwd immediately before spawn.
         checkVersion("cli_version_before");
-        const child = spawnProcess("claude", args, {
-          cwd,
+        const child = spawnProcess(executable, args, {
+          cwd: runtime.cwd,
           env: callEnv,
           stdio: ["ignore", "pipe", "pipe"],
         });

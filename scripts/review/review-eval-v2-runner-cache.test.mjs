@@ -220,6 +220,7 @@ function providerArguments(c) {
     const invokeJudge = existsSync(judgeFile) ? (await import(${JSON.stringify(c.moduleUrl("review-eval-v2-judge-provider.mjs"))})).invokeJudge : (provider, request) => provider.invoke(request);
     const calls = [];
     const provider = createProvider({out:${JSON.stringify(path.join(c.directory, "argument-probe"))}, repoRoot:${JSON.stringify(c.copy)}, version:'test', env:{PATH:'/usr/bin:/bin'}, verifyPolicy:()=>{},
+      resolveExecutable:()=>'/trusted/claude',
       execVersion:()=> 'test',
       execAuth:()=>JSON.stringify({loggedIn:true,authMethod:'claude.ai',apiProvider:'firstParty',subscriptionType:'max'}),
       spawnProcess:(name,args)=>{
