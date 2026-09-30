@@ -1057,7 +1057,8 @@ That note owns desktop notification routing, the `say` command, and the
 `spd-say` Linux fallback; do not re-derive them here. Send the notification
 first as a separate call. Target the caller's cmux workspace and terminal pane
 when available. Keep the same safe sweep label in the notification and report.
-Report notification failures and any fallback without session click-through. The operator is away by design here, so speak one of the
+Report notification failures or unavailable session routing. Do not use a
+notification that opens another app. The operator is away by design here, so speak one of the
 note's three fixed phrases: a labelled line prompts for an approval nobody is
 there to give. Name the sweep in the written report instead. Run the nudge with escalated execution rather than inside the workspace
 sandbox — `say` needs the local audio device, and a sandboxed attempt fails in a

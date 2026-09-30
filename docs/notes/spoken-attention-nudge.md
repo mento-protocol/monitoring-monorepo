@@ -92,7 +92,7 @@ failure cannot prevent the notification. Keep the written request in all cases.
 Use the same safe session label and short reason in the notification and report.
 
 In cmux, check that both caller environment variables are non-empty. Use the
-CLI and socket inherited by this session, and target both IDs explicitly:
+CLI and socket of the cmux app that hosts this session, and target both IDs explicitly:
 
 ```bash
 cmux notify --workspace "$CMUX_WORKSPACE_ID" --surface "$CMUX_SURFACE_ID" \
@@ -104,18 +104,21 @@ Clicking the cmux notification opens the target workspace and terminal pane.
 Never substitute the focused pane, workspace indexes, another session's IDs,
 or another app instance's socket. Do not focus the pane yourself.
 
-If cmux or either caller ID is unavailable on macOS, use a notification with
-reviewed literal text instead:
+If the tool shell lacks either caller ID, inspect its process ancestry and
+identify the current agent's ancestor PID. Resolve that verified agent PID
+through cmux's `agent.resolve_delivery_target` RPC with a numeric `pid` field.
+Require a successful response with `source: "pid"` and both `workspace_id` and
+`surface_id`. Use those returned IDs in `cmux notify`. Do not use the tool
+shell's temporary PTY or another agent's PID. Never infer a target from the
+working directory, pane title, or whichever pane has focus.
 
-```bash
-osascript -e 'display notification "The report is ready and needs your attention." with title "Monitoring, backlog sweep"'
-```
-
-This fallback cannot open the session. State that limit in the written request.
-Outside macOS, use an available session-targeted notification tool; otherwise
-report notification delivery as unavailable and continue with the spoken
-fallback and report. Never interpolate captured titles into shell code or
-AppleScript. Apply the spoken text restrictions below to notification text too.
+If neither caller IDs nor a verified process route are available, report that
+session-targeted notification delivery is unavailable. Continue with speech
+and the written report. Do not substitute `osascript display notification`:
+clicking it opens Script Editor rather than the requesting terminal. Outside
+cmux, use a notification mechanism only when it can open the verified calling
+session. Never interpolate captured titles into shell code. Apply the spoken
+text restrictions below to notification text too.
 
 If the sandbox blocks the socket or notification service, use the runtime's
 supported permission path. Keep notification and speech requests separate.
