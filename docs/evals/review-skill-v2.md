@@ -1,0 +1,122 @@
+---
+title: Paired review evaluation v2
+status: active
+owner: eng
+canonical: true
+last_verified: 2026-09-30
+doc_type: runbook
+scope: ci/process
+review_interval_days: 90
+garden_lane: operator-runbooks
+---
+
+# Paired review evaluation v2
+
+Use this diagnostic evaluation to compare two explicit review-skill snapshots.
+It scores complete final reviews against audited root causes and checks repaired
+counterparts. It preserves reviewer outputs when only the grading changes.
+[ADR 0110](../adr/0110-paired-review-evaluation-v2.md) records the decision.
+
+The [v1 evaluation](review-skill.md) retains its ledger, scheduler, and historical
+scores. A v2 run cannot update that ledger, its baseline, or its freshness clock.
+
+## Terms and evidence
+
+- A **case** is a frozen source change, optionally with a pinned repair patch.
+- A **family** groups an original PR and all its repaired variants. A family
+  belongs to one split.
+- A **root cause** is one distinct defect, even if several review comments
+  describe it.
+- A **negative control** is a repaired case where specified root causes are
+  absent. Other defects can remain; it is not a globally clean PR.
+- **Completion** means every planned reviewer and grading phase returned valid
+  evidence. It does not establish that the candidate improves review quality.
+
+The pilot contains two families and four cases. It audits optional repository
+fallback, optional branch parsing, and trailing-newline parsing. Labels are
+agent-audited and supported by executable source probes. They are not independent
+human calibration. The original PRs have prior exposure. The PR-disjoint
+confirmation split is prospective organization, not an unseen holdout.
+
+## Plan and run
+
+Freeze both skill directories before planning. Use explicit absolute paths.
+Store the run outside the repository. Planning calls no model.
+
+```bash
+pnpm review:eval:v2 plan   --dataset "$PWD/docs/evals/review-skill-v2/dataset.json"   --incumbent /absolute/path/to/incumbent-review   --candidate /absolute/path/to/candidate-review   --out /absolute/path/to/eval-run   --budget 60
+
+pnpm review:eval:v2 run --out /absolute/path/to/eval-run
+pnpm review:eval:v2 report --out /absolute/path/to/eval-run
+```
+
+The pilot uses one draw for each arm of each case: eight reviewer calls, plus
+calls for grading. It runs direct source review through Claude. It does not run
+a live Codex finder or external security scanners. Provider concurrency is one.
+The plan pins model, effort, skill content, source, and execution behavior.
+The runner supplies the complete working-tree diff. Reviewers and source graders
+can use Read, Grep, and Glob only. They cannot run tests or shell commands.
+
+The budget uses provider-reported API-equivalent usage. It does not establish
+an account charge. The runner reserves each call before launch and preserves
+conservative accounting when actual usage is unavailable. Provider request
+boundaries can overshoot a per-call limit; inspect recorded usage and limits.
+A failed call or missing artifact leaves the run incomplete. Resume the same
+run to reuse valid completed work. Do not retry a valid grade merely to obtain
+a different judgment.
+
+An A/A run supplies the same skill bytes to both arms. It qualifies the
+execution and scoring path. Differences between its outputs reflect sampling;
+they do not establish a skill improvement.
+
+## Score and inspect
+
+The caller requires one self-contained final review. The scorer reads that
+artifact. Earlier observations and tool results remain available for diagnosis.
+An incompatible historical transcript cannot be imported as a complete final
+review merely because it has a last message.
+
+Every eligible root cause reaches semantic matching regardless of file type.
+A matched verdict carries a verbatim quote from the final review. Code checks
+quote provenance; the grader still owns the semantic judgment. The scorer
+retains every extracted claim and reports insufficient coverage explicitly.
+Uncertain matches and unverifiable claims remain visible.
+
+Rescore saved reviewer outputs after a dataset or grader change:
+
+```bash
+pnpm review:eval:v2 score --out /absolute/path/to/eval-run   --dataset "$PWD/docs/evals/review-skill-v2/dataset.json"
+pnpm review:eval:v2 report --out /absolute/path/to/eval-run
+```
+
+Reviewer identity excludes the answer key and grader. Grading identity includes
+the immutable reviewer artifact, answer key, scorer, prompts, and judge settings.
+A source, skill, prompt, runtime, or execution change requires a compatible new
+execution identity. A grading-only change must not silently buy another review.
+
+Read paired results by PR family. Inspect serious misses, claims about repaired
+roots, other false or unsupported claims, and model-supported novel defects.
+Include cost, duration, and incomplete cells. Multiple defects from one PR are
+not independent experiments. The report does not promote a skill automatically.
+
+## Validation and limits
+
+```bash
+pnpm review:eval:test
+pnpm lint:scripts
+pnpm docs:index --check
+```
+
+The tests and source probes validate dataset structure, source repairs, final-artifact handling,
+evidence references, grading completeness, budget accounting, and cache identity.
+They do not establish model-grade accuracy. A meaningful accuracy claim needs
+independent domain-expert labels for extraction, matching, and claim correctness,
+with development and held-out examples. Broad review-quality claims also need
+new PRs that did not guide candidate design.
+[Issue #2556](https://github.com/mento-protocol/monitoring-monorepo/issues/2556)
+tracks those evidence requirements.
+
+Keep full execution artifacts private. Publish a reviewed summary that names
+the source revisions, skill digests, planned/completed cells, grader provenance,
+usage, result, and nearest unproven claim. Never publish credentials or unrelated
+session content.
