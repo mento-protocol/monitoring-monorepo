@@ -25,6 +25,51 @@ export function writeJson(file, value) {
   renameSync(temporary, file);
 }
 
+function providerEnvironment({ repoRoot, env }) {
+  const callEnv = scrubbedEnv({ env, roots: [repoRoot] });
+  // A relative or empty PATH component can select a different CLI in each
+  // fixture/judge cwd. Absolute entries keep capture and invocation aligned.
+  if (
+    callEnv.PATH.split(path.delimiter).some((entry) => !path.isAbsolute(entry))
+  )
+    throw new Error(
+      "provider PATH requires absolute directories outside the source checkout; remove relative entries and supply a usable PATH",
+    );
+  return callEnv;
+}
+
+function readProviderVersion({ cwd, env, execVersion }) {
+  let observed;
+  try {
+    observed = execVersion("claude", ["--version"], {
+      cwd,
+      env,
+      encoding: "utf8",
+      timeout: 15_000,
+      maxBuffer: 64 * 1024,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch {
+    throw new Error("cannot verify provider version");
+  }
+  if (typeof observed !== "string" || !observed.trim())
+    throw new Error("cannot verify provider version");
+  return observed.trim();
+}
+
+export function providerVersion({
+  repoRoot,
+  cwd = process.cwd(),
+  env = process.env,
+  execVersion = execFileSync,
+}) {
+  return readProviderVersion({
+    cwd,
+    env: providerEnvironment({ repoRoot, env }),
+    execVersion,
+  });
+}
+
 // Empty setting sources do not disable managed policy. Refuse its presence
 // instead of attempting to reproduce the CLI's dynamic policy merge.
 export function verifyUnmanagedPolicy({
@@ -263,7 +308,7 @@ export function createProvider({
       { prompt, model, effort, allowedTools: readTools, maxTurns },
       buildArguments,
     );
-    const callEnv = scrubbedEnv({ env, roots: [repoRoot] });
+    const callEnv = providerEnvironment({ repoRoot, env });
     verifySubscription({ cwd, env: callEnv, execAuth, verifyPolicy });
     const call = reserveCall(ledger, label);
     call.expected_cli_version = version;
@@ -292,22 +337,7 @@ export function createProvider({
     let stdout = "";
     let stderr = "";
     const checkVersion = (field) => {
-      let observed;
-      try {
-        observed = execVersion("claude", ["--version"], {
-          cwd,
-          env: callEnv,
-          encoding: "utf8",
-          timeout: 15_000,
-          maxBuffer: 64 * 1024,
-          stdio: ["ignore", "pipe", "pipe"],
-        });
-      } catch {
-        throw new Error("cannot verify provider version");
-      }
-      if (typeof observed !== "string" || !observed.trim())
-        throw new Error("cannot verify provider version");
-      call[field] = observed.trim();
+      call[field] = readProviderVersion({ cwd, env: callEnv, execVersion });
       if (call[field] !== version)
         throw new Error("provider version changed since campaign capture");
     };

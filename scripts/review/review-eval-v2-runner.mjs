@@ -15,8 +15,13 @@ import {
   sha256Bytes,
 } from "./review-eval-experiment-cache.mjs";
 import { loadDataset, verifyCaseProbes } from "./review-eval-v2-dataset.mjs";
-import { createProvider, writeJson } from "./review-eval-v2-provider.mjs";
+import {
+  createProvider,
+  providerVersion as captureProviderVersion,
+  writeJson,
+} from "./review-eval-v2-provider.mjs";
 import { gradeCell, finishCampaign } from "./review-eval-v2-grading.mjs";
+import { scorerDigestV2 } from "./review-eval-v2-score.mjs";
 export { scoringIdentity, campaignReport } from "./review-eval-v2-grading.mjs";
 
 export const REPO_ROOT = path.resolve(
@@ -44,8 +49,8 @@ const digestFiles = (files) =>
     ]),
   );
 const keyed = (value) => ({ ...value, digest: digestObject(value) });
-export const providerVersion = () =>
-  execFileSync("claude", ["--version"], { encoding: "utf8" }).trim();
+export const providerVersion = (cwd = REPO_ROOT) =>
+  captureProviderVersion({ repoRoot: REPO_ROOT, cwd });
 
 const gitText = (cwd, args) =>
   execFileSync("git", args, {
@@ -199,7 +204,7 @@ function readPlan(out, { scoreOnly = false } = {}) {
     throw new Error(
       "legacy dollar-budget plan; create a new subscription plan and preserve existing evidence",
     );
-  if (body.execution_digest !== digestFiles(EXECUTION_FILES))
+  if (!scoreOnly && body.execution_digest !== digestFiles(EXECUTION_FILES))
     throw new Error("execution source changed since plan; create a new plan");
   if (
     !scoreOnly &&
@@ -287,7 +292,10 @@ export async function runCampaign({
       version,
     });
     for (const cell of plan.cells) {
-      if (digestFiles(EXECUTION_FILES) !== plan.execution_digest)
+      // Saved reviews retain the execution identity that produced them. Current
+      // scoring pins these callbacks and rejects any in-process source drift.
+      scorerDigestV2();
+      if (!scoreOnly && digestFiles(EXECUTION_FILES) !== plan.execution_digest)
         throw new Error("execution source changed during campaign");
       if (providerVersion() !== version)
         throw new Error("provider version changed during campaign");

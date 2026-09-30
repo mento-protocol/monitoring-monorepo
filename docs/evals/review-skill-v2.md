@@ -71,8 +71,10 @@ V2 requires a verified Claude subscription. Before every reviewer or grading
 call, it checks `claude auth status --json` with the same environment, working
 directory, and empty settings sources as the model call. It also verifies the
 CLI version before each model invocation, including later grading calls within
-one cell, and checks again before accepting the result. A version mismatch
-leaves the run incomplete. API-key, alternate
+one cell, and checks again before accepting the result. Planning and model calls
+use the same scrubbed environment for CLI lookup. Surviving relative `PATH`
+entries are refused because planning and model calls use different directories.
+A version mismatch leaves the run incomplete. API-key, alternate
 provider, token override, logged-out, and unknown authentication are refused.
 Managed policy files, cached remote policy, policy redirection, and macOS managed
 preferences are also refused because the auth status probe cannot attest their
@@ -90,7 +92,7 @@ account billing settings still apply. Each call retains its turn limit,
 `--budget` is retired. Plans from the dollar-budget runtime require a new plan
 and output directory. Keep their evidence with the original pinned runtime;
 this change does not rewrite plans, ledgers, or cached results. The existing
-execution identity checks still reject source drift.
+execution identity checks still reject source drift for new reviewer calls.
 
 A failed call or missing artifact leaves the run incomplete. Resume the same
 run to reuse valid completed work. Do not retry a valid grade merely to obtain
@@ -129,8 +131,9 @@ pnpm review:eval:v2 report --out /absolute/path/to/eval-run
 
 Rescoring must retain the plan's case IDs. It may reorder cases or revise labels.
 To add or remove cases, create a new plan.
-Score-only runs use each saved review's recorded skill and reviewer-prompt
-identity. Later edits to those reviewer inputs do not prevent rescoring.
+Score-only runs use each saved review's recorded skill, reviewer-prompt, and
+execution identity. Later edits to reviewer code or inputs do not prevent
+rescoring. A missing compatible raw result fails without invoking a reviewer.
 Runs that can invoke the reviewer still reject that drift.
 
 Reviewer identity excludes the answer key and grader. Grading identity includes
@@ -141,9 +144,11 @@ the reviewer execution module, as does answer-key selection. Judge-specific
 command construction also belongs to grading identity. Shared authentication,
 transport, and command restrictions remain pinned to both identities. Changes to
 grading-only modules do not invalidate saved reviewer outputs. A scoring process pins
-its grading source and prompts at startup and rejects later changes. After a
-grading edit, start a new scoring process to reuse the saved reviews under the
-new grading identity.
+its grading source and prompts at startup and rejects later changes. That
+identity includes the current runner callbacks, fixture preparation, probe trust,
+and cache helpers used during grading. Changes to these shared helpers require
+new grades but preserve saved reviews. After a grading edit, start a new scoring
+process to reuse the saved reviews under the new grading identity.
 A new reviewer call after a source, skill, reviewer-prompt, runtime, or execution
 change requires a compatible new execution identity. A grading-only change must
 not silently buy another review.

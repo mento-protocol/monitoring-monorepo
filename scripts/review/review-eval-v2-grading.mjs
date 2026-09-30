@@ -49,6 +49,7 @@ export async function gradeCell({
   sourceState,
   sourceDiff,
 }) {
+  scorerDigestV2();
   if (
     raw.payload.completed !== true ||
     raw.payload.output_contract !== plan.output_contract ||

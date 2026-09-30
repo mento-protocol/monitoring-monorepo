@@ -184,16 +184,19 @@ function freshRescore(c, selectorFile = "review-eval-v2-selection.mjs") {
     const dataset = JSON.parse(readFileSync(plan.dataset_file, 'utf8'));
     const digest = scorer.scorerDigestV2();
     const raws = [];
+    const priorScores = [];
     for (const cell of plan.cells) {
       const fixture = dataset.cases.find(item => item.id === cell.case_id);
       const raw = cache.readExperimentCache({artifactRoot:out, kind:'raw', identity:runner.executionIdentity({plan, fixture, treatment:cell.treatment})});
       if (!raw) throw new Error('raw identity changed');
       raws.push(raw.artifact.content_digest);
-      cache.writeExperimentCache({artifactRoot:out, kind:'score', identity:runner.scoringIdentity({rawDigest:raw.artifact.content_digest, datasetDigest:plan.dataset_digest, scorerDigest:digest, model:plan.model, effort:plan.effort, version:plan.cli_version}), payload:{status:'complete', errors:[], claims:[], defects:[], novel:[]}});
+      const identity = runner.scoringIdentity({rawDigest:raw.artifact.content_digest, datasetDigest:plan.dataset_digest, scorerDigest:digest, model:plan.model, effort:plan.effort, version:plan.cli_version});
+      priorScores.push(Boolean(cache.readExperimentCache({artifactRoot:out, kind:'score', identity})));
+      cache.writeExperimentCache({artifactRoot:out, kind:'score', identity, payload:{status:'complete', errors:[], claims:[], defects:[], novel:[]}});
     }
     const repaired = dataset.cases.find(item => item.variant === 'repaired');
     const report = await runner.runCampaign({out, scoreOnly:true});
-    process.stdout.write(JSON.stringify({report, digest, raws, repairedRoots:selector.rootsForCase(dataset,repaired.id)}));
+    process.stdout.write(JSON.stringify({report, digest, raws, priorScores, repairedRoots:selector.rootsForCase(dataset,repaired.id)}));
   `,
       ],
       { encoding: "utf8", env: process.env },
@@ -216,7 +219,7 @@ function providerArguments(c) {
     const judgeFile = ${JSON.stringify(path.join(c.copy, "scripts/review/review-eval-v2-judge-provider.mjs"))};
     const invokeJudge = existsSync(judgeFile) ? (await import(${JSON.stringify(c.moduleUrl("review-eval-v2-judge-provider.mjs"))})).invokeJudge : (provider, request) => provider.invoke(request);
     const calls = [];
-    const provider = createProvider({out:${JSON.stringify(path.join(c.directory, "argument-probe"))}, repoRoot:${JSON.stringify(c.copy)}, version:'test', env:{}, verifyPolicy:()=>{},
+    const provider = createProvider({out:${JSON.stringify(path.join(c.directory, "argument-probe"))}, repoRoot:${JSON.stringify(c.copy)}, version:'test', env:{PATH:'/usr/bin:/bin'}, verifyPolicy:()=>{},
       execVersion:()=> 'test',
       execAuth:()=>JSON.stringify({loggedIn:true,authMethod:'claude.ai',apiProvider:'firstParty',subscriptionType:'max'}),
       spawnProcess:(name,args)=>{
@@ -269,6 +272,73 @@ test("score-only reuses recorded reviewer prompt identity after a live prompt ed
   assert.deepEqual(result.raws, c.rawDigests);
   assert.equal(result.digest, c.scoreDigest);
   assert.equal(readFileSync(path.join(c.out, "plan.json"), "utf8"), planBytes);
+  assert.equal(existsSync(path.join(c.out, "spend.json")), false);
+});
+
+test("score-only reuses historical raw execution while current callback changes invalidate grades", async (context) => {
+  const c = await cachedCampaign(context);
+  const planFile = path.join(c.out, "plan.json");
+  const planBytes = readFileSync(planFile, "utf8");
+  const target = path.join(c.copy, "scripts/review/review-eval-v2-runner.mjs");
+  const before = readFileSync(target, "utf8");
+  const after = before.replace(
+    "export function sourceState(cwd) {",
+    'export function sourceState(cwd) { if (cwd === "revision-control") return "changed-source-callback";',
+  );
+  assert.notEqual(after, before);
+  writeFileSync(target, after);
+  const changedRunner = await import(
+    `${c.moduleUrl("review-eval-v2-runner.mjs")}?changed`
+  );
+  assert.equal(
+    changedRunner.sourceState("revision-control"),
+    "changed-source-callback",
+  );
+  await assert.rejects(
+    changedRunner.runCampaign({ out: c.out }),
+    /execution source changed since plan/,
+  );
+  const grading = await import(c.moduleUrl("review-eval-v2-grading.mjs"));
+  await assert.rejects(
+    grading.gradeCell({}),
+    /scoring source changed after module load/,
+    "direct grading must reject stale callbacks before inspecting artifacts",
+  );
+  const result = freshRescore(c);
+  assert.equal(result.report.status, "completed");
+  assert.deepEqual(result.raws, c.rawDigests);
+  assert.notEqual(result.digest, c.scoreDigest);
+  assert.ok(
+    result.priorScores.every((present) => !present),
+    "old grades cannot survive changed source callbacks",
+  );
+  assert.ok(
+    result.report.rows.every((row) => row.raw_reused && row.score_reused),
+  );
+  assert.equal(readFileSync(planFile, "utf8"), planBytes);
+  assert.equal(existsSync(path.join(c.out, "spend.json")), false);
+
+  // Missing raw must stop before materialization or any reviewer invocation.
+  for (const file of readdirSync(path.join(c.out, "cache/raw"))) {
+    rmSync(path.join(c.out, "cache/raw", file));
+  }
+  const missing = JSON.parse(
+    execFileSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `
+    const {runCampaign} = await import(${JSON.stringify(c.moduleUrl("review-eval-v2-runner.mjs"))});
+    process.stdout.write(JSON.stringify(await runCampaign({out:${JSON.stringify(c.out)},scoreOnly:true})));
+  `,
+      ],
+      { encoding: "utf8", env: process.env },
+    ),
+  );
+  assert.equal(missing.status, "incomplete");
+  assert.match(missing.failure, /no compatible raw result/);
+  assert.equal(existsSync(path.join(c.out, "fixtures")), false);
   assert.equal(existsSync(path.join(c.out, "spend.json")), false);
 });
 

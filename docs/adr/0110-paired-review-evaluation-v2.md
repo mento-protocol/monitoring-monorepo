@@ -42,8 +42,11 @@ result handling. Keep judge-specific command construction in grading identity;
 pin shared authentication, transport, and restrictions to both identities.
 Pin grading source and prompts for the process lifetime, and
 reject source drift before saving results.
-Rescoring keeps each saved review's recorded skill and prompt identities. Later
-edits to those inputs do not authorize new reviewer calls during scoring.
+Rescoring keeps each saved review's recorded skill, prompt, and execution
+identities. Reviewer code changes do not block reuse of complete raw evidence.
+Pin the current runner callbacks, fixture preparation, probe trust, and cache
+helpers in grading identity. Changes to these shared helpers require new grades.
+Missing compatible raw evidence fails without a new reviewer call.
 
 Use root-cause labels and repaired-root negative controls. A repaired case is
 not a claim that its whole PR has no defects. Keep original and repaired cases

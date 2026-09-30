@@ -475,9 +475,13 @@ test("execution identity pins host probe code but permits label and grader chang
         );
         assert.throws(() => changedModule[symbol]({}), /probe fault sentinel/);
         await assert.rejects(
-          runner.runCampaign({ out, scoreOnly: true }),
+          runner.runCampaign({ out }),
           /execution source changed since plan/,
         );
+        const stale = await runner.runCampaign({ out, scoreOnly: true });
+        assert.equal(stale.status, "incomplete");
+        assert.match(stale.failure, /scoring source changed after module load/);
+        assert.equal(stale.metrics, null);
         const revised = runner.makePlan({
           ...options,
           out: path.join(directory, file),

@@ -19,6 +19,15 @@ function currentScorerDigest() {
   const files = [
     fileURLToPath(import.meta.url),
     path.join(directory, "review-eval-v2-grading.mjs"),
+    // Rescoring reuses historical reviewer identities but executes current
+    // fixture, probe, source-state and cache callbacks from this closure.
+    path.join(directory, "review-eval-v2-runner.mjs"),
+    path.join(directory, "review-eval-v2-dataset.mjs"),
+    path.join(directory, "review-eval-v2-probe-trust.mjs"),
+    path.join(directory, "review-eval-experiment-cache.mjs"),
+    path.join(directory, "review-eval-fixtures.mjs"),
+    path.join(directory, "build-fixture.sh"),
+    path.join(directory, "review-eval-run-plan.mjs"),
     path.join(directory, "review-eval-v2-judge-provider.mjs"),
     path.join(directory, "review-eval-v2-provider.mjs"),
     path.join(directory, "review-eval-run-execution.mjs"),

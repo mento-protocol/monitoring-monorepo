@@ -1,10 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import {
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
   existsSync,
@@ -19,6 +21,8 @@ import {
 } from "./review-eval-v2-provider.mjs";
 import { invokeJudge } from "./review-eval-v2-judge-provider.mjs";
 import { claudeArgv } from "./review-eval-run-execution.mjs";
+import * as providerModule from "./review-eval-v2-provider.mjs";
+import { providerVersion as legacyCapture } from "./review-eval-v2-runner.mjs";
 
 const subscription = {
   loggedIn: true,
@@ -47,7 +51,7 @@ function setup(
     out,
     repoRoot: out,
     version: "test",
-    env,
+    env: { PATH: "/usr/bin:/bin", ...env },
     verifyPolicy: () => {},
     execVersion: (name, args, settings) => {
       versionCalls.push({ name, args, settings });
@@ -91,6 +95,97 @@ function setup(
     invoke: (provider) => provider.invoke({ ...request, cwd: out }),
   };
 }
+
+test("version capture and provider children select the same CLI after checkout PATH scrubbing", async (context) => {
+  const root = mkdtempSync(path.join(tmpdir(), "v2-cli-resolution-"));
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  const repoRoot = path.join(root, "checkout");
+  const checkoutBin = path.join(repoRoot, "node_modules/.bin");
+  const trustedBin = path.join(root, "trusted-bin");
+  const cwd = path.join(root, "fixture");
+  for (const directory of [checkoutBin, trustedBin, cwd])
+    mkdirSync(directory, { recursive: true });
+  writeFileSync(
+    path.join(checkoutBin, "claude"),
+    '#!/bin/sh\nprintf "%s\\n" "checkout-cli"\n',
+    { mode: 0o755 },
+  );
+  writeFileSync(
+    path.join(trustedBin, "claude"),
+    `#!/bin/sh
+printf '%s\\n' "$PWD" >> "$SHIM_LOG"
+if [ "$1" = "--version" ]; then printf '%s\\n' 'provider-cli'; exit 0; fi
+if [ "$3" = "auth" ]; then printf '%s\\n' '${JSON.stringify(subscription)}'; exit 0; fi
+printf '%s\\n' '{"type":"result","is_error":false,"result":"controlled-shim-result","total_cost_usd":0}'
+`,
+    { mode: 0o755 },
+  );
+  const log = path.join(root, "shim.log");
+  const env = {
+    PATH: `${checkoutBin}${path.delimiter}${trustedBin}`,
+    SHIM_LOG: log,
+  };
+  assert.equal(
+    execFileSync("claude", ["--version"], {
+      cwd,
+      env,
+      encoding: "utf8",
+    }).trim(),
+    "checkout-cli",
+    "the unsanitized route must actually resolve the conflicting CLI",
+  );
+  const oldPath = process.env.PATH;
+  process.env.PATH = env.PATH;
+  let version;
+  try {
+    version = (providerModule.providerVersion ?? legacyCapture)({
+      repoRoot,
+      cwd,
+      env,
+    });
+  } finally {
+    if (oldPath === undefined) delete process.env.PATH;
+    else process.env.PATH = oldPath;
+  }
+  assert.equal(version, "provider-cli");
+  const provider = createProvider({
+    out: path.join(root, "evidence"),
+    repoRoot,
+    version,
+    env,
+    verifyPolicy: () => {},
+  });
+  const result = await provider.invoke({ ...request, cwd });
+  assert.equal(result.version, version);
+  assert.equal(result.envelope.result, "controlled-shim-result");
+  const visited = readFileSync(log, "utf8").trim().split("\n");
+  assert.equal(
+    visited.length,
+    5,
+    "capture, auth, pre-version, model and post-version use the trusted shim",
+  );
+  assert.ok(
+    visited.every((directory) => realpathSync(directory) === realpathSync(cwd)),
+  );
+});
+
+test("capture and invocation reject PATH values that depend on the child working directory", async (context) => {
+  for (const value of ["", "../outside-bin", "/usr/bin:../outside-bin"]) {
+    const s = setup(context, { env: { PATH: value } });
+    assert.throws(
+      () => providerModule.providerVersion({ ...s.options, cwd: s.out }),
+      /provider PATH requires absolute directories/,
+    );
+    await assert.rejects(
+      s.invoke(createProvider(s.options)),
+      /provider PATH requires absolute directories/,
+    );
+    assert.equal(s.versionCalls.length, 0);
+    assert.equal(s.authCalls.length, 0);
+    assert.equal(s.modelCalls.length, 0);
+    assert.equal(existsSync(path.join(s.out, "spend.json")), false);
+  }
+});
 
 test("subscription calls have no dollar stop, keep unknown usage, and retain tool restrictions", async (context) => {
   const s = setup(context, {
@@ -432,7 +527,7 @@ test("managed policy redirection and cached policy cannot pass subscription veri
     assert.equal(s.modelCalls.length, 0);
   }
   const s = setup(context);
-  s.options.env = { CLAUDE_CONFIG_DIR: s.out };
+  s.options.env = { ...s.options.env, CLAUDE_CONFIG_DIR: s.out };
   s.options.verifyPolicy = ({ env }) =>
     verifyUnmanagedPolicy({
       env,
@@ -545,7 +640,7 @@ test("relative config policy is inspected from the auth and model working direct
     mkdirSync(config, { recursive: true });
     const policy = path.join(config, "remote-settings.json");
     writeFileSync(policy, '{"env":{"ANTHROPIC_API_KEY":"test-only"}}');
-    s.options.env = { [variable]: relative };
+    s.options.env = { ...s.options.env, [variable]: relative };
     const inspected = [];
     s.options.verifyPolicy = (options) =>
       verifyUnmanagedPolicy({
@@ -576,7 +671,7 @@ test("relative config policy is inspected from the auth and model working direct
     assert.equal(s.authCalls[0].settings.env[variable], relative);
     assert.deepEqual(s.authCalls[0].settings.env, s.modelCalls[0].settings.env);
 
-    s.options.env = { CLAUDE_CONFIG_DIR: config };
+    s.options.env = { ...s.options.env, CLAUDE_CONFIG_DIR: config };
     await s.invoke(createProvider(s.options));
     assert.equal(inspected.at(-1), config);
     assert.equal(s.authCalls[1].settings.env.CLAUDE_CONFIG_DIR, config);
