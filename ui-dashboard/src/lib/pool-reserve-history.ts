@@ -5,8 +5,7 @@ import { sortedCopy } from "@/lib/immutable-sort";
 
 export const RESERVE_HISTORY_RANGES = ["1h", "6h", "1d", "7d", "All"] as const;
 export type ReserveHistoryRange = (typeof RESERVE_HISTORY_RANGES)[number];
-export type ReserveHistoryRow =
-  PoolReserveHistoryQuery["ReserveUpdate"][number];
+type ReserveHistoryRow = PoolReserveHistoryQuery["ReserveUpdate"][number];
 
 const RANGE_SECONDS = { "1h": 3600, "6h": 21600, "1d": 86400, "7d": 604800 };
 const PAGE_SIZE = 1000;

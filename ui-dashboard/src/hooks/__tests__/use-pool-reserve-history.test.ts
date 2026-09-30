@@ -33,12 +33,15 @@ describe("usePoolReserveHistory", () => {
       "pool-a",
       "All",
     ]);
-    expect(config).toBe(SHARED_QUERY_SWR_CONFIG);
+    expect(config).toMatchObject({
+      ...SHARED_QUERY_SWR_CONFIG,
+      refreshInterval: 0,
+    });
     expect(config).toMatchObject({
       revalidateOnFocus: false,
       revalidateOnReconnect: false,
       refreshWhenHidden: false,
-      refreshInterval: 300000,
+      refreshInterval: 0,
     });
     await fetcher();
     expect(mocks.fetch).toHaveBeenCalledWith(
@@ -53,6 +56,11 @@ describe("usePoolReserveHistory", () => {
   it("does not retain another range's rows while the new range loads", () => {
     usePoolReserveHistory("pool-a", "1h");
     expect(mocks.swr.mock.calls[0]![2].keepPreviousData).toBeUndefined();
+  });
+
+  it("skips fetching when the chart cannot use token decimals", () => {
+    usePoolReserveHistory("pool-a", "All", false);
+    expect(mocks.swr.mock.calls[0]![0]).toBeNull();
   });
 
   it("reports an unconfigured endpoint and skips fetching", () => {

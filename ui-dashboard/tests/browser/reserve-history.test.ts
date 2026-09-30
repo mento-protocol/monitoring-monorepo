@@ -82,9 +82,11 @@ test("reserve ranges load their own history beyond 1,000 events and ignore table
   const rowsControl = page.getByLabel("Rows per page");
   const searchInput = page.getByRole("searchbox", { name: "Search reserves" });
   const chart = page.getByRole("figure", { name: /Reserve history chart/ });
-  const controlBox = await rowsControl.boundingBox();
-  const searchBox = await searchInput.boundingBox();
-  const chartBox = await chart.boundingBox();
+  const [controlBox, searchBox, chartBox] = await Promise.all([
+    rowsControl.boundingBox(),
+    searchInput.boundingBox(),
+    chart.boundingBox(),
+  ]);
   expect(controlBox!.y).toBeGreaterThan(chartBox!.y + chartBox!.height);
   expect(Math.abs(controlBox!.y - searchBox!.y)).toBeLessThan(12);
 

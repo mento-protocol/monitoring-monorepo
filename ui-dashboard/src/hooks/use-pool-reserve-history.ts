@@ -12,15 +12,16 @@ import {
 export function usePoolReserveHistory(
   poolId: string,
   range: ReserveHistoryRange,
+  enabled = true,
 ) {
   const { network } = useNetwork();
   const endpoint = resolveGraphqlEndpoint(network.hasuraUrl);
   const result = useSWR(
-    endpoint
+    endpoint && enabled
       ? ["pool-reserve-history", network.id, endpoint, poolId, range]
       : null,
     () => fetchPoolReserveHistory(endpoint, poolId, range),
-    SHARED_QUERY_SWR_CONFIG,
+    { ...SHARED_QUERY_SWR_CONFIG, refreshInterval: 0 },
   );
   return {
     ...result,

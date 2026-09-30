@@ -36,7 +36,11 @@ export function PoolReserveHistoryChart({
   pool: Pool | null;
 }) {
   const [range, setRange] = useState<ReserveHistoryRange>("1d");
-  const { data, error, isLoading } = usePoolReserveHistory(poolId, range);
+  const { data, error, isLoading } = usePoolReserveHistory(
+    poolId,
+    range,
+    pool?.tokenDecimalsKnown === true,
+  );
   const controls = (
     <div
       role="group"
