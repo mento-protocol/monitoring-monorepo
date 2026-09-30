@@ -5,14 +5,20 @@ import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach } from "vitest";
 import { usePoolReserveHistory } from "../use-pool-reserve-history";
+import { unstable_serialize } from "swr";
 import { SHARED_QUERY_SWR_CONFIG } from "@/lib/gql-retry";
 
 const mocks = vi.hoisted(() => ({
   swr: vi.fn(),
+  cache: new Map(),
   fetch: vi.fn(),
   network: { id: "celo-mainnet", hasuraUrl: "https://example.com/graphql" },
 }));
-vi.mock("swr", () => ({ default: mocks.swr }));
+vi.mock("swr", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("swr")>()),
+  default: mocks.swr,
+  useSWRConfig: () => ({ cache: mocks.cache }),
+}));
 vi.mock("@/components/network-provider", () => ({
   useNetwork: () => ({ network: mocks.network }),
 }));
@@ -43,6 +49,7 @@ beforeEach(() => {
   actEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
   mocks.swr.mockReset();
   mocks.fetch.mockReset();
+  mocks.cache.clear();
   mocks.network.hasuraUrl = "https://example.com/graphql";
   mocks.swr.mockReturnValue({ data: undefined, isLoading: true });
 });
@@ -82,6 +89,30 @@ describe("usePoolReserveHistory", () => {
     );
     expect(result.isLoading).toBe(true);
     expect(result.data).toBeUndefined();
+  });
+
+  it("seeds each remounted range from its own SWR cache", async () => {
+    const cached = {
+      rows: [],
+      from: 0,
+      to: 100,
+      truncated: false,
+      reconciledAt: 100,
+    };
+    const key = [
+      "pool-reserve-history",
+      "celo-mainnet",
+      "https://example.com/graphql",
+      "pool-a",
+      "All",
+    ];
+    mocks.cache.set(unstable_serialize(key), { data: cached });
+    renderHistory("pool-a", "1h");
+    await mocks.swr.mock.calls.at(-1)![1]();
+    expect(mocks.fetch.mock.calls.at(-1)![3].previous).toBeUndefined();
+    renderHistory("pool-a", "All");
+    await mocks.swr.mock.calls.at(-1)![1]();
+    expect(mocks.fetch.mock.calls.at(-1)![3].previous).toBe(cached);
   });
 
   it("does not retain another range's rows while the new range loads", () => {

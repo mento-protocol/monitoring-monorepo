@@ -3,6 +3,7 @@
 import { EmptyBox, ErrorBox } from "@/components/feedback";
 import { useNetwork } from "@/components/network-provider";
 import { PoolReserveHistoryChart } from "@/components/pool-reserve-history-chart";
+import { TableControlsFallback } from "@/components/table-controls-context";
 import { TableSkeleton } from "@/components/skeletons";
 import { Row, Table, Td, Th } from "@/components/table";
 import { TableSearch } from "@/components/table-search";
@@ -112,11 +113,17 @@ export function ReservesTab({
     <>
       <PoolReserveHistoryChart key={poolId} poolId={poolId} pool={pool} />
       {hasErrorWithoutData(error, data) ? (
-        <ErrorBox message={error.message} />
+        <TableControlsFallback>
+          <ErrorBox message={error.message} />
+        </TableControlsFallback>
       ) : isLoadingWithoutData(isLoading, data) ? (
-        <TableSkeleton variant="rows" rows={limit} />
+        <TableControlsFallback>
+          <TableSkeleton variant="rows" rows={limit} />
+        </TableControlsFallback>
       ) : rows.length === 0 ? (
-        <EmptyBox message="No reserve updates for this pool." />
+        <TableControlsFallback>
+          <EmptyBox message="No reserve updates for this pool." />
+        </TableControlsFallback>
       ) : (
         <>
           <TableSearch

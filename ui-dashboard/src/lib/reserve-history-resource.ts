@@ -8,6 +8,7 @@ export function createReserveHistoryResource(
   endpoint: string,
   poolId: string,
   range: ReserveHistoryRange,
+  cached?: () => ReserveHistory | undefined,
 ) {
   let previous: ReserveHistory | undefined;
   let controller: AbortController | undefined;
@@ -18,7 +19,7 @@ export function createReserveHistoryResource(
       const current = new AbortController();
       controller = current;
       const result = await fetchPoolReserveHistory(endpoint, poolId, range, {
-        previous,
+        previous: previous ?? cached?.(),
         signal: current.signal,
       });
       current.signal.throwIfAborted();

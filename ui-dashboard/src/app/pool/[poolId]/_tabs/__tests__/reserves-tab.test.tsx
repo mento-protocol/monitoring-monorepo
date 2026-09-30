@@ -63,6 +63,7 @@ vi.mock("@/components/table", () => ({
   Th: ({ children }: { children: ReactNode }) => <th>{children}</th>,
 }));
 
+import { TableControlsContext } from "@/components/table-controls-context";
 import { ReservesTab } from "../reserves-tab";
 
 const POOL: Pool = {
@@ -187,4 +188,45 @@ describe("ReservesTab loading skeleton", () => {
     const rowMatches = html.match(/height:44px/g) ?? [];
     expect(rowMatches).toHaveLength(10);
   });
+});
+
+describe("ReservesTab page-size recovery", () => {
+  it.each([
+    ["loading", { data: undefined, isLoading: true }],
+    [
+      "error",
+      { data: undefined, error: new Error("offline"), isLoading: false },
+    ],
+    ["empty", { data: { ReserveUpdate: [] }, isLoading: false }],
+  ])(
+    "keeps the selector after the chart in the %s state",
+    (_state, response) => {
+      mockUseGQL.mockReturnValue(response);
+      mockUseHistory.mockReturnValue({
+        data: { rows: ROWS_DESC, from: 0, to: 4000, truncated: false },
+        isLoading: false,
+      });
+      const html = renderToStaticMarkup(
+        <TableControlsContext.Provider
+          value={
+            <select aria-label="Rows per page" defaultValue="25">
+              <option value="25">25</option>
+            </select>
+          }
+        >
+          <ReservesTab
+            poolId="42220-0xpool"
+            limit={25}
+            pool={POOL}
+            search=""
+            onSearchChange={() => {}}
+          />
+        </TableControlsContext.Provider>,
+      );
+      expect(html.match(/aria-label="Rows per page"/g)).toHaveLength(1);
+      expect(html.indexOf('aria-label="Rows per page"')).toBeGreaterThan(
+        html.indexOf('data-testid="reserve-chart"'),
+      );
+    },
+  );
 });

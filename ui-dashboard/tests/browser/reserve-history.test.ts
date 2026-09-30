@@ -12,7 +12,11 @@ const HISTORY = Array.from({ length: 1205 }, (_, i) => ({
   txHash: `0x${(i + 1).toString(16).padStart(64, "0")}`,
 }));
 
-async function mockReserveData(page: Page, failHistory = false) {
+async function mockReserveData(
+  page: Page,
+  failHistory = false,
+  failLargeTable = false,
+) {
   const requests: Record<string, unknown>[] = [];
   await page.clock.setFixedTime(new Date(NOW * 1000));
   await page.route("**/graphql", async (route) => {
@@ -34,6 +38,13 @@ async function mockReserveData(page: Page, failHistory = false) {
       ).slice(0, Number(variables.limit));
       await route.fulfill({ json: { data: { ReserveUpdate: rows } } });
     } else if (query.includes("query PoolReserves(")) {
+      if (failLargeTable && Number(variables.limit) === 100) {
+        await route.fulfill({
+          status: 503,
+          json: { errors: [{ message: "Table unavailable" }] },
+        });
+        return;
+      }
       await route.fulfill({
         json: {
           data: {
@@ -147,4 +158,26 @@ test("reserve history failure keeps range controls and the transaction table usa
   ).toBeEnabled();
   await page.getByLabel("Rows per page").selectOption("10");
   await expect(page.getByRole("table").getByRole("row")).toHaveCount(11);
+});
+
+test("a failed table keeps its page-size control below the chart and can recover", async ({
+  page,
+}) => {
+  await mockReserveData(page, false, true);
+  await page.goto(`/pool/${POOL_ID}?tab=reserves&limit=100`);
+  await expect(
+    page.getByRole("alert").filter({ hasText: "Table unavailable" }),
+  ).toBeVisible();
+  const control = page.getByLabel("Rows per page");
+  await expect(control).toBeVisible();
+  await expect(control).toHaveCount(1);
+  const chart = page.getByRole("figure", { name: /Reserve history chart/ });
+  const [controlBox, chartBox] = await Promise.all([
+    control.boundingBox(),
+    chart.boundingBox(),
+  ]);
+  expect(controlBox!.y).toBeGreaterThan(chartBox!.y + chartBox!.height);
+  await control.selectOption("25");
+  await expect(page.getByRole("table").getByRole("row")).toHaveCount(26);
+  await expect(control).toHaveCount(1);
 });

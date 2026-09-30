@@ -12,18 +12,36 @@ const PAGE_SIZE = 1000;
 const MAX_PAGES = 100;
 const MAX_ROWS = PAGE_SIZE * MAX_PAGES;
 const FETCH_BUDGET_MS = 20_000;
+const RECONCILE_SECONDS = 3600;
 
 export type ReserveHistory = {
   rows: ReserveHistoryRow[];
   from: number;
   to: number;
   truncated: boolean;
+  reconciledAt?: number;
 };
 
-function retainedRows(previous: ReserveHistory | undefined, from: number) {
+function refreshBaseline(previous: ReserveHistory | undefined, to: number) {
+  return previous?.reconciledAt !== undefined &&
+    previous.to <= to &&
+    to - previous.reconciledAt < RECONCILE_SECONDS
+    ? previous
+    : undefined;
+}
+
+function retainedRows(
+  previous: ReserveHistory | undefined,
+  from: number,
+  afterBlock: string,
+) {
   const rows = new Map<string, ReserveHistoryRow>();
   for (const row of previous?.rows ?? []) {
-    if (Number(row.blockTimestamp) >= from) rows.set(row.id, row);
+    if (
+      Number(row.blockTimestamp) >= from &&
+      BigInt(row.blockNumber) <= BigInt(afterBlock)
+    )
+      rows.set(row.id, row);
   }
   return rows;
 }
@@ -73,16 +91,19 @@ export async function fetchPoolReserveHistory(
   const to = Math.floor(Date.now() / 1000);
   const from = range === "All" ? 0 : to - RANGE_SECONDS[range];
   const deadline = Date.now() + FETCH_BUDGET_MS;
-  const rows = retainedRows(options.previous, from);
-  // Re-read the last block: later logs can sort before its old lexical cursor.
-  const lastBlock = options.previous?.rows.at(-1)?.blockNumber;
+  // Reconcile the full range hourly so deeper reorgs also remove orphaned rows.
+  const previous = refreshBaseline(options.previous, to);
+  // Replace the last block, including any rows deleted by a reorg.
+  const lastBlock = previous?.rows.at(-1)?.blockNumber;
   let afterBlock = lastBlock ? String(BigInt(lastBlock) - BigInt(1)) : "-1";
+  const rows = retainedRows(previous, from, afterBlock);
   let afterId = "";
   const result = (truncated: boolean): ReserveHistory => ({
     rows: sortedCopy([...rows.values()], compareEvents).slice(0, MAX_ROWS),
     from,
     to,
     truncated,
+    reconciledAt: previous?.reconciledAt ?? to,
   });
   for (let page = 0; page < MAX_PAGES; page++) {
     options.signal?.throwIfAborted();

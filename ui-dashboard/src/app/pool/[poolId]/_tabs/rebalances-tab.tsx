@@ -6,6 +6,7 @@ import { EmptyBox, ErrorBox } from "@/components/feedback";
 import { Tooltip } from "@/components/tooltip";
 import { Pagination } from "@/components/pagination";
 import { SenderCell } from "@/components/sender-cell";
+import { TableControlsFallback } from "@/components/table-controls-context";
 import { TableSkeleton } from "@/components/skeletons";
 import { Row, Table, Td, Th } from "@/components/table";
 import { TableSearch } from "@/components/table-search";
@@ -303,11 +304,23 @@ export function RebalancesTab({
   }, [rows, query, getName, getTags]);
 
   if (hasErrorWithoutData(error, data))
-    return <ErrorBox message={error.message} />;
+    return (
+      <TableControlsFallback>
+        <ErrorBox message={error.message} />
+      </TableControlsFallback>
+    );
   if (isLoadingWithoutData(isLoading, data))
-    return <TableSkeleton variant="rows" rows={limit} />;
+    return (
+      <TableControlsFallback>
+        <TableSkeleton variant="rows" rows={limit} />
+      </TableControlsFallback>
+    );
   if (rows.length === 0)
-    return <EmptyBox message="No rebalance events for this pool." />;
+    return (
+      <TableControlsFallback>
+        <EmptyBox message="No rebalance events for this pool." />
+      </TableControlsFallback>
+    );
 
   return (
     <>

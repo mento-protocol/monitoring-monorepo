@@ -45,6 +45,43 @@ describe("reserve history pagination", () => {
     expect(previous.rows).toHaveLength(2);
   });
 
+  it("removes tail rows that disappear upstream after a reorg", async () => {
+    request.mockResolvedValueOnce({ ReserveUpdate: [row(1), row(2)] });
+    const previous = await fetchPoolReserveHistory("endpoint", "pool", "All");
+    request.mockResolvedValueOnce({ ReserveUpdate: [row(3)] });
+    const refreshed = await fetchPoolReserveHistory("endpoint", "pool", "All", {
+      previous,
+    });
+    expect(refreshed.rows.map((r) => r.blockNumber)).toEqual(["1", "3"]);
+  });
+
+  it("reconciles older rows hourly to remove deeper reorgs", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(4000 * 1000);
+    request.mockResolvedValueOnce({ ReserveUpdate: [row(1), row(2), row(3)] });
+    const previous = await fetchPoolReserveHistory("endpoint", "pool", "All");
+    vi.setSystemTime(4500 * 1000);
+    request.mockResolvedValueOnce({ ReserveUpdate: [row(3), row(4)] });
+    const incremental = await fetchPoolReserveHistory(
+      "endpoint",
+      "pool",
+      "All",
+      { previous },
+    );
+    expect(request.mock.calls[1]![0].variables.afterBlock).toBe("2");
+    vi.setSystemTime(8000 * 1000);
+    request.mockResolvedValueOnce({ ReserveUpdate: [row(2), row(4)] });
+    const reconciled = await fetchPoolReserveHistory(
+      "endpoint",
+      "pool",
+      "All",
+      { previous: incremental },
+    );
+    expect(request.mock.calls[2]![0].variables.afterBlock).toBe("-1");
+    expect(reconciled.rows.map((r) => r.blockNumber)).toEqual(["2", "4"]);
+    expect(reconciled.reconciledAt).toBe(8000);
+  });
+
   it("drops expired rows when a rolling range refreshes", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(4000 * 1000);
