@@ -1,6 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  rmSync,
+  cpSync,
+  readFileSync,
+  existsSync,
+} from "node:fs";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -262,4 +270,67 @@ test("each reviewer prompt uses exactly the pinned bytes and rejects late drift"
     () => reviewerPrompt(plan, "complete diff", file),
     /review prompt changed/,
   );
+});
+
+test("rescoring requires the planned case set before provider or spend access", async (context) => {
+  const directory = mkdtempSync(path.join(tmpdir(), "review-v2-case-panel-"));
+  context.after(() => rmSync(directory, { recursive: true, force: true }));
+  const bin = path.join(directory, "bin");
+  mkdirSync(bin);
+  const cli = path.join(bin, "claude");
+  const versionStub =
+    '#!/bin/sh\n[ "$#" -eq 1 ] && [ "$1" = "--version" ] || exit 99\nprintf "%s\\n" "claude-test-version"\n';
+  writeFileSync(cli, versionStub, { mode: 0o755 });
+  const previousPath = process.env.PATH;
+  process.env.PATH = bin;
+  context.after(() => {
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+  });
+  const skillDir = path.join(directory, "skill");
+  mkdirSync(skillDir);
+  writeFileSync(path.join(skillDir, "SKILL.md"), "Review the code.");
+  const dataDir = path.join(directory, "datasets");
+  cpSync(path.join(REPO_ROOT, "docs/evals/review-skill-v2"), dataDir, {
+    recursive: true,
+  });
+  const fullFile = path.join(dataDir, "dataset.json");
+  const full = JSON.parse(readFileSync(fullFile, "utf8"));
+  const subset = structuredClone(full);
+  subset.cases = subset.cases.filter((item) => item.family_id === "pr-1984");
+  subset.roots = subset.roots.filter((item) => item.family_id === "pr-1984");
+  const subsetFile = path.join(dataDir, "subset.json");
+  writeFileSync(subsetFile, JSON.stringify(subset));
+  const options = { incumbent: skillDir, candidate: skillDir };
+  const subsetOut = path.join(directory, "subset-run");
+  const fullOut = path.join(directory, "full-run");
+  makePlan({ ...options, datasetFile: subsetFile, out: subsetOut });
+  makePlan({ ...options, datasetFile: fullFile, out: fullOut });
+  // Both panels are valid. A mismatch must fail before even asking CLI version.
+  writeFileSync(cli, "#!/bin/sh\nexit 99\n");
+  await assert.rejects(
+    runCampaign({ out: subsetOut, scoreOnly: true, datasetFile: fullFile }),
+    /dataset case set differs from plan/,
+  );
+  await assert.rejects(
+    runCampaign({ out: fullOut, scoreOnly: true, datasetFile: subsetFile }),
+    /dataset case set differs from plan/,
+  );
+  for (const out of [subsetOut, fullOut]) {
+    assert.equal(existsSync(path.join(out, "active.lock")), false);
+    assert.equal(existsSync(path.join(out, "spend.json")), false);
+    assert.equal(existsSync(path.join(out, "report.json")), false);
+  }
+  writeFileSync(cli, versionStub);
+  subset.cases.reverse();
+  subset.roots[0].title += " (revised label)";
+  const reorderedFile = path.join(dataDir, "reordered.json");
+  writeFileSync(reorderedFile, JSON.stringify(subset));
+  const report = await runCampaign({
+    out: subsetOut,
+    scoreOnly: true,
+    datasetFile: reorderedFile,
+  });
+  assert.match(report.failure, /no compatible raw result/);
+  assert.equal(report.cost.actual_known_usd, 0);
 });

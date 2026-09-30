@@ -268,6 +268,12 @@ export async function runCampaign({
     ? path.resolve(datasetFile)
     : plan.dataset_file;
   const loaded = loadDataset({ file: sourceFile });
+  const caseIds = loaded.dataset.cases.map((item) => item.id).sort();
+  if (JSON.stringify(caseIds) !== JSON.stringify([...plan.case_ids].sort())) {
+    throw new Error(
+      "dataset case set differs from plan; create a new plan for a changed panel",
+    );
+  }
   if (!scoreOnly && loaded.digest !== plan.dataset_digest)
     throw new Error("dataset changed since planning");
   const version = providerVersion();

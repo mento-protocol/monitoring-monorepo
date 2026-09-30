@@ -20,6 +20,8 @@ export function scorerDigestV2() {
     fileURLToPath(import.meta.url),
     path.join(directory, "review-eval-score.mjs"),
     path.join(directory, "review-eval-stream.mjs"),
+    // rootsForCase selects the answer-key roots sent to the grader.
+    path.join(directory, "review-eval-v2-dataset.mjs"),
     ...promptNames.map(promptPath),
   ];
   const hash = createHash("sha256");

@@ -1,8 +1,16 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 
 import {
   FINAL_REVIEW_CONTRACT,
@@ -370,4 +378,60 @@ test("provider failure and malformed output are incomplete instead of no finding
 test("scorer identity is stable and contains a full sha256 digest", () => {
   assert.match(scorerDigestV2(), /^[a-f0-9]{64}$/);
   assert.equal(scorerDigestV2(), scorerDigestV2());
+});
+
+test("scorer identity changes when answer-key selection behavior changes", async (context) => {
+  const copy = mkdtempSync(path.join(os.tmpdir(), "v2-scorer-identity-"));
+  context.after(() => rmSync(copy, { recursive: true, force: true }));
+  for (const file of [
+    "review-eval-v2-score.mjs",
+    "review-eval-score.mjs",
+    "review-eval-stream.mjs",
+    "review-eval-v2-dataset.mjs",
+    "review-eval-v2-probe-trust.mjs",
+    "prompts/v2",
+  ]) {
+    cpSync(new URL(file, import.meta.url), path.join(copy, file), {
+      recursive: true,
+    });
+  }
+  const scorer = await import(
+    pathToFileURL(path.join(copy, "review-eval-v2-score.mjs"))
+  );
+  const selectorPath = path.join(copy, "review-eval-v2-dataset.mjs");
+  const selectorUrl = pathToFileURL(selectorPath).href;
+  const beforeSelector = await import(selectorUrl);
+  const dataset = {
+    cases: [
+      {
+        id: "repaired",
+        expected_root_ids: [],
+        negative_control_root_ids: ["root"],
+      },
+    ],
+    roots: [{ id: "root" }],
+  };
+  assert.deepEqual(
+    beforeSelector.rootsForCase(dataset, "repaired"),
+    dataset.roots,
+  );
+  const beforeDigest = scorer.scorerDigestV2();
+  const beforeSource = readFileSync(selectorPath, "utf8");
+  const afterSource = beforeSource.replace(
+    "...item.negative_control_root_ids,",
+    "",
+  );
+  assert.notEqual(
+    afterSource,
+    beforeSource,
+    "fault injection must change selector",
+  );
+  writeFileSync(selectorPath, afterSource);
+  const afterSelector = await import(`${selectorUrl}?changed`);
+  assert.deepEqual(afterSelector.rootsForCase(dataset, "repaired"), []);
+  assert.notEqual(
+    scorer.scorerDigestV2(),
+    beforeDigest,
+    "changing the roots sent to grading must invalidate cached scores",
+  );
 });

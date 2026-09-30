@@ -96,8 +96,12 @@ pnpm review:eval:v2 score --out /absolute/path/to/eval-run   --dataset "$PWD/doc
 pnpm review:eval:v2 report --out /absolute/path/to/eval-run
 ```
 
+Rescoring must retain the plan's case IDs. It may reorder cases or revise labels.
+To add or remove cases, create a new plan.
+
 Reviewer identity excludes the answer key and grader. Grading identity includes
-the immutable reviewer artifact, answer key, scorer, prompts, and judge settings.
+the immutable reviewer artifact, answer key and its selection code, scorer,
+prompts, and judge settings.
 A source, skill, prompt, runtime, or execution change requires a compatible new
 execution identity. A grading-only change must not silently buy another review.
 
