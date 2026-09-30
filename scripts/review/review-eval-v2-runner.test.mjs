@@ -214,6 +214,19 @@ test("wrong counts distinct claims while repaired-root accusations count roots",
 test("rescoring uses recorded skill identity after a skill snapshot changes", async (context) => {
   const directory = mkdtempSync(path.join(tmpdir(), "review-v2-rescore-"));
   context.after(() => rmSync(directory, { recursive: true, force: true }));
+  const bin = path.join(directory, "bin");
+  mkdirSync(bin);
+  writeFileSync(
+    path.join(bin, "claude"),
+    '#!/bin/sh\n[ "$#" -eq 1 ] && [ "$1" = "--version" ] || exit 99\nprintf "%s\\n" "claude-test-version"\n',
+    { mode: 0o755 },
+  );
+  const previousPath = process.env.PATH;
+  process.env.PATH = bin;
+  context.after(() => {
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+  });
   const skillDir = path.join(directory, "skill");
   mkdirSync(skillDir);
   writeFileSync(path.join(skillDir, "SKILL.md"), "Review the code.");
