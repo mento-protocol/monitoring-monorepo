@@ -921,7 +921,11 @@ merges.
 
 The sweep then announces the report through
 [`spoken-attention-nudge.md`](spoken-attention-nudge.md), which owns the `say`
-command. The operator is away by design, so the sweep speaks one of the note's
+command and the desktop notification. Send the notification first as a
+separate call, targeted to the caller's cmux workspace and terminal pane when
+available. Keep the same safe sweep label in the notification and report.
+Report notification failures and any fallback without session click-through.
+The operator is away by design, so the sweep speaks one of the note's
 three fixed phrases rather than a labelled line, which would prompt for an
 approval nobody is there to give. The nudge runs with escalated execution, not
 inside the workspace sandbox: it needs the local audio device, and a sandboxed

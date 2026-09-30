@@ -60,7 +60,7 @@ rule are in
 - **Forensic drafts stay local.** Use the `forensic-report` skill; sensitive
   drafts belong under gitignored `.investigations/`, never `docs/`.
 - When the user is away and a decision, production approval, long completion,
-  or plan feedback needs attention, follow
+  or plan feedback needs attention, pair speech with a desktop notification. Follow
   [`docs/notes/spoken-attention-nudge.md`](docs/notes/spoken-attention-nudge.md).
 
 ## PR Workflow

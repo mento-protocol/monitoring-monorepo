@@ -1050,10 +1050,14 @@ output is its summary.
 for the rest. A human can open each link and merge in the GitHub UI. Listing a
 link is not merge approval, and this skill never merges.
 
-Finally, send one spoken line saying the report is ready, through
+Finally, send a desktop notification and one spoken line saying the report is
+ready, through
 [`spoken-attention-nudge.md`](../../../docs/notes/spoken-attention-nudge.md).
-That note owns the `say` command and the `spd-say` Linux fallback; do not
-re-derive them here. The operator is away by design here, so speak one of the
+That note owns desktop notification routing, the `say` command, and the
+`spd-say` Linux fallback; do not re-derive them here. Send the notification
+first as a separate call. Target the caller's cmux workspace and terminal pane
+when available. Keep the same safe sweep label in the notification and report.
+Report notification failures and any fallback without session click-through. The operator is away by design here, so speak one of the
 note's three fixed phrases: a labelled line prompts for an approval nobody is
 there to give. Name the sweep in the written report instead. Run the nudge with escalated execution rather than inside the workspace
 sandbox — `say` needs the local audio device, and a sandboxed attempt fails in a

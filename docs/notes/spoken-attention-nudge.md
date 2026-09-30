@@ -13,8 +13,8 @@ garden_lane: operator-runbooks
 # Spoken Attention Nudge
 
 When you need the user's attention and they are not actively responding, send a
-brief spoken nudge with `say` in addition to the normal chat message. Default to
-doing this when blocked on a user decision, waiting on approval for a production
+brief spoken nudge with `say` and a desktop notification in addition to the
+normal chat message. Default to doing this when blocked on a user decision, waiting on approval for a production
 mutation, a long task has finished and needs user follow-up, or plan feedback is
 required before meaningful progress can continue.
 
@@ -59,7 +59,8 @@ two.
 
 Use metadata tied to this session, not whichever pane holds focus. In cmux, look
 the title up through the caller's own `CMUX_WORKSPACE_ID` and `CMUX_SURFACE_ID`,
-and never speak those IDs. Do not guess a title, and do not change focus or
+and use both IDs to target the notification. Never speak those IDs. Do not
+guess a title, and do not change focus or
 titles. When that lookup is unavailable, use the working directory, branch, and
 task context.
 
@@ -82,6 +83,46 @@ unanswered prompt is a failed spoken path — fall back to the written request.
 Closing the gap needs a reviewed helper that derives the label itself.
 Pre-approving `say` with a free message argument is not the way to close it: a
 shell substitution in that argument reads local file contents aloud.
+
+## Pair speech with a desktop notification
+
+Send a desktop notification before each spoken attention nudge. Make it a
+separate tool call so notification failure cannot prevent speech, and speech
+failure cannot prevent the notification. Keep the written request in all cases.
+Use the same safe session label and short reason in the notification and report.
+
+In cmux, check that both caller environment variables are non-empty. Use the
+CLI and socket inherited by this session, and target both IDs explicitly:
+
+```bash
+cmux notify --workspace "$CMUX_WORKSPACE_ID" --surface "$CMUX_SURFACE_ID" \
+  --title "Monitoring, backlog sweep" \
+  --body "The report is ready and needs your attention."
+```
+
+Clicking the cmux notification opens the target workspace and terminal pane.
+Never substitute the focused pane, workspace indexes, another session's IDs,
+or another app instance's socket. Do not focus the pane yourself.
+
+If cmux or either caller ID is unavailable on macOS, use a notification with
+reviewed literal text instead:
+
+```bash
+osascript -e 'display notification "The report is ready and needs your attention." with title "Monitoring, backlog sweep"'
+```
+
+This fallback cannot open the session. State that limit in the written request.
+Outside macOS, use an available session-targeted notification tool; otherwise
+report notification delivery as unavailable and continue with the spoken
+fallback and report. Never interpolate captured titles into shell code or
+AppleScript. Apply the spoken text restrictions below to notification text too.
+
+If the sandbox blocks the socket or notification service, use the runtime's
+supported permission path. Keep notification and speech requests separate.
+Do not add wildcard command approvals. A blocked notification approval is a
+failed notification path; report it and continue with speech and the report.
+A successful command proves submission, not that a desktop banner appeared.
+Notification permissions, Focus settings, and cmux policy can suppress banners.
 
 ## Keep the spoken text low-information
 
@@ -116,5 +157,5 @@ Do not wire this into the existing SessionEnd hook. The current shared hook
 events do not know whether the agent is genuinely waiting on the user versus
 waiting on CI, bot review, deploy sync, or another external process, so a hook
 would either miss the important decision point or create noisy false alarms. Use
-the manual `say` call at the moment the agent identifies a real user-input
+the manual notification and `say` calls at the moment the agent identifies a real user-input
 blocker.
