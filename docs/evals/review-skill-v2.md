@@ -51,7 +51,7 @@ Freeze both skill directories before planning. Use explicit absolute paths.
 Store the run outside the repository. Planning calls no model.
 
 ```bash
-pnpm review:eval:v2 plan   --dataset "$PWD/docs/evals/review-skill-v2/dataset.json"   --incumbent /absolute/path/to/incumbent-review   --candidate /absolute/path/to/candidate-review   --out /absolute/path/to/eval-run   --budget 60
+pnpm review:eval:v2 plan   --dataset "$PWD/docs/evals/review-skill-v2/dataset.json"   --incumbent /absolute/path/to/incumbent-review   --candidate /absolute/path/to/candidate-review   --out /absolute/path/to/eval-run
 
 pnpm review:eval:v2 run --out /absolute/path/to/eval-run
 pnpm review:eval:v2 report --out /absolute/path/to/eval-run
@@ -64,10 +64,12 @@ The plan pins model, effort, skill content, source, and execution behavior.
 The runner supplies the complete working-tree diff. Reviewers and source graders
 can use Read, Grep, and Glob only. They cannot run tests or shell commands.
 
-The budget uses provider-reported API-equivalent usage. It does not establish
-an account charge. The runner reserves each call before launch and preserves
-conservative accounting when actual usage is unavailable. Provider request
-boundaries can overshoot a per-call limit; inspect recorded usage and limits.
+Provider-reported dollar figures are API-equivalent usage estimates. They do
+not establish account charges for subscription-backed runs or require separate
+dollar approval. The current runner still enforces its implementation usage
+thresholds. It reserves each call before launch and preserves conservative
+accounting when actual usage is unavailable. Request boundaries can overshoot
+a per-call threshold; inspect the recorded usage and plan controls.
 A failed call or missing artifact leaves the run incomplete. Resume the same
 run to reuse valid completed work. Do not retry a valid grade merely to obtain
 a different judgment.
