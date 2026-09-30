@@ -77,6 +77,7 @@ const POOL: Pool = {
   updatedAtTimestamp: "1700000000",
   token0Decimals: 18,
   token1Decimals: 18,
+  tokenDecimalsKnown: true,
   oraclePrice: "0",
   reserves0: "1",
   reserves1: "1",
@@ -147,7 +148,7 @@ describe("ReservesTab ordering contract", () => {
     );
 
     expect(capturedChartRows).toBe(historyRows);
-    expect(mockUseHistory).toHaveBeenCalledWith("42220-0xpool", "1d");
+    expect(mockUseHistory).toHaveBeenCalledWith("42220-0xpool", "1d", true);
 
     // Table contract: newest-first (desc). The first txHash in document order
     // is the newest row; the last is the oldest.
