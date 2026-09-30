@@ -38,13 +38,19 @@ immutable reviewer evidence, answer key, grading orchestration, grader
 configuration, and scorer bytes to the latter. Reuse each phase only when its
 own inputs match. Keep answer-key selection and grading orchestration separate
 from execution code, including score-cache identity, judge calls, and grading
-result handling. Pin grading source and prompts for the process lifetime, and
+result handling. Keep judge-specific command construction in grading identity;
+pin shared authentication, transport, and restrictions to both identities.
+Pin grading source and prompts for the process lifetime, and
 reject source drift before saving results.
 
 Use root-cause labels and repaired-root negative controls. A repaired case is
 not a claim that its whole PR has no defects. Keep original and repaired cases
 in one PR family and split. Record prior exposure and label authority explicitly.
 Agent audits and model judgments do not become human calibration.
+Alternate arm order by sorted family ID and reverse it for repaired cases.
+This balances first positions within each variant when the family count is even.
+Reject a claim reused across distinct matched roots. Keep uncertain root-linked
+claims out of source-only novelty grading while retaining definite root matches.
 
 A dataset digest establishes identity, not permission to execute its source.
 Restrict executable probes to reviewed source and repair tuples. Verify and copy

@@ -19,6 +19,9 @@ function currentScorerDigest() {
   const files = [
     fileURLToPath(import.meta.url),
     path.join(directory, "review-eval-v2-grading.mjs"),
+    path.join(directory, "review-eval-v2-judge-provider.mjs"),
+    path.join(directory, "review-eval-v2-provider.mjs"),
+    path.join(directory, "review-eval-run-execution.mjs"),
     path.join(directory, "review-eval-experiment-contract.mjs"),
     path.join(directory, "review-eval-run-cell.mjs"),
     path.join(directory, "review-eval-score.mjs"),
@@ -134,6 +137,7 @@ function matchesFrom(parsed, defects, claims, finalText) {
     "matching",
   );
   const claimMap = new Map(claims.map((claim) => [claim.id, claim]));
+  const matchedClaims = new Set();
   return parsed.defects.map((record) => {
     requireValue(
       ["matched", "unmatched", "uncertain"].includes(record.verdict),
@@ -160,6 +164,11 @@ function matchesFrom(parsed, defects, claims, finalText) {
         ),
         "matched quote is absent from the linked claims",
       );
+      requireValue(
+        record.claim_ids.every((id) => !matchedClaims.has(id)),
+        "matching reused a claim across multiple matched roots",
+      );
+      for (const id of record.claim_ids) matchedClaims.add(id);
     } else if (record.verdict === "unmatched") {
       requireValue(
         record.claim_ids.length === 0,
@@ -322,13 +331,15 @@ export async function scoreReview({
       ? "incomplete"
       : "complete";
     phase = "classification";
-    const knownClaims = new Set(
+    // An unresolved known-root link cannot establish novelty. Keep that claim
+    // visible through the uncertain root and defer its source-only verdict.
+    const rootLinkedClaims = new Set(
       result.defects
-        .filter((defect) => defect.verdict === "matched")
+        .filter((defect) => ["matched", "uncertain"].includes(defect.verdict))
         .flatMap((defect) => defect.claim_ids),
     );
     const unmatched = result.claims.filter(
-      (claim) => !knownClaims.has(claim.id),
+      (claim) => !rootLinkedClaims.has(claim.id),
     );
     if (unmatched.length > 0) {
       requireValue(

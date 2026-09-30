@@ -201,6 +201,85 @@ function freshRescore(c, selectorFile = "review-eval-v2-selection.mjs") {
   );
 }
 
+function providerArguments(c) {
+  return JSON.parse(
+    execFileSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `
+    import {existsSync} from 'node:fs';
+    import {EventEmitter} from 'node:events';
+    import {PassThrough} from 'node:stream';
+    const {createProvider} = await import(${JSON.stringify(c.moduleUrl("review-eval-v2-provider.mjs"))});
+    const judgeFile = ${JSON.stringify(path.join(c.copy, "scripts/review/review-eval-v2-judge-provider.mjs"))};
+    const invokeJudge = existsSync(judgeFile) ? (await import(${JSON.stringify(c.moduleUrl("review-eval-v2-judge-provider.mjs"))})).invokeJudge : (provider, request) => provider.invoke(request);
+    const calls = [];
+    const provider = createProvider({out:${JSON.stringify(path.join(c.directory, "argument-probe"))}, repoRoot:${JSON.stringify(c.copy)}, version:'test', env:{}, verifyPolicy:()=>{},
+      execAuth:()=>JSON.stringify({loggedIn:true,authMethod:'claude.ai',apiProvider:'firstParty',subscriptionType:'max'}),
+      spawnProcess:(name,args)=>{
+        calls.push(args);
+        const child = new EventEmitter(); child.stdout = new PassThrough(); child.stderr = new PassThrough(); child.kill=()=>{};
+        queueMicrotask(()=>{child.stdout.write(JSON.stringify({type:'result',is_error:false,result:'Complete',total_cost_usd:0})+'\\n');child.emit('close',0);});
+        return child;
+      }});
+    const request = {label:'probe',prompt:'Review',model:'test',effort:'high',cwd:${JSON.stringify(c.directory)}};
+    await provider.invoke({...request,allowedTools:['Read','Grep','Glob'],maxTurns:60});
+    await invokeJudge(provider,{...request,allowedTools:[],maxTurns:1});
+    process.stdout.write(JSON.stringify(calls));
+  `,
+      ],
+      { encoding: "utf8", env: process.env },
+    ),
+  );
+}
+
+test("judge-only provider changes reuse saved reviews without changing reviewer arguments", async (context) => {
+  const c = await cachedCampaign(context);
+  const beforeArgs = providerArguments(c);
+  const split = existsSync(
+    path.join(c.copy, "scripts/review/review-eval-v2-judge-provider.mjs"),
+  );
+  const target = path.join(
+    c.copy,
+    "scripts/review",
+    split ? "review-eval-v2-judge-provider.mjs" : "review-eval-v2-provider.mjs",
+  );
+  const before = readFileSync(target, "utf8");
+  const after = split
+    ? before.replace(
+        "return claudeArgv(request);",
+        "return claudeArgv({ ...request, maxTurns: request.allowedTools.length === 0 ? request.maxTurns + 1 : request.maxTurns });",
+      )
+    : before.replace(
+        "        maxTurns,",
+        "        maxTurns: allowedTools.length === 0 ? maxTurns + 1 : maxTurns,",
+      );
+  assert.notEqual(
+    after,
+    before,
+    "fault must change the blind judge turn limit",
+  );
+  writeFileSync(target, after);
+  const afterArgs = providerArguments(c);
+  assert.deepEqual(
+    afterArgs[0],
+    beforeArgs[0],
+    "reviewer invocation is unchanged",
+  );
+  assert.equal(beforeArgs[1][beforeArgs[1].indexOf("--max-turns") + 1], "1");
+  assert.equal(afterArgs[1][afterArgs[1].indexOf("--max-turns") + 1], "2");
+  const result = freshRescore(c);
+  assert.notEqual(result.digest, c.scoreDigest);
+  assert.equal(result.report.status, "completed");
+  assert.ok(
+    result.report.rows.every((row) => row.raw_reused && row.score_reused),
+  );
+  assert.deepEqual(result.raws, c.rawDigests);
+  assert.equal(existsSync(path.join(c.out, "spend.json")), false);
+});
+
 test("fresh-process selector changes rescore existing raw without changing execution identity", async (context) => {
   const c = await cachedCampaign(context);
   const selectorFile = existsSync(

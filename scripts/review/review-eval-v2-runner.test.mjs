@@ -489,3 +489,103 @@ test("execution identity pins host probe code but permits label and grader chang
     });
   }
 });
+
+test("arm order balances variants and families independently of dataset order", (context) => {
+  const directory = mkdtempSync(path.join(tmpdir(), "v2-arm-order-"));
+  context.after(() => rmSync(directory, { recursive: true, force: true }));
+  const bin = path.join(directory, "bin");
+  mkdirSync(bin);
+  writeFileSync(
+    path.join(bin, "claude"),
+    '#!/bin/sh\n[ "$#" -eq 1 ] && [ "$1" = "--version" ] || exit 99\nprintf "%s\\n" "claude-test-version"\n',
+    { mode: 0o755 },
+  );
+  const previousPath = process.env.PATH;
+  process.env.PATH = bin;
+  context.after(() => {
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+  });
+  const skillDir = path.join(directory, "skill");
+  mkdirSync(skillDir);
+  writeFileSync(path.join(skillDir, "SKILL.md"), "Review the code.");
+  const dataDir = path.join(directory, "dataset");
+  cpSync(path.join(REPO_ROOT, "docs/evals/review-skill-v2"), dataDir, {
+    recursive: true,
+  });
+  const datasetFile = path.join(dataDir, "dataset.json");
+  const dataset = JSON.parse(readFileSync(datasetFile, "utf8"));
+  let counter = 0;
+  const planFor = (data) => {
+    writeFileSync(datasetFile, JSON.stringify(data));
+    return makePlan({
+      datasetFile,
+      incumbent: skillDir,
+      candidate: skillDir,
+      out: path.join(directory, `run-${counter++}`),
+    });
+  };
+  const firstArms = (planned) =>
+    Object.fromEntries(
+      planned.cells
+        .filter((_, index) => index % 2 === 0)
+        .map((cell) => [cell.case_id, cell.treatment]),
+    );
+  const original = planFor(dataset);
+  const expected = firstArms(original);
+  for (const key of ["variant", "family_id"]) {
+    for (const value of new Set(dataset.cases.map((item) => item[key]))) {
+      const arms = dataset.cases
+        .filter((item) => item[key] === value)
+        .map((item) => expected[item.id])
+        .sort();
+      assert.deepEqual(
+        arms,
+        ["candidate", "incumbent"],
+        `${key} ${value} must have each arm first once`,
+      );
+    }
+  }
+  assert.equal(original.arm_order.method, "family-variant-counterbalance-v1");
+  assert.deepEqual(original.arm_order.family_ids, ["pr-1982", "pr-1984"]);
+  const permutations = (items) =>
+    items.length
+      ? items.flatMap((item, index) =>
+          permutations(items.filter((_, other) => index !== other)).map(
+            (tail) => [item, ...tail],
+          ),
+        )
+      : [[]];
+  for (const cases of permutations(dataset.cases)) {
+    const planned = planFor({ ...dataset, cases });
+    assert.deepEqual(firstArms(planned), expected);
+    assert.deepEqual(planned.arm_order, original.arm_order);
+    assert.deepEqual(
+      planned.cells
+        .filter((_, index) => index % 2 === 0)
+        .map((cell) => cell.case_id),
+      cases.map((item) => item.id),
+    );
+    for (let index = 0; index < planned.cells.length; index += 2) {
+      assert.equal(
+        planned.cells[index].case_id,
+        planned.cells[index + 1].case_id,
+      );
+      assert.notEqual(
+        planned.cells[index].treatment,
+        planned.cells[index + 1].treatment,
+      );
+    }
+  }
+  const subset = {
+    ...dataset,
+    cases: dataset.cases.filter((item) => item.family_id === "pr-1984"),
+    roots: dataset.roots.filter((item) => item.family_id === "pr-1984"),
+  };
+  const oneFamily = planFor(subset);
+  assert.deepEqual(oneFamily.arm_order.family_ids, ["pr-1984"]);
+  assert.deepEqual(Object.values(firstArms(oneFamily)).sort(), [
+    "candidate",
+    "incumbent",
+  ]);
+});

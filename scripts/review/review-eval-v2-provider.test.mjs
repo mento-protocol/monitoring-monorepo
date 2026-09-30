@@ -17,6 +17,8 @@ import {
   createProvider,
   verifyUnmanagedPolicy,
 } from "./review-eval-v2-provider.mjs";
+import { invokeJudge } from "./review-eval-v2-judge-provider.mjs";
+import { claudeArgv } from "./review-eval-run-execution.mjs";
 
 const subscription = {
   loggedIn: true,
@@ -127,6 +129,97 @@ test("subscription calls have no dollar stop, keep unknown usage, and retain too
   assert.equal(ledger.calls[1].reserved_usd, null);
   assert.equal(ledger.calls[1].charged_usd, null);
   assert.equal(createProvider(s.options).ledger.calls.length, 2);
+});
+
+test("blind and source judges share auth and capture while preserving their exact tool sets", async (context) => {
+  const s = setup(context);
+  const provider = createProvider(s.options);
+  await s.invoke(provider);
+  for (const allowedTools of [[], ["Read", "Grep", "Glob"]]) {
+    const maxTurns = allowedTools.length ? 60 : 1;
+    await invokeJudge(provider, {
+      ...request,
+      label: "judge",
+      cwd: s.out,
+      allowedTools,
+      maxTurns,
+    });
+    const call = s.modelCalls.at(-1);
+    assert.equal(
+      call.args[call.args.indexOf("--tools") + 1],
+      allowedTools.join(","),
+    );
+    assert.equal(
+      call.args[call.args.indexOf("--max-turns") + 1],
+      String(maxTurns),
+    );
+    assert.equal(
+      call.args[call.args.indexOf("--permission-mode") + 1],
+      "dontAsk",
+    );
+    for (const flag of [
+      "--restricted",
+      "--no-session-persistence",
+      "--strict-mcp-config",
+    ])
+      assert.ok(call.args.includes(flag));
+    assert.equal(
+      call.args[call.args.indexOf("--mcp-config") + 1],
+      '{"mcpServers":{}}',
+    );
+    assert.deepEqual(s.authCalls.at(-1).settings.env, call.settings.env);
+    assert.equal(s.authCalls.at(-1).settings.cwd, call.settings.cwd);
+  }
+  assert.equal(provider.ledger.calls.length, 3);
+  assert.equal(readdirSync(path.join(s.out, "calls")).length, 3);
+});
+
+test("judge argument builders cannot widen tools or change trusted settings and transport", async (context) => {
+  for (const change of [
+    (args) =>
+      args.map((value, index) =>
+        args[index - 1] === "--tools" ? "Bash" : value,
+      ),
+    (args) => [...args, "--tools", "Read"],
+    (args) => [...args, "--tools=Read"],
+    (args) => [...args, "--allowed-tools", "Read"],
+    (args) => [...args, "--settings", "untrusted.json"],
+    (args) =>
+      args.map((value, index) =>
+        args[index - 1] === "--setting-sources" ? "project" : value,
+      ),
+    (args) =>
+      args.map((value, index) =>
+        args[index - 1] === "--output-format" ? "json" : value,
+      ),
+  ]) {
+    const s = setup(context);
+    const provider = createProvider(s.options);
+    await assert.rejects(
+      provider.invoke(
+        { ...request, cwd: s.out, allowedTools: [], maxTurns: 1 },
+        (input) => change(claudeArgv(input)),
+      ),
+      /shared invocation boundary/,
+    );
+    assert.equal(s.authCalls.length, 0);
+    assert.equal(s.modelCalls.length, 0);
+    assert.equal(existsSync(path.join(s.out, "spend.json")), false);
+  }
+  const s = setup(context);
+  const provider = createProvider(s.options);
+  await assert.rejects(
+    provider.invoke(
+      { ...request, cwd: s.out, allowedTools: [], maxTurns: 1 },
+      (input) => {
+        input.allowedTools.push("Bash");
+        return claudeArgv(input);
+      },
+    ),
+    /shared invocation boundary/,
+  );
+  assert.equal(s.authCalls.length, 0);
+  assert.equal(s.modelCalls.length, 0);
 });
 
 test("API, unknown, logged-out, and changing auth fail before model launch", async (context) => {

@@ -129,6 +129,10 @@ export function makePlan({
       "--budget is retired; subscription runs have no dollar stop",
     );
   const loaded = loadDataset({ file: path.resolve(datasetFile) });
+  const familyIds = [
+    ...new Set(loaded.dataset.cases.map((item) => item.family_id)),
+  ].sort();
+  const familyRanks = new Map(familyIds.map((id, index) => [id, index]));
   const skills = Object.fromEntries(
     Object.entries({ incumbent, candidate }).map(([id, file]) => {
       const skillRef = path.resolve(file);
@@ -162,12 +166,19 @@ export function makePlan({
     execution_digest: digestFiles(EXECUTION_FILES),
     prompt_sha256: sha256Bytes(readFileSync(path.join(REPO_ROOT, PROMPT))),
     case_ids: loaded.dataset.cases.map((fixture) => fixture.id),
-    cells: loaded.dataset.cases.flatMap((fixture, index) =>
-      (index % 2 === 0
-        ? ["incumbent", "candidate"]
-        : ["candidate", "incumbent"]
-      ).map((treatment) => ({ case_id: fixture.id, treatment })),
-    ),
+    arm_order: {
+      method: "family-variant-counterbalance-v1",
+      family_ids: familyIds,
+    },
+    cells: loaded.dataset.cases.flatMap((fixture) => {
+      const familyRank = familyRanks.get(fixture.family_id);
+      const variantOffset = Number(fixture.variant === "repaired");
+      const arms =
+        (familyRank + variantOffset) % 2 === 0
+          ? ["incumbent", "candidate"]
+          : ["candidate", "incumbent"];
+      return arms.map((treatment) => ({ case_id: fixture.id, treatment }));
+    }),
     created_at: new Date().toISOString(),
   };
   const planFile = path.join(root, "plan.json");

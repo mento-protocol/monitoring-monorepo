@@ -10,6 +10,7 @@ import { leakSignals } from "./review-eval-run-cell.mjs";
 import { rootsForCase } from "./review-eval-v2-selection.mjs";
 import { scoreReview, scorerDigestV2 } from "./review-eval-v2-score.mjs";
 import { writeJson } from "./review-eval-v2-provider.mjs";
+import { invokeJudge } from "./review-eval-v2-judge-provider.mjs";
 import { metricSummary } from "./review-eval-v2-report.mjs";
 
 const keyed = (value) => ({ ...value, digest: digestObject(value) });
@@ -91,7 +92,7 @@ export async function gradeCell({
       if (scorerDigestV2() !== scoreId.scorer_digest)
         throw new Error("scorer changed during grading");
       const before = sourceState(isolated.path);
-      const result = await provider.invoke({
+      const result = await invokeJudge(provider, {
         ...request,
         label: `${fixture.id}/${cell.treatment}/judge-${judgeIndex++}`,
       });

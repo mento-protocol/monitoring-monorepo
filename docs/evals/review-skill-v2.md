@@ -61,6 +61,9 @@ The pilot uses one draw for each arm of each case: eight reviewer calls, plus
 calls for grading. It runs direct source review through Claude. It does not run
 a live Codex finder or external security scanners. Provider concurrency is one.
 The plan pins model, effort, skill content, source, and execution behavior.
+Arm order alternates by sorted family ID and reverses for repaired cases.
+The plan records this rule. Reordering cases does not change their arm order.
+An odd number of families leaves one extra first position for one arm per variant.
 The runner supplies the complete working-tree diff. Reviewers and source graders
 can use Read, Grep, and Glob only. They cannot run tests or shell commands.
 
@@ -107,6 +110,10 @@ A matched verdict carries a verbatim quote from the final review. Code checks
 quote provenance; the grader still owns the semantic judgment. The scorer
 retains every extracted claim and reports insufficient coverage explicitly.
 Uncertain matches and unverifiable claims remain visible.
+One extracted claim cannot satisfy two distinct matched roots. Claims linked to
+uncertain root matches skip source-only novelty grading. The unresolved links
+remain visible; a separate definite root match still counts normally.
+Other unmatched claims still receive source-based grading.
 
 Rescore saved reviewer outputs after a dataset or grader change:
 
@@ -122,8 +129,10 @@ Reviewer identity excludes the answer key and grader. Grading identity includes
 the immutable reviewer artifact, answer key and its selection code, grading
 orchestration, scorer, prompts, and judge settings. Grading orchestration covers
 score-cache identity, judge calls, and grading result handling. It lives outside
-the reviewer execution module, as does answer-key selection. Changes to these
-grading modules do not invalidate saved reviewer outputs. A scoring process pins
+the reviewer execution module, as does answer-key selection. Judge-specific
+command construction also belongs to grading identity. Shared authentication,
+transport, and command restrictions remain pinned to both identities. Changes to
+grading-only modules do not invalidate saved reviewer outputs. A scoring process pins
 its grading source and prompts at startup and rejects later changes. After a
 grading edit, start a new scoring process to reuse the saved reviews under the
 new grading identity.

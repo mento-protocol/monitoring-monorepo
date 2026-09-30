@@ -165,6 +165,55 @@ export function settleCall(call, result) {
   call.finished_at = new Date().toISOString();
 }
 
+// Role-specific builders are trusted code, but cannot widen the shared tool,
+// settings or transport boundary. No file/config value selects a builder.
+function checkedArguments(request, buildArguments) {
+  const allowedTools = [...request.allowedTools];
+  const args = buildArguments(request);
+  const values = new Map();
+  const scalar = new Set([
+    "-p",
+    "--model",
+    "--effort",
+    "--setting-sources",
+    "--output-format",
+    "--permission-mode",
+    "--tools",
+    "--max-turns",
+  ]);
+  const fail = () => {
+    throw new Error(
+      "provider arguments violate the shared invocation boundary",
+    );
+  };
+  if (!Array.isArray(args)) fail();
+  for (let index = 0; index < args.length; index++) {
+    const flag = args[index];
+    if (values.has(flag)) fail();
+    if (flag === "--verbose") values.set(flag, true);
+    else if (flag === "--allowed-tools") {
+      const tools = [];
+      while (index + 1 < args.length && !args[index + 1].startsWith("--"))
+        tools.push(args[++index]);
+      if (tools.some((tool) => !allowedTools.includes(tool))) fail();
+      values.set(flag, tools);
+    } else if (scalar.has(flag) && typeof args[index + 1] === "string")
+      values.set(flag, args[++index]);
+    else fail();
+  }
+  if ([...scalar].some((flag) => !values.has(flag)) || !values.has("--verbose"))
+    fail();
+  const tools = values.get("--tools");
+  if (
+    tools !== allowedTools.join(",") ||
+    values.get("--setting-sources") !== "" ||
+    values.get("--output-format") !== "stream-json" ||
+    !/^[1-9]\d*$/.test(values.get("--max-turns"))
+  )
+    fail();
+  return args;
+}
+
 export function createProvider({
   out,
   limit,
@@ -191,33 +240,34 @@ export function createProvider({
     throw new Error(
       "legacy dollar-budget ledger; create a new subscription plan and preserve existing evidence",
     );
-  const invoke = async ({
-    label,
-    prompt,
-    model,
-    effort,
-    cwd,
-    systemPrompt = "",
-    allowedTools = [],
-    maxTurns = 8,
-  }) => {
+  const invoke = async (
+    {
+      label,
+      prompt,
+      model,
+      effort,
+      cwd,
+      systemPrompt = "",
+      allowedTools = [],
+      maxTurns = 8,
+    },
+    buildArguments = claudeArgv,
+  ) => {
+    const readTools = allowedTools.filter((tool) =>
+      ["Read", "Grep", "Glob"].includes(tool),
+    );
+    const baseArgs = checkedArguments(
+      { prompt, model, effort, allowedTools: readTools, maxTurns },
+      buildArguments,
+    );
     const callEnv = scrubbedEnv({ env, roots: [repoRoot] });
     verifySubscription({ cwd, env: callEnv, execAuth, verifyPolicy });
     const call = reserveCall(ledger, label);
     writeJson(file, ledger);
     // Provider subprocesses cannot launch more providers, edit fixtures, or post.
     // Restricted mode also confines file access to the fixture directory.
-    const readTools = allowedTools.filter((tool) =>
-      ["Read", "Grep", "Glob"].includes(tool),
-    );
     const args = [
-      ...claudeArgv({
-        prompt,
-        model,
-        effort,
-        allowedTools: readTools,
-        maxTurns,
-      }),
+      ...baseArgs,
       "--no-session-persistence",
       "--restricted",
       "--strict-mcp-config",

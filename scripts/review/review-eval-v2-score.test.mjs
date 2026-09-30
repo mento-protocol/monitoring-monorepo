@@ -18,6 +18,7 @@ import {
   scoreReview,
   scorerDigestV2,
 } from "./review-eval-v2-score.mjs";
+import { metricSummary } from "./review-eval-v2-report.mjs";
 
 const review = (finalText) => ({
   finalText,
@@ -299,14 +300,172 @@ test("matcher rejects omitted roots, duplicates, unknown IDs, and fabricated quo
   }
 });
 
-test("uncertain matches and unverified claims remain visible without becoming misses or false alarms", async () => {
+test("a claim cannot satisfy two matched roots; distinct claims can", async () => {
+  const text = "The null input crashes.";
+  const second = "The empty list hangs.";
+  const roots = [root, { ...root, id: "root-2", mechanism: "infinite loop" }];
+  for (const shared of [true, false]) {
+    const requests = [];
+    const result = await scoreReview({
+      review: review(`${text} ${second}`),
+      defects: roots,
+      judge: judgeSequence(
+        [
+          extraction(claim(text), claim(second)),
+          {
+            defects: [
+              match(),
+              match({
+                id: "root-2",
+                claim_ids: shared ? ["c1", "c2"] : ["c2"],
+                quote: second,
+              }),
+            ],
+          },
+        ],
+        requests,
+      ),
+    });
+    assert.equal(requests.length, 2);
+    assert.equal(result.status, shared ? "incomplete" : "complete");
+    if (shared) {
+      assert.equal(result.coverage.matching, "incomplete");
+      assert.match(result.errors[0].message, /claim.*multiple matched roots/);
+      assert.deepEqual(result.defects, []);
+    } else {
+      assert.deepEqual(result.errors, []);
+      assert.equal(
+        result.defects.filter((item) => item.verdict === "matched").length,
+        2,
+      );
+    }
+  }
+});
+
+test("uncertain-linked claims stay visible but cannot become definitive novelty or false claims", async (context) => {
+  const fixture = mkdtempSync(path.join(os.tmpdir(), "v2-uncertain-"));
+  context.after(() => rmSync(fixture, { recursive: true, force: true }));
+  writeFileSync(path.join(fixture, "source"), "verified source quote");
+  for (const variant of ["original", "repaired"]) {
+    for (const verdict of ["model-supported", "wrong", "unsupported"]) {
+      await context.test(`${variant}/${verdict}`, async () => {
+        const requests = [];
+        const result = await scoreReview({
+          review: review("The null input crashes."),
+          defects: [root],
+          fixturePath: fixture,
+          sourceDiff: "complete working-tree diff",
+          judge: judgeSequence(
+            [
+              extraction(claim("The null input crashes.")),
+              {
+                defects: [
+                  match({
+                    verdict: "uncertain",
+                    reason: "Mechanism unresolved.",
+                  }),
+                ],
+              },
+              {
+                novel: [
+                  {
+                    claim_id: "c1",
+                    verdict,
+                    reason: "Source-only diagnosis.",
+                    evidence: [
+                      { path: "source", quote: "verified source quote" },
+                    ],
+                  },
+                ],
+              },
+            ],
+            requests,
+          ),
+        });
+        const metrics = metricSummary([
+          {
+            treatment: "incumbent",
+            variant,
+            case_id: "case",
+            family_id: "family",
+            expected_root_ids: variant === "original" ? [root.id] : [],
+            negative_control_root_ids: variant === "repaired" ? [root.id] : [],
+            score: result,
+          },
+        ]).arms.incumbent;
+        assert.equal(metrics.model_supported_novel, 0);
+        assert.equal(metrics.wrong, 0);
+        assert.equal(metrics.unsupported, 0);
+        assert.equal(metrics.repaired_wrong_or_unsupported, 0);
+        assert.equal(result.status, "incomplete");
+        assert.deepEqual(result.errors, []);
+        assert.equal(result.coverage.matching, "incomplete");
+        assert.deepEqual(result.defects[0].claim_ids, ["c1"]);
+        assert.equal(result.claims[0].id, "c1");
+        assert.deepEqual(result.novel, []);
+        assert.equal(
+          requests.length,
+          2,
+          "unresolved claims must not reach source-only classification",
+        );
+      });
+    }
+  }
+});
+
+test("matched and uncertain links retain root uncertainty without double routing novelty", async () => {
   const result = await scoreReview({
     review: review("The null input crashes."),
+    defects: [root, { ...root, id: "root-2" }],
+    judge: judgeSequence([
+      extraction(claim("The null input crashes.")),
+      { defects: [match(), match({ id: "root-2", verdict: "uncertain" })] },
+    ]),
+  });
+  const metrics = metricSummary([
+    {
+      treatment: "incumbent",
+      expected_root_ids: [root.id, "root-2"],
+      score: result,
+    },
+  ]).arms.incumbent;
+  assert.equal(result.status, "incomplete");
+  assert.deepEqual(result.errors, []);
+  assert.equal(metrics.known_matched, 1);
+  assert.equal(metrics.uncertain_count, 1);
+  assert.equal(metrics.known_recall, null);
+  assert.deepEqual(result.novel, []);
+  const repaired = metricSummary([
+    {
+      treatment: "incumbent",
+      variant: "repaired",
+      expected_root_ids: [],
+      negative_control_root_ids: [root.id, "root-2"],
+      score: result,
+    },
+  ]).arms.incumbent;
+  assert.equal(repaired.repaired_root_accusations, 1);
+  assert.equal(
+    repaired.wrong,
+    1,
+    "a separate definite repaired-root match remains a false claim",
+  );
+  assert.equal(result.defects[1].verdict, "uncertain");
+});
+
+test("uncertain matches and unverified claims remain visible without becoming misses or false alarms", async () => {
+  const result = await scoreReview({
+    review: review(
+      "The null input crashes. An independent caller loses value.",
+    ),
     defects: [root],
     fixturePath: "/unused",
     sourceDiff: "complete working-tree diff",
     judge: judgeSequence([
-      extraction(claim("The null input crashes.")),
+      extraction(
+        claim("The null input crashes."),
+        claim("An independent caller loses value."),
+      ),
       {
         defects: [
           match({
@@ -319,7 +478,7 @@ test("uncertain matches and unverified claims remain visible without becoming mi
       {
         novel: [
           {
-            claim_id: "c1",
+            claim_id: "c2",
             verdict: "unverified",
             reason: "External behavior unavailable.",
           },
@@ -331,6 +490,7 @@ test("uncertain matches and unverified claims remain visible without becoming mi
   assert.deepEqual(result.errors, []);
   assert.equal(result.defects[0].verdict, "uncertain");
   assert.equal(result.novel[0].verdict, "unverified");
+  assert.equal(result.novel[0].claim_id, "c2");
 });
 
 test("same-file claims can be unmatched and get source-backed classification", async (context) => {
@@ -461,6 +621,9 @@ async function copiedScorer(context) {
     "review-eval-v2-selection.mjs",
     "review-eval-v2-report.mjs",
     "review-eval-v2-grading.mjs",
+    "review-eval-v2-judge-provider.mjs",
+    "review-eval-v2-provider.mjs",
+    "review-eval-run-execution.mjs",
     "review-eval-experiment-contract.mjs",
     "review-eval-run-cell.mjs",
     "prompts/v2",
@@ -645,6 +808,9 @@ test("source drift during the final judge await invalidates the result", async (
   for (const file of [
     "review-eval-v2-report.mjs",
     "review-eval-v2-grading.mjs",
+    "review-eval-v2-judge-provider.mjs",
+    "review-eval-v2-provider.mjs",
+    "review-eval-run-execution.mjs",
     "review-eval-experiment-contract.mjs",
     "review-eval-run-cell.mjs",
   ]) {
