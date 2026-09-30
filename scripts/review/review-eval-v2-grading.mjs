@@ -37,6 +37,42 @@ export function scoringIdentity({
   });
 }
 
+function phaseCache({
+  out,
+  scoreId,
+  fixturePath,
+  sourceState,
+  expectedSource,
+}) {
+  const options = (phase, inputDigest) => {
+    if (
+      scorerDigestV2() !== scoreId.scorer_digest ||
+      sourceState(fixturePath) !== expectedSource
+    )
+      throw new Error("grading source changed before phase cache access");
+    return {
+      artifactRoot: out,
+      kind: "stage",
+      identity: keyed({
+        namespace: "review-eval-v2-grading-phase",
+        phase,
+        score_digest: scoreId.digest,
+        input_digest: inputDigest,
+      }),
+    };
+  };
+  return {
+    read: (phase, inputDigest) =>
+      readExperimentCache(options(phase, inputDigest))?.payload,
+    write: (phase, inputDigest, parsed) =>
+      writeExperimentCache({
+        ...options(phase, inputDigest),
+        payload: { parsed },
+        beforePublish: () => options(phase, inputDigest),
+      }),
+  };
+}
+
 export async function gradeCell({
   plan,
   cell,
@@ -115,6 +151,13 @@ export async function gradeCell({
       sourceDiff: sourceDiff(isolated.path),
       fixturePath: isolated.path,
       judge: { exec, model: plan.model, effort: plan.effort },
+      phaseCache: phaseCache({
+        out,
+        scoreId,
+        fixturePath: isolated.path,
+        sourceState,
+        expectedSource: raw.payload.source_state,
+      }),
     });
     scorerDigestV2();
     if (result.errors?.length) {

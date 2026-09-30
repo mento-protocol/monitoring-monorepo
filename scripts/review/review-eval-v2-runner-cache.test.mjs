@@ -73,6 +73,10 @@ async function cachedCampaign(
   });
   if (legacy) {
     delete plan.provider_runtime;
+    for (const cell of plan.cells) {
+      delete cell.raw_identity;
+      delete cell.raw_identity_version;
+    }
     const { digestObject } = await import(
       moduleUrl("review-eval-experiment-contract.mjs")
     );
@@ -82,6 +86,7 @@ async function cachedCampaign(
     );
   }
   const rawDigests = [];
+  const rawIdentities = [];
   const scoreDigest = scorer.scorerDigestV2();
   for (const cell of plan.cells) {
     const fixture = dataset.cases.find((item) => item.id === cell.case_id);
@@ -114,6 +119,7 @@ async function cachedCampaign(
       },
     });
     rawDigests.push(raw.artifact.content_digest);
+    rawIdentities.push(raw.artifact.identity);
     cache.writeExperimentCache({
       artifactRoot: out,
       kind: "score",
@@ -144,6 +150,7 @@ async function cachedCampaign(
     plan,
     dataset,
     rawDigests,
+    rawIdentities,
     scoreDigest,
     moduleUrl,
   };
@@ -201,9 +208,9 @@ function freshRescore(c, selectorFile = "review-eval-v2-selection.mjs") {
     const runtime = runner.providerIdentity();
     const raws = [];
     const priorScores = [];
-    for (const cell of plan.cells) {
-      const fixture = dataset.cases.find(item => item.id === cell.case_id);
-      const raw = cache.readExperimentCache({artifactRoot:out, kind:'raw', identity:runner.executionIdentity({plan, fixture, treatment:cell.treatment})});
+    const savedIdentities = ${JSON.stringify(c.rawIdentities)};
+    for (const [index, cell] of plan.cells.entries()) {
+      const raw = cache.readExperimentCache({artifactRoot:out, kind:'raw', identity:savedIdentities[index]});
       if (!raw) throw new Error('raw identity changed');
       raws.push(raw.artifact.content_digest);
       const identity = runner.scoringIdentity({rawDigest:raw.artifact.content_digest, datasetDigest:plan.dataset_digest, scorerDigest:digest, model:plan.model, effort:plan.effort, version:runtime.version,runtime});
@@ -690,4 +697,140 @@ test("CLI dispatch drift cannot turn score-only missing evidence into a reviewer
   assert.equal(report.status, "completed");
   assert.ok(report.rows.every((row) => row.raw_reused && row.score_reused));
   assert.equal(existsSync(marker), false);
+});
+
+test("planning rejects loaded execution drift before and during version capture", async (context) => {
+  for (const duringProbe of [false, true])
+    await context.test(String(duringProbe), async (child) => {
+      const c = await cachedCampaign(child);
+      const target = path.join(
+        c.copy,
+        "scripts/review/review-eval-v2-dataset.mjs",
+      );
+      const out = path.join(c.directory, "next-plan");
+      const changed =
+        readFileSync(target, "utf8") + "\n// changed during planning\n";
+      if (duringProbe) {
+        const shim = c.plan.provider_runtime.executable;
+        writeFileSync(
+          shim,
+          `#!${process.execPath}\nrequire('node:fs').writeFileSync(${JSON.stringify(target)},${JSON.stringify(changed)}); process.stdout.write('claude-test-version\\n');\n`,
+          { mode: 0o755 },
+        );
+      } else writeFileSync(target, changed);
+      assert.throws(
+        () =>
+          c.runner.makePlan({
+            datasetFile: c.plan.dataset_file,
+            incumbent: c.plan.skills.incumbent.skill_ref,
+            candidate: c.plan.skills.candidate.skill_ref,
+            out,
+          }),
+        /execution source changed after module load/,
+      );
+      assert.equal(existsSync(path.join(out, "plan.json")), false);
+    });
+});
+
+test("recorded and legacy raw survive a changed execution identity builder", async (context) => {
+  for (const legacy of [false, true])
+    await context.test(String(legacy), async (child) => {
+      const c = await cachedCampaign(child);
+      if (legacy) {
+        const planFile = path.join(c.out, "plan.json");
+        const stored = JSON.parse(readFileSync(planFile, "utf8"));
+        delete stored.plan_digest;
+        for (const cell of stored.cells) delete cell.raw_identity;
+        const { digestObject } = await import(
+          c.moduleUrl("review-eval-experiment-contract.mjs")
+        );
+        writeFileSync(
+          planFile,
+          JSON.stringify({ ...stored, plan_digest: digestObject(stored) }),
+        );
+      }
+      const target = path.join(
+        c.copy,
+        "scripts/review/review-eval-v2-runner.mjs",
+      );
+      const before = readFileSync(target, "utf8");
+      const signature =
+        "export function executionIdentity({ plan, fixture, treatment }) {";
+      assert.ok(before.includes(signature));
+      const after = before.replace(
+        signature,
+        signature +
+          ` const {digest: previousDigest, ...inputs} = historicalIdentity({plan,fixture,treatment}); return keyed({...inputs, revised_reviewer_input:true}); }\nfunction historicalIdentity({plan,fixture,treatment}) {`,
+      );
+      writeFileSync(target, after);
+      const revisedRunner = await import(
+        `${c.moduleUrl("review-eval-v2-runner.mjs")}?valid-shape`
+      );
+      const { digestObject } = await import(
+        c.moduleUrl("review-eval-experiment-contract.mjs")
+      );
+      const cell = c.plan.cells[0];
+      const revised = revisedRunner.executionIdentity({
+        plan: c.plan,
+        fixture: c.dataset.cases.find((item) => item.id === cell.case_id),
+        treatment: cell.treatment,
+      });
+      const { digest, ...inputs } = revised;
+      assert.equal(
+        digest,
+        digestObject(inputs),
+        "mutated identity must have a valid content digest",
+      );
+      assert.equal(inputs.revised_reviewer_input, true);
+      assert.notEqual(digest, c.rawIdentities[0].digest);
+      const result = freshRescore(c);
+      assert.equal(result.report.status, "completed", result.report.failure);
+      assert.deepEqual(result.raws, c.rawDigests);
+      assert.ok(result.report.rows.every((row) => row.raw_reused));
+      assert.notEqual(result.digest, c.scoreDigest);
+    });
+});
+
+test("recorded raw identities reject changed source and plan pins", async (context) => {
+  for (const changed of ["fixture", "identity", "version"])
+    await context.test(changed, async (child) => {
+      const c = await cachedCampaign(child);
+      const { digestObject } = await import(
+        c.moduleUrl("review-eval-experiment-contract.mjs")
+      );
+      if (changed === "fixture") {
+        const dataset = JSON.parse(readFileSync(c.plan.dataset_file, "utf8"));
+        dataset.cases[0].forbidden_shas.push("a".repeat(40));
+        writeFileSync(c.plan.dataset_file, JSON.stringify(dataset));
+        await assert.rejects(
+          c.runner.runCampaign({ out: c.out, scoreOnly: true }),
+          /unaudited forbidden commits/,
+        );
+        assert.equal(existsSync(path.join(c.out, "spend.json")), false);
+        return;
+      } else {
+        const stored = JSON.parse(
+          readFileSync(path.join(c.out, "plan.json"), "utf8"),
+        );
+        delete stored.plan_digest;
+        if (changed === "version") stored.cells[0].raw_identity_version = 99;
+        else {
+          const identity = stored.cells[0].raw_identity;
+          identity.model = "changed-model";
+          delete identity.digest;
+          identity.digest = digestObject(identity);
+        }
+        writeFileSync(
+          path.join(c.out, "plan.json"),
+          JSON.stringify({ ...stored, plan_digest: digestObject(stored) }),
+        );
+      }
+      const result = await c.runner.runCampaign({
+        out: c.out,
+        scoreOnly: true,
+      });
+      assert.equal(result.status, "incomplete");
+      assert.match(result.failure, /recorded raw identity/);
+      assert.equal(existsSync(path.join(c.out, "spend.json")), false);
+    });
 });

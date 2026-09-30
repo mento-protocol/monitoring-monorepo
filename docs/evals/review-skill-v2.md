@@ -104,8 +104,11 @@ this change does not rewrite plans, ledgers, or cached results. The existing
 execution identity checks still reject source drift for new reviewer calls.
 
 A failed call or missing artifact leaves the run incomplete. Resume the same
-run to reuse valid completed work. Do not retry a valid grade merely to obtain
-a different judgment.
+run to reuse valid completed work. Cache each extraction, matching, and novelty
+phase only after its output passes validation. A later failure preserves those
+completed phases. Resume revalidates them under the same raw evidence, dataset,
+scorer, prompt, and grader-runtime identity. Do not retry a valid grade merely
+to obtain a different judgment.
 
 An A/A run supplies the same skill bytes to both arms. It qualifies the
 execution and scoring path. Differences between its outputs reflect sampling;
@@ -121,8 +124,9 @@ Leak checks cover both the captured messages and the final text used for scoring
 
 Every eligible root cause reaches semantic matching regardless of file type.
 A matched verdict carries a verbatim quote from the final review. Code checks
-quote provenance; the grader still owns the semantic judgment. The scorer
-retains every extracted claim and reports insufficient coverage explicitly.
+that every linked claim contains this quote. The grader still owns the semantic
+judgment. The scorer retains every extracted claim and reports insufficient
+coverage explicitly.
 Uncertain matches and unverifiable claims remain visible.
 An uncertain root match must name at least one extracted claim. A verdict with
 no supporting claim is invalid grading evidence.
@@ -141,8 +145,10 @@ pnpm review:eval:v2 report --out /absolute/path/to/eval-run
 Rescoring must retain the plan's case IDs. It may reorder cases or revise labels.
 To add or remove cases, create a new plan.
 Score-only runs use each saved review's recorded skill, reviewer-prompt, and
-execution identity. Later edits to reviewer code or inputs do not prevent
-rescoring. A missing compatible raw result fails without invoking a reviewer.
+execution identity. New plans store each cell's original raw identity. Older
+plans use the frozen historical identity format. Later edits to reviewer code
+or inputs do not prevent rescoring. A missing compatible raw result fails
+without invoking a reviewer.
 Runs that can invoke the reviewer still reject that drift. Score-only runs
 capture the current grader executable separately and bind its path, entry-file
 hash, and version to grading identity. Historical raw keys without an executable
@@ -165,6 +171,9 @@ process to reuse the saved reviews under the new grading identity.
 A new reviewer call after a source, skill, reviewer-prompt, runtime, or execution
 change requires a compatible new execution identity. A grading-only change must
 not silently buy another review.
+Planning pins execution source at module startup and rejects later disk drift
+before writing a plan. It cannot label an old loaded implementation with a
+new on-disk digest.
 
 Read paired results by PR family. Inspect serious misses, claims about repaired
 roots, other false or unsupported claims, and model-supported novel defects.

@@ -36,8 +36,10 @@ Separate reviewer execution identity from grading identity. Bind source,
 repair, skill, prompt, runtime, and invocation behavior to the former. Bind
 immutable reviewer evidence, answer key, grading orchestration, grader
 configuration, and scorer bytes to the latter. Reuse each phase only when its
-own inputs match. Keep answer-key selection and grading orchestration separate
-from execution code, including score-cache identity, judge calls, and grading
+own inputs match. Persist validated extraction, matching, and novelty phases
+before starting the next phase. Revalidate them on resume; a later failure must
+not replace valid earlier judgments. Keep answer-key selection and grading
+orchestration separate from execution code, including score-cache identity, judge calls, and grading
 result handling. Keep judge-specific command construction in grading identity;
 pin shared authentication, transport, and restrictions to both identities.
 Pin the reviewer CLI version, canonical executable path, and entry-file SHA-256
@@ -48,7 +50,10 @@ legacy keys without an executable pin. Legacy plans cannot start new reviews.
 Pin grading source and prompts for the process lifetime, and
 reject source drift before saving results.
 Rescoring keeps each saved review's recorded skill, prompt, and execution
-identities. Reviewer code changes do not block reuse of complete raw evidence.
+identities. Store original raw identities in new plans and retain a frozen
+identity builder for historical plans. Reviewer code changes do not block reuse
+of complete raw evidence. Pin loaded execution source at startup and reject
+disk drift before writing a plan with that digest.
 Pin the current runner callbacks, fixture preparation, probe trust, and cache
 helpers in grading identity. Changes to these shared helpers require new grades.
 Missing compatible raw evidence fails without a new reviewer call.

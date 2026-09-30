@@ -476,17 +476,20 @@ test("execution identity pins host probe code but permits label and grader chang
         assert.throws(() => changedModule[symbol]({}), /probe fault sentinel/);
         await assert.rejects(
           runner.runCampaign({ out }),
-          /execution source changed since plan/,
+          /execution source changed (?:since plan|after module load)/,
         );
         const stale = await runner.runCampaign({ out, scoreOnly: true });
         assert.equal(stale.status, "incomplete");
         assert.match(stale.failure, /scoring source changed after module load/);
         assert.equal(stale.metrics, null);
-        const revised = runner.makePlan({
-          ...options,
-          out: path.join(directory, file),
-        });
-        assert.notEqual(revised.execution_digest, original.execution_digest);
+        assert.throws(
+          () =>
+            runner.makePlan({
+              ...options,
+              out: path.join(directory, file),
+            }),
+          /execution source changed after module load/,
+        );
       } finally {
         writeFileSync(target, originalBytes);
       }

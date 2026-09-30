@@ -49,6 +49,14 @@ const digestFiles = (files) =>
       sha256Bytes(readFileSync(path.join(REPO_ROOT, file))),
     ]),
   );
+const LOADED_EXECUTION_DIGEST = digestFiles(EXECUTION_FILES);
+function executionDigest() {
+  if (digestFiles(EXECUTION_FILES) !== LOADED_EXECUTION_DIGEST)
+    throw new Error(
+      "execution source changed after module load; restart process",
+    );
+  return LOADED_EXECUTION_DIGEST;
+}
 const keyed = (value) => ({ ...value, digest: digestObject(value) });
 export const providerIdentity = (cwd = REPO_ROOT) =>
   captureProviderIdentity({ repoRoot: REPO_ROOT, cwd });
@@ -95,6 +103,11 @@ function sourceDiff(cwd) {
 }
 
 export function executionIdentity({ plan, fixture, treatment }) {
+  return legacyExecutionIdentityV1({ plan, fixture, treatment });
+}
+
+// Frozen pre-recorded-identity schema. Do not change historical cache keys.
+function legacyExecutionIdentityV1({ plan, fixture, treatment }) {
   return keyed({
     namespace: "review-eval-v2",
     phase: "raw",
@@ -123,6 +136,29 @@ export function executionIdentity({ plan, fixture, treatment }) {
   });
 }
 
+function recordedIdentity({ plan, fixture, cell, scoreOnly }) {
+  const expected = legacyExecutionIdentityV1({
+    plan,
+    fixture,
+    treatment: cell.treatment,
+  });
+  const identity = cell.raw_identity ?? expected;
+  if (cell.raw_identity && cell.raw_identity_version !== 1)
+    throw new Error("unsupported recorded raw identity version");
+  const { digest, ...body } = identity;
+  if (digestObject(body) !== digest || digest !== expected.digest)
+    throw new Error(
+      "recorded raw identity differs from plan or fixture inputs",
+    );
+  if (
+    !scoreOnly &&
+    digest !==
+      executionIdentity({ plan, fixture, treatment: cell.treatment }).digest
+  )
+    throw new Error("current raw identity differs from recorded execution");
+  return identity;
+}
+
 export function makePlan({
   datasetFile,
   incumbent,
@@ -132,6 +168,7 @@ export function makePlan({
   model = "claude-opus-5",
   effort = "high",
 }) {
+  executionDigest();
   const root = canonicalPath(out);
   if (root === REPO_ROOT || root.startsWith(`${REPO_ROOT}${path.sep}`))
     throw new Error("artifacts must be outside repository");
@@ -176,7 +213,7 @@ export function makePlan({
       tools: ["Read", "Grep", "Glob"],
       executed_tests_by_reviewer: false,
     },
-    execution_digest: digestFiles(EXECUTION_FILES),
+    execution_digest: executionDigest(),
     prompt_sha256: sha256Bytes(readFileSync(path.join(REPO_ROOT, PROMPT))),
     case_ids: loaded.dataset.cases.map((fixture) => fixture.id),
     arm_order: {
@@ -194,6 +231,18 @@ export function makePlan({
     }),
     created_at: new Date().toISOString(),
   };
+  for (const cell of plan.cells) {
+    const fixture = loaded.dataset.cases.find(
+      (item) => item.id === cell.case_id,
+    );
+    cell.raw_identity_version = 1;
+    cell.raw_identity = executionIdentity({
+      plan,
+      fixture,
+      treatment: cell.treatment,
+    });
+  }
+  executionDigest();
   const planFile = path.join(root, "plan.json");
   if (existsSync(planFile))
     throw new Error(
@@ -216,7 +265,7 @@ function readPlan(out, { scoreOnly = false } = {}) {
     throw new Error(
       "plan lacks a provider runtime pin; create a new plan or use score-only for saved reviews",
     );
-  if (!scoreOnly && body.execution_digest !== digestFiles(EXECUTION_FILES))
+  if (!scoreOnly && body.execution_digest !== executionDigest())
     throw new Error("execution source changed since plan; create a new plan");
   if (
     !scoreOnly &&
@@ -307,18 +356,14 @@ export async function runCampaign({
       // Saved reviews retain the execution identity that produced them. Current
       // scoring pins these callbacks and rejects any in-process source drift.
       scorerDigestV2();
-      if (!scoreOnly && digestFiles(EXECUTION_FILES) !== plan.execution_digest)
+      if (!scoreOnly && executionDigest() !== plan.execution_digest)
         throw new Error("execution source changed during campaign");
       provider.assertRuntime(REPO_ROOT);
       const fixture = loaded.dataset.cases.find(
         (item) => item.id === cell.case_id,
       );
       if (!fixture) throw new Error(`missing case ${cell.case_id}`);
-      const identity = executionIdentity({
-        plan,
-        fixture,
-        treatment: cell.treatment,
-      });
+      const identity = recordedIdentity({ plan, fixture, cell, scoreOnly });
       let raw = readExperimentCache({
         artifactRoot: out,
         kind: "raw",
@@ -367,12 +412,14 @@ export async function runCampaign({
             allowedTools: ["Read", "Grep", "Glob"],
             maxTurns: 60,
           });
+          executionDigest();
           if (sourceState(isolated.path) !== before)
             throw new Error("reviewer mutated source fixture");
           result.source_state = before;
         } finally {
           purgeExperimentSkill(isolated.path);
         }
+        executionDigest();
         raw = writeExperimentCache({
           artifactRoot: out,
           kind: "raw",

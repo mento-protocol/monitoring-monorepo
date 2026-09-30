@@ -88,22 +88,45 @@ function exactIds(records, ids, key, label) {
   );
 }
 
-async function call(judge, name, values, fixturePath, maxInputChars) {
-  scorerDigestV2();
+async function call(
+  judge,
+  name,
+  values,
+  fixturePath,
+  maxInputChars,
+  validate,
+  phaseCache,
+) {
+  const scorerDigest = scorerDigestV2();
   const prompt = renderPrompt(readFileSync(promptPath(name), "utf8"), values);
   requireValue(
     prompt.length <= maxInputChars,
     `${name}: input exceeds ${maxInputChars} characters; no text was truncated`,
   );
   const sourceJudge = name === "judge-novel";
-  const raw = await judge.exec({
+  const request = {
     prompt,
     model: judge.model,
     effort: judge.effort,
     cwd: sourceJudge ? fixturePath : blindJudgeCwd(),
     allowedTools: sourceJudge ? ["Read", "Grep", "Glob"] : [],
     maxTurns: sourceJudge ? 60 : 1,
-  });
+  };
+  const inputDigest = createHash("sha256")
+    .update(
+      JSON.stringify({
+        scorerDigest,
+        request: { ...request, cwd: sourceJudge ? request.cwd : "blind-judge" },
+      }),
+    )
+    .digest("hex");
+  const cached = phaseCache?.read(name, inputDigest);
+  if (cached !== undefined) {
+    const value = validate(cached.parsed);
+    scorerDigestV2();
+    return value;
+  }
+  const raw = await judge.exec(request);
   scorerDigestV2();
   // The injected executor can return a CLI envelope. An error result must not
   // become an apparently valid partial response after JSON extraction.
@@ -116,7 +139,11 @@ async function call(judge, name, values, fixturePath, maxInputChars) {
   } catch (error) {
     if (!(error instanceof SyntaxError)) throw error;
   }
-  return parseJudgeJson(raw, { label: name });
+  const parsed = parseJudgeJson(raw, { label: name });
+  const value = validate(parsed);
+  scorerDigestV2();
+  phaseCache?.write(name, inputDigest, parsed);
+  return value;
 }
 
 function claimsFrom(parsed, finalText) {
@@ -254,6 +281,7 @@ export async function scoreReview({
   sourceDiff,
   judge,
   maxInputChars = 120_000,
+  phaseCache,
 }) {
   const result = {
     schema_version: 2,
@@ -300,18 +328,19 @@ export async function scoreReview({
         new Set(defects.map((defect) => defect.id)).size === defects.length,
       "defects need distinct nonempty string IDs",
     );
-    const extracted = await call(
+    result.claims = await call(
       judge,
       "extract-claims",
       { REVIEW: review.finalText },
       fixturePath,
       maxInputChars,
+      (parsed) => claimsFrom(parsed, review.finalText),
+      phaseCache,
     );
-    result.claims = claimsFrom(extracted, review.finalText);
     result.coverage.extraction = "complete";
     phase = "matching";
     if (defects.length > 0 && result.claims.length > 0) {
-      const matched = await call(
+      result.defects = await call(
         judge,
         "judge-match",
         {
@@ -321,12 +350,9 @@ export async function scoreReview({
         },
         fixturePath,
         maxInputChars,
-      );
-      result.defects = matchesFrom(
-        matched,
-        defects,
-        result.claims,
-        review.finalText,
+        (parsed) =>
+          matchesFrom(parsed, defects, result.claims, review.finalText),
+        phaseCache,
       );
     } else {
       result.defects = defects.map((defect) => ({
@@ -362,14 +388,15 @@ export async function scoreReview({
         typeof sourceDiff === "string",
         "unmatched claims require the complete working-tree diff",
       );
-      const classified = await call(
+      result.novel = await call(
         judge,
         "judge-novel",
         { CLAIMS: JSON.stringify(unmatched), DIFF: sourceDiff },
         fixturePath,
         maxInputChars,
+        (parsed) => novelFrom(parsed, unmatched, fixturePath),
+        phaseCache,
       );
-      result.novel = novelFrom(classified, unmatched, fixturePath);
     }
     result.coverage.classification = result.novel.some(
       (claim) => claim.verdict === "unverified",
