@@ -264,7 +264,7 @@ describe("raw token charts", () => {
         truncated
       />,
     );
-    expect(html).toContain("Later updates are omitted.");
+    expect(html).toContain("Later updates may be omitted.");
     expect(capturedPlotProps).toHaveLength(1);
   });
 });

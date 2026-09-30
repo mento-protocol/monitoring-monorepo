@@ -26,6 +26,53 @@ afterEach(() => {
 });
 
 describe("reserve history pagination", () => {
+  it("refreshes only the mutable last block and merges new logs without duplicates", async () => {
+    request.mockResolvedValueOnce({ ReserveUpdate: [row(1), row(2, 9)] });
+    const previous = await fetchPoolReserveHistory("endpoint", "pool", "All");
+    request.mockResolvedValueOnce({
+      ReserveUpdate: [row(2, 10), row(2, 9), row(3)],
+    });
+    const refreshed = await fetchPoolReserveHistory("endpoint", "pool", "All", {
+      previous,
+    });
+    expect(request.mock.calls[1]![0].variables.afterBlock).toBe("1");
+    expect(refreshed.rows.map((r) => r.id)).toEqual([
+      "42220_1_0",
+      "42220_2_9",
+      "42220_2_10",
+      "42220_3_0",
+    ]);
+    expect(previous.rows).toHaveLength(2);
+  });
+
+  it("drops expired rows when a rolling range refreshes", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(4000 * 1000);
+    request.mockResolvedValueOnce({ ReserveUpdate: [row(500), row(3900)] });
+    const previous = await fetchPoolReserveHistory("endpoint", "pool", "1h");
+    vi.setSystemTime(5000 * 1000);
+    request.mockResolvedValueOnce({ ReserveUpdate: [row(3900), row(4900)] });
+    const refreshed = await fetchPoolReserveHistory("endpoint", "pool", "1h", {
+      previous,
+    });
+    expect(refreshed.from).toBe(1400);
+    expect(refreshed.rows.map((r) => r.blockNumber)).toEqual(["3900", "4900"]);
+  });
+
+  it("stops pagination after cancellation, even if the current page still resolves", async () => {
+    const controller = new AbortController();
+    request.mockImplementationOnce(async ({ signal }) => {
+      controller.abort();
+      expect(signal.aborted).toBe(true);
+      return { ReserveUpdate: Array.from({ length: 1000 }, (_, i) => row(i)) };
+    });
+    await expect(
+      fetchPoolReserveHistory("endpoint", "pool", "All", {
+        signal: controller.signal,
+      }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(request).toHaveBeenCalledTimes(1);
+  });
   it("loads beyond 1,000 events with a stable block/id cursor and fixed time bounds", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-30T12:00:00Z"));

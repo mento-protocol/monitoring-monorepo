@@ -159,7 +159,7 @@ function ReserveChartStatus({
       {truncated && (
         <p role="status" className="mb-2 text-sm text-amber-400">
           Showing the first {rows.length.toLocaleString()} reserve updates in
-          this range. Later updates are omitted. Select a shorter range for
+          this range. Later updates may be omitted. Select a shorter range for
           complete history.
         </p>
       )}
