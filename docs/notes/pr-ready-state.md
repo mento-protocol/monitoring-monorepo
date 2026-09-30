@@ -63,7 +63,7 @@ Required blockers:
   and optional native stack base SHA remain separate snapshots; they can be
   older than a stable live branch. The final PR and stack reads must still
   match those original snapshots. A failed or malformed live-branch lookup
-  refuses readiness.
+  exits without readiness JSON in one-shot mode. Watch mode retries the probe.
 
 - Closed-unmerged PRs. The babysit gate proves a same-repo head before any
   terminal-state exit. Merged PRs are then terminal-ready and short-circuit the
