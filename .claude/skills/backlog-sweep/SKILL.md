@@ -1059,8 +1059,8 @@ first as a separate call. Target the caller's cmux workspace and terminal pane
 when available. Keep the same safe sweep label in the notification and report.
 Report notification failures or unavailable session routing. Do not use a
 notification that opens another app. The operator is away by design here, so speak one of the
-note's three fixed phrases: a labelled line prompts for an approval nobody is
-there to give. Name the sweep in the written report instead. Run the nudge with escalated execution rather than inside the workspace
+note's three fixed phrases: in manual approval mode a labelled line prompts
+for approval nobody is there to give. Name the sweep in the written report instead. Run the nudge with escalated execution rather than inside the workspace
 sandbox — `say` needs the local audio device, and a sandboxed attempt fails in a
 way that looks like a missing command.
 
@@ -1071,3 +1071,8 @@ When every spoken path fails, **say so in the report** instead of skipping
 quietly. A sweep that finished overnight and could not announce itself is a
 different situation from one the operator was told about, and only the written
 line distinguishes them.
+
+After all delivery attempts, append notification and speech delivery status
+to this run's reserved report file. Mark failed or unavailable channels
+explicitly. Reprint the updated terminal summary and end it with the same
+READY PR links. Do not modify another run's report.

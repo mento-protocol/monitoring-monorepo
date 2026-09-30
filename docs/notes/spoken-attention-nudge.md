@@ -73,12 +73,13 @@ Pass the whole message as one safely quoted argument. Never build it from
 command substitution, a file, or captured output.
 
 **Known limit.** The pre-approved phrases live in `.claude/settings.json` and
-cover Claude only. A labelled line is not one of them, so it prompts for
-approval, and an away operator cannot give it. Speak the labelled line when
+cover Claude only. A labelled line is not one of them. In manual approval mode it prompts,
+and an away operator cannot give approval. Speak the labelled line when
 someone can approve it. Otherwise speak a pre-approved phrase, which tells the
 operator that a session needs them but not which one, and name the session in
-the written request. Codex has no equivalent pre-approval: its nudge goes
-through escalated execution, which can prompt for either form, and an
+the written request. Codex has no equivalent literal pre-approval: its nudge goes
+through escalated execution, which the runtime may approve automatically or
+may prompt for in either form, and an
 unanswered prompt is a failed spoken path — fall back to the written request.
 Closing the gap needs a reviewed helper that derives the label itself.
 Pre-approving `say` with a free message argument is not the way to close it: a
@@ -119,6 +120,12 @@ clicking it opens Script Editor rather than the requesting terminal. Outside
 cmux, use a notification mechanism only when it can open the verified calling
 session. Never interpolate captured titles into shell code. Apply the spoken
 text restrictions below to notification text too.
+
+For unattended runs, use the existing permission mode. Automatic approval may
+admit a safe notification without a literal allow-list entry. In manual or
+allow-list-only modes, use an already approved notification capability. If none
+is available, record notification delivery as unavailable; do not wait on a
+prompt the away operator cannot answer. Do not change permission settings.
 
 If the sandbox blocks the socket or notification service, use the runtime's
 supported permission path. Keep notification and speech requests separate.
