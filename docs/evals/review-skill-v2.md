@@ -78,8 +78,9 @@ The selected executable resolves to a canonical file outside the source checkout
 and invocation directory. Authentication, version checks, and the model call use
 that same resolved path. External installation symlinks remain supported.
 Planning pins the CLI version, canonical executable path, and SHA-256 of the
-entry file. Each call must match that pin before authentication. Entry bytes and
-version are checked again before model launch and before accepting output. A
+entry file. Each call must match the path and entry-file hash before
+authentication. Entry bytes and version are checked before model launch and
+before accepting output. A
 mismatch leaves the run incomplete; completed usage and output remain recorded.
 This pin does not attest interpreters, libraries, or other runtime dependencies.
 API-key, alternate
