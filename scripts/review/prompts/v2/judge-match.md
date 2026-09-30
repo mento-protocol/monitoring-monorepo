@@ -15,7 +15,9 @@ In the reason, identify the shared input and failing operation. Choose a quote
 that supports that causal match, not merely its trigger or consequence.
 
 Use matched, unmatched, or uncertain. A matched root needs at least one supplied
-claim ID and a verbatim contiguous quote contained in that claim's quote.
+claim ID and a verbatim contiguous quote contained in EVERY linked claim's quote.
+Link only claims supported by that quote. Do not attach unrelated claims to a
+matched root; they must remain available for separate classification.
 Each claim describes one failure mechanism. Use a claim ID for at most one
 matched root. If a broad claim could refer to several distinct roots and its
 mechanism is unclear, mark those unresolved links uncertain and include the

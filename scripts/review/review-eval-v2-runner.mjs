@@ -29,6 +29,7 @@ export const REPO_ROOT = path.resolve(
 );
 const PROMPT = "scripts/review/prompts/v2/request.md";
 const EXECUTION_FILES = [
+  "scripts/review/review-eval-v2.mjs",
   "scripts/review/review-eval-v2-runner.mjs",
   "scripts/review/review-eval-v2-provider.mjs",
   "scripts/review/review-eval-v2-dataset.mjs",

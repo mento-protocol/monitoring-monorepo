@@ -1,12 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
   cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   readdirSync,
   rmSync,
   writeFileSync,
@@ -21,6 +22,7 @@ async function cachedCampaign(
   finalText = () => "No findings.",
   streamText = finalText,
   legacy = false,
+  prepareCopy = () => {},
 ) {
   const directory = mkdtempSync(path.join(tmpdir(), "v2-cached-campaign-"));
   context.after(() => rmSync(directory, { recursive: true, force: true }));
@@ -35,6 +37,7 @@ async function cachedCampaign(
     path.join(copy, "docs/evals/review-skill-v2"),
     { recursive: true },
   );
+  prepareCopy({ copy, directory });
   const bin = path.join(directory, "bin");
   mkdirSync(bin);
   writeFileSync(
@@ -577,4 +580,114 @@ test("same-version runtime changes reject reviewer resume but allow current-runt
       },
     );
   }
+});
+
+test("CLI dispatch drift cannot turn score-only missing evidence into a reviewer call", async (context) => {
+  let marker;
+  const c = await cachedCampaign(
+    context,
+    undefined,
+    undefined,
+    false,
+    ({ copy, directory }) => {
+      // Isolate this dispatch proof from fixture materialization and providers.
+      // These instrumented bytes are already present when the real planner pins them.
+      marker = path.join(directory, "reviewer-invoked");
+      const source = path.join(directory, "stub-source");
+      mkdirSync(source);
+      const runner = path.join(
+        copy,
+        "scripts/review/review-eval-v2-runner.mjs",
+      );
+      let body = readFileSync(runner, "utf8");
+      for (const [before, after] of [
+        [
+          "import { loadDataset, verifyCaseProbes }",
+          "import { loadDataset, verifyCaseProbes as unusedProbe }",
+        ],
+        [
+          "export function sourceState(cwd) {",
+          'export function sourceState(cwd) { return "unused-cached-source";',
+        ],
+        [
+          "function sourceDiff(cwd) {",
+          'function sourceDiff(cwd) { return "controlled diff";',
+        ],
+        [
+          "function prepareCase({ fixture, dataset, datasetFile, out }) {",
+          `function prepareCase({ fixture, dataset, datasetFile, out }) { return {path:${JSON.stringify(source)}};`,
+        ],
+      ]) {
+        assert.ok(body.includes(before));
+        body = body.replace(before, after);
+      }
+      writeFileSync(runner, body + "\nconst verifyCaseProbes = () => {};\n");
+      const provider = path.join(
+        copy,
+        "scripts/review/review-eval-v2-provider.mjs",
+      );
+      const original = readFileSync(provider, "utf8");
+      assert.ok(original.includes("export function createProvider("));
+      writeFileSync(
+        provider,
+        original.replace(
+          "export function createProvider(",
+          "function unusedCreateProvider(",
+        ) +
+          `
+      export function createProvider(options) {
+        return {identity:options.expectedRuntime,ledger:{calls:[],limit_usd:null},assertRuntime(){},
+          async invoke(request){writeFileSync(${JSON.stringify(marker)},request.label);throw new Error('OFFLINE_REVIEWER_SENTINEL');}};
+      }
+    `,
+      );
+    },
+  );
+  const cli = realpathSync(
+    path.join(c.copy, "scripts/review/review-eval-v2.mjs"),
+  );
+  const rawDir = path.join(c.out, "cache/raw");
+  const saved = path.join(c.directory, "saved-raw");
+  cpSync(rawDir, saved, { recursive: true });
+  rmSync(rawDir, { recursive: true });
+  const invoke = () =>
+    spawnSync(process.execPath, [cli, "score", "--out", c.out], {
+      encoding: "utf8",
+      env: process.env,
+    });
+  const control = invoke();
+  assert.equal(control.status, 1);
+  assert.match(control.stdout, /no compatible raw result/);
+  assert.equal(existsSync(marker), false);
+  const original = readFileSync(cli, "utf8");
+  assert.ok(original.includes('scoreOnly: mode === "score"'));
+  writeFileSync(
+    cli,
+    original.replace('scoreOnly: mode === "score"', "scoreOnly: false"),
+  );
+  const drifted = invoke();
+  assert.equal(drifted.status, 1);
+  assert.equal(
+    existsSync(marker),
+    false,
+    "changed dispatch must not reach the reviewer transport",
+  );
+  assert.match(drifted.stderr, /execution source changed since plan/);
+  assert.equal(existsSync(path.join(c.out, "spend.json")), false);
+  // Valid score-only dispatch still reuses historical raw identities after a CLI edit.
+  writeFileSync(
+    cli,
+    original +
+      "\n// Revised CLI documentation, unchanged score-only dispatch.\n",
+  );
+  cpSync(saved, rawDir, { recursive: true });
+  const rescored = freshRescore(c);
+  assert.equal(rescored.report.status, "completed");
+  assert.deepEqual(rescored.raws, c.rawDigests);
+  const completed = invoke();
+  assert.equal(completed.status, 0, completed.stderr);
+  const report = JSON.parse(completed.stdout);
+  assert.equal(report.status, "completed");
+  assert.ok(report.rows.every((row) => row.raw_reused && row.score_reused));
+  assert.equal(existsSync(marker), false);
 });

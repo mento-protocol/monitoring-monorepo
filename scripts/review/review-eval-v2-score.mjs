@@ -22,6 +22,7 @@ function currentScorerDigest() {
     // Rescoring reuses historical reviewer identities but executes current
     // fixture, probe, source-state and cache callbacks from this closure.
     path.join(directory, "review-eval-v2-runner.mjs"),
+    path.join(directory, "review-eval-v2.mjs"),
     path.join(directory, "review-eval-v2-dataset.mjs"),
     path.join(directory, "review-eval-v2-probe-trust.mjs"),
     path.join(directory, "review-eval-experiment-cache.mjs"),
@@ -170,10 +171,10 @@ function matchesFrom(parsed, defects, claims, finalText) {
     if (record.verdict === "matched") {
       requireQuote(record.quote, finalText, "matched defect");
       requireValue(
-        record.claim_ids.some((id) =>
+        record.claim_ids.every((id) =>
           claimMap.get(id).quote.includes(record.quote),
         ),
-        "matched quote is absent from the linked claims",
+        "matched quote must appear in every linked claim",
       );
       requireValue(
         record.claim_ids.every((id) => !matchedClaims.has(id)),

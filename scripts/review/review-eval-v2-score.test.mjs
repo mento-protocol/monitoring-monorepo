@@ -347,6 +347,77 @@ test("uncertain roots without linked claims fail matching before source classifi
   );
 });
 
+test("every matched claim needs quote support; an independent claim still reaches classification", async () => {
+  const text = "The null input crashes.";
+  const other = "An unrelated list loses data.";
+  for (const mode of ["unsupported-link", "separate", "shared-support"]) {
+    const requests = [];
+    const result = await scoreReview({
+      review: review(`${text} ${other}`),
+      defects: [root],
+      fixturePath: "/unused",
+      sourceDiff: "complete working-tree diff",
+      judge: judgeSequence(
+        [
+          extraction(
+            claim(text),
+            mode === "shared-support"
+              ? {
+                  text: "Null input dereferences an absent value.",
+                  quote: text,
+                }
+              : claim(other),
+          ),
+          {
+            defects: [
+              match({ claim_ids: mode === "separate" ? ["c1"] : ["c1", "c2"] }),
+            ],
+          },
+          {
+            novel: [
+              {
+                claim_id: "c2",
+                verdict: "unsupported",
+                reason: "No supported trigger.",
+              },
+            ],
+          },
+        ],
+        requests,
+      ),
+    });
+    if (mode === "unsupported-link") {
+      assert.equal(result.status, "incomplete");
+      assert.equal(result.coverage.matching, "incomplete");
+      assert.match(
+        result.errors[0]?.message ?? "",
+        /quote.*every linked claim/,
+      );
+      assert.deepEqual(
+        result.defects,
+        [],
+        "do not accept a link that hides an unclassified claim",
+      );
+      assert.deepEqual(result.novel, []);
+      assert.equal(
+        result.claims.length,
+        2,
+        "retain both extracted claims for diagnosis",
+      );
+      assert.equal(requests.length, 2);
+    } else {
+      assert.equal(result.status, "complete");
+      assert.deepEqual(result.errors, []);
+      assert.equal(result.defects[0].verdict, "matched");
+      assert.equal(requests.length, mode === "separate" ? 3 : 2);
+      if (mode === "separate") {
+        assert.equal(result.novel[0].claim_id, "c2");
+        assert.equal(result.novel[0].verdict, "unsupported");
+      } else assert.deepEqual(result.defects[0].claim_ids, ["c1", "c2"]);
+    }
+  }
+});
+
 test("a claim cannot satisfy two matched roots; distinct claims can", async () => {
   const text = "The null input crashes.";
   const second = "The empty list hangs.";
@@ -358,7 +429,10 @@ test("a claim cannot satisfy two matched roots; distinct claims can", async () =
       defects: roots,
       judge: judgeSequence(
         [
-          extraction(claim(text), claim(second)),
+          extraction(
+            { text, quote: `${text} ${second}` },
+            { text: second, quote: `${text} ${second}` },
+          ),
           {
             defects: [
               match(),
@@ -669,6 +743,7 @@ async function copiedScorer(context) {
     "review-eval-v2-report.mjs",
     "review-eval-v2-grading.mjs",
     "review-eval-v2-runner.mjs",
+    "review-eval-v2.mjs",
     "review-eval-v2-dataset.mjs",
     "review-eval-v2-probe-trust.mjs",
     "review-eval-experiment-cache.mjs",
@@ -863,6 +938,7 @@ test("source drift during the final judge await invalidates the result", async (
     "review-eval-v2-report.mjs",
     "review-eval-v2-grading.mjs",
     "review-eval-v2-runner.mjs",
+    "review-eval-v2.mjs",
     "review-eval-v2-dataset.mjs",
     "review-eval-v2-probe-trust.mjs",
     "review-eval-experiment-cache.mjs",
