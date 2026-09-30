@@ -58,6 +58,13 @@ Required blockers:
   as `state: "overridden"` with the author and reason. An unknown base is
   never overridable.
 
+  After reading base health, the probe independently resolves the live
+  protection branch again. Both live commit IDs must match. The PR base SHA
+  and optional native stack base SHA remain separate snapshots; they can be
+  older than a stable live branch. The final PR and stack reads must still
+  match those original snapshots. A failed or malformed live-branch lookup
+  exits without readiness JSON in one-shot mode. Watch mode retries the probe.
+
 - Closed-unmerged PRs. The babysit gate proves a same-repo head before any
   terminal-state exit. Merged PRs are then terminal-ready and short-circuit the
   readiness sweep. Closed-unmerged PRs report only the terminal `state` blocker;
