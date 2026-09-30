@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
 import { readFileSync, realpathSync } from "node:fs";
-import { spawnSync } from "node:child_process";
+import {
+  assertAuditedCase,
+  runAuditedProbe,
+} from "./review-eval-v2-probe-trust.mjs";
 import path from "node:path";
 
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
@@ -116,6 +119,11 @@ export function validateDataset({ dataset, rootDir }) {
     if (!validId(item.id) || caseIds.has(item.id))
       errors.push(`duplicate or invalid case ${item.id}`);
     caseIds.add(item.id);
+    try {
+      assertAuditedCase({ repo: dataset.repo, item });
+    } catch (error) {
+      errors.push(error.message);
+    }
     if (!Number.isSafeInteger(item.pr) || item.pr < 1)
       errors.push(`${item.id}: invalid PR`);
     if (
@@ -239,8 +247,8 @@ export function rootsForCase(dataset, caseId) {
   return dataset.roots.filter((root) => ids.has(root.id));
 }
 
-// Probes run in a fresh process so each repaired tree has a fresh module cache.
-// They call pure exported functions and make no network or repository mutations.
+// Probes execute a pinned, audited module closure in a fresh private snapshot.
+// The trusted helper rejects other source/repair choices before importing code.
 const PROBE = `
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
@@ -268,15 +276,12 @@ if (pr === '1984') {
 export function verifyCaseProbes({ fixturePath, caseId, dataset }) {
   const item = dataset.cases.find((entry) => entry.id === caseId);
   if (!item) throw new Error(`Unknown case ${caseId}`);
-  const result = spawnSync(
-    process.execPath,
-    ["--input-type=module", "-e", PROBE, fixturePath, String(item.pr)],
-    {
-      encoding: "utf8",
-      timeout: 15_000,
-      maxBuffer: 1024 * 1024,
-    },
-  );
+  const result = runAuditedProbe({
+    repo: dataset.repo,
+    item,
+    fixturePath,
+    script: PROBE,
+  });
   if (result.status !== 0)
     throw new Error(
       `Probe failed for ${caseId}: ${result.error?.message ?? result.stderr}`,

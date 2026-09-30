@@ -38,6 +38,13 @@ agent-audited and supported by executable source probes. They are not independen
 human calibration. The original PRs have prior exposure. The PR-disjoint
 confirmation split is prospective organization, not an unseen holdout.
 
+Source probes accept only the four audited source and repair combinations in
+`review-eval-v2-probe-trust.mjs`. The probe verifies the complete local import
+closure by hash, copies those verified bytes into a private temporary directory,
+and runs them with an empty environment. It never imports modules directly from
+a supplied fixture. Adding a family requires source and repair review plus new
+trust pins; a dataset file alone cannot authorize code execution.
+
 ## Plan and run
 
 Freeze both skill directories before planning. Use explicit absolute paths.

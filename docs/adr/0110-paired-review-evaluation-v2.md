@@ -42,6 +42,12 @@ not a claim that its whole PR has no defects. Keep original and repaired cases
 in one PR family and split. Record prior exposure and label authority explicitly.
 Agent audits and model judgments do not become human calibration.
 
+A dataset digest establishes identity, not permission to execute its source.
+Restrict executable probes to reviewed source and repair tuples. Verify and copy
+their complete local module closure by hash before importing the copies in a
+private directory with an empty environment. New families require reviewed
+trust pins. Model confinement alone does not protect the host probe process.
+
 Separate execution completion from comparative conclusions. Incomplete calls
 cannot become zero findings. Valid uncertainty remains visible. An A/A run can
 qualify the instrument but cannot establish a skill improvement. V2 cannot

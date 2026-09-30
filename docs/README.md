@@ -261,6 +261,7 @@ Authority: canonical
 - [`indexer-envio/STATUS.md`](../indexer-envio/STATUS.md)
 - [`integration-probes/README.md`](../integration-probes/README.md)
 - [`README.md`](../README.md)
+- [`scripts/review/fixtures/v2-probes/README.md`](../scripts/review/fixtures/v2-probes/README.md)
 - [`SPEC.md`](../SPEC.md)
 - [`ui-dashboard/scripts/intel-marathon/README.md`](../ui-dashboard/scripts/intel-marathon/README.md)
 
