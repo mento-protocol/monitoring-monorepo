@@ -420,21 +420,25 @@ test("execution identity pins host probe code but permits label and grader chang
   const source = JSON.parse(readFileSync(datasetFile, "utf8"));
   source.roots[0].title += " (revised label)";
   writeFileSync(datasetFile, JSON.stringify(source));
+  const gradingOriginals = new Map();
   for (const file of [
     "review-eval-v2-score.mjs",
+    "review-eval-v2-selection.mjs",
     "prompts/v2/judge-match.md",
   ]) {
     const target = path.join(copy, "scripts/review", file);
-    writeFileSync(
-      target,
-      `${readFileSync(target, "utf8")}\n// grading-only edit\n`,
-    );
+    const originalBytes = readFileSync(target, "utf8");
+    gradingOriginals.set(target, originalBytes);
+    writeFileSync(target, `${originalBytes}\n// grading-only edit\n`);
   }
   const rescored = runner.makePlan({
     ...options,
     out: path.join(directory, "rescored-plan"),
   });
   assert.equal(rescored.execution_digest, original.execution_digest);
+  // Same-process grading must retain its loaded snapshot. A separate cache test
+  // proves that a fresh process can rescore after a selector behavior change.
+  for (const [target, bytes] of gradingOriginals) writeFileSync(target, bytes);
   const report = await runner.runCampaign({ out, scoreOnly: true });
   assert.match(report.failure, /no compatible raw result/);
   assert.equal(report.cost.actual_known_usd, 0);

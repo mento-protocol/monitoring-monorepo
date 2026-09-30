@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import {
   cpSync,
   mkdtempSync,
@@ -457,8 +458,7 @@ async function copiedScorer(context) {
     "review-eval-v2-score.mjs",
     "review-eval-score.mjs",
     "review-eval-stream.mjs",
-    "review-eval-v2-dataset.mjs",
-    "review-eval-v2-probe-trust.mjs",
+    "review-eval-v2-selection.mjs",
     "review-eval-v2-report.mjs",
     "prompts/v2",
   ]) {
@@ -474,7 +474,7 @@ async function copiedScorer(context) {
 
 test("scorer identity changes when answer-key selection behavior changes", async (context) => {
   const { copy, scorer } = await copiedScorer(context);
-  const selectorPath = path.join(copy, "review-eval-v2-dataset.mjs");
+  const selectorPath = path.join(copy, "review-eval-v2-selection.mjs");
   const selectorUrl = pathToFileURL(selectorPath).href;
   const beforeSelector = await import(selectorUrl);
   const dataset = {
@@ -503,12 +503,27 @@ test("scorer identity changes when answer-key selection behavior changes", async
     "fault injection must change selector",
   );
   writeFileSync(selectorPath, afterSource);
-  const afterSelector = await import(`${selectorUrl}?changed`);
-  assert.deepEqual(afterSelector.rootsForCase(dataset, "repaired"), []);
+  assert.deepEqual(
+    beforeSelector.rootsForCase(dataset, "repaired"),
+    dataset.roots,
+    "the loaded selector still has the previous behavior",
+  );
+  assert.throws(
+    () => scorer.scorerDigestV2(),
+    /source changed after module load/,
+  );
+  const fresh = freshScorer(
+    copy,
+    `({
+    digest: scorer.scorerDigestV2(),
+    roots: (await import("./review-eval-v2-selection.mjs")).rootsForCase(${JSON.stringify(dataset)}, "repaired"),
+  })`,
+  );
+  assert.deepEqual(fresh.roots, []);
   assert.notEqual(
-    scorer.scorerDigestV2(),
+    fresh.digest,
     beforeDigest,
-    "changing the roots sent to grading must invalidate cached scores",
+    "a fresh selector must use a new scoring identity",
   );
 });
 
@@ -530,11 +545,122 @@ test("scorer identity changes when report reduction changes", async (context) =>
     "fault injection must change the report reducer",
   );
   writeFileSync(reducerPath, afterSource);
-  const afterReducer = await import(`${reducerUrl}?changed`);
-  assert.equal(afterReducer.metricSummary([]).arms.incumbent.known_matched, 1);
-  assert.notEqual(
-    scorer.scorerDigestV2(),
-    beforeDigest,
-    "changed headline metrics must not share the previous score identity",
+  assert.equal(
+    beforeReducer.metricSummary([]).arms.incumbent.known_matched,
+    0,
+    "the loaded reducer still has the previous behavior",
   );
+  assert.throws(
+    () => scorer.scorerDigestV2(),
+    /source changed after module load/,
+  );
+  const fresh = freshScorer(
+    copy,
+    `({
+    digest: scorer.scorerDigestV2(),
+    matched: (await import("./review-eval-v2-report.mjs")).metricSummary([]).arms.incumbent.known_matched,
+  })`,
+  );
+  assert.equal(fresh.matched, 1);
+  assert.notEqual(
+    fresh.digest,
+    beforeDigest,
+    "a fresh reducer must use a new scoring identity",
+  );
+});
+
+function freshScorer(copy, expression) {
+  return JSON.parse(
+    execFileSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "--eval",
+        `
+    import * as scorer from "./review-eval-v2-score.mjs";
+    console.log(JSON.stringify(${expression}));
+  `,
+      ],
+      { cwd: copy, env: {}, encoding: "utf8" },
+    ),
+  );
+}
+
+test("loaded scorer rejects changed source while a fresh process can rescore it", async (context) => {
+  const { copy, scorer } = await copiedScorer(context);
+  const beforeDigest = scorer.scorerDigestV2();
+  const sourcePath = path.join(copy, "review-eval-v2-score.mjs");
+  const source = readFileSync(sourcePath, "utf8");
+  const changed = source.replace(
+    '"final-consolidated-v1"',
+    '"test-fresh-contract"',
+  );
+  assert.notEqual(changed, source);
+  writeFileSync(sourcePath, changed);
+  assert.equal(
+    scorer.FINAL_REVIEW_CONTRACT,
+    "final-consolidated-v1",
+    "the existing ESM instance still exposes its loaded contract",
+  );
+  assert.throws(
+    () => scorer.scorerDigestV2(),
+    /source changed after module load/,
+  );
+  const fresh = freshScorer(
+    copy,
+    `({
+    digest: scorer.scorerDigestV2(),
+    contract: scorer.FINAL_REVIEW_CONTRACT,
+    result: await scorer.scoreReview({
+      review: { finalText: "No findings.", completed: true, outputContract: scorer.FINAL_REVIEW_CONTRACT },
+      defects: [],
+      judge: {model: "stub", effort: "high", exec: async () => '{"complete":true,"claims":[]}'},
+    }),
+  })`,
+  );
+  assert.notEqual(fresh.digest, beforeDigest);
+  assert.equal(fresh.contract, "test-fresh-contract");
+  assert.equal(fresh.result.status, "complete");
+});
+
+test("direct scoring rejects prompt drift before invoking a judge", async (context) => {
+  const { copy, scorer } = await copiedScorer(context);
+  const prompt = path.join(copy, "prompts/v2/extract-claims.md");
+  writeFileSync(prompt, `${readFileSync(prompt, "utf8")}\nchanged rubric\n`);
+  const requests = [];
+  const result = await scorer.scoreReview({
+    review: review("No findings."),
+    defects: [],
+    judge: judgeSequence([extraction()], requests),
+  });
+  assert.equal(result.status, "incomplete");
+  assert.match(result.errors[0].message, /source changed after module load/);
+  assert.equal(requests.length, 0);
+});
+
+test("source drift during the final judge await invalidates the result", async (context) => {
+  const { copy, scorer } = await copiedScorer(context);
+  const reducer = path.join(copy, "review-eval-v2-report.mjs");
+  let calls = 0;
+  const result = await scorer.scoreReview({
+    review: review("No findings."),
+    defects: [],
+    judge: {
+      model: "stub",
+      effort: "high",
+      exec: async () => {
+        calls++;
+        await Promise.resolve();
+        writeFileSync(
+          reducer,
+          `${readFileSync(reducer, "utf8")}\n// changed during judge\n`,
+        );
+        return JSON.stringify(extraction());
+      },
+    },
+  });
+  assert.equal(calls, 1);
+  assert.equal(result.status, "incomplete");
+  assert.match(result.errors[0].message, /source changed after module load/);
+  assert.deepEqual(result.claims, []);
 });

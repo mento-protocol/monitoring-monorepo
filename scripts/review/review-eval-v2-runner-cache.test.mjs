@@ -1,0 +1,256 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+import { REPO_ROOT } from "./review-eval-v2-runner.mjs";
+
+async function cachedCampaign(
+  context,
+  finalText = () => "No findings.",
+  streamText = finalText,
+) {
+  const directory = mkdtempSync(path.join(tmpdir(), "v2-cached-campaign-"));
+  context.after(() => rmSync(directory, { recursive: true, force: true }));
+  const copy = path.join(directory, "repo");
+  cpSync(
+    path.join(REPO_ROOT, "scripts/review"),
+    path.join(copy, "scripts/review"),
+    { recursive: true },
+  );
+  cpSync(
+    path.join(REPO_ROOT, "docs/evals/review-skill-v2"),
+    path.join(copy, "docs/evals/review-skill-v2"),
+    { recursive: true },
+  );
+  const bin = path.join(directory, "bin");
+  mkdirSync(bin);
+  writeFileSync(
+    path.join(bin, "claude"),
+    '#!/bin/sh\n[ "$#" -eq 1 ] && [ "$1" = "--version" ] || exit 99\nprintf "%s\\n" "claude-test-version"\n',
+    { mode: 0o755 },
+  );
+  const previousPath = process.env.PATH;
+  process.env.PATH = bin;
+  context.after(() => {
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+  });
+  const moduleUrl = (file) =>
+    pathToFileURL(path.join(copy, "scripts/review", file)).href;
+  const runner = await import(moduleUrl("review-eval-v2-runner.mjs"));
+  const scorer = await import(moduleUrl("review-eval-v2-score.mjs"));
+  const cache = await import(moduleUrl("review-eval-experiment-cache.mjs"));
+  const skillDir = path.join(directory, "skill");
+  mkdirSync(skillDir);
+  writeFileSync(path.join(skillDir, "SKILL.md"), "Review the code.");
+  const datasetFile = path.join(
+    copy,
+    "docs/evals/review-skill-v2/dataset.json",
+  );
+  const dataset = JSON.parse(readFileSync(datasetFile, "utf8"));
+  const out = path.join(directory, "campaign");
+  const plan = runner.makePlan({
+    datasetFile,
+    incumbent: skillDir,
+    candidate: skillDir,
+    out,
+  });
+  const rawDigests = [];
+  const scoreDigest = scorer.scorerDigestV2();
+  for (const cell of plan.cells) {
+    const fixture = dataset.cases.find((item) => item.id === cell.case_id);
+    const final = finalText(fixture);
+    const envelope = {
+      is_error: false,
+      result: final,
+      duration_ms: 1,
+      total_cost_usd: null,
+    };
+    const raw = cache.writeExperimentCache({
+      artifactRoot: out,
+      kind: "raw",
+      identity: runner.executionIdentity({
+        plan,
+        fixture,
+        treatment: cell.treatment,
+      }),
+      payload: {
+        final_text: final,
+        stream: JSON.stringify({
+          type: "result",
+          ...envelope,
+          result: streamText(fixture),
+        }),
+        envelope,
+        completed: true,
+        output_contract: plan.output_contract,
+        source_state: "unused-cached-source",
+      },
+    });
+    rawDigests.push(raw.artifact.content_digest);
+    cache.writeExperimentCache({
+      artifactRoot: out,
+      kind: "score",
+      identity: runner.scoringIdentity({
+        rawDigest: raw.artifact.content_digest,
+        datasetDigest: plan.dataset_digest,
+        scorerDigest: scoreDigest,
+        model: plan.model,
+        effort: plan.effort,
+        version: plan.cli_version,
+      }),
+      payload: {
+        status: "complete",
+        errors: [],
+        claims: [],
+        defects: [],
+        novel: [],
+      },
+    });
+  }
+  return {
+    directory,
+    copy,
+    out,
+    runner,
+    scorer,
+    plan,
+    dataset,
+    rawDigests,
+    scoreDigest,
+    moduleUrl,
+  };
+}
+
+test("result-only and separately stored final text are checked before cached grades", async (context) => {
+  for (const mode of ["result-only", "final-artifact-only", "clean"]) {
+    await context.test(mode, async (child) => {
+      const text = (fixture) =>
+        mode === "clean"
+          ? "No findings."
+          : `No findings. ${" ".repeat(120_001)} ${fixture.forbidden_shas[0]}`;
+      const c = await cachedCampaign(
+        child,
+        text,
+        mode === "final-artifact-only" ? () => "No findings." : text,
+      );
+      const report = await c.runner.runCampaign({
+        out: c.out,
+        scoreOnly: true,
+      });
+      if (mode === "clean") {
+        assert.equal(report.status, "completed");
+        assert.ok(
+          report.rows.every((row) => row.raw_reused && row.score_reused),
+        );
+      } else {
+        assert.equal(report.status, "incomplete");
+        assert.match(
+          report.failure,
+          /possible answer-key leak.*withheld commit/,
+        );
+        assert.equal(report.completed_cells, 0);
+      }
+      assert.equal(report.cost.actual_known_usd, 0);
+      assert.equal(existsSync(path.join(c.out, "spend.json")), false);
+    });
+  }
+});
+
+test("fresh-process selector changes rescore existing raw without changing execution identity", async (context) => {
+  const c = await cachedCampaign(context);
+  const selectorFile = existsSync(
+    path.join(c.copy, "scripts/review/review-eval-v2-selection.mjs"),
+  )
+    ? "review-eval-v2-selection.mjs"
+    : "review-eval-v2-dataset.mjs";
+  const target = path.join(c.copy, "scripts/review", selectorFile);
+  const before = readFileSync(target, "utf8");
+  const after = before.replace("...item.negative_control_root_ids,", "");
+  assert.notEqual(
+    after,
+    before,
+    "fault must alter grading-only root selection",
+  );
+  writeFileSync(target, after);
+  const result = JSON.parse(
+    execFileSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `
+    import {readFileSync} from 'node:fs';
+    const [runner, scorer, cache, selector] = await Promise.all(${JSON.stringify([c.moduleUrl("review-eval-v2-runner.mjs"), c.moduleUrl("review-eval-v2-score.mjs"), c.moduleUrl("review-eval-experiment-cache.mjs"), c.moduleUrl(selectorFile)])}.map(url => import(url)));
+    const out = ${JSON.stringify(c.out)};
+    const plan = JSON.parse(readFileSync(out + '/plan.json', 'utf8'));
+    const dataset = JSON.parse(readFileSync(plan.dataset_file, 'utf8'));
+    const digest = scorer.scorerDigestV2();
+    const raws = [];
+    for (const cell of plan.cells) {
+      const fixture = dataset.cases.find(item => item.id === cell.case_id);
+      const raw = cache.readExperimentCache({artifactRoot:out, kind:'raw', identity:runner.executionIdentity({plan, fixture, treatment:cell.treatment})});
+      if (!raw) throw new Error('raw identity changed');
+      raws.push(raw.artifact.content_digest);
+      cache.writeExperimentCache({artifactRoot:out, kind:'score', identity:runner.scoringIdentity({rawDigest:raw.artifact.content_digest, datasetDigest:plan.dataset_digest, scorerDigest:digest, model:plan.model, effort:plan.effort, version:plan.cli_version}), payload:{status:'complete', errors:[], claims:[], defects:[], novel:[]}});
+    }
+    const repaired = dataset.cases.find(item => item.variant === 'repaired');
+    const report = await runner.runCampaign({out, scoreOnly:true});
+    process.stdout.write(JSON.stringify({report, digest, raws, repairedRoots:selector.rootsForCase(dataset,repaired.id)}));
+  `,
+      ],
+      { encoding: "utf8", env: process.env },
+    ),
+  );
+  assert.notEqual(result.digest, c.scoreDigest);
+  assert.deepEqual(result.repairedRoots, []);
+  assert.equal(result.report.status, "completed");
+  assert.ok(
+    result.report.rows.every((row) => row.raw_reused && row.score_reused),
+  );
+  assert.deepEqual(result.raws, c.rawDigests);
+  assert.equal(result.report.cost.actual_known_usd, 0);
+});
+
+test("loaded scoring drift replaces a prior completed report with durable incomplete evidence", async (context) => {
+  const c = await cachedCampaign(context);
+  const complete = await c.runner.runCampaign({ out: c.out, scoreOnly: true });
+  assert.equal(complete.status, "completed");
+  const scores = path.join(c.out, "cache/score");
+  const cacheBytes = () =>
+    Object.fromEntries(
+      readdirSync(scores)
+        .sort()
+        .map((file) => [file, readFileSync(path.join(scores, file), "utf8")]),
+    );
+  const before = cacheBytes();
+  const reducer = path.join(c.copy, "scripts/review/review-eval-v2-report.mjs");
+  writeFileSync(
+    reducer,
+    `${readFileSync(reducer, "utf8")}\n// changed after scoring modules loaded\n`,
+  );
+  const report = await c.runner.runCampaign({ out: c.out, scoreOnly: true });
+  assert.equal(report.status, "incomplete");
+  assert.match(report.failure, /scoring source changed/);
+  assert.equal(report.metrics, null);
+  assert.deepEqual(report.rows, []);
+  assert.equal(report.completed_cells, 0);
+  assert.deepEqual(
+    JSON.parse(readFileSync(path.join(c.out, "report.json"), "utf8")),
+    report,
+  );
+  assert.deepEqual(cacheBytes(), before);
+  assert.equal(existsSync(path.join(c.out, "spend.json")), false);
+});

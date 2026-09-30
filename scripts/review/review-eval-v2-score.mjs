@@ -15,13 +15,13 @@ const promptNames = ["extract-claims", "judge-match", "judge-novel"];
 const directory = path.dirname(fileURLToPath(import.meta.url));
 const promptPath = (name) => path.join(directory, "prompts/v2", `${name}.md`);
 
-export function scorerDigestV2() {
+function currentScorerDigest() {
   const files = [
     fileURLToPath(import.meta.url),
     path.join(directory, "review-eval-score.mjs"),
     path.join(directory, "review-eval-stream.mjs"),
     // rootsForCase selects the answer-key roots sent to the grader.
-    path.join(directory, "review-eval-v2-dataset.mjs"),
+    path.join(directory, "review-eval-v2-selection.mjs"),
     // Cached grades and their headline metrics must share a versioned reducer.
     path.join(directory, "review-eval-v2-report.mjs"),
     ...promptNames.map(promptPath),
@@ -34,6 +34,17 @@ export function scorerDigestV2() {
     hash.update("\0");
   }
   return hash.digest("hex");
+}
+
+// ESM functions stay loaded even when their files change. Never stamp that old
+// implementation with a digest of newer bytes. Intentional edits need a restart.
+const loadedScorerDigest = currentScorerDigest();
+export function scorerDigestV2() {
+  requireValue(
+    currentScorerDigest() === loadedScorerDigest,
+    "scoring source changed after module load; restart the process to rescore",
+  );
+  return loadedScorerDigest;
 }
 
 function requireValue(condition, message) {
@@ -62,6 +73,7 @@ function exactIds(records, ids, key, label) {
 }
 
 async function call(judge, name, values, fixturePath, maxInputChars) {
+  scorerDigestV2();
   const prompt = renderPrompt(readFileSync(promptPath(name), "utf8"), values);
   requireValue(
     prompt.length <= maxInputChars,
@@ -76,6 +88,7 @@ async function call(judge, name, values, fixturePath, maxInputChars) {
     allowedTools: sourceJudge ? ["Read", "Grep", "Glob"] : [],
     maxTurns: sourceJudge ? 60 : 1,
   });
+  scorerDigestV2();
   // The injected executor can return a CLI envelope. An error result must not
   // become an apparently valid partial response after JSON extraction.
   try {
@@ -237,6 +250,7 @@ export async function scoreReview({
   };
   let phase = "extraction";
   try {
+    scorerDigestV2();
     requireValue(
       review?.completed === true &&
         review.outputContract === FINAL_REVIEW_CONTRACT,

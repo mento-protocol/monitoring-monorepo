@@ -29,6 +29,7 @@ export function writeJson(file, value) {
 // instead of attempting to reproduce the CLI's dynamic policy merge.
 export function verifyUnmanagedPolicy({
   env,
+  cwd = process.cwd(),
   platform = process.platform,
   stat = lstatSync,
   readDir = readdirSync,
@@ -39,8 +40,10 @@ export function verifyUnmanagedPolicy({
       "cannot attest subscription under managed policy; use a verified unmanaged environment",
     );
   };
-  const config =
-    env.CLAUDE_CONFIG_DIR || path.join(env.HOME || homedir(), ".claude");
+  const config = path.resolve(
+    cwd,
+    env.CLAUDE_CONFIG_DIR || path.join(env.HOME || homedir(), ".claude"),
+  );
   for (const root of [
     "/Library/Application Support/ClaudeCode",
     "/etc/claude-code",
@@ -105,7 +108,7 @@ export function verifySubscription({
       "subscription authentication override present; unset provider, API-key, or token overrides",
     );
   }
-  verifyPolicy({ env });
+  verifyPolicy({ env, cwd });
   let status;
   try {
     status = JSON.parse(

@@ -8,6 +8,8 @@ import {
   rmSync,
   writeFileSync,
   existsSync,
+  mkdirSync,
+  readdirSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -328,4 +330,55 @@ test("policy inspection dependency rejects before auth or model access", async (
   await assert.rejects(s.invoke(provider), /managed policy sentinel/);
   assert.equal(s.authCalls.length, 0);
   assert.equal(s.modelCalls.length, 0);
+});
+
+test("relative config policy is inspected from the auth and model working directory", async (context) => {
+  for (const variable of ["CLAUDE_CONFIG_DIR", "HOME"]) {
+    const s = setup(context);
+    const relative = `config-${path.basename(s.out)}`;
+    const config = path.join(
+      s.out,
+      relative,
+      variable === "HOME" ? ".claude" : "",
+    );
+    mkdirSync(config, { recursive: true });
+    const policy = path.join(config, "remote-settings.json");
+    writeFileSync(policy, '{"env":{"ANTHROPIC_API_KEY":"test-only"}}');
+    s.options.env = { [variable]: relative };
+    const inspected = [];
+    s.options.verifyPolicy = (options) =>
+      verifyUnmanagedPolicy({
+        ...options,
+        platform: "linux",
+        stat: () => {
+          const error = new Error("absent");
+          error.code = "ENOENT";
+          throw error;
+        },
+        readDir: (directory) => {
+          inspected.push(directory);
+          return readdirSync(directory);
+        },
+      });
+    const provider = createProvider(s.options);
+    await assert.rejects(s.invoke(provider), /managed policy/);
+    assert.deepEqual(inspected, [config]);
+    assert.equal(s.authCalls.length, 0);
+    assert.equal(s.modelCalls.length, 0);
+    assert.equal(existsSync(path.join(s.out, "spend.json")), false);
+
+    rmSync(policy);
+    await s.invoke(provider);
+    assert.equal(inspected.at(-1), config);
+    assert.equal(s.authCalls[0].settings.cwd, s.out);
+    assert.equal(s.modelCalls[0].settings.cwd, s.out);
+    assert.equal(s.authCalls[0].settings.env[variable], relative);
+    assert.deepEqual(s.authCalls[0].settings.env, s.modelCalls[0].settings.env);
+
+    s.options.env = { CLAUDE_CONFIG_DIR: config };
+    await s.invoke(createProvider(s.options));
+    assert.equal(inspected.at(-1), config);
+    assert.equal(s.authCalls[1].settings.env.CLAUDE_CONFIG_DIR, config);
+    assert.deepEqual(s.authCalls[1].settings.env, s.modelCalls[1].settings.env);
+  }
 });

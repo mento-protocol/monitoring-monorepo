@@ -16,11 +16,8 @@ import {
   writeExperimentCache,
   sha256Bytes,
 } from "./review-eval-experiment-cache.mjs";
-import {
-  loadDataset,
-  verifyCaseProbes,
-  rootsForCase,
-} from "./review-eval-v2-dataset.mjs";
+import { loadDataset, verifyCaseProbes } from "./review-eval-v2-dataset.mjs";
+import { rootsForCase } from "./review-eval-v2-selection.mjs";
 import { scoreReview, scorerDigestV2 } from "./review-eval-v2-score.mjs";
 import { createProvider, writeJson } from "./review-eval-v2-provider.mjs";
 import { metricSummary } from "./review-eval-v2-report.mjs";
@@ -393,7 +390,10 @@ export async function runCampaign({
         throw new Error("raw artifact lacks a completed final-review contract");
       }
       const leak = leakSignals({
-        transcript: parseClaudeStream(raw.payload.stream).messages.join("\n"),
+        transcript: [
+          ...parseClaudeStream(raw.payload.stream).messages,
+          raw.payload.final_text,
+        ].join("\n"),
         truth: { findings: loaded.dataset.roots },
         pr: fixture.pr,
         forbiddenShas: fixture.forbidden_shas,
@@ -427,6 +427,7 @@ export async function runCampaign({
             ...request,
             label: `${fixture.id}/${cell.treatment}/judge-${judgeIndex++}`,
           });
+          scorerDigestV2();
           if (sourceState(isolated.path) !== before)
             throw new Error("grader mutated source fixture");
           return JSON.stringify(result.envelope);
@@ -443,6 +444,7 @@ export async function runCampaign({
           fixturePath: isolated.path,
           judge: { exec, model: plan.model, effort: plan.effort },
         });
+        scorerDigestV2();
         if (result.errors?.length) {
           writeJson(path.join(out, "last-grading-error.json"), {
             ...cell,
@@ -487,13 +489,33 @@ export async function runCampaign({
   } finally {
     rmSync(lock, { recursive: true, force: true });
   }
-  const report = campaignReport({
-    plan,
-    rows,
-    failure,
-    spend: provider?.ledger ?? null,
-    datasetDigest: loaded.digest,
-  });
+  let gradingSourceFailure = null;
+  try {
+    scorerDigestV2();
+  } catch (error) {
+    gradingSourceFailure = error.message;
+  }
+  // Do not call a stale metric reducer or leave an older successful report.
+  const report = gradingSourceFailure
+    ? {
+        schema_version: 2,
+        status: "incomplete",
+        failure: gradingSourceFailure,
+        plan_digest: plan.plan_digest,
+        dataset_digest: loaded.digest,
+        planned_cells: plan.cells.length,
+        completed_cells: 0,
+        metrics: null,
+        rows: [],
+        cost: null,
+      }
+    : campaignReport({
+        plan,
+        rows,
+        failure,
+        spend: provider?.ledger ?? null,
+        datasetDigest: loaded.digest,
+      });
   report.elapsed_ms = Date.now() - started;
   writeJson(path.join(out, "report.json"), report);
   return report;

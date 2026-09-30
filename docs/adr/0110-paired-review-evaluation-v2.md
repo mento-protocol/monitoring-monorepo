@@ -36,6 +36,8 @@ Separate reviewer execution identity from grading identity. Bind source,
 repair, skill, prompt, runtime, and invocation behavior to the former. Bind
 immutable reviewer evidence, answer key, grader configuration, and scorer bytes
 to the latter. Reuse each phase only when its own inputs match.
+Keep answer-key selection separate from execution code. Pin grading source and
+prompts for the process lifetime, and reject source drift before saving results.
 
 Use root-cause labels and repaired-root negative controls. A repaired case is
 not a claim that its whole PR has no defects. Keep original and repaired cases

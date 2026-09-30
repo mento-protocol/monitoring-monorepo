@@ -70,7 +70,9 @@ directory, and empty settings sources as the model call. API-key, alternate
 provider, token override, logged-out, and unknown authentication are refused.
 Managed policy files, cached remote policy, policy redirection, and macOS managed
 preferences are also refused because the auth status probe cannot attest their
-effective billing route. V2 does not offer an API billing mode. Sign in through the Claude subscription
+effective billing route. Relative `CLAUDE_CONFIG_DIR` and `HOME` paths resolve
+against the model call's working directory when checking cached policy.
+V2 does not offer an API billing mode. Sign in through the Claude subscription
 account and remove provider or credential overrides before running.
 
 Subscription runs have no campaign or per-call dollar stop. Provider-reported
@@ -98,6 +100,7 @@ The caller requires one self-contained final review. The scorer reads that
 artifact. Earlier observations and tool results remain available for diagnosis.
 An incompatible historical transcript cannot be imported as a complete final
 review merely because it has a last message.
+Leak checks cover both the captured messages and the final text used for scoring.
 
 Every eligible root cause reaches semantic matching regardless of file type.
 A matched verdict carries a verbatim quote from the final review. Code checks
@@ -118,7 +121,11 @@ To add or remove cases, create a new plan.
 Reviewer identity excludes the answer key and grader. Grading identity includes
 the immutable reviewer artifact, answer key and its selection code, scorer,
 prompts, and judge settings.
-A source, skill, prompt, runtime, or execution change requires a compatible new
+Answer-key selection lives in a separate grading module. Its changes do not
+invalidate saved reviewer outputs. A scoring process pins its grading source
+and prompts at startup and rejects later changes. After a grading edit, start a
+new scoring process to reuse the saved reviews under the new grading identity.
+A source, skill, reviewer-prompt, runtime, or execution change requires a compatible new
 execution identity. A grading-only change must not silently buy another review.
 
 Read paired results by PR family. Inspect serious misses, claims about repaired

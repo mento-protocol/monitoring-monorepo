@@ -14,9 +14,9 @@ import { runAuditedProbe } from "./review-eval-v2-probe-trust.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
+import { rootsForCase } from "./review-eval-v2-selection.mjs";
 import {
   loadDataset,
-  rootsForCase,
   validateDataset,
   verifyCaseProbes,
 } from "./review-eval-v2-dataset.mjs";
