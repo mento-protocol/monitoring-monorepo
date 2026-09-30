@@ -1,7 +1,15 @@
-// Durable reservations bound a sequential campaign, including failed calls.
-import { spawn } from "node:child_process";
-import { readFileSync, writeFileSync, renameSync, mkdirSync } from "node:fs";
+// Subscription-only execution with durable API-equivalent usage telemetry.
+import { spawn, execFileSync } from "node:child_process";
+import {
+  readFileSync,
+  writeFileSync,
+  renameSync,
+  mkdirSync,
+  lstatSync,
+  readdirSync,
+} from "node:fs";
 import path from "node:path";
+import { homedir } from "node:os";
 import {
   claudeArgv,
   scrubbedEnv,
@@ -17,17 +25,127 @@ export function writeJson(file, value) {
   renameSync(temporary, file);
 }
 
-export function reserveCall(ledger, limit, cap, label) {
-  const spent = ledger.calls.reduce((sum, call) => sum + call.charged_usd, 0);
-  const remaining = limit - spent;
-  if (remaining < 0.01) throw new Error("campaign budget exhausted");
-  const reservation = Math.floor(Math.min(cap, remaining) * 100) / 100;
+// Empty setting sources do not disable managed policy. Refuse its presence
+// instead of attempting to reproduce the CLI's dynamic policy merge.
+export function verifyUnmanagedPolicy({
+  env,
+  platform = process.platform,
+  stat = lstatSync,
+  readDir = readdirSync,
+  execPolicy = execFileSync,
+}) {
+  const fail = () => {
+    throw new Error(
+      "cannot attest subscription under managed policy; use a verified unmanaged environment",
+    );
+  };
+  const config =
+    env.CLAUDE_CONFIG_DIR || path.join(env.HOME || homedir(), ".claude");
+  for (const root of [
+    "/Library/Application Support/ClaudeCode",
+    "/etc/claude-code",
+  ]) {
+    for (const name of ["managed-settings.json", "managed-settings.d"]) {
+      try {
+        stat(path.join(root, name));
+      } catch (error) {
+        if (error.code === "ENOENT") continue;
+        fail();
+      }
+      fail();
+    }
+  }
+  try {
+    if (readDir(config).some((name) => name.includes("remote-settings")))
+      fail();
+  } catch (error) {
+    if (error.code !== "ENOENT") fail();
+  }
+  if (platform === "darwin") {
+    try {
+      execPolicy("/usr/bin/defaults", ["read", "com.anthropic.claudecode"], {
+        env: { ...env, LC_ALL: "C", LANG: "C" },
+        encoding: "utf8",
+        timeout: 15000,
+        maxBuffer: 64 * 1024,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch (error) {
+      if (
+        error.status === 1 &&
+        /(?:Domain .* not found|domain.*does not exist)/is.test(
+          String(error.stderr),
+        )
+      )
+        return;
+      fail();
+    }
+    fail();
+  } else if (platform !== "linux") fail();
+}
+
+// Auth and model calls use the same environment, cwd and empty settings sources.
+// Refuse route overrides rather than silently switching billing modes.
+export function verifySubscription({
+  cwd,
+  env,
+  execAuth = execFileSync,
+  verifyPolicy = verifyUnmanagedPolicy,
+}) {
+  if (
+    Object.entries(env).some(
+      ([name, value]) =>
+        value &&
+        /^(?:ANTHROPIC_|CLAUDE_SECURESTORAGE_CONFIG_DIR$|CLAUDE_CODE_(?:USE_|API_KEY|OAUTH_|MANAGED_SETTINGS|REMOTE_SETTINGS|MOCK_REMOTE_SETTINGS|BRIDGE_CHILD_MACHINE_SETTINGS|POLICY_HELPER|PROVIDER_MANAGED_BY_HOST))/.test(
+          name,
+        ),
+    )
+  ) {
+    throw new Error(
+      "subscription authentication override present; unset provider, API-key, or token overrides",
+    );
+  }
+  verifyPolicy({ env });
+  let status;
+  try {
+    status = JSON.parse(
+      execAuth(
+        "claude",
+        ["--setting-sources", "", "auth", "status", "--json"],
+        {
+          cwd,
+          env,
+          encoding: "utf8",
+          timeout: 15_000,
+          maxBuffer: 64 * 1024,
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      ),
+    );
+  } catch {
+    throw new Error(
+      "cannot verify Claude subscription; inspect claude auth status",
+    );
+  }
+  if (
+    status?.loggedIn !== true ||
+    status.authMethod !== "claude.ai" ||
+    status.apiProvider !== "firstParty" ||
+    !["pro", "max", "team", "enterprise"].includes(status.subscriptionType)
+  ) {
+    throw new Error(
+      "v2 requires a verified Claude subscription; API and unknown authentication are unsupported",
+    );
+  }
+}
+
+export function reserveCall(ledger, label) {
   const call = {
     id: ledger.calls.length,
     label,
     state: "reserved",
-    reserved_usd: reservation,
-    charged_usd: reservation,
+    reserved_usd: null,
+    charged_usd: null,
     actual_usd: null,
     started_at: new Date().toISOString(),
   };
@@ -49,20 +167,27 @@ export function createProvider({
   limit,
   repoRoot,
   version,
-  reviewerCap = 5,
-  graderCap = 2,
+  env = process.env,
+  execAuth = execFileSync,
+  verifyPolicy = verifyUnmanagedPolicy,
   spawnProcess = spawn,
 }) {
+  if (limit !== undefined && limit !== null)
+    throw new Error(
+      "dollar limits are unsupported for subscription runs; create a new plan",
+    );
   const file = path.join(out, "spend.json");
   let ledger;
   try {
     ledger = JSON.parse(readFileSync(file, "utf8"));
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
-    ledger = { limit_usd: limit, calls: [] };
+    ledger = { billing_mode: "subscription", limit_usd: null, calls: [] };
   }
-  if (ledger.limit_usd !== limit)
-    throw new Error("campaign budget differs from stored ledger");
+  if (ledger.billing_mode !== "subscription" || ledger.limit_usd !== null)
+    throw new Error(
+      "legacy dollar-budget ledger; create a new subscription plan and preserve existing evidence",
+    );
   const invoke = async ({
     label,
     prompt,
@@ -70,16 +195,12 @@ export function createProvider({
     effort,
     cwd,
     systemPrompt = "",
-    reviewer = false,
     allowedTools = [],
     maxTurns = 8,
   }) => {
-    const call = reserveCall(
-      ledger,
-      limit,
-      reviewer ? reviewerCap : graderCap,
-      label,
-    );
+    const callEnv = scrubbedEnv({ env, roots: [repoRoot] });
+    verifySubscription({ cwd, env: callEnv, execAuth, verifyPolicy });
+    const call = reserveCall(ledger, label);
     writeJson(file, ledger);
     // Provider subprocesses cannot launch more providers, edit fixtures, or post.
     // Restricted mode also confines file access to the fixture directory.
@@ -94,8 +215,6 @@ export function createProvider({
         allowedTools: readTools,
         maxTurns,
       }),
-      "--max-budget-usd",
-      String(call.reserved_usd),
       "--no-session-persistence",
       "--restricted",
       "--strict-mcp-config",
@@ -119,7 +238,7 @@ export function createProvider({
       await new Promise((resolve, reject) => {
         const child = spawnProcess("claude", args, {
           cwd,
-          env: scrubbedEnv({ roots: [repoRoot] }),
+          env: callEnv,
           stdio: ["ignore", "pipe", "pipe"],
         });
         const timer = setTimeout(() => {

@@ -22,6 +22,8 @@ import {
 } from "./review-eval-v2-runner.mjs";
 import { reserveCall, settleCall } from "./review-eval-v2-provider.mjs";
 import { metricSummary } from "./review-eval-v2-report.mjs";
+import { digestObject } from "./review-eval-experiment-contract.mjs";
+import { main } from "./review-eval-v2.mjs";
 import { sha256Bytes } from "./review-eval-experiment-cache.mjs";
 
 const skill = { skill_digest: "skill-a" };
@@ -32,6 +34,7 @@ const plan = {
   cli_version: "1",
   prompt_sha256: "prompt",
   execution_digest: "execution",
+  billing_mode: "subscription",
   cells: [{ case_id: "a", treatment: "incumbent" }],
 };
 const fixture = {
@@ -57,6 +60,7 @@ test("raw identity excludes grader and labels, but binds every changed reviewer 
     "cli_version",
     "prompt_sha256",
     "execution_digest",
+    "billing_mode",
   ]) {
     assert.notEqual(
       raw().digest,
@@ -90,15 +94,19 @@ test("rescoring binds raw output and every grading input", () => {
     );
 });
 
-test("reservations survive failure and unknown costs; actual overshoot stops another call", () => {
-  const ledger = { calls: [] };
-  const first = reserveCall(ledger, 6, 5, "review");
-  settleCall(first, { is_error: true });
-  assert.equal(first.charged_usd, 5);
-  const second = reserveCall(ledger, 6, 5, "retry");
-  assert.equal(second.reserved_usd, 1);
-  settleCall(second, { is_error: false, total_cost_usd: 1.2 });
-  assert.throws(() => reserveCall(ledger, 6, 5, "extra"), /budget exhausted/);
+test("subscription usage remains diagnostic after large and unknown values", () => {
+  const ledger = { billing_mode: "subscription", limit_usd: null, calls: [] };
+  const first = reserveCall(ledger, "review");
+  settleCall(first, { is_error: false, total_cost_usd: 1000 });
+  const second = reserveCall(ledger, "retry");
+  settleCall(second, { is_error: true });
+  assert.equal(second.reserved_usd, null);
+  assert.equal(second.actual_usd, null);
+  const report = campaignReport({ plan, rows: [], spend: ledger });
+  assert.equal(report.cost.actual_known_usd, 1000);
+  assert.equal(report.cost.unknown_cost_calls, 1);
+  assert.equal(report.cost.limit_usd, null);
+  assert.match(report.cost.note, /not account charges/);
 });
 
 test("missing cells and runtime errors are incomplete; uncertain valid grading remains diagnostic", () => {
@@ -304,7 +312,13 @@ test("rescoring requires the planned case set before provider or spend access", 
   const options = { incumbent: skillDir, candidate: skillDir };
   const subsetOut = path.join(directory, "subset-run");
   const fullOut = path.join(directory, "full-run");
-  makePlan({ ...options, datasetFile: subsetFile, out: subsetOut });
+  const newPlan = makePlan({
+    ...options,
+    datasetFile: subsetFile,
+    out: subsetOut,
+  });
+  assert.equal(newPlan.billing_mode, "subscription");
+  assert.equal(Object.hasOwn(newPlan, "budget_usd"), false);
   makePlan({ ...options, datasetFile: fullFile, out: fullOut });
   // Both panels are valid. A mismatch must fail before even asking CLI version.
   writeFileSync(cli, "#!/bin/sh\nexit 99\n");
@@ -333,4 +347,29 @@ test("rescoring requires the planned case set before provider or spend access", 
   });
   assert.match(report.failure, /no compatible raw result/);
   assert.equal(report.cost.actual_known_usd, 0);
+});
+
+test("legacy dollar plans are refused before provider access without rewriting artifacts", async (context) => {
+  const out = mkdtempSync(path.join(tmpdir(), "v2-legacy-plan-"));
+  context.after(() => rmSync(out, { recursive: true, force: true }));
+  const legacy = { ...plan, budget_usd: 60 };
+  delete legacy.billing_mode;
+  const bytes = JSON.stringify({
+    ...legacy,
+    plan_digest: digestObject(legacy),
+  });
+  const file = path.join(out, "plan.json");
+  writeFileSync(file, bytes);
+  await assert.rejects(runCampaign({ out }), /legacy dollar-budget plan/);
+  assert.equal(readFileSync(file, "utf8"), bytes);
+  assert.equal(existsSync(path.join(out, "spend.json")), false);
+  assert.equal(existsSync(path.join(out, "active.lock")), false);
+});
+
+test("retired dollar arguments are rejected explicitly before planning or auth", async () => {
+  await assert.rejects(main(["plan", "--budget", "60"]), /--budget is retired/);
+  assert.throws(
+    () => makePlan({ out: path.join(tmpdir(), "unused-v2-plan"), budget: 60 }),
+    /--budget is retired/,
+  );
 });

@@ -64,12 +64,26 @@ The plan pins model, effort, skill content, source, and execution behavior.
 The runner supplies the complete working-tree diff. Reviewers and source graders
 can use Read, Grep, and Glob only. They cannot run tests or shell commands.
 
-Provider-reported dollar figures are API-equivalent usage estimates. They do
-not establish account charges for subscription-backed runs or require separate
-dollar approval. The current runner still enforces its implementation usage
-thresholds. It reserves each call before launch and preserves conservative
-accounting when actual usage is unavailable. Request boundaries can overshoot
-a per-call threshold; inspect the recorded usage and plan controls.
+V2 requires a verified Claude subscription. Before every reviewer or grading
+call, it checks `claude auth status --json` with the same environment, working
+directory, and empty settings sources as the model call. API-key, alternate
+provider, token override, logged-out, and unknown authentication are refused.
+Managed policy files, cached remote policy, policy redirection, and macOS managed
+preferences are also refused because the auth status probe cannot attest their
+effective billing route. V2 does not offer an API billing mode. Sign in through the Claude subscription
+account and remove provider or credential overrides before running.
+
+Subscription runs have no campaign or per-call dollar stop. Provider-reported
+dollar values remain API-equivalent usage estimates; they do not establish an
+account charge. Missing usage stays unknown. Subscription service quotas and
+account billing settings still apply. Each call retains its turn limit,
+20-minute timeout, tool restrictions, and failure records. Concurrency stays one.
+
+`--budget` is retired. Plans from the dollar-budget runtime require a new plan
+and output directory. Keep their evidence with the original pinned runtime;
+this change does not rewrite plans, ledgers, or cached results. The existing
+execution identity checks still reject source drift.
+
 A failed call or missing artifact leaves the run incomplete. Resume the same
 run to reuse valid completed work. Do not retry a valid grade merely to obtain
 a different judgment.
@@ -121,7 +135,7 @@ pnpm docs:index --check
 ```
 
 The tests and source probes validate dataset structure, source repairs, final-artifact handling,
-evidence references, grading completeness, budget accounting, and cache identity.
+evidence references, grading completeness, subscription authentication, usage accounting, and cache identity.
 They do not establish model-grade accuracy. A meaningful accuracy claim needs
 independent domain-expert labels for extraction, matching, and claim correctness,
 with development and held-out examples. Broad review-quality claims also need

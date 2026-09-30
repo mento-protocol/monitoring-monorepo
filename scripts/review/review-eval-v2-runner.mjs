@@ -111,7 +111,8 @@ export function executionIdentity({ plan, fixture, treatment }) {
     source: "direct-review",
     tools: ["Read", "Grep", "Glob"],
     max_turns: 60,
-    reviewer_cap_usd: 5,
+    billing_mode: plan.billing_mode,
+    reviewer_cap_usd: null,
   });
 }
 
@@ -140,15 +141,17 @@ export function makePlan({
   incumbent,
   candidate,
   out,
-  budget = 60,
+  budget,
   model = "claude-opus-5",
   effort = "high",
 }) {
   const root = canonicalPath(out);
   if (root === REPO_ROOT || root.startsWith(`${REPO_ROOT}${path.sep}`))
     throw new Error("artifacts must be outside repository");
-  if (!(budget > 0 && budget <= 60))
-    throw new Error("budget must be greater than zero and at most $60");
+  if (budget !== undefined)
+    throw new Error(
+      "--budget is retired; subscription runs have no dollar stop",
+    );
   const loaded = loadDataset({ file: path.resolve(datasetFile) });
   const skills = Object.fromEntries(
     Object.entries({ incumbent, candidate }).map(([id, file]) => {
@@ -166,7 +169,7 @@ export function makePlan({
     skills,
     model,
     effort,
-    budget_usd: budget,
+    billing_mode: "subscription",
     cli_version: providerVersion(),
     source: "direct-review",
     concurrency: 1,
@@ -205,6 +208,10 @@ function readPlan(out, { scoreOnly = false } = {}) {
   const stored = JSON.parse(readFileSync(path.join(out, "plan.json"), "utf8"));
   const { plan_digest: digest, ...body } = stored;
   if (digestObject(body) !== digest) throw new Error("plan digest mismatch");
+  if (body.billing_mode !== "subscription" || Object.hasOwn(body, "budget_usd"))
+    throw new Error(
+      "legacy dollar-budget plan; create a new subscription plan and preserve existing evidence",
+    );
   if (body.execution_digest !== digestFiles(EXECUTION_FILES))
     throw new Error("execution source changed since plan; create a new plan");
   if (
@@ -288,7 +295,6 @@ export async function runCampaign({
   try {
     provider = createProvider({
       out,
-      limit: plan.budget_usd,
       repoRoot: REPO_ROOT,
       version,
     });
@@ -535,7 +541,7 @@ export function campaignReport({
             (call) => call.actual_usd === null,
           ).length,
           limit_usd: spend.limit_usd,
-          note: "CLI per-call limits may overshoot by one API request; this is a reservation bound, not a billing guarantee.",
+          note: "API-equivalent usage estimates, not account charges. Subscription runs have no dollar stop; missing usage remains unknown.",
         }
       : null,
     rows,
