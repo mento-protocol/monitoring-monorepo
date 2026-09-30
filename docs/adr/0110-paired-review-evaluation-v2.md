@@ -40,6 +40,11 @@ own inputs match. Keep answer-key selection and grading orchestration separate
 from execution code, including score-cache identity, judge calls, and grading
 result handling. Keep judge-specific command construction in grading identity;
 pin shared authentication, transport, and restrictions to both identities.
+Pin the reviewer CLI version, canonical executable path, and entry-file SHA-256
+at planning. Verify that pin before each call and verify entry bytes around
+execution. This does not attest transitive runtime dependencies. Score-only runs
+pin the current grader separately and retain historical raw identity, including
+legacy keys without an executable pin. Legacy plans cannot start new reviews.
 Pin grading source and prompts for the process lifetime, and
 reject source drift before saving results.
 Rescoring keeps each saved review's recorded skill, prompt, and execution

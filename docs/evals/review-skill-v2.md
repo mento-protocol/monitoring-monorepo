@@ -77,7 +77,12 @@ entries are refused because planning and model calls use different directories.
 The selected executable resolves to a canonical file outside the source checkouts
 and invocation directory. Authentication, version checks, and the model call use
 that same resolved path. External installation symlinks remain supported.
-A version mismatch leaves the run incomplete. API-key, alternate
+Planning pins the CLI version, canonical executable path, and SHA-256 of the
+entry file. Each call must match that pin before authentication. Entry bytes and
+version are checked again before model launch and before accepting output. A
+mismatch leaves the run incomplete; completed usage and output remain recorded.
+This pin does not attest interpreters, libraries, or other runtime dependencies.
+API-key, alternate
 provider, token override, logged-out, and unknown authentication are refused.
 Managed policy files, cached remote policy, policy redirection, and macOS managed
 preferences are also refused because the auth status probe cannot attest their
@@ -137,7 +142,11 @@ To add or remove cases, create a new plan.
 Score-only runs use each saved review's recorded skill, reviewer-prompt, and
 execution identity. Later edits to reviewer code or inputs do not prevent
 rescoring. A missing compatible raw result fails without invoking a reviewer.
-Runs that can invoke the reviewer still reject that drift.
+Runs that can invoke the reviewer still reject that drift. Score-only runs
+capture the current grader executable separately and bind its path, entry-file
+hash, and version to grading identity. Historical raw keys without an executable
+pin keep their original form. Such plans support score-only reuse; new reviewer
+calls require a new pinned plan.
 
 Reviewer identity excludes the answer key and grader. Grading identity includes
 the immutable reviewer artifact, answer key and its selection code, grading

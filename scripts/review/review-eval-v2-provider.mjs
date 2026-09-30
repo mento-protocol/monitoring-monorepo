@@ -14,6 +14,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { homedir } from "node:os";
+import { createHash } from "node:crypto";
 import {
   claudeArgv,
   scrubbedEnv,
@@ -103,18 +104,47 @@ function readProviderVersion({ executable, cwd, env, execVersion }) {
   return observed.trim();
 }
 
-export function providerVersion({
+function executableIdentity(executable) {
+  try {
+    const canonical = realpathSync(executable);
+    if (canonical !== executable || !statSync(canonical).isFile())
+      throw new Error("changed executable");
+    accessSync(canonical, constants.X_OK);
+    return {
+      executable: canonical,
+      executable_sha256: createHash("sha256")
+        .update(readFileSync(canonical))
+        .digest("hex"),
+    };
+  } catch {
+    throw new Error("cannot verify provider executable identity");
+  }
+}
+
+function assertExecutable(executable, expected) {
+  const actual = executableIdentity(executable);
+  if (
+    actual.executable !== expected.executable ||
+    actual.executable_sha256 !== expected.executable_sha256
+  )
+    throw new Error("provider executable changed since campaign capture");
+}
+
+export function providerIdentity({
   repoRoot,
   cwd = process.cwd(),
   env = process.env,
   execVersion = execFileSync,
   resolveExecutable = resolveProviderExecutable,
 }) {
-  return readProviderVersion({
-    ...providerRuntime({ repoRoot, cwd, env, resolveExecutable }),
-    execVersion,
-  });
+  const runtime = providerRuntime({ repoRoot, cwd, env, resolveExecutable });
+  const identity = executableIdentity(runtime.executable);
+  const version = readProviderVersion({ ...runtime, execVersion });
+  assertExecutable(runtime.executable, identity);
+  return Object.freeze({ version, ...identity });
 }
+
+export const providerVersion = (options) => providerIdentity(options).version;
 
 // Empty setting sources do not disable managed policy. Refuse its presence
 // instead of attempting to reproduce the CLI's dynamic policy merge.
@@ -315,6 +345,7 @@ export function createProvider({
   limit,
   repoRoot,
   version,
+  expectedRuntime,
   env = process.env,
   execAuth = execFileSync,
   execVersion = execFileSync,
@@ -324,6 +355,37 @@ export function createProvider({
 }) {
   if (typeof version !== "string" || !version.trim())
     throw new Error("expected provider version must be nonempty");
+  if (
+    !expectedRuntime ||
+    expectedRuntime.version !== version ||
+    typeof expectedRuntime.executable !== "string" ||
+    !path.isAbsolute(expectedRuntime.executable) ||
+    typeof expectedRuntime.executable_sha256 !== "string" ||
+    !/^[a-f0-9]{64}$/.test(expectedRuntime.executable_sha256)
+  )
+    throw new Error(
+      "expected provider runtime pin is missing or invalid; create a new plan",
+    );
+  const identity = Object.freeze({
+    version,
+    executable: expectedRuntime.executable,
+    executable_sha256: expectedRuntime.executable_sha256,
+  });
+  const resolvePinned = (cwd) => {
+    const runtime = providerRuntime({ repoRoot, cwd, env, resolveExecutable });
+    assertExecutable(runtime.executable, identity);
+    return runtime;
+  };
+  const checkVersion = (runtime) => {
+    assertExecutable(runtime.executable, identity);
+    const observed = readProviderVersion({ ...runtime, execVersion });
+    assertExecutable(runtime.executable, identity);
+    if (observed !== version)
+      throw new Error("provider version changed since campaign capture");
+    return observed;
+  };
+  const assertRuntime = (cwd) => checkVersion(resolvePinned(cwd));
+
   if (limit !== undefined && limit !== null)
     throw new Error(
       "dollar limits are unsupported for subscription runs; create a new plan",
@@ -360,7 +422,7 @@ export function createProvider({
       { prompt, model, effort, allowedTools: readTools, maxTurns },
       buildArguments,
     );
-    const runtime = providerRuntime({ repoRoot, cwd, env, resolveExecutable });
+    const runtime = resolvePinned(cwd);
     const { env: callEnv, executable } = runtime;
     verifySubscription({
       executable,
@@ -372,6 +434,7 @@ export function createProvider({
     const call = reserveCall(ledger, label);
     call.expected_cli_version = version;
     call.executable = executable;
+    call.executable_sha256 = identity.executable_sha256;
     writeJson(file, ledger);
     // Provider subprocesses cannot launch more providers, edit fixtures, or post.
     // Restricted mode also confines file access to the fixture directory.
@@ -396,15 +459,10 @@ export function createProvider({
     );
     let stdout = "";
     let stderr = "";
-    const checkVersion = (field) => {
-      call[field] = readProviderVersion({ ...runtime, execVersion });
-      if (call[field] !== version)
-        throw new Error("provider version changed since campaign capture");
-    };
     try {
       await new Promise((resolve, reject) => {
         // Auth can take time. Check the same PATH/cwd immediately before spawn.
-        checkVersion("cli_version_before");
+        call.cli_version_before = checkVersion(runtime);
         const child = spawnProcess(executable, args, {
           cwd: runtime.cwd,
           env: callEnv,
@@ -449,7 +507,7 @@ export function createProvider({
       settleCall(call, envelope);
       // Preserve completed output and known usage, but do not cache a result
       // when the runtime changed while the child was running.
-      checkVersion("cli_version_after");
+      call.cli_version_after = checkVersion(runtime);
       if (envelope.is_error || !envelope.result.trim())
         throw new Error("provider returned an incomplete result");
       return {
@@ -473,5 +531,5 @@ export function createProvider({
       writeJson(file, ledger);
     }
   };
-  return { invoke, ledger };
+  return Object.freeze({ invoke, ledger, identity, assertRuntime });
 }

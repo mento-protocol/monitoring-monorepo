@@ -20,6 +20,7 @@ async function cachedCampaign(
   context,
   finalText = () => "No findings.",
   streamText = finalText,
+  legacy = false,
 ) {
   const directory = mkdtempSync(path.join(tmpdir(), "v2-cached-campaign-"));
   context.after(() => rmSync(directory, { recursive: true, force: true }));
@@ -67,6 +68,16 @@ async function cachedCampaign(
     candidate: skillDir,
     out,
   });
+  if (legacy) {
+    delete plan.provider_runtime;
+    const { digestObject } = await import(
+      moduleUrl("review-eval-experiment-contract.mjs")
+    );
+    writeFileSync(
+      path.join(out, "plan.json"),
+      JSON.stringify({ ...plan, plan_digest: digestObject(plan) }),
+    );
+  }
   const rawDigests = [];
   const scoreDigest = scorer.scorerDigestV2();
   for (const cell of plan.cells) {
@@ -110,6 +121,7 @@ async function cachedCampaign(
         model: plan.model,
         effort: plan.effort,
         version: plan.cli_version,
+        runtime: runner.providerIdentity(),
       }),
       payload: {
         status: "complete",
@@ -183,6 +195,7 @@ function freshRescore(c, selectorFile = "review-eval-v2-selection.mjs") {
     const plan = JSON.parse(readFileSync(out + '/plan.json', 'utf8'));
     const dataset = JSON.parse(readFileSync(plan.dataset_file, 'utf8'));
     const digest = scorer.scorerDigestV2();
+    const runtime = runner.providerIdentity();
     const raws = [];
     const priorScores = [];
     for (const cell of plan.cells) {
@@ -190,7 +203,7 @@ function freshRescore(c, selectorFile = "review-eval-v2-selection.mjs") {
       const raw = cache.readExperimentCache({artifactRoot:out, kind:'raw', identity:runner.executionIdentity({plan, fixture, treatment:cell.treatment})});
       if (!raw) throw new Error('raw identity changed');
       raws.push(raw.artifact.content_digest);
-      const identity = runner.scoringIdentity({rawDigest:raw.artifact.content_digest, datasetDigest:plan.dataset_digest, scorerDigest:digest, model:plan.model, effort:plan.effort, version:plan.cli_version});
+      const identity = runner.scoringIdentity({rawDigest:raw.artifact.content_digest, datasetDigest:plan.dataset_digest, scorerDigest:digest, model:plan.model, effort:plan.effort, version:runtime.version,runtime});
       priorScores.push(Boolean(cache.readExperimentCache({artifactRoot:out, kind:'score', identity})));
       cache.writeExperimentCache({artifactRoot:out, kind:'score', identity, payload:{status:'complete', errors:[], claims:[], defects:[], novel:[]}});
     }
@@ -219,8 +232,8 @@ function providerArguments(c) {
     const judgeFile = ${JSON.stringify(path.join(c.copy, "scripts/review/review-eval-v2-judge-provider.mjs"))};
     const invokeJudge = existsSync(judgeFile) ? (await import(${JSON.stringify(c.moduleUrl("review-eval-v2-judge-provider.mjs"))})).invokeJudge : (provider, request) => provider.invoke(request);
     const calls = [];
-    const provider = createProvider({out:${JSON.stringify(path.join(c.directory, "argument-probe"))}, repoRoot:${JSON.stringify(c.copy)}, version:'test', env:{PATH:'/usr/bin:/bin'}, verifyPolicy:()=>{},
-      resolveExecutable:()=>'/trusted/claude',
+    const provider = createProvider({out:${JSON.stringify(path.join(c.directory, "argument-probe"))}, repoRoot:${JSON.stringify(c.copy)}, version:'test', expectedRuntime:{...${JSON.stringify(c.plan.provider_runtime)},version:'test'}, env:{PATH:'/usr/bin:/bin'}, verifyPolicy:()=>{},
+      resolveExecutable:()=>${JSON.stringify(c.plan.provider_runtime.executable)},
       execVersion:()=> 'test',
       execAuth:()=>JSON.stringify({loggedIn:true,authMethod:'claude.ai',apiProvider:'firstParty',subscriptionType:'max'}),
       spawnProcess:(name,args)=>{
@@ -489,5 +502,79 @@ test("grading orchestration and leak-helper changes reuse reviewer artifacts in 
       assert.equal(result.report.cost.actual_known_usd, 0);
       assert.equal(existsSync(path.join(c.out, "spend.json")), false);
     });
+  }
+});
+
+test("same-version runtime changes reject reviewer resume but allow current-runtime rescoring of saved raw", async (context) => {
+  for (const legacy of [false, true]) {
+    await context.test(
+      legacy ? "historical unpinned raw" : "pinned raw",
+      async (child) => {
+        const c = await cachedCampaign(
+          child,
+          () => "No findings.",
+          undefined,
+          legacy,
+        );
+        const planBytes = readFileSync(path.join(c.out, "plan.json"), "utf8");
+        const original = path.join(c.directory, "bin/claude");
+        const changedBin = path.join(c.directory, "new-bin");
+        mkdirSync(changedBin);
+        writeFileSync(
+          path.join(changedBin, "claude"),
+          readFileSync(original, "utf8") +
+            "# different same-version installation\n",
+          { mode: 0o755 },
+        );
+        process.env.PATH = changedBin;
+        const observed = execFileSync(
+          process.execPath,
+          [
+            "--input-type=module",
+            "-e",
+            `
+        const runner=await import(${JSON.stringify(c.moduleUrl("review-eval-v2-runner.mjs"))});
+        try { const report=await runner.runCampaign({out:${JSON.stringify(c.out)}}); process.stdout.write(JSON.stringify(report)); }
+        catch(error) { process.stdout.write(JSON.stringify({failure:error.message})); }
+      `,
+          ],
+          { encoding: "utf8", env: process.env },
+        );
+        assert.match(
+          JSON.parse(observed).failure,
+          legacy
+            ? /plan lacks a provider runtime pin/
+            : /provider executable changed/,
+        );
+        const result = freshRescore(c);
+        assert.equal(result.report.status, "completed");
+        assert.equal(result.report.completed_cells, c.plan.cells.length);
+        assert.deepEqual(result.raws, c.rawDigests);
+        assert.ok(
+          result.priorScores.every((present) => !present),
+          "current grader runtime gets a separate score identity",
+        );
+        assert.ok(
+          result.report.rows.every((row) => row.raw_reused && row.score_reused),
+        );
+        assert.equal(
+          readFileSync(path.join(c.out, "plan.json"), "utf8"),
+          planBytes,
+        );
+        assert.equal(existsSync(path.join(c.out, "spend.json")), false);
+        if (legacy) {
+          const rawId = c.runner.executionIdentity({
+            plan: c.plan,
+            fixture: c.dataset.cases[0],
+            treatment: "incumbent",
+          });
+          assert.equal(
+            Object.hasOwn(rawId, "provider_runtime"),
+            false,
+            "old raw key shape must remain exact",
+          );
+        }
+      },
+    );
   }
 });

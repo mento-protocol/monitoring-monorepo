@@ -1,4 +1,5 @@
 import test from "node:test";
+import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { EventEmitter } from "node:events";
@@ -24,7 +25,6 @@ import {
 import { invokeJudge } from "./review-eval-v2-judge-provider.mjs";
 import { claudeArgv } from "./review-eval-run-execution.mjs";
 import * as providerModule from "./review-eval-v2-provider.mjs";
-import { providerVersion as legacyCapture } from "./review-eval-v2-runner.mjs";
 
 const subscription = {
   loggedIn: true,
@@ -49,13 +49,23 @@ function setup(
   const authCalls = [];
   const versionCalls = [];
   const modelCalls = [];
+  const executable = path.join(out, "fake-cli");
+  writeFileSync(executable, "controlled transport fixture", { mode: 0o755 });
+  const expectedRuntime = {
+    version: "test",
+    executable: realpathSync(executable),
+    executable_sha256: createHash("sha256")
+      .update(readFileSync(executable))
+      .digest("hex"),
+  };
   const options = {
     out,
+    expectedRuntime,
     repoRoot: out,
     version: "test",
     env: { PATH: "/usr/bin:/bin", ...env },
     verifyPolicy: () => {},
-    resolveExecutable: () => "/trusted/claude",
+    resolveExecutable: () => expectedRuntime.executable,
     execVersion: (name, args, settings) => {
       versionCalls.push({ name, args, settings });
       return "test";
@@ -138,6 +148,13 @@ test("external PATH symlinks into excluded source directories cannot execute", a
         out,
         repoRoot,
         version: "test",
+        expectedRuntime: {
+          version: "test",
+          executable: realpathSync(path.join(laterBin, "claude")),
+          executable_sha256: createHash("sha256")
+            .update(readFileSync(path.join(laterBin, "claude")))
+            .digest("hex"),
+        },
         env,
         verifyPolicy: () => {},
       });
@@ -197,11 +214,17 @@ printf '%s\\n' '{"type":"result","is_error":false,"result":"safe-global-cli","to
     PATH: [nonexecutableBin, directoryBin, bin].join(path.delimiter),
     SHIM_LOG: log,
   };
-  const version = providerModule.providerVersion({ repoRoot, cwd, env });
+  const expectedRuntime = providerModule.providerIdentity({
+    repoRoot,
+    cwd,
+    env,
+  });
+  const version = expectedRuntime.version;
   const provider = createProvider({
     out: path.join(root, "evidence"),
     repoRoot,
     version,
+    expectedRuntime,
     env,
     verifyPolicy: () => {},
     execAuth: (...args) => {
@@ -274,24 +297,18 @@ printf '%s\\n' '{"type":"result","is_error":false,"result":"controlled-shim-resu
     "checkout-cli",
     "the unsanitized route must actually resolve the conflicting CLI",
   );
-  const oldPath = process.env.PATH;
-  process.env.PATH = env.PATH;
-  let version;
-  try {
-    version = (providerModule.providerVersion ?? legacyCapture)({
-      repoRoot,
-      cwd,
-      env,
-    });
-  } finally {
-    if (oldPath === undefined) delete process.env.PATH;
-    else process.env.PATH = oldPath;
-  }
+  const expectedRuntime = providerModule.providerIdentity({
+    repoRoot,
+    cwd,
+    env,
+  });
+  const version = expectedRuntime.version;
   assert.equal(version, "provider-cli");
   const provider = createProvider({
     out: path.join(root, "evidence"),
     repoRoot,
     version,
+    expectedRuntime,
     env,
     verifyPolicy: () => {},
   });
@@ -571,7 +588,7 @@ test("provider version changes between calls reject the next judge before launch
   assert.equal(s.modelCalls.length, 1);
   assert.equal(provider.ledger.calls[1].state, "failed");
   for (const probe of s.versionCalls) {
-    assert.equal(probe.name, "/trusted/claude");
+    assert.equal(probe.name, s.options.expectedRuntime.executable);
     assert.deepEqual(probe.args, ["--version"]);
     assert.equal(probe.settings.cwd, s.modelCalls[0].settings.cwd);
     assert.deepEqual(probe.settings.env, s.modelCalls[0].settings.env);
@@ -816,5 +833,139 @@ test("relative config policy is inspected from the auth and model working direct
     assert.equal(inspected.at(-1), config);
     assert.equal(s.authCalls[1].settings.env.CLAUDE_CONFIG_DIR, config);
     assert.deepEqual(s.authCalls[1].settings.env, s.modelCalls[1].settings.env);
+  }
+});
+
+// Real executable fixtures exercise identity independently of the injected transport.
+test("campaign pins reject same-version executable changes before authentication", async (context) => {
+  for (const change of ["path", "symlink", "bytes"]) {
+    await context.test(change, async (child) => {
+      const root = mkdtempSync(path.join(tmpdir(), "v2-runtime-pin-"));
+      child.after(() => rmSync(root, { recursive: true, force: true }));
+      const repoRoot = path.join(root, "repo");
+      const bin = path.join(root, "bin");
+      const other = path.join(root, "other");
+      for (const dir of [repoRoot, bin, other]) mkdirSync(dir);
+      const log = path.join(root, "calls");
+      const script = `#!/bin/sh
+if [ "$1" = "--version" ]; then printf '%s\\n' 'same-version'; exit 0; fi
+printf '%s\\n' 'called' >> "$SHIM_LOG"
+if [ "$3" = "auth" ]; then printf '%s\\n' '${JSON.stringify(subscription)}'; exit 0; fi
+printf '%s\\n' '{"type":"result","is_error":false,"result":"ok","total_cost_usd":0}'
+`;
+      const original = path.join(bin, "original");
+      const alias = path.join(bin, "claude");
+      const alternate = path.join(other, "claude");
+      writeFileSync(original, script, { mode: 0o755 });
+      writeFileSync(alternate, script + "# alternate\n", { mode: 0o755 });
+      symlinkSync(original, alias);
+      const env = { PATH: bin, SHIM_LOG: log };
+      const expectedRuntime = providerModule.providerIdentity({
+        repoRoot,
+        cwd: repoRoot,
+        env,
+      });
+      const provider = createProvider({
+        out: path.join(root, "out"),
+        repoRoot,
+        version: expectedRuntime.version,
+        expectedRuntime,
+        env,
+        verifyPolicy: () => {},
+      });
+      await provider.invoke({ ...request, cwd: repoRoot });
+      assert.equal(readFileSync(log, "utf8").trim().split("\n").length, 2);
+      if (change === "path") env.PATH = other;
+      else if (change === "symlink") {
+        unlinkSync(alias);
+        symlinkSync(alternate, alias);
+      } else
+        writeFileSync(original, script + "# changed bytes\n", { mode: 0o755 });
+      await assert.rejects(
+        provider.invoke({ ...request, cwd: repoRoot }),
+        /provider executable changed/,
+      );
+      assert.equal(
+        readFileSync(log, "utf8").trim().split("\n").length,
+        2,
+        "no auth or model call after identity drift",
+      );
+      assert.equal(provider.ledger.calls.length, 1);
+    });
+  }
+});
+
+test("runtime pins are required and copied before callers can mutate them", async (context) => {
+  const s = setup(context);
+  for (const expectedRuntime of [
+    undefined,
+    {},
+    { ...s.options.expectedRuntime, executable: "relative" },
+    { ...s.options.expectedRuntime, executable_sha256: "bad" },
+  ])
+    assert.throws(
+      () => createProvider({ ...s.options, expectedRuntime }),
+      /runtime pin/,
+    );
+  const provider = createProvider(s.options);
+  assert.equal(Object.isFrozen(provider.identity), true);
+  const pinned = { ...provider.identity };
+  s.options.expectedRuntime.executable_sha256 = "0".repeat(64);
+  assert.deepEqual(provider.identity, pinned);
+  await s.invoke(provider);
+});
+
+test("capture rejects entry bytes replaced while reading the version", (context) => {
+  const s = setup(context);
+  assert.throws(
+    () =>
+      providerModule.providerIdentity({
+        ...s.options,
+        cwd: s.out,
+        execVersion: () => {
+          writeFileSync(s.options.expectedRuntime.executable, "changed");
+          return "test";
+        },
+      }),
+    /provider executable changed/,
+  );
+});
+
+test("entry-byte drift during auth or model execution cannot yield a cacheable result", async (context) => {
+  for (const phase of ["auth", "model"]) {
+    await context.test(phase, async (child) => {
+      const s = setup(child, { costs: [0.25] });
+      const mutate = () =>
+        writeFileSync(
+          s.options.expectedRuntime.executable,
+          "replacement bytes",
+        );
+      if (phase === "auth") {
+        const original = s.options.execAuth;
+        s.options.execAuth = (...args) => {
+          const result = original(...args);
+          mutate();
+          return result;
+        };
+      } else {
+        const original = s.options.spawnProcess;
+        s.options.spawnProcess = (...args) => {
+          const result = original(...args);
+          queueMicrotask(mutate);
+          return result;
+        };
+      }
+      const provider = createProvider(s.options);
+      await assert.rejects(s.invoke(provider), /provider executable changed/);
+      assert.equal(provider.ledger.calls[0].state, "failed");
+      assert.equal(s.modelCalls.length, Number(phase === "model"));
+      const artifact = JSON.parse(
+        readFileSync(path.join(s.out, "calls/0000.json"), "utf8"),
+      );
+      if (phase === "model") {
+        assert.match(artifact.stdout, /Final review/);
+        assert.equal(provider.ledger.calls[0].actual_usd, 0.25);
+      }
+    });
   }
 });

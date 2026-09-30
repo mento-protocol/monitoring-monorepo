@@ -17,7 +17,7 @@ import {
 import { loadDataset, verifyCaseProbes } from "./review-eval-v2-dataset.mjs";
 import {
   createProvider,
-  providerVersion as captureProviderVersion,
+  providerIdentity as captureProviderIdentity,
   writeJson,
 } from "./review-eval-v2-provider.mjs";
 import { gradeCell, finishCampaign } from "./review-eval-v2-grading.mjs";
@@ -49,8 +49,10 @@ const digestFiles = (files) =>
     ]),
   );
 const keyed = (value) => ({ ...value, digest: digestObject(value) });
+export const providerIdentity = (cwd = REPO_ROOT) =>
+  captureProviderIdentity({ repoRoot: REPO_ROOT, cwd });
 export const providerVersion = (cwd = REPO_ROOT) =>
-  captureProviderVersion({ repoRoot: REPO_ROOT, cwd });
+  providerIdentity(cwd).version;
 
 const gitText = (cwd, args) =>
   execFileSync("git", args, {
@@ -107,6 +109,9 @@ export function executionIdentity({ plan, fixture, treatment }) {
     model: plan.model,
     effort: plan.effort,
     cli_version: plan.cli_version,
+    ...(plan.provider_runtime
+      ? { provider_runtime: plan.provider_runtime }
+      : {}),
     prompt_sha256: plan.prompt_sha256,
     execution_digest: plan.execution_digest,
     source: "direct-review",
@@ -147,6 +152,7 @@ export function makePlan({
       ];
     }),
   );
+  const runtime = providerIdentity();
   const plan = {
     schema_version: 2,
     dataset_file: path.resolve(datasetFile),
@@ -155,7 +161,8 @@ export function makePlan({
     model,
     effort,
     billing_mode: "subscription",
-    cli_version: providerVersion(),
+    cli_version: runtime.version,
+    provider_runtime: runtime,
     source: "direct-review",
     concurrency: 1,
     draws: 1,
@@ -203,6 +210,10 @@ function readPlan(out, { scoreOnly = false } = {}) {
   if (body.billing_mode !== "subscription" || Object.hasOwn(body, "budget_usd"))
     throw new Error(
       "legacy dollar-budget plan; create a new subscription plan and preserve existing evidence",
+    );
+  if (!scoreOnly && !body.provider_runtime)
+    throw new Error(
+      "plan lacks a provider runtime pin; create a new plan or use score-only for saved reviews",
     );
   if (!scoreOnly && body.execution_digest !== digestFiles(EXECUTION_FILES))
     throw new Error("execution source changed since plan; create a new plan");
@@ -276,9 +287,8 @@ export async function runCampaign({
   }
   if (!scoreOnly && loaded.digest !== plan.dataset_digest)
     throw new Error("dataset changed since planning");
-  const version = providerVersion();
-  if (!scoreOnly && version !== plan.cli_version)
-    throw new Error("provider version changed since planning");
+  const runtime = scoreOnly ? providerIdentity() : plan.provider_runtime;
+  const version = scoreOnly ? runtime.version : plan.cli_version;
   const lock = path.join(out, "active.lock");
   mkdirSync(lock); // An abandoned lock requires operator inspection, never an automatic takeover.
   const rows = [];
@@ -290,6 +300,7 @@ export async function runCampaign({
       out,
       repoRoot: REPO_ROOT,
       version,
+      expectedRuntime: runtime,
     });
     for (const cell of plan.cells) {
       // Saved reviews retain the execution identity that produced them. Current
@@ -297,8 +308,7 @@ export async function runCampaign({
       scorerDigestV2();
       if (!scoreOnly && digestFiles(EXECUTION_FILES) !== plan.execution_digest)
         throw new Error("execution source changed during campaign");
-      if (providerVersion() !== version)
-        throw new Error("provider version changed during campaign");
+      provider.assertRuntime(REPO_ROOT);
       const fixture = loaded.dataset.cases.find(
         (item) => item.id === cell.case_id,
       );
@@ -385,7 +395,6 @@ export async function runCampaign({
           raw,
           reused,
           loaded,
-          version,
           out,
           provider,
           prepare,
@@ -404,6 +413,7 @@ export async function runCampaign({
     rows,
     failure,
     spend: provider?.ledger ?? null,
+    gradingRuntime: provider?.identity ?? null,
     datasetDigest: loaded.digest,
     out,
     started,

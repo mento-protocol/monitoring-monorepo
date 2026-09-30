@@ -22,6 +22,7 @@ export function scoringIdentity({
   model,
   effort,
   version,
+  runtime,
 }) {
   return keyed({
     namespace: "review-eval-v2",
@@ -32,6 +33,7 @@ export function scoringIdentity({
     model,
     effort,
     cli_version: version,
+    provider_runtime: runtime,
   });
 }
 
@@ -42,7 +44,6 @@ export async function gradeCell({
   raw,
   reused,
   loaded,
-  version,
   out,
   provider,
   prepare,
@@ -76,7 +77,8 @@ export async function gradeCell({
     scorerDigest: scorerDigestV2(),
     model: plan.model,
     effort: plan.effort,
-    version,
+    version: provider.identity.version,
+    runtime: provider.identity,
   });
   let scored = readExperimentCache({
     artifactRoot: out,
@@ -165,6 +167,7 @@ export function finishCampaign({
   datasetDigest,
   out,
   started,
+  gradingRuntime,
 }) {
   let gradingSourceFailure = null;
   try {
@@ -193,6 +196,7 @@ export function finishCampaign({
         spend,
         datasetDigest,
       });
+  report.grading_runtime = gradingRuntime ?? null;
   report.elapsed_ms = Date.now() - started;
   writeJson(path.join(out, "report.json"), report);
   return report;
