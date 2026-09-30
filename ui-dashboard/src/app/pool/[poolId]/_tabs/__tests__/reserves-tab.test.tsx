@@ -5,7 +5,12 @@ import type { Pool, ReserveUpdate } from "@/lib/types";
 
 // Hoist mocks so they're applied before the SUT imports its dependencies.
 const mockUseGQL = vi.fn();
+const mockUseHistory = vi.fn();
 let capturedChartRows: ReserveUpdate[] | null = null;
+
+vi.mock("@/hooks/use-pool-reserve-history", () => ({
+  usePoolReserveHistory: (...args: unknown[]) => mockUseHistory(...args),
+}));
 
 vi.mock("@/lib/graphql", () => ({
   useGQL: (...args: unknown[]) => mockUseGQL(...args),
@@ -115,11 +120,19 @@ const ROWS_DESC: ReserveUpdate[] = [
 ];
 
 describe("ReservesTab ordering contract", () => {
-  it("feeds the chart chronological (asc) rows and renders the table newest-first (desc)", () => {
+  it("uses independent chart history and renders the table newest-first", () => {
     capturedChartRows = null;
     mockUseGQL.mockReturnValue({
       data: { ReserveUpdate: ROWS_DESC },
       error: null,
+      isLoading: false,
+    });
+    const historyRows = [
+      { ...ROWS_DESC[2]!, id: "older", blockNumber: "1" },
+      ...ROWS_DESC,
+    ].reverse();
+    mockUseHistory.mockReturnValue({
+      data: { rows: historyRows, from: 0, to: 4000, truncated: false },
       isLoading: false,
     });
 
@@ -133,13 +146,8 @@ describe("ReservesTab ordering contract", () => {
       />,
     );
 
-    // Chart contract: chronological (asc) so plotly's x-axis renders left-to-right in time order.
-    expect(capturedChartRows).not.toBeNull();
-    expect(capturedChartRows!.map((r) => r.blockNumber)).toEqual([
-      "10",
-      "20",
-      "30",
-    ]);
+    expect(capturedChartRows).toBe(historyRows);
+    expect(mockUseHistory).toHaveBeenCalledWith("42220-0xpool", "1d");
 
     // Table contract: newest-first (desc). The first txHash in document order
     // is the newest row; the last is the oldest.
@@ -159,6 +167,7 @@ describe("ReservesTab loading skeleton", () => {
       error: undefined,
       isLoading: true,
     });
+    mockUseHistory.mockReturnValue({ data: undefined, isLoading: true });
 
     const html = renderToStaticMarkup(
       <ReservesTab

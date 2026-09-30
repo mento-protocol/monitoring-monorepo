@@ -323,6 +323,28 @@ export const POOL_RESERVES = `
   }
 `;
 
+// Independent chart history. The block/id cursor avoids offset drift while
+// the indexer appends events. Each request stays within Hasura's 1,000-row cap.
+export const POOL_RESERVE_HISTORY = `
+  query PoolReserveHistory($poolId: String!, $from: numeric!, $to: numeric!, $afterBlock: numeric!, $afterId: String!, $limit: Int!) {
+    ReserveUpdate(
+      where: {
+        poolId: { _eq: $poolId }
+        blockTimestamp: { _gte: $from, _lte: $to }
+        _or: [
+          { blockNumber: { _gt: $afterBlock } }
+          { blockNumber: { _eq: $afterBlock }, id: { _gt: $afterId } }
+        ]
+      }
+      order_by: [{ blockNumber: asc }, { id: asc }]
+      limit: $limit
+    ) {
+      id chainId reserve0 reserve1
+      txHash blockNumber blockTimestamp
+    }
+  }
+`;
+
 export const POOL_REBALANCES = `
   query PoolRebalances($poolId: String!, $limit: Int!) {
     RebalanceEvent(

@@ -2,7 +2,7 @@
 
 import { EmptyBox, ErrorBox } from "@/components/feedback";
 import { useNetwork } from "@/components/network-provider";
-import { ReserveChart } from "@/components/reserve-chart";
+import { PoolReserveHistoryChart } from "@/components/pool-reserve-history-chart";
 import { TableSkeleton } from "@/components/skeletons";
 import { Row, Table, Td, Th } from "@/components/table";
 import { TableSearch } from "@/components/table-search";
@@ -39,7 +39,7 @@ function reserveUsdSplit(
   return { usd0, usd1, total: usd0 + usd1 };
 }
 
-// eslint-disable-next-line max-lines-per-function -- Existing tab keeps reserve fetching, search filtering, chart, and table rendering together; this PR only swaps the loading skeleton to the shared row-count-matched primitive.
+// eslint-disable-next-line max-lines-per-function -- This tab renders reserve fetching, search controls, the table, and an independent history chart.
 export function ReservesTab({
   poolId,
   limit,
@@ -62,12 +62,10 @@ export function ReservesTab({
   const query = normalizeSearch(search);
 
   const rows = data?.ReserveUpdate ?? [];
+  const dec0 = pool?.token0Decimals ?? 18;
+  const dec1 = pool?.token1Decimals ?? 18;
   const sym0 = tokenSymbol(network, pool?.token0 ?? null);
   const sym1 = tokenSymbol(network, pool?.token1 ?? null);
-
-  // Query is desc so the 25-row limit captures recent updates (not the
-  // pool's first day); chart needs chronological order for plotting.
-  const chartRows = useMemo(() => [...rows].reverse(), [rows]);
 
   const feedVal =
     pool?.oraclePrice && pool.oraclePrice !== "0"
@@ -86,8 +84,8 @@ export function ReservesTab({
         r.txHash,
         sym0,
         sym1,
-        formatWei(r.reserve0, pool?.token0Decimals ?? 18, 2),
-        formatWei(r.reserve1, pool?.token1Decimals ?? 18, 2),
+        formatWei(r.reserve0, dec0, 2),
+        formatWei(r.reserve1, dec1, 2),
         showUsd
           ? total.toLocaleString(undefined, {
               minimumFractionDigits: 2,
@@ -97,109 +95,117 @@ export function ReservesTab({
         r.blockNumber,
       ]);
     });
-  }, [rows, query, sym0, sym1, pool, feedVal, usdmIsToken0, showUsd]);
+  }, [
+    rows,
+    query,
+    sym0,
+    sym1,
+    pool,
+    dec0,
+    dec1,
+    feedVal,
+    usdmIsToken0,
+    showUsd,
+  ]);
 
-  if (hasErrorWithoutData(error, data))
-    return <ErrorBox message={error.message} />;
-  if (isLoadingWithoutData(isLoading, data))
-    return <TableSkeleton variant="rows" rows={limit} />;
-  if (rows.length === 0)
-    return <EmptyBox message="No reserve updates for this pool." />;
   return (
     <>
-      <ReserveChart
-        rows={chartRows}
-        token0={pool?.token0 ?? null}
-        token1={pool?.token1 ?? null}
-        pool={pool}
-      />
-      <TableSearch
-        value={search}
-        onChange={onSearchChange}
-        placeholder="Search reserves by tx, token, amount, or block…"
-        ariaLabel="Search reserves"
-      />
-      {filteredRows.length === 0 ? (
-        <EmptyBox message="No reserve updates match your search." />
+      <PoolReserveHistoryChart key={poolId} poolId={poolId} pool={pool} />
+      {hasErrorWithoutData(error, data) ? (
+        <ErrorBox message={error.message} />
+      ) : isLoadingWithoutData(isLoading, data) ? (
+        <TableSkeleton variant="rows" rows={limit} />
+      ) : rows.length === 0 ? (
+        <EmptyBox message="No reserve updates for this pool." />
       ) : (
-        <Table>
-          <thead>
-            <tr className="border-b border-slate-800 bg-slate-900/50">
-              <Th>Tx</Th>
-              <Th align="right">{sym0} Reserve</Th>
-              <Th align="right">{sym1} Reserve</Th>
-              {showUsd && <Th align="right">Total (USD)</Th>}
-              <th
-                scope="col"
-                className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400 text-right"
-              >
-                Block
-              </th>
-              <Th>Time</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredRows.map((r) => {
-              const { usd0, usd1, total } = reserveUsdSplit(
-                r,
-                pool,
-                feedVal,
-                usdmIsToken0,
-              );
-
-              return (
-                <Row key={r.id}>
-                  <TxHashCell txHash={r.txHash} />
-                  <Td mono small align="right">
-                    <div>
-                      {formatWei(r.reserve0, pool?.token0Decimals ?? 18, 2)}{" "}
-                      {sym0}
-                    </div>
-                    {showUsd && (
-                      <div className="text-xs text-slate-500">
-                        ≈ $
-                        {usd0.toLocaleString(undefined, {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}
-                      </div>
-                    )}
-                  </Td>
-                  <Td mono small align="right">
-                    <div>
-                      {formatWei(r.reserve1, pool?.token1Decimals ?? 18, 2)}{" "}
-                      {sym1}
-                    </div>
-                    {showUsd && (
-                      <div className="text-xs text-slate-500">
-                        ≈ $
-                        {usd1.toLocaleString(undefined, {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}
-                      </div>
-                    )}
-                  </Td>
-                  {showUsd && (
-                    <Td mono small align="right">
-                      {`$${total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-                    </Td>
-                  )}
-                  <td className="hidden sm:table-cell px-2 sm:px-4 py-1.5 sm:py-2 font-mono text-[10px] sm:text-xs text-slate-400 text-right">
-                    {formatBlock(r.blockNumber)}
-                  </td>
-                  <Td
-                    small
-                    muted
-                    title={timestampOrUtc(r.blockTimestamp, nowSeconds)}
+        <>
+          <TableSearch
+            value={search}
+            onChange={onSearchChange}
+            placeholder="Search reserves by tx, token, amount, or block…"
+            ariaLabel="Search reserves"
+          />
+          {filteredRows.length === 0 ? (
+            <EmptyBox message="No reserve updates match your search." />
+          ) : (
+            <Table>
+              <thead>
+                <tr className="border-b border-slate-800 bg-slate-900/50">
+                  <Th>Tx</Th>
+                  <Th align="right">{sym0} Reserve</Th>
+                  <Th align="right">{sym1} Reserve</Th>
+                  {showUsd && <Th align="right">Total (USD)</Th>}
+                  <th
+                    scope="col"
+                    className="hidden sm:table-cell px-2 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium text-slate-400 text-right"
                   >
-                    {relativeTimeOrTimestamp(r.blockTimestamp, nowSeconds)}
-                  </Td>
-                </Row>
-              );
-            })}
-          </tbody>
-        </Table>
+                    Block
+                  </th>
+                  <Th>Time</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredRows.map((r) => {
+                  const { usd0, usd1, total } = reserveUsdSplit(
+                    r,
+                    pool,
+                    feedVal,
+                    usdmIsToken0,
+                  );
+
+                  return (
+                    <Row key={r.id}>
+                      <TxHashCell txHash={r.txHash} />
+                      <Td mono small align="right">
+                        <div>
+                          {formatWei(r.reserve0, dec0, 2)} {sym0}
+                        </div>
+                        {showUsd && (
+                          <div className="text-xs text-slate-500">
+                            ≈ $
+                            {usd0.toLocaleString(undefined, {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}
+                          </div>
+                        )}
+                      </Td>
+                      <Td mono small align="right">
+                        <div>
+                          {formatWei(r.reserve1, dec1, 2)} {sym1}
+                        </div>
+                        {showUsd && (
+                          <div className="text-xs text-slate-500">
+                            ≈ $
+                            {usd1.toLocaleString(undefined, {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}
+                          </div>
+                        )}
+                      </Td>
+                      {showUsd && (
+                        <Td mono small align="right">
+                          {`$${total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                        </Td>
+                      )}
+                      <td className="hidden sm:table-cell px-2 sm:px-4 py-1.5 sm:py-2 font-mono text-[10px] sm:text-xs text-slate-400 text-right">
+                        {formatBlock(r.blockNumber)}
+                      </td>
+                      <Td
+                        small
+                        muted
+                        title={timestampOrUtc(r.blockTimestamp, nowSeconds)}
+                      >
+                        {relativeTimeOrTimestamp(r.blockTimestamp, nowSeconds)}
+                      </Td>
+                    </Row>
+                  );
+                })}
+              </tbody>
+            </Table>
+          )}
+        </>
       )}
     </>
   );

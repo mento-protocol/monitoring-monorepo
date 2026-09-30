@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import type { ReactNode } from "react";
 import type { Pool, ReserveUpdate } from "@/lib/types";
 import { tokenSymbol, USDM_SYMBOLS } from "@/lib/tokens";
 import { useNetwork } from "@/components/network-provider";
@@ -17,11 +18,19 @@ import {
 // Plotly must be loaded client-side only (no SSR)
 const Plot = dynamic(() => import("@/lib/react-plotly-basic"), { ssr: false });
 
-function makeReserveChartLayout(yAxisTitle: string) {
+function makeReserveChartLayout(
+  yAxisTitle: string,
+  timeWindow?: [number, number],
+) {
   return {
     ...PLOTLY_BASE_LAYOUT,
     font: { ...PLOTLY_BASE_LAYOUT.font, size: 11 },
-    xaxis: makeDateXAxis(RANGE_SELECTOR_BUTTONS_HOURLY),
+    xaxis: {
+      ...makeDateXAxis(timeWindow ? [] : RANGE_SELECTOR_BUTTONS_HOURLY),
+      ...(timeWindow && {
+        range: timeWindow.map((ts) => new Date(ts * 1000).toISOString()),
+      }),
+    },
     yaxis: { title: { text: yAxisTitle }, ...PLOTLY_AXIS_DEFAULTS },
     legend: {
       ...PLOTLY_LEGEND,
@@ -38,27 +47,29 @@ function makeReserveChartLayout(yAxisTitle: string) {
 }
 
 interface ReserveChartProps {
-  rows: ReserveUpdate[];
+  rows: Pick<
+    ReserveUpdate,
+    "id" | "reserve0" | "reserve1" | "blockTimestamp"
+  >[];
   token0: string | null;
   token1: string | null;
   pool?: Pool | null;
+  controls?: ReactNode;
+  timeWindow?: [number, number] | undefined;
+  isLoading?: boolean;
+  error?: string | undefined;
+  truncated?: boolean;
 }
 
-export function ReserveChart({
-  rows,
-  token0,
-  token1,
-  pool,
-}: ReserveChartProps) {
-  const { network } = useNetwork();
-  if (rows.length === 0 || pool?.tokenDecimalsKnown !== true) return null;
-
-  const sym0 = tokenSymbol(network, token0);
-  const sym1 = tokenSymbol(network, token1);
-
+function reserveChartData(
+  rows: ReserveChartProps["rows"],
+  pool: Pool,
+  sym0: string,
+  sym1: string,
+) {
   // Convert to USD using current oracle price (same approach as liquidity chart).
   // feedValue = oraclePrice / 1e24 (feed direction = "feedToken/USD", no inversion needed).
-  const rawOraclePrice = pool?.oraclePrice ?? "0";
+  const rawOraclePrice = pool.oraclePrice ?? "0";
   const feedVal =
     rawOraclePrice && rawOraclePrice !== "0"
       ? Number(rawOraclePrice) / 10 ** 24
@@ -81,7 +92,7 @@ export function ReserveChart({
     return usdmIsToken0 ? amount * feedVal : amount;
   };
 
-  // rows arrive in chronological (asc) order — see reserves-tab.tsx
+  // History rows arrive in chronological event order, independent of the table.
   const timestamps = rows.map((r) =>
     new Date(Number(r.blockTimestamp) * 1000).toISOString(),
   );
@@ -125,34 +136,105 @@ export function ReserveChart({
     yaxis: "y" as const,
   };
 
-  const layout = makeReserveChartLayout(yAxisTitle);
-
   const subtitle = useUsd
     ? "Estimated using current oracle price — balanced pool = lines overlap"
     : null;
+
+  return { traces: [trace0, trace1], yAxisTitle, subtitle };
+}
+
+function ReserveChartStatus({
+  error,
+  truncated,
+  rows,
+  isLoading,
+}: Pick<ReserveChartProps, "error" | "truncated" | "rows" | "isLoading">) {
+  return (
+    <>
+      {error && (
+        <p role="alert" className="mb-2 text-sm text-amber-400">
+          Reserve history unavailable: {error}
+        </p>
+      )}
+      {truncated && (
+        <p role="status" className="mb-2 text-sm text-amber-400">
+          Showing the first {rows.length.toLocaleString()} reserve updates in
+          this range. Later updates are omitted. Select a shorter range for
+          complete history.
+        </p>
+      )}
+      {rows.length === 0 && (
+        <div
+          className="flex h-80 items-center justify-center text-sm text-slate-400"
+          role="status"
+        >
+          {isLoading
+            ? "Loading reserve history…"
+            : error
+              ? "Select another range or wait for the next retry."
+              : "No reserve updates in this time range."}
+        </div>
+      )}
+    </>
+  );
+}
+
+export function ReserveChart({
+  rows,
+  token0,
+  token1,
+  pool,
+  controls,
+  timeWindow,
+  isLoading = false,
+  error,
+  truncated = false,
+}: ReserveChartProps) {
+  const { network } = useNetwork();
+  if (pool?.tokenDecimalsKnown !== true) return null;
+
+  const sym0 = tokenSymbol(network, token0);
+  const sym1 = tokenSymbol(network, token1);
+
+  const { traces, yAxisTitle, subtitle } = reserveChartData(
+    rows,
+    pool,
+    sym0,
+    sym1,
+  );
+  const layout = makeReserveChartLayout(yAxisTitle, timeWindow);
 
   const reserveSummary = `Reserve history for ${sym0} and ${sym1}: ${rows.length} snapshots plotted.`;
 
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-2 sm:p-4 mb-4 overflow-hidden">
-      <div className="flex items-baseline gap-2 mb-3">
+      <div className="flex flex-wrap items-baseline gap-2 mb-3">
         <h3 className="text-sm font-medium text-slate-400">Reserve History</h3>
         {subtitle && <span className="text-xs text-slate-600">{subtitle}</span>}
       </div>
-      <div
-        role="figure"
-        aria-label={`Reserve history chart for ${sym0} and ${sym1}`}
-      >
-        <Plot
-          ariaLabel={`Reserve history chart for ${sym0} and ${sym1}`}
-          textAlternative={reserveSummary}
-          data={[trace0, trace1]}
-          layout={layout}
-          config={PLOTLY_CONFIG}
-          style={{ width: "100%", height: 320 }}
-          useResizeHandler
-        />
-      </div>
+      {controls}
+      <ReserveChartStatus
+        rows={rows}
+        error={error}
+        truncated={truncated}
+        isLoading={isLoading}
+      />
+      {rows.length > 0 && (
+        <div
+          role="figure"
+          aria-label={`Reserve history chart for ${sym0} and ${sym1}`}
+        >
+          <Plot
+            ariaLabel={`Reserve history chart for ${sym0} and ${sym1}`}
+            textAlternative={reserveSummary}
+            data={traces}
+            layout={layout}
+            config={PLOTLY_CONFIG}
+            style={{ width: "100%", height: 320 }}
+            useResizeHandler
+          />
+        </div>
+      )}
       <p className="sr-only">{reserveSummary}</p>
     </div>
   );
