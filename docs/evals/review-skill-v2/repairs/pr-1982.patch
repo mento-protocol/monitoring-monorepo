@@ -1,0 +1,32 @@
+--- a/scripts/pr/issue-board-backfill.mjs
++++ b/scripts/pr/issue-board-backfill.mjs
+@@ -66,6 +66,8 @@
+ }
+ 
+ function isBoundedCloudHandoff(lines) {
++  lines = [...lines];
++  while (lines[lines.length - 1] === "") lines.pop();
+   return (
+     lines.length <= 4 &&
+     lines.join("\n").length <= 1000 &&
+@@ -116,7 +118,8 @@
+   const claimedAt = values.get("Claimed at");
+   if (
+     !isSafeSingleLineText(claimId, MAX_CLAIM_ID_LENGTH) ||
+-    !isSafeSingleLineText(branch, MAX_BRANCH_LENGTH) ||
++    (branch !== undefined &&
++      !isSafeSingleLineText(branch, MAX_BRANCH_LENGTH)) ||
+     !isValidIsoTimestamp(claimedAt)
+   ) {
+     return null;
+@@ -128,7 +131,9 @@
+     metadata: {
+       [OPTIONAL_PROJECT_FIELDS.agent]: match[1],
+       [OPTIONAL_PROJECT_FIELDS.claimId]: claimId,
+-      [OPTIONAL_PROJECT_FIELDS.branch]: branch,
++      ...(branch === undefined
++        ? {}
++        : { [OPTIONAL_PROJECT_FIELDS.branch]: branch }),
+       [OPTIONAL_PROJECT_FIELDS.claimedAt]: projectDateFieldValue(claimedAt),
+     },
+   };
