@@ -925,15 +925,17 @@ command and the desktop notification. Send the notification first as a
 separate call, targeted to the caller's cmux workspace and terminal pane when
 available. Keep the same safe sweep label in the notification and report.
 Report notification failures or unavailable session routing. Do not use a
-notification that opens another app. After the delivery attempts, append
-notification and speech delivery status to this run's saved report. Mark
-failed or unavailable channels explicitly. Reprint the updated terminal summary
-and end it with the same READY PR links.
+notification that opens another app. After the delivery attempts, update this
+run's saved report. Place notification and speech delivery status before the
+final READY PR links. Mark failed or unavailable channels explicitly. Keep the
+same READY PR links at the end of both the saved report and the reprinted
+terminal summary.
 The operator is away by design, so the sweep speaks one of the note's
 three fixed phrases. In manual approval mode a labelled line would prompt
-for approval nobody is there to give. The nudge runs with escalated execution, not
-inside the workspace sandbox: it needs the local audio device, and a sandboxed
-attempt fails in a way indistinguishable from a missing command. The spoken text
+for approval nobody is there to give. Keep notification delivery on the existing
+permission mode, as the canonical note requires. Do not wait on unattended
+approval prompts. Use escalated execution for the speech call when the workspace
+sandbox blocks the local audio device. The spoken text
 stays fixed and low-information, and the detail belongs in the report. When
 every spoken path fails, the report says so rather than leaving the operator to
 assume they were told.
