@@ -3,7 +3,7 @@ title: Monitoring Monorepo Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-02
+last_verified: 2026-10-01
 doc_type: agent-instructions
 scope: repo-wide
 review_interval_days: 90
@@ -141,9 +141,9 @@ Open the scoped instructions before editing a package:
 | Governance watchdog              | [`governance-watchdog/README.md`](governance-watchdog/README.md) |
 | Root tooling and deploy wrappers | [`scripts/AGENTS.md`](scripts/AGENTS.md)                         |
 
-Indexer coverage includes Celo, Monad, and Polygon FPMM pools, Polygon
-Wormhole NTT flows, the Celo v2 Broker path, and Ethereum reserve-yield
-accounting.
+Indexer coverage includes Celo, Monad, and Polygon v3 pools, Polygon
+Wormhole NTT flows, the Celo v2 Broker path, Ethereum reserve-yield
+accounting, and Mento Liquity/CDP state.
 
 Dashboard review assumptions such as current pool scale are canonical in
 [`docs/pr-checklists/review-prompt-exclusions.md`](docs/pr-checklists/review-prompt-exclusions.md),
