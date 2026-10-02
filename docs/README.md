@@ -265,6 +265,10 @@ Authority: canonical
 - [`SPEC.md`](../SPEC.md)
 - [`ui-dashboard/scripts/intel-marathon/README.md`](../ui-dashboard/scripts/intel-marathon/README.md)
 
+Authority: non-canonical
+
+- [`docs/evals/review-skill-v2-expansion-2026-10.md`](evals/review-skill-v2-expansion-2026-10.md)
+
 ## notes-plans-archive
 
 Authority: canonical

@@ -20,6 +20,10 @@ counterparts. It preserves reviewer outputs when only the grading changes.
 The [v1 evaluation](review-skill.md) retains its ledger, scheduler, and historical
 scores. A v2 run cannot update that ledger, its baseline, or its freshness clock.
 
+The [October 2026 expansion report](review-skill-v2-expansion-2026-10.md)
+records a separate 32-cell internal-reviewer comparison and its limits. Its
+private adapters and expanded dataset are not part of this CLI.
+
 ## Terms and evidence
 
 - A **case** is a frozen source change, optionally with a pinned repair patch.
