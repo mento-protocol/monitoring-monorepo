@@ -326,6 +326,27 @@ printf '%s\\n' '{"type":"result","is_error":false,"result":"controlled-shim-resu
   );
 });
 
+test("capture and every provider child discard inherited Node runtime options", async (context) => {
+  const s = setup(context, {
+    env: { NODE_OPTIONS: "--no-warnings", NODE_PATH: "/operator/modules" },
+  });
+  const captured = providerModule.providerIdentity({
+    ...s.options,
+    cwd: s.out,
+  });
+  assert.equal(captured.version, "test");
+  const result = await s.invoke(createProvider(s.options));
+  assert.equal(result.envelope.result, "Final review");
+  assert.equal(s.versionCalls.length, 3);
+  assert.equal(s.authCalls.length, 1);
+  assert.equal(s.modelCalls.length, 1);
+  for (const call of [...s.versionCalls, ...s.authCalls, ...s.modelCalls]) {
+    assert.equal(call.settings.env.NODE_OPTIONS, undefined);
+    assert.equal(call.settings.env.NODE_PATH, undefined);
+  }
+  assert.equal(s.options.env.NODE_OPTIONS, "--no-warnings");
+});
+
 test("capture and invocation reject PATH values that depend on the child working directory", async (context) => {
   for (const value of ["", "../outside-bin", "/usr/bin:../outside-bin"]) {
     const s = setup(context, { env: { PATH: value } });

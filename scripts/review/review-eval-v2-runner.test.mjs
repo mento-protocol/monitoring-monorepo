@@ -193,6 +193,53 @@ test("uncertain positive roots cannot become misses, measured recall, or paired 
   assert.equal(metrics.by_family[0].known_match_delta, null);
 });
 
+test("uncertain repaired roots stay visible by arm without changing positive recall", () => {
+  const rows = ["incumbent", "candidate"].flatMap((treatment) => [
+    {
+      case_id: "original",
+      family_id: "family",
+      treatment,
+      expected_root_ids: ["bug"],
+      negative_control_root_ids: [],
+      score: { defects: [{ id: "bug", verdict: "matched" }], novel: [] },
+    },
+    {
+      case_id: "repaired",
+      family_id: "family",
+      treatment,
+      variant: "repaired",
+      expected_root_ids: [],
+      negative_control_root_ids: ["bug"],
+      roots: [{ id: "bug", severity: "P1" }],
+      score: {
+        defects: [
+          {
+            id: "bug",
+            verdict: treatment === "incumbent" ? "uncertain" : "unmatched",
+            claim_ids: treatment === "incumbent" ? ["c1"] : [],
+          },
+        ],
+        novel: [],
+      },
+    },
+  ]);
+  const metrics = metricSummary(rows);
+  assert.equal(metrics.arms.incumbent.uncertain_repaired_root_count, 1);
+  assert.deepEqual(metrics.arms.incumbent.uncertain_repaired_roots, [
+    { case_id: "repaired", id: "bug", verdict: "uncertain", severity: "P1" },
+  ]);
+  assert.equal(metrics.arms.candidate.uncertain_repaired_root_count, 0);
+  assert.deepEqual(metrics.arms.candidate.uncertain_repaired_roots, []);
+  for (const arm of Object.values(metrics.arms)) {
+    assert.equal(arm.known_recall, 1);
+    assert.equal(arm.uncertain_count, 0);
+    assert.deepEqual(arm.uncertain_roots, []);
+    assert.equal(arm.repaired_root_accusations, 0);
+    assert.equal(arm.wrong, 0);
+  }
+  assert.equal(metrics.by_family[0].known_match_delta, 0);
+});
+
 test("wrong counts distinct claims while repaired-root accusations count roots", () => {
   const metrics = metricSummary([
     {

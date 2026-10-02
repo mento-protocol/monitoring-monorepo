@@ -33,6 +33,8 @@ export function writeJson(file, value) {
 
 function providerEnvironment({ repoRoot, env }) {
   const callEnv = scrubbedEnv({ env, roots: [repoRoot] });
+  // Preloads and loaders can change execution without changing the pinned CLI.
+  delete callEnv.NODE_OPTIONS;
   // A relative or empty PATH component can select a different CLI in each
   // fixture/judge cwd. Absolute entries keep capture and invocation aligned.
   if (

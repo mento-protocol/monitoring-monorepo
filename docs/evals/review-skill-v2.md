@@ -76,7 +76,9 @@ call, it checks `claude auth status --json` with the same environment, working
 directory, and empty settings sources as the model call. It also verifies the
 CLI version before each model invocation, including later grading calls within
 one cell, and checks again before accepting the result. Planning and model calls
-use the same scrubbed environment for CLI lookup. Surviving relative `PATH`
+use the same scrubbed environment for CLI lookup. Provider children do not inherit
+`NODE_OPTIONS` or `NODE_PATH`; Node preload and module lookup overrides are removed
+before capture, authentication, version checks, and model calls. Surviving relative `PATH`
 entries are refused because planning and model calls use different directories.
 The selected executable resolves to a canonical file outside the source checkouts
 and invocation directory. Authentication, version checks, and the model call use
@@ -131,7 +133,10 @@ A matched verdict carries a verbatim quote from the final review. Code checks
 that every linked claim contains this quote. The grader still owns the semantic
 judgment. The scorer retains every extracted claim and reports insufficient
 coverage explicitly.
-Uncertain matches and unverifiable claims remain visible.
+Duplicate extracted claim text is rejected even when its supporting quotes differ.
+Uncertain matches and unverifiable claims remain visible. The arm summary reports
+uncertain repaired-root matches separately from known-root uncertainty. Those
+records do not count as definite repaired-root accusations or alter known recall.
 An uncertain root match must name at least one extracted claim. A verdict with
 no supporting claim is invalid grading evidence.
 One extracted claim cannot satisfy two distinct matched roots. Claims linked to

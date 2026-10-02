@@ -155,7 +155,7 @@ function claimsFrom(parsed, finalText) {
   for (const claim of parsed.claims) {
     requireValue(nonempty(claim?.text), "extraction returned an empty claim");
     requireQuote(claim.quote, finalText, "claim");
-    const key = JSON.stringify([claim.text, claim.quote]);
+    const key = claim.text.trim();
     requireValue(!seen.has(key), "extraction returned duplicate claims");
     seen.add(key);
   }

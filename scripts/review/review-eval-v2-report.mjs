@@ -20,6 +20,21 @@ export function metricSummary(rows) {
           root.verdict === "matched",
       ),
     );
+    const uncertainRepairedRoots = selected.flatMap((row) =>
+      (row.score.defects ?? [])
+        .filter(
+          (root) =>
+            row.negative_control_root_ids?.includes(root.id) &&
+            root.verdict === "uncertain",
+        )
+        .map((root) => ({
+          case_id: row.case_id,
+          id: root.id,
+          verdict: root.verdict,
+          severity:
+            row.roots?.find((item) => item.id === root.id)?.severity ?? null,
+        })),
+    );
     const novel = selected.flatMap((row) => row.score.novel ?? []);
     arms[treatment] = {
       reviews: selected.length,
@@ -76,6 +91,8 @@ export function metricSummary(rows) {
         0,
       ),
       repaired_root_accusations: negativeAccusations.length,
+      uncertain_repaired_root_count: uncertainRepairedRoots.length,
+      uncertain_repaired_roots: uncertainRepairedRoots,
       unsupported: novel.filter((claim) => claim.verdict === "unsupported")
         .length,
       unverified: novel.filter((claim) => claim.verdict === "unverified")

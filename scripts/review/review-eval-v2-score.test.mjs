@@ -205,44 +205,47 @@ test("extraction rejects invented quotes and explicit incomplete coverage", asyn
   }
 });
 
-test("exact duplicate claims fail extraction before IDs or later grading", async () => {
+test("duplicate claim text fails extraction regardless of quote or surrounding whitespace", async () => {
   for (const defects of [[root], []]) {
-    const requests = [];
-    const result = await scoreReview({
-      review: review("The null input crashes."),
-      defects,
-      fixturePath: "/unused",
-      sourceDiff: "complete working-tree diff",
-      judge: judgeSequence(
-        [
-          extraction(
-            claim("The null input crashes."),
-            claim("The null input crashes."),
-          ),
-          defects.length
-            ? { defects: [match({ claim_ids: ["c1", "c2"] })] }
-            : {
-                novel: ["c1", "c2"].map((claim_id) => ({
-                  claim_id,
-                  verdict: "unsupported",
-                  reason: "No verifiable trigger.",
-                })),
-              },
-        ],
-        requests,
-      ),
-    });
-    assert.equal(result.status, "incomplete");
-    assert.equal(result.coverage.extraction, "incomplete");
-    assert.match(result.errors[0].message, /duplicate claims/);
-    assert.deepEqual(result.claims, []);
-    assert.deepEqual(result.defects, []);
-    assert.deepEqual(result.novel, []);
-    assert.equal(
-      requests.length,
-      1,
-      "duplicates must not reach matching or novelty",
-    );
+    for (const duplicate of [
+      claim("The null input crashes."),
+      { text: "The null input crashes.", quote: "null input crashes" },
+      { text: "  The null input crashes.\n", quote: "null input crashes" },
+    ]) {
+      const requests = [];
+      const result = await scoreReview({
+        review: review("The null input crashes."),
+        defects,
+        fixturePath: "/unused",
+        sourceDiff: "complete working-tree diff",
+        judge: judgeSequence(
+          [
+            extraction(claim("The null input crashes."), duplicate),
+            defects.length
+              ? { defects: [match({ claim_ids: ["c1", "c2"] })] }
+              : {
+                  novel: ["c1", "c2"].map((claim_id) => ({
+                    claim_id,
+                    verdict: "unsupported",
+                    reason: "No verifiable trigger.",
+                  })),
+                },
+          ],
+          requests,
+        ),
+      });
+      assert.equal(result.status, "incomplete");
+      assert.equal(result.coverage.extraction, "incomplete");
+      assert.match(result.errors[0].message, /duplicate claims/);
+      assert.deepEqual(result.claims, []);
+      assert.deepEqual(result.defects, []);
+      assert.deepEqual(result.novel, []);
+      assert.equal(
+        requests.length,
+        1,
+        "duplicates must not reach matching or novelty",
+      );
+    }
   }
 });
 
