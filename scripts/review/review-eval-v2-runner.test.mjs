@@ -2,7 +2,6 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   mkdtempSync,
-  mkdirSync,
   writeFileSync,
   rmSync,
   cpSync,
@@ -26,6 +25,11 @@ import { metricSummary } from "./review-eval-v2-report.mjs";
 import { digestObject } from "./review-eval-experiment-contract.mjs";
 import { main } from "./review-eval-v2.mjs";
 import { sha256Bytes } from "./review-eval-experiment-cache.mjs";
+import {
+  campaignEnvironment,
+  copyReviewRepo,
+  versionStub,
+} from "./review-eval-v2-test-support.mjs";
 
 const skill = { skill_digest: "skill-a" };
 const plan = {
@@ -79,7 +83,7 @@ test("raw identity excludes grader and labels, but binds every changed reviewer 
   assert.notEqual(raw().digest, raw({ treatment: "candidate" }).digest);
 });
 
-test("rescoring binds raw output and every grading input", () => {
+test("rescoring binds raw output and the declared grading inputs", () => {
   const options = {
     rawDigest: "raw",
     datasetDigest: "labels",
@@ -276,24 +280,7 @@ test("wrong counts distinct claims while repaired-root accusations count roots",
 });
 
 test("rescoring uses recorded skill identity after a skill snapshot changes", async (context) => {
-  const directory = mkdtempSync(path.join(tmpdir(), "review-v2-rescore-"));
-  context.after(() => rmSync(directory, { recursive: true, force: true }));
-  const bin = path.join(directory, "bin");
-  mkdirSync(bin);
-  writeFileSync(
-    path.join(bin, "claude"),
-    '#!/bin/sh\n[ "$#" -eq 1 ] && [ "$1" = "--version" ] || exit 99\nprintf "%s\\n" "claude-test-version"\n',
-    { mode: 0o755 },
-  );
-  const previousPath = process.env.PATH;
-  process.env.PATH = bin;
-  context.after(() => {
-    if (previousPath === undefined) delete process.env.PATH;
-    else process.env.PATH = previousPath;
-  });
-  const skillDir = path.join(directory, "skill");
-  mkdirSync(skillDir);
-  writeFileSync(path.join(skillDir, "SKILL.md"), "Review the code.");
+  const { directory, skillDir } = campaignEnvironment(context);
   const out = path.join(directory, "campaign");
   makePlan({
     datasetFile: path.join(
@@ -329,23 +316,7 @@ test("each reviewer prompt uses exactly the pinned bytes and rejects late drift"
 });
 
 test("rescoring requires the planned case set before provider or spend access", async (context) => {
-  const directory = mkdtempSync(path.join(tmpdir(), "review-v2-case-panel-"));
-  context.after(() => rmSync(directory, { recursive: true, force: true }));
-  const bin = path.join(directory, "bin");
-  mkdirSync(bin);
-  const cli = path.join(bin, "claude");
-  const versionStub =
-    '#!/bin/sh\n[ "$#" -eq 1 ] && [ "$1" = "--version" ] || exit 99\nprintf "%s\\n" "claude-test-version"\n';
-  writeFileSync(cli, versionStub, { mode: 0o755 });
-  const previousPath = process.env.PATH;
-  process.env.PATH = bin;
-  context.after(() => {
-    if (previousPath === undefined) delete process.env.PATH;
-    else process.env.PATH = previousPath;
-  });
-  const skillDir = path.join(directory, "skill");
-  mkdirSync(skillDir);
-  writeFileSync(path.join(skillDir, "SKILL.md"), "Review the code.");
+  const { directory, cli, skillDir } = campaignEnvironment(context);
   const dataDir = path.join(directory, "datasets");
   cpSync(path.join(REPO_ROOT, "docs/evals/review-skill-v2"), dataDir, {
     recursive: true,
@@ -423,40 +394,9 @@ test("retired dollar arguments are rejected explicitly before planning or auth",
 });
 
 test("execution identity pins host probe code but permits label and grader changes", async (context) => {
-  const directory = mkdtempSync(
-    path.join(tmpdir(), "review-v2-probe-identity-"),
-  );
-  context.after(() => rmSync(directory, { recursive: true, force: true }));
-  const copy = path.join(directory, "repo");
-  cpSync(
-    path.join(REPO_ROOT, "scripts/review"),
-    path.join(copy, "scripts/review"),
-    { recursive: true },
-  );
-  cpSync(
-    path.join(REPO_ROOT, "docs/evals/review-skill-v2"),
-    path.join(copy, "docs/evals/review-skill-v2"),
-    { recursive: true },
-  );
-  const bin = path.join(directory, "bin");
-  mkdirSync(bin);
-  writeFileSync(
-    path.join(bin, "claude"),
-    '#!/bin/sh\n[ "$#" -eq 1 ] && [ "$1" = "--version" ] || exit 99\nprintf "%s\\n" "claude-test-version"\n',
-    { mode: 0o755 },
-  );
-  const previousPath = process.env.PATH;
-  process.env.PATH = bin;
-  context.after(() => {
-    if (previousPath === undefined) delete process.env.PATH;
-    else process.env.PATH = previousPath;
-  });
-  const runner = await import(
-    pathToFileURL(path.join(copy, "scripts/review/review-eval-v2-runner.mjs"))
-  );
-  const skillDir = path.join(directory, "skill");
-  mkdirSync(skillDir);
-  writeFileSync(path.join(skillDir, "SKILL.md"), "Review the code.");
+  const { directory, copy, moduleUrl } = copyReviewRepo(context);
+  const { skillDir } = campaignEnvironment(context, directory);
+  const runner = await import(moduleUrl("review-eval-v2-runner.mjs"));
   const datasetFile = path.join(
     copy,
     "docs/evals/review-skill-v2/dataset.json",
@@ -545,24 +485,7 @@ test("execution identity pins host probe code but permits label and grader chang
 });
 
 test("arm order balances variants and families independently of dataset order", (context) => {
-  const directory = mkdtempSync(path.join(tmpdir(), "v2-arm-order-"));
-  context.after(() => rmSync(directory, { recursive: true, force: true }));
-  const bin = path.join(directory, "bin");
-  mkdirSync(bin);
-  writeFileSync(
-    path.join(bin, "claude"),
-    '#!/bin/sh\n[ "$#" -eq 1 ] && [ "$1" = "--version" ] || exit 99\nprintf "%s\\n" "claude-test-version"\n',
-    { mode: 0o755 },
-  );
-  const previousPath = process.env.PATH;
-  process.env.PATH = bin;
-  context.after(() => {
-    if (previousPath === undefined) delete process.env.PATH;
-    else process.env.PATH = previousPath;
-  });
-  const skillDir = path.join(directory, "skill");
-  mkdirSync(skillDir);
-  writeFileSync(path.join(skillDir, "SKILL.md"), "Review the code.");
+  const { directory, skillDir } = campaignEnvironment(context);
   const dataDir = path.join(directory, "dataset");
   cpSync(path.join(REPO_ROOT, "docs/evals/review-skill-v2"), dataDir, {
     recursive: true,

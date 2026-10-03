@@ -82,22 +82,26 @@ test("labels must be partial and agent-audited with source provenance", () => {
 });
 
 test("unknown, duplicate, foreign and orphan roots fail validation", () => {
-  const data = fresh();
-  data.cases[0].expected_root_ids.push(
-    "claim-optional-branch",
-    "unknown",
-    "unknown",
-  );
-  assert.ok(
-    check(data).some((message) =>
-      message.includes("invalid expected_root_ids"),
-    ),
-  );
-  data.cases[0].expected_root_ids = ["unknown"];
-  assert.ok(
-    check(data).some((message) => message.includes("unknown or foreign root")),
-  );
-  assert.ok(check(data).some((message) => message.includes("orphan root")));
+  const dataset = fresh();
+  assert.deepEqual(check(dataset), []);
+  const item = dataset.cases[0];
+  const root = item.expected_root_ids[0];
+  const foreign = dataset.roots.find(
+    (entry) => entry.family_id !== item.family_id,
+  ).id;
+  for (const [ids, error] of [
+    [[root, root], "invalid expected_root_ids"],
+    [["unknown"], "unknown or foreign root unknown"],
+    [[foreign], `unknown or foreign root ${foreign}`],
+    [[], `${root}: orphan root`],
+  ]) {
+    const data = fresh();
+    data.cases[0].expected_root_ids = ids;
+    assert.ok(
+      check(data).some((message) => message.includes(error)),
+      error,
+    );
+  }
 });
 
 test("repair bytes and corresponding negative roots cannot drift", () => {
@@ -131,17 +135,29 @@ test("repair symlinks cannot escape dataset directory", () => {
 });
 
 test("malformed label objects and missing arrays produce validation errors", () => {
-  const data = fresh();
-  data.roots.push(null);
-  data.cases.push(null);
-  data.roots[0].locations = [null];
-  data.cases[0].expected_root_ids = null;
-  const errors = check(data);
-  assert.ok(errors.includes("invalid root object"));
-  assert.ok(errors.includes("invalid case object"));
-  assert.ok(
-    errors.some((message) => message.includes("invalid source locations")),
-  );
+  for (const [mutate, error] of [
+    [(data) => data.roots.push(null), "invalid root object"],
+    [(data) => data.cases.push(null), "invalid case object"],
+    [
+      (data) => {
+        data.roots[0].locations = [null];
+      },
+      "invalid source locations",
+    ],
+    [
+      (data) => {
+        data.cases[0].expected_root_ids = null;
+      },
+      "invalid expected_root_ids",
+    ],
+  ]) {
+    const data = fresh();
+    mutate(data);
+    assert.ok(
+      check(data).some((message) => message.includes(error)),
+      error,
+    );
+  }
 });
 
 test("one harvested finding cannot count toward two root causes", () => {

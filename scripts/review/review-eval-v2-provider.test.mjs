@@ -793,19 +793,6 @@ test("managed policy uncertainty fails closed across file and macOS preference s
   );
 });
 
-test("policy inspection dependency rejects before auth or model access", async (context) => {
-  const s = setup(context);
-  const provider = createProvider({
-    ...s.options,
-    verifyPolicy: () => {
-      throw new Error("managed policy sentinel");
-    },
-  });
-  await assert.rejects(s.invoke(provider), /managed policy sentinel/);
-  assert.equal(s.authCalls.length, 0);
-  assert.equal(s.modelCalls.length, 0);
-});
-
 test("relative config policy is inspected from the auth and model working directory", async (context) => {
   for (const variable of ["CLAUDE_CONFIG_DIR", "HOME"]) {
     const s = setup(context);

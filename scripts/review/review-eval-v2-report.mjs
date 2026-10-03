@@ -1,3 +1,19 @@
+function rootDetails(rows, field, verdict) {
+  return rows.flatMap((row) =>
+    (row.score.defects ?? [])
+      .filter(
+        (root) => row[field]?.includes(root.id) && root.verdict === verdict,
+      )
+      .map((root) => ({
+        case_id: row.case_id,
+        id: root.id,
+        verdict: root.verdict,
+        severity:
+          row.roots?.find((item) => item.id === root.id)?.severity ?? null,
+      })),
+  );
+}
+
 // Count one root once per delivered review. Never infer globally clean code.
 export function metricSummary(rows) {
   const arms = {};
@@ -20,20 +36,10 @@ export function metricSummary(rows) {
           root.verdict === "matched",
       ),
     );
-    const uncertainRepairedRoots = selected.flatMap((row) =>
-      (row.score.defects ?? [])
-        .filter(
-          (root) =>
-            row.negative_control_root_ids?.includes(root.id) &&
-            root.verdict === "uncertain",
-        )
-        .map((root) => ({
-          case_id: row.case_id,
-          id: root.id,
-          verdict: root.verdict,
-          severity:
-            row.roots?.find((item) => item.id === root.id)?.severity ?? null,
-        })),
+    const uncertainRepairedRoots = rootDetails(
+      selected,
+      "negative_control_root_ids",
+      "uncertain",
     );
     const novel = selected.flatMap((row) => row.score.novel ?? []);
     arms[treatment] = {
@@ -43,36 +49,8 @@ export function metricSummary(rows) {
       known_recall:
         expected.length && uncertain === 0 ? matched / expected.length : null,
       uncertain_count: uncertain,
-      uncertain_roots: selected.flatMap((row) =>
-        (row.score.defects ?? [])
-          .filter(
-            (root) =>
-              row.expected_root_ids?.includes(root.id) &&
-              root.verdict === "uncertain",
-          )
-          .map((root) => ({
-            case_id: row.case_id,
-            id: root.id,
-            verdict: root.verdict,
-            severity:
-              row.roots?.find((item) => item.id === root.id)?.severity ?? null,
-          })),
-      ),
-      missed_roots: selected.flatMap((row) =>
-        (row.score.defects ?? [])
-          .filter(
-            (root) =>
-              row.expected_root_ids?.includes(root.id) &&
-              root.verdict === "unmatched",
-          )
-          .map((root) => ({
-            case_id: row.case_id,
-            id: root.id,
-            verdict: root.verdict,
-            severity:
-              row.roots?.find((item) => item.id === root.id)?.severity ?? null,
-          })),
-      ),
+      uncertain_roots: rootDetails(selected, "expected_root_ids", "uncertain"),
+      missed_roots: rootDetails(selected, "expected_root_ids", "unmatched"),
       wrong: selected.reduce(
         (count, row) =>
           count +

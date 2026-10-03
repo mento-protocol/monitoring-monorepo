@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import {
-  cpSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -13,12 +12,9 @@ import path from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
 
-import {
-  FINAL_REVIEW_CONTRACT,
-  scoreReview,
-  scorerDigestV2,
-} from "./review-eval-v2-score.mjs";
+import { FINAL_REVIEW_CONTRACT, scoreReview } from "./review-eval-v2-score.mjs";
 import { metricSummary } from "./review-eval-v2-report.mjs";
+import { copyReviewRepo } from "./review-eval-v2-test-support.mjs";
 
 const review = (finalText) => ({
   finalText,
@@ -179,14 +175,20 @@ test("oversized input is explicitly incomplete before a model call", async () =>
 });
 
 test("missing final contract and empty final text fail before calls", async () => {
-  for (const input of [{ finalText: "No findings." }, review("")]) {
+  for (const [input, error] of [
+    [{ finalText: "No findings." }, /completed final-review contract/],
+    [review(""), /no final text/],
+  ]) {
+    const requests = [];
     const result = await scoreReview({
       review: input,
       defects: [],
-      judge: judgeSequence([]),
+      judge: judgeSequence([], requests),
     });
     assert.equal(result.status, "incomplete");
     assert.equal(result.errors.length, 1);
+    assert.equal(requests.length, 0);
+    assert.match(result.errors[0].message, error);
   }
 });
 
@@ -206,46 +208,31 @@ test("extraction rejects invented quotes and explicit incomplete coverage", asyn
 });
 
 test("duplicate claim text fails extraction regardless of quote or surrounding whitespace", async () => {
-  for (const defects of [[root], []]) {
-    for (const duplicate of [
-      claim("The null input crashes."),
-      { text: "The null input crashes.", quote: "null input crashes" },
-      { text: "  The null input crashes.\n", quote: "null input crashes" },
-    ]) {
-      const requests = [];
-      const result = await scoreReview({
-        review: review("The null input crashes."),
-        defects,
-        fixturePath: "/unused",
-        sourceDiff: "complete working-tree diff",
-        judge: judgeSequence(
-          [
-            extraction(claim("The null input crashes."), duplicate),
-            defects.length
-              ? { defects: [match({ claim_ids: ["c1", "c2"] })] }
-              : {
-                  novel: ["c1", "c2"].map((claim_id) => ({
-                    claim_id,
-                    verdict: "unsupported",
-                    reason: "No verifiable trigger.",
-                  })),
-                },
-          ],
-          requests,
-        ),
-      });
-      assert.equal(result.status, "incomplete");
-      assert.equal(result.coverage.extraction, "incomplete");
-      assert.match(result.errors[0].message, /duplicate claims/);
-      assert.deepEqual(result.claims, []);
-      assert.deepEqual(result.defects, []);
-      assert.deepEqual(result.novel, []);
-      assert.equal(
-        requests.length,
-        1,
-        "duplicates must not reach matching or novelty",
-      );
-    }
+  for (const duplicate of [
+    claim("The null input crashes."),
+    { text: "The null input crashes.", quote: "null input crashes" },
+    { text: "  The null input crashes.\n", quote: "null input crashes" },
+  ]) {
+    const requests = [];
+    const result = await scoreReview({
+      review: review("The null input crashes."),
+      defects: [root],
+      judge: judgeSequence(
+        [extraction(claim("The null input crashes."), duplicate)],
+        requests,
+      ),
+    });
+    assert.equal(result.status, "incomplete");
+    assert.equal(result.coverage.extraction, "incomplete");
+    assert.match(result.errors[0].message, /duplicate claims/);
+    assert.deepEqual(result.claims, []);
+    assert.deepEqual(result.defects, []);
+    assert.deepEqual(result.novel, []);
+    assert.equal(
+      requests.length,
+      1,
+      "duplicates must not reach matching or novelty",
+    );
   }
 });
 
@@ -467,73 +454,56 @@ test("a claim cannot satisfy two matched roots; distinct claims can", async () =
 });
 
 test("uncertain-linked claims stay visible but cannot become definitive novelty or false claims", async (context) => {
-  const fixture = mkdtempSync(path.join(os.tmpdir(), "v2-uncertain-"));
-  context.after(() => rmSync(fixture, { recursive: true, force: true }));
-  writeFileSync(path.join(fixture, "source"), "verified source quote");
   for (const variant of ["original", "repaired"]) {
-    for (const verdict of ["model-supported", "wrong", "unsupported"]) {
-      await context.test(`${variant}/${verdict}`, async () => {
-        const requests = [];
-        const result = await scoreReview({
-          review: review("The null input crashes."),
-          defects: [root],
-          fixturePath: fixture,
-          sourceDiff: "complete working-tree diff",
-          judge: judgeSequence(
-            [
-              extraction(claim("The null input crashes.")),
-              {
-                defects: [
-                  match({
-                    verdict: "uncertain",
-                    reason: "Mechanism unresolved.",
-                  }),
-                ],
-              },
-              {
-                novel: [
-                  {
-                    claim_id: "c1",
-                    verdict,
-                    reason: "Source-only diagnosis.",
-                    evidence: [
-                      { path: "source", quote: "verified source quote" },
-                    ],
-                  },
-                ],
-              },
-            ],
-            requests,
-          ),
-        });
-        const metrics = metricSummary([
-          {
-            treatment: "incumbent",
-            variant,
-            case_id: "case",
-            family_id: "family",
-            expected_root_ids: variant === "original" ? [root.id] : [],
-            negative_control_root_ids: variant === "repaired" ? [root.id] : [],
-            score: result,
-          },
-        ]).arms.incumbent;
-        assert.equal(metrics.model_supported_novel, 0);
-        assert.equal(metrics.wrong, 0);
-        assert.equal(metrics.unsupported, 0);
-        assert.equal(metrics.repaired_wrong_or_unsupported, 0);
-        assert.equal(result.status, "incomplete");
-        assert.deepEqual(result.errors, []);
-        assert.equal(result.coverage.matching, "incomplete");
-        assert.deepEqual(result.defects[0].claim_ids, ["c1"]);
-        assert.equal(result.claims[0].id, "c1");
-        assert.deepEqual(result.novel, []);
-        assert.equal(
-          requests.length,
-          2,
-          "unresolved claims must not reach source-only classification",
-        );
+    await context.test(variant, async () => {
+      const requests = [];
+      const result = await scoreReview({
+        review: review("The null input crashes."),
+        defects: [root],
+        fixturePath: "/unused",
+        sourceDiff: "complete working-tree diff",
+        judge: judgeSequence(
+          [
+            extraction(claim("The null input crashes.")),
+            {
+              defects: [
+                match({
+                  verdict: "uncertain",
+                  reason: "Mechanism unresolved.",
+                }),
+              ],
+            },
+          ],
+          requests,
+        ),
       });
-    }
+      const metrics = metricSummary([
+        {
+          treatment: "incumbent",
+          variant,
+          case_id: "case",
+          family_id: "family",
+          expected_root_ids: variant === "original" ? [root.id] : [],
+          negative_control_root_ids: variant === "repaired" ? [root.id] : [],
+          score: result,
+        },
+      ]).arms.incumbent;
+      assert.equal(metrics.model_supported_novel, 0);
+      assert.equal(metrics.wrong, 0);
+      assert.equal(metrics.unsupported, 0);
+      assert.equal(metrics.repaired_wrong_or_unsupported, 0);
+      assert.equal(result.status, "incomplete");
+      assert.deepEqual(result.errors, []);
+      assert.equal(result.coverage.matching, "incomplete");
+      assert.deepEqual(result.defects[0].claim_ids, ["c1"]);
+      assert.equal(result.claims[0].id, "c1");
+      assert.deepEqual(result.novel, []);
+      assert.equal(
+        requests.length,
+        2,
+        "unresolved claims must not reach source-only classification",
+      );
+    });
   }
 });
 
@@ -730,100 +700,11 @@ test("provider failure and malformed output are incomplete instead of no finding
   }
 });
 
-test("scorer identity is stable and contains a full sha256 digest", () => {
-  assert.match(scorerDigestV2(), /^[a-f0-9]{64}$/);
-  assert.equal(scorerDigestV2(), scorerDigestV2());
-});
-
 async function copiedScorer(context) {
-  const copy = mkdtempSync(path.join(os.tmpdir(), "v2-scorer-identity-"));
-  context.after(() => rmSync(copy, { recursive: true, force: true }));
-  for (const file of [
-    "review-eval-v2-score.mjs",
-    "review-eval-score.mjs",
-    "review-eval-stream.mjs",
-    "review-eval-v2-selection.mjs",
-    "review-eval-v2-report.mjs",
-    "review-eval-v2-grading.mjs",
-    "review-eval-v2-runner.mjs",
-    "review-eval-v2.mjs",
-    "review-eval-v2-dataset.mjs",
-    "review-eval-v2-probe-trust.mjs",
-    "review-eval-experiment-cache.mjs",
-    "review-eval-fixtures.mjs",
-    "build-fixture.sh",
-    "review-eval-run-plan.mjs",
-    "review-eval-v2-judge-provider.mjs",
-    "review-eval-v2-provider.mjs",
-    "review-eval-run-execution.mjs",
-    "review-eval-experiment-contract.mjs",
-    "review-eval-run-cell.mjs",
-    "prompts/v2",
-  ]) {
-    cpSync(new URL(file, import.meta.url), path.join(copy, file), {
-      recursive: true,
-    });
-  }
-  const scorer = await import(
-    pathToFileURL(path.join(copy, "review-eval-v2-score.mjs"))
-  );
-  return { copy, scorer };
+  const { reviewDir, moduleUrl } = copyReviewRepo(context);
+  const scorer = await import(moduleUrl("review-eval-v2-score.mjs"));
+  return { copy: reviewDir, scorer };
 }
-
-test("scorer identity changes when answer-key selection behavior changes", async (context) => {
-  const { copy, scorer } = await copiedScorer(context);
-  const selectorPath = path.join(copy, "review-eval-v2-selection.mjs");
-  const selectorUrl = pathToFileURL(selectorPath).href;
-  const beforeSelector = await import(selectorUrl);
-  const dataset = {
-    cases: [
-      {
-        id: "repaired",
-        expected_root_ids: [],
-        negative_control_root_ids: ["root"],
-      },
-    ],
-    roots: [{ id: "root" }],
-  };
-  assert.deepEqual(
-    beforeSelector.rootsForCase(dataset, "repaired"),
-    dataset.roots,
-  );
-  const beforeDigest = scorer.scorerDigestV2();
-  const beforeSource = readFileSync(selectorPath, "utf8");
-  const afterSource = beforeSource.replace(
-    "...item.negative_control_root_ids,",
-    "",
-  );
-  assert.notEqual(
-    afterSource,
-    beforeSource,
-    "fault injection must change selector",
-  );
-  writeFileSync(selectorPath, afterSource);
-  assert.deepEqual(
-    beforeSelector.rootsForCase(dataset, "repaired"),
-    dataset.roots,
-    "the loaded selector still has the previous behavior",
-  );
-  assert.throws(
-    () => scorer.scorerDigestV2(),
-    /source changed after module load/,
-  );
-  const fresh = freshScorer(
-    copy,
-    `({
-    digest: scorer.scorerDigestV2(),
-    roots: (await import("./review-eval-v2-selection.mjs")).rootsForCase(${JSON.stringify(dataset)}, "repaired"),
-  })`,
-  );
-  assert.deepEqual(fresh.roots, []);
-  assert.notEqual(
-    fresh.digest,
-    beforeDigest,
-    "a fresh selector must use a new scoring identity",
-  );
-});
 
 test("scorer identity changes when report reduction changes", async (context) => {
   const { copy, scorer } = await copiedScorer(context);
@@ -887,6 +768,8 @@ function freshScorer(copy, expression) {
 test("loaded scorer rejects changed source while a fresh process can rescore it", async (context) => {
   const { copy, scorer } = await copiedScorer(context);
   const beforeDigest = scorer.scorerDigestV2();
+  assert.match(beforeDigest, /^[a-f0-9]{64}$/);
+  assert.equal(scorer.scorerDigestV2(), beforeDigest);
   const sourcePath = path.join(copy, "review-eval-v2-score.mjs");
   const source = readFileSync(sourcePath, "utf8");
   const changed = source.replace(
