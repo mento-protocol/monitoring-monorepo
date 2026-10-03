@@ -252,8 +252,8 @@ importers:
         specifier: 5.0.5
         version: 5.0.5(supports-color@5.5.0)
       '@google-cloud/logging':
-        specifier: ^12.0.1
-        version: 12.0.1
+        specifier: ^12.1.0
+        version: 12.1.0
       env-schema:
         specifier: ^8.0.0
         version: 8.0.0
@@ -298,8 +298,8 @@ importers:
         specifier: 5.0.5
         version: 5.0.5(supports-color@5.5.0)
       '@google-cloud/logging':
-        specifier: ^12.0.1
-        version: 12.0.1
+        specifier: ^12.1.0
+        version: 12.1.0
       axios:
         specifier: ^1.20.0
         version: 1.20.0(supports-color@5.5.0)
@@ -1680,8 +1680,8 @@ packages:
     resolution: {integrity: sha512-HAUW5vFdl5SC4evLxkq1P6Hbf77fFBTqpfq1oOXQ+x6mhVdQ6H3si0LOcat9SWbfoGlIfk3aX4j+rbTL47hVAg==}
     engines: {node: '>=22'}
 
-  '@google-cloud/logging@12.0.1':
-    resolution: {integrity: sha512-bvft23NAkdvtOwybi8ilImFXHseMgXRS+4P1YAVx6Leu5uZpZwV0hsGpj59m6P9lsziQgt/E65TVjrjET02MZg==}
+  '@google-cloud/logging@12.1.0':
+    resolution: {integrity: sha512-Nf11w/91L+h4M/U5tTKjyXZAEv8Q6o5boUrkHa8bYzmB7R/NAVnjUP7rO+mu/2OSE9OQ8IkdJXQLsHrL9j/6tQ==}
     engines: {node: '>=22'}
 
   '@google-cloud/paginator@7.0.1':
@@ -11866,7 +11866,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@google-cloud/logging@12.0.1':
+  '@google-cloud/logging@12.1.0':
     dependencies:
       '@google-cloud/common': 8.0.2
       '@google-cloud/logging-api': 0.3.0
