@@ -465,6 +465,8 @@ export function createProvider({
       await new Promise((resolve, reject) => {
         // Auth can take time. Check the same PATH/cwd immediately before spawn.
         call.cli_version_before = checkVersion(runtime);
+        // Auth and version probes can refresh managed or remote settings.
+        verifyPolicy({ env: callEnv, cwd: runtime.cwd });
         const child = spawnProcess(executable, args, {
           cwd: runtime.cwd,
           env: callEnv,

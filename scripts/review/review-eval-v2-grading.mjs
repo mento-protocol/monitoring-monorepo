@@ -75,6 +75,7 @@ function phaseCache({
 
 export async function gradeCell({
   plan,
+  gradingSettings,
   cell,
   fixture,
   raw,
@@ -87,6 +88,7 @@ export async function gradeCell({
   sourceDiff,
 }) {
   scorerDigestV2();
+  gradingSettings ??= { model: plan.model, effort: plan.effort };
   if (
     raw.payload.completed !== true ||
     raw.payload.output_contract !== plan.output_contract ||
@@ -111,8 +113,7 @@ export async function gradeCell({
     rawDigest: raw.artifact.content_digest,
     datasetDigest: loaded.digest,
     scorerDigest: scorerDigestV2(),
-    model: plan.model,
-    effort: plan.effort,
+    ...gradingSettings,
     version: provider.identity.version,
     runtime: provider.identity,
   });
@@ -150,7 +151,7 @@ export async function gradeCell({
       defects: rootsForCase(loaded.dataset, fixture.id),
       sourceDiff: sourceDiff(isolated.path),
       fixturePath: isolated.path,
-      judge: { exec, model: plan.model, effort: plan.effort },
+      judge: { exec, ...gradingSettings },
       phaseCache: phaseCache({
         out,
         scoreId,
@@ -211,6 +212,7 @@ export function finishCampaign({
   out,
   started,
   gradingRuntime,
+  gradingSettings,
 }) {
   let gradingSourceFailure = null;
   try {
@@ -240,6 +242,7 @@ export function finishCampaign({
         datasetDigest,
       });
   report.grading_runtime = gradingRuntime ?? null;
+  report.grading_settings = gradingSettings;
   report.elapsed_ms = Date.now() - started;
   writeJson(path.join(out, "report.json"), report);
   return report;

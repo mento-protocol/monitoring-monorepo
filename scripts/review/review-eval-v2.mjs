@@ -9,7 +9,7 @@ export async function main(argv = process.argv.slice(2)) {
   const [mode, ...args] = argv.filter((arg) => arg !== "--");
   if (!mode || mode === "--help" || mode === "help") {
     process.stdout.write(
-      "review:eval:v2 plan --dataset FILE --incumbent DIR --candidate DIR --out DIR [--model claude-opus-5] [--effort high]\nreview:eval:v2 run --out DIR\nreview:eval:v2 score --out DIR [--dataset FILE]\nreview:eval:v2 report --out DIR\nProvider concurrency is 1. Runs require verified Claude subscription authentication and have no dollar stop. Only run and score use model quota.\n",
+      "review:eval:v2 plan --dataset FILE --incumbent DIR --candidate DIR --out DIR [--model claude-opus-5] [--effort high]\nreview:eval:v2 run --out DIR\nreview:eval:v2 score --out DIR [--dataset FILE] [--model GRADER_MODEL] [--effort GRADER_EFFORT]\nreview:eval:v2 report --out DIR\nProvider concurrency is 1. Runs require verified Claude subscription authentication and have no dollar stop. Score overrides change grading only; omitted settings use the plan. Only run and score use model quota.\n",
     );
     return;
   }
@@ -45,7 +45,7 @@ export async function main(argv = process.argv.slice(2)) {
           "effort",
         ]
       : mode === "score"
-        ? ["out", "dataset"]
+        ? ["out", "dataset", "model", "effort"]
         : ["out"];
   if (Object.keys(values).some((key) => !allowed.includes(key)))
     throw new Error(`option not supported for ${mode}`);
@@ -66,6 +66,8 @@ export async function main(argv = process.argv.slice(2)) {
       out: values.out,
       scoreOnly: mode === "score",
       datasetFile: values.dataset,
+      graderModel: values.model,
+      graderEffort: values.effort,
     });
     if (result.status !== "completed") process.exitCode = 1;
   } else if (mode === "report")

@@ -127,6 +127,95 @@ async function cachedCampaign(
   };
 }
 
+test("score CLI changes grader settings while preserving saved raw and plan bytes", async (context) => {
+  const c = await cachedCampaign(context);
+  const planFile = path.join(c.out, "plan.json");
+  const planBytes = readFileSync(planFile, "utf8");
+  const cache = await import(c.moduleUrl("review-eval-experiment-cache.mjs"));
+  const gradingSettings = { model: "other-grader", effort: "medium" };
+  const scoreFiles = c.rawDigests.map((rawDigest) => {
+    const identity = c.runner.scoringIdentity({
+      rawDigest,
+      datasetDigest: c.plan.dataset_digest,
+      scorerDigest: c.scoreDigest,
+      ...gradingSettings,
+      version: c.plan.cli_version,
+      runtime: c.plan.provider_runtime,
+    });
+    assert.equal(
+      cache.readExperimentCache({
+        artifactRoot: c.out,
+        kind: "score",
+        identity,
+      }),
+      null,
+    );
+    return cache.writeExperimentCache({
+      artifactRoot: c.out,
+      kind: "score",
+      identity,
+      payload: {
+        status: "complete",
+        errors: [],
+        claims: [],
+        defects: [],
+        novel: [],
+      },
+    }).file;
+  });
+  const invoke = (args = []) =>
+    JSON.parse(
+      execFileSync(
+        process.execPath,
+        [
+          realpathSync(path.join(c.copy, "scripts/review/review-eval-v2.mjs")),
+          "score",
+          "--out",
+          c.out,
+          ...args,
+        ],
+        { encoding: "utf8", env: process.env },
+      ),
+    );
+  const report = invoke([
+    "--model",
+    gradingSettings.model,
+    "--effort",
+    gradingSettings.effort,
+  ]);
+  assert.equal(report.status, "completed");
+  assert.deepEqual(report.grading_settings, gradingSettings);
+  assert.deepEqual(
+    report.rows.map((row) => row.raw_digest),
+    c.rawDigests,
+  );
+  assert.deepEqual(
+    report.rows.map((row) => row.score_file),
+    scoreFiles,
+  );
+  assert.ok(report.rows.every((row) => row.raw_reused && row.score_reused));
+  const defaults = invoke();
+  assert.deepEqual(defaults.grading_settings, {
+    model: c.plan.model,
+    effort: c.plan.effort,
+  });
+  assert.ok(defaults.rows.every((row) => row.raw_reused && row.score_reused));
+  assert.deepEqual(
+    defaults.rows.map((row) => row.raw_digest),
+    c.rawDigests,
+  );
+  assert.notDeepEqual(
+    defaults.rows.map((row) => row.score_file),
+    scoreFiles,
+  );
+  assert.equal(readFileSync(planFile, "utf8"), planBytes);
+  assert.equal(existsSync(path.join(c.out, "spend.json")), false);
+  await assert.rejects(
+    c.runner.runCampaign({ out: c.out, graderModel: "other-grader" }),
+    /grader overrides require score-only mode/,
+  );
+});
+
 test("result-only and separately stored final text are checked before cached grades", async (context) => {
   for (const mode of ["result-only", "final-artifact-only", "clean"]) {
     await context.test(mode, async (child) => {

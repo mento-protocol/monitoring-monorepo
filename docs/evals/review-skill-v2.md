@@ -133,7 +133,10 @@ A matched verdict carries a verbatim quote from the final review. Code checks
 that every linked claim contains this quote. The grader still owns the semantic
 judgment. The scorer retains every extracted claim and reports insufficient
 coverage explicitly.
-Duplicate extracted claim text is rejected even when its supporting quotes differ.
+Duplicate extracted claim text is rejected after trimming surrounding whitespace,
+even when its supporting quotes differ. This exact-text guard does not independently
+validate semantic duplicates or paraphrases; [issue #2564](https://github.com/mento-protocol/monitoring-monorepo/issues/2564)
+tracks that limit.
 Uncertain matches and unverifiable claims remain visible. The arm summary reports
 uncertain repaired-root matches separately from known-root uncertainty. Those
 records do not count as definite repaired-root accusations or alter known recall.
@@ -144,12 +147,18 @@ uncertain root matches skip source-only novelty grading. The unresolved links
 remain visible; a separate definite root match still counts normally.
 Other unmatched claims still receive source-based grading.
 
-Rescore saved reviewer outputs after a dataset or grader change:
+Rescore saved reviewer outputs after a dataset or grader change. Use `--model`
+and `--effort` on `score` to select the grader independently:
 
 ```bash
-pnpm review:eval:v2 score --out /absolute/path/to/eval-run   --dataset "$PWD/docs/evals/review-skill-v2/dataset.json"
+pnpm review:eval:v2 score --out /absolute/path/to/eval-run   --dataset "$PWD/docs/evals/review-skill-v2/dataset.json"   --model claude-opus-5 --effort high
 pnpm review:eval:v2 report --out /absolute/path/to/eval-run
 ```
+
+Omitted grader settings default to the plan's model and effort. Overrides change
+judge requests and grading cache identity. They do not edit the plan or saved
+reviewer identities. The report records the effective `grading_settings`.
+`run` does not accept grader overrides.
 
 Rescoring must retain the plan's case IDs. It may reorder cases or revise labels.
 To add or remove cases, create a new plan.

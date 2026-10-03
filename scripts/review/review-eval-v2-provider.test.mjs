@@ -726,6 +726,53 @@ test("managed policy redirection and cached policy cannot pass subscription veri
   assert.equal(existsSync(path.join(s.out, "spend.json")), false);
 });
 
+test("policy appearing during auth or version capture rejects before model launch", async (context) => {
+  for (const phase of ["auth", "version"]) {
+    await context.test(phase, async (child) => {
+      const s = setup(child);
+      const config = path.join(s.out, "config");
+      mkdirSync(config);
+      s.options.env.CLAUDE_CONFIG_DIR = "config";
+      s.options.verifyPolicy = (options) =>
+        verifyUnmanagedPolicy({
+          ...options,
+          platform: "linux",
+          stat: () => {
+            const error = new Error("absent");
+            error.code = "ENOENT";
+            throw error;
+          },
+        });
+      const key = phase === "auth" ? "execAuth" : "execVersion";
+      const original = s.options[key];
+      s.options[key] = (...args) => {
+        const result = original(...args);
+        writeFileSync(path.join(config, "remote-settings.json"), "{}");
+        return result;
+      };
+      const provider = createProvider(s.options);
+      await assert.rejects(s.invoke(provider), /managed policy/);
+      assert.equal(
+        s.authCalls.length,
+        1,
+        "clean policy allowed authentication",
+      );
+      assert.equal(
+        s.versionCalls.length,
+        1,
+        "version probe completed before rejection",
+      );
+      assert.equal(s.modelCalls.length, 0);
+      assert.equal(provider.ledger.calls[0].state, "failed");
+      const artifact = JSON.parse(
+        readFileSync(path.join(s.out, "calls/0000.json"), "utf8"),
+      );
+      assert.equal(artifact.stdout, "");
+      assert.match(artifact.call.error, /managed policy/);
+    });
+  }
+});
+
 test("managed policy uncertainty fails closed across file and macOS preference sources", () => {
   const absent = () => {
     const error = new Error("absent");

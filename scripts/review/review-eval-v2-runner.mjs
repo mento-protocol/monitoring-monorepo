@@ -322,9 +322,23 @@ export async function runCampaign({
   out,
   scoreOnly = false,
   datasetFile = null,
+  graderModel,
+  graderEffort,
 }) {
+  if (!scoreOnly && (graderModel !== undefined || graderEffort !== undefined))
+    throw new Error("grader overrides require score-only mode");
   out = path.resolve(out);
   const plan = readPlan(out, { scoreOnly });
+  const gradingSettings = {
+    model: graderModel ?? plan.model,
+    effort: graderEffort ?? plan.effort,
+  };
+  if (
+    Object.values(gradingSettings).some(
+      (value) => typeof value !== "string" || !value.trim(),
+    )
+  )
+    throw new Error("grader model and effort must be nonempty strings");
   const sourceFile = datasetFile
     ? path.resolve(datasetFile)
     : plan.dataset_file;
@@ -438,6 +452,7 @@ export async function runCampaign({
       rows.push(
         await gradeCell({
           plan,
+          gradingSettings,
           cell,
           fixture,
           raw,
@@ -462,6 +477,7 @@ export async function runCampaign({
     failure,
     spend: provider?.ledger ?? null,
     gradingRuntime: provider?.identity ?? null,
+    gradingSettings,
     datasetDigest: loaded.digest,
     out,
     started,

@@ -26,6 +26,7 @@ function setup(context, uncertain = false, artifactRoot) {
     digestObject(readFileSync(path.join(fixturePath, "code"), "utf8"));
   const finalText = "Null input crashes. An independent call hangs.";
   const calls = [];
+  const requests = [];
   const replies = {
     extraction: {
       complete: true,
@@ -79,6 +80,7 @@ function setup(context, uncertain = false, artifactRoot) {
           ? "matching"
           : "extraction";
       calls.push(phase);
+      requests.push({ model: request.model, effort: request.effort });
       if (state.failure?.phase === phase) {
         if (state.failure.kind === "provider")
           throw new Error("provider unavailable");
@@ -137,7 +139,7 @@ function setup(context, uncertain = false, artifactRoot) {
         readFileSync(path.join(out, "cache/stage", file), "utf8"),
       ),
     }));
-  return { args, state, calls, artifacts };
+  return { args, state, calls, requests, artifacts };
 }
 
 test("resume keeps validated phases after later provider or malformed-output failure", async (context) => {
@@ -194,12 +196,32 @@ test("raw, dataset, and grading runtime changes cannot reuse earlier phase judgm
       if (input === "dataset") s.args.loaded.digest = "other-dataset";
       if (input === "runtime")
         s.args.provider.identity.executable_sha256 = "1".repeat(64);
-      if (input === "model") s.args.plan.model = "other-model";
-      if (input === "effort") s.args.plan.effort = "low";
+      const originalPlan = structuredClone(s.args.plan);
+      const originalRaw = structuredClone(s.args.raw);
+      if (input === "model" || input === "effort") {
+        s.args.gradingSettings = {
+          model: s.args.plan.model,
+          effort: s.args.plan.effort,
+        };
+        s.args.gradingSettings[input] =
+          input === "model" ? "other-model" : "low";
+      }
       s.state.failure = null;
       s.calls.length = 0;
+      s.requests.length = 0;
       assert.equal((await gradeCell(s.args)).score.status, "complete");
       assert.deepEqual(s.calls, ["extraction", "matching", "classification"]);
+      assert.deepEqual(
+        s.requests,
+        Array(3).fill(
+          s.args.gradingSettings ?? {
+            model: s.args.plan.model,
+            effort: s.args.plan.effort,
+          },
+        ),
+      );
+      assert.deepEqual(s.args.plan, originalPlan);
+      assert.deepEqual(s.args.raw, originalRaw);
     });
 });
 
