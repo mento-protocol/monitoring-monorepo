@@ -123,6 +123,16 @@ const validationModuleLineLimits = new Map([
   ["review-eval-plan-evidence.mjs", 600],
   ["review-eval-run-evidence.mjs", 600],
   ["review-eval-appended.mjs", 600],
+  ["review-eval-v2.mjs", 100],
+  ["review-eval-v2-dataset.mjs", 400],
+  ["review-eval-v2-grading.mjs", 400],
+  ["review-eval-v2-judge-provider.mjs", 100],
+  ["review-eval-v2-probe-trust.mjs", 200],
+  ["review-eval-v2-provider.mjs", 600],
+  ["review-eval-v2-report.mjs", 200],
+  ["review-eval-v2-runner.mjs", 500],
+  ["review-eval-v2-score.mjs", 500],
+  ["review-eval-v2-selection.mjs", 100],
 ]);
 const contractRelative = "docs/evals/review-skill-fixtures.json";
 const ledgerRelative = "docs/evals/review-skill-ledger.jsonl";

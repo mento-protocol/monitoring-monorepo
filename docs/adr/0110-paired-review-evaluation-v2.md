@@ -1,0 +1,102 @@
+---
+title: Paired review evaluation v2 separates execution from grading
+status: active
+owner: eng
+canonical: true
+last_verified: 2026-09-30
+scope: ci/process
+date: 2026-09
+doc_type: adr
+review_interval_days: 90
+garden_lane: adrs-architecture
+---
+
+# ADR 0110 — Paired review evaluation v2
+
+## Status
+
+Accepted for the opt-in diagnostic path. Narrows
+[ADR 0083](0083-non-ledger-review-eval-experiments.md) to allow the v2 direct-review
+comparison described here. Existing v1 lanes and ledger rules remain in force.
+
+## Context
+
+The existing evaluation preserves execution identity carefully, but its answer
+key contains duplicate roots and some later-head findings. Session-tail scoring
+can count a withdrawn suspicion. Its raw cache identity also binds grading
+inputs, so a grader change can require another reviewer execution.
+
+## Decision
+
+Add a small paired direct-review evaluation with a separately versioned dataset
+and scorer. Compare explicit skill snapshots on the same frozen cases. Require
+one complete final review and retain full execution traces for diagnosis.
+
+Separate reviewer execution identity from grading identity. Bind source,
+repair, skill, prompt, runtime, and invocation behavior to the former. Bind
+immutable reviewer evidence, answer key, grading orchestration, grader
+configuration, and scorer bytes to the latter. Reuse each phase only when its
+own inputs match. Persist validated extraction, matching, and novelty phases
+before starting the next phase. Revalidate them on resume; a later failure must
+not replace valid earlier judgments. Keep answer-key selection and grading
+orchestration separate from execution code, including score-cache identity, judge calls, and grading
+result handling. Keep judge-specific command construction in grading identity;
+pin shared authentication, transport, and restrictions to both identities.
+Pin the reviewer CLI version, canonical executable path, and entry-file SHA-256
+at planning. Verify that pin before each call and verify entry bytes around
+execution. This does not attest transitive runtime dependencies. Score-only runs
+pin the current grader separately and retain historical raw identity, including
+legacy keys without an executable pin. Legacy plans cannot start new reviews.
+Pin grading source and prompts for the process lifetime, and
+reject source drift before saving results.
+Rescoring keeps each saved review's recorded skill, prompt, and execution
+identities. Store original raw identities in new plans and retain a frozen
+identity builder for historical plans. Reviewer code changes do not block reuse
+of complete raw evidence. Pin loaded execution source at startup and reject
+disk drift before writing a plan with that digest.
+Pin the current runner callbacks, fixture preparation, probe trust, and cache
+helpers in grading identity. Changes to these shared helpers require new grades.
+Missing compatible raw evidence fails without a new reviewer call.
+
+Use root-cause labels and repaired-root negative controls. A repaired case is
+not a claim that its whole PR has no defects. Keep original and repaired cases
+in one PR family and split. Record prior exposure and label authority explicitly.
+Agent audits and model judgments do not become human calibration.
+Alternate arm order by sorted family ID and reverse it for repaired cases.
+This balances first positions within each variant when the family count is even.
+Reject a claim reused across distinct matched roots. Keep uncertain root-linked
+claims out of source-only novelty grading while retaining definite root matches.
+Require an extracted claim for every matched or uncertain root verdict.
+
+A dataset digest establishes identity, not permission to execute its source.
+Restrict executable probes to reviewed source and repair tuples. Verify and copy
+their complete local module closure by hash before importing the copies in a
+private directory with an empty environment. New families require reviewed
+trust pins. Model confinement alone does not protect the host probe process.
+
+Separate execution completion from comparative conclusions. Incomplete calls
+cannot become zero findings. Valid uncertainty remains visible. An A/A run can
+qualify the instrument but cannot establish a skill improvement. V2 cannot
+promote a skill, append a v1 ledger row, or refresh its schedule.
+
+## Alternatives considered
+
+- Change v1 scoring in place: rejected because historical scores would change
+  meaning and broad cache invalidation would buy unnecessary reviewer calls.
+- Add a dashboard and automatic benchmark service: rejected because a small
+  operator-run panel resolves the current execution and scoring defects.
+- Require the final message of any old transcript: rejected because old callers
+  permitted addenda after a report. Final-review compatibility needs evidence.
+
+## Consequences
+
+The repository retains v1 during explicit migration. The v2 path has no scheduler,
+publication automation, live finder, or automatic promotion. Its pilot proves
+operation on a narrow, previously exposed panel. Independent calibration and
+unseen PRs are necessary before broader quality claims.
+
+## Evidence
+
+- [Implementation issue #2555](https://github.com/mento-protocol/monitoring-monorepo/issues/2555)
+- [V2 runbook](../evals/review-skill-v2.md)
+- [V1 answer-key limits](../evals/review-skill.md#the-exam-and-the-answer-key)
