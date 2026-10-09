@@ -139,6 +139,8 @@ jobs:
       # blip → re-run the job manually.
       - name: pnpm audit high gate self-tests
         run: node scripts/supply-chain/pnpm-audit-high-gate.test.mjs
+      - name: security baseline glob compatibility
+        run: node --test scripts/supply-chain/security-baseline-compatibility.test.mjs
       - name: alerts uuid override contract
         run: node --test scripts/supply-chain/alerts-uuid-overrides.test.mjs
       - name: pnpm audit (high+ only)

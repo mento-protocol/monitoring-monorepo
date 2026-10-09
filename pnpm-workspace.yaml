@@ -92,9 +92,13 @@ packageConfigs:
 overrides:
   # Nodemon watches literal directories; chokidar 4 removes unpatched braces.
   "nodemon>chokidar": 4.0.3
+  # GHSA-68fv-2mgg-jv7q: patched floor 1.2.2.
   "source-map-js@<1.2.2": 1.2.2
+  # GHSA-jqcg-44mw-7w3h: patched floor 2.0.8.
   "proxy-addr@<2.0.8": 2.0.8
+  # GHSA-vc2v-76pw-4v95: patched floor 1.8.2.
   "compression@<1.8.2": 1.8.2
+  # GHSA-c475-qrg2-pj4r: patched floor 6.2.1.
   "basic-ftp@<6.2.1": 6.2.1
   # Next only uses globSync for root-directory matching. The companion patch
   # disables tinyglobby directory expansion to preserve fast-glob semantics.
@@ -119,6 +123,7 @@ overrides:
   "postcss@<8.5.23": 8.5.23
   "picomatch@>=4.0.0 <4.0.4": 4.0.4
   "vite@>=8.0.0 <8.0.16": 8.0.16
+  # GHSA-m9gg-hp2v-232j: patched 1.14.x floor 1.14.5.
   "@grpc/grpc-js": 1.14.5
   "esbuild": 0.28.1
   "@babel/core@>=7.0.0 <7.29.6": 7.29.6
@@ -155,6 +160,7 @@ overrides:
   "cron": 4.3.4
   "diff@^4.0.0": ^4.0.4
   "file-type@^21.0.0": ^21.3.2
+  # GHSA-8r5x-fm3f-whwj / GHSA-p8wg-vrv2-v86f: floor 4.7.10.
   "handlebars@<4.7.10": 4.7.10
   # GHSA-mwp4-54f8-5fhr: 10.3.1 rejects ambiguous leading-zero IPv4 octets.
   "ip-address@<10.3.1": 10.3.1
@@ -181,6 +187,7 @@ overrides:
   "lighthouse>ws": 7.5.11
   "ws@>=8.0.0 <8.21.0": 8.21.0
   # GHSA-8xcm-r25x-g524, GHSA-m8rv-5g2x-5cg5, GHSA-v3r7-h72x-cjcm.
+  # GHSA-rfgv-xxqx-mfg5: patched 6.x floor 6.28.1.
   "undici@<6.28.1": 6.28.1
   "yaml@^2.0.0": ^2.8.3
 
