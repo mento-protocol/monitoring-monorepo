@@ -26,6 +26,29 @@ catalog:
 
 minimumReleaseAge: 4320
 minimumReleaseAgeExclude:
+  - "@grpc/grpc-js@1.14.5"
+  - source-map-js@1.2.2
+  - proxy-addr@2.0.8
+  - compression@1.8.2
+  - basic-ftp@6.2.1
+  - sharp@0.35.5
+  - "@img/sharp-linux-arm@0.35.5"
+  - "@img/sharp-linux-x64@0.35.5"
+  - "@img/sharp-win32-x64@0.35.5"
+  - "@img/sharp-darwin-x64@0.35.5"
+  - "@img/sharp-win32-ia32@0.35.5"
+  - "@img/sharp-linux-arm64@0.35.5"
+  - "@img/sharp-linux-ppc64@0.35.5"
+  - "@img/sharp-linux-s390x@0.35.5"
+  - "@img/sharp-win32-arm64@0.35.5"
+  - "@img/sharp-darwin-arm64@0.35.5"
+  - "@img/sharp-linux-riscv64@0.35.5"
+  - "@img/sharp-linuxmusl-x64@0.35.5"
+  - "@img/sharp-freebsd-wasm32@0.35.5"
+  - "@img/sharp-linuxmusl-arm64@0.35.5"
+  - "@img/sharp-webcontainers-wasm32@0.35.5"
+  - handlebars@4.7.10
+  - undici@6.28.1
   - "@mento-protocol/*"
   - envio-cloud
   - "@envio-dev/envio-cloud-*"
@@ -67,6 +90,15 @@ packageConfigs:
     saveExact: true
 
 overrides:
+  # Nodemon watches literal directories; chokidar 4 removes unpatched braces.
+  "nodemon>chokidar": 4.0.3
+  "source-map-js@<1.2.2": 1.2.2
+  "proxy-addr@<2.0.8": 2.0.8
+  "compression@<1.8.2": 1.8.2
+  "basic-ftp@<6.2.1": 6.2.1
+  # Next only uses globSync for root-directory matching. The companion patch
+  # disables tinyglobby directory expansion to preserve fast-glob semantics.
+  "@next/eslint-plugin-next>fast-glob": npm:tinyglobby@0.2.17
   # react-doctor 0.1.6 scores the dashboard with Knip 6.12.2. Newer Knip
   # releases change its dead-code result and lower the required score to 99.
   "react-doctor>knip": 6.12.2
@@ -75,20 +107,19 @@ overrides:
   # track the dashboard's react version or react-dom's own `react: ^x` peer
   # breaks inside envio's subtree.
   "envio>react": 19.2.8
-  # GHSA-rgj7-g3m4-5g8c (libheif) hits 0.35.3, the floor the superseded
-  # GHSA-f88m-g3jw-g9cj pin set. 0.35.4 is the patched floor. Stable Next
+  # GHSA-wq5f-xc86-pv6w: 0.35.5 is the patched floor. Stable Next
   # 16.2.x still requests sharp ^0.34.5; remove once the supported stable Next
-  # line selects sharp >=0.35.4.
-  "sharp@<0.35.4": 0.35.4
+  # line selects sharp >=0.35.5.
+  "sharp@<0.35.5": 0.35.5
   "flatted@<3.4.2": 3.4.2
-  # GHSA-rgw5-rvv9-x895: the 5.0.8 resource-limit fix is incomplete.
-  "brace-expansion@>=2.0.0 <3": 5.0.9
-  "brace-expansion@>=5.0.0 <6": 5.0.9
+  # GHSA-qhr7-859c-m2p7 and GHSA-q2hr-2g5m-vwhr: patched 5.x floor.
+  "brace-expansion@>=2.0.0 <3": 5.0.12
+  "brace-expansion@>=5.0.0 <6": 5.0.12
   # GHSA-fxqj-rqcc-2cmp: all releases through 8.5.22 are vulnerable.
   "postcss@<8.5.23": 8.5.23
   "picomatch@>=4.0.0 <4.0.4": 4.0.4
   "vite@>=8.0.0 <8.0.16": 8.0.16
-  "@grpc/grpc-js": 1.14.4
+  "@grpc/grpc-js": 1.14.5
   "esbuild": 0.28.1
   "@babel/core@>=7.0.0 <7.29.6": 7.29.6
   # GHSA-v422-hmwv-36x6: enforce limit validation on both supported lines.
@@ -119,12 +150,12 @@ overrides:
   "ajv@^6.0.0": ^6.14.0
   "ajv@^8.0.0": ^8.18.0
   "body-parser@>=2.0.0 <2.3.0": 2.3.0
-  # GHSA-rgw5-rvv9-x895: the 5.0.8 resource-limit fix is incomplete.
-  "brace-expansion@^1.0.0": 5.0.9
+  # GHSA-qhr7-859c-m2p7 and GHSA-q2hr-2g5m-vwhr: patched 5.x floor.
+  "brace-expansion@^1.0.0": 5.0.12
   "cron": 4.3.4
   "diff@^4.0.0": ^4.0.4
   "file-type@^21.0.0": ^21.3.2
-  "handlebars@<4.7.9": 4.7.9
+  "handlebars@<4.7.10": 4.7.10
   # GHSA-mwp4-54f8-5fhr: 10.3.1 rejects ambiguous leading-zero IPv4 octets.
   "ip-address@<10.3.1": 10.3.1
   "lodash@>=4.0.0 <4.17.23": 4.18.1
@@ -150,12 +181,12 @@ overrides:
   "lighthouse>ws": 7.5.11
   "ws@>=8.0.0 <8.21.0": 8.21.0
   # GHSA-8xcm-r25x-g524, GHSA-m8rv-5g2x-5cg5, GHSA-v3r7-h72x-cjcm.
-  "undici@<6.28.0": 6.28.0
+  "undici@<6.28.1": 6.28.1
   "yaml@^2.0.0": ^2.8.3
 
 patchedDependencies:
+  "@next/eslint-plugin-next@16.3.5": patches/@next__eslint-plugin-next@16.3.5.patch
   "@lhci/utils@0.15.1": patches/@lhci__utils@0.15.1.patch
-  blamer@1.0.7: patches/blamer@1.0.7.patch
 
 # pnpm 11 records dependency build-script policy explicitly.
 allowBuilds:
