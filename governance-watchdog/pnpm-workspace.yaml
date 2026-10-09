@@ -3,6 +3,9 @@ packages:
 
 minimumReleaseAge: 4320
 minimumReleaseAgeExclude:
+  - "@grpc/grpc-js@1.14.5"
+  - source-map-js@1.2.2
+  - proxy-addr@2.0.8
   - "@mento-protocol/*"
   - envio-cloud
   - "@envio-dev/envio-cloud-*"
@@ -21,10 +24,18 @@ minimumReleaseAgeExclude:
   - protobufjs
 
 overrides:
-  # GHSA-rgw5-rvv9-x895: the 5.0.8 resource-limit fix is incomplete.
-  "brace-expansion@^1.0.0": 5.0.9
-  "brace-expansion@>=2.0.0 <3": 5.0.9
-  "brace-expansion@>=5.0.0 <6": 5.0.9
+  # Nodemon watches literal directories; chokidar 4 removes unpatched braces.
+  "nodemon>chokidar": 4.0.3
+  # GHSA-68fv-2mgg-jv7q: patched floor 1.2.2.
+  "source-map-js@<1.2.2": 1.2.2
+  # GHSA-jqcg-44mw-7w3h: patched floor 2.0.8.
+  "proxy-addr@<2.0.8": 2.0.8
+  # GHSA-m9gg-hp2v-232j: patched 1.14.x floor 1.14.5.
+  "@grpc/grpc-js": 1.14.5
+  # GHSA-qhr7-859c-m2p7 and GHSA-q2hr-2g5m-vwhr: patched 5.x floor.
+  "brace-expansion@^1.0.0": 5.0.12
+  "brace-expansion@>=2.0.0 <3": 5.0.12
+  "brace-expansion@>=5.0.0 <6": 5.0.12
   # Exact pin because ranges resolve forward on fresh installs. 3.4.2 is what
   # both the standalone npm lockfile and this lockfile resolve today.
   flatted: 3.4.2
