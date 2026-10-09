@@ -1,3 +1,4 @@
+// Required CI runs this test via scripts/lighthouse-config.test.mjs.
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
