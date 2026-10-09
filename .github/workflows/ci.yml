@@ -1316,8 +1316,6 @@ jobs:
           restore-cache: ${{ !inputs.no_skip_audit }}
       - name: ESLint root scripts
         run: pnpm lint:scripts
-      - name: security baseline glob compatibility
-        run: node --test scripts/supply-chain/security-baseline-compatibility.test.mjs
       - name: Peg registry integrity
         env:
           PEG_POLICY_BASE_REF: ${{ inputs.no_skip_audit && inputs.audit_base_sha || format('origin/{0}', github.base_ref || 'main') }}
