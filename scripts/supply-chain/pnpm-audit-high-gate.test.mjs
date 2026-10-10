@@ -166,7 +166,15 @@ test("rejects the second extract-zip advisory on both LHCI toolchain paths", () 
     },
   });
   assert(exitCode !== 0, "expected non-zero exit");
-  assert(stderr.includes("extract-zip@2.0.1"), `stderr: ${stderr}`);
+  for (const path of [
+    ".>@lhci/cli>@lhci/utils>lighthouse>puppeteer-core>@puppeteer/browsers>extract-zip",
+    "ui-dashboard>@lhci/cli>lighthouse>puppeteer-core>@puppeteer/browsers>extract-zip",
+  ]) {
+    assert(
+      stderr.includes(`extract-zip@2.0.1 via ${path}`),
+      `stderr: ${stderr}`,
+    );
+  }
 });
 
 test("the second extract-zip advisory on a non-toolchain path still fails the gate", () => {
