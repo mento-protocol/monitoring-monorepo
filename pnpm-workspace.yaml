@@ -99,6 +99,8 @@ overrides:
   # extract-zip has no patched release. Puppeteer 25 removes it; retain
   # Lighthouse 12 audits and use a release older than the three-day floor.
   "lighthouse>puppeteer-core": 25.12.0
+  # LHCI supplies Browsers 3's optional proxy peer; its v6 is out of range.
+  "@lhci/cli>proxy-agent": 8.0.1
   # Nodemon watches literal directories; chokidar 4 removes unpatched braces.
   "nodemon>chokidar": 4.0.3
   # GHSA-68fv-2mgg-jv7q: patched floor 1.2.2.
