@@ -31,10 +31,8 @@ overrides:
   # GHSA-qhr7-859c-m2p7 and GHSA-q2hr-2g5m-vwhr: patched 5.x floor.
   "brace-expansion@^1.0.0": 5.0.12
   "brace-expansion@>=5.0.0 <6": 5.0.12
-  # GHSA-qw65-cvwx-89v3 and GHSA-58mr-gqgx-xq4g hit 3.1.6, the floor the
-  # earlier fast-uri advisories set. 3.1.7 is the patched floor for the 3.x
-  # line; ajv 8 needs fast-uri ^3.
-  fast-uri@<3.1.7: 3.1.7
+  # GHSA-hrr3-gc8f-f4qj: patched 3.x floor; ajv 8 needs fast-uri ^3.
+  fast-uri@<3.1.8: 3.1.8
   form-data@<2.5.6: 2.5.6
   "form-data@>=4.0.0 <4.0.6": 4.0.6
   # GHSA-2883-xcg3-v3hh hits 4.3.1, the floor the superseded
@@ -45,7 +43,8 @@ overrides:
   # GHSA-fxqj-rqcc-2cmp: all releases through 8.5.22 are vulnerable.
   postcss@<8.5.23: 8.5.23
   protobufjs@>=7.0.0 <7.6.5: 7.6.5
-  qs@<6.15.2: 6.15.2
+  # GHSA-x5fp-wj9c-mxmx / GHSA-4mjr-xmp4-gh2g: patched floor 6.16.0.
+  qs@<6.16.0: 6.16.0
   # GHSA-w5hq-g745-h8pq: use each affected release line's patched backport.
   uuid@<11.1.1: 11.1.1
   "uuid@>=12.0.0 <12.0.1": 12.0.1

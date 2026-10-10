@@ -124,7 +124,7 @@ test("rejects unrelated high advisories", () => {
   assert(stderr.includes("example@1.0.0"), `stderr: ${stderr}`);
 });
 
-test("excepts the unpatched extract-zip advisory only on LHCI toolchain paths", () => {
+test("rejects the extract-zip advisory if the LHCI toolchain reintroduces it", () => {
   const { exitCode, stderr } = run({
     advisories: {
       789: {
@@ -142,10 +142,11 @@ test("excepts the unpatched extract-zip advisory only on LHCI toolchain paths", 
       },
     },
   });
-  assert(exitCode === 0, `expected exit 0, got ${exitCode}: ${stderr}`);
+  assert(exitCode !== 0, "expected non-zero exit");
+  assert(stderr.includes("extract-zip@2.0.1"), `stderr: ${stderr}`);
 });
 
-test("excepts the second unpatched extract-zip advisory on LHCI toolchain paths", () => {
+test("rejects the second extract-zip advisory on both LHCI toolchain paths", () => {
   const { exitCode, stderr } = run({
     advisories: {
       793: {
@@ -164,7 +165,16 @@ test("excepts the second unpatched extract-zip advisory on LHCI toolchain paths"
       },
     },
   });
-  assert(exitCode === 0, `expected exit 0, got ${exitCode}: ${stderr}`);
+  assert(exitCode !== 0, "expected non-zero exit");
+  for (const path of [
+    ".>@lhci/cli>@lhci/utils>lighthouse>puppeteer-core>@puppeteer/browsers>extract-zip",
+    "ui-dashboard>@lhci/cli>lighthouse>puppeteer-core>@puppeteer/browsers>extract-zip",
+  ]) {
+    assert(
+      stderr.includes(`extract-zip@2.0.1 via ${path}`),
+      `stderr: ${stderr}`,
+    );
+  }
 });
 
 test("the second extract-zip advisory on a non-toolchain path still fails the gate", () => {

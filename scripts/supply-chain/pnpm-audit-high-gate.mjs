@@ -14,70 +14,6 @@ import { spawnSync } from "node:child_process";
 const HIGH_SEVERITIES = new Set(["high", "critical"]);
 
 /**
- * Path-scoped advisory exceptions. pnpm's own ignoreGhsas is advisory-wide,
- * which would also mask a FUTURE production dependency picking up the same
- * vulnerable package — so exceptions live here instead, and a finding is
- * excepted only when its dependency path matches the allowed route AND its
- * resolved package@version equals the exact one this exception was written
- * for. A newly released version, or the same advisory on any other route,
- * still fails the gate.
- *
- * @typedef {{pathPattern: RegExp; module: string; version: string; reason: string}} AdvisoryException
- */
-
-/** @type {AdvisoryException} */
-const LHCI_EXTRACT_ZIP_EXCEPTION = {
-  // Anchored on the @lhci/cli path segment specifically: a runtime
-  // dependency that pulls puppeteer directly (service>puppeteer>…) must
-  // still fail the gate — only the Lighthouse CI toolchain route is the
-  // dev/CI-only case this exception describes.
-  pathPattern: /(^|>)@lhci\/cli>/,
-  module: "extract-zip",
-  version: "2.0.1",
-  reason: "unpatched upstream; only reachable via the @lhci/cli toolchain",
-};
-
-/** @type {Record<string, AdvisoryException>} */
-const ADVISORY_EXCEPTIONS = {
-  // extract-zip 2.0.1 symlink handling; NO patched release exists for either
-  // advisory (2.0.1 from 2020 is still the latest release). Reached only
-  // through the Lighthouse CI toolchain, which extracts Chrome archives from
-  // Google's CDN in dev/CI — never untrusted zips at runtime. @lhci/cli
-  // 0.15.1 pins lighthouse 12.6.1, whose puppeteer-core 24.x still bundles
-  // extract-zip; lighthouse 13.4+ moved to @puppeteer/browsers 3.x, which
-  // dropped it. Remove the moment @lhci/cli takes that line; if a NEWER
-  // extract-zip appears on this path the version guard reopens the gate,
-  // which is what we want.
-  // GHSA-jmr9-qjv8-65gv: unvalidated symlink path traversal (2026-06).
-  "GHSA-jmr9-qjv8-65gv": LHCI_EXTRACT_ZIP_EXCEPTION,
-  // GHSA-7pqw-9j4j-h8q3: arbitrary file writes through symlink archive
-  // entries (2026-08). Same package, version, route and dev/CI-only reasoning.
-  "GHSA-7pqw-9j4j-h8q3": LHCI_EXTRACT_ZIP_EXCEPTION,
-};
-
-/**
- * @param {string[]} ids
- * @param {string} moduleName
- * @param {string} version
- * @param {string} path
- * @returns {boolean}
- */
-function isExceptedFinding(ids, moduleName, version, path) {
-  for (const id of ids) {
-    const exception = ADVISORY_EXCEPTIONS[id];
-    if (
-      exception &&
-      exception.module === moduleName &&
-      exception.version === version &&
-      exception.pathPattern.test(path)
-    ) {
-      return true;
-    }
-  }
-  return false;
-}
-
-/**
  * @param {string} message
  * @returns {never}
  */
@@ -242,7 +178,6 @@ function evaluateReport(report) {
 
     for (const { finding, path } of findingPaths(advisory)) {
       const version = finding.version ?? "unknown-version";
-      if (isExceptedFinding(ids, moduleName, version, path)) continue;
       const summary = `${id} ${severity} ${moduleName}@${version} via ${path}`;
       disallowed.push(summary);
     }
