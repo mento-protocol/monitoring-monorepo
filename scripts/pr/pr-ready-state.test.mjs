@@ -5,6 +5,7 @@
 
 import { readFileSync } from "node:fs";
 import "./pr-stack-ready-state.test.mjs";
+import "./pr-ready-state-classic-protection.test.mjs";
 import "./pr-stack-recover.test.mjs";
 
 import {
@@ -612,6 +613,10 @@ test("falls back to rulesets for the current gh branch-protection 404", async ()
     }),
     fetchRules: rules,
     fetchBranch: async () => rulesetOnlyBranch,
+    fetchClassicProtection: async () => ({
+      ok: false,
+      error: "unreadable GraphQL",
+    }),
   });
   assertDeepEqual(masked.contexts, expectedContexts);
   assert(
@@ -634,6 +639,10 @@ test("falls back to rulesets for the current gh branch-protection 404", async ()
     }),
     fetchRules: rules,
     fetchBranch: async () => rulesetOnlyBranch,
+    fetchClassicProtection: async () => ({
+      ok: false,
+      error: "unreadable GraphQL",
+    }),
   });
   assertDeepEqual(proven, {
     contexts: expectedContexts,
@@ -663,6 +672,10 @@ test("a permission-masked classic 404 blocks readiness end to end", async () => 
       ],
     }),
     fetchBranch: async () => rulesetOnlyBranch,
+    fetchClassicProtection: async () => ({
+      ok: false,
+      error: "unreadable GraphQL",
+    }),
   });
 
   const summary = summarizeReadyState({
@@ -784,6 +797,10 @@ test("fails closed on the context list for every unproven classic 404", async ()
       fetchProtection: async () => ({ ok: false, error: protectionError }),
       fetchRules: rules,
       fetchBranch: async () => branchResult,
+      fetchClassicProtection: async () => ({
+        ok: false,
+        error: "unreadable GraphQL",
+      }),
     });
 
     assert(
@@ -820,12 +837,17 @@ function nonStrictRulesetFetchers(protectionError, branchResult) {
       ],
     }),
     fetchBranch: async () => branchResult,
+    fetchClassicProtection: async () => ({
+      ok: false,
+      error: "unreadable GraphQL",
+    }),
   };
 }
 
 const rulesetOnlyBranch = {
   ok: true,
   value: {
+    name: "main",
     protected: true,
     protection: { enabled: false, required_status_checks: { contexts: [] } },
   },

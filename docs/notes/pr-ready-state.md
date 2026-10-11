@@ -78,16 +78,22 @@ Required blockers:
   probe reads active branch rulesets and derives required status contexts from
   any `required_status_checks` and named `workflows` rule. It trusts that list,
   and a ruleset's `strict_required_status_checks_policy: false`, only once one
-  proof establishes that classic protection is absent: the 404 body must say
-  `Branch not protected`, and `repos/{owner}/{repo}/branches/{base}` must report
-  `protection.enabled: false`. The top-level `protected` flag proves nothing —
-  a ruleset-only base still reports `protected: true`. A branch that is protected but has no
-  required-status-checks configuration answers `Required status checks not
-enabled`, which proves absence on its own. Unproven (another 404 body,
-  `protection.enabled` true or missing, a failed branch read) keeps the
-  contexts unavailable and blocking, because a classic-only required check
-  could be hiding behind the 404; strictness stays unknown, and a ruleset's
-  confirmed `true` still stands. An empty ruleset result blocks the same way.
+  proof establishes that classic protection is absent. A `Branch not protected`
+  404 plus `repos/{owner}/{repo}/branches/{base}` reporting
+  `protection.enabled: false` is conclusive. A generic `Not Found` 404 can also
+  be proved absent, but only with that disabled-classic branch response bound to
+  the exact base name, plus a successful GraphQL read for the same repository
+  and exact base ref: the viewer has `WRITE`, `MAINTAIN` or `ADMIN` permission,
+  the classic-rule inventory has `totalCount: 0`, an empty `nodes` list and
+  `hasNextPage: false`, and the base ref's `branchProtectionRule` is explicitly
+  null. GraphQL errors, missing fields, a partial inventory or any classic rule
+  leave the probe blocked. The top-level `protected` flag proves nothing —
+  a ruleset-only base still reports `protected: true`. A branch that is protected
+  but has no required-status-checks configuration answers `Required status checks
+not enabled`, which proves absence on its own. Unproven 404s keep the contexts
+  unavailable and blocking, because a classic-only required check could be
+  hiding behind the 404; strictness stays unknown, and a ruleset's confirmed
+  `true` still stands. An empty ruleset result blocks the same way.
 - Required GitHub review state, including requested changes or required review
   still pending.
 - Unreplied review comments that repo policy requires agents to answer. A
