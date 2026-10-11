@@ -1,6 +1,6 @@
 import { buildSearchBlob, matchesSearch } from "@/lib/table-search";
 import type { OlsPool, Pool } from "@/lib/types";
-import { MAX_TAB_LIMIT, type Tab } from "./constants";
+import { MAX_TAB_LIMIT, TABS, type Tab } from "./constants";
 
 export function addressSearchTerms(
   address: string | null | undefined,
@@ -85,4 +85,8 @@ export function parseTabLimit(rawLimit: string | null): number {
   const parsed = Number(rawLimit ?? "25");
   if (!Number.isInteger(parsed) || parsed <= 0) return 25;
   return Math.min(parsed, MAX_TAB_LIMIT);
+}
+
+export function parsePoolTab(value: string | null): Tab {
+  return TABS.includes(value as Tab) ? (value as Tab) : "providers";
 }

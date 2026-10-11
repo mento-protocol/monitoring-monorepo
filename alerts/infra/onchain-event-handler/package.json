@@ -12,7 +12,7 @@
   "scripts": {
     "build": "rimraf dist && tsc",
     "build:event-hashes": "node scripts/build-event-hashes.mjs",
-    "dev": "nodemon --ext ts --ignore dist --exec \"pnpm run start\"",
+    "dev": "nodemon --watch src --watch vitest.config.ts --watch vitest.hermetic-setup.ts --ext ts --exec \"pnpm run start\"",
     "format": "prettier --write \"src/**/*.{ts,js,json}\"",
     "format:check": "prettier --check \"src/**/*.{ts,js,json}\"",
     "generate:env": "terraform -chdir=.. apply -replace=module.onchain_event_handler.terraform_data.env_file -target=module.onchain_event_handler.terraform_data.env_file",

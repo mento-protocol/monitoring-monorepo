@@ -1,0 +1,88 @@
+{
+  "schema_version": 2,
+  "method": "Agent source inspection at pinned heads and direct pure-function reproductions. Repair patches are minimal adaptations of recorded historical fixes.",
+  "human_adjudication": false,
+  "reproductions": [
+    {
+      "root_id": "inventory-null-repo",
+      "input": "renderRefusedStubInventory({state: known, count: 1, issues: [123]}, null)",
+      "original": "Link contains github.com/null/issues/123",
+      "repaired": "Link contains github.com/mento-protocol/monitoring-monorepo/issues/123"
+    },
+    {
+      "root_id": "claim-trailing-newline",
+      "input": "Trusted valid claim with handoff footer plus final newline",
+      "original": "parseClaimComment returns null",
+      "repaired": "Returns claim metadata"
+    },
+    {
+      "root_id": "claim-optional-branch",
+      "input": "Trusted valid claim with optional Branch field omitted",
+      "original": "parseClaimComment returns null",
+      "repaired": "Returns Agent, Claim ID and Claimed At; omits Branch"
+    }
+  ],
+  "history": [
+    {
+      "pr": 1984,
+      "first_head": "07901b22c0da7db2b27f15dbbc3f5e8ea45623df",
+      "fix_head": "e0f88c07b012bf180ea93b26ae490d4eaf8a68ef",
+      "scope": "scripts/sentry/autofix/sentry-autofix-run-record.mjs"
+    },
+    {
+      "pr": 1982,
+      "first_head": "ee739b4142564a3a4e9273da6ba345f3cda5e8d3",
+      "fix_head": "25c4ed882df59c45b5fe16539fff31a79a80a073",
+      "scope": "scripts/pr/issue-board-backfill.mjs"
+    }
+  ],
+  "excluded": [
+    {
+      "pr": 1984,
+      "ids": [3828303385],
+      "reason": "Unquoted Search API label claim requires independent API evidence; not validated in this pilot."
+    },
+    {
+      "pr": 1984,
+      "ids": [3828304403, 3828313971],
+      "reason": "Path inventory policy and Markdown formatting are outside this functional-root pilot."
+    },
+    {
+      "pr": 1982,
+      "ids": [3827647420],
+      "reason": "Concurrent write recovery requires a separate stateful reproduction; not audited in this pilot."
+    },
+    {
+      "pr": 1982,
+      "ids": [3827655676],
+      "reason": "Markdown formatting is outside this functional-root pilot."
+    },
+    {
+      "pr": 2001,
+      "ids": [3830513980],
+      "reason": "Describes a later introduced zero-output branch absent at the first head."
+    },
+    {
+      "pr": 1995,
+      "ids": [3830695396],
+      "reason": "Later review describes wording already present at the first head. Review timestamp alone does not prove absence. Prose nit excluded."
+    }
+  ],
+  "duplicate_examples": [
+    {
+      "pr": 1982,
+      "ids": [3827655684, 3827663924],
+      "root": "claim-trailing-newline"
+    },
+    {
+      "pr": 1984,
+      "ids": [3828313974, 3828328194],
+      "root": "inventory-null-repo"
+    },
+    {
+      "pr": 1995,
+      "ids": [3829986403, 3830003055],
+      "root": "Exact-one dispatch validation; not part of pilot"
+    }
+  ]
+}

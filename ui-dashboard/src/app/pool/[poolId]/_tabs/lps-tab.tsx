@@ -9,6 +9,7 @@ import {
 } from "@/components/lp-concentration-chart";
 import { useNetwork } from "@/components/network-provider";
 import { Pagination } from "@/components/pagination";
+import { TableControlsFallback } from "@/components/table-controls-context";
 import { TableSkeleton } from "@/components/skeletons";
 import { Row, Table, Td, Th } from "@/components/table";
 import { TableSearch } from "@/components/table-search";
@@ -119,21 +120,33 @@ export function LpsTab({
 
   if (isFpmmPool === false) {
     return (
-      <EmptyBox message="LP provider data is only available for FPMM pools." />
+      <TableControlsFallback>
+        <EmptyBox message="LP provider data is only available for FPMM pools." />
+      </TableControlsFallback>
     );
   }
   if (hasErrorWithoutData(indexedError, indexedData)) {
     if (isLiquidityPositionSchemaError(indexedError)) {
       return (
-        <EmptyBox message="LP provider data is unavailable until this environment is reindexed with the LiquidityPosition schema." />
+        <TableControlsFallback>
+          <EmptyBox message="LP provider data is unavailable until this environment is reindexed with the LiquidityPosition schema." />
+        </TableControlsFallback>
       );
     }
-    return <ErrorBox message={indexedError.message} />;
+    return (
+      <TableControlsFallback>
+        <ErrorBox message={indexedError.message} />
+      </TableControlsFallback>
+    );
   }
   if (isLoadingWithoutData(indexedLoading, indexedData))
     return <LpsTabSkeleton limit={limit} />;
   if (positions.length === 0)
-    return <EmptyBox message="No active LP positions for this pool." />;
+    return (
+      <TableControlsFallback>
+        <EmptyBox message="No active LP positions for this pool." />
+      </TableControlsFallback>
+    );
 
   const rankedPositions = positions.map((p, i) => ({ ...p, rank: i + 1 }));
   const filteredPositions = filterLpPositions(
@@ -386,10 +399,12 @@ function LpsTabSkeleton({ limit }: { limit: number }) {
         />
       </div>
       <div className={`mb-4 h-9 w-full max-w-sm ${LP_SKELETON_SHIMMER}`} />
-      <TableSkeleton
-        variant="rows"
-        rows={Math.min(limit, LPS_SKELETON_ROW_COUNT)}
-      />
+      <TableControlsFallback>
+        <TableSkeleton
+          variant="rows"
+          rows={Math.min(limit, LPS_SKELETON_ROW_COUNT)}
+        />
+      </TableControlsFallback>
     </>
   );
 }
