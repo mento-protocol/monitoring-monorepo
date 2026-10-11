@@ -68,6 +68,21 @@ function makeFixture(root, contractBytes, sourceLedgerBytes) {
   const facadeFixture = path.join(state, "facade-fixture");
   const facadePlanDir = path.join(generated, "facade-plan");
   const tmp = path.join(state, "tmp");
+  const clockHarness = path.join(root, "snapshot-clock.mjs");
+  mkdirSync(root, { recursive: true });
+  // Only the ledger-check child reads the wall clock. Keep its captured
+  // 2026-08-28 date outside the snapshotted state; scheduler cases already
+  // supply their own explicit date, and runtime deadlines keep real time.
+  writeFileSync(
+    clockHarness,
+    `const RealDate = Date;
+const now = RealDate.parse("2026-08-28T00:00:00Z");
+globalThis.Date = class extends RealDate {
+  constructor(...args) { super(...(args.length ? args : [now])); }
+  static now() { return now; }
+};
+`,
+  );
   mkdirSync(path.join(state, "docs/evals"), { recursive: true });
   mkdirSync(bin, { recursive: true });
   mkdirSync(generated, { recursive: true });
@@ -156,21 +171,12 @@ exit 0
     facadeFixture,
     facadePlanDir,
     shellHarness,
+    clockHarness,
   };
 }
 
 function normalizeStatePath(value, state) {
   return String(value).split(state).join("<STATE>");
-}
-
-function normalizeCalendarAges(processes) {
-  return processes.map((process) => ({
-    ...process,
-    stdout: process.stdout.replace(
-      /("days_since_(?:any|complete|full)": )\d+/g,
-      "$1<DAYS>",
-    ),
-  }));
 }
 
 function processResult(result, state) {
@@ -238,6 +244,8 @@ function driveHarness({ sourceRoot, fixture, markerFlavor }) {
       result: run(
         process.execPath,
         [
+          "--import",
+          fixture.clockHarness,
           cli,
           "--root",
           fixture.state,
@@ -465,8 +473,8 @@ test("review-eval entry points match the frozen pre-split behavior", (t) => {
   });
 
   assert.deepEqual(
-    normalizeCalendarAges(processes),
-    normalizeCalendarAges(expected.processes),
+    processes,
+    expected.processes,
     "stdout, stderr, exit codes, and signals must match the frozen pre-split snapshot",
   );
   assert.deepEqual(
