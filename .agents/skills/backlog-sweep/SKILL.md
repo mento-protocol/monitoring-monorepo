@@ -1050,14 +1050,20 @@ output is its summary.
 for the rest. A human can open each link and merge in the GitHub UI. Listing a
 link is not merge approval, and this skill never merges.
 
-Finally, send one spoken line saying the report is ready, through
+Finally, send a desktop notification and one spoken line saying the report is
+ready, through
 [`spoken-attention-nudge.md`](../../../docs/notes/spoken-attention-nudge.md).
-That note owns the `say` command and the `spd-say` Linux fallback; do not
-re-derive them here. The operator is away by design here, so speak one of the
-note's three fixed phrases: a labelled line prompts for an approval nobody is
-there to give. Name the sweep in the written report instead. Run the nudge with escalated execution rather than inside the workspace
-sandbox — `say` needs the local audio device, and a sandboxed attempt fails in a
-way that looks like a missing command.
+That note owns desktop notification routing, the `say` command, and the
+`spd-say` Linux fallback; do not re-derive them here. Send the notification
+first as a separate call. Target the caller's cmux workspace and terminal pane
+when available. Keep the same safe sweep label in the notification and report.
+Report notification failures or unavailable session routing. Do not use a
+notification that opens another app. The operator is away by design here, so speak one of the
+note's three fixed phrases: in manual approval mode a labelled line prompts
+for approval nobody is there to give. Name the sweep in the written report instead. Keep notification delivery on
+the existing permission mode, as the canonical note requires. Do not wait on
+unattended approval prompts. Use escalated execution for the speech call when
+the workspace sandbox blocks the local audio device.
 
 Keep the spoken text fixed and low-information: no issue numbers, PR numbers,
 paths, or findings. The report on disk is where the detail belongs.
@@ -1066,3 +1072,9 @@ When every spoken path fails, **say so in the report** instead of skipping
 quietly. A sweep that finished overnight and could not announce itself is a
 different situation from one the operator was told about, and only the written
 line distinguishes them.
+
+After all delivery attempts, update this run's reserved report file. Place
+notification and speech delivery status before the final READY PR links. Mark
+failed or unavailable channels explicitly. Keep the same READY PR links at the
+end of both the saved report and the reprinted terminal summary. Do not modify
+another run's report.

@@ -51,6 +51,7 @@ import {
 } from "react";
 import { HeaderCardSkeleton } from "./header-card-skeleton";
 import { PoolHeader } from "./pool-header";
+import { PoolTableControls } from "./pool-table-controls";
 import { PoolTablist } from "./pool-tablist";
 import {
   isTokenAmountTab,
@@ -61,6 +62,7 @@ import { SEARCH_PARAM_BY_TAB, TABS, type Tab } from "../_lib/constants";
 import {
   decodePoolId,
   parseTabLimit,
+  parsePoolTab,
   selectActiveOlsPool,
 } from "../_lib/helpers";
 import { useObservedPoolDetail } from "../_lib/use-observed-pool-detail";
@@ -291,9 +293,7 @@ function PoolDetail({ initialSearch, initialData }: PoolDetailProps) {
     normalizedPoolId,
   );
   const rawTab = readSearchParam(urlParams, "tab");
-  const requestedTab: Tab = TABS.includes(rawTab as Tab)
-    ? (rawTab as Tab)
-    : "providers";
+  const requestedTab = parsePoolTab(rawTab);
   const limit = parseTabLimit(readSearchParam(urlParams, "limit"));
   const detail = usePoolDetailData(normalizedPoolId, network, initialData);
   const { visibleTabs, tab, activeSearch } = usePoolTabState({
@@ -303,7 +303,6 @@ function PoolDetail({ initialSearch, initialData }: PoolDetailProps) {
     requestedTab,
     urlParams,
   });
-  const poolUnavailable = isPoolUnavailable(detail);
 
   useEffect(() => {
     if (
@@ -353,32 +352,36 @@ function PoolDetail({ initialSearch, initialData }: PoolDetailProps) {
         initialData={initialData}
       />
 
-      {!poolUnavailable && (
+      {!isPoolUnavailable(detail) && (
         <>
           <PoolTablist
             visibleTabs={visibleTabs}
             active={tab}
             onSelect={(t) => replacePoolURL(t, limit)}
-            limit={limit}
-            onLimitChange={(l) => replacePoolURL(tab, l)}
           />
 
-          <PoolTabPanel
+          <PoolTableControls
             tab={tab}
-            normalizedPoolId={normalizedPoolId}
             limit={limit}
-            pool={detail.pool}
-            activeSearch={activeSearch}
-            setTabSearch={setTabSearch}
-            tradingLimits={detail.tradingLimits}
-            tradingLimitsError={detail.tradingLimitsError}
-            tradingLimitsLoading={detail.tradingLimitsLoading}
-            brokerLimits={detail.brokerLimits}
-            fpmmPool={detail.fpmmPool}
-            network={network}
-            thresholdsLoading={detail.thresholdsLoading}
-            thresholdsError={detail.thresholdsError}
-          />
+            onLimitChange={(l) => replacePoolURL(tab, l)}
+          >
+            <PoolTabPanel
+              tab={tab}
+              normalizedPoolId={normalizedPoolId}
+              limit={limit}
+              pool={detail.pool}
+              activeSearch={activeSearch}
+              setTabSearch={setTabSearch}
+              tradingLimits={detail.tradingLimits}
+              tradingLimitsError={detail.tradingLimitsError}
+              tradingLimitsLoading={detail.tradingLimitsLoading}
+              brokerLimits={detail.brokerLimits}
+              fpmmPool={detail.fpmmPool}
+              network={network}
+              thresholdsLoading={detail.thresholdsLoading}
+              thresholdsError={detail.thresholdsError}
+            />
+          </PoolTableControls>
         </>
       )}
     </div>

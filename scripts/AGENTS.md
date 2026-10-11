@@ -55,7 +55,7 @@ Move each pin class together.
   `install-review-eval-launchd*`, `review-eval-*publication*`,
   `ORCHESTRATOR_FILES` cells, `SCORING_MODULES` and
   `validationModuleLineLimits` scorers (incl. `review-eval-schedule-issue.mjs`),
-  `review-eval-experiment*.mjs`. The sealed set is ten files in a fixed order:
+  `review-eval-{experiment,v2}*.mjs`, `prompts/v2/`. Sealed set: ten ordered files:
   `run-eval{,-source-snapshot,-lifecycle,-runtime,-matrix,-plan,-publish,-cell}.sh`
   plus `review-eval-{cell-writer,stream}.mjs`. Adding or moving one updates
   `ORCHESTRATOR_FILES`, the four lists in `run-eval-source-snapshot.sh`, the

@@ -7,6 +7,7 @@ import { LiquidityChart } from "@/components/liquidity-chart";
 import { useNetwork } from "@/components/network-provider";
 import { Pagination } from "@/components/pagination";
 import { SenderCell } from "@/components/sender-cell";
+import { TableControlsFallback } from "@/components/table-controls-context";
 import { TableSkeleton } from "@/components/skeletons";
 import { Row, Table, Td, Th } from "@/components/table";
 import { TableSearch } from "@/components/table-search";
@@ -131,9 +132,17 @@ export function LiquidityTab({
   }, [rows, query, getName, getTags, sym0, sym1]);
 
   if (hasErrorWithoutData(error, data))
-    return <ErrorBox message={error.message} />;
+    return (
+      <TableControlsFallback>
+        <ErrorBox message={error.message} />
+      </TableControlsFallback>
+    );
   if (isLoadingWithoutData(isLoading, data))
-    return <TableSkeleton variant="rows" rows={limit} />;
+    return (
+      <TableControlsFallback>
+        <TableSkeleton variant="rows" rows={limit} />
+      </TableControlsFallback>
+    );
 
   return (
     <>
@@ -160,7 +169,9 @@ export function LiquidityTab({
         />
       )}
       {rows.length === 0 ? (
-        <EmptyBox message="No liquidity events for this pool." />
+        <TableControlsFallback>
+          <EmptyBox message="No liquidity events for this pool." />
+        </TableControlsFallback>
       ) : filteredRows.length === 0 ? (
         <EmptyBox message="No liquidity events match your search." />
       ) : (

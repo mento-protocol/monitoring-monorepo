@@ -1,3 +1,7 @@
+// Required CI already runs this installed front-end toolchain suite.
+// Include the Next glob contract without changing the pinned workflow graph.
+import "./supply-chain/security-baseline-compatibility.test.mjs";
+
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {

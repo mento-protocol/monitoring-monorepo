@@ -12,6 +12,10 @@ garden_lane: operator-runbooks
 
 # Review skill evaluation
 
+For new paired direct-review experiments, use [evaluation v2](review-skill-v2.md).
+It audits root causes and scores complete final reviews. This v1 ledger and
+scheduler retain their historical behavior.
+
 This evaluation measures whether the `review` skill still finds real defects in
 real pull requests from this repository. It replays nine merged PRs at the
 commit they had before review, runs the reviewer against them, and scores the
@@ -770,7 +774,8 @@ pnpm review:eval:experiment -- --run "$experiment_root" \
   --stage holdout --json
 ```
 
-The holdout uses the complementary frozen report of each grid fixture and
+The stage named `holdout` is an alternate-report check, not an unseen-PR
+holdout. It uses the complementary frozen report of each grid fixture and
 combines its arms with the screen's, at `max(3, round(0.06 x scorable x draws x
 2))`. A finalist also needs `round(0.75 x P1 opportunities)` candidate P1
 matches, `max(2, round(P1 opportunities / 6))` net P1 matches, gains on half the

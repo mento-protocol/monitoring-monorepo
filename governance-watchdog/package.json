@@ -16,7 +16,7 @@
     "cache:clear": "./bin/get-project-vars.sh --invalidate-cache",
     "deploy:function": "./bin/deploy-via-gcloud.sh",
     "destroy": "terraform -chdir=infra destroy",
-    "dev": "nodemon --ext ts --ignore dist --exec \"pnpm run start\"",
+    "dev": "nodemon --watch src --watch vitest.config.ts --watch vitest.hermetic-setup.ts --watch bin --ext ts --exec \"pnpm run start\"",
     "format": "prettier --write \"src/**/*.{ts,js,json}\"",
     "format:check": "prettier --check \"src/**/*.{ts,js,json}\"",
     "gcp-build": "pnpm run build",
