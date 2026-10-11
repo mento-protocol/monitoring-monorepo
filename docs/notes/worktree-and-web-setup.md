@@ -36,10 +36,8 @@ type facade required for `indexer-envio` TypeScript to compile. It also attempts
 install Playwright Chromium for dashboard browser tests. A blocked browser
 download warns and continues; run
 `pnpm --filter @mento-protocol/ui-dashboard exec playwright install --with-deps chromium`
-before browser tests when the binary is still absent. A `pnpm patch` on
-`blamer@1.0.7` (jscpd's transitive git-blame dependency) strips its shipped
-`.idea/` directory so sandboxed installs no longer hit a deterministic EPERM
-at `importPackage`.
+before browser tests when the binary is still absent. The Rust-backed jscpd 5
+uses platform binaries and no longer installs the former blamer dependency.
 Worktrunk-created worktrees (`wt switch --create` / `wt switch -c`) run the
 same setup script automatically through `.config/wt.toml` as a blocking
 `pre-start` hook before any launch command configured with `-x` starts.
