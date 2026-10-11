@@ -31,8 +31,7 @@ export const SEARCH_PARAM_BY_TAB: Record<Tab, string> = {
 
 export const MAX_TAB_LIMIT = 200;
 
-// Tabs that manage their own pagination — the inline `LimitSelect` next to
-// the tablist is hidden when one of these is active. `oracle` has its own
+// Tabs that do not use the shared table page-size control. `oracle` has its own
 // page-size dropdown; `limits` has no paginated data at all.
 export const TABS_WITHOUT_LIMIT_SELECT: ReadonlySet<Tab> = new Set([
   "oracle",

@@ -5,6 +5,7 @@ import { EmptyBox, ErrorBox } from "@/components/feedback";
 import { useNetwork } from "@/components/network-provider";
 import { Pagination } from "@/components/pagination";
 import { SenderCell } from "@/components/sender-cell";
+import { TableControlsFallback } from "@/components/table-controls-context";
 import { TableSkeleton } from "@/components/skeletons";
 import { SnapshotChart } from "@/components/snapshot-chart";
 import { Row, Table, Td, Th } from "@/components/table";
@@ -131,9 +132,17 @@ export function SwapsTab({
   }, [swaps, query, sym0, sym1, dec0, dec1, getName, getTags]);
 
   if (hasErrorWithoutData(error, data))
-    return <ErrorBox message={error.message} />;
+    return (
+      <TableControlsFallback>
+        <ErrorBox message={error.message} />
+      </TableControlsFallback>
+    );
   if (isLoadingWithoutData(isLoading, data))
-    return <TableSkeleton variant="rows" rows={limit} />;
+    return (
+      <TableControlsFallback>
+        <TableSkeleton variant="rows" rows={limit} />
+      </TableControlsFallback>
+    );
 
   return (
     <>
@@ -170,7 +179,9 @@ export function SwapsTab({
         />
       )}
       {swaps.length === 0 ? (
-        <EmptyBox message="No swaps for this pool." />
+        <TableControlsFallback>
+          <EmptyBox message="No swaps for this pool." />
+        </TableControlsFallback>
       ) : filteredSwaps.length === 0 ? (
         <EmptyBox message="No swaps match your search." />
       ) : (

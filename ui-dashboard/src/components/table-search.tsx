@@ -5,7 +5,8 @@
  * instance with a tab-specific placeholder.
  */
 
-import { useEffect, useReducer, useRef } from "react";
+import { use, useEffect, useReducer, useRef } from "react";
+import { TableControlsContext } from "./table-controls-context";
 
 type TableSearchProps = {
   value: string;
@@ -30,6 +31,7 @@ export function TableSearch({
   containerClassName = "mb-4",
   inputClassName = "w-full max-w-sm",
 }: TableSearchProps) {
+  const controls = use(TableControlsContext);
   const [draft, dispatchDraft] = useReducer(
     (_: string, nextValue: string) => nextValue,
     value,
@@ -57,7 +59,13 @@ export function TableSearch({
   );
 
   return (
-    <div className={containerClassName}>
+    <div
+      className={
+        controls
+          ? `${containerClassName} flex flex-wrap items-center justify-between gap-3`
+          : containerClassName
+      }
+    >
       <input
         type="search"
         placeholder={placeholder}
@@ -75,8 +83,9 @@ export function TableSearch({
           }, debounceMs);
         }}
         aria-label={ariaLabel}
-        className={`${inputClassName} rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500`}
+        className={`${inputClassName} ${controls ? "min-w-0 flex-1 basis-60" : ""} rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500`}
       />
+      {controls}
     </div>
   );
 }

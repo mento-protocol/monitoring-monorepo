@@ -2,6 +2,7 @@
 
 import { ErrorBox } from "@/components/feedback";
 import { useNetwork } from "@/components/network-provider";
+import { TableControlsFallback } from "@/components/table-controls-context";
 import { TableSkeleton } from "@/components/skeletons";
 import { useGQL } from "@/lib/graphql";
 import { OLS_POOL } from "@/lib/queries";
@@ -41,7 +42,11 @@ export function OlsTab({
   const olsPool = selectActiveOlsPool(olsData?.OlsPool);
 
   if (hasErrorWithoutData(olsErr, olsData))
-    return <ErrorBox message={olsErr.message} />;
+    return (
+      <TableControlsFallback>
+        <ErrorBox message={olsErr.message} />
+      </TableControlsFallback>
+    );
   if (isLoadingWithoutData(olsLoading, olsData))
     return <OlsTabSkeleton limit={limit} />;
 
@@ -95,7 +100,9 @@ function OlsTabSkeleton({ limit }: { limit: number }) {
           </div>
         ))}
       </div>
-      <TableSkeleton variant="rows" rows={limit} />
+      <TableControlsFallback>
+        <TableSkeleton variant="rows" rows={limit} />
+      </TableControlsFallback>
     </div>
   );
 }

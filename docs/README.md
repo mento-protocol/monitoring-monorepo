@@ -71,6 +71,7 @@ Authority: canonical
 - [`alerts/rules/README.md`](../alerts/rules/README.md)
 - [`docs/deployment.md`](deployment.md)
 - [`docs/evals/documentation-navigation.md`](evals/documentation-navigation.md)
+- [`docs/evals/review-skill-v2.md`](evals/review-skill-v2.md)
 - [`docs/evals/review-skill.md`](evals/review-skill.md)
 - [`docs/notes/agent-issue-workflow.md`](notes/agent-issue-workflow.md)
 - [`docs/notes/backlog-ranking.md`](notes/backlog-ranking.md)
@@ -222,6 +223,7 @@ Authority: canonical
 - [`adr/0107-enforced-shell-size-limits.md`](adr/0107-enforced-shell-size-limits.md) — Shell file and function size limits are enforced with a closed baseline
 - [`adr/0108-sealed-orchestrator-source-set.md`](adr/0108-sealed-orchestrator-source-set.md) — Every run-eval shell module joins the sealed orchestrator source set
 - [`adr/0109-pool-liquidity-event-delivery.md`](adr/0109-pool-liquidity-event-delivery.md) — Pool liquidity watches use event-keyed durable alert delivery
+- [`adr/0110-paired-review-evaluation-v2.md`](adr/0110-paired-review-evaluation-v2.md) — Paired review evaluation v2 separates execution from grading
 
 Authority: non-canonical
 
@@ -259,8 +261,13 @@ Authority: canonical
 - [`indexer-envio/STATUS.md`](../indexer-envio/STATUS.md)
 - [`integration-probes/README.md`](../integration-probes/README.md)
 - [`README.md`](../README.md)
+- [`scripts/review/fixtures/v2-probes/README.md`](../scripts/review/fixtures/v2-probes/README.md)
 - [`SPEC.md`](../SPEC.md)
 - [`ui-dashboard/scripts/intel-marathon/README.md`](../ui-dashboard/scripts/intel-marathon/README.md)
+
+Authority: non-canonical
+
+- [`docs/evals/review-skill-v2-expansion-2026-10.md`](evals/review-skill-v2-expansion-2026-10.md)
 
 ## notes-plans-archive
 
