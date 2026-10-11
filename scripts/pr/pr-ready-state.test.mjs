@@ -996,6 +996,11 @@ test("fails closed when a protection 404 yields no ruleset-required contexts", a
       error: "gh: Not Found (HTTP 404)",
     }),
     fetchRules: async () => ({ ok: true, value: [{ type: "deletion" }] }),
+    fetchBranch: async () => ({ ok: false, error: "unreadable branch" }),
+    fetchClassicProtection: async () => ({
+      ok: false,
+      error: "unreadable GraphQL",
+    }),
   });
 
   assertDeepEqual(result, {
