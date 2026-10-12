@@ -11,7 +11,7 @@
  * recurring-review-patterns.md "File-size budget").
  */
 
-import { repoPath } from "./pr-ready-state-gh.mjs";
+import { ghApiJsonResult, repoPath } from "./pr-ready-state-gh.mjs";
 
 export function isHttpNotFoundError(error) {
   return /\bHTTP 404\b/i.test(String(error));
@@ -29,8 +29,9 @@ export function compactSingleLine(value) {
 // GitHub renders three different 404s on the classic-protection endpoint, and
 // only one of them proves classic protection is absent: "Branch not protected"
 // (no classic protection), "Branch not found" (no such base), and "Not Found"
-// (the token may not read protection). Only the first can license trusting a
-// ruleset's `false` in place of an unread classic `strict`.
+// (the token may not read protection). The first supplies conclusive REST
+// evidence; generic Not Found needs the independent absence proof below before
+// a ruleset's `false` can stand in for an unread classic `strict`.
 export function isBranchNotProtectedError(error) {
   return /\bBranch not protected\b/i.test(String(error));
 }
@@ -45,33 +46,75 @@ export function isRequiredStatusChecksNotEnabledError(error) {
   return /\bRequired status checks not enabled\b/i.test(String(error));
 }
 
-// Prove classic protection is absent from two independent signals before the
-// 404 path trusts anything a ruleset says: the 404 must be the API's "Branch
-// not protected" message, and the branch object must report
-// `protection.enabled: false`. The branch object's top-level `protected` flag
-// cannot serve here — a ruleset-protected branch with no classic protection
-// still reports `protected: true` (observed on this repo's `main`). Anything
-// else — another 404 message, `protection.enabled` true or absent, or a failed
-// branch read — means an unread classic protection cannot be ruled out. The one
-// shortcut is a branch that is protected but has no required-status-checks
-// configuration at all, which GitHub reports conclusively.
-//
-// One proof serves both the strictness reading and the context list. They were
-// separate once, and the context list silently trusted a permission-masked 404
-// that the strictness reading refused: a hidden classic-only required check was
-// then classified as optional, so a PR could read ready while it was pending or
-// failing. Keep them on this single helper so they cannot drift again.
+// A generic Not Found remains ambiguous. For this response only, an exact-base
+// branch read plus a complete, readable GraphQL inventory supplies independent
+// absence proof. Do not accept a missing field, partial inventory or read error.
+export function graphqlConfirmsNoClassicProtection(value, repo, baseRef) {
+  if (
+    value?.errors !== undefined &&
+    (!Array.isArray(value.errors) || value.errors.length > 0)
+  )
+    return false;
+  const repository = value?.data?.repository;
+  const rules = repository?.branchProtectionRules;
+  const ref = repository?.ref;
+  return (
+    typeof repository?.nameWithOwner === "string" &&
+    repository.nameWithOwner.toLowerCase() === repoPath(repo).toLowerCase() &&
+    ["WRITE", "MAINTAIN", "ADMIN"].includes(repository?.viewerPermission) &&
+    rules?.totalCount === 0 &&
+    Array.isArray(rules?.nodes) &&
+    rules.nodes.length === 0 &&
+    rules?.pageInfo?.hasNextPage === false &&
+    ref?.name === baseRef &&
+    ref?.branchProtectionRule === null
+  );
+}
+
+const CLASSIC_ABSENCE_QUERY = `query($owner:String!,$name:String!,$ref:String!) {
+  repository(owner:$owner,name:$name) {
+    nameWithOwner viewerPermission
+    branchProtectionRules(first:100) { totalCount nodes { id } pageInfo { hasNextPage } }
+    ref(qualifiedName:$ref) { name branchProtectionRule { id } }
+  }
+}`;
+
+// Keep one proof for both the strictness reading and the complete context list.
+// The old conclusive REST shapes remain unchanged. Generic 404 alone, ruleset
+// contents alone, and the branch's top-level protected flag prove nothing.
 export async function classicProtectionConfirmedAbsent({
   repo,
   encodedBaseRef,
   error,
   fetchBranch,
+  fetchClassicProtection = ghApiJsonResult,
 }) {
   if (isRequiredStatusChecksNotEnabledError(error)) return true;
-  if (!isBranchNotProtectedError(error)) return false;
+  const conclusiveMessage = isBranchNotProtectedError(error);
+  const genericNotFound =
+    /(?:^|\n)(?:gh:\s*)?Not Found \(HTTP 404\)(?:\s|$)/i.test(String(error));
+  if (!conclusiveMessage && !genericNotFound) return false;
   const branchResult = await fetchBranch(repo, [
     `repos/${repoPath(repo)}/branches/${encodedBaseRef}`,
   ]);
-  if (!branchResult.ok) return false;
-  return branchResult.value?.protection?.enabled === false;
+  if (!branchResult.ok || branchResult.value?.protection?.enabled !== false)
+    return false;
+  if (conclusiveMessage) return true;
+  const baseRef = decodeURIComponent(encodedBaseRef);
+  if (branchResult.value?.name !== baseRef) return false;
+  const result = await fetchClassicProtection(repo, [
+    "graphql",
+    "-f",
+    `query=${CLASSIC_ABSENCE_QUERY}`,
+    "-f",
+    `owner=${repo.owner}`,
+    "-f",
+    `name=${repo.name}`,
+    "-f",
+    `ref=refs/heads/${baseRef}`,
+  ]);
+  return (
+    result?.ok === true &&
+    graphqlConfirmsNoClassicProtection(result.value, repo, baseRef)
+  );
 }
