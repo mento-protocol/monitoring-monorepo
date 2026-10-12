@@ -12,7 +12,7 @@
   "scripts": {
     "build": "rimraf dist && tsc",
     "build:event-hashes": "node scripts/build-event-hashes.mjs",
-    "dev": "nodemon --ext ts --ignore dist --exec \"pnpm run start\"",
+    "dev": "nodemon --watch src --watch vitest.config.ts --watch vitest.hermetic-setup.ts --ext ts --exec \"pnpm run start\"",
     "format": "prettier --write \"src/**/*.{ts,js,json}\"",
     "format:check": "prettier --check \"src/**/*.{ts,js,json}\"",
     "generate:env": "terraform -chdir=.. apply -replace=module.onchain_event_handler.terraform_data.env_file -target=module.onchain_event_handler.terraform_data.env_file",
@@ -33,7 +33,7 @@
   },
   "dependencies": {
     "@google-cloud/functions-framework": "5.0.5",
-    "@google-cloud/logging": "^12.0.1",
+    "@google-cloud/logging": "^12.1.0",
     "axios": "^1.20.0",
     "env-schema": "^8.0.0",
     "viem": "2.56.9"
@@ -41,14 +41,14 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.4.0",
-    "@vitest/coverage-v8": "^5.0.0",
-    "eslint": "^10.9.1",
-    "knip": "^6.35.1",
+    "@vitest/coverage-v8": "^5.0.3",
+    "eslint": "^10.12.0",
+    "knip": "^6.39.0",
     "nodemon": "^3.1.11",
-    "prettier": "^3.9.6",
+    "prettier": "^3.9.9",
     "rimraf": "^6.1.0",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.70.0",
-    "vitest": "^5.0.0"
+    "typescript-eslint": "^8.71.0",
+    "vitest": "^5.0.3"
   }
 }
