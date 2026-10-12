@@ -661,11 +661,11 @@ importers:
         specifier: 5.0.0-beta.32
         version: 5.0.0-beta.32(next@16.3.8(@babel/core@7.29.6)(@opentelemetry/api@1.9.1)(@playwright/test@1.63.0)(@types/node@26.4.0)(babel-plugin-react-compiler@1.0.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react@19.3.0)
       plotly.js:
-        specifier: npm:plotly.js-basic-dist-min@3.7.0
-        version: plotly.js-basic-dist-min@3.7.0
+        specifier: npm:plotly.js-basic-dist-min@4.0.0
+        version: plotly.js-basic-dist-min@4.0.0
       plotly.js-basic-dist-min:
-        specifier: ^3.7.0
-        version: 3.7.0
+        specifier: 4.0.0
+        version: 4.0.0
       react:
         specifier: 19.3.0
         version: 19.3.0
@@ -677,7 +677,7 @@ importers:
         version: 10.1.0(@types/react@19.3.0)(react@19.3.0)
       react-plotly.js:
         specifier: 4.1.0
-        version: 4.1.0(plotly.js-basic-dist-min@3.7.0)(react@19.3.0)
+        version: 4.1.0(plotly.js-basic-dist-min@4.0.0)(react@19.3.0)
       rehype-sanitize:
         specifier: ^6.0.0
         version: 6.0.0
@@ -8755,8 +8755,8 @@ packages:
     engines: {node: '>=20'}
     hasBin: true
 
-  plotly.js-basic-dist-min@3.7.0:
-    resolution: {integrity: sha512-84KPQhLTrO5IHu6DCte2KwA4bzSoVIdIs3uDPWid3sgeTX8L5RjpDARjCG3spgOwQ8MYE8PL+MeQ0DQRWA1Emw==}
+  plotly.js-basic-dist-min@4.0.0:
+    resolution: {integrity: sha512-GGhpuikawKAGNQpPAeuvynUSI+BptB0NT6J0ofXfq2frGonhGG3zxrf6OVl/6aZhIeDaj7tP0Hb+de+QKVR08A==}
 
   pluralize@8.0.0:
     resolution: {integrity: sha512-Nc3IT5yHzflTfbjgqWcCPpo7DaKy4FnpB0l/zCAW0Tc7jxAiuqSxHasntB3D7887LSrA93kDJ9IXovxJYxyLCA==}
@@ -19767,7 +19767,7 @@ snapshots:
     dependencies:
       playwright-core: 1.63.0
 
-  plotly.js-basic-dist-min@3.7.0: {}
+  plotly.js-basic-dist-min@4.0.0: {}
 
   pluralize@8.0.0: {}
 
@@ -20079,9 +20079,9 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  react-plotly.js@4.1.0(plotly.js-basic-dist-min@3.7.0)(react@19.3.0):
+  react-plotly.js@4.1.0(plotly.js-basic-dist-min@4.0.0)(react@19.3.0):
     dependencies:
-      plotly.js: plotly.js-basic-dist-min@3.7.0
+      plotly.js: plotly.js-basic-dist-min@4.0.0
       react: 19.3.0
 
   react-reconciler@0.33.0(react@19.2.8):
