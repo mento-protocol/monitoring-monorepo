@@ -22,6 +22,8 @@ minimumReleaseAgeExclude:
   - vite
 
 overrides:
+  # Keep all framework and Express declarations on the deployed Node 24 runtime.
+  "@types/node": 24.13.2
   # Nodemon watches literal directories; chokidar 4 removes unpatched braces.
   "nodemon>chokidar": 4.0.3
   # GHSA-68fv-2mgg-jv7q: patched floor 1.2.2.
