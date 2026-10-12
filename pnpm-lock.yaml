@@ -143,8 +143,8 @@ importers:
         specifier: 4.0.7
         version: 4.0.7
       smol-toml:
-        specifier: 1.8.0
-        version: 1.8.0
+        specifier: 1.9.0
+        version: 1.9.0
       turbo:
         specifier: ^2.10.12
         version: 2.10.13
@@ -9436,6 +9436,10 @@ packages:
 
   smol-toml@1.8.0:
     resolution: {integrity: sha512-kCZr2V3ch9i00x8zXRhjUNVcjG9ijES5dDudkXvUVCT5QlJNQWElSJdZqyPemffHoLNUYwOcou0Fy+ojN0uHSQ==}
+    engines: {node: '>= 18'}
+
+  smol-toml@1.9.0:
+    resolution: {integrity: sha512-hpd+HLON7HdZXqYchMM/+LaTTbdK0AU3NngIJ4KVyWbY9bfQqdL9cD+4yf6dUoU2Ap4VsU0JkQi6FxAI1B2mXQ==}
     engines: {node: '>= 18'}
 
   socks-proxy-agent@10.0.0:
@@ -20665,6 +20669,8 @@ snapshots:
   smart-buffer@4.2.0: {}
 
   smol-toml@1.8.0: {}
+
+  smol-toml@1.9.0: {}
 
   socks-proxy-agent@10.0.0:
     dependencies:
