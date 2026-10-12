@@ -93,7 +93,7 @@ pnpm --silent pr:feedback-state --pr 123 --json  # Normalize unresolved/reply-re
 pnpm pr:ready-state --pr 123 --json              # Final current-head required-readiness probe
 node scripts/pr/pr-stack-recover.mjs --help      # Prepare local native-stack recovery; never publishes or merges
 pnpm lockfile:lint                 # Fail-closed integrity/registry/override-floor check; no install
-pnpm skew:check                    # Fail on dependency skew vs pnpm catalog; no install
+pnpm skew:check                    # Fail on catalog skew and deployed graph declaration/Vite peer skew; no install
 pnpm sanitize:test                 # Fixture-test scripts/sanitize-terraform-output.sh secret redaction
 pnpm deploy-staging:test           # ADR 0053 source-staging contract; also in `pnpm tf:test`
 pnpm override:prune-report          # Advisory pnpm.overrides + minimumReleaseAgeExclude prune report; no install
