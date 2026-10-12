@@ -96,6 +96,22 @@ Never run a local production-stack apply. The targeted `generate:env`
 provisioner below is the sole documented local-development exception and still
 requires explicit approval.
 
+The private retry function rolls source, ordinary configuration, and numeric
+Slack-secret versions in place. Its `prevent_destroy` guard rejects a plan
+that would delete or replace it; do not remove the guard to clear a failed
+deployment. A required replacement needs a separate reviewed maintenance plan
+that pauses Scheduler, restores the endpoint and its invoker grants, verifies
+IAM propagation, and resumes Scheduler. Keep both invoker bindings attached
+during ordinary revision updates.
+
+Terraform apply success alone does not prove retry delivery is healthy. After
+the gated apply, verify a naturally scheduled attempt **starting after apply
+completion** returns HTTP 200 and check for application errors. Do not force a
+retry as a health probe: it can post real alerts and mutate delivery state.
+Inspect pending records in the private delivery bucket separately; HTTP 200
+does not prove a fully drained backlog when the scan budget is reached. Keep
+the deployment unverified if logs or record state cannot be read.
+
 After the gated deploy, obtain the function URL from the stack output and
 confirm that an unsigned request is rejected:
 

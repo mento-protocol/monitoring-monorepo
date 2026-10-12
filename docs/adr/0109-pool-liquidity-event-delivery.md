@@ -122,5 +122,32 @@ delivery pattern; a deposit cannot be inferred from a withdrawal Burn.
 
 ## Evidence
 
+### Deployment availability (October 2026)
+
+The October 12 infrastructure apply deleted and recreated the private retry
+function and its invoker bindings while Scheduler kept running. Attempts
+returned 404 during recreation and 403 while restored IAM propagated; later
+attempts recovered without an operational repair.
+
+The retry function now uses in-place revision updates for source, ordinary
+environment configuration, and a numeric Slack secret version. Its invoker
+bindings remain attached across updates. Terraform `prevent_destroy` rejects
+accidental destruction or replacement while the resource remains declared;
+removing the resource block also removes that Terraform guard and still needs
+review. We retain internal-only ingress and both scoped invoker grants.
+The public webhook's existing replacement behavior is unchanged.
+
+Removing only the source replacement trigger was rejected: retaining the
+ignored environment map would leave routing changes stale. Secrets are
+injected separately, and the ordinary configuration map is nonsensitive, so
+the retry worker can manage that map directly. Pinning the Slack secret version
+also rolls a revision on rotation without destroying the function.
+
+A deliberately required replacement needs a separate approved maintenance
+plan; the guard must not be weakened by an agent to unblock its own apply.
+After deployment, a naturally scheduled attempt starting after apply completes
+must return HTTP 200. Pending-state inspection is a separate proof: a successful
+bounded scan is not evidence that every retained candidate was delivered.
+
 PR #2548; `alerts/infra/onchain-event-handler/src/pool-liquidity-withdrawal.ts` and its
 receipt fixture; `alerts/infra/onchain-event-handler/main.tf`.

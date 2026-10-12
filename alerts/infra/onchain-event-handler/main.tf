@@ -633,17 +633,17 @@ resource "google_cloudfunctions2_function" "pool_liquidity_retry" {
       key        = "SLACK_BOT_TOKEN"
       project_id = var.project_id
       secret     = google_secret_manager_secret.slack_bot_token.secret_id
-      version    = "latest"
+      # A new secret version rolls a revision without deleting the service.
+      version = google_secret_manager_secret_version.slack_bot_token.version
     }
   }
 
   lifecycle {
-    # Match the public function's Google provider sensitive-env workaround.
-    ignore_changes = [service_config[0].environment_variables]
-    replace_triggered_by = [
-      google_storage_bucket_object.function_source,
-      google_secret_manager_secret_version.slack_bot_token,
-    ]
+    # Scheduler calls this endpoint continuously. Source, ordinary env, and
+    # numeric secret-version changes must roll revisions in place, keeping
+    # the endpoint and IAM bindings alive. Secrets are injected separately;
+    # local.all_env_vars contains only ordinary configuration.
+    prevent_destroy = true
   }
 
   depends_on = [
@@ -668,10 +668,6 @@ resource "google_cloudfunctions2_function_iam_member" "pool_liquidity_scheduler_
   role           = "roles/cloudfunctions.invoker"
   member         = "serviceAccount:${google_service_account.pool_liquidity_scheduler.email}"
   depends_on     = [google_cloudfunctions2_function.pool_liquidity_retry]
-
-  lifecycle {
-    replace_triggered_by = [google_cloudfunctions2_function.pool_liquidity_retry]
-  }
 }
 
 resource "google_cloud_run_v2_service_iam_member" "pool_liquidity_scheduler_run_invoker" {
@@ -681,10 +677,6 @@ resource "google_cloud_run_v2_service_iam_member" "pool_liquidity_scheduler_run_
   role       = "roles/run.invoker"
   member     = "serviceAccount:${google_service_account.pool_liquidity_scheduler.email}"
   depends_on = [google_cloudfunctions2_function.pool_liquidity_retry]
-
-  lifecycle {
-    replace_triggered_by = [google_cloudfunctions2_function.pool_liquidity_retry]
-  }
 }
 
 resource "google_cloud_scheduler_job" "pool_liquidity_retry" {
