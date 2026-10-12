@@ -11,11 +11,15 @@
  * workspace adopts pnpm named catalogs via `catalogs:`, extend this checker
  * and its fixtures in the same change.
  *
+ * Also checks deployed application runtime-dependency Node declaration majors
+ * and reachable Vite/tsx peer edges in root and standalone installation graphs.
+ * Reachability is not proof of which declarations TypeScript loads.
  * No external dependencies. Run: pnpm skew:check
  */
 
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { validateDependencySemantics } from "./dependency-semantics.mjs";
 
 const ROOT = process.env["SKEW_CHECK_ROOT"] ?? process.cwd();
 
@@ -89,7 +93,6 @@ const catalog = parseCatalog(readTopLevelBlock(workspaceText, "catalog"));
 
 if (catalog.size === 0) {
   ok("no catalog entries - nothing to check");
-  process.exit(0);
 }
 
 const memberDirs = parseWorkspacePackages(
@@ -120,4 +123,10 @@ for (const dir of manifestDirs) {
 
 if (process.exitCode !== 1) {
   ok(`all catalog-pinned packages aligned (${[...catalog.keys()].join(", ")})`);
+}
+
+try {
+  validateDependencySemantics(ROOT, memberDirs, fail, ok);
+} catch (error) {
+  fail(`dependency semantics: ${error.message}`);
 }

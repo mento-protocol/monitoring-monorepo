@@ -61,7 +61,13 @@ or the `.dependency-cruiser.cjs` / `*/knip.json` files.
   use `catalog:`; independently installed or deployed roots keep literal pins,
   and
   [`version-skew-check.mjs`](../../scripts/supply-chain/version-skew-check.mjs)
-  prevents those pins from drifting.
+  prevents those pins from drifting. It also follows the three Cloud Function applications
+  (`oncall-announcer`, `onchain-event-handler`, `governance-watchdog`) in the
+  workspace and their standalone lockfiles, requiring direct and reachable Node declarations to match the
+  Terraform runtime major. Reachable Vite/tsx peers match the application's
+  direct resolved tsx version. Isolated tooling, same-major patches and unused
+  snapshots remain valid; graph reachability does not prove which declarations
+  TypeScript loads. Frozen installs own complete lockfile syntax/schema checks.
 - Packages with an env module parse supported variables through Zod at module
   load. The dashboard keeps public values in
   [`src/env.ts`](../../ui-dashboard/src/env.ts) and server-only values in

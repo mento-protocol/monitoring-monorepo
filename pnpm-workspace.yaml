@@ -90,6 +90,14 @@ packageConfigs:
     saveExact: true
 
 overrides:
+  # Framework declaration edges must match the deployed Node 24 applications.
+  # Keep other tooling contexts (Jest, Lighthouse, ts-node) independent.
+  "@types/body-parser>@types/node": 24.13.2
+  "@types/connect>@types/node": 24.13.2
+  "@types/express-serve-static-core>@types/node": 24.13.2
+  "@types/send>@types/node": 24.13.2
+  "@types/serve-static>@types/node": 24.13.2
+  "protobufjs>@types/node": 24.13.2
   # GHSA-p498-v437-472g, GHSA-jggr-w7fw-pc2j, GHSA-px8p-9vwx-vf98.
   "@humanfs/node@<0.16.8": 0.16.8
   "fast-copy@<4.1.0": 4.1.0

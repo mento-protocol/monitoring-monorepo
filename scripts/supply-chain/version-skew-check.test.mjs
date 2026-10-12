@@ -163,3 +163,6 @@ test("passes when the workspace has no catalog", () => {
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);
+
+// The same CI entry point exercises graph semantics regressions.
+await import("./dependency-semantics.test.mjs");
