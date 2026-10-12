@@ -1,0 +1,133 @@
+{
+  "schema_version": 2,
+  "suite_id": "review-skill-v2-pilot",
+  "repo": "mento-protocol/monitoring-monorepo",
+  "label_authority": "agent-audited",
+  "labels_complete": false,
+  "split_policy": "PR-disjoint prospective confirmation; both variants remain in their family split.",
+  "exposure": "Both PRs appeared in v1 evaluations and were inspected during v2 dataset construction. Confirmation is not a previously unseen holdout.",
+  "limitations": [
+    "Labels cover three audited root causes, not every defect in each PR.",
+    "Repaired cases test absence of named roots; they are not certified globally clean.",
+    "Agent inspection and deterministic reproductions do not establish human grader calibration."
+  ],
+  "cases": [
+    {
+      "id": "pr-1984-original",
+      "family_id": "pr-1984",
+      "split": "development",
+      "variant": "original",
+      "pr": 1984,
+      "first_head": "07901b22c0da7db2b27f15dbbc3f5e8ea45623df",
+      "base_sha": "efcfb16d9b0b9c65fe50e7dac185295c8bb1c10a",
+      "forbidden_shas": ["e0f88c07b012bf180ea93b26ae490d4eaf8a68ef"],
+      "repair": null,
+      "expected_root_ids": ["inventory-null-repo"],
+      "negative_control_root_ids": []
+    },
+    {
+      "id": "pr-1984-repaired",
+      "family_id": "pr-1984",
+      "split": "development",
+      "variant": "repaired",
+      "pr": 1984,
+      "first_head": "07901b22c0da7db2b27f15dbbc3f5e8ea45623df",
+      "base_sha": "efcfb16d9b0b9c65fe50e7dac185295c8bb1c10a",
+      "forbidden_shas": ["e0f88c07b012bf180ea93b26ae490d4eaf8a68ef"],
+      "repair": {
+        "file": "repairs/pr-1984.patch",
+        "sha256": "954483bca2be6e96e93b3c9afe53a0c962e5cafe37f93f696109efe92494ed4e"
+      },
+      "expected_root_ids": [],
+      "negative_control_root_ids": ["inventory-null-repo"]
+    },
+    {
+      "id": "pr-1982-original",
+      "family_id": "pr-1982",
+      "split": "confirmation",
+      "variant": "original",
+      "pr": 1982,
+      "first_head": "ee739b4142564a3a4e9273da6ba345f3cda5e8d3",
+      "base_sha": "efcfb16d9b0b9c65fe50e7dac185295c8bb1c10a",
+      "forbidden_shas": ["25c4ed882df59c45b5fe16539fff31a79a80a073"],
+      "repair": null,
+      "expected_root_ids": ["claim-trailing-newline", "claim-optional-branch"],
+      "negative_control_root_ids": []
+    },
+    {
+      "id": "pr-1982-repaired",
+      "family_id": "pr-1982",
+      "split": "confirmation",
+      "variant": "repaired",
+      "pr": 1982,
+      "first_head": "ee739b4142564a3a4e9273da6ba345f3cda5e8d3",
+      "base_sha": "efcfb16d9b0b9c65fe50e7dac185295c8bb1c10a",
+      "forbidden_shas": ["25c4ed882df59c45b5fe16539fff31a79a80a073"],
+      "repair": {
+        "file": "repairs/pr-1982.patch",
+        "sha256": "6740fc7372efc71cc42a5386b6405594b95b96e2222378600375f630e9bbbfda"
+      },
+      "expected_root_ids": [],
+      "negative_control_root_ids": [
+        "claim-trailing-newline",
+        "claim-optional-branch"
+      ]
+    }
+  ],
+  "roots": [
+    {
+      "id": "inventory-null-repo",
+      "family_id": "pr-1984",
+      "severity": "P1",
+      "title": "Optional null repository produces broken inventory links",
+      "trigger": "The finalize CLI omits --refused-inventory-repo and forwards null with a known nonempty inventory.",
+      "mechanism": "The parameter default only applies to undefined; null is interpolated into the GitHub link.",
+      "consequence": "Tracker inventory links point to github.com/null/issues/<number>.",
+      "source_finding_ids": [3828313974, 3828328194],
+      "locations": [
+        {
+          "path": "scripts/sentry/autofix/sentry-autofix-run-record.mjs",
+          "line_start": 65,
+          "line_end": 78
+        }
+      ],
+      "label_authority": "agent-audited"
+    },
+    {
+      "id": "claim-trailing-newline",
+      "family_id": "pr-1982",
+      "severity": "P2",
+      "title": "Trailing newline rejects a valid cloud claim",
+      "trigger": "A trusted claim includes a handoff footer and ends with a newline.",
+      "mechanism": "The split leaves an empty trailing line; isBoundedCloudHandoff rejects every empty line.",
+      "consequence": "Backfill rejects the valid claim as absent.",
+      "source_finding_ids": [3827655684, 3827663924],
+      "locations": [
+        {
+          "path": "scripts/pr/issue-board-backfill.mjs",
+          "line_start": 72,
+          "line_end": 83
+        }
+      ],
+      "label_authority": "agent-audited"
+    },
+    {
+      "id": "claim-optional-branch",
+      "family_id": "pr-1982",
+      "severity": "P1",
+      "title": "Missing optional branch rejects claim metadata",
+      "trigger": "A trusted claim originates in detached HEAD and omits its optional Branch field.",
+      "mechanism": "parseClaimComment requires branch to be a nonempty string although the claim writer omits unavailable branches.",
+      "consequence": "Backfill cannot recover Agent, Claim ID, or Claimed At fields.",
+      "source_finding_ids": [3827636772],
+      "locations": [
+        {
+          "path": "scripts/pr/issue-board-backfill.mjs",
+          "line_start": 116,
+          "line_end": 139
+        }
+      ],
+      "label_authority": "agent-audited"
+    }
+  ]
+}

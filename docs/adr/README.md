@@ -113,6 +113,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0106](0106-sentry-triage-moves-to-operator-skills.md)      | Sentry triage and autofix move from a CI pipeline to operator-run skills                                                                     |
 | [0107](0107-enforced-shell-size-limits.md)                  | Shell files and functions are enforced at 500/50 lines with a closed, shrinking baseline                                                     |
 | [0108](0108-sealed-orchestrator-source-set.md)              | Every run-eval shell module joins the sealed orchestrator source set                                                                         |
+| [0110](0110-paired-review-evaluation-v2.md)                 | Paired review evaluation separates reviewer execution from grading                                                                           |
 
 ### shared-config
 

@@ -95,7 +95,7 @@
     "ruleId": "complexity",
     "message": "Function 'ReservesTab' has a complexity of 20. Maximum allowed is 15.",
     "line": 43,
-    "linePreview": "// eslint-disable-next-line max-lines-per-function -- Existing tab keeps reserve fetching, search filtering, chart, and table rendering together; this PR only swaps the loading skeleton to the shared "
+    "linePreview": "// eslint-disable-next-line max-lines-per-function -- This tab renders reserve fetching, search controls, the table, and an independent history chart. | export function ReservesTab({ | poolId,"
   },
   {
     "file": "src/app/pool/[poolId]/opengraph-image.tsx",
@@ -229,13 +229,6 @@
     "message": "Function 'UptimeValue' has a complexity of 29. Maximum allowed is 15.",
     "line": 81,
     "linePreview": " | export function UptimeValue({ pool }: { pool: Pool }) { | const isVirtual = isVirtualPool(pool);"
-  },
-  {
-    "file": "src/components/reserve-chart.tsx",
-    "ruleId": "complexity",
-    "message": "Function 'ReserveChart' has a complexity of 17. Maximum allowed is 15.",
-    "line": 47,
-    "linePreview": " | export function ReserveChart({ | rows,"
   },
   {
     "file": "src/components/tag-input.tsx",

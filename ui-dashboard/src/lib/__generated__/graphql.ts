@@ -8112,6 +8112,27 @@ export type PoolReservesQuery = {
   }>;
 };
 
+// queries/pools.POOL_RESERVE_HISTORY
+export type PoolReserveHistoryQueryVariables = {
+  readonly poolId: string;
+  readonly from: number | string;
+  readonly to: number | string;
+  readonly afterBlock: number | string;
+  readonly afterId: string;
+  readonly limit: number;
+};
+export type PoolReserveHistoryQuery = {
+  readonly ReserveUpdate: ReadonlyArray<{
+    readonly id: string;
+    readonly chainId: number;
+    readonly reserve0: string;
+    readonly reserve1: string;
+    readonly txHash: string;
+    readonly blockNumber: string;
+    readonly blockTimestamp: string;
+  }>;
+};
+
 // queries/pools.POOL_REBALANCES
 export type PoolRebalancesQueryVariables = {
   readonly poolId: string;
