@@ -122,6 +122,9 @@ delivery pattern; a deposit cannot be inferred from a withdrawal Burn.
 
 ## Evidence
 
+PR #2548; `alerts/infra/onchain-event-handler/src/pool-liquidity-withdrawal.ts` and its
+receipt fixture; `alerts/infra/onchain-event-handler/main.tf`.
+
 ### Deployment availability (October 2026)
 
 The October 12 infrastructure apply deleted and recreated the private retry
@@ -148,6 +151,3 @@ plan; the guard must not be weakened by an agent to unblock its own apply.
 After deployment, a naturally scheduled attempt starting after apply completes
 must return HTTP 200. Pending-state inspection is a separate proof: a successful
 bounded scan is not evidence that every retained candidate was delivered.
-
-PR #2548; `alerts/infra/onchain-event-handler/src/pool-liquidity-withdrawal.ts` and its
-receipt fixture; `alerts/infra/onchain-event-handler/main.tf`.
