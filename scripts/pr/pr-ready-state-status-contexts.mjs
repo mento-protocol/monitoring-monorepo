@@ -396,6 +396,7 @@ export async function fetchRequiredStatusContexts({
   fetchRules = ghApiJsonPagesResult,
   fetchWorkflowNames = fetchWorkflowNamesForRules,
   fetchBranch = ghApiJsonResult,
+  fetchClassicProtection = ghApiJsonResult,
 }) {
   const encodedBaseRef = encodeURIComponent(baseRef);
   const result = await fetchProtection(repo, [
@@ -421,6 +422,7 @@ export async function fetchRequiredStatusContexts({
         encodedBaseRef,
         error: result.error,
         fetchBranch,
+        fetchClassicProtection,
       });
 
       // A ruleset's confirmed `true` stands on its own: GitHub enforces the
