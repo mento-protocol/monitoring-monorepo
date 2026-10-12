@@ -25,6 +25,10 @@ name: Supply Chain
 # 3. dependency version-skew check — validates every manifest entry for a
 #    cataloged package is either "catalog:" or the exact catalog version. This
 #    keeps standalone deploy roots aligned with workspace-only catalog consumers.
+#    It also checks the three Cloud Function applications' workspace and standalone
+#    graphs against Terraform runtime majors and their direct resolved tsx peers.
+#    Isolated tooling and unreachable snapshots remain valid; frozen installs
+#    own lockfile syntax/schema validation, not this reachability check.
 #
 # 4. moderate advisory report — a weekly non-blocking audit that opens or
 #    updates a labeled GitHub issue for sub-high advisories, so stale
@@ -193,7 +197,11 @@ jobs:
         run: node scripts/supply-chain/version-skew-check.test.mjs
       - name: dependency version-skew check
         # Every declared version of a cataloged package (currently viem)
-        # must be "catalog:" or exactly the catalog version.
+        # must be "catalog:" or exactly the catalog version. Also checks the three
+        # Cloud Function applications' workspace and standalone lockfile graphs:
+        # declarations match its Terraform runtime major, and reachable Vite/tsx
+        # peers match its direct resolved tsx. Errors identify the application,
+        # installation context and dependency edge; this is not compiler proof.
         run: node scripts/supply-chain/version-skew-check.mjs
 
   context-staleness-report:
