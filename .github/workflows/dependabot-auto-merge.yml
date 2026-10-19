@@ -491,7 +491,7 @@ jobs:
           # "when your schedule runs" and "when Dependabot detects that a
           # Dependabot pull request is in conflict after a recent push to the
           # target branch" — merely being behind is not a trigger. This
-          # repository schedules `github-actions` every second Monday, so a stale
+          # repository schedules `github-actions` weekly on Monday, so a stale
           # pull request waits for that run, and Dependabot stops rebasing any
           # pull request left unmerged for 30 days. Announce the stall loudly
           # rather than letting the lane look idle: a human can post
