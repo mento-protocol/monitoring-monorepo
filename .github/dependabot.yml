@@ -4,8 +4,8 @@ version: 2
 # github-actions entry opens a PR whenever an action we use tags a new release,
 # letting us refresh the pinned SHA under review.
 #
-# The npm entry batches routine workspace updates into Monday group PRs so
-# they arrive as a handful of themed PRs instead of one PR per package.
+# The npm entry batches routine workspace updates into group PRs so they
+# arrive as a handful of themed PRs instead of one PR per package.
 # `minimumReleaseAge: 4320` in pnpm-workspace.yaml is a separate three-day
 # install-time guard for versions not listed in `minimumReleaseAgeExclude`;
 # the Dependabot cooldown below is the longer floor for version-update PRs.
@@ -27,10 +27,15 @@ updates:
       - /governance-watchdog
       - /alerts/infra/onchain-event-handler
       - /alerts/infra/oncall-announcer
+    # Both entries run every second Monday. Dependabot parses `cronjob` with
+    # the fugit library. `mon%2` matches Mondays whose week count since Monday
+    # 2018-12-31 is even, an exact 14-day cadence (next runs 2026-10-26 and
+    # 2026-11-09). Plain cron cannot express "every other week". Security
+    # updates ignore the schedule and still open immediately.
+    # Source: https://github.com/dependabot/dependabot-core/issues/12246
     schedule:
-      interval: weekly
-      day: monday
-      time: "06:00" # trunk-ignore(yamllint/quoted-strings)
+      interval: cron
+      cronjob: 0 6 * * mon%2
       timezone: UTC
 
     # Security updates bypass cooldown. Version updates wait so a malicious
@@ -41,10 +46,10 @@ updates:
       semver-minor-days: 7
       semver-patch-days: 7
 
-    # Worst case per Monday: nine version groups plus one PR per ungrouped
+    # Worst case per run: nine version groups plus one PR per ungrouped
     # major (chain-stack majors and any production major outside the named
     # runtime groups). Dependabot defers further PRs until the count drops,
-    # so a busy week queues rather than fails.
+    # so a busy run queues rather than fails.
     open-pull-requests-limit: 12
 
     labels:
@@ -189,7 +194,7 @@ updates:
           - patch
 
       # Catch-all so ungrouped production minor and patch stragglers arrive as
-      # one weekly PR. Production majors stay individual so each gets its own
+      # one PR per run. Production majors stay individual so each gets its own
       # review. Exclusions mirror the named groups above so group order never
       # matters.
       production-misc:
@@ -449,9 +454,10 @@ updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
-      day: monday
-    # 10 leaves headroom for the current worst-case week: two grouped
+      interval: cron
+      cronjob: 0 6 * * mon%2
+      timezone: UTC
+    # 10 leaves headroom for the current worst-case run: two grouped
     # minor/patch PRs, one grouped major PR, and one individual PR per
     # review-sensitive exclusion. Keep the headroom so Dependabot does not
     # silently stop opening PRs when another reviewed exclusion is added.
@@ -462,7 +468,7 @@ updates:
     labels:
       - dependencies
 
-    # Collapse the Monday batch into one PR per tier. Only GitHub-owned
+    # Collapse each run into one PR per tier. Only GitHub-owned
     # `actions/*` minor and patch updates enter the narrow auto-merge group.
     # Other publishers, major updates, and every excluded action use the
     # normal operator-authorized merge path.

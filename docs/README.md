@@ -206,7 +206,7 @@ Authority: canonical
 - [`adr/0089-review-eval-canonical-matrix-pr-groups.md`](adr/0089-review-eval-canonical-matrix-pr-groups.md) — The canonical review-eval matrix runs PR groups concurrently
 - [`adr/0090-canonical-eval-matrix-freshness-floor.md`](adr/0090-canonical-eval-matrix-freshness-floor.md) — The canonical review-eval matrix is a freshness floor
 - [`adr/0091-promote-needs-replay-corroboration.md`](adr/0091-promote-needs-replay-corroboration.md) — A PROMOTE needs replay corroboration before it re-anchors
-- [`adr/0092-dependabot-npm-version-updates.md`](adr/0092-dependabot-npm-version-updates.md) — Dependabot batches npm version updates into Monday groups
+- [`adr/0092-dependabot-npm-version-updates.md`](adr/0092-dependabot-npm-version-updates.md) — Dependabot batches npm version updates into every-second-Monday groups
 - [`adr/0093-opt-in-native-stacked-pull-requests.md`](adr/0093-opt-in-native-stacked-pull-requests.md) — Adopt native stacked pull requests through an opt-in pilot
 - [`adr/0094-grid-waiver.md`](adr/0094-grid-waiver.md) — Scale the control waiver to grid scope
 - [`adr/0095-isolated-bridge-transfer-observations.md`](adr/0095-isolated-bridge-transfer-observations.md) — Bridge transfers use isolated complete observations
