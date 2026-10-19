@@ -243,7 +243,7 @@ Audit workflows that "tolerate transient errors" become attack surface — an at
 ## 7. Dependabot policy
 
 Dependabot covers two ecosystems in `.github/dependabot.yml`: `github-actions`
-and `npm`. Both run weekly on Monday. The npm entry batches routine workspace
+and `npm`. Both run every second Monday at 06:00 UTC. The npm entry batches routine workspace
 updates into themed groups (`next-runtime`, `envio-runtime`, `nest-runtime`,
 `playwright-runtime`, `chain-stack`, `test-toolchain`, `lint-toolchain`, plus
 `production-misc` and `tooling` catch-alls) and mirrors those boundaries for
