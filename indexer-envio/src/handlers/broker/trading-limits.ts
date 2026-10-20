@@ -342,8 +342,8 @@ indexer.onEvent(
       config,
       configKnown: true,
       // A null read falls back to mirroring the contract's `reset()` locally,
-      // which leaves `stateKnown` as it was and a zero `stateTimestamp` so the
-      // next Broker.Swap re-reads.
+      // which preserves `stateKnown` and the previous `stateBlock` so the
+      // next later Broker.Swap block re-reads.
       state: read
         ? read.state
         : resetBrokerState(

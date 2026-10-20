@@ -907,8 +907,8 @@ type BrokerTradingLimit @index(fields: ["poolId"]) {
   netflowGlobal: BigInt!
   lastUpdated0: BigInt!
   lastUpdated1: BigInt!
-  stateBlock: BigInt! # block the state read was pinned to
-  stateTimestamp: BigInt! # timestamp of that block; drives the refresh gate
+  stateBlock: BigInt! # block the state read was pinned to; drives the refresh gate
+  stateTimestamp: BigInt! # timestamp of that block
   # Derived. A window contributes only when its flag bit is set AND its limit
   # is > 0; disabled windows carry "0.0000".
   limitPressure0: String! # 4dp string, |netflow0| / limit0
