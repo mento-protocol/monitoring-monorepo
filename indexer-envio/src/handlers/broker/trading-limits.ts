@@ -6,15 +6,13 @@
 // the EXCHANGE level — "does a VirtualPool wrap this exchangeId" — never on
 // the Broker caller.
 //
-// State has no event: `Broker.Swap` triggers an at-block RPC read, gated by a
-// freshness window so a full resync costs 31k-53k reads instead of 1-2M. The
-// ceiling is one read per wrapped-exchange swap leg: preload batching lets every
-// swap whose leg is stale at batch start request its own block-pinned read.
-// ADR 0103 carries the measurement.
+// State has no event: every later `Broker.Swap` block on a wrapped exchange
+// triggers an exact-block RPC read for each leg. Same/older blocks are skipped.
+// The wrapped-exchange guard bounds replay traffic; see ADR 0103.
 // Config is authoritative from `Broker.TradingLimitConfigured`; the at-block
 // config read is a one-time bootstrap for limits configured before
 // `start_block`. That event also samples state once at its own block, because
-// the contract's `reset()` invalidates whatever the last gated read stored.
+// the contract's `reset()` invalidates whatever the last read stored.
 // ---------------------------------------------------------------------------
 
 import type { BrokerTradingLimit, EvmOnEventContext, Pool } from "envio";
@@ -83,8 +81,9 @@ async function resolveWrappedExchange(
   return { poolId, exchangeProvider: exchange?.exchangeProvider ?? "" };
 }
 
-/** Effect key. Derived from event params and the stored row only, so preload
- * and processing present byte-identical inputs and Envio dedupes them. */
+/** Both passes derive the same key from the event and known-config state.
+ * Bootstrap in an earlier ordered event can change readConfig after preload;
+ * that event needs a new exact-block read with its now-known config. */
 function effectInput(
   args: BrokerTradingLimitArgs,
   token: string,
@@ -117,7 +116,7 @@ export async function preloadBrokerTradingLimits(
     const row = await args.context.BrokerTradingLimit.get(
       legRowId(args, token),
     );
-    if (!shouldRefreshBrokerState(row, args.blockNumber, args.blockTimestamp)) {
+    if (!shouldRefreshBrokerState(row, args.blockNumber)) {
       continue;
     }
     await args.context.effect(
@@ -137,10 +136,7 @@ async function applyLeg(
   const existing = await args.context.BrokerTradingLimit.get(
     legRowId(args, token),
   );
-  if (
-    existing &&
-    !shouldRefreshBrokerState(existing, args.blockNumber, args.blockTimestamp)
-  ) {
+  if (existing && !shouldRefreshBrokerState(existing, args.blockNumber)) {
     return { row: existing, adopted: false };
   }
   const read = await args.context.effect(

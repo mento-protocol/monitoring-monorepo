@@ -232,7 +232,10 @@ Key design decisions:
   field: `limitId = exchangeId XOR bytes32(uint160(token))`, 66 lowercase
   characters. Its limit and netflow values are WHOLE
   TOKEN UNITS, not the 15-decimal internal scale `TradingLimit` uses; never
-  route them through the same formatter. See
+  route them through the same formatter. Both legs refresh from authoritative
+  RPC state on every later Broker swap block for a wrapped exchange, regardless
+  of caller or prior pressure; same/older blocks reuse the block-end state.
+  Failed reads retain the previous row and retry on the next swap. See
   [ADR 0103](../docs/adr/0103-virtualpool-broker-trading-limits.md)
 - All BigInt fields use string representation in GraphQL responses
 
