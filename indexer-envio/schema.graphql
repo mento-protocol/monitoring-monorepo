@@ -878,8 +878,8 @@ type TradingLimit @index(fields: ["poolId"]) {
 # per caller. All limit/netflow values are WHOLE TOKEN UNITS (int48 on-chain,
 # `deltaFlow / 10^decimals`, minimum ±1) — NOT the 15-decimal internal scale of
 # the FPMM `TradingLimit` entity. State comes from an exact-block RPC read on
-# `Broker.Swap`, refreshed at most every `BROKER_LIMIT_REFRESH_SECONDS` per leg
-# (every swap while a leg is at or above 80% pressure); config comes from
+# every later `Broker.Swap` block on a wrapped exchange (same/older blocks
+# are skipped); config comes from
 # `Broker.TradingLimitConfigured` params, with one exact-block bootstrap read
 # for limits configured before `start_block`.
 type BrokerTradingLimit @index(fields: ["poolId"]) {
@@ -907,8 +907,8 @@ type BrokerTradingLimit @index(fields: ["poolId"]) {
   netflowGlobal: BigInt!
   lastUpdated0: BigInt!
   lastUpdated1: BigInt!
-  stateBlock: BigInt! # block the state read was pinned to
-  stateTimestamp: BigInt! # timestamp of that block; drives the refresh gate
+  stateBlock: BigInt! # block the state read was pinned to; drives the refresh gate
+  stateTimestamp: BigInt! # timestamp of that block
   # Derived. A window contributes only when its flag bit is set AND its limit
   # is > 0; disabled windows carry "0.0000".
   limitPressure0: String! # 4dp string, |netflow0| / limit0
