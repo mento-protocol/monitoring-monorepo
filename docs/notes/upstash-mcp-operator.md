@@ -3,7 +3,7 @@ title: Upstash MCP operator setup
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-11
+last_verified: 2026-10-21
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -46,12 +46,19 @@ registry.
   `sha512-LN5yao74QQZTjGmolGqAh9YkQa/206ni94wwTtu6I/mVkyMeAbRME7rjK64KrWmCTw2OHUb8TMFsw6r4rMmUSQ==`
 - npm shasum: `4b2a627dbce2773f000a0e14d15e61a7ca1150f8`
 - launcher SHA-256:
-  `633a7f94140ee014355d7e57bd50925bc8c9cd5aad774149e23db57a8ae273c2`
+  `63493a7622f26d7ae56b330f5e256816d2e82ea4c088e42f10d18561d3a986a3`
 - dependency-closed runtime SHA-256:
-  `8dd4f9a1d40127541d7030d2bb4c6eaf9a96812bf591306736762e1831e70f76`
+  `771c08ff939347f8356e87b2ffa48f6a21e6045744b755003bdb85ff0817cca7`
 - entrypoint SHA-256:
   `1949e38e9c66aaac5cc00e2da2b8bbf712a4c39266f8f501a3cdd86253fe4b8e`
 - upstream git commit: `e3ab3c20ebd7d0e195cd774004fdb4c3dcb448d1`
+
+The reviewed dependency closure uses `@modelcontextprotocol/sdk@1.32.1`,
+`@hono/node-server@1.19.17`, and `hono@4.13.7`. This repair leaves the Hono
+security floor (`GHSA-hxh3-vqpv-xpqv`) at `4.13.7` and esbuild at `0.28.1`.
+Future dependency or bundler changes require the same artifact review, runtime
+rebuild, hash update, and focused contract checks as a server-version update.
+Do not reuse a runtime hash across different dependency closures.
 
 The published entrypoint reads `UPSTASH_EMAIL` and `UPSTASH_API_KEY` when the
 matching command flags are absent. The reviewed config omits those flags,

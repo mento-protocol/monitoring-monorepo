@@ -3,7 +3,6 @@ import { describe, it } from "vitest";
 import type { BrokerTradingLimit } from "envio";
 import {
   BROKER_LIMIT_HOT_PRESSURE,
-  BROKER_LIMIT_REFRESH_SECONDS,
   EMPTY_BROKER_LIMIT_CONFIG,
   EMPTY_BROKER_LIMIT_STATE,
   LIMIT_FLAG_L0,
@@ -338,83 +337,24 @@ describe("resetBrokerState", () => {
 });
 
 describe("shouldRefreshBrokerState", () => {
-  const BLOCK = 100n;
-  const NOW = 1_757_000_000n;
-  const fresh = row({
-    stateBlock: 90n,
-    stateTimestamp: NOW,
-    state: state({ netflowGlobal: 100n }),
-    config: config({ flags: LIMIT_FLAG_LG, limitGlobal: 1597n }),
+  const fresh = row({ stateBlock: 100n, state: state({ netflowGlobal: 0n }) });
+
+  it("refreshes an absent row and every later block, regardless of stored pressure", () => {
+    assert.equal(shouldRefreshBrokerState(undefined, 100n), true);
+    for (const netflowGlobal of [0n, 1200n, 1597n]) {
+      const stored = row({ stateBlock: 100n, state: state({ netflowGlobal }) });
+      assert.equal(shouldRefreshBrokerState(stored, 101n), true);
+    }
   });
 
-  it("refreshes when no row exists", () => {
-    assert.equal(shouldRefreshBrokerState(undefined, BLOCK, NOW), true);
-  });
-
-  it("skips a row already read at or after this block", () => {
-    assert.equal(
-      shouldRefreshBrokerState({ ...fresh, stateBlock: BLOCK }, BLOCK, NOW),
-      false,
-    );
-    assert.equal(
-      shouldRefreshBrokerState(
-        { ...fresh, stateBlock: BLOCK + 1n },
-        BLOCK,
-        NOW,
-      ),
-      false,
-    );
-  });
-
-  it("keeps the same-block guard ahead of every other reason", () => {
-    const stale = {
-      ...fresh,
-      stateBlock: BLOCK,
-      stateTimestamp: 0n,
-      configKnown: false,
-      stateKnown: false,
-    };
-    assert.equal(shouldRefreshBrokerState(stale, BLOCK, NOW), false);
-  });
-
-  it("refreshes an unknown config or an unknown state", () => {
-    assert.equal(
-      shouldRefreshBrokerState({ ...fresh, configKnown: false }, BLOCK, NOW),
-      true,
-    );
-    assert.equal(
-      shouldRefreshBrokerState({ ...fresh, stateKnown: false }, BLOCK, NOW),
-      true,
-    );
-  });
-
-  it("refreshes once the stored state reaches the refresh window", () => {
-    const at = NOW + BROKER_LIMIT_REFRESH_SECONDS;
-    assert.equal(shouldRefreshBrokerState(fresh, BLOCK, at), true);
-    assert.equal(shouldRefreshBrokerState(fresh, BLOCK, at - 1n), false);
-  });
-
-  it("refreshes on every swap once a window is hot", () => {
-    const hot = row({
-      stateBlock: 90n,
-      stateTimestamp: NOW,
-      state: state({ netflowGlobal: 1278n }),
-    });
-    assert.equal(shouldRefreshBrokerState(hot, BLOCK, NOW), true);
-    // Pressure exactly at the threshold refreshes too: the gate is `>=`.
-    const atThreshold = row({
-      stateBlock: 90n,
-      stateTimestamp: NOW,
-      config: config({ flags: LIMIT_FLAG_LG, limitGlobal: 1000n }),
-      state: state({ netflowGlobal: 800n }),
-    });
-    assert.equal(shouldRefreshBrokerState(atThreshold, BLOCK, NOW), true);
-    const warm = row({
-      stateBlock: 90n,
-      stateTimestamp: NOW,
-      state: state({ netflowGlobal: 1200n }),
-    });
-    assert.equal(shouldRefreshBrokerState(warm, BLOCK, NOW), false);
+  it("suppresses same/older blocks even for an unknown row", () => {
+    for (const stored of [
+      fresh,
+      { ...fresh, configKnown: false, stateKnown: false },
+    ]) {
+      assert.equal(shouldRefreshBrokerState(stored, 100n), false);
+      assert.equal(shouldRefreshBrokerState(stored, 99n), false);
+    }
   });
 });
 

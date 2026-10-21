@@ -52,7 +52,8 @@ overrides:
   uuid@<11.1.1: 11.1.1
   "uuid@>=12.0.0 <12.0.1": 12.0.1
   "uuid@>=13.0.0 <13.0.1": 13.0.1
-  vite@<8.0.16: 8.0.16
+  # GHSA-587h-7wmj-h5pm: patched 8.0/8.1 floor; retain the Vite 8 line.
+  "vite@>=8.0.0 <8.1.6": 8.1.6
 
 # pnpm 11 records dependency build-script policy explicitly.
 allowBuilds:

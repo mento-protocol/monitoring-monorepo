@@ -1,9 +1,9 @@
 ---
-title: VirtualPool trading limits come from block-pinned, freshness-gated Broker state reads
+title: VirtualPool trading limits come from block-pinned, wrapped-exchange Broker state reads
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-15
+last_verified: 2026-10-20
 scope: indexer-envio
 date: 2026-09
 doc_type: adr
@@ -48,19 +48,21 @@ config, state, derived pressures, and status.
   block, through a dedicated effect module
   ([ADR 0016](0016-effect-rpc-split-and-heal-stages.md)). A read that falls back
   to `latest` is discarded and never overwrites a row.
-- **The read is gated**: at most one refresh per leg per
-  `BROKER_LIMIT_REFRESH_SECONDS` (300), overridden to every swap once a leg is
-  at or above 0.8 pressure, and suppressed for a block at or below the row's
-  `stateBlock`.
+- **Refresh every later swap block for wrapped exchanges**, regardless of the
+  stored pressure or age. Suppress reads at or below the row's `stateBlock`:
+  an exact-block read already covers all swaps in that block. The former
+  300-second, below-80% gate missed a reset followed by a three-second burst
+  to the cap on 2026-10-19, leaving the pool at OK with no later swap to heal it.
 - **Config is event-sourced** from a newly indexed
   `Broker.TradingLimitConfigured`. The contract's `reset()` runs in that same
   block, so the handler reads state once pinned to the reconfigure block and
-  adopts it, rather than pricing a sampled netflow up to 300 s old against the
+  adopts it, rather than pricing a previously sampled netflow against the
   new limit. The read is bounded: governance reconfigures are rare, so it
   carries a `preload-effect-exempt` annotation instead of joining the preload
   pass. When it returns null the handler mirrors `reset()` locally, keeps
-  `stateKnown` as it was, and zeroes `stateTimestamp` so the next swap
-  re-reads. The at-block config read is a one-time bootstrap for limits
+  `stateKnown` as it was, and zeroes `stateTimestamp`. A failed read does not
+  advance `stateBlock`, so the next later swap block re-reads. The at-block
+  config read is a one-time bootstrap for limits
   configured before `start_block`. The `TradingLimitConfigured` fragment is
   appended to the hand-vendored `abis/Broker.json` under the ABI exception rule
   of [ADR 0015](0015-abi-vendoring-and-address-drift-gate.md).
@@ -90,8 +92,9 @@ is greater than 0.
   standing rule in `indexer-envio/src/rpc/effects.ts` (Group E), which keeps the
   authoritative per-swap path on an RPC read because local derivation cannot
   prove row contiguity after a transient miss or during a full replay.
-- **Read state on every Broker swap, ungated** — rejected: 1–2M archive
-  `eth_call`s per full resync.
+- **Read state on every Broker swap, including unwrapped exchanges** —
+  rejected: 1–2M archive `eth_call`s per full resync. This is distinct from
+  the accepted wrapped-only per-block refresh.
 - **Key the read by refresh bucket instead of block** — rejected: a quantized
   block returns state from the bucket boundary, not from the swap's block, so
   the stored netflow would no longer match the event it is attributed to. It
@@ -102,26 +105,32 @@ is greater than 0.
 
 ## Consequences
 
-- A full resync costs between about **31,026 and 53,400 state reads**, plus at
-  most 24 config bootstrap reads. Only 26,705 of 524,004 indexed Celo
-  `Broker.Swap` rows are on VirtualPool-wrapped exchanges; distinct (exchange,
-  leg token, refresh bucket) triples number 31,026 at 300s, 21,512 at 900s, and
-  16,146 at 1800s. 31,026 is the perfect-gating floor. The ceiling is one read
-  per wrapped-exchange swap leg — 26,705 × 2 ≈ 53,400 — because under Envio's
-  preload batching every swap whose leg is already stale at batch start requests
-  its own block-pinned read; ordered processing then adopts the first result and
-  skips the rest, but those preload calls have gone out. At 50–100 `eth_call`/s
-  that range is roughly 10–18 minutes. The FPMM `poolTradingLimitsEffect` path
-  has the same property, and the bucket-keyed alternative that would collapse it
-  is rejected above. Re-measure before changing
-  `BROKER_LIMIT_REFRESH_SECONDS`. The `brokerTradingLimit` effect carries that
-  cost: `cache: false` (netflow is block-scoped state), rate-limited to 50 calls
-  per second, one `tradingLimitsState` read per dispatch, plus one
-  `tradingLimitsConfig` read only while the row has no `configKnown`, plus one
-  state read per `TradingLimitConfigured` event.
-- Displayed state can be up to 5 minutes stale below 0.8 pressure. The panel
-  shows an "as of" time rather than implying live state. Aegis and Grafana keep
-  the 10s polling path, and they remain the paging authority.
+- The historical Celo sample had **26,705 wrapped-exchange swaps** out of
+  524,004 Broker swaps: at most about **53,400 state reads** (two legs per
+  swap), with same-block suppression able to reduce ordered reads. This is a
+  historical workload bound, not a new production measurement or a future
+  volume cap. The former 300-second gate ranged from a 31,026 perfect-gating
+  floor to the same 53,400 ceiling: concurrent preload could already request
+  each stale leg's block-pinned read before ordered processing suppressed it.
+  Removing the gate increases ordered reads towards that ceiling, not the
+  rejected global 1–2M path. At 50 state reads/s the sample ceiling takes about
+  18 minutes before bootstrap duplication, retries and config reads. The effect
+  stays `cache: false` and rate-limited to 50 dispatches/s. Config is read only while `configKnown`
+  is false; ordered bootstrap can change that input after concurrent preload,
+  so bootstrap calls can exceed the 24 unique historical leg configs and can
+  dispatch state twice for a leg/block (once with config, once without). A
+  two-swap cold batch uses six state and four config reads; a known-config
+  batch uses four state and zero config reads. The conservative dispatch bound
+  is twice the wrapped swap-leg count during cold batches, about 106,800
+  state reads for that historical sample, plus retries. This pre-existing
+  bootstrap duplication is separate from removing age/pressure suppression.
+  Each governance reconfigure also adds one state read. Future replay cost grows
+  with wrapped-exchange swap volume; re-measure that volume before rollout.
+- State reflects the last successfully read swap block, even when a cool leg
+  jumps straight to its cap. A failed read retains the prior row and retries on
+  the next swap; an idle exchange cannot repair a failed final read by itself.
+  The panel's "as of" time remains useful. Aegis and Grafana keep their 10s
+  polling path and remain the paging authority.
 - **Rows bootstrap on the first indexed swap for their exchange.** An exchange
   with no swap since the change shipped has no row, and its pool shows the
   "limits refresh on Broker swaps" note, not `N/A` as a claim about the limit.
