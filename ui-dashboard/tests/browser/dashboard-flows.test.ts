@@ -1049,7 +1049,9 @@ test.describe("dashboard browser flows", () => {
     await expect(rows.filter({ hasText: "GBPm" })).toHaveCount(0);
     await expect(rows.filter({ hasText: "BRLm" })).toHaveCount(1);
 
-    await input.fill("1.");
+    const originalInput = await input.elementHandle();
+    await input.fill("");
+    await input.pressSequentially("1.");
 
     await expect(input).toHaveValue("1.");
     expect(page.url()).not.toContain("minSupplyChangeUsd");
@@ -1063,6 +1065,12 @@ test.describe("dashboard browser flows", () => {
 
     await expect(page).toHaveURL(/minSupplyChangeUsd=1/);
     await expect(input).toHaveValue("1");
+    await expect(input).toBeFocused();
+    expect(
+      await originalInput?.evaluate((node) => node === document.activeElement),
+    ).toBe(true);
+    await input.pressSequentially(".");
+    await expect(input).toHaveValue("1.");
     await expect(
       page.getByText("Hiding changes below $1.00 equivalent."),
     ).toBeVisible();
@@ -1071,11 +1079,43 @@ test.describe("dashboard browser flows", () => {
     await expect(rows.filter({ hasText: "GBPm" })).toHaveCount(1);
     await expect(rows.filter({ hasText: "BRLm" })).toHaveCount(1);
 
+    // Filter writes replace history; seed entries to test actual in-place Back/Forward.
+    await page.evaluate(() => {
+      window.history.replaceState(
+        null,
+        "",
+        "/stables?foo=1&minSupplyChangeUsd=1#changes",
+      );
+      window.history.pushState(
+        null,
+        "",
+        "/stables?foo=1&minSupplyChangeUsd=1000#changes",
+      );
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    await expect(input).toHaveValue("1000");
+    await expect(input).toBeFocused();
+    await input.fill(".");
+    await page.goBack();
+    await expect(input).toHaveValue("1");
+    await expect(input).toBeFocused();
+    await expect(rows).toHaveCount(2);
+    await input.fill(".");
+    await page.goForward();
+    await expect(input).toHaveValue("1000");
+    await expect(input).toBeFocused();
+    expect(
+      await originalInput?.evaluate((node) => node === document.activeElement),
+    ).toBe(true);
+    await expect(rows).toHaveCount(1);
+    await page.goBack();
+    await expect(input).toHaveValue("1");
     await page.getByRole("button", { name: "Reset" }).click();
 
     await expect(page).not.toHaveURL(/minSupplyChangeUsd=/);
     await expect(input).toHaveValue("1000");
     await expect(rows).toHaveCount(1);
+    await expect(page).toHaveURL(/foo=1#changes$/);
   });
 
   test("SSR-renders the FX weekend banner on both pool surfaces and hydrates without a mismatch", async ({

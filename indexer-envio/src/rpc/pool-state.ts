@@ -137,7 +137,7 @@ export async function fetchErc20Decimals(
       chainId,
       client,
       {
-        address: tokenAddress as `0x${string}`,
+        address: tokenAddress,
         abi: ERC20_DECIMALS_ABI,
         functionName: "decimals",
       },
@@ -223,7 +223,7 @@ export async function fetchRebalancingState(
       chainId,
       client,
       {
-        address: poolAddress as `0x${string}`,
+        address: poolAddress,
         abi: FPMM_MINIMAL_ABI,
         functionName: "getRebalancingState",
       },
@@ -275,7 +275,7 @@ export async function fetchReserves(
       chainId,
       client,
       {
-        address: poolAddress as `0x${string}`,
+        address: poolAddress,
         abi: FPMM_MINIMAL_ABI,
         functionName: "getReserves",
       },
@@ -316,7 +316,7 @@ export async function fetchInvertRateFeed(
       chainId,
       client,
       {
-        address: poolAddress as `0x${string}`,
+        address: poolAddress,
         abi: FPMM_MINIMAL_ABI,
         functionName: "invertRateFeed",
       },
@@ -382,7 +382,7 @@ export async function fetchRebalanceThresholds(
         chainId,
         client,
         {
-          address: poolAddress as `0x${string}`,
+          address: poolAddress,
           abi: FPMM_MINIMAL_ABI,
           functionName: "rebalanceThresholdAbove",
         },
@@ -394,7 +394,7 @@ export async function fetchRebalanceThresholds(
         chainId,
         client,
         {
-          address: poolAddress as `0x${string}`,
+          address: poolAddress,
           abi: FPMM_MINIMAL_ABI,
           functionName: "rebalanceThresholdBelow",
         },
@@ -457,7 +457,7 @@ export async function fetchTokenDecimalsScaling(
       chainId,
       client,
       {
-        address: poolAddress as `0x${string}`,
+        address: poolAddress,
         abi: FPMM_MINIMAL_ABI,
         functionName: fn,
       },
@@ -494,7 +494,7 @@ export async function fetchTradingLimits(
         chainId,
         client,
         {
-          address: poolAddress as `0x${string}`,
+          address: poolAddress,
           abi: FPMM_TRADING_LIMITS_ABI,
           functionName: "getTradingLimits",
           args: [token as `0x${string}`],

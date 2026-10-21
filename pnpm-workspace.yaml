@@ -90,6 +90,8 @@ packageConfigs:
     saveExact: true
 
 overrides:
+  # Preserve the deployed glob closure during the lint-toolchain update.
+  "glob@13.0.6>minimatch": 10.2.5
   # GHSA-q3jh-wrc6-jgq8 / GHSA-8r9p-f939-6h3c: patched redirect handling.
   "follow-redirects@<1.16.1": 1.16.1
   # Framework declaration edges must match the deployed Node 24 applications.

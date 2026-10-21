@@ -193,10 +193,10 @@ async function probeFunction(
       chainId,
       client,
       {
-        address: address as `0x${string}`,
-        abi: abi as never,
+        address: address,
+        abi: abi,
         functionName,
-        args: args as never,
+        args: args,
       },
       undefined,
       getFallbackRpcClient(chainId),
@@ -348,7 +348,7 @@ export async function fetchBreakerDefaults(
       // Reject latest-block fallback — see comment in the multi-read branch.
       if (tm.usedLatestFallback) return null;
       return {
-        activatesTradingMode: Number(tm.result as number),
+        activatesTradingMode: Number(tm.result),
         defaultCooldownTime: 0n,
         defaultRateChangeThreshold: 0n,
       };
@@ -364,7 +364,7 @@ export async function fetchBreakerDefaults(
         chainId,
         client,
         {
-          address: breakerAddress as `0x${string}`,
+          address: breakerAddress,
           abi: breakerAbi,
           functionName: "defaultCooldownTime",
         },
@@ -376,7 +376,7 @@ export async function fetchBreakerDefaults(
         chainId,
         client,
         {
-          address: breakerAddress as `0x${string}`,
+          address: breakerAddress,
           abi: breakerAbi,
           functionName: "defaultRateChangeThreshold",
         },
@@ -397,7 +397,7 @@ export async function fetchBreakerDefaults(
     )
       return null;
     return {
-      activatesTradingMode: Number(tmRes.result as number),
+      activatesTradingMode: Number(tmRes.result),
       defaultCooldownTime: cdRes.result as bigint,
       defaultRateChangeThreshold: thrRes.result as bigint,
     };
@@ -484,7 +484,7 @@ export async function fetchBreakerFeedState(
         chainId,
         client,
         {
-          address: breakerAddress as `0x${string}`,
+          address: breakerAddress,
           abi: breakerAbi,
           functionName: "rateFeedCooldownTime",
           args: [rateFeedID as `0x${string}`],
@@ -497,7 +497,7 @@ export async function fetchBreakerFeedState(
         chainId,
         client,
         {
-          address: breakerAddress as `0x${string}`,
+          address: breakerAddress,
           abi: breakerAbi,
           functionName: "rateChangeThreshold",
           args: [rateFeedID as `0x${string}`],
@@ -512,7 +512,7 @@ export async function fetchBreakerFeedState(
               chainId,
               client,
               {
-                address: breakerAddress as `0x${string}`,
+                address: breakerAddress,
                 abi: MEDIAN_DELTA_BREAKER_ABI,
                 functionName: "smoothingFactors",
                 args: [rateFeedID as `0x${string}`],
@@ -525,7 +525,7 @@ export async function fetchBreakerFeedState(
               chainId,
               client,
               {
-                address: breakerAddress as `0x${string}`,
+                address: breakerAddress,
                 abi: MEDIAN_DELTA_BREAKER_ABI,
                 functionName: "medianRatesEMA",
                 args: [rateFeedID as `0x${string}`],
@@ -539,7 +539,7 @@ export async function fetchBreakerFeedState(
             chainId,
             client,
             {
-              address: breakerAddress as `0x${string}`,
+              address: breakerAddress,
               abi: VALUE_DELTA_BREAKER_ABI,
               functionName: "referenceValues",
               args: [rateFeedID as `0x${string}`],
@@ -713,7 +713,7 @@ export function _withRateFeedDependencyProbeLogger(log: RpcLogger): RpcLogger {
         typeof first === "string" &&
         first.includes(ARCHIVE_FALLBACK_FAILED_MARKER)
       ) {
-        log.debug(...(args as Parameters<RpcLogger["debug"]>));
+        log.debug(...args);
         return;
       }
       log.warn(...args);

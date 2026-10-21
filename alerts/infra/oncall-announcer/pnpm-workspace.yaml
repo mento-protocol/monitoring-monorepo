@@ -22,6 +22,8 @@ minimumReleaseAgeExclude:
   - vite
 
 overrides:
+  # Preserve the deployed metadata parser during the lint-toolchain update.
+  "normalize-package-data>semver": 7.8.1
   # Keep all framework and Express declarations on the deployed Node 24 runtime.
   "@types/node": 24.13.2
   # Nodemon watches literal directories; chokidar 4 removes unpatched braces.

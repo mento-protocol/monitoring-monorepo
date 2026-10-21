@@ -72,7 +72,7 @@ export async function fetchBrokerTradingLimit(args: {
       chainId,
       getRpcClient(chainId),
       {
-        address: brokerAddress as `0x${string}`,
+        address: brokerAddress,
         abi: BROKER_TRADING_LIMITS_ABI,
         functionName: fn,
         args: [limitId as `0x${string}`],

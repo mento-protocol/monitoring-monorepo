@@ -53,18 +53,18 @@ indexer.onEvent(
     // to==lock/mint NTT manager, or to==yield-split Safe (protocol fees).
     // Other Transfers are filtered at the HyperSync edge — they never reach
     // the handler.
-    // The `0x${string}` casts narrow ZERO_ADDRESS (typed as plain string in
-    // constants.ts) to the SingleOrMultiple<`0x${string}`> envio expects.
+    // Keep the filter tuple literal so its address values do not widen to
+    // plain strings before envio checks its SingleOrMultiple address type.
     // NTT manager proxies are CREATE3-identical on Celo and Monad, so Monad
     // burn/mint manager transfers that match these custody params are also
     // delivered and then dropped by handleStableTokenCustodyTransfer.
     where: () => ({
       params: [
-        { from: ZERO_ADDRESS as `0x${string}` },
-        { to: ZERO_ADDRESS as `0x${string}` },
+        { from: ZERO_ADDRESS },
+        { to: ZERO_ADDRESS },
         { to: YIELD_SPLIT_ADDRESS },
         ...STABLE_TOKEN_CUSTODY_TRANSFER_WHERE_PARAMS,
-      ],
+      ] as const,
     }),
   },
   async ({ event, context }) => {

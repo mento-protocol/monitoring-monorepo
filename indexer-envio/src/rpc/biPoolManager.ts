@@ -120,7 +120,7 @@ export async function fetchPoolExchange(
       chainId,
       client,
       {
-        address: exchangeProvider as `0x${string}`,
+        address: exchangeProvider,
         abi: BI_POOL_MANAGER_GET_POOL_EXCHANGE_ABI,
         functionName: "getPoolExchange",
         args: [exchangeId as `0x${string}`],

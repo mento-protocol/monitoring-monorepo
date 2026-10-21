@@ -46,9 +46,9 @@ registry.
   `sha512-LN5yao74QQZTjGmolGqAh9YkQa/206ni94wwTtu6I/mVkyMeAbRME7rjK64KrWmCTw2OHUb8TMFsw6r4rMmUSQ==`
 - npm shasum: `4b2a627dbce2773f000a0e14d15e61a7ca1150f8`
 - launcher SHA-256:
-  `63493a7622f26d7ae56b330f5e256816d2e82ea4c088e42f10d18561d3a986a3`
+  `d26e950f130d8ca8b4a5d357ded55047b049a913d76425fb621dbd6a7050ed7a`
 - dependency-closed runtime SHA-256:
-  `771c08ff939347f8356e87b2ffa48f6a21e6045744b755003bdb85ff0817cca7`
+  `6af58c9ada397f5e445ca28e752cc285f9806de8ecc3ae0eea57aeb5f4f0bd9d`
 - entrypoint SHA-256:
   `1949e38e9c66aaac5cc00e2da2b8bbf712a4c39266f8f501a3cdd86253fe4b8e`
 - upstream git commit: `e3ab3c20ebd7d0e195cd774004fdb4c3dcb448d1`
@@ -59,6 +59,11 @@ security floor (`GHSA-hxh3-vqpv-xpqv`) at `4.13.7` and esbuild at `0.28.1`.
 Future dependency or bundler changes require the same artifact review, runtime
 rebuild, hash update, and focused contract checks as a server-version update.
 Do not reuse a runtime hash across different dependency closures.
+
+The byte pin also includes esbuild source-path comments. The frozen lock
+resolves the existing `supports-color@5.5.0` peer context in the server and SDK
+paths; those comments remain part of the reviewed artifact. Do not normalize
+them or reuse a hash from a different peer context.
 
 The published entrypoint reads `UPSTASH_EMAIL` and `UPSTASH_API_KEY` when the
 matching command flags are absent. The reviewed config omits those flags,
