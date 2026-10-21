@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   filterAndStripSentryEvent,
+  getServerSentryOptions,
   resolveTracesSampleRate,
   shouldEnableSentry,
   stripAuthHeaders,
@@ -329,6 +330,83 @@ describe("filterAndStripSentryEvent — loopback requests", () => {
     expect(filtered).toEqual({
       request: {
         url: "https://monitoring.mento.org/api/auth/callback",
+        headers: { host: "monitoring.mento.org" },
+      },
+    });
+  });
+});
+
+describe("Sentry 11 initialization privacy", () => {
+  it("keeps sensitive collection opt-out explicit on server and edge", () => {
+    expect(getServerSentryOptions().dataCollection).toEqual({
+      userInfo: false,
+      cookies: false,
+      httpHeaders: {
+        request: {
+          deny: [
+            "forwarded",
+            "-ip",
+            "remote-",
+            "via",
+            "-user",
+            "authorization",
+            "cookie",
+          ],
+        },
+        response: {
+          deny: [
+            "forwarded",
+            "-ip",
+            "remote-",
+            "via",
+            "-user",
+            "authorization",
+            "cookie",
+            "set-cookie",
+          ],
+        },
+      },
+      httpBodies: [],
+      urlQueryParams: false,
+      genAI: { inputs: false, outputs: false },
+      databaseQueryData: false,
+      queues: false,
+      graphQL: { document: false, variables: false },
+    });
+  });
+
+  it("keeps transaction filtering active instead of Sentry 11's streaming no-op", () => {
+    const options = getServerSentryOptions();
+    expect(options.traceLifecycle).toBe("static");
+    const beforeSend = options.beforeSendTransaction!;
+    expect(
+      beforeSend(
+        {
+          type: "transaction",
+          request: { url: "http://localhost:3000/api/pools" },
+        },
+        {},
+      ),
+    ).toBeNull();
+    expect(
+      beforeSend(
+        {
+          type: "transaction",
+          request: {
+            url: "https://user:secret@monitoring.mento.org/api/pools?token=secret#private",
+            headers: {
+              cookie: "session=secret",
+              Authorization: "Bearer secret",
+              host: "monitoring.mento.org",
+            },
+          },
+        },
+        {},
+      ),
+    ).toEqual({
+      type: "transaction",
+      request: {
+        url: "https://monitoring.mento.org/api/pools",
         headers: { host: "monitoring.mento.org" },
       },
     });
