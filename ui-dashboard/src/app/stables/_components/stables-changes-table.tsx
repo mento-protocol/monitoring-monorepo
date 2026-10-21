@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { AddressLink } from "@/components/address-link";
 import { TableSkeleton } from "@/components/skeletons";
 import { formatWei, truncateAddress } from "@/lib/format";
@@ -358,13 +358,13 @@ function SupplyChangeThresholdInput({
 }): React.JSX.Element {
   const [draft, setDraft] = useState(() => String(value));
 
-  // Draft text can be temporarily empty/invalid while `value` remains the
-  // committed URL-backed number; sync only when back/reset changes `value`.
-  // react-doctor-disable-next-line react-doctor/no-derived-state-effect
-  useEffect(() => {
-    // react-doctor-disable-next-line effect/no-derived-state
+  const [previousValue, setPreviousValue] = useState(value);
+
+  // Preserve incomplete edits until the committed URL-backed number changes.
+  if (value !== previousValue) {
+    setPreviousValue(value);
     setDraft(String(value));
-  }, [value]);
+  }
 
   const updateDraft = (nextDraft: string) => {
     if (/^\d*(?:\.\d*)?$/.test(nextDraft)) setDraft(nextDraft);
