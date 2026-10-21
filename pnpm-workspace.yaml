@@ -175,7 +175,7 @@ overrides:
   "body-parser@>=2.0.0 <2.3.0": 2.3.0
   # GHSA-qhr7-859c-m2p7 and GHSA-q2hr-2g5m-vwhr: patched 5.x floor.
   "brace-expansion@^1.0.0": 5.0.12
-  "cron": 4.3.4
+  "cron": 4.4.0
   "diff@^4.0.0": ^4.0.4
   "file-type@^21.0.0": ^21.3.2
   # GHSA-8r5x-fm3f-whwj / GHSA-p8wg-vrv2-v86f: floor 4.7.10.
