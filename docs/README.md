@@ -206,7 +206,7 @@ Authority: canonical
 - [`adr/0089-review-eval-canonical-matrix-pr-groups.md`](adr/0089-review-eval-canonical-matrix-pr-groups.md) — The canonical review-eval matrix runs PR groups concurrently
 - [`adr/0090-canonical-eval-matrix-freshness-floor.md`](adr/0090-canonical-eval-matrix-freshness-floor.md) — The canonical review-eval matrix is a freshness floor
 - [`adr/0091-promote-needs-replay-corroboration.md`](adr/0091-promote-needs-replay-corroboration.md) — A PROMOTE needs replay corroboration before it re-anchors
-- [`adr/0092-dependabot-npm-version-updates.md`](adr/0092-dependabot-npm-version-updates.md) — Dependabot batches npm version updates into Monday groups
+- [`adr/0092-dependabot-npm-version-updates.md`](adr/0092-dependabot-npm-version-updates.md) — Dependabot batches npm version updates into every-second-Monday groups
 - [`adr/0093-opt-in-native-stacked-pull-requests.md`](adr/0093-opt-in-native-stacked-pull-requests.md) — Adopt native stacked pull requests through an opt-in pilot
 - [`adr/0094-grid-waiver.md`](adr/0094-grid-waiver.md) — Scale the control waiver to grid scope
 - [`adr/0095-isolated-bridge-transfer-observations.md`](adr/0095-isolated-bridge-transfer-observations.md) — Bridge transfers use isolated complete observations
@@ -216,7 +216,7 @@ Authority: canonical
 - [`adr/0100-monthly-ci-reliability-report.md`](adr/0100-monthly-ci-reliability-report.md) — Monthly CI reliability report is an issue-only scheduler
 - [`adr/0101-legacy-gate-retirement.md`](adr/0101-legacy-gate-retirement.md) — Retire the legacy local quality gate
 - [`adr/0102-github-hosted-runners-only.md`](adr/0102-github-hosted-runners-only.md) — GitHub-hosted runners only; a frozen allow-list blocks other labels
-- [`adr/0103-virtualpool-broker-trading-limits.md`](adr/0103-virtualpool-broker-trading-limits.md) — VirtualPool trading limits come from block-pinned, freshness-gated Broker state reads
+- [`adr/0103-virtualpool-broker-trading-limits.md`](adr/0103-virtualpool-broker-trading-limits.md) — VirtualPool trading limits come from block-pinned, wrapped-exchange Broker state reads
 - [`adr/0104-non-strict-required-status-checks.md`](adr/0104-non-strict-required-status-checks.md) — Non-strict required status checks for main
 - [`adr/0105-replayed-events-are-handler-layer-no-ops.md`](adr/0105-replayed-events-are-handler-layer-no-ops.md) — Replayed SortedOracles events are handler-layer no-ops; the pure guards stay fail-closed
 - [`adr/0106-sentry-triage-moves-to-operator-skills.md`](adr/0106-sentry-triage-moves-to-operator-skills.md) — Sentry triage and autofix move from a CI pipeline to operator-run skills

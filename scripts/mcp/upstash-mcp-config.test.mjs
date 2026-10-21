@@ -333,9 +333,15 @@ test("external verifier refuses launcher tampering before importing it", async (
 
 test("runtime build closes over every non-builtin server dependency", async () => {
   const runtime = await buildUpstashMcpRuntime();
+  assert.equal(
+    UPSTASH_MCP_RUNTIME_SHA256,
+    "771c08ff939347f8356e87b2ffa48f6a21e6045744b755003bdb85ff0817cca7",
+  );
   assert.equal(runtime.sha256, UPSTASH_MCP_RUNTIME_SHA256);
   for (const dependency of [
-    "@modelcontextprotocol+sdk@",
+    "@modelcontextprotocol+sdk@1.32.1_",
+    "@hono+node-server@1.19.17_hono@4.13.7",
+    "hono@4.13.7",
     "commander@14.0.3",
     "dotenv@16.6.1",
     "zod@3.25.76",

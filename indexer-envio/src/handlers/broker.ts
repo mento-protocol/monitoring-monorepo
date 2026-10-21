@@ -539,7 +539,7 @@ indexer.onEvent(
       blockTimestamp,
     };
 
-    // preload-handler-note: high-frequency caller-pool healing depends on ordered Pool state; see #1394. A trading-limit leg that crosses 0.8 pressure mid-batch is only visible in the processing pass, so that swap pays one unbatched read. The same holds for `readConfig`: the second swap on an exchange first written earlier in the batch asks for a config read in preload and a state-only read in processing, so it pays one unbatched read too.
+    // preload-handler-note: high-frequency caller-pool healing depends on ordered Pool state; see #1394. Trading-limit eligibility is re-evaluated in each pass. When an earlier ordered swap bootstraps config, a later swap can request config in preload but state only in processing, requiring a new exact-block read.
     // preload-effect-helpers: maybeHealBrokerCallerPool, applyBrokerTradingLimits
     if (context.isPreload)
       return preloadBrokerSwapInputs({

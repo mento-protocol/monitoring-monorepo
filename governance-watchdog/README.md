@@ -1,10 +1,12 @@
-<!-- agent-context: title="Governance Watchdog" status=active owner=eng canonical=true last_verified=2026-07-22 doc_type=runbook scope=governance-watchdog review_interval_days=90 garden_lane=operator-runbooks -->
+<!-- agent-context: title="Governance Watchdog" status=active owner=eng canonical=true last_verified=2026-10-21 doc_type=runbook scope=governance-watchdog review_interval_days=90 garden_lane=operator-runbooks -->
 
 # Governance Watchdog
 
-The watchdog receives Celo events from QuickNode, rejects unauthenticated or
-replayed deliveries, validates supported events, and posts governance
-notifications to Discord and Telegram. A separate SortedOracles event from the
+In production, the watchdog receives Celo events from QuickNode, authenticates
+the source, reserves a durable nonce for QuickNode deliveries, validates
+supported events, and posts governance notifications to Discord and Telegram.
+The approved test-token path bypasses QuickNode nonce reservation; development
+mode bypasses source authentication. A separate SortedOracles event from the
 Chainlink EUR/USD feed powers a QuickNode-to-watchdog delivery canary. Its
 absence signals a delivery-path gap, not governance or oracle-feed health.
 

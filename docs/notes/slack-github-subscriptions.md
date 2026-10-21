@@ -3,7 +3,7 @@ title: GitHub-to-Slack notifications for Terraform-applying workflows
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-22
+last_verified: 2026-10-21
 doc_type: runbook
 scope: terraform/infra
 review_interval_days: 30
@@ -30,6 +30,8 @@ brought under IaC. This document is therefore the versioned record of what
 should be subscribed and where — keep it in sync whenever someone runs
 `/github subscribe`. See GitHub's
 [Slack notification reference](https://docs.github.com/en/integrations/how-tos/slack/customize-notifications).
+Revalidating the repository wiring does not verify the live channel filter or
+GitHub Environment protection rules; those need a separate read-only live audit.
 
 ### The approval prompt comes from the `workflows` feature, filtered by name
 
@@ -54,11 +56,12 @@ The `name` filter is a strict allowlist: a gated workflow **absent** from it
 gets no card and no approval prompt — this is exactly what silently drops the
 `Governance Watchdog Infra` and `Aegis Terraform` prompts when they are left
 out. (`Aegis App Engine` and `Metrics Bridge` are also deploy workflows but
-do **not** gate on `production-infra`; their cards are status-only, with no
-approval button.)
+use `production-services`, not `production-infra`; their inclusion does not
+provide the Terraform approval prompt. Any approval prompt for those workflows
+depends on their own live environment protection rules.)
 
 Canonical subscription (run in the target channel, `#deploys`) —
-all four gated workflows plus the two status-only deploy workflows:
+all four gated workflows plus the two service deploy workflows:
 
 ```
 /github subscribe mento-protocol/monitoring-monorepo workflows:{name:"Governance Watchdog Infra","Alerts Infra","Alerts Rules","Aegis Terraform","Aegis App Engine","Metrics Bridge" event:"push","workflow_dispatch" branch:"main"}
@@ -69,8 +72,9 @@ channel — that is the variant GitHub documents for showing a channel's active
 subscription filters; plain `/github subscribe list` only names the
 repositories the channel follows and will **not** print the `workflows:{…}`
 string you need to reconcile. Its output detail has been inconsistent in
-practice, so treat **this document** as the source of truth and reconcile the
-live filter against it — not the other way around.
+practice. This document records the required filter; it is not proof of the
+installed filter. If the live command does not expose enough detail, leave the
+subscription audit unverified rather than inferring it from repository config.
 
 | Channel    | Subscription                     | Why                                                                                                                                                                      |
 | ---------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |

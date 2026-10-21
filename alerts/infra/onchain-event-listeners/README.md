@@ -1,4 +1,4 @@
-<!-- agent-context: title="On-chain Event Listeners Module" status=active owner=eng canonical=true last_verified=2026-07-22 doc_type=runbook scope=alerts/infra/onchain-event-listeners review_interval_days=90 garden_lane=operator-runbooks -->
+<!-- agent-context: title="On-chain Event Listeners Module" status=active owner=eng canonical=true last_verified=2026-10-21 doc_type=runbook scope=alerts/infra/onchain-event-listeners review_interval_days=90 garden_lane=operator-runbooks -->
 
 # On-chain Event Listeners Module
 
@@ -49,8 +49,8 @@ resulting drift before the next apply.
 
 QuickNode does not support in-place updates for this webhook shape. The module:
 
-1. hashes the network, addresses, endpoint, signing secret, compression, and
-   event hashes;
+1. hashes the name, network, lowercased addresses, normalized endpoint, signing
+   secret, compression, and Safe plus extra event hashes;
 2. pauses and deletes the old webhook when that hash changes;
 3. removes only the matching chain instance from Terraform state; and
 4. creates a replacement through the `evmContractEvents` template.

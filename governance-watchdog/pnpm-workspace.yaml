@@ -24,6 +24,8 @@ minimumReleaseAgeExclude:
   - protobufjs
 
 overrides:
+  # GHSA-587h-7wmj-h5pm: patched 8.0/8.1 floor; retain the Vite 8 line.
+  "vite@>=8.0.0 <8.1.6": 8.1.6
   # Nodemon watches literal directories; chokidar 4 removes unpatched braces.
   "nodemon>chokidar": 4.0.3
   # GHSA-68fv-2mgg-jv7q: patched floor 1.2.2.
