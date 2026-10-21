@@ -1,4 +1,4 @@
-<!-- agent-context: title="On-chain Event Handler Module" status=active owner=eng canonical=true last_verified=2026-07-22 doc_type=runbook scope=alerts/infra/onchain-event-handler review_interval_days=90 garden_lane=operator-runbooks -->
+<!-- agent-context: title="On-chain Event Handler Module" status=active owner=eng canonical=true last_verified=2026-10-21 doc_type=runbook scope=alerts/infra/onchain-event-handler review_interval_days=90 garden_lane=operator-runbooks -->
 
 # On-chain Event Handler Module
 
@@ -13,7 +13,7 @@ deploy this nested module independently. Its current wiring lives in
 [`../main.tf`](../main.tf), with the maintained input and output contracts in
 [`variables.tf`](variables.tf) and [`outputs.tf`](outputs.tf).
 
-Production routes Celo, Ethereum, and Polygon. Safe Wallet links use each
+The parent stack configures Celo, Ethereum, and Polygon. Safe Wallet links use each
 network's EIP-3770 short name (`celo`, `eth`, and `matic`), which intentionally
 differs from the internal `ethereum` and `polygon` chain keys.
 
@@ -30,12 +30,12 @@ differs from the internal `ethereum` and `polygon` chain keys.
 - The function uses the same private GCS bucket for replay nonces and
   dead-lettered Slack payloads.
 - The Polygon listener forwards `Burn` candidates for every configured pool watch. The
-  listener remains configured when no Polygon Safe is present.
+  listener remains configured when no Polygon Safe is present. The
   public handler only stages each event key in a candidate GCS bucket;
   its runtime identity cannot access the separate private delivery-state bucket.
   The private retry worker reads candidate names but never trusts candidate
   contents or states; it matches the watch ID to its own configuration before
-  queries the Polygon receipt. Only a successful receipt with the watched wallet's
+  querying the Polygon receipt. Only a successful receipt with the watched wallet's
   LP-token transfer to the pool (one or more consecutive same-receipt transfers
   may sum to the burned amount), the matching LP burn, and the exact pool Burn
   can post to the configured `#alerts-pools` channel ID. Router/beneficiary

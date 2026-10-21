@@ -3,7 +3,7 @@ title: Hasura isolation trigger
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-22
+last_verified: 2026-10-21
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -19,9 +19,11 @@ new Envio endpoint now.
 ## Topology
 
 The public dashboard allows browser GraphQL calls to `indexer.hyperindex.xyz`
-through `ui-dashboard/src/lib/csp.ts` and polls through `useGQL` every 30s. A
-single pool page fans out roughly 15-20 parallel GraphQL hooks
-(`ui-dashboard/src/lib/graphql.ts`).
+through `ui-dashboard/src/lib/csp.ts`. Browser queries use `useGQL`, whose
+default refresh interval is 30s (`ui-dashboard/src/lib/graphql.ts`). Pool
+detail combines server-prefetched data with client queries under
+`ui-dashboard/src/app/pool/[poolId]/`; query fanout depends on the active
+components and tabs. Measure current traffic before sizing an isolated backend.
 
 The primary `metrics-bridge` loop polls `HASURA_URL` every 30s by default
 (`metrics-bridge/src/config.ts` and `metrics-bridge/src/env.ts`) and exports the
