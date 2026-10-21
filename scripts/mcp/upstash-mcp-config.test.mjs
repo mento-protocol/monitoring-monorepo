@@ -335,7 +335,7 @@ test("runtime build closes over every non-builtin server dependency", async () =
   const runtime = await buildUpstashMcpRuntime();
   assert.equal(
     UPSTASH_MCP_RUNTIME_SHA256,
-    "771c08ff939347f8356e87b2ffa48f6a21e6045744b755003bdb85ff0817cca7",
+    "6af58c9ada397f5e445ca28e752cc285f9806de8ecc3ae0eea57aeb5f4f0bd9d",
   );
   assert.equal(runtime.sha256, UPSTASH_MCP_RUNTIME_SHA256);
   for (const dependency of [
