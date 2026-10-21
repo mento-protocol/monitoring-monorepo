@@ -22,10 +22,10 @@
     "start": "nest start",
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/main",
-    "test": "jest --watchman=false",
-    "test:cov": "jest --coverage --watchman=false && node --test \"grafana-agent/*.test.mjs\"",
-    "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-    "test:watch": "jest --watch",
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --watchman=false",
+    "test:cov": "node --experimental-vm-modules node_modules/jest/bin/jest.js --coverage --watchman=false && node --test \"grafana-agent/*.test.mjs\"",
+    "test:debug": "node --inspect-brk --experimental-vm-modules -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
+    "test:watch": "node --experimental-vm-modules node_modules/jest/bin/jest.js --watch",
     "tf:apply": "terraform -chdir=terraform apply",
     "tf:deploy": "terraform -chdir=terraform apply",
     "tf:destroy": "terraform -chdir=terraform destroy",
@@ -98,12 +98,12 @@
     "ts-jest": "29.4.12",
     "ts-node": "10.9.2",
     "tsconfig-paths": "4.2.0",
-    "typescript": "5.9.3"
+    "typescript": "6.0.3"
   },
   "engines": {
-    "node": ">=24"
+    "node": "^24.15.0 || >=26"
   },
   "volta": {
-    "node": "24.13.1"
+    "node": "24.21.0"
   }
 }
