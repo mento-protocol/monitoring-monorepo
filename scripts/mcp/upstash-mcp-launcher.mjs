@@ -10,7 +10,7 @@ export const UPSTASH_MCP_VERSION = "0.2.4";
 export const UPSTASH_MCP_ENTRYPOINT_SHA256 =
   "1949e38e9c66aaac5cc00e2da2b8bbf712a4c39266f8f501a3cdd86253fe4b8e";
 export const UPSTASH_MCP_RUNTIME_SHA256 =
-  "8dd4f9a1d40127541d7030d2bb4c6eaf9a96812bf591306736762e1831e70f76";
+  "771c08ff939347f8356e87b2ffa48f6a21e6045744b755003bdb85ff0817cca7";
 export const UPSTASH_MCP_RUNTIME_LOADER = [
   'import { readFileSync } from "node:fs";',
   'process.argv.splice(1, 0, "upstash-mcp-runtime.mjs");',
