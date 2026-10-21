@@ -90,6 +90,8 @@ packageConfigs:
     saveExact: true
 
 overrides:
+  # GHSA-q3jh-wrc6-jgq8 / GHSA-8r9p-f939-6h3c: patched redirect handling.
+  "follow-redirects@<1.16.1": 1.16.1
   # Framework declaration edges must match the deployed Node 24 applications.
   # Keep other tooling contexts (Jest, Lighthouse, ts-node) independent.
   "@types/body-parser>@types/node": 24.13.2
@@ -141,7 +143,8 @@ overrides:
   # GHSA-fxqj-rqcc-2cmp: all releases through 8.5.22 are vulnerable.
   "postcss@<8.5.23": 8.5.23
   "picomatch@>=4.0.0 <4.0.4": 4.0.4
-  "vite@>=8.0.0 <8.0.16": 8.0.16
+  # GHSA-587h-7wmj-h5pm: patched 8.0/8.1 floor; retain the Vite 8 line.
+  "vite@>=8.0.0 <8.1.6": 8.1.6
   # GHSA-m9gg-hp2v-232j: patched 1.14.x floor 1.14.5.
   "@grpc/grpc-js": 1.14.5
   "esbuild": 0.28.1
