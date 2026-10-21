@@ -20,6 +20,10 @@ minimumReleaseAgeExclude:
   - vite
 
 overrides:
+  # Preserve viem's deployed optional peer while updating lint tools.
+  zod: 4.4.3
+  # Keep the existing production metadata parser on its deployed dependency.
+  "normalize-package-data>semver": 7.8.1
   # Keep all framework and Express declarations on the deployed Node 24 runtime.
   "@types/node": 24.13.2
   # Nodemon watches literal directories; chokidar 4 removes unpatched braces.
