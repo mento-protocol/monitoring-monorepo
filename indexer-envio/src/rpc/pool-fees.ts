@@ -117,7 +117,7 @@ async function readFeeGetter(
     chainId,
     client,
     {
-      address: poolAddress as `0x${string}`,
+      address: poolAddress,
       abi: FPMM_FEE_ABI,
       functionName,
     },
@@ -192,7 +192,7 @@ export async function fetchRebalanceIncentiveAtBlock(
       chainId,
       client,
       {
-        address: poolAddress as `0x${string}`,
+        address: poolAddress,
         abi: FPMM_FEE_ABI,
         functionName: "rebalanceIncentive",
       },
@@ -203,7 +203,7 @@ export async function fetchRebalanceIncentiveAtBlock(
     // Only `latest`-block fallback breaks block-scoping; secondary-RPC
     // fallback still queries the requested block, so its result is fine.
     if (usedLatestFallback) return null;
-    return Number(result as bigint);
+    return Number(result);
   } catch (err) {
     if (isUnsupportedGetterError(err)) return -2;
     logRpcFailure(

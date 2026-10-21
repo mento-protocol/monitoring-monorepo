@@ -22,7 +22,7 @@ async function fetchLiquityPrice(
       chainId,
       client,
       {
-        address: priceFeed as `0x${string}`,
+        address: priceFeed,
         abi: fxPriceFeedAbi,
         functionName: "fetchPrice",
       },

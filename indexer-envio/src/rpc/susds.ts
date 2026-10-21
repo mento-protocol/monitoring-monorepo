@@ -46,7 +46,7 @@ export async function fetchSusdsSharePriceUsdWei(
       chainId,
       client,
       {
-        address: tokenAddress as `0x${string}`,
+        address: tokenAddress,
         abi: SUSDS_CONVERT_TO_ASSETS_ABI,
         functionName: "convertToAssets",
         args: [ONE_SHARE],

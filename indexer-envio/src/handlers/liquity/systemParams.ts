@@ -158,7 +158,7 @@ async function readParam(
       chainId,
       client,
       {
-        address: systemParams as `0x${string}`,
+        address: systemParams,
         abi: systemParamsAbi,
         functionName: getter,
       },
