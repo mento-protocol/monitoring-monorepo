@@ -44,9 +44,13 @@ this package.
 - Exported shapes are a change surface: dashboard, indexer, and bridge typechecks
   are part of any `shared-config` change, and config edits need a cross-reference test.
 - `shared-config` stays low-dependency because it is imported into client bundles.
-- The indexer is the **one** sanctioned exception: it vendors a mirror because Envio
-  builds it outside the pnpm workspace and has not yet moved to the public package
-  as an explicit registry dependency (ADR 0013).
+- The indexer is the sole **vendored-package** exception: Envio builds it outside
+  the pnpm workspace, without an explicit public-package dependency (ADR 0013).
+- Terraform separately mirrors `DEVIATION_TOLERANCE_RATIO` and both
+  `POOL_DEPLETION_*_SHARE` constants as HCL literals in `alerts/rules/rules-fpmms.tf`
+  and `alerts/rules/main.tf`, because HCL cannot import TypeScript. Update those
+  sites with `shared-config/src/thresholds.ts`;
+  `scripts/alerts/check-deviation-threshold-drift.mjs` enforces parity.
 
 ## Evidence
 

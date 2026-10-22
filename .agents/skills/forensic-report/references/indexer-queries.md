@@ -191,7 +191,7 @@ without full pagination, report samples, not totals.
   }
 }
 {
-  Trove(where: { owner: { _eq: "0xtarget" }, chainId: { _eq: <CHAIN_ID> } }) {
+  Trove(where: { owner: { _eq: "0xtarget" }, chainId: { _eq: <CHAIN_ID> } }, order_by: [{ id: desc }], limit: 1000, offset: 0) {
     id
     coll
     debt
@@ -212,7 +212,7 @@ without full pagination, report samples, not totals.
   }
 }
 {
-  LiquidityPosition(where: { address: { _eq: "0xtarget" }, chainId: { _eq: <CHAIN_ID> } }) {
+  LiquidityPosition(where: { address: { _eq: "0xtarget" }, chainId: { _eq: <CHAIN_ID> } }, order_by: [{ id: desc }], limit: 1000, offset: 0) {
     poolId
   }
 }
