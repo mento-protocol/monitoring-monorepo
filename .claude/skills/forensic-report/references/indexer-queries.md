@@ -42,9 +42,8 @@ From `docs/pr-checklists/swr-polling-hasura.md`:
   handler’s caller classification and transaction evidence before summing;
   if that classification cannot be established, report raw activity without
   claiming de-duplicated v2 totals.
-- `RebalanceEvent` USD fields use `""` for VirtualPools, missing token/decimal metadata,
-  no USD-pegged leg, or zero deltas (including pre-reserve RPC failures); `""` is unknown, not `"0"`.
-  Failed incentive reads blank `rewardUsd`; absent getters mean zero incentive (`"0.0000"` reward when notional is valued).
+- `RebalanceEvent`: VirtualPools leave both USD fields `""`; reward is not applicable (no incentive), not unknown.
+  FPMM `notionalUsd` is blank for missing tokens/decimals, no USD-pegged leg, or two zero deltas; failed pre-reserve reads produce zero deltas, but zero deltas alone do not prove failure. FPMM `rewardUsd` is blank when notional is blank or incentive reads fail; absent getters mean zero incentive (`"0.0000"` when notional is valued). Treat valuation blanks as unknown, never numeric zero.
 
 ## Endpoint and liveness probe
 

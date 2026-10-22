@@ -108,7 +108,7 @@ One row per source attempted — `HIT` / `EMPTY` / `NOT-COVERED` / `NOT-ATTEMPTE
 
 **Top alternative hypothesis considered** (skill Step 8.5): `<e.g. MM rebalancer rather than arb bot>` — rejected because `<disconfirming evidence>`.
 
-> "Arkham has `<some / no>` data on the target across the chains it covers. Attribution came from `<the curated entity / a high-confidence prediction / the funder graph on chains Arkham does index>`: `<the chain on which the surfacing happened>` showed `<persona / entity>` funded `<operator EOA>`, and `<bridge / direct funder>` funded them on `<upstream chain>`."
+> Only if Arkham returned usable evidence (otherwise cite actual sources and its access/coverage limit): "Arkham has `<some / no>` data on the target across the chains it covers. Attribution came from `<the curated entity / a high-confidence prediction / the funder graph on chains Arkham does index>`: `<the chain on which the surfacing happened>` showed `<persona / entity>` funded `<operator EOA>`, and `<bridge / direct funder>` funded them on `<upstream chain>`."
 
 ## Bottom line
 
