@@ -3,7 +3,7 @@ title: The indexer vendors a mirror of shared-config because Envio builds outsid
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-10-22
 scope: indexer-envio
 date: 2026-03
 doc_type: adr

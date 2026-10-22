@@ -3,7 +3,7 @@ title: Forensic Report — Mento Indexer Query Cookbook
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-10-22
 doc_type: skill
 scope: repo-wide
 review_interval_days: 90
@@ -30,8 +30,11 @@ From `docs/pr-checklists/swr-polling-hasura.md`:
 - `volumeUsdWei` is 0 when neither leg is USD-pegged (non-stable FX pairs) —
   don't read that as "no volume".
 - `BrokerSwapEvent` with `routedViaV3Router:true` are v3 siblings already
-  counted in `SwapEvent` — filter them out (`_eq:false`) to avoid
-  double-counting.
+  counted in `SwapEvent` — filter them out (`_eq:false`). This filter alone
+  does not establish legacy-v2 totals: third-party aggregator → VirtualPool →
+  Broker paths can have the flag false. Prefer the producer rollups for v2
+  totals; `indexer-envio/src/handlers/broker.ts` excludes every VirtualPool
+  caller there. Keep raw rows for transaction-level investigation.
 - `RebalanceEvent.notionalUsd`/`rewardUsd` use an **empty-string sentinel** when
   pre-reserve RPC failed — handle `""` distinctly from `"0"`.
 
@@ -90,7 +93,7 @@ show `caller`; swap the field to match the target.
 {
   TraderDailySnapshot(
     where: { trader: { _eq: "0xtarget" }, chainId: { _eq: <CHAIN_ID> } }
-    order_by: { timestamp: desc }
+    order_by: [{ timestamp: desc }, { id: desc }]
     limit: 1000
   ) {
     chainId
@@ -106,7 +109,7 @@ show `caller`; swap the field to match the target.
 {
   BrokerTraderDailySnapshot(
     where: { caller: { _eq: "0xtarget" }, chainId: { _eq: <CHAIN_ID> } }
-    order_by: { timestamp: desc }
+    order_by: [{ timestamp: desc }, { id: desc }]
     limit: 1000
   ) {
     chainId

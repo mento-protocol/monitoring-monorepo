@@ -3,7 +3,7 @@ title: Forensic Report — Chain Bootstrap and Cache Inventory
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-10-22
 doc_type: skill
 scope: repo-wide
 review_interval_days: 90
@@ -48,6 +48,10 @@ case "$CHAIN" in
   *) echo "Unsupported CHAIN=$CHAIN — add a case arm with its CHAIN_ID / RPC / DUNE_NS / DL_NS." >&2; exit 1 ;;
 esac
 ```
+
+Before any state read, run `cast chain-id --rpc-url "$RPC"` and require it
+to equal `$CHAIN_ID`. RPC defaults match `indexer-envio/src/rpc/client.ts`;
+endpoint availability still needs a live check.
 
 ## Provenance capture
 

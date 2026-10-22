@@ -3,7 +3,7 @@ title: shared-config is the single source of truth for chain and token metadata
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-10-22
 scope: shared-config
 date: 2026-03
 doc_type: adr

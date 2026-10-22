@@ -3,7 +3,7 @@ title: Supply-chain hardening — release-age gate, lockfile-lint, SHA-pinned Ac
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-10-22
 scope: ci/process
 date: 2026-05
 doc_type: adr
@@ -28,8 +28,9 @@ Adopt a defense-in-depth posture:
 
 - **`minimumReleaseAge`** in `pnpm-workspace.yaml` refuses registry versions
   younger than 3 days. `@mento-protocol/*` and narrow, reviewed security
-  releases may bypass the delay; frozen-lockfile installs verify new entries
-  against the same policy.
+  releases may bypass the delay. CI uses frozen-lockfile installs to preserve
+  the committed resolutions; the release-age setting is not a substitute for
+  lockfile review and security audits.
 - **`pnpm lockfile:lint`** fails closed when invoked and validates lockfile
   integrity, registry provenance, and bounded override/resolution floors with
   no install needed. The advisory Supply Chain workflow runs it on dependency
