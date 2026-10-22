@@ -198,7 +198,7 @@ Snapshot holdings with `dune sim evm balances $PRINCIPAL --chain-ids $CHAIN_ID`,
 
 ### Step 5.5 — Historical USD valuation → `references/pricing.md`
 
-Sim's `value_usd` is current spot, so "moved $2M in March" is wrong the moment the token moves. Price flows at the time they happened via DefiLlama's free coins.llama.fi oracle, keyed `$DL_NS:{tokenLower}`; no Pro key is needed or useful here. If the request is blocked, use an available read-only fetch surface or mark the source `NOT-ATTEMPTED`; never bypass an execution control or treat a transport failure as a missing price.
+Sim's `value_usd` is current spot, so "moved $2M in March" is wrong the moment the token moves. Price flows at the time they happened via DefiLlama's free coins.llama.fi oracle, keyed `$DL_NS:{tokenLower}`; no Pro key is needed or useful here. If the request is blocked, use an available read-only fetch surface or mark the source NOT-ATTEMPTED; never bypass an execution control or treat a transport failure as a missing price.
 
 ### Step 6 — Why \_\_\_, why these venues
 
