@@ -125,13 +125,13 @@ they are not address-keyed.
 
 ## Reading the payloads
 
-**These caches ARE the cross-chain identity leg**: they're populated from the
-target's activity on chains Arkham covers — i.e. NOT Celo/Monad. For a
-Celo-native address they're often empty, and that emptiness is itself the
-finding ("no Ethereum/L2 footprint Arkham can see"). When they hit, they're the
-fastest path to who's behind the address — subject to the contract-target
-identity rule in `SKILL.md`: only consume a hit keyed on the target's own
-address as identity for an **EOA** target.
+These caches support the cross-chain identity leg on the chains and periods
+recorded in their provenance. Verify current provider coverage and access
+before a live query; do not assume Celo or Monad is excluded. A missing cache
+entry does not prove an absent footprint. Record it as a cache miss; distinguish
+`NOT-COVERED` provider coverage from `NOT-ATTEMPTED` transport. Consume a hit
+subject to the contract-target identity rule in `SKILL.md`: only a hit keyed on
+the target's own address can identify an **EOA** target.
 
 Don't treat the payloads as opaque blobs — the typed accessors in
 `ui-dashboard/src/lib/` give exact field paths:

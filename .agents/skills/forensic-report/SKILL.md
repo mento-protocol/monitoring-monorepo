@@ -36,14 +36,14 @@ Two facts shape every tool choice in this skill:
    Polygon (`137`), and Ethereum (`1`) are live in the production indexer.
    Ethereum currently carries reserve-yield monitoring. **Never hardcode
    `42220`**; thread the target chain id through every chain-scoped call.
-2. **One key, many chains.** If someone controls a private key on Celo, the same EOA almost always has a history on other EVM chains (Ethereum, Base, Arbitrum, …). That cross-chain footprint is usually where the _identity_ lives — ENS, OpenSea, CEX deposits, prior bots — because the richest attribution tools (Arkham, Nansen, EigenPhi, MetaSleuth) index Ethereum/L2s but **not** Celo.
+2. **One key, many chains.** If someone controls a private key on Celo, the same EOA may have a history on other EVM chains (Ethereum, Base, Arbitrum, …). That cross-chain footprint is usually where the _identity_ lives — ENS, OpenSea, CEX deposits, prior bots — where attribution tools (Arkham, Nansen, EigenPhi, MetaSleuth) may have evidence. Verify each provider’s current chain coverage and access; do not assume Celo or Monad is excluded.
 
 So split the work into two legs and pick tools per leg:
 
 - **On-chain behaviour leg** (what the address _does_ — swaps, storage, capital, venues): use chain-native sources for Celo, Monad, or Polygon (the Mento Envio indexer where promoted, Blockscout/Polygonscan, Dune chain tables, GeckoTerminal / DexScreener, `cast` against the chain's RPC). These are the sources that actually see the target chain.
 - **Cross-chain identity leg** (who is _behind_ the address): pivot the operator EOA onto the chains the heavyweight attributors cover and let them work there.
 
-**Corollary — never drop a source just because it lacks Celo.** A Celo-blind tool (Nansen, EigenPhi, GoPlus, Across, …) can still be the right tool for the identity leg or for supported Mento chains such as Polygon. `references/tooling-matrix.md` records what each source covers and which leg it serves — consult it instead of assuming "no Celo = useless".
+**Corollary — never drop a source just because it lacks Celo.** A tool without verified Celo coverage (Nansen, EigenPhi, GoPlus, Across, …) can still be the right tool for the identity leg or for supported Mento chains such as Polygon. `references/tooling-matrix.md` selects candidates for each leg; verify current chain coverage and access before relying on a result.
 
 **Contract-target identity rule.** The same 20-byte address on another chain is
 usually an unrelated account. So a cross-chain hit keyed on a **contract**
@@ -109,7 +109,7 @@ Lowercase the address, set `CHAIN`, and derive `CHAIN_ID` / `RPC` / `DUNE_NS` / 
 
 ### Step 1.5 — Check Upstash caches first → `references/chain-setup.md`
 
-When the transport preflight passed, five Arkham-derived caches live in that same database — three address-keyed (`intel_deep`, `intel_transfers`, `intel_wealth`) and two entity-slug-keyed (`intel_entities`, `intel_entity_cps`, joined via `intel_deep`'s `arkhamEntity.id`). Prefer a current cache hit over a live call. **These caches ARE the cross-chain identity leg**: they see the chains Arkham covers, not Celo/Monad, so for a Celo-native address an empty result is itself the finding, not a failure. Consume them subject to the contract-target identity rule above.
+When the transport preflight passed, five Arkham-derived caches live in that same database — three address-keyed (`intel_deep`, `intel_transfers`, `intel_wealth`) and two entity-slug-keyed (`intel_entities`, `intel_entity_cps`, joined via `intel_deep`'s `arkhamEntity.id`). Prefer a current cache hit over a live call. **These caches support the cross-chain identity leg** on the chains and periods recorded in their provenance. Verify current provider coverage and access before a live query. A cache miss means no cached entry, not no identity footprint; unavailable coverage is `NOT-COVERED`, and an unavailable transport is `NOT-ATTEMPTED`. Consume them subject to the contract-target identity rule above.
 
 ### Step 1.6 — Mento indexer fingerprint → `references/indexer-queries.md`
 
@@ -198,7 +198,7 @@ Snapshot holdings with `dune sim evm balances $PRINCIPAL --chain-ids $CHAIN_ID`,
 
 ### Step 5.5 — Historical USD valuation → `references/pricing.md`
 
-Sim's `value_usd` is current spot, so "moved $2M in March" is wrong the moment the token moves. Price flows at the time they happened via DefiLlama's free coins.llama.fi oracle, keyed `$DL_NS:{tokenLower}`; no Pro key is needed or useful here. Note that the coins.llama.fi host is **not on the default sandbox network allowlist** — allowlist it or run the single read-only GET unsandboxed.
+Sim's `value_usd` is current spot, so "moved $2M in March" is wrong the moment the token moves. Price flows at the time they happened via DefiLlama's free coins.llama.fi oracle, keyed `$DL_NS:{tokenLower}`; no Pro key is needed or useful here. If the request is blocked, use an available read-only fetch surface or mark the source `NOT-ATTEMPTED`; never bypass an execution control or treat a transport failure as a missing price.
 
 ### Step 6 — Why \_\_\_, why these venues
 
@@ -306,4 +306,4 @@ The `address-labels` Upstash database also holds the `labels` hash (custom addre
 - **Mirror the output contract.** Don't write a payload the API would reject — that includes the body length cap, title length cap, version monotonicity, and `createdAt` preservation on update.
 - **Cite evidence.** Every claim about an address gets a tx hash, an Arkham response, a Sim balance snapshot, an indexer row, or a storage read backing it. "Probably MEV" is not enough; "selector `0x49aa2402` calls into a contract whose public `routerUniswap()` returns Uniswap V3 SwapRouter02 (factory `0xafe208a3…` matches official UniV3 on Celo)" is.
 - **Grade, don't hedge.** Tag load-bearing attribution claims with a confidence tier (CONFIRMED / PROBABLE / POSSIBLE) instead of weasel words. A claim that can't reach POSSIBLE doesn't ship; if the whole attribution is sub-POSSIBLE, write a label + notes blurb instead of a durable report. Run the Step 8.5 adversarial gate before saving.
-- **Think multi-chain; never disable a source just because it lacks Celo.** The target chain (Celo, Monad, or Polygon) drives the behaviour leg; the operator's cross-chain footprint drives the identity leg. A Celo-blind tool can be the right tool for the identity leg or a supported non-Celo chain — consult `references/tooling-matrix.md` instead of dropping it. Thread the target chain id through every chain-scoped call; never hardcode `42220`.
+- **Think multi-chain; never disable a source just because it lacks Celo.** The target chain (Celo, Monad, or Polygon) drives the behaviour leg; the operator's cross-chain footprint drives the identity leg. A tool without verified Celo coverage can be the right tool for the identity leg or a supported non-Celo chain — consult `references/tooling-matrix.md` for candidates and verify live chain coverage and access instead of dropping it. Thread the target chain id through every chain-scoped call; never hardcode `42220`.

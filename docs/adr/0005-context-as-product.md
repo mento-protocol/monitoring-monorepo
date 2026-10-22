@@ -28,8 +28,10 @@ are just history.
 
 Treat context as part of the product with a two-tier **authority model**:
 **canonical** context (AGENTS.md files, SPEC.md, PR checklists, deployment docs,
-skills/roles) is current operating truth; **non-canonical** context (PLANs, notes,
-archived docs, backlog) is history that must be re-verified before acting. Managed
+skills/roles, and explicitly delegated notes with `canonical: true`) is current
+operating truth; **non-canonical** context (PLANs, ordinary notes without
+`canonical: true`, archived docs, backlog) is history that must be re-verified
+before acting. Managed
 files carry metadata (`title`, `status`, `owner`, `canonical`, `last_verified`),
 and `pnpm agent:context-check` enforces the contract, including a 90-day
 staleness window on canonical files.

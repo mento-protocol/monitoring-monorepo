@@ -13,9 +13,9 @@ garden_lane: agent-entry-points
 # Mento indexer query cookbook
 
 Deep procedure for Step 1.6 of [`SKILL.md`](../SKILL.md). The production Envio
-endpoint is the primary on-chain-behaviour source for the target chain: Arkham
-and Nansen are blind on Celo and Monad, so this is where "what did this address
-do with Mento" gets answered there.
+endpoint is the primary on-chain-behaviour source for Mento activity on the
+target chain. Verify external attribution providers’ current coverage and
+access separately; their identity results do not replace Mento event history.
 
 ## Hard constraints (read before writing a query)
 
@@ -32,9 +32,13 @@ From `docs/pr-checklists/swr-polling-hasura.md`:
 - `BrokerSwapEvent` with `routedViaV3Router:true` are v3 siblings already
   counted in `SwapEvent` — filter them out (`_eq:false`). This filter alone
   does not establish legacy-v2 totals: third-party aggregator → VirtualPool →
-  Broker paths can have the flag false. Prefer the producer rollups for v2
-  totals; `indexer-envio/src/handlers/broker.ts` excludes every VirtualPool
-  caller there. Keep raw rows for transaction-level investigation.
+  Broker paths can have the flag false. For **EOA targets**, prefer producer
+  rollups for v2 totals; `indexer-envio/src/handlers/broker.ts` excludes every
+  VirtualPool caller there. For **contract targets**, query raw events by the
+  matching role and exclude VirtualPool-routed Broker siblings using the
+  handler’s caller classification and transaction evidence before summing;
+  if that classification cannot be established, report raw activity without
+  claiming de-duplicated v2 totals.
 - `RebalanceEvent.notionalUsd`/`rewardUsd` use an **empty-string sentinel** when
   pre-reserve RPC failed — handle `""` distinctly from `"0"`.
 
@@ -84,12 +88,15 @@ the bot contract itself), `tx.from` is the _operator EOA_, not the contract, so 
 `caller`-only filter returns a false-EMPTY even though the contract is all over
 the data. Filter on `sender` / `txTo` / `recipient` / `brokerCaller` instead, or
 `_in` across roles when the address could appear as either. The examples below
-show `caller`; swap the field to match the target.
+show EOA attribution. The daily rollups have only EOA keys (`trader` or
+`caller`); do not substitute contract roles into them. For contracts, skip those
+rollups and use raw rows with the applicable role fields and de-duplication
+rule above.
 
 ## The battery
 
 ```graphql
-# Lifetime rollups (fast path — swap volume, cadence, routers, protocol-actor flag)
+# EOA-only lifetime rollups (page all days for lifetime totals)
 {
   TraderDailySnapshot(
     where: { trader: { _eq: "0xtarget" }, chainId: { _eq: <CHAIN_ID> } }
@@ -269,7 +276,7 @@ show `caller`; swap the field to match the target.
 }
 ```
 
-A non-empty result here, scoped to the actual target chain, is far stronger than
-anything the Celo-blind attributors can give — and a verified-live **empty**
-result is a real signal ("never interacted with Mento v2/v3 on this chain"), not
-a tooling gap.
+Results here describe Mento activity on the verified-live target chain, not
+identity. An **empty** result is evidence only for the queried roles, entities,
+and indexed period after coverage and pagination are verified; it does not
+prove the address never interacted with Mento.
