@@ -3,7 +3,7 @@ title: Non-strict required status checks for main
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-15
+last_verified: 2026-10-19
 scope: ci/process
 date: 2026-09
 doc_type: adr
@@ -119,7 +119,9 @@ Dependabot pull request when your schedule runs" and "when Dependabot detects
 that a Dependabot pull request is in conflict after a recent push to the target
 branch" — being merely behind is not a trigger, and with strict mode off a
 behind pull request is not in conflict either. This repository schedules
-`github-actions` weekly on Monday, so a stale pull request waits for that run;
+`github-actions` every second Monday (amended 2026-10-19, see
+[ADR 0092](0092-dependabot-npm-version-updates.md)), so a stale pull request
+can wait up to two weeks for that run;
 GitHub also stops rebasing any pull request left unmerged for 30 days. The
 writer therefore emits a `::warning::` annotation and a job-summary entry naming
 the pull request, its head, and `behind_by`, so the lane cannot look idle while

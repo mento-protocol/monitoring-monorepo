@@ -101,7 +101,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0089](0089-review-eval-canonical-matrix-pr-groups.md)      | The canonical review-eval matrix runs PR groups concurrently                                                                                 |
 | [0090](0090-canonical-eval-matrix-freshness-floor.md)       | Canonical full run drops to 27 cells; repeat draws live in the experiment lane                                                               |
 | [0091](0091-promote-needs-replay-corroboration.md)          | A PROMOTE re-anchors only when `replay` corroborates the `pipeline` gain                                                                     |
-| [0092](0092-dependabot-npm-version-updates.md)              | Dependabot batches npm version updates into Monday groups; npm stays operator-merged                                                         |
+| [0092](0092-dependabot-npm-version-updates.md)              | Dependabot batches npm version updates into every-second-Monday groups; npm stays operator-merged                                            |
 | [0093](0093-opt-in-native-stacked-pull-requests.md)         | Native stacks use separate diff and protection bases through an opt-in pilot                                                                 |
 | [0094](0094-grid-waiver.md)                                 | The control-drift waiver asks control for its share of the flips, not the headline's                                                         |
 | [0096](0096-finder-probe-non-ledger-kind.md)                | Non-ledger finder probes run in the canonical runner, narrowing ADR 0083                                                                     |
@@ -140,7 +140,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0039](0039-multistrategy-pools-historical-fx-volume.md) | Pool strategies are many-to-many; same-currency swaps use historical FX crosses                                          |
 | [0046](0046-event-sourced-oracle-freshness.md)           | Oracle freshness is reconstructed from persisted report events                                                           |
 | [0074](0074-trove-ledger-parallel-append-only-entity.md) | Trove history is a parallel append-only `TroveLedgerEvent`, not a widened `TroveOperationEvent`                          |
-| [0103](0103-virtualpool-broker-trading-limits.md)        | VirtualPool trading limits are a separate entity fed by block-pinned, freshness-gated Broker state reads                 |
+| [0103](0103-virtualpool-broker-trading-limits.md)        | VirtualPool trading limits are a separate entity fed by block-pinned, wrapped-exchange Broker state reads                |
 | [0105](0105-replayed-events-are-handler-layer-no-ops.md) | Replayed SortedOracles events are handler-layer no-ops; the pure transitions stay fail-closed                            |
 
 ### ui-dashboard
