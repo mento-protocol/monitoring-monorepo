@@ -8,7 +8,7 @@
  * branches-ignore / tags / tags-ignore).
  */
 
-import jsYaml from "js-yaml";
+import * as jsYaml from "js-yaml";
 
 /**
  * Returns true if the GitHub Actions branch glob `pattern` matches `branch`.

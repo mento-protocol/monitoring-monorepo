@@ -18,7 +18,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import yaml from "js-yaml";
+import * as yaml from "js-yaml";
 import { parse as parseToml } from "smol-toml";
 import {
   buildUpstashMcpRuntime,
