@@ -105,7 +105,7 @@ a Redis command as the availability probe.
 
 ### Step 1 — Bootstrap → `references/chain-setup.md`
 
-Lowercase the address, set `CHAIN`, and derive `CHAIN_ID` / `RPC` / `DUNE_NS` / `DL_NS` from it in **one** case switch so a non-Celo investigation can't silently read Celo data. Capture provenance up front — `HEAD_BLOCK`, block hash, RPC endpoint, `cast --version`, and the UTC timestamp of each Sim/DefiLlama query — because mutable-state reads are only reproducible pinned to a block. When the transport preflight passed, discover the `address-labels` database by exact name (never hardcode its opaque id) and `HGET` both `reports` and `labels` for the address: an existing report means you're updating, and an existing label sets the H1 nickname.
+Lowercase the address, set `CHAIN`, and derive `CHAIN_ID` / `RPC` / `DUNE_NS` / `DL_NS` from it in **one** case switch so a non-Celo investigation can't silently read Celo data. Capture provenance up front — finalized snapshot `HEAD_BLOCK`, block hash, RPC endpoint, `cast --version`, and the UTC timestamp of each Sim/DefiLlama query — because mutable-state reads are only reproducible pinned to a block. When the transport preflight passed, discover the `address-labels` database by exact name (never hardcode its opaque id) and `HGET` both `reports` and `labels` for the address: an existing report means you're updating, and an existing label sets the H1 nickname.
 
 ### Step 1.5 — Check Upstash caches first → `references/chain-setup.md`
 
@@ -113,7 +113,7 @@ When the transport preflight passed, five Arkham-derived caches live in that sam
 
 ### Step 1.6 — Mento indexer fingerprint → `references/indexer-queries.md`
 
-The production Envio endpoint is the **primary on-chain-behaviour source** for the target chain, and the only one that answers "what did this address do with Mento" on Celo and Monad. Probe liveness and per-chain coverage before trusting any empty result — a pruned deployment is not a "no activity" finding — then run the address battery with `chainId` scoped to the target chain and the filter field matched to the target type (`caller` for an EOA; `sender`/`txTo`/`recipient`/`brokerCaller` for a contract, or a `caller`-only filter returns a false EMPTY). A verified-live empty result is a real signal. Query this before the funder graph.
+The production Envio endpoint is the **primary on-chain-behaviour source** for the target chain, and the only one that answers "what did this address do with Mento" on Celo and Monad. Probe liveness and per-chain coverage before trusting any empty result — a pruned deployment is not a "no activity" finding — then run the address battery with `chainId` scoped to the target chain and the filter field matched to the target type (`caller` for an EOA; `sender`/`txTo`/`recipient`/`brokerCaller` for a contract, or a `caller`-only filter returns a false EMPTY). An empty result is `EMPTY` only after verifying the promoted deployment, target-chain configuration, and cursor coverage of the requested period; otherwise mark `NOT-ATTEMPTED`. Query this before the funder graph.
 
 ### Step 2 — Cast of characters (multi-chain attribution + funder graph)
 
@@ -242,7 +242,7 @@ Write the finished markdown to `.investigations/<addr>-<slug>.md`. Slug = first 
 End the report with a **provenance footer** so mutable-state reads are reproducible (this lives in the markdown body — the report JSON has no field for it, and the API silently drops unknown keys):
 
 ```
-_Provenance: <chain> head block <N> (hash <0x…>), RPC <endpoint>, cast <version>. Sim/DefiLlama queried <UTC ts>._
+_Provenance: <chain> finalized snapshot block <N> (hash <0x…>), RPC <endpoint>, cast <version>. Sim/DefiLlama queried <UTC ts>._
 
 _Investigation date: YYYY-MM-DD._
 ```

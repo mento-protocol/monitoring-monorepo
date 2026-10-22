@@ -102,15 +102,9 @@ Connect the behaviour to the on-chain economics — don't just describe, explain
 
 One row per source attempted — `HIT` / `EMPTY` / `NOT-COVERED` / `NOT-ATTEMPTED` with a one-line why. The `EMPTY` (covers this chain, found nothing) vs `NOT-COVERED` (can't see this chain) distinction is the whole point — don't collapse them.
 
-| Source                | Result      | Note                                        |
-| --------------------- | ----------- | ------------------------------------------- |
-| Arkham (target chain) | NOT-COVERED | target chain not indexed (when true)        |
-| Arkham (identity leg) | HIT / EMPTY | operator EOA on supported chains: `<…>`     |
-| Mento Envio indexer   | HIT / EMPTY | `<N SwapEvents, isProtocolActor=…>`         |
-| Sim / Dune            | HIT         | `<…>`                                       |
-| Sourcify / Celoscan   | EMPTY       | unverified — decompiled instead             |
-| Sanctions screen      | EMPTY       | not OFAC-listed (Celo oracle + static list) |
-| `<…>`                 | `<…>`       | `<…>`                                       |
+| Source | Result | Note  |
+| ------ | ------ | ----- |
+| `<…>`  | `<…>`  | `<…>` |
 
 **Top alternative hypothesis considered** (skill Step 8.5): `<e.g. MM rebalancer rather than arb bot>` — rejected because `<disconfirming evidence>`.
 
@@ -133,6 +127,6 @@ facts.
 
 ---
 
-_Provenance: `<chain>` head block `<N>` (hash `0x…`), RPC `<endpoint>`, cast `<version>`. Sim/DefiLlama queried `<UTC ts>`._
+_Provenance: `<chain>` finalized snapshot block `<N>` (hash `0x…`), RPC `<endpoint>`, cast `<version>`. Sim/DefiLlama queried `<UTC ts>`._
 
 _Investigation date: YYYY-MM-DD._

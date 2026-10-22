@@ -66,14 +66,7 @@ cast --version                                   # tool version, for the footer
 # Record the RPC endpoint, $HEAD_BLOCK, $HEAD_HASH, and each query’s UTC timestamp.
 ```
 
-Pin the attribution-anchoring storage reads with
-`cast call "$ADDR" "<sig>" --block "$HEAD_BLOCK" --rpc-url "$RPC"` (quote the
-`<sig>` placeholder so bash doesn't read it as a redirection) for replay of
-captured finalized state.
-
-If the RPC lacks the `finalized` tag or capture fails, stop and mark the
-snapshot unavailable; never fall back to `latest` or `safe`. Historical replay
-also requires the endpoint to retain the captured state.
+Replay captured finalized state with `cast call "$ADDR" "<sig>" --block "$HEAD_BLOCK" --rpc-url "$RPC"`; keep the signature quoted. If finalized capture fails or is unsupported, stop and mark the snapshot unavailable; never fall back to `latest` or `safe`. Replay requires retained historical state.
 
 ## Production database discovery (only after the preflight passes)
 
