@@ -42,9 +42,9 @@ From `docs/pr-checklists/swr-polling-hasura.md`:
   handler’s caller classification and transaction evidence before summing;
   if that classification cannot be established, report raw activity without
   claiming de-duplicated v2 totals.
-- `RebalanceEvent.notionalUsd`/`rewardUsd` use `""` for VirtualPool events,
-  failed pre-reserve reads, missing token metadata/decimals, or no USD-pegged leg.
-  Unknown is not `"0"`; never infer an RPC failure from `""` alone.
+- `RebalanceEvent` USD fields use `""` for VirtualPools, missing token/decimal metadata,
+  no USD-pegged leg, or zero deltas (including pre-reserve RPC failures); missing
+  block-scoped incentives also blank `rewardUsd`. `""` is unknown, not `"0"` or proof of RPC failure.
 
 ## Endpoint and liveness probe
 
