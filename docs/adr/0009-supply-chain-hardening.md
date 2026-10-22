@@ -27,8 +27,12 @@ by a range, and a mutated GitHub Action tag executing arbitrary code in CI.
 Adopt a defense-in-depth posture:
 
 - **`minimumReleaseAge`** in `pnpm-workspace.yaml` refuses registry versions
-  younger than 3 days. `@mento-protocol/*` and narrow, reviewed security
-  releases may bypass the delay. CI uses frozen-lockfile installs to preserve
+  younger than 3 days, except entries in `minimumReleaseAgeExclude`. These
+  include exact security-release versions, whole packages such as `@babel/core`,
+  `esbuild`, `protobufjs`, `tar`, and `vite`, and package-family wildcards such as
+  `@mento-protocol/*` and `@esbuild/*`. Bare names and wildcards bypass the delay
+  for future matching releases too; they are not version-specific approvals.
+  CI uses frozen-lockfile installs to preserve
   the committed resolutions; the release-age setting is not a substitute for
   lockfile review and security audits.
 - **`pnpm lockfile:lint`** fails closed when invoked and validates lockfile

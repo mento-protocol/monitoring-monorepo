@@ -33,8 +33,11 @@ From `docs/pr-checklists/swr-polling-hasura.md`:
   counted in `SwapEvent` — filter them out (`_eq:false`). This filter alone
   does not establish legacy-v2 totals: third-party aggregator → VirtualPool →
   Broker paths can have the flag false. For **EOA targets**, prefer producer
-  rollups for v2 totals; `indexer-envio/src/handlers/broker.ts` excludes every
-  VirtualPool caller there. For **contract targets**, query raw events by the
+  rollups for totals of USD-valued v2 swaps only;
+  `indexer-envio/src/handlers/broker.ts` excludes every VirtualPool caller and
+  every zero-USD row there, including from `swapCount`. These are not total
+  activity counts. To count unpriced swaps too, supplement with raw zero-USD
+  rows only after the same VirtualPool de-duplication below. For **contract targets**, query raw events by the
   matching role and exclude VirtualPool-routed Broker siblings using the
   handler’s caller classification and transaction evidence before summing;
   if that classification cannot be established, report raw activity without
@@ -96,7 +99,7 @@ rule above.
 ## The battery
 
 ```graphql
-# EOA-only lifetime rollups (page all days for lifetime totals)
+# EOA-only USD-valued swap rollups (page all days; excludes unpriced swaps)
 {
   TraderDailySnapshot(
     where: { trader: { _eq: "0xtarget" }, chainId: { _eq: <CHAIN_ID> } }
