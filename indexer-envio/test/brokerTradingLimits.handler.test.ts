@@ -3,6 +3,7 @@ import { beforeEach, describe, it } from "vitest";
 import type { BrokerTradingLimit, Pool } from "envio";
 import {
   indexerTestHelpers,
+  processMockEvents,
   type EntityReader,
   type MockDbWith,
   type WritableEntity,
@@ -31,7 +32,7 @@ import {
 
 // ---------------------------------------------------------------------------
 // Broker trading limits end to end: Broker.Swap drives a block-pinned RPC read
-// behind a freshness gate, Broker.TradingLimitConfigured drives config, and the
+// once per later block, Broker.TradingLimitConfigured drives config, and the
 // worst leg lands on the wrapping VirtualPool's Pool row.
 // ---------------------------------------------------------------------------
 
@@ -216,6 +217,61 @@ describe("Broker trading limits", () => {
     mockLeg(AUDM_LIMIT_ID, { netflowGlobal: -1596n, limitGlobal: 1597n });
   });
 
+  it.each([SIGNER_EOA, VIRTUAL_POOL])(
+    "observes the reset plus three-swap burst without a follow-up swap (%s)",
+    async (brokerCaller) => {
+      const resetBlock = 80_524_420;
+      const resetTimestamp = 1_792_425_178;
+      mockLeg(USDM_LIMIT_ID, { netflowGlobal: 0n, limitGlobal: 10_000n });
+      mockLeg(AUDM_LIMIT_ID, { netflowGlobal: 0n, limitGlobal: 14_339n });
+      let db = await fireSwap(seededDb(), {
+        blockNumber: resetBlock - 1,
+        blockTimestamp: resetTimestamp - 1,
+      });
+      for (const [token, limitGlobal] of [
+        [USDM, 10_000n],
+        [AUDM, 14_339n],
+      ] as const) {
+        db = await fireConfigured(db, {
+          token,
+          limitGlobal,
+          flags: LIMIT_FLAG_LG,
+          blockNumber: resetBlock,
+          blockTimestamp: resetTimestamp,
+        });
+      }
+      assert.equal(db.entities.Pool.get(POOL_ID)?.limitStatus, "OK");
+      resetHttpRpcCallCounts();
+      const flows = [
+        [7455n, -10661n],
+        [9999n, -14300n],
+        [10000n, -14301n],
+      ] as const;
+      for (const [index, [usd, aud]] of flows.entries()) {
+        mockLeg(USDM_LIMIT_ID, { netflowGlobal: usd, limitGlobal: 10_000n });
+        mockLeg(AUDM_LIMIT_ID, { netflowGlobal: aud, limitGlobal: 14_339n });
+        db = await fireSwap(db, {
+          brokerCaller,
+          blockNumber: resetBlock + index + 1,
+          blockTimestamp: resetTimestamp + index + 1,
+        });
+        assert.equal(legRow(db, USDM)?.netflowGlobal, usd);
+        assert.equal(legRow(db, AUDM)?.netflowGlobal, aud);
+        assert.equal(
+          legRow(db, USDM)?.stateBlock,
+          BigInt(resetBlock + index + 1),
+        );
+      }
+      const pool = db.entities.Pool.get(POOL_ID);
+      assert.equal(pool?.limitStatus, "CRITICAL");
+      assert.equal(pool?.limitPressure0, "1.0000");
+      assert.equal(pool?.limitPressure1, "0.9973");
+      assert.equal(pool?.updatedAtBlock, 80_524_423n);
+      assert.equal(stateCalls(), 6);
+      assert.equal(configCalls(), 0);
+    },
+  );
+
   it("writes both legs and folds the worst window onto the VirtualPool", async () => {
     const mockDb = await fireSwap(seededDb());
 
@@ -270,7 +326,7 @@ describe("Broker trading limits", () => {
     assert.equal(configCalls(), 0);
   });
 
-  it("skips the read entirely inside the refresh window", async () => {
+  it("refreshes cool legs in the next block without re-reading config", async () => {
     mockLeg(USDM_LIMIT_ID, { netflowGlobal: 100n, limitGlobal: 1144n });
     mockLeg(AUDM_LIMIT_ID, { netflowGlobal: 100n, limitGlobal: 1597n });
     let mockDb = await fireSwap(seededDb());
@@ -282,12 +338,12 @@ describe("Broker trading limits", () => {
       logIndex: 1,
     });
 
-    assert.equal(stateCalls(), 0);
+    assert.equal(stateCalls(), 2);
     assert.equal(configCalls(), 0);
-    assert.equal(legRow(mockDb, AUDM)?.stateTimestamp, BigInt(START_TS));
+    assert.equal(legRow(mockDb, AUDM)?.stateTimestamp, BigInt(START_TS + 60));
   });
 
-  it("refreshes once the state reaches the refresh window", async () => {
+  it("refreshes after a long gap as well as a burst", async () => {
     mockLeg(USDM_LIMIT_ID, { netflowGlobal: 100n, limitGlobal: 1144n });
     mockLeg(AUDM_LIMIT_ID, { netflowGlobal: 100n, limitGlobal: 1597n });
     let mockDb = await fireSwap(seededDb());
@@ -305,7 +361,7 @@ describe("Broker trading limits", () => {
     assert.equal(legRow(mockDb, AUDM)?.stateTimestamp, BigInt(START_TS + 400));
   });
 
-  it("re-reads a hot leg on every swap, inside the window", async () => {
+  it("refreshes both legs even when only one was hot", async () => {
     // 1360/1597 = 0.85 — above the 0.8 hot threshold.
     mockLeg(USDM_LIMIT_ID, { netflowGlobal: 100n, limitGlobal: 1144n });
     mockLeg(AUDM_LIMIT_ID, { netflowGlobal: 1360n, limitGlobal: 1597n });
@@ -318,28 +374,82 @@ describe("Broker trading limits", () => {
       logIndex: 1,
     });
 
-    // Only the hot AUDm leg is re-read; the calm USDm leg stays gated.
-    assert.equal(stateCalls(), 1);
+    // Both legs move with the swap, regardless of their previous pressure.
+    assert.equal(stateCalls(), 2);
     assert.equal(legRow(mockDb, AUDM)?.stateBlock, BigInt(START_BLOCK + 1));
-    assert.equal(legRow(mockDb, USDM)?.stateBlock, BigInt(START_BLOCK));
+    assert.equal(legRow(mockDb, USDM)?.stateBlock, BigInt(START_BLOCK + 1));
   });
 
-  it("reads once for two swaps in the same block", async () => {
+  it("refreshes a cool leg straight to critical and retries a failed read next block", async () => {
+    mockLeg(USDM_LIMIT_ID, { netflowGlobal: 0n, limitGlobal: 10000n });
+    let db = await fireSwap(seededDb());
+    const before = legRow(db, USDM);
+    failLeg(USDM_LIMIT_ID, "tradingLimitsState");
+    db = await fireSwap(db, {
+      blockNumber: START_BLOCK + 1,
+      blockTimestamp: START_TS + 1,
+    });
+    assert.deepEqual(legRow(db, USDM), before);
+    mockLeg(USDM_LIMIT_ID, { netflowGlobal: 10000n, limitGlobal: 10000n });
+    resetHttpRpcCallCounts();
+    db = await fireSwap(db, {
+      blockNumber: START_BLOCK + 2,
+      blockTimestamp: START_TS + 2,
+    });
+    assert.equal(legRow(db, USDM)?.stateBlock, BigInt(START_BLOCK + 2));
+    assert.equal(db.entities.Pool.get(POOL_ID)?.limitStatus, "CRITICAL");
+    assert.equal(stateCalls(), 2);
+    assert.equal(configCalls(), 0);
+  });
+
+  it.each([false, true])(
+    "bounds preload/processing reads across a batch (bootstrapped=%s)",
+    async (bootstrapped) => {
+      let db = bootstrapped ? await fireSwap(seededDb()) : seededDb();
+      resetHttpRpcCallCounts();
+      const events = [1, 2].map((offset) =>
+        Broker.Swap.createMockEvent({
+          exchangeProvider: BIPOOL_MANAGER,
+          exchangeId: EXCHANGE_ID,
+          trader: SIGNER_EOA,
+          tokenIn: USDM,
+          tokenOut: AUDM,
+          amountIn: 10n ** 18n,
+          amountOut: 10n ** 18n,
+          mockEventData: createMockEventData({
+            chainId: CHAIN_ID,
+            srcAddress: BROKER_PROXY,
+            blockNumber: START_BLOCK + offset,
+            blockTimestamp: START_TS + offset,
+            transaction: { from: SIGNER_EOA, to: BROKER_PROXY },
+          }),
+        }),
+      );
+      db = await processMockEvents({ events, mockDb: db });
+      assert.equal(stateCalls(), bootstrapped ? 4 : 6);
+      assert.equal(configCalls(), bootstrapped ? 0 : 4);
+      assert.equal(legRow(db, USDM)?.stateBlock, BigInt(START_BLOCK + 2));
+    },
+  );
+
+  it("keeps authoritative block-end state for same/older-block swaps", async () => {
     const mockDb = await fireSwap(seededDb());
     resetHttpRpcCallCounts();
 
+    // The first read already includes every swap in the block. Changing the
+    // mock must not replace that block-end snapshot on replay or a later log.
+    mockLeg(AUDM_LIMIT_ID, { netflowGlobal: 0n });
     await fireSwap(mockDb, { logIndex: 1 });
+    await fireSwap(mockDb, { blockNumber: START_BLOCK - 1, logIndex: 2 });
+    assert.equal(legRow(mockDb, AUDM)?.netflowGlobal, -1596n);
 
     assert.equal(stateCalls(), 0);
     assert.equal(configCalls(), 0);
   });
 
   it("folds onto the pool once its tokens land, with no fresh read", async () => {
-    // The first swap can land before the pool mirrors token0/token1, which
-    // folds to N/A. Nothing else re-folds, so the next swap must, even inside
-    // the refresh window where it reads nothing.
-    // Cool legs, so the second swap is inside the refresh window and reads
-    // nothing — the re-fold cannot be riding on a fresh read.
+    // Tokens can arrive after the block-end read; a second same-block swap
+    // must repair the fold without another read.
     mockLeg(USDM_LIMIT_ID, { netflowGlobal: 100n, limitGlobal: 1144n });
     mockLeg(AUDM_LIMIT_ID, { netflowGlobal: 100n, limitGlobal: 1597n });
     let mockDb = seededDb().entities.Pool.set({
@@ -357,8 +467,8 @@ describe("Broker trading limits", () => {
       token1: AUDM,
     });
     mockDb = await fireSwap(mockDb, {
-      blockNumber: START_BLOCK + 1,
-      blockTimestamp: START_TS + 2,
+      blockNumber: START_BLOCK,
+      blockTimestamp: START_TS,
       logIndex: 1,
     });
 
@@ -501,8 +611,7 @@ describe("Broker trading limits", () => {
     assert.equal(configured?.lastUpdated0, 0n);
     assert.equal(configured?.limitGlobal, 4000n);
     assert.equal(configured?.limitPressureGlobal, "0.3990");
-    // `stateKnown` is left as it was, and the zero timestamp is what forces
-    // the next swap to re-read.
+    // The failed read does not advance stateBlock, so the next block retries.
     assert.equal(configured?.stateKnown, true);
     assert.equal(configured?.stateTimestamp, 0n);
 
@@ -514,8 +623,7 @@ describe("Broker trading limits", () => {
       logIndex: 2,
     });
 
-    // Both legs read: the reconfigured AUDm leg because its stored state is
-    // stale by definition, the USDm leg because it sits above 0.8 pressure.
+    // Both legs refresh on the next swap block.
     assert.equal(stateCalls(), 2);
     assert.equal(configCalls(), 0);
     assert.equal(legRow(mockDb, AUDM)?.netflowGlobal, -1700n);

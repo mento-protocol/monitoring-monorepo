@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { NodeClient } from "@sentry/nextjs";
 import {
   filterAndStripSentryEvent,
   getServerSentryOptions,
@@ -337,6 +338,49 @@ describe("filterAndStripSentryEvent — loopback requests", () => {
 });
 
 describe("Sentry 11 initialization privacy", () => {
+  it("keeps informational messages stackless without stripping real error stacks", async () => {
+    const options = getServerSentryOptions();
+    // Exercise the real SDK builder, not a mock of captureMessage. A real
+    // synthetic call-site stack makes a missing opt-out observable in v11.
+    const client = new NodeClient({
+      ...options,
+      dsn: undefined,
+      integrations: [],
+      transport: () => ({
+        send: async () => ({}),
+        flush: async () => true,
+      }),
+      stackParser: () => [
+        {
+          filename: "https://monitoring.mento.org/app.js",
+          function: "warn",
+          lineno: 1,
+        },
+      ],
+    });
+    try {
+      const message = await client.eventFromMessage(
+        "hasura-snapshot-cap-exhausted",
+        "warning",
+        { syntheticException: new Error("message call site") },
+      );
+      expect(message.message).toBe("hasura-snapshot-cap-exhausted");
+      expect(message.level).toBe("warning");
+      expect(message.exception).toBeUndefined();
+
+      const error = await client.eventFromException(new Error("real failure"));
+      expect(error.exception?.values?.[0]?.stacktrace?.frames).toEqual([
+        {
+          filename: "https://monitoring.mento.org/app.js",
+          function: "warn",
+          lineno: 1,
+        },
+      ]);
+    } finally {
+      await client.close();
+    }
+  });
+
   it("keeps sensitive collection opt-out explicit on server and edge", () => {
     expect(getServerSentryOptions().dataCollection).toEqual({
       userInfo: false,

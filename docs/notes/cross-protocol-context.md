@@ -3,7 +3,7 @@ title: Cross-Protocol Context
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-22
+last_verified: 2026-10-21
 doc_type: runbook
 scope: repo-wide
 review_interval_days: 90
@@ -18,6 +18,10 @@ read the private `mento-master-context` router when the checkout is available:
 ```text
 ../mento-master-context/.agents/mento-context/README.md
 ```
+
+The path above assumes sibling repository checkouts. In a worktree, resolve the
+router from the shared code-checkout directory instead of assuming the
+worktree has the same siblings. Do not copy the private router into this repo.
 
 This applies before broad repo searches for questions about contracts,
 deployments, addresses, ABIs, live on-chain state, stable supply, reserve data,

@@ -1,9 +1,9 @@
 ---
-title: Dependabot batches npm version updates into Monday groups
+title: Dependabot batches npm version updates into every-second-Monday groups
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-16
+last_verified: 2026-10-19
 scope: ci/process
 date: 2026-09
 doc_type: adr
@@ -11,14 +11,25 @@ review_interval_days: 90
 garden_lane: adrs-architecture
 ---
 
-# ADR 0092 — Dependabot batches npm version updates into Monday groups
+# ADR 0092 — Dependabot batches npm version updates into every-second-Monday groups
 
-**Status:** Accepted (Sep 2026), amended 2026-09-16, in force.
+**Status:** Accepted (Sep 2026), amended 2026-09-16 and 2026-10-19, in force.
 **Scope:** ci/process
 
 Amended 2026-09-16: [ADR 0106](0106-sentry-triage-moves-to-operator-skills.md)
 removed the `sentry-ingest-watcher` root from the `npm` entry's `directories`.
 The cadence, cooldown and groups are unchanged.
+
+Amended 2026-10-19: both Dependabot entries moved from weekly to every second
+Monday at 06:00 UTC. The entries use `interval: cron` with
+`cronjob: 0 6 * * mon%2`, which Dependabot parses with the fugit library.
+The `%2` matches Mondays whose week count since 2018-12-31 is even, so runs
+are exactly 14 days apart (next runs 2026-10-26 and 2026-11-09). Plain cron
+cannot express "every other week". Security updates ignore the schedule. The
+"Weekly on Monday" and "up to nine grouped PRs on a Monday" statements below
+describe the original decision; read them as "every second Monday" and "per
+run". The 2026-03 fugit `%2` regression was fixed by GitHub. Source:
+[dependabot-core#12246](https://github.com/dependabot/dependabot-core/issues/12246).
 
 ## Context
 

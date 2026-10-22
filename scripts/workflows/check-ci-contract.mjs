@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 // prettier-ignore
 import { contextOwnershipBlockers, envMutationBlockers, parseActionList, pinValidationOrderBlockers, sentinelBlockers, triggerBlockers } from "./ci-sentinel-core.mjs";
 import { isMapping } from "../lib/workflow-yaml.mjs";
-import yaml from "js-yaml";
+import * as yaml from "js-yaml";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 // Frozen: every runs-on label in .github/workflows/*.yml must be one of
 // these two free, unlimited GitHub-hosted labels (issue #2400).

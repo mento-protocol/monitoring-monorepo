@@ -70,7 +70,8 @@ export class MetricsService {
   }
 
   async refreshAll() {
-    return Promise.all(Object.keys(this.metrics).map(this.refreshTemplate));
+    const templateIDs = Object.keys(this.metrics) as UUID[];
+    return Promise.all(templateIDs.map(this.refreshTemplate));
   }
 
   refreshTemplate = (templateID: UUID): Promise<void> => {

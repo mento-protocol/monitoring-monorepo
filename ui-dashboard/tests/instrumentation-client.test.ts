@@ -27,6 +27,7 @@ describe("browser Sentry initialization", () => {
     expect(init).toHaveBeenCalledOnce();
     const options = init.mock.calls[0]![0];
     expect(options.traceLifecycle).toBe("static");
+    expect(options.attachStacktrace).toBe(false);
     expect(options.dataCollection).toEqual(
       getServerSentryOptions().dataCollection,
     );

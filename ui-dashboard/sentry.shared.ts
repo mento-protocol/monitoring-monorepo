@@ -251,6 +251,8 @@ export function shouldEnableSentry(
 // disable query collection (the scrubber already removes it), and retain
 // buffered transactions so beforeSendTransaction still filters and scrubs them.
 export const sentryPrivacyOptions = {
+  // Keep v10 message grouping and do not count informational messages as session errors.
+  attachStacktrace: false,
   traceLifecycle: "static",
   dataCollection: {
     userInfo: false,
@@ -291,7 +293,11 @@ export const sentryPrivacyOptions = {
   beforeSendTransaction: filterAndStripSentryEvent,
 } satisfies Pick<
   Options,
-  "traceLifecycle" | "dataCollection" | "beforeSend" | "beforeSendTransaction"
+  | "attachStacktrace"
+  | "traceLifecycle"
+  | "dataCollection"
+  | "beforeSend"
+  | "beforeSendTransaction"
 >;
 
 export function getServerSentryOptions(): Options {
