@@ -27,8 +27,10 @@ const loadConfiguration = async (yamlSource: string): Promise<LoadedConfig> => {
     jest.doMock('fs', () => ({
       readFileSync: jest.fn(() => yamlSource),
     }));
-    const configModule = await import('./config');
-    configuration = configModule.default as unknown as () => LoadedConfig;
+    const configModule = jest.requireActual<{ default: () => LoadedConfig }>(
+      './config',
+    );
+    configuration = configModule.default;
   });
 
   jest.dontMock('fs');
