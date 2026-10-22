@@ -71,6 +71,14 @@ Pin the attribution-anchoring storage reads with
 `<sig>` placeholder so bash doesn't read it as a redirection) so a future reader
 gets the same bytes.
 
+After every block-pinned read group, verify before accepting results; on failure,
+discard them and restart provenance capture and dependent reads:
+
+```bash
+READ_HASH=$(cast block "$HEAD_BLOCK" --json --rpc-url "$RPC" | jq -er .hash) || exit 1
+[ "$READ_HASH" = "$HEAD_HASH" ] || { echo "Block changed; discard reads and recapture provenance." >&2; exit 1; }
+```
+
 ## Production database discovery (only after the preflight passes)
 
 Discover the production database with
