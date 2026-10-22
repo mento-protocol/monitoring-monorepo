@@ -59,25 +59,21 @@ Mutable-state reads (storage, balances, prices) are only reproducible if pinned
 to a block. Record these and put them in the report's provenance footer:
 
 ```bash
-SNAPSHOT_BLOCK=$(cast block latest --json --rpc-url "$RPC")
-HEAD_BLOCK=$(printf '%s' "$SNAPSHOT_BLOCK" | jq -er .number)
-HEAD_HASH=$(printf '%s' "$SNAPSHOT_BLOCK" | jq -er .hash)
+SNAPSHOT_BLOCK=$(cast block finalized --json --rpc-url "$RPC") || exit 1
+HEAD_BLOCK=$(printf '%s' "$SNAPSHOT_BLOCK" | jq -er '.number | select(type == "string" and test("^0x[0-9a-fA-F]+$"))') || exit 1
+HEAD_HASH=$(printf '%s' "$SNAPSHOT_BLOCK" | jq -er '.hash | select(type == "string" and test("^0x[0-9a-fA-F]{64}$"))') || exit 1
 cast --version                                   # tool version, for the footer
 # Record the RPC endpoint, $HEAD_BLOCK, $HEAD_HASH, and each query’s UTC timestamp.
 ```
 
 Pin the attribution-anchoring storage reads with
 `cast call "$ADDR" "<sig>" --block "$HEAD_BLOCK" --rpc-url "$RPC"` (quote the
-`<sig>` placeholder so bash doesn't read it as a redirection) so a future reader
-gets the same bytes.
+`<sig>` placeholder so bash doesn't read it as a redirection) for replay of
+captured finalized state.
 
-After every block-pinned read group, verify before accepting results; on failure,
-discard them and restart provenance capture and dependent reads:
-
-```bash
-READ_HASH=$(cast block "$HEAD_BLOCK" --json --rpc-url "$RPC" | jq -er .hash) || exit 1
-[ "$READ_HASH" = "$HEAD_HASH" ] || { echo "Block changed; discard reads and recapture provenance." >&2; exit 1; }
-```
+If the RPC lacks the `finalized` tag or capture fails, stop and mark the
+snapshot unavailable; never fall back to `latest` or `safe`. Historical replay
+also requires the endpoint to retain the captured state.
 
 ## Production database discovery (only after the preflight passes)
 
