@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import jsYaml from "js-yaml";
+import * as jsYaml from "js-yaml";
 
 import {
   buildDocsGardenIssueSpec,

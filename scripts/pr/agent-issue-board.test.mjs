@@ -13691,7 +13691,7 @@ runs:
   using: composite
   steps:
     - shell: bash
-      run: '${CANARY_UPDATE_MUTATION.replaceAll("'", "''")}'
+      run: ${JSON.stringify(CANARY_UPDATE_MUTATION)}
 `,
     ],
     [
@@ -13702,7 +13702,7 @@ jobs:
   escape:
     runs-on: ubuntu-latest
     steps:
-      - run: '${CANARY_UPDATE_MUTATION.replaceAll("'", "''")}'
+      - run: ${JSON.stringify(CANARY_UPDATE_MUTATION)}
 `,
     ],
   ]) {
