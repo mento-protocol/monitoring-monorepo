@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
-import { dump as dumpYaml, load as loadYaml } from "js-yaml";
+import { CORE_SCHEMA, dump as dumpYaml, load as loadYaml } from "js-yaml";
 import { GOOGLE_AUTH_ACTION, PLAN_JOB_CONDITION } from "./constants.mjs";
 import { validFixtureFiles } from "./fixtures.mjs";
 import { validateWorkflowContract } from "./workflow.mjs";
@@ -49,7 +49,7 @@ function mutateParsed(files, filePath, mutateWorkflow) {
     ...files,
     [filePath]: dumpYaml(workflow, {
       lineWidth: -1,
-      noCompatMode: true,
+      schema: CORE_SCHEMA,
       noRefs: true,
     }),
   };

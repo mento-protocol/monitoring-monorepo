@@ -14,12 +14,7 @@ export const LIMIT_FLAG_L0 = 1;
 export const LIMIT_FLAG_L1 = 2;
 export const LIMIT_FLAG_LG = 4;
 
-/** Minimum age of a stored state read before the next Broker.Swap re-reads it.
- * 300 s costs 31k-53k state reads for a full Celo resync; see ADR 0103. */
-export const BROKER_LIMIT_REFRESH_SECONDS = 300n;
-
-/** At or above this pressure a leg is re-read on EVERY swap, not once per
- * refresh window — the alert plane needs the last few percent to be exact. */
+/** WARN threshold shared with the FPMM path. It does not gate state reads. */
 export const BROKER_LIMIT_HOT_PRESSURE = 0.8;
 
 const PRESSURE_SCALE = 100_000_000n;
@@ -194,7 +189,7 @@ function storedWorstPressure(row: BrokerTradingLimit): number {
   );
 }
 
-/** Freshness gate for the at-block state read.
+/** Refresh every later swap block: stored pressure cannot predict a burst.
  *
  * Always false when the event's block is at or below the block the stored
  * state was pinned to: a second swap in the same block cannot move state the
@@ -202,15 +197,8 @@ function storedWorstPressure(row: BrokerTradingLimit): number {
 export function shouldRefreshBrokerState(
   row: BrokerTradingLimit | undefined,
   blockNumber: bigint,
-  blockTimestamp: bigint,
 ): boolean {
-  if (!row) return true;
-  if (blockNumber <= row.stateBlock) return false;
-  if (!row.configKnown || !row.stateKnown) return true;
-  if (blockTimestamp - row.stateTimestamp >= BROKER_LIMIT_REFRESH_SECONDS) {
-    return true;
-  }
-  return storedWorstPressure(row) >= BROKER_LIMIT_HOT_PRESSURE;
+  return !row || blockNumber > row.stateBlock;
 }
 
 export function buildBrokerTradingLimitRow(args: {
