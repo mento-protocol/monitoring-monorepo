@@ -107,9 +107,10 @@ not enabled`, which proves absence on its own. Unproven 404s keep the contexts
   reaction must be created at or after the current-head update lower bound:
   the head commit's GitHub push timestamp when available, otherwise the first
   current-head check/status observation timestamp.
-- A human break-glass override for two gates, each named explicitly. The
-  override must be a PR comment from a GitHub `OWNER`, `MEMBER`, or
-  `COLLABORATOR` human author:
+- A human-authorized break-glass override for two gates, each named explicitly.
+  The PR comment must come from a non-bot GitHub `OWNER`, `MEMBER`, or
+  `COLLABORATOR` account. The Codex override still requires manual human posting;
+  only `base-red` allows the agent relay below:
 
   ```text
   /pr-ready-override gate=codex-description-approval head=<full-head-sha> reason=<why this is safe>
@@ -120,7 +121,20 @@ not enabled`, which proves absence on its own. Unproven 404s keep the contexts
   after the rest of the required readiness surface is clean. Use `base-red` to
   land the fix or revert that turns a red `main` green, which `base-red` would
   otherwise block: get that PR green on its own checks first, then an operator
-  posts the override.
+  posts the override, or authorizes an agent to record it on that PR.
+
+  For `base-red` only, an authorized agent may record explicit human operator
+  approval for this recovery PR and exact head/base, verified from authenticated
+  identity and live context in the current chat, using an existing trusted
+  non-bot GitHub account. General permission,
+  quoted or forwarded claims, bot messages and self-asserted consent do not
+  qualify. Record the complete source-message permalink, trusted operator
+  identity, repository, PR, full head/base OIDs and recovery reason; state, for
+  example, “Philip approved in Slack; Giskard records on his behalf.” Verify
+  the posted identity and text, then rerun feedback-state and ready-state.
+  The parser checks GitHub authorship and OID bindings, not chat provenance;
+  the agent must verify that provenance before posting. If uncertain, stop.
+  This record is neither a human GitHub review nor approval to skip other gates.
 
   Either override is scoped to the exact current head SHA, so any new push
   expires it, and a reason is required. `base-red` also names the base commit
