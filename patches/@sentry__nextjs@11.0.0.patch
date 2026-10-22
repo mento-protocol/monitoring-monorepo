@@ -1,0 +1,66 @@
+diff --git a/build/cjs/config/loaders/componentAnnotationLoader.js b/build/cjs/config/loaders/componentAnnotationLoader.js
+index f0ef7d80bce11bad238849188def1f948115e589..26cef9e314c2864b84cfa8bed8a653aedfc31e14 100644
+--- a/build/cjs/config/loaders/componentAnnotationLoader.js
++++ b/build/cjs/config/loaders/componentAnnotationLoader.js
+@@ -1,6 +1,6 @@
+ Object.defineProperties(exports, { __esModule: { value: true }, [Symbol.toStringTag]: { value: 'Module' } });
+ 
+-const core = require('@sentry/bundler-plugins/core');
++const core = require('@sentry/bundler-plugins/loader-utils');
+ 
+ function componentAnnotationLoader(userCode) {
+   const options = "getOptions" in this ? this.getOptions() : this.query;
+diff --git a/build/cjs/config/loaders/moduleMetadataInjectionLoader.js b/build/cjs/config/loaders/moduleMetadataInjectionLoader.js
+index 3e6f321d6870d8d6fbd51b2ade43269582aedd7f..ebc7fdbade3aff40fd21138d03ec7eec41555ac4 100644
+--- a/build/cjs/config/loaders/moduleMetadataInjectionLoader.js
++++ b/build/cjs/config/loaders/moduleMetadataInjectionLoader.js
+@@ -1,6 +1,6 @@
+ Object.defineProperties(exports, { __esModule: { value: true }, [Symbol.toStringTag]: { value: 'Module' } });
+ 
+-const core = require('@sentry/bundler-plugins/core');
++const core = require('@sentry/bundler-plugins/loader-utils');
+ 
+ function moduleMetadataInjectionLoader(userCode) {
+   const { applicationKey } = "getOptions" in this ? this.getOptions() : this.query;
+diff --git a/build/cjs/config/loaders/valueInjectionLoader.js b/build/cjs/config/loaders/valueInjectionLoader.js
+index 149aab4c55bf0e88bae7bac366d8f13b37b06ae9..f4e93d2887be0abde64bd3423f09f9336d9ceba4 100644
+--- a/build/cjs/config/loaders/valueInjectionLoader.js
++++ b/build/cjs/config/loaders/valueInjectionLoader.js
+@@ -1,6 +1,6 @@
+ Object.defineProperties(exports, { __esModule: { value: true }, [Symbol.toStringTag]: { value: 'Module' } });
+ 
+-const core = require('@sentry/bundler-plugins/core');
++const core = require('@sentry/bundler-plugins/loader-utils');
+ 
+ function valueInjectionLoader(userCode) {
+   const { values } = "getOptions" in this ? this.getOptions() : this.query;
+diff --git a/build/esm/config/loaders/componentAnnotationLoader.js b/build/esm/config/loaders/componentAnnotationLoader.js
+index edab4efcf3025826d3a32926c1c54b4a8ce5bf51..24b27e14cb15c396414e19afcd754e13aa8fcfb3 100644
+--- a/build/esm/config/loaders/componentAnnotationLoader.js
++++ b/build/esm/config/loaders/componentAnnotationLoader.js
+@@ -1,4 +1,4 @@
+-import { createComponentNameAnnotateHooks } from '@sentry/bundler-plugins/core';
++import { createComponentNameAnnotateHooks } from '@sentry/bundler-plugins/loader-utils';
+ 
+ function componentAnnotationLoader(userCode) {
+   const options = "getOptions" in this ? this.getOptions() : this.query;
+diff --git a/build/esm/config/loaders/moduleMetadataInjectionLoader.js b/build/esm/config/loaders/moduleMetadataInjectionLoader.js
+index a09fc68049790987478f997e94573ce36ee8ebd0..76fa74b0df7e335d0b4d9976216d91cd71f01edf 100644
+--- a/build/esm/config/loaders/moduleMetadataInjectionLoader.js
++++ b/build/esm/config/loaders/moduleMetadataInjectionLoader.js
+@@ -1,4 +1,4 @@
+-import { getCodeInjectionPosition } from '@sentry/bundler-plugins/core';
++import { getCodeInjectionPosition } from '@sentry/bundler-plugins/loader-utils';
+ 
+ function moduleMetadataInjectionLoader(userCode) {
+   const { applicationKey } = "getOptions" in this ? this.getOptions() : this.query;
+diff --git a/build/esm/config/loaders/valueInjectionLoader.js b/build/esm/config/loaders/valueInjectionLoader.js
+index d7568be2e8f4b745a8d3e0a8bc9778c7a791f735..d6f71b91be43386b40bc4b713984f294e8c4ba77 100644
+--- a/build/esm/config/loaders/valueInjectionLoader.js
++++ b/build/esm/config/loaders/valueInjectionLoader.js
+@@ -1,4 +1,4 @@
+-import { getCodeInjectionPosition } from '@sentry/bundler-plugins/core';
++import { getCodeInjectionPosition } from '@sentry/bundler-plugins/loader-utils';
+ 
+ function valueInjectionLoader(userCode) {
+   const { values } = "getOptions" in this ? this.getOptions() : this.query;
