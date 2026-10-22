@@ -16,7 +16,7 @@
  * credential-bearing rather than clean.
  */
 
-import yaml from "js-yaml";
+import * as yaml from "js-yaml";
 
 /**
  * Parse a workflow body. Returns the parsed document, or null when the source

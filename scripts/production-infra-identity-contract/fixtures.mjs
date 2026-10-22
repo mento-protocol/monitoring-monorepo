@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { dump as dumpYaml } from "js-yaml";
+import { CORE_SCHEMA, dump as dumpYaml } from "js-yaml";
 import {
   DRIFT_REFRESH_CONDITION,
   GOOGLE_AUTH_ACTION,
@@ -640,7 +640,7 @@ function applyWorkflowFixture(workflowPath) {
     },
     {
       lineWidth: -1,
-      noCompatMode: true,
+      schema: CORE_SCHEMA,
       noRefs: true,
     },
   );
@@ -794,7 +794,7 @@ export function validFixtureFiles() {
       },
       {
         lineWidth: -1,
-        noCompatMode: true,
+        schema: CORE_SCHEMA,
         noRefs: true,
       },
     ),
