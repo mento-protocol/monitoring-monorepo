@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { test } from "node:test";
+import { test } from "vitest";
+import { fileURLToPath } from "node:url";
 
 // Regression for getsentry/sentry-javascript#24650/#24651. Exercise installed
 // loaders, not patch text: CLI imports must fail while injection and the v11.0.0
@@ -43,7 +44,7 @@ Module._load = function (specifier, ...args) {
 })().catch((error) => { console.error(error); process.exitCode = 1; });
 `,
     ],
-    { cwd: process.cwd(), encoding: "utf8" },
+    { cwd: fileURLToPath(new URL("../..", import.meta.url)), encoding: "utf8" },
   );
   assert.equal(result.status, 0, result.stderr || result.stdout);
 });
