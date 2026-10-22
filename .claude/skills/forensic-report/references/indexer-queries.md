@@ -42,8 +42,9 @@ From `docs/pr-checklists/swr-polling-hasura.md`:
   handler’s caller classification and transaction evidence before summing;
   if that classification cannot be established, report raw activity without
   claiming de-duplicated v2 totals.
-- `RebalanceEvent.notionalUsd`/`rewardUsd` use an **empty-string sentinel** when
-  pre-reserve RPC failed — handle `""` distinctly from `"0"`.
+- `RebalanceEvent.notionalUsd`/`rewardUsd` use `""` for VirtualPool events,
+  failed pre-reserve reads, missing token metadata/decimals, or no USD-pegged leg.
+  Unknown is not `"0"`; never infer an RPC failure from `""` alone.
 
 ## Endpoint and liveness probe
 
@@ -65,11 +66,9 @@ curl -s "$HASURA" -H 'content-type: application/json' \
   --data "{\"query\":\"{ SwapEvent(where:{chainId:{_eq:$CHAIN_ID}},limit:1){id} LiquidityEvent(where:{chainId:{_eq:$CHAIN_ID}},limit:1){id} StableSupplyChangeEvent(where:{chainId:{_eq:$CHAIN_ID}},limit:1){id} RebalanceEvent(where:{chainId:{_eq:$CHAIN_ID}},limit:1){id} BridgeTransfer(where:{_or:[{sourceChainId:{_eq:$CHAIN_ID}},{destChainId:{_eq:$CHAIN_ID}}]},limit:1){id} SusdsPosition(where:{chainId:{_eq:$CHAIN_ID}},limit:1){id} SusdsYieldMovement(where:{chainId:{_eq:$CHAIN_ID}},limit:1){id} StethPosition(where:{chainId:{_eq:$CHAIN_ID}},limit:1){id} StethYieldMovement(where:{chainId:{_eq:$CHAIN_ID}},limit:1){id} }\"}" | jq .
 # Ethereum reserve-yield coverage includes both sUSDS and stETH positions and
 # movement history; omitting either family can turn real activity into false EMPTY.
-# Empty probes alone do not establish coverage. Verify the promoted deployment’s
-# network/entity configuration and indexed cursor cover the requested chain and period;
-# repository YAML is intended configuration, not deployment proof. Without that proof,
-# record coverage as unverified (NOT-ATTEMPTED), not EMPTY. Use NOT-COVERED only
-# when deployment evidence establishes exclusion; use EMPTY only within proven coverage.
+# Empty probes and repository YAML do not prove coverage. Verify promoted network/entity
+# configuration and cursor coverage for the chain/period: unverified = NOT-ATTEMPTED;
+# proven exclusion = NOT-COVERED; within proven coverage only, no rows = EMPTY.
 ```
 
 ## Picking the filter field
@@ -100,11 +99,10 @@ rule above.
 
 ## The battery
 
-These are first-page examples, not complete histories. For every multi-row
-query, use deterministic `order_by` ending in `id` and add `offset: 0`;
-repeat with offsets 1000, 2000, … until a page has fewer than 1000 rows.
-Bound historical queries to a fixed indexed range before paging so new rows
-do not shift offsets. Without full pagination, report samples, never totals.
+These are first-page examples, not histories. Page every multi-row query with
+deterministic ordering ending in `id` and offsets 0, 1000, … until fewer than
+1000 rows return. Fix the indexed range first so inserts cannot shift pages;
+without full pagination, report samples, not totals.
 
 ```graphql
 # EOA-only USD-valued swap rollups (page all days; excludes unpriced swaps)
@@ -206,7 +204,7 @@ do not shift offsets. Without full pagination, report samples, never totals.
   # closed owns no Trove now but is all over TroveOperationEvent. NOTE: the indexer records LIQUIDATE in a
   # separate LiquidationEvent (keyed by trove/instance, not owner address), so liquidations are NOT in this
   # entity — check LiquidationEvent by troveId if the target's trove may have been liquidated.
-  TroveOperationEvent(where: { owner: { _eq: "0xtarget" }, chainId: { _eq: <CHAIN_ID> } }, order_by: [{ timestamp: desc }, { id: desc }], limit: 1000) {
+  TroveOperationEvent(where: { owner: { _eq: "0xtarget" }, chainId: { _eq: <CHAIN_ID> } }, order_by: [{ timestamp: desc }, { blockNumber: desc }, { logIndex: desc }, { id: desc }], limit: 1000, offset: 0) {
     id
     troveId
     operation
