@@ -65,9 +65,11 @@ curl -s "$HASURA" -H 'content-type: application/json' \
   --data "{\"query\":\"{ SwapEvent(where:{chainId:{_eq:$CHAIN_ID}},limit:1){id} LiquidityEvent(where:{chainId:{_eq:$CHAIN_ID}},limit:1){id} StableSupplyChangeEvent(where:{chainId:{_eq:$CHAIN_ID}},limit:1){id} RebalanceEvent(where:{chainId:{_eq:$CHAIN_ID}},limit:1){id} BridgeTransfer(where:{_or:[{sourceChainId:{_eq:$CHAIN_ID}},{destChainId:{_eq:$CHAIN_ID}}]},limit:1){id} SusdsPosition(where:{chainId:{_eq:$CHAIN_ID}},limit:1){id} SusdsYieldMovement(where:{chainId:{_eq:$CHAIN_ID}},limit:1){id} StethPosition(where:{chainId:{_eq:$CHAIN_ID}},limit:1){id} StethYieldMovement(where:{chainId:{_eq:$CHAIN_ID}},limit:1){id} }\"}" | jq .
 # Ethereum reserve-yield coverage includes both sUSDS and stETH positions and
 # movement history; omitting either family can turn real activity into false EMPTY.
-# Mark the indexer NOT-COVERED for $CHAIN only if EVERY entity above (and the full battery below) is
-# empty AND $CHAIN isn't in the indexer's configured network list — see the `networks:` section of
-# `indexer-envio/config.multichain.mainnet.yaml`. Otherwise an empty result is EMPTY (a real signal).
+# Empty probes alone do not establish coverage. Verify the promoted deployment’s
+# network/entity configuration and indexed cursor cover the requested chain and period;
+# repository YAML is intended configuration, not deployment proof. Without that proof,
+# record coverage as unverified (NOT-ATTEMPTED), not EMPTY. Use NOT-COVERED only
+# when deployment evidence establishes exclusion; use EMPTY only within proven coverage.
 ```
 
 ## Picking the filter field
@@ -97,6 +99,12 @@ rollups and use raw rows with the applicable role fields and de-duplication
 rule above.
 
 ## The battery
+
+These are first-page examples, not complete histories. For every multi-row
+query, use deterministic `order_by` ending in `id` and add `offset: 0`;
+repeat with offsets 1000, 2000, … until a page has fewer than 1000 rows.
+Bound historical queries to a fixed indexed range before paging so new rows
+do not shift offsets. Without full pagination, report samples, never totals.
 
 ```graphql
 # EOA-only USD-valued swap rollups (page all days; excludes unpriced swaps)
@@ -246,7 +254,8 @@ rule above.
 {
   # Filter on caller (signer) OR counterparty (mint recipient / burn holder) — the target may be the
   # recipient/holder rather than the tx signer, which a caller-only filter would miss.
-  StableSupplyChangeEvent(where: { _and: [{ _or: [{ caller: { _eq: "0xtarget" } }, { counterparty: { _eq: "0xtarget" } }] }, { chainId: { _eq: <CHAIN_ID> } }] }, limit: 1000) {
+  StableSupplyChangeEvent(where: { _and: [{ _or: [{ caller: { _eq: "0xtarget" } }, { counterparty: { _eq: "0xtarget" } }] }, { chainId: { _eq: <CHAIN_ID> } }] }, order_by: [{ id: desc }], limit: 1000, offset: 0) {
+    id
     txHash
     kind
     amount
@@ -269,8 +278,11 @@ rule above.
         { _or: [{ sourceChainId: { _eq: <CHAIN_ID> } }, { destChainId: { _eq: <CHAIN_ID> } }] }
       ]
     }
+    order_by: [{ id: desc }]
     limit: 1000
+    offset: 0
   ) {
+    id
     sentTxHash
     sender
     recipient

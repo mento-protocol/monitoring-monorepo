@@ -59,9 +59,11 @@ Mutable-state reads (storage, balances, prices) are only reproducible if pinned
 to a block. Record these and put them in the report's provenance footer:
 
 ```bash
-HEAD_BLOCK=$(cast block-number --rpc-url $RPC)   # the block reads are "as of"
+SNAPSHOT_BLOCK=$(cast block latest --json --rpc-url "$RPC")
+HEAD_BLOCK=$(printf '%s' "$SNAPSHOT_BLOCK" | jq -er .number)
+HEAD_HASH=$(printf '%s' "$SNAPSHOT_BLOCK" | jq -er .hash)
 cast --version                                   # tool version, for the footer
-# Note the RPC endpoint, $HEAD_BLOCK, and the UTC timestamp of each Sim/DefiLlama query.
+# Record the RPC endpoint, $HEAD_BLOCK, $HEAD_HASH, and each query’s UTC timestamp.
 ```
 
 Pin the attribution-anchoring storage reads with
