@@ -132,6 +132,8 @@ not enabled`, which proves absence on its own. Unproven 404s keep the contexts
   identity, repository, PR, full head/base OIDs and recovery reason; state, for
   example, “Philip approved in Slack; Giskard records on his behalf.” Verify
   the posted identity and text, then rerun feedback-state and ready-state.
+  Source approval must postdate the latest failed required base run; check
+  again immediately before posting. A newer failure requires fresh consent.
   The parser checks GitHub authorship and OID bindings, not chat provenance;
   the agent must verify that provenance before posting. If uncertain, stop.
   This record is neither a human GitHub review nor approval to skip other gates.

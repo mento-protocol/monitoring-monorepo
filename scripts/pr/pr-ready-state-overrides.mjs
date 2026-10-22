@@ -16,9 +16,9 @@ export const CODEX_DESCRIPTION_APPROVAL_OVERRIDE_GATE =
   "codex-description-approval";
 // The `base-red` blocker would otherwise deadlock its own recovery: the fix or
 // revert PR that turns `main` green is blocked by the red `main` it exists to
-// repair. This is the documented way out, and it carries exactly the same
-// conditions as the Codex gate above — a human operator author, a reason, and
-// binding to the current head — so it expires on any push.
+// repair. Both gates require a trusted non-bot account, reason and current
+// head binding. Only base-red permits verified operator-chat consent relayed
+// by an agent; docs/notes/pr-ready-state.md owns provenance and freshness.
 export const BASE_RED_OVERRIDE_GATE = "base-red";
 const SUPPORTED_OVERRIDE_GATES = new Set([
   CODEX_DESCRIPTION_APPROVAL_OVERRIDE_GATE,
