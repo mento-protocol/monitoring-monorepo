@@ -43,8 +43,8 @@ From `docs/pr-checklists/swr-polling-hasura.md`:
   if that classification cannot be established, report raw activity without
   claiming de-duplicated v2 totals.
 - `RebalanceEvent` USD fields use `""` for VirtualPools, missing token/decimal metadata,
-  no USD-pegged leg, or zero deltas (including pre-reserve RPC failures); missing
-  block-scoped incentives also blank `rewardUsd`. `""` is unknown, not `"0"` or proof of RPC failure.
+  no USD-pegged leg, or zero deltas (including pre-reserve RPC failures); `""` is unknown, not `"0"`.
+  Failed incentive reads blank `rewardUsd`; absent getters mean zero incentive (`"0.0000"` reward when notional is valued).
 
 ## Endpoint and liveness probe
 
