@@ -91,7 +91,7 @@ patchedDependencies:
   '@lhci/utils@0.15.1': d543de2cd2dadadbb6465e9411e7bc12dd6706a75c6d3ef9fe352cf51f90761c
   '@next/eslint-plugin-next@16.3.5': 563b3a4b32207df82c93e77d3cd9dae1cabd8e81255b2535ec13b82441036fd4
   '@sentry/bundler-plugins@11.0.0': cc48ba00a3e67e12f815a92131afbb55f768945067ba875862d49ed4034c9cc2
-  '@sentry/nextjs@11.0.0': a8f4795bd4a7cba32448001fcd68e742d3b960163eae798a5aed6a567634e344
+  '@sentry/nextjs@11.0.0': 4a4b68514a1a640429365d455f4763a941e9f4ab8962c789d72cbb646095951e
 
 importers:
 
@@ -653,7 +653,7 @@ importers:
         version: 1.2.16(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@sentry/nextjs':
         specifier: ^11.0.0
-        version: 11.0.0(patch_hash=a8f4795bd4a7cba32448001fcd68e742d3b960163eae798a5aed6a567634e344)(next@16.4.1(@babel/core@8.0.5)(@opentelemetry/api@1.9.1)(@playwright/test@1.63.0)(@types/node@26.4.0)(babel-plugin-react-compiler@1.0.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react@19.3.0)(webpack@5.106.2(esbuild@0.28.1))
+        version: 11.0.0(patch_hash=4a4b68514a1a640429365d455f4763a941e9f4ab8962c789d72cbb646095951e)(next@16.4.1(@babel/core@8.0.5)(@opentelemetry/api@1.9.1)(@playwright/test@1.63.0)(@types/node@26.4.0)(babel-plugin-react-compiler@1.0.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react@19.3.0)(webpack@5.106.2(esbuild@0.28.1))
       '@upstash/redis':
         specifier: ^1.38.4
         version: 1.38.4
@@ -14091,7 +14091,7 @@ snapshots:
       '@sentry/utils': 7.120.4
       localforage: 1.10.0
 
-  '@sentry/nextjs@11.0.0(patch_hash=a8f4795bd4a7cba32448001fcd68e742d3b960163eae798a5aed6a567634e344)(next@16.4.1(@babel/core@8.0.5)(@opentelemetry/api@1.9.1)(@playwright/test@1.63.0)(@types/node@26.4.0)(babel-plugin-react-compiler@1.0.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react@19.3.0)(webpack@5.106.2(esbuild@0.28.1))':
+  '@sentry/nextjs@11.0.0(patch_hash=4a4b68514a1a640429365d455f4763a941e9f4ab8962c789d72cbb646095951e)(next@16.4.1(@babel/core@8.0.5)(@opentelemetry/api@1.9.1)(@playwright/test@1.63.0)(@types/node@26.4.0)(babel-plugin-react-compiler@1.0.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react@19.3.0)(webpack@5.106.2(esbuild@0.28.1))':
     dependencies:
       '@opentelemetry/api': 1.9.1
       '@rollup/plugin-commonjs': 28.0.1(rollup@4.63.2)
