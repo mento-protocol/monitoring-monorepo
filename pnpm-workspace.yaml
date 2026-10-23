@@ -215,6 +215,10 @@ overrides:
 patchedDependencies:
   "@next/eslint-plugin-next@16.3.5": patches/@next__eslint-plugin-next@16.3.5.patch
   "@lhci/utils@0.15.1": patches/@lhci__utils@0.15.1.patch
+  # Loader-only backport of getsentry/sentry-javascript#24651.
+  # Remove both patches after upgrading to an SDK with that upstream fix.
+  "@sentry/bundler-plugins@11.0.0": patches/@sentry__bundler-plugins@11.0.0.patch
+  "@sentry/nextjs@11.0.0": patches/@sentry__nextjs@11.0.0.patch
 
 # pnpm 11 records dependency build-script policy explicitly.
 allowBuilds:

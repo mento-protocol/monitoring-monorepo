@@ -3,7 +3,7 @@ title: The peg-monitor registry is service-local config, not published shared-co
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-24
+last_verified: 2026-10-23
 scope: metrics-bridge / shared-config
 date: 2026-07
 doc_type: adr

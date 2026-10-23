@@ -507,8 +507,10 @@ If root `package.json` changed, first run
 reason=<why this is safe>`. When `main` itself is red, the recovery order is:
    open the fix or revert PR, get it green on its own checks, have an operator
    post `/pr-ready-override gate=base-red head=<full-head-sha> base=<base-oid>
-reason=<why>`,
-   then drive it to ALL_CLEAR. The override waives `base-red` only; it is not
+reason=<why>`, directly or through an authorized agent recording verified
+   current-chat consent under [pr-ready-state.md](pr-ready-state.md)'s exact
+   provenance/head/base contract, then drive it to ALL_CLEAR. This relay does
+   not apply to the manual human Codex override. The override waives `base-red` only; it is not
    approval to merge, which still needs the user's explicit per-PR word.
    Nothing else merges until `main` is green again. Do not block on slow optional bots that branch
    protection does not require, and do not post routine or duplicate `@codex
