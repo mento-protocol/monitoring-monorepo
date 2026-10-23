@@ -75,6 +75,9 @@ activate_package_manager
 echo "==> Syncing workspace dependencies for the checked-out branch"
 CI=true pnpm install --frozen-lockfile --prefer-offline
 
+echo "==> Syncing Playwright Chromium for the checked-out branch"
+pnpm --filter @mento-protocol/ui-dashboard exec playwright install chromium
+
 echo "==> Regenerating Envio types for the checked-out branch"
 pnpm indexer:codegen
 
