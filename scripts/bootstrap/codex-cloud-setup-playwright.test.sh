@@ -55,17 +55,14 @@ for maintenance_case in success browser-fails timeout-stalls missing-timeout dep
       fi
     }
     timeout() {
-      if [[ "$1" == "--kill-after=30s" ]]; then
-        shift
+      if [[ "$1" != "--kill-after=30s" || "$2" != "300" ]]; then
+        echo "error: missing bounded timeout or hard-kill deadline" >> "$case_tool_log"
+        return 1
       fi
+      shift 2
       if [[ "$maintenance_case" == timeout-stalls ]]; then
-        if [[ "$1" != "300" ]]; then
-          echo "error: timeout called with '$1', expected '300'" >> "$case_tool_log"
-          return 1
-        fi
         return 124
       fi
-      shift # drop the duration argument
       "$@"
     }
     # For missing-timeout, we replace the command builtin so 'command -v timeout' fails.
