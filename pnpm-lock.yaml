@@ -722,7 +722,7 @@ importers:
         specifier: ^16.3.5
         version: 16.3.5(patch_hash=563b3a4b32207df82c93e77d3cd9dae1cabd8e81255b2535ec13b82441036fd4)(eslint@10.0.3(jiti@2.7.0)(supports-color@5.5.0))
       '@playwright/test':
-        specifier: ^1.63.0
+        specifier: ^1.64.0
         version: 1.64.0
       '@size-limit/file':
         specifier: ^13.0.3
