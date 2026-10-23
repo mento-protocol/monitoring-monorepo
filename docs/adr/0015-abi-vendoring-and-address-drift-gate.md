@@ -3,7 +3,7 @@ title: Vendor ABIs from the contracts package and gate indexed config addresses 
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-10-22
 scope: indexer-envio
 date: 2026-05
 doc_type: adr

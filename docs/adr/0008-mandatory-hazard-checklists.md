@@ -3,7 +3,7 @@ title: Cross-layer and stateful changes must run dedicated PR checklists
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-10-22
 scope: ci/process
 date: 2026-05
 doc_type: adr
