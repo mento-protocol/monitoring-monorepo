@@ -122,7 +122,8 @@ and runtime evidence separate.
 
 After checkout in a cached container, maintenance refreshes `origin/main`, syncs
 the branch lockfile with `pnpm install --frozen-lockfile --prefer-offline`,
-regenerates Envio types, and validates agent context.
+installs the branch's Playwright Chromium revision, regenerates Envio types,
+and validates agent context. A failed browser download stops maintenance.
 
 If you install manually, verify the dashboard can resolve its Sentry package
 after `pnpm install`:
