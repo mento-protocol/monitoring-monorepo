@@ -49,7 +49,7 @@ locals {
         # the refill script's 30-day top-up line for these feeds.
         gas = {
           label       = "gas feeds"
-          feeds       = ["CELOAUD", "CELOBRL", "CELOCAD", "CELOCHF", "CELOCOP", "CELOETH", "CELOEUR", "CELOGBP", "CELOGHS", "CELOJPY", "CELOKES", "CELONGN", "CELOPHP", "CELOXAUT", "CELOXOF", "CELOZAR"]
+          feeds       = ["CELOAUD", "CELOBRL", "CELOCAD", "CELOCHF", "CELOCOP", "CELOETH", "CELOEUR", "CELOGBP", "CELOGHS", "CELOJPY", "CELOKES", "CELONGN", "CELOPHP", "CELOUSD", "CELOXAUT", "CELOXOF", "CELOZAR"]
           daily_burn  = 0.05
           runway_days = 20
         }
