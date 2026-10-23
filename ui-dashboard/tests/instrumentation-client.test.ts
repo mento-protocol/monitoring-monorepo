@@ -1,8 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const { init } = vi.hoisted(() => ({ init: vi.fn() }));
+const { init, browserSessionIntegration } = vi.hoisted(() => ({
+  init: vi.fn(),
+  browserSessionIntegration: vi.fn(() => ({ name: "BrowserSession" })),
+}));
 vi.mock("@sentry/nextjs", () => ({
   init,
+  browserSessionIntegration,
   captureRouterTransitionStart: vi.fn(),
 }));
 vi.mock("../src/env", () => ({

@@ -65,9 +65,7 @@ if (shouldEnableSentry(clientEnv.NEXT_PUBLIC_VERCEL_ENV)) {
     replaysSessionSampleRate: 0.1,
     replaysOnErrorSampleRate: 1.0,
     ...sentryPrivacyOptions,
-    integrations: [
-      Sentry.browserSessionIntegration({ lifecycle: "route" }),
-    ],
+    integrations: [Sentry.browserSessionIntegration({ lifecycle: "route" })],
   });
 
   lazyLoadReplayIntegration();
