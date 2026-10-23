@@ -3,7 +3,7 @@ title: Split effects and RPC from handlers; decompose upsertPool into named effe
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-10-22
 scope: indexer-envio
 date: 2026-07
 doc_type: adr

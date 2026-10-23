@@ -3,7 +3,7 @@ title: Forensic Report — Mento Indexer Query Cookbook
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-10-22
 doc_type: skill
 scope: repo-wide
 review_interval_days: 90
@@ -13,9 +13,9 @@ garden_lane: agent-entry-points
 # Mento indexer query cookbook
 
 Deep procedure for Step 1.6 of [`SKILL.md`](../SKILL.md). The production Envio
-endpoint is the primary on-chain-behaviour source for the target chain: Arkham
-and Nansen are blind on Celo and Monad, so this is where "what did this address
-do with Mento" gets answered there.
+endpoint is the primary on-chain-behaviour source for Mento activity on the
+target chain. Verify external attribution providers’ current coverage and
+access separately; their identity results do not replace Mento event history.
 
 ## Hard constraints (read before writing a query)
 
@@ -30,10 +30,20 @@ From `docs/pr-checklists/swr-polling-hasura.md`:
 - `volumeUsdWei` is 0 when neither leg is USD-pegged (non-stable FX pairs) —
   don't read that as "no volume".
 - `BrokerSwapEvent` with `routedViaV3Router:true` are v3 siblings already
-  counted in `SwapEvent` — filter them out (`_eq:false`) to avoid
-  double-counting.
-- `RebalanceEvent.notionalUsd`/`rewardUsd` use an **empty-string sentinel** when
-  pre-reserve RPC failed — handle `""` distinctly from `"0"`.
+  counted in `SwapEvent` — filter them out (`_eq:false`). This filter alone
+  does not establish legacy-v2 totals: third-party aggregator → VirtualPool →
+  Broker paths can have the flag false. For **EOA targets**, prefer producer
+  rollups for totals of USD-valued v2 swaps only;
+  `indexer-envio/src/handlers/broker.ts` excludes every VirtualPool caller and
+  every zero-USD row there, including from `swapCount`. These are not total
+  activity counts. To count unpriced swaps too, supplement with raw zero-USD
+  rows only after the same VirtualPool de-duplication below. For **contract targets**, query raw events by the
+  matching role and exclude VirtualPool-routed Broker siblings using the
+  handler’s caller classification and transaction evidence before summing;
+  if that classification cannot be established, report raw activity without
+  claiming de-duplicated v2 totals.
+- `RebalanceEvent`: VirtualPools leave both USD fields `""`; reward is not applicable (no incentive), not unknown.
+  FPMM `notionalUsd` is blank for missing tokens/decimals, no USD-pegged leg, or two zero deltas; failed pre-reserve reads produce zero deltas, but zero deltas alone do not prove failure. FPMM `rewardUsd` is blank when notional is blank or incentive reads fail; absent getters mean zero incentive (`"0.0000"` when notional is valued). Treat valuation blanks as unknown, never numeric zero.
 
 ## Endpoint and liveness probe
 
@@ -55,9 +65,9 @@ curl -s "$HASURA" -H 'content-type: application/json' \
   --data "{\"query\":\"{ SwapEvent(where:{chainId:{_eq:$CHAIN_ID}},limit:1){id} LiquidityEvent(where:{chainId:{_eq:$CHAIN_ID}},limit:1){id} StableSupplyChangeEvent(where:{chainId:{_eq:$CHAIN_ID}},limit:1){id} RebalanceEvent(where:{chainId:{_eq:$CHAIN_ID}},limit:1){id} BridgeTransfer(where:{_or:[{sourceChainId:{_eq:$CHAIN_ID}},{destChainId:{_eq:$CHAIN_ID}}]},limit:1){id} SusdsPosition(where:{chainId:{_eq:$CHAIN_ID}},limit:1){id} SusdsYieldMovement(where:{chainId:{_eq:$CHAIN_ID}},limit:1){id} StethPosition(where:{chainId:{_eq:$CHAIN_ID}},limit:1){id} StethYieldMovement(where:{chainId:{_eq:$CHAIN_ID}},limit:1){id} }\"}" | jq .
 # Ethereum reserve-yield coverage includes both sUSDS and stETH positions and
 # movement history; omitting either family can turn real activity into false EMPTY.
-# Mark the indexer NOT-COVERED for $CHAIN only if EVERY entity above (and the full battery below) is
-# empty AND $CHAIN isn't in the indexer's configured network list — see the `networks:` section of
-# `indexer-envio/config.multichain.mainnet.yaml`. Otherwise an empty result is EMPTY (a real signal).
+# Empty probes and repository YAML do not prove coverage. Verify promoted network/entity
+# configuration and cursor coverage for the chain/period: unverified = NOT-ATTEMPTED;
+# proven exclusion = NOT-COVERED; within proven coverage only, no rows = EMPTY.
 ```
 
 ## Picking the filter field
@@ -81,16 +91,24 @@ the bot contract itself), `tx.from` is the _operator EOA_, not the contract, so 
 `caller`-only filter returns a false-EMPTY even though the contract is all over
 the data. Filter on `sender` / `txTo` / `recipient` / `brokerCaller` instead, or
 `_in` across roles when the address could appear as either. The examples below
-show `caller`; swap the field to match the target.
+show EOA attribution. The daily rollups have only EOA keys (`trader` or
+`caller`); do not substitute contract roles into them. For contracts, skip those
+rollups and use raw rows with the applicable role fields and de-duplication
+rule above.
 
 ## The battery
 
+These are first-page examples, not histories. Page every multi-row query with
+deterministic ordering ending in `id` and offsets 0, 1000, … until fewer than
+1000 rows return. Fix the indexed range first so inserts cannot shift pages;
+without full pagination, report samples, not totals.
+
 ```graphql
-# Lifetime rollups (fast path — swap volume, cadence, routers, protocol-actor flag)
+# EOA-only USD-valued swap rollups (page all days; excludes unpriced swaps)
 {
   TraderDailySnapshot(
     where: { trader: { _eq: "0xtarget" }, chainId: { _eq: <CHAIN_ID> } }
-    order_by: { timestamp: desc }
+    order_by: [{ timestamp: desc }, { id: desc }]
     limit: 1000
   ) {
     chainId
@@ -106,7 +124,7 @@ show `caller`; swap the field to match the target.
 {
   BrokerTraderDailySnapshot(
     where: { caller: { _eq: "0xtarget" }, chainId: { _eq: <CHAIN_ID> } }
-    order_by: { timestamp: desc }
+    order_by: [{ timestamp: desc }, { id: desc }]
     limit: 1000
   ) {
     chainId
@@ -173,7 +191,7 @@ show `caller`; swap the field to match the target.
   }
 }
 {
-  Trove(where: { owner: { _eq: "0xtarget" }, chainId: { _eq: <CHAIN_ID> } }) {
+  Trove(where: { owner: { _eq: "0xtarget" }, chainId: { _eq: <CHAIN_ID> } }, order_by: [{ id: desc }], limit: 1000, offset: 0) {
     id
     coll
     debt
@@ -185,7 +203,7 @@ show `caller`; swap the field to match the target.
   # closed owns no Trove now but is all over TroveOperationEvent. NOTE: the indexer records LIQUIDATE in a
   # separate LiquidationEvent (keyed by trove/instance, not owner address), so liquidations are NOT in this
   # entity — check LiquidationEvent by troveId if the target's trove may have been liquidated.
-  TroveOperationEvent(where: { owner: { _eq: "0xtarget" }, chainId: { _eq: <CHAIN_ID> } }, order_by: [{ timestamp: desc }, { id: desc }], limit: 1000) {
+  TroveOperationEvent(where: { owner: { _eq: "0xtarget" }, chainId: { _eq: <CHAIN_ID> } }, order_by: [{ timestamp: desc }, { blockNumber: desc }, { logIndex: desc }, { id: desc }], limit: 1000, offset: 0) {
     id
     troveId
     operation
@@ -194,7 +212,7 @@ show `caller`; swap the field to match the target.
   }
 }
 {
-  LiquidityPosition(where: { address: { _eq: "0xtarget" }, chainId: { _eq: <CHAIN_ID> } }) {
+  LiquidityPosition(where: { address: { _eq: "0xtarget" }, chainId: { _eq: <CHAIN_ID> } }, order_by: [{ id: desc }], limit: 1000, offset: 0) {
     poolId
   }
 }
@@ -233,7 +251,8 @@ show `caller`; swap the field to match the target.
 {
   # Filter on caller (signer) OR counterparty (mint recipient / burn holder) — the target may be the
   # recipient/holder rather than the tx signer, which a caller-only filter would miss.
-  StableSupplyChangeEvent(where: { _and: [{ _or: [{ caller: { _eq: "0xtarget" } }, { counterparty: { _eq: "0xtarget" } }] }, { chainId: { _eq: <CHAIN_ID> } }] }, limit: 1000) {
+  StableSupplyChangeEvent(where: { _and: [{ _or: [{ caller: { _eq: "0xtarget" } }, { counterparty: { _eq: "0xtarget" } }] }, { chainId: { _eq: <CHAIN_ID> } }] }, order_by: [{ id: desc }], limit: 1000, offset: 0) {
+    id
     txHash
     kind
     amount
@@ -256,8 +275,11 @@ show `caller`; swap the field to match the target.
         { _or: [{ sourceChainId: { _eq: <CHAIN_ID> } }, { destChainId: { _eq: <CHAIN_ID> } }] }
       ]
     }
+    order_by: [{ id: desc }]
     limit: 1000
+    offset: 0
   ) {
+    id
     sentTxHash
     sender
     recipient
@@ -266,7 +288,7 @@ show `caller`; swap the field to match the target.
 }
 ```
 
-A non-empty result here, scoped to the actual target chain, is far stronger than
-anything the Celo-blind attributors can give — and a verified-live **empty**
-result is a real signal ("never interacted with Mento v2/v3 on this chain"), not
-a tooling gap.
+Results here describe Mento activity on the verified-live target chain, not
+identity. An **empty** result is evidence only for the queried roles, entities,
+and indexed period after coverage and pagination are verified; it does not
+prove the address never interacted with Mento.

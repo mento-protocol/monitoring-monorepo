@@ -3,7 +3,7 @@ title: Forensic Report — Capital, Scale, and Historical USD Valuation
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-10-22
 doc_type: skill
 scope: repo-wide
 review_interval_days: 90
@@ -19,6 +19,11 @@ Deep procedure for Steps 5 and 5.5 of [`SKILL.md`](../SKILL.md).
 Pass the chain hint through to Sim. `$CHAIN_ID` comes from Step 1's case switch
 (see `chain-setup.md`); hardcoding `42220` would return empty or unrelated
 holdings for a Monad (or other-chain) principal.
+
+These examples require a CLI exposing `dune sim evm balances`. Check the
+installed CLI help for that subcommand and its flags before running them;
+otherwise use the available Sim balance tool with the same chain, pagination,
+and unpriced-asset controls, or record the source as `NOT-ATTEMPTED`.
 
 ```bash
 dune sim evm balances $PRINCIPAL --chain-ids $CHAIN_ID -o json | jq '.balances | length'
@@ -76,6 +81,6 @@ corroboration; it is not a deterministic scam or liquidity verdict.
 - Coverage is token-specific even on supported chains. If a key returns nothing,
   corroborate with Sim and venue liquidity and disclose the pricing gap rather
   than silently reporting zero.
-- **`coins.llama.fi` is not on the default sandbox network allowlist.** It's a
-  read-only public GET — allowlist the host or run the single command
-  unsandboxed.
+- Network access depends on the execution surface. If a public GET is blocked,
+  use an available read-only fetch surface or record the pricing source as
+  `NOT-ATTEMPTED`; never treat a transport failure as a missing price.

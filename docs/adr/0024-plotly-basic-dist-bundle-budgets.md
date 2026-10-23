@@ -3,7 +3,7 @@ title: Plotly.js basic-dist-min plus enforced bundle-size budgets
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-24
+last_verified: 2026-10-23
 scope: ui-dashboard
 date: 2026-03
 doc_type: adr
