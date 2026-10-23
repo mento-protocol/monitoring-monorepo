@@ -42,5 +42,12 @@ describe("browser Sentry initialization", () => {
     expect(options.tracesSampleRate).toBe(0.2);
     expect(options.replaysSessionSampleRate).toBe(0.1);
     expect(options.replaysOnErrorSampleRate).toBe(1);
+
+    expect(browserSessionIntegration).toHaveBeenCalledWith({
+      lifecycle: "route",
+    });
+    const integrationMockInstance =
+      browserSessionIntegration.mock.results[0].value;
+    expect(options.integrations).toContain(integrationMockInstance);
   });
 });
