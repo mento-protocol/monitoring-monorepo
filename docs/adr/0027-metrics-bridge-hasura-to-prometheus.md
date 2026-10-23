@@ -3,7 +3,7 @@ title: A Hasura to Prometheus bridge exists so v3 DB data can drive Grafana aler
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-24
+last_verified: 2026-10-23
 scope: metrics-bridge
 date: 2026-04
 doc_type: adr

@@ -3,7 +3,7 @@ title: Auth.js with Google; previews share prod auth secrets behind SSO and Git 
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-24
+last_verified: 2026-10-23
 scope: ui-dashboard
 date: 2026-03
 doc_type: adr
@@ -28,9 +28,9 @@ Use **Auth.js v5 with Google OAuth**. Preview deployments receive the **same**
 `AUTH_GOOGLE_ID`/`AUTH_GOOGLE_SECRET`/`AUTH_SECRET` as production, because the
 `redirectProxyUrl` flow requires the signed state JWE to verify against the same
 `AUTH_SECRET` on both ends. This is made safe by two controls: **Vercel Deployment
-Protection** and **Git fork protection**. The live Vercel project applies SSO
-protection to all previews and production deployment URLs, and refuses preview
-deployments from fork PRs.
+Protection** and **Git fork protection**. Policy requires SSO on previews and
+production deployment URLs and blocks fork PR previews; the dated live
+observation below is historical, not a new deployment attestation.
 
 ## Alternatives considered
 

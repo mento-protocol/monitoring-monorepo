@@ -3,7 +3,7 @@ title: Denormalize the v2 Broker swap path to de-duplicate VirtualPool-routed vo
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-10-22
 scope: indexer-envio
 date: 2026-05
 doc_type: adr

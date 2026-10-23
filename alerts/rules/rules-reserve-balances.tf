@@ -16,6 +16,9 @@ resource "grafana_rule_group" "reserve_balances" {
       name      = "Low ${rule.key} Reserve Balance Alert"
       condition = "lowerThan${rule.value.threshold / 1000000}m${rule.key}"
 
+      # Retire Celo's legacy balance alerts while preserving positional rule UIDs.
+      is_paused = contains(["USDC", "USDT", "axlUSDC"], rule.key)
+
       # Threshold must be breached for at least 1 hour. Using the default 1m could get very noisy.
       # Because due to trades in both directions, it could temporarily dip below the threshold and
       # then back above it many times, causing a lot of alerts.

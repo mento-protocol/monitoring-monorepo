@@ -3,7 +3,7 @@ title: Forensic Report — Contract and EOA Analysis
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-10-22
 doc_type: skill
 scope: repo-wide
 review_interval_days: 90
@@ -39,18 +39,21 @@ Before concluding "no interesting getters", do three things.
 
 ### 1. Proxy check (zero new dependency)
 
-Read the standard slots — a non-zero value means you've been reading an empty
-shell and must analyse the _implementation_ instead:
+Read the standard slots from [ERC-1967](https://eips.ethereum.org/EIPS/eip-1967)
+and [ERC-1822](https://eips.ethereum.org/EIPS/eip-1822). Resolve the logic address
+before analysing implementation code; keep state reads on the proxy address:
 
 ```bash
-# EIP-1967 impl / admin / beacon, then EIP-1822 (UUPS). For impl/admin/EIP-1822, non-zero → last 20
-# bytes IS the address to analyse. The BEACON slot is different: its last 20 bytes are the BEACON
-# contract, not the impl — call beacon.implementation() and analyse THAT (see below).
+# EIP-1967 impl / admin / beacon, then the original EIP-1822 PROXIABLE slot.
+# impl/PROXIABLE: last 20 bytes identify the logic contract, not the admin.
+# admin: upgrade authority only; never substitute it for the implementation.
+# beacon: consider only when the implementation slot is empty; resolve its implementation().
+# Empty slots do not rule out other proxy families (for example minimal proxies).
 cast storage $ADDR 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc --block $HEAD_BLOCK --rpc-url $RPC  # impl
 cast storage $ADDR 0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103 --block $HEAD_BLOCK --rpc-url $RPC  # admin
 cast storage $ADDR 0xa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee59ff6cb3582b35133d50 --block $HEAD_BLOCK --rpc-url $RPC  # beacon
 cast storage $ADDR 0xc5f16f0fcc639fa48a6947836d9850f504798523bf8c9a3a87d5876cf622bcf7 --block $HEAD_BLOCK --rpc-url $RPC  # EIP-1822
-# If the beacon slot was non-zero, resolve the real implementation from the beacon contract:
+# If implementation is empty and beacon is non-zero, resolve the logic from the beacon:
 BEACON=0x…   # last 20 bytes of the beacon slot value above
 cast call "$BEACON" "implementation()(address)" --block "$HEAD_BLOCK" --rpc-url "$RPC"
 ```
@@ -67,8 +70,8 @@ chain's explorer: Celoscan / Monadscan / Polygonscan / Etherscan.
 These are chain-agnostic — they operate on raw bytecode, so Celo non-indexing is
 irrelevant:
 
-- **Dedaub API** (`https://api.dedaub.com`, free tier, async POST→poll) for
-  readable pseudo-Solidity.
+- **Dedaub** for readable pseudo-Solidity when its current API and access
+  terms permit. Check those terms before uploading bytecode.
 - **heimdall-rs** locally (`heimdall decompile/cfg`, MIT, nothing leaves the
   machine — use for sensitive targets).
 - **WhatsABI** (`@shazow/whatsabi`) to enumerate the full selector surface
@@ -76,8 +79,8 @@ irrelevant:
   or it reads bytecode/proxy slots on the wrong chain — and follows EIP-1967
   proxies. Resolve names via the OpenChain DB.
 
-This is the only way to describe what a closed-source proprietary bot actually
-does.
+Treat decompiled output as a hypothesis. Confirm material behaviour against
+bytecode, pinned state reads, and transaction traces.
 
 ## EOA target — behavioural profile
 
@@ -113,9 +116,9 @@ cast call "$ADDR" 'getOwners()(address[])'  --block "$HEAD_BLOCK" --rpc-url "$RP
 cast call "$ADDR" 'getThreshold()(uint256)' --block "$HEAD_BLOCK" --rpc-url "$RPC"
 ```
 
-Link Safes by intersecting owner sets. The free hosted Safe tx-service (keyless
-reads) is per-chain: `https://api.safe.global/tx-service/<safe-slug>/api/v1/safes/<safe>/`,
-where `<safe-slug>` is the chain's Safe short-name (celo→`celo`, polygon→`pol`,
-ethereum→`eth`). Not every chain has one (Monad doesn't), so don't copy the
-`celo` slug for a non-Celo target. This exposes the people behind a
-treasury/managed-bot the proxy address would otherwise hide.
+Link Safes by intersecting owner sets; an owner can itself be a contract,
+so do not equate the returned addresses with identified people. For optional
+transaction history, discover the requested chain's current service and access
+requirements in the [Safe Transaction Service documentation](https://docs.safe.global/core-api/transaction-service-overview).
+Do not construct a service URL by substituting a chain slug. A missing service
+is `NOT-COVERED`; a failed request is a tooling gap, not empty Safe history.
