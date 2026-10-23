@@ -47,7 +47,9 @@ describe("browser Sentry initialization", () => {
       lifecycle: "route",
     });
     const integrationMockInstance =
-      browserSessionIntegration.mock.results[0].value;
-    expect(options.integrations).toContain(integrationMockInstance);
+      browserSessionIntegration.mock.results[0]!.value;
+    expect(options.integrations as unknown[]).toContain(
+      integrationMockInstance,
+    );
   });
 });
