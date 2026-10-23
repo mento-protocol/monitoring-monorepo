@@ -36,7 +36,7 @@
     "@mento-protocol/config": "workspace:*",
     "@mento-protocol/ui": "0.1.0",
     "@radix-ui/react-tooltip": "^1.2.16",
-    "@sentry/nextjs": "^10.74.0",
+    "@sentry/nextjs": "^11.0.0",
     "@upstash/redis": "^1.38.4",
     "@vercel/analytics": "^2.0.1",
     "@vercel/blob": "^2.8.0",
