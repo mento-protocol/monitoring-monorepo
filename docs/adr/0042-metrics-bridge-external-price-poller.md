@@ -3,7 +3,7 @@ title: metrics-bridge hosts the external market-price peg poller
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-24
+last_verified: 2026-10-23
 scope: metrics-bridge
 date: 2026-07
 doc_type: adr
@@ -58,9 +58,8 @@ monitoring, extending — not replacing — ADR 0027's scope:
   indexer's `SwapEvent` entity (indexed by `poolId, blockTimestamp`, with
   `caller` identity), the already-polled pool reserves, and the indexed
   `TradingLimit` rows (`limit0`/`limit1`, `netflow0`/`netflow1`, window
-  update times), which supply the denominator for the saturation fraction —
-  swap flow alone gives only the numerator, and pool-level pressure fields
-  collapse token direction. Saturation is computed per configured window on
+  update times), supplying the contract-observed fraction — raw swap flow
+  is advisory, and pool-level pressure fields collapse token direction. Saturation is computed per configured window on
   the monitored token's inflow direction, taking the maximum across the
   active L0/L1 windows. Window durations (`timestep0`/`timestep1`) are
   exposed by neither the indexed `TradingLimit` entity nor the FPMM's
@@ -73,11 +72,9 @@ monitoring, extending — not replacing — ADR 0027's scope:
   closed if that provenance can no longer be verified. A window's retained
   netflow counts only while it remains inside the vendored timestep
   (TradingLimitsV2's lazy reset) — stale flow must never feed saturation
-  after its window has ended. Swap amounts are normalized from raw token units
-  into TradingLimitsV2's fixed 15-decimal limit scale (using each token's
-  decimals) before the fraction — `SwapEvent` stores raw event units while
-  `TradingLimit.limit*`/`netflow*` use the 15-decimal internal precision,
-  so unnormalized division misstates saturation by orders of magnitude.
+  after its window has ended. Saturation uses indexed `netflow* / limit*`,
+  both in TradingLimitsV2's fixed 15-decimal scale. Raw swap reductions are
+  advisory only: even normalized swaps omit fee-adjusted contract input.
   Queries page to a bounded maximum and emit an
   explicit saturation flag when the window overflows; per
   [ADR 0014](0014-snapshot-entities-no-aggregate.md), no Hasura

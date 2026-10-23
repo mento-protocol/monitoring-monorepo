@@ -3,7 +3,7 @@ title: Required CI checks carry no paths filters; only advisory jobs may
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-10-22
 scope: ci/process
 date: 2026-04
 doc_type: adr

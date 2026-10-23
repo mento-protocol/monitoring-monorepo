@@ -3,7 +3,7 @@ title: Hasura auto-generated GraphQL over Postgres is the read API
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-10-22
 scope: repo-wide
 date: 2026-03
 doc_type: adr
