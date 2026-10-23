@@ -79,9 +79,13 @@ revert that turns it green, so the recovery path is authorized rather than left
 to improvisation. The operator opens that PR, gets it green on its own required
 checks, and posts
 `/pr-ready-override gate=base-red head=<full-head-sha> base=<base-oid>
-reason=<why>`. That reuses the existing Codex break-glass mechanism: a human
-`OWNER`/`MEMBER`/`COLLABORATOR` author, a stated reason, and binding to the
-current head, so any push expires it. It also names the base commit judged, so
+reason=<why>`. For `base-red` only, an authorized agent may record explicit
+operator consent from authenticated current chat under the provenance contract
+in [pr-ready-state.md](../notes/pr-ready-state.md). This avoids asking the
+operator to repeat the same approval manually on GitHub. The existing parser's
+non-bot `OWNER`/`MEMBER`/`COLLABORATOR` account check is unchanged; the agent
+verifies chat provenance. The manual human Codex override remains unchanged.
+Both require a stated reason and bind to current head, so any push expires it. It also names the base commit judged, so
 a base that moves to another red commit needs a fresh decision, and a base
 whose health could not be read is never overridable. The override clears only `base-red`;
 checks, conflicts, review state and the Codex gate stay independent, and the

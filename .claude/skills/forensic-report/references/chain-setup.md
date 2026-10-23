@@ -3,7 +3,7 @@ title: Forensic Report — Chain Bootstrap and Cache Inventory
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-10-22
 doc_type: skill
 scope: repo-wide
 review_interval_days: 90
@@ -49,21 +49,24 @@ case "$CHAIN" in
 esac
 ```
 
+Before any state read, run `cast chain-id --rpc-url "$RPC"` and require it
+to equal `$CHAIN_ID`. RPC defaults match `indexer-envio/src/rpc/client.ts`;
+endpoint availability still needs a live check.
+
 ## Provenance capture
 
 Mutable-state reads (storage, balances, prices) are only reproducible if pinned
 to a block. Record these and put them in the report's provenance footer:
 
 ```bash
-HEAD_BLOCK=$(cast block-number --rpc-url $RPC)   # the block reads are "as of"
+SNAPSHOT_BLOCK=$(cast block finalized --json --rpc-url "$RPC") || exit 1
+HEAD_BLOCK=$(printf '%s' "$SNAPSHOT_BLOCK" | jq -er '.number | select(type == "string" and test("^0x[0-9a-fA-F]+$"))') || exit 1
+HEAD_HASH=$(printf '%s' "$SNAPSHOT_BLOCK" | jq -er '.hash | select(type == "string" and test("^0x[0-9a-fA-F]{64}$"))') || exit 1
 cast --version                                   # tool version, for the footer
-# Note the RPC endpoint, $HEAD_BLOCK, and the UTC timestamp of each Sim/DefiLlama query.
+# Record the RPC endpoint, $HEAD_BLOCK, $HEAD_HASH, and each query’s UTC timestamp.
 ```
 
-Pin the attribution-anchoring storage reads with
-`cast call "$ADDR" "<sig>" --block "$HEAD_BLOCK" --rpc-url "$RPC"` (quote the
-`<sig>` placeholder so bash doesn't read it as a redirection) so a future reader
-gets the same bytes.
+Replay captured finalized state with `cast call "$ADDR" "<sig>" --block "$HEAD_BLOCK" --rpc-url "$RPC"`; keep the signature quoted. If finalized capture fails or is unsupported, stop and mark the snapshot unavailable; never fall back to `latest` or `safe`. Replay requires retained historical state.
 
 ## Production database discovery (only after the preflight passes)
 
@@ -121,13 +124,13 @@ they are not address-keyed.
 
 ## Reading the payloads
 
-**These caches ARE the cross-chain identity leg**: they're populated from the
-target's activity on chains Arkham covers — i.e. NOT Celo/Monad. For a
-Celo-native address they're often empty, and that emptiness is itself the
-finding ("no Ethereum/L2 footprint Arkham can see"). When they hit, they're the
-fastest path to who's behind the address — subject to the contract-target
-identity rule in `SKILL.md`: only consume a hit keyed on the target's own
-address as identity for an **EOA** target.
+These caches support the cross-chain identity leg on the chains and periods
+recorded in their provenance. Verify current provider coverage and access
+before a live query; do not assume Celo or Monad is excluded. A missing cache
+entry does not prove an absent footprint. Record it as a cache miss; distinguish
+`NOT-COVERED` provider coverage from `NOT-ATTEMPTED` transport. Consume a hit
+subject to the contract-target identity rule in `SKILL.md`: only a hit keyed on
+the target's own address can identify an **EOA** target.
 
 Don't treat the payloads as opaque blobs — the typed accessors in
 `ui-dashboard/src/lib/` give exact field paths:

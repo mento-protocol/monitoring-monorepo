@@ -3,7 +3,7 @@ title: Dashboard mutable state lives in Upstash Redis with Vercel Blob backups
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-24
+last_verified: 2026-10-23
 scope: ui-dashboard
 date: 2026-03
 doc_type: adr
