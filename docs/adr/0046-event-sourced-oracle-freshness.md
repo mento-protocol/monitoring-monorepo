@@ -3,7 +3,7 @@ title: Oracle freshness is reconstructed from persisted report events
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-24
+last_verified: 2026-10-23
 scope: indexer-envio
 date: 2026-07
 doc_type: adr
