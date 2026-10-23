@@ -1194,6 +1194,7 @@ describe("GET /api/reserve-yield", () => {
   });
 
   it("falls back to Block Analitica when the on-chain Sky Savings Rate read fails", async () => {
+    globalThis.__hermeticTestGuardExpectBlockedRequests?.(1);
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(Response.json(RESERVE_WITH_YIELD_COMPONENTS))
@@ -1210,7 +1211,7 @@ describe("GET /api/reserve-yield", () => {
     const body = await res.json();
 
     expect(res.status).toBe(200);
-    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock).toHaveBeenCalledTimes(5);
     expect(body.skySavingsRateApyPercent).toBeCloseTo(3.6, 12);
     expect(body.skySavingsRateSource).toBe("blockanalitica-overall");
     expect(body.rateError).toBeNull();
@@ -1222,6 +1223,7 @@ describe("GET /api/reserve-yield", () => {
   });
 
   it("keeps AUSD forecasts when the Sky Savings Rate sources fail", async () => {
+    globalThis.__hermeticTestGuardExpectBlockedRequests?.(1);
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(Response.json(RESERVE_WITH_YIELD_COMPONENTS))
       .mockResolvedValueOnce(
@@ -1250,6 +1252,7 @@ describe("GET /api/reserve-yield", () => {
   });
 
   it("returns null forecasts when both rate feeds fail", async () => {
+    globalThis.__hermeticTestGuardExpectBlockedRequests?.(1);
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(Response.json(RESERVE_WITH_YIELD_COMPONENTS))
       .mockResolvedValueOnce(new Response("fred down", { status: 503 }))
