@@ -3,7 +3,7 @@ title: The indexer vendors a mirror of shared-config because Envio builds outsid
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-23
+last_verified: 2026-10-22
 scope: indexer-envio
 date: 2026-03
 doc_type: adr
@@ -33,7 +33,9 @@ workspace package. The checked-in JSON mirrors are
 `config/aggregators.json`, `config/deployment-namespaces.json`,
 `config/fx-calendar.json`, and `config/oracle-reporters.json`; the selected
 token-filter policy is mirrored in
-`src/feeToken.ts` (`buildKnownTokenMeta`). These are deliberate, documented
+`src/feeToken.ts` (`buildKnownTokenMeta`). The deviation ratios in
+`shared-config/src/thresholds.ts` are also mirrored as bigint numerator/denominator
+constants in `indexer-envio/src/pool/health.ts`. These are deliberate, documented
 mirrors: when a source changes in `shared-config`, its indexer copy changes in
 the same PR.
 
@@ -53,11 +55,15 @@ the same PR.
   called out as a mirror-not-debt so reviewers don't try to "DRY" it away.
 - JSON parity tests fail when a checked-in mirror diverges. The indexer layers
   a stricter fee-token policy at its call site; drift is a review hazard, so
-  both sides move together.
+  both sides move together. Numeric threshold parity is enforced by
+  `indexer-envio/test/deviationThresholdSharedConfigSync.test.ts`;
+  `indexer-envio/test/healthStatusParity.test.ts` checks behavior.
 
 ## Evidence
 
 - `indexer-envio/config/{aggregators,deployment-namespaces,fx-calendar,oracle-reporters}.json`,
   their parity tests, `src/feeToken.ts`, and the workspace-boundary note in
   `src/contractAddresses.ts`.
+- `shared-config/src/thresholds.ts`, `indexer-envio/src/pool/health.ts`, and
+  `indexer-envio/test/deviationThresholdSharedConfigSync.test.ts`.
 - [`indexer-envio/AGENTS.md`](../../indexer-envio/AGENTS.md) §Dependencies.
