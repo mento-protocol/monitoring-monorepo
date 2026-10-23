@@ -134,5 +134,5 @@ CI=true pnpm install --frozen-lockfile --prefer-offline
 It then installs the Chromium revision selected by the branch's Playwright
 package with `pnpm --filter @mento-protocol/ui-dashboard exec playwright install chromium`.
 This refreshes cached browsers after a dependency upgrade without rerunning apt
-or installing host libraries. A failed browser install stops maintenance. It
+or installing host libraries. The browser download is bounded to 5 minutes to prevent indefinite CDN stalls; a failed or timed-out browser install stops maintenance. It
 finishes by regenerating Envio types and running `pnpm agent:context-check`.

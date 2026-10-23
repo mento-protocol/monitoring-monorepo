@@ -247,13 +247,64 @@ export function shouldEnableSentry(
   return Boolean(vercelEnv);
 }
 
+// Sentry 11 collects more data by default. Keep the v10 privacy baseline,
+// disable query collection (the scrubber already removes it), and retain
+// buffered transactions so beforeSendTransaction still filters and scrubs them.
+export const sentryPrivacyOptions = {
+  // Keep v10 message grouping and do not count informational messages as session errors.
+  attachStacktrace: false,
+  traceLifecycle: "static",
+  dataCollection: {
+    userInfo: false,
+    cookies: false,
+    httpHeaders: {
+      request: {
+        deny: [
+          "forwarded",
+          "-ip",
+          "remote-",
+          "via",
+          "-user",
+          "authorization",
+          "cookie",
+        ],
+      },
+      response: {
+        deny: [
+          "forwarded",
+          "-ip",
+          "remote-",
+          "via",
+          "-user",
+          "authorization",
+          "cookie",
+          "set-cookie",
+        ],
+      },
+    },
+    httpBodies: [],
+    urlQueryParams: false,
+    genAI: { inputs: false, outputs: false },
+    databaseQueryData: false,
+    queues: false,
+    graphQL: { document: false, variables: false },
+  },
+  beforeSend: filterAndStripSentryEvent,
+  beforeSendTransaction: filterAndStripSentryEvent,
+} satisfies Pick<
+  Options,
+  | "attachStacktrace"
+  | "traceLifecycle"
+  | "dataCollection"
+  | "beforeSend"
+  | "beforeSendTransaction"
+>;
+
 export function getServerSentryOptions(): Options {
   return {
     dsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
     environment: process.env.VERCEL_ENV ?? "development",
     tracesSampleRate: resolveTracesSampleRate(process.env.VERCEL_ENV),
-    sendDefaultPii: false,
-    beforeSend: filterAndStripSentryEvent,
-    beforeSendTransaction: filterAndStripSentryEvent,
+    ...sentryPrivacyOptions,
   };
 }

@@ -76,7 +76,15 @@ echo "==> Syncing workspace dependencies for the checked-out branch"
 CI=true pnpm install --frozen-lockfile --prefer-offline
 
 echo "==> Syncing Playwright Chromium for the checked-out branch"
-pnpm --filter @mento-protocol/ui-dashboard exec playwright install chromium
+if command -v timeout >/dev/null 2>&1; then
+  timeout --kill-after=30s 300 pnpm --filter @mento-protocol/ui-dashboard exec playwright install chromium
+else
+  cat >&2 <<'MSG'
+error: 'timeout' command is required but not found. A bounded browser
+download is required to prevent indefinite CDN stalls.
+MSG
+  exit 1
+fi
 
 echo "==> Regenerating Envio types for the checked-out branch"
 pnpm indexer:codegen
