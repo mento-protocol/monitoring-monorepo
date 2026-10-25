@@ -24,6 +24,10 @@ minimumReleaseAgeExclude:
   - protobufjs
 
 overrides:
+  # GHSA-27r3-jxmh-p828: retain the framework's 2.x parser line.
+  "body-parser@>=2.0.0 <2.4.0": 2.4.0
+  # GHSA-mrhx-c7xc-m3w5: patch existing 4.x consumers without forcing 3.x.
+  "zod@>=4.0.0 <4.6.6": 4.6.6
   # GHSA-587h-7wmj-h5pm: patched 8.0/8.1 floor; retain the Vite 8 line.
   "vite@>=8.0.0 <8.1.6": 8.1.6
   # Nodemon watches literal directories; chokidar 4 removes unpatched braces.

@@ -3,7 +3,7 @@ title: Documentation Catalog
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-26
+last_verified: 2026-10-25
 doc_type: index
 scope: repo-wide
 review_interval_days: 90

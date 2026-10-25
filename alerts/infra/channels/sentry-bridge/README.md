@@ -1,4 +1,4 @@
-<!-- agent-context: title="Sentry Alerts Module" status=active owner=eng canonical=true last_verified=2026-07-26 doc_type=runbook scope=alerts/infra/channels/sentry-bridge review_interval_days=90 garden_lane=operator-runbooks -->
+<!-- agent-context: title="Sentry Alerts Module" status=active owner=eng canonical=true last_verified=2026-10-25 doc_type=runbook scope=alerts/infra/channels/sentry-bridge review_interval_days=90 garden_lane=operator-runbooks -->
 
 # Sentry Alerts Module
 

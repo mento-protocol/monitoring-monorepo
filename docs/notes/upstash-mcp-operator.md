@@ -20,7 +20,7 @@ or the authenticated dashboard editor.
 
 ## Reviewed transport
 
-The workspace pins `@upstash/mcp-server@0.2.4` and `esbuild@0.28.1` in
+The workspace pins `@upstash/mcp-server@0.3.0` and `esbuild@0.28.1` in
 `package.json` and `pnpm-lock.yaml`. Normal repository setup installs those
 reviewed artifacts. Config generation verifies the server entrypoint, bundles
 its complete non-builtin dependency closure with an exact reviewed native
@@ -43,17 +43,18 @@ directory, install a missing package, or resolve a newer version from the
 registry.
 
 - npm integrity:
-  `sha512-LN5yao74QQZTjGmolGqAh9YkQa/206ni94wwTtu6I/mVkyMeAbRME7rjK64KrWmCTw2OHUb8TMFsw6r4rMmUSQ==`
-- npm shasum: `4b2a627dbce2773f000a0e14d15e61a7ca1150f8`
+  `sha512-lkdnEOFYUf3qxhBnejW1jaGC4vUHhGqjjzuTSeJDM3ztQhxzbmejyNcqyM7aNrqcPC4J8wtas8xeQcfb7x56YA==`
+- npm shasum: `fc3d0b920c92e4b7328435f7ab032908b89180d7`
 - launcher SHA-256:
-  `d26e950f130d8ca8b4a5d357ded55047b049a913d76425fb621dbd6a7050ed7a`
+  `b2ee55191c3c2474c0f0e5aadabe465b88979a5ec1310f64b375dffc7144da1c`
 - dependency-closed runtime SHA-256:
-  `6af58c9ada397f5e445ca28e752cc285f9806de8ecc3ae0eea57aeb5f4f0bd9d`
+  `7e7f852038ee7ffde747af4d64a29776c7dfa74659e75690c80a4e82539da5c7`
 - entrypoint SHA-256:
-  `1949e38e9c66aaac5cc00e2da2b8bbf712a4c39266f8f501a3cdd86253fe4b8e`
-- upstream git commit: `e3ab3c20ebd7d0e195cd774004fdb4c3dcb448d1`
+  `a2054c469aefbdf6ade732057dc16b5e12345ed284e79989327d1c1a6baddc73`
+- upstream git commit: `9a0f49f9e241d604b0820251eb5b47e268dea5bd`
 
-The reviewed dependency closure uses `@modelcontextprotocol/sdk@1.32.1`,
+The reviewed dependency closure uses native Zod 4.6.6 schemas and
+`@modelcontextprotocol/server@2.3.1`, `@modelcontextprotocol/node@2.1.1`,
 `@hono/node-server@1.19.17`, and `hono@4.13.7`. This repair leaves the Hono
 security floor (`GHSA-hxh3-vqpv-xpqv`) at `4.13.7` and esbuild at `0.28.1`.
 Future dependency or bundler changes require the same artifact review, runtime
@@ -169,7 +170,7 @@ secret-adjacent because another personal server may use unsafe arguments. For a
 shared log, record only these facts after redaction:
 
 - server name is `upstash`;
-- workspace package and lockfile resolve exactly `@upstash/mcp-server@0.2.4`;
+- workspace package and lockfile resolve exactly `@upstash/mcp-server@0.3.0`;
 - Node and the repository-owned launcher use absolute paths;
 - the personal config verifies the reviewed launcher SHA-256 before importing
   checkout code;
