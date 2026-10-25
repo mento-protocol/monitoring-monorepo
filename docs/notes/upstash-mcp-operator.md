@@ -61,11 +61,6 @@ Future dependency or bundler changes require the same artifact review, runtime
 rebuild, hash update, and focused contract checks as a server-version update.
 Do not reuse a runtime hash across different dependency closures.
 
-The byte pin also includes esbuild source-path comments. The frozen lock
-resolves the existing `supports-color@5.5.0` peer context in the server and SDK
-paths; those comments remain part of the reviewed artifact. Do not normalize
-them or reuse a hash from a different peer context.
-
 The published entrypoint reads `UPSTASH_EMAIL` and `UPSTASH_API_KEY` when the
 matching command flags are absent. The reviewed config omits those flags,
 disables upstream telemetry, and exposes only
