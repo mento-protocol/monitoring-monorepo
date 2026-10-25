@@ -112,7 +112,7 @@ async function upsertTransferByDigest(
   const nextDetail = {
     ...priorDetail,
     ...detailDelta,
-  } as WormholeTransferDetail;
+  };
   const mergedTransfer = {
     ...priorTransfer,
     ...transferDelta,
@@ -120,8 +120,8 @@ async function upsertTransferByDigest(
   };
   const nextTransfer: BridgeTransfer = {
     ...mergedTransfer,
-    status: computeWormholeStatus(mergedTransfer as BridgeTransfer, nextDetail),
-  } as BridgeTransfer;
+    status: computeWormholeStatus(mergedTransfer, nextDetail),
+  };
 
   context.BridgeTransfer.set(nextTransfer);
   context.WormholeTransferDetail.set(nextDetail);
@@ -223,15 +223,11 @@ indexer.onEvent(
       },
     );
     if (!pending) {
-      warnUnmatchedScratchDrain(
-        context as HandlerContext,
-        event,
-        "WormholeTransferPending",
-      );
+      warnUnmatchedScratchDrain(context, event, "WormholeTransferPending");
     }
 
     const mgr = await ensureNttManagerSeed(
-      context as HandlerContext,
+      context,
       chainId,
       manager,
       BigInt(event.block.timestamp),
@@ -284,7 +280,7 @@ indexer.onEvent(
     }
 
     await upsertTransferByDigest(
-      context as HandlerContext,
+      context,
       digest,
       ts,
       transferDelta,
@@ -311,7 +307,7 @@ indexer.onEvent(
         const firstTimeSent =
           priorTransfer?.sentBlock == null || priorTransfer.sentBlock === 0n;
         if (firstTimeSent) {
-          await updateDailySnapshot(context as HandlerContext, {
+          await updateDailySnapshot(context, {
             blockTimestamp: ts,
             tokenSymbol: mgr.tokenSymbol,
             sourceChainId: chainId,
@@ -322,7 +318,7 @@ indexer.onEvent(
           // skip when tx.from was missing — would create a phantom "" sender
           // row that aggregates unrelated transfers.
           if (pending.sender) {
-            await updateBridger(context as HandlerContext, {
+            await updateBridger(context, {
               sender: pending.sender,
               sourceChainId: chainId,
               tokenSymbol: mgr.tokenSymbol,
@@ -339,7 +335,7 @@ indexer.onEvent(
           priorTransfer?.deliveredTimestamp != null &&
           priorTransfer?.amount == null
         ) {
-          await updateDailySnapshot(context as HandlerContext, {
+          await updateDailySnapshot(context, {
             blockTimestamp: priorTransfer.deliveredTimestamp,
             tokenSymbol: mgr.tokenSymbol,
             sourceChainId: chainId,
@@ -395,7 +391,7 @@ indexer.onEvent(
     const chainId = event.chainId;
     const manager = event.srcAddress.toLowerCase();
     const mgr = await ensureNttManagerSeed(
-      context as HandlerContext,
+      context,
       chainId,
       manager,
       BigInt(event.block.timestamp),
@@ -465,18 +461,15 @@ indexer.onEvent(
       context.log.warn(
         `wormhole.transferRedeemed.fallback_drain digest=${digest} chain=${chainId} txHash=${event.transaction.hash} — MessageAttestedTo missing; draining scratch with ${filterDescription}`,
       );
-      destPending = await drainDestPending(
-        context as HandlerContext,
-        event,
-        mgr?.transceiver,
-        { warnOnMiss: false },
-      );
+      destPending = await drainDestPending(context, event, mgr?.transceiver, {
+        warnOnMiss: false,
+      });
     }
     const detailDelta: WormholeDetailDelta = {};
     applyDestPendingToDelta(destPending, priorTransfer, delta, detailDelta);
 
     const transfer = await upsertTransferByDigest(
-      context as HandlerContext,
+      context,
       digest,
       ts,
       delta,
@@ -494,7 +487,7 @@ indexer.onEvent(
       // TransferSentDigest) rather than the dest-side manifest — if a future
       // peer ever registered a different symbol for the same token, this
       // keeps the sent + delivered rollups bucketed against the same key.
-      await updateDailySnapshot(context as HandlerContext, {
+      await updateDailySnapshot(context, {
         blockTimestamp: ts,
         tokenSymbol: transfer.tokenSymbol,
         sourceChainId: transfer.sourceChainId,
@@ -617,21 +610,11 @@ indexer.onEvent(
     // (the transceiver-layer digest from ReceivedMessage cannot be used as
     // a BridgeTransfer key — it's a different hash from the manager digest).
     // Stamp the source identity onto the row being upserted here.
-    const destPending = await drainDestPending(
-      context as HandlerContext,
-      event,
-      p.transceiver,
-    );
+    const destPending = await drainDestPending(context, event, p.transceiver);
     const detailDelta: WormholeDetailDelta = {};
     applyDestPendingToDelta(destPending, prior, destDelta, detailDelta);
 
-    await upsertTransferByDigest(
-      context as HandlerContext,
-      p.digest,
-      ts,
-      destDelta,
-      detailDelta,
-    );
+    await upsertTransferByDigest(context, p.digest, ts, destDelta, detailDelta);
   },
 );
 
@@ -641,7 +624,7 @@ indexer.onEvent(
     const digest = event.params.digest;
     const ts = BigInt(event.block.timestamp);
     await upsertTransferByDigest(
-      context as HandlerContext,
+      context,
       digest,
       ts,
       {

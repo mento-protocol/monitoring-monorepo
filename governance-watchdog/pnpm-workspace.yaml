@@ -24,6 +24,8 @@ minimumReleaseAgeExclude:
   - protobufjs
 
 overrides:
+  # Keep the existing production metadata parser on its deployed dependency.
+  "normalize-package-data>semver": 7.8.2
   # GHSA-27r3-jxmh-p828: retain the framework's 2.x parser line.
   "body-parser@>=2.0.0 <2.4.0": 2.4.0
   # GHSA-mrhx-c7xc-m3w5: patch existing 4.x consumers without forcing 3.x.

@@ -351,7 +351,7 @@ export async function fetchReferenceRateFeedID(
       chainId,
       client,
       {
-        address: poolAddress as `0x${string}`,
+        address: poolAddress,
         abi: FPMM_MINIMAL_ABI,
         functionName: "referenceRateFeedID",
       },

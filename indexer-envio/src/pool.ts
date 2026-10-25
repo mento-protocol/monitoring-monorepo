@@ -223,7 +223,6 @@ const defaultPool = (
   updatedAtTimestamp: 0n,
 });
 
-// eslint-disable-next-line max-lines-per-function -- Existing pool upsert pipeline remains intentionally centralized for atomic state updates.
 export const upsertPool = async ({
   context,
   chainId,
@@ -280,6 +279,7 @@ export const upsertPool = async ({
    * `{ pool: ... }` so `pool: undefined` (fresh pool) is distinguishable
    * from "not passed". When `undefined`, upsertPool does its own lookup. */
   existing?: { pool: Pool | undefined };
+  // eslint-disable-next-line max-lines-per-function -- Existing pool upsert pipeline remains intentionally centralized for atomic state updates.
 }): Promise<Pool> => {
   const initialBase = existingOverride
     ? (existingOverride.pool ??

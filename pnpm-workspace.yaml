@@ -90,6 +90,8 @@ packageConfigs:
     saveExact: true
 
 overrides:
+  # Preserve the deployed glob closure during the lint-toolchain update.
+  "glob@13.0.6>minimatch": 10.2.5
   # GHSA-mrhx-c7xc-m3w5: patch existing 4.x consumers without forcing 3.x.
   "zod@>=4.0.0 <4.6.6": 4.6.6
   # GHSA-q3jh-wrc6-jgq8 / GHSA-8r9p-f939-6h3c: patched redirect handling.

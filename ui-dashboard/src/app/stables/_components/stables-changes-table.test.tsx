@@ -28,28 +28,31 @@ function renderThresholdInput({
   document.body.appendChild(container);
   root = createRoot(container);
 
-  act(() => {
-    root?.render(
-      <StablesChangesTable
-        events={[]}
-        minimumUsdValue={value}
-        onMinimumUsdValueChange={onChange}
-        onMinimumUsdValueReset={onReset}
-        isLoading={false}
-        hasError={false}
-        hasSettled={true}
-        capped={false}
-        unpricedEventsCount={0}
-        snapshotLimitCapped={false}
-      />,
-    );
-  });
+  const rerender = (nextValue = value, isLoading = false) =>
+    act(() => {
+      root?.render(
+        <StablesChangesTable
+          events={[]}
+          minimumUsdValue={nextValue}
+          onMinimumUsdValueChange={onChange}
+          onMinimumUsdValueReset={onReset}
+          isLoading={isLoading}
+          hasError={false}
+          hasSettled={true}
+          capped={false}
+          unpricedEventsCount={0}
+          snapshotLimitCapped={false}
+        />,
+      );
+    });
+
+  rerender();
 
   const input = container.querySelector<HTMLInputElement>(
     'input[aria-label="Minimum USD-equivalent supply change"]',
   );
   expect(input).toBeTruthy();
-  return { input: input as HTMLInputElement, onChange, onReset };
+  return { input: input as HTMLInputElement, onChange, onReset, rerender };
 }
 
 function changeEvent(index: number): StableSupplyChangeEvent {
@@ -191,6 +194,76 @@ describe("StablesChangesTable", () => {
 
     expect(input.value).toBe("1.5");
     expect(onChange).toHaveBeenCalledWith(1.5);
+  });
+
+  it.each(["", ".", "1."])(
+    "preserves focused %j drafts on same-value data rerenders",
+    (draft) => {
+      const { input, rerender, onChange, onReset } = renderThresholdInput();
+      input.focus();
+      setInputValue(input, draft);
+      rerender(DEFAULT_SUPPLY_CHANGE_MIN_USD, true);
+      expect(container?.querySelector("input")).toBe(input);
+      expect(document.activeElement).toBe(input);
+      expect(input.value).toBe(draft);
+      expect(onChange).not.toHaveBeenCalled();
+      expect(onReset).not.toHaveBeenCalled();
+    },
+  );
+
+  it("resets changed committed values without replacing or blurring the input", () => {
+    const { input, rerender, onChange, onReset } = renderThresholdInput();
+    input.focus();
+    for (const value of [10, 1000, 10]) {
+      setInputValue(input, ".");
+      rerender(value);
+      expect(input.value).toBe(String(value));
+      expect(container?.querySelector("input")).toBe(input);
+      expect(document.activeElement).toBe(input);
+    }
+    expect(onChange).not.toHaveBeenCalled();
+    expect(onReset).not.toHaveBeenCalled();
+  });
+
+  it.each(["", ".", "1."])(
+    "restores %j on Enter and Escape without committing",
+    (draft) => {
+      const { input, onChange } = renderThresholdInput();
+      for (const key of ["Enter", "Escape"]) {
+        setInputValue(input, draft);
+        act(() => {
+          input.dispatchEvent(
+            new KeyboardEvent("keydown", { key, bubbles: true }),
+          );
+        });
+        expect(input.value).toBe("1000");
+      }
+      expect(onChange).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps focus through a controlled Enter commit and avoids duplicate blur commits", () => {
+    const onChange = vi.fn();
+    const { input, rerender } = renderThresholdInput({ onChange });
+    input.focus();
+    setInputValue(input, "1.5");
+    act(() => {
+      input.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+      );
+    });
+    expect(onChange).toHaveBeenCalledExactlyOnceWith(1.5);
+    rerender(1.5);
+    expect(container?.querySelector("input")).toBe(input);
+    expect(document.activeElement).toBe(input);
+    act(() => {
+      input.blur();
+    });
+    expect(onChange).toHaveBeenCalledTimes(1);
+    input.focus();
+    setInputValue(input, "1.50");
+    expect(input.value).toBe("1.50");
+    expect(onChange).toHaveBeenCalledTimes(1);
   });
 
   it("limits rendered rows to 50 and paginates the remaining changes", () => {

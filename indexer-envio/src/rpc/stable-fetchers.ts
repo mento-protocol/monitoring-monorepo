@@ -65,7 +65,7 @@ export async function fetchStableTotalSupply(
       chainId,
       client,
       {
-        address: tokenAddress as `0x${string}`,
+        address: tokenAddress,
         abi: ERC20_TOTAL_SUPPLY_ABI,
         functionName: "totalSupply",
       },
@@ -121,7 +121,7 @@ export async function fetchStableBalanceOf(
       chainId,
       client,
       {
-        address: tokenAddress as `0x${string}`,
+        address: tokenAddress,
         abi: ERC20_BALANCE_OF_ABI,
         functionName: "balanceOf",
         args: [account as `0x${string}`],

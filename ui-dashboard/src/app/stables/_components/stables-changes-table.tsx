@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { AddressLink } from "@/components/address-link";
 import { TableSkeleton } from "@/components/skeletons";
 import { formatWei, truncateAddress } from "@/lib/format";
@@ -356,36 +356,40 @@ function SupplyChangeThresholdInput({
   onChange: (next: number) => void;
   onReset: () => void;
 }): React.JSX.Element {
-  const [draft, setDraft] = useState(() => String(value));
+  const [draft, setDraft] = useState(() => ({
+    committedValue: value,
+    text: String(value),
+  }));
 
-  // Draft text can be temporarily empty/invalid while `value` remains the
-  // committed URL-backed number; sync only when back/reset changes `value`.
-  // react-doctor-disable-next-line react-doctor/no-derived-state-effect
-  useEffect(() => {
-    // react-doctor-disable-next-line effect/no-derived-state
-    setDraft(String(value));
-  }, [value]);
+  // Preserve incomplete edits until the committed URL-backed number changes.
+  if (value !== draft.committedValue) {
+    setDraft({ committedValue: value, text: String(value) });
+  }
 
   const updateDraft = (nextDraft: string) => {
-    if (/^\d*(?:\.\d*)?$/.test(nextDraft)) setDraft(nextDraft);
+    if (/^\d*(?:\.\d*)?$/.test(nextDraft))
+      setDraft({ committedValue: value, text: nextDraft });
   };
 
   const commitDraft = () => {
-    const next = parseThresholdDraft(draft);
+    const next = parseThresholdDraft(draft.text);
     if (next == null) {
-      setDraft(String(value));
+      setDraft({ committedValue: value, text: String(value) });
       return;
     }
-    setDraft(String(next));
+    setDraft({ committedValue: value, text: String(next) });
     if (next !== value) onChange(next);
   };
 
   const restoreCommittedValue = () => {
-    setDraft(String(value));
+    setDraft({ committedValue: value, text: String(value) });
   };
 
   const resetDraft = () => {
-    setDraft(String(DEFAULT_SUPPLY_CHANGE_MIN_USD));
+    setDraft({
+      committedValue: value,
+      text: String(DEFAULT_SUPPLY_CHANGE_MIN_USD),
+    });
     onReset();
   };
 
@@ -413,7 +417,7 @@ function SupplyChangeThresholdInput({
             type="text"
             inputMode="decimal"
             pattern="[0-9]*[.]?[0-9]*"
-            value={draft}
+            value={draft.text}
             onChange={(event) => updateDraft(event.target.value)}
             onBlur={commitDraft}
             onKeyDown={handleKeyDown}

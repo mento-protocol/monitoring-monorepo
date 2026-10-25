@@ -132,7 +132,7 @@ export async function ensureBreakerConfig(
   const state = await context.effect(breakerFeedStateEffect, {
     chainId,
     breakerAddress: breaker.address,
-    kind: breaker.kind as BreakerKindRpc,
+    kind: breaker.kind,
     rateFeedID,
     blockNumber,
   });
