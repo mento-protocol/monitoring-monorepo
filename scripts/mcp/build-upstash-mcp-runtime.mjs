@@ -56,11 +56,11 @@ const ESBUILD_NATIVE_PACKAGES = {
   "win32 x64 LE": ["@esbuild/win32-x64", "esbuild.exe"],
 };
 const REQUIRED_RUNTIME_INPUTS = [
-  "@modelcontextprotocol+sdk@",
-  "@upstash+mcp-server@0.2.4",
+  "@modelcontextprotocol+server@",
+  "@upstash+mcp-server@0.3.0",
   "commander@14.0.3",
   "dotenv@16.6.1",
-  "zod@3.25.76",
+  "zod@4.6.6",
 ];
 
 function sha256(bytes) {

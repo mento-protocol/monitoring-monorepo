@@ -1,4 +1,4 @@
-<!-- agent-context: title="Mento Alerts Delivery Infrastructure" status=active owner=eng canonical=true last_verified=2026-07-26 doc_type=runbook scope=alerts/infra review_interval_days=90 garden_lane=operator-runbooks -->
+<!-- agent-context: title="Mento Alerts Delivery Infrastructure" status=active owner=eng canonical=true last_verified=2026-10-25 doc_type=runbook scope=alerts/infra review_interval_days=90 garden_lane=operator-runbooks -->
 
 # Mento Alerts
 
@@ -206,10 +206,11 @@ chain key.
 
 ### Build-artifact retention
 
-Every Gen2 deploy leaves two kinds of debris. One is bounded here, one is a
-known gap.
+Gen2 deploys leave function source archives and build images. This stack
+configures no expiry for either; current external retention settings need a
+separate live check.
 
-**Function source zips — partly bounded.** Versioning keeps each replaced
+**Function source zips — no expiry configured.** Versioning keeps each replaced
 archive as a noncurrent generation forever, so a source bucket needs a Delete
 rule at `days_since_noncurrent_time = 30`. Expire by noncurrent age, never by
 `num_newer_versions`: the object name embeds the source hash, so no generation
@@ -222,21 +223,24 @@ No function in this stack carries this rule today: the one that did
 their noncurrent archives accumulate without limit. Both are cheap to fix — the
 same `lifecycle_rule` block, on a bucket that already exists.
 
-**Build images — not bounded.** `gcf-artifacts` holds the function and build
-cache images for the Gen2 functions in this project. It was created by
-Cloud Functions on 2025-11-17 and has **no cleanup policy at all**, so every
-redeploy by every function adds versions that are never collected.
+**Build images — no repository-managed cleanup.** A historical inspection
+recorded `gcf-artifacts` as holding the project's Gen2 function and build-cache
+images, created by Cloud Functions on 2025-11-17 with no cleanup policy. Its
+current external state has not been rechecked. This stack does not manage a
+cleanup policy for that repository.
 `governance-watchdog/infra/artifact-registry.tf` solved the same problem there
 (delete older than 30 days, keep the 3 most recent per package) and is the
 model to copy.
 
 Adopting it here needs more than a resource block. The repository already
-exists, so Terraform must `import` it before the first apply — and
-`.github/workflows/alerts-infra.yml` applies unattended on merge with
-`terraform init` then `terraform apply` and nothing in between. A resource that
-adopts existing infrastructure would fail that apply with "already exists" and
-block every other change in the stack. The adoption therefore needs a matching
-change to the gated apply workflow, and belongs in its own PR.
+exists in the historical observation, so verify its current state and import
+it before applying a resource that adopts it.
+`.github/workflows/alerts-infra.yml` gates eligible main-branch applies on
+`production-infra` approval, verifies environment protection, and runs
+`terraform init` then `terraform apply`; it has no import step. Adding a
+resource for an existing repository without importing it would fail with
+"already exists" and block other changes in that apply. Plan the state-aware
+adoption through the gated workflow in its own PR.
 
 ### QuickNode Webhooks
 
