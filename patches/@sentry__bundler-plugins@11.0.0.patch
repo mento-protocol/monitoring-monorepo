@@ -1,0 +1,169 @@
+diff --git a/build/cjs/loader-utils/index.js b/build/cjs/loader-utils/index.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..6c0198febc57cab880fbdfe6d499de80e61c0613
+--- /dev/null
++++ b/build/cjs/loader-utils/index.js
+@@ -0,0 +1,68 @@
++// Backport of getsentry/sentry-javascript#24651; retain v11.0.0 Babel annotation.
++Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
++const core = require("@sentry/core");
++const utils = require("../core/utils.js");
++const getCodeInjectionPosition = require("../core/get-code-injection-position.js");
++
++let babelAnnotationRuntimePromise;
++function loadBabelAnnotationRuntime() {
++  if (!babelAnnotationRuntimePromise) {
++    babelAnnotationRuntimePromise = Promise.all([import('@babel/core'), Promise.resolve().then(() => require('../babel-plugin/index.js'))]).then(
++      ([babel, babelPlugin]) => {
++        return {
++          transformAsync: babel.transformAsync,
++          componentNameAnnotatePlugin: babelPlugin.default,
++          experimentalComponentNameAnnotatePlugin: babelPlugin.experimentalComponentNameAnnotatePlugin
++        };
++      }
++    );
++  }
++  return babelAnnotationRuntimePromise;
++}
++function createComponentNameAnnotateHooks(ignoredComponents, injectIntoHtml) {
++  return {
++    async transform(code, id) {
++      const idWithoutQueryAndHash = utils.stripQueryAndHashFromPath(id);
++      if (idWithoutQueryAndHash.match(/\\node_modules\\|\/node_modules\//)) {
++        return null;
++      }
++      if (![".jsx", ".tsx"].some((ending) => idWithoutQueryAndHash.endsWith(ending))) {
++        return null;
++      }
++      const parserPlugins = [];
++      if (idWithoutQueryAndHash.endsWith(".jsx")) {
++        parserPlugins.push("jsx");
++      } else if (idWithoutQueryAndHash.endsWith(".tsx")) {
++        parserPlugins.push("jsx", "typescript");
++      }
++      const { transformAsync, componentNameAnnotatePlugin, experimentalComponentNameAnnotatePlugin } = await loadBabelAnnotationRuntime();
++      const plugin = injectIntoHtml ? experimentalComponentNameAnnotatePlugin : componentNameAnnotatePlugin;
++      try {
++        const result = await transformAsync(code, {
++          plugins: [[plugin, { ignoredComponents }]],
++          filename: id,
++          sourceFileName: idWithoutQueryAndHash,
++          parserOpts: {
++            sourceType: "module",
++            allowAwaitOutsideFunction: true,
++            plugins: parserPlugins
++          },
++          generatorOpts: {
++            decoratorsBeforeExport: true
++          },
++          sourceMaps: true
++        });
++        return {
++          code: result?.code ?? code,
++          map: result?.map
++        };
++      } catch (e) {
++        core.debug.error(`Failed to apply react annotate plugin`, e);
++      }
++      return { code };
++    }
++  };
++}
++
++exports.getCodeInjectionPosition = getCodeInjectionPosition.getCodeInjectionPosition;
++exports.createComponentNameAnnotateHooks = createComponentNameAnnotateHooks;
+diff --git a/build/esm/loader-utils/index.js b/build/esm/loader-utils/index.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..d0613747e85e2ff4c201705c2ca63d698295ab45
+--- /dev/null
++++ b/build/esm/loader-utils/index.js
+@@ -0,0 +1,66 @@
++// Backport of getsentry/sentry-javascript#24651; retain v11.0.0 Babel annotation.
++import { debug } from "@sentry/core";
++import { stripQueryAndHashFromPath } from "../core/utils.js";
++export { getCodeInjectionPosition } from "../core/get-code-injection-position.js";
++
++let babelAnnotationRuntimePromise;
++function loadBabelAnnotationRuntime() {
++  if (!babelAnnotationRuntimePromise) {
++    babelAnnotationRuntimePromise = Promise.all([import('@babel/core'), import('../babel-plugin/index.js')]).then(
++      ([babel, babelPlugin]) => {
++        return {
++          transformAsync: babel.transformAsync,
++          componentNameAnnotatePlugin: babelPlugin.default,
++          experimentalComponentNameAnnotatePlugin: babelPlugin.experimentalComponentNameAnnotatePlugin
++        };
++      }
++    );
++  }
++  return babelAnnotationRuntimePromise;
++}
++function createComponentNameAnnotateHooks(ignoredComponents, injectIntoHtml) {
++  return {
++    async transform(code, id) {
++      const idWithoutQueryAndHash = stripQueryAndHashFromPath(id);
++      if (idWithoutQueryAndHash.match(/\\node_modules\\|\/node_modules\//)) {
++        return null;
++      }
++      if (![".jsx", ".tsx"].some((ending) => idWithoutQueryAndHash.endsWith(ending))) {
++        return null;
++      }
++      const parserPlugins = [];
++      if (idWithoutQueryAndHash.endsWith(".jsx")) {
++        parserPlugins.push("jsx");
++      } else if (idWithoutQueryAndHash.endsWith(".tsx")) {
++        parserPlugins.push("jsx", "typescript");
++      }
++      const { transformAsync, componentNameAnnotatePlugin, experimentalComponentNameAnnotatePlugin } = await loadBabelAnnotationRuntime();
++      const plugin = injectIntoHtml ? experimentalComponentNameAnnotatePlugin : componentNameAnnotatePlugin;
++      try {
++        const result = await transformAsync(code, {
++          plugins: [[plugin, { ignoredComponents }]],
++          filename: id,
++          sourceFileName: idWithoutQueryAndHash,
++          parserOpts: {
++            sourceType: "module",
++            allowAwaitOutsideFunction: true,
++            plugins: parserPlugins
++          },
++          generatorOpts: {
++            decoratorsBeforeExport: true
++          },
++          sourceMaps: true
++        });
++        return {
++          code: result?.code ?? code,
++          map: result?.map
++        };
++      } catch (e) {
++        debug.error(`Failed to apply react annotate plugin`, e);
++      }
++      return { code };
++    }
++  };
++}
++
++export { createComponentNameAnnotateHooks };
+diff --git a/build/types/loader-utils/index.d.ts b/build/types/loader-utils/index.d.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..d0f7c96ab0b8af9578b17c112ca1179e83cb7e58
+--- /dev/null
++++ b/build/types/loader-utils/index.d.ts
+@@ -0,0 +1 @@
++export { getCodeInjectionPosition, createComponentNameAnnotateHooks } from "../core";
+diff --git a/package.json b/package.json
+index d11b2c1e87840285c53b5e9fb63e2a1e7917ba96..874852374c17247a5d307532f9c2f749208a0e86 100644
+--- a/package.json
++++ b/package.json
+@@ -44,6 +44,11 @@
+       "import": "./build/esm/core/index.js",
+       "require": "./build/cjs/core/index.js"
+     },
++    "./loader-utils": {
++      "types": "./build/types/loader-utils/index.d.ts",
++      "import": "./build/esm/loader-utils/index.js",
++      "require": "./build/cjs/loader-utils/index.js"
++    },
+     "./babel-plugin": {
+       "types": "./build/types/babel-plugin/index.d.ts",
+       "import": "./build/esm/babel-plugin/index.js",

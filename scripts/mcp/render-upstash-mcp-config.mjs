@@ -13,7 +13,7 @@ const ROOT = resolve(SCRIPT_DIR, "../..");
 // changes, and re-run the renderer on every operator machine — the generated
 // Codex TOML embeds this value next to the launcher path.
 export const UPSTASH_MCP_LAUNCHER_SHA256 =
-  "63493a7622f26d7ae56b330f5e256816d2e82ea4c088e42f10d18561d3a986a3";
+  "b2ee55191c3c2474c0f0e5aadabe465b88979a5ec1310f64b375dffc7144da1c";
 
 function assertLauncherInputs({ launcherPath, launcherSha256 }) {
   if (!isAbsolute(launcherPath)) {

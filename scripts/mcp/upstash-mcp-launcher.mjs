@@ -6,11 +6,11 @@ import { readFileSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-export const UPSTASH_MCP_VERSION = "0.2.4";
+export const UPSTASH_MCP_VERSION = "0.3.0";
 export const UPSTASH_MCP_ENTRYPOINT_SHA256 =
-  "1949e38e9c66aaac5cc00e2da2b8bbf712a4c39266f8f501a3cdd86253fe4b8e";
+  "a2054c469aefbdf6ade732057dc16b5e12345ed284e79989327d1c1a6baddc73";
 export const UPSTASH_MCP_RUNTIME_SHA256 =
-  "771c08ff939347f8356e87b2ffa48f6a21e6045744b755003bdb85ff0817cca7";
+  "7e7f852038ee7ffde747af4d64a29776c7dfa74659e75690c80a4e82539da5c7";
 export const UPSTASH_MCP_RUNTIME_LOADER = [
   'import { readFileSync } from "node:fs";',
   'process.argv.splice(1, 0, "upstash-mcp-runtime.mjs");',
