@@ -20,10 +20,12 @@ minimumReleaseAgeExclude:
   - vite
 
 overrides:
-  # Preserve viem's deployed optional peer while updating lint tools.
-  zod: 4.4.3
   # Keep the existing production metadata parser on its deployed dependency.
   "normalize-package-data>semver": 7.8.1
+  # GHSA-27r3-jxmh-p828: retain the framework's 2.x parser line.
+  "body-parser@>=2.0.0 <2.4.0": 2.4.0
+  # GHSA-mrhx-c7xc-m3w5: patch existing 4.x consumers without forcing 3.x.
+  "zod@>=4.0.0 <4.6.6": 4.6.6
   # GHSA-q3jh-wrc6-jgq8 / GHSA-8r9p-f939-6h3c: patched redirect handling.
   "follow-redirects@<1.16.1": 1.16.1
   # Keep all framework and Express declarations on the deployed Node 24 runtime.

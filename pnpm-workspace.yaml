@@ -92,6 +92,8 @@ packageConfigs:
 overrides:
   # Preserve the deployed glob closure during the lint-toolchain update.
   "glob@13.0.6>minimatch": 10.2.5
+  # GHSA-mrhx-c7xc-m3w5: patch existing 4.x consumers without forcing 3.x.
+  "zod@>=4.0.0 <4.6.6": 4.6.6
   # GHSA-q3jh-wrc6-jgq8 / GHSA-8r9p-f939-6h3c: patched redirect handling.
   "follow-redirects@<1.16.1": 1.16.1
   # Framework declaration edges must match the deployed Node 24 applications.
@@ -110,7 +112,7 @@ overrides:
   "hono@<4.13.7": 4.13.7
   # extract-zip has no patched release. Puppeteer 25 removes it; retain
   # Lighthouse 12 audits and use a release older than the three-day floor.
-  "lighthouse>puppeteer-core": 25.12.0
+  "lighthouse>puppeteer-core": 25.13.0
   # LHCI supplies Browsers 3's optional proxy peer; its v6 is out of range.
   "@lhci/cli>proxy-agent": 8.0.1
   # Nodemon watches literal directories; chokidar 4 removes unpatched braces.
@@ -151,8 +153,8 @@ overrides:
   "@grpc/grpc-js": 1.14.5
   "esbuild": 0.28.1
   "@babel/core@>=7.0.0 <7.29.6": 7.29.6
-  # GHSA-v422-hmwv-36x6: enforce limit validation on both supported lines.
-  "body-parser@<1.20.6": 1.20.6
+  # GHSA-27r3-jxmh-p828: retain the supported 1.x parser line.
+  "body-parser@<1.20.9": 1.20.9
   "path-to-regexp@<0.1.13": 0.1.13
   # GHSA-hrr3-gc8f-f4qj: patched 3.x floor; ajv 8 needs fast-uri ^3.
   "fast-uri@<3.1.8": 3.1.8
@@ -177,10 +179,10 @@ overrides:
   "@eslint/eslintrc@<3.3.5": 3.3.5
   "ajv@^6.0.0": ^6.14.0
   "ajv@^8.0.0": ^8.18.0
-  "body-parser@>=2.0.0 <2.3.0": 2.3.0
+  "body-parser@>=2.0.0 <2.4.0": 2.4.0
   # GHSA-qhr7-859c-m2p7 and GHSA-q2hr-2g5m-vwhr: patched 5.x floor.
   "brace-expansion@^1.0.0": 5.0.12
-  "cron": 4.3.4
+  "cron": 4.4.0
   "diff@^4.0.0": ^4.0.4
   "file-type@^21.0.0": ^21.3.2
   # GHSA-8r5x-fm3f-whwj / GHSA-p8wg-vrv2-v86f: floor 4.7.10.
@@ -191,8 +193,8 @@ overrides:
   "minimatch@^3.0.0": ^3.1.4
   "minimatch@^9.0.0": ^9.0.7
   "minimatch@^10.0.0": ^10.2.3
-  # GHSA-3pph-fpjx-jg34: patched floor; Nest 11 still requests multer 2.0.2.
-  "multer@<2.4.0": 2.4.0
+  # GHSA-q7qp-rjg7-q26m: patched floor for the existing 2.x consumer.
+  "multer@>=2.0.0 <2.5.0": 2.5.0
   "@opentelemetry/core@<2.8.0": 2.8.0
   "path-to-regexp@^8.0.0": ^8.4.0
   "picomatch@^2.0.0": ^2.3.2
@@ -208,8 +210,10 @@ overrides:
   "lighthouse>ws": 7.5.11
   "ws@>=8.0.0 <8.21.0": 8.21.0
   # GHSA-8xcm-r25x-g524, GHSA-m8rv-5g2x-5cg5, GHSA-v3r7-h72x-cjcm.
-  # GHSA-rfgv-xxqx-mfg5: patched 6.x floor 6.28.1.
-  "undici@<6.28.1": 6.28.1
+  # GHSA-rfgv-xxqx-mfg5 / GHSA-xjj6-f33q-929c: patched 6.x floor.
+  "undici@<6.29.1": 6.29.1
+  # GHSA-xjj6-f33q-929c: retain jsdom's supported 8.x line.
+  "undici@>=8.0.0 <8.12.2": 8.12.2
   "yaml@^2.0.0": ^2.8.3
 
 patchedDependencies:

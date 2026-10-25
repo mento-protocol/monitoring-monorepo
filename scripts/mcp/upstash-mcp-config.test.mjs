@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { EventEmitter } from "node:events";
+import { EventEmitter, once } from "node:events";
 import {
   chmod,
   copyFile,
@@ -14,6 +14,7 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, resolve } from "node:path";
 import test from "node:test";
@@ -43,11 +44,11 @@ import {
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const PACKAGE_NAME = "@upstash/mcp-server";
-const PACKAGE_VERSION = "0.2.4";
+const PACKAGE_VERSION = "0.3.0";
 const ESBUILD_VERSION = "0.28.1";
 const PINNED_PACKAGE = `${PACKAGE_NAME}@${PACKAGE_VERSION}`;
 const PACKAGE_INTEGRITY =
-  "sha512-LN5yao74QQZTjGmolGqAh9YkQa/206ni94wwTtu6I/mVkyMeAbRME7rjK64KrWmCTw2OHUb8TMFsw6r4rMmUSQ==";
+  "sha512-lkdnEOFYUf3qxhBnejW1jaGC4vUHhGqjjzuTSeJDM3ztQhxzbmejyNcqyM7aNrqcPC4J8wtas8xeQcfb7x56YA==";
 const LAUNCHER_NAME = "scripts/mcp/upstash-mcp-launcher.mjs";
 const EXPECTED_ENV_VARS = ["UPSTASH_EMAIL", "UPSTASH_API_KEY"];
 const EXPECTED_TOOLS = [
@@ -335,16 +336,17 @@ test("runtime build closes over every non-builtin server dependency", async () =
   const runtime = await buildUpstashMcpRuntime();
   assert.equal(
     UPSTASH_MCP_RUNTIME_SHA256,
-    "6af58c9ada397f5e445ca28e752cc285f9806de8ecc3ae0eea57aeb5f4f0bd9d",
+    "7e7f852038ee7ffde747af4d64a29776c7dfa74659e75690c80a4e82539da5c7",
   );
   assert.equal(runtime.sha256, UPSTASH_MCP_RUNTIME_SHA256);
   for (const dependency of [
-    "@modelcontextprotocol+sdk@1.32.1_",
+    "@modelcontextprotocol+server@2.3.1",
+    "@modelcontextprotocol+node@2.1.1_",
     "@hono+node-server@1.19.17_hono@4.13.7",
     "hono@4.13.7",
     "commander@14.0.3",
     "dotenv@16.6.1",
-    "zod@3.25.76",
+    "zod@4.6.6",
   ]) {
     assert.ok(
       runtime.inputs.some((input) => input.includes(dependency)),
@@ -571,7 +573,7 @@ test("workspace dependency and lockfile pin the reviewed artifact", async () => 
   assert.equal(packageJson.devDependencies.esbuild, ESBUILD_VERSION);
   assert.equal(importer.specifier, PACKAGE_VERSION);
   // pnpm suffixes the resolved version with a peer-resolution key (e.g.
-  // "0.2.4(supports-color@5.5.0)") when other workspace dependencies make a
+  // "0.3.0(supports-color@5.5.0)") when other workspace dependencies make a
   // transitive peer resolvable. The suffix changes graph keying, not which
   // artifact installs — the integrity assertion below pins the bytes, and the
   // rebuilt runtime hash pins the dependency closure.
@@ -617,7 +619,7 @@ test("operator and upload guidance carry the pin, ownership, and Cloud boundary"
     ]);
 
   assert.ok(operator.includes(PINNED_PACKAGE));
-  assert.match(operator, /sha512-LN5yao74QQZTjGmo/);
+  assert.match(operator, /sha512-lkdnEOFYUf3qxhBn/);
   assert.match(operator, /explicit human approval/i);
   assert.match(operator, /Codex Cloud/);
   assert.match(operator, /reviewed native esbuild binary/i);
@@ -683,4 +685,221 @@ test("contract rejects quoted and inline-table shared Upstash entries", () => {
       "mcp_servers = { upstash = { enabled = true } }\n",
     ),
   );
+});
+
+// Run the real dependency-closed bytes with no workspace or real credentials.
+// A fail-closed fetch fixture verifies auth/telemetry and forbids real network.
+async function startServer(t, readonly) {
+  const runtime = await buildUpstashMcpRuntime();
+  assert.ok(runtime.inputs.some((p) => p.includes("zod/v4/core/parse.js")));
+  assert.ok(!runtime.inputs.some((p) => p.includes("zod/v3/")));
+  const cwd = await mkdtemp(resolve(tmpdir(), "upstash-protocol-"));
+  const requestLog = resolve(cwd, "requests.jsonl");
+  await writeFile(requestLog, "");
+  const fixture = `
+    import { appendFileSync } from "node:fs";
+    import assert from 'node:assert/strict';
+    globalThis.fetch = async (url, init = {}) => {
+      appendFileSync(${JSON.stringify(requestLog)}, "request\\n");
+      const u = new URL(url);
+      const headers = new Headers(init.headers);
+      const response = (body, status = 200) => new Response(JSON.stringify(body), {status});
+      if (u.origin === 'https://api.upstash.com') {
+        assert.equal(headers.get('Authorization'), 'Basic ' + Buffer.from('fixture@example.invalid:fixture-management-key').toString('base64'));
+        assert.ok(![...headers.keys()].some(k => k.startsWith('upstash-telemetry')));
+        if (u.pathname === '/v2/redis/databases') return response([]);
+        if (u.pathname === '/v2/redis/database/readonly-check-nonexistent' && init.method === 'DELETE') {
+          return response(${readonly ? '"Readonly API key"' : '"Not found"'}, ${readonly ? "401" : "404"});
+        }
+        if (u.pathname === '/v2/redis/database/fixture-db') return response({endpoint:'fixture.upstash.io',read_only_rest_token:'fixture-readonly',rest_token:'fixture-write'});
+      }
+      if (u.origin === 'https://fixture.upstash.io') {
+        assert.equal(headers.get('Authorization'), 'Bearer ${readonly ? "fixture-readonly" : "fixture-write"}');
+        assert.equal(init.method, 'POST');
+        assert.deepEqual(JSON.parse(init.body), ['GET','fixture-key']);
+        return response({result:'fixture-value'});
+      }
+      throw new Error('Unexpected fixture request: ' + init.method + ' ' + u.origin + u.pathname);
+    };
+  `;
+  const child = spawn(
+    process.execPath,
+    [
+      "--input-type=module",
+      "--eval",
+      fixture + UPSTASH_MCP_RUNTIME_LOADER,
+      "--",
+      "--disable-telemetry",
+    ],
+    {
+      cwd,
+      env: {
+        UPSTASH_EMAIL: "fixture@example.invalid",
+        UPSTASH_API_KEY: "fixture-management-key",
+      },
+      stdio: ["pipe", "pipe", "pipe", "pipe"],
+    },
+  );
+  const closed = once(child, "close");
+  t.after(async () => {
+    child.kill("SIGKILL");
+    await closed;
+    await rm(cwd, { recursive: true, force: true });
+  });
+  let buffer = "",
+    stderr = "",
+    nextId = 0;
+  const pending = new Map();
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk;
+  });
+  child.stdout.setEncoding("utf8");
+  child.stdout.on("data", (chunk) => {
+    buffer += chunk;
+    for (let end; (end = buffer.indexOf("\n")) !== -1; ) {
+      const line = buffer.slice(0, end);
+      buffer = buffer.slice(end + 1);
+      if (!line) continue;
+      const message = JSON.parse(line);
+      const resolveReply = pending.get(message.id);
+      if (resolveReply) {
+        pending.delete(message.id);
+        resolveReply(message);
+      }
+    }
+  });
+  child.stdio[3].end(runtime.bytes);
+  const send = (message) =>
+    child.stdin.write(JSON.stringify({ jsonrpc: "2.0", ...message }) + "\n");
+  const rpc = (method, params) => {
+    const id = ++nextId;
+    return new Promise((resolveReply, reject) => {
+      const timer = setTimeout(() => {
+        pending.delete(id);
+        reject(new Error(`No reply to ${method}: ${stderr}`));
+      }, 5000);
+      pending.set(id, (message) => {
+        clearTimeout(timer);
+        resolveReply(message);
+      });
+      send({ id, method, params });
+    });
+  };
+  const initialized = await rpc("initialize", {
+    protocolVersion: "2025-03-26",
+    capabilities: {},
+    clientInfo: { name: "migration-contract", version: "1" },
+  });
+  assert.ok(initialized.result, JSON.stringify(initialized));
+  send({ method: "notifications/initialized" });
+  return {
+    rpc,
+    requests: async () =>
+      (await readFile(requestLog, "utf8")).split("\n").filter(Boolean).length,
+  };
+}
+
+for (const readonly of [true, false]) {
+  test(
+    `native v4 stdio preserves schemas and ${readonly ? "readonly" : "write-key"} auth`,
+    { timeout: 15000 },
+    async (t) => {
+      const { rpc, requests } = await startServer(t, readonly);
+      const list = await rpc("tools/list", {});
+      assert.ok(list.result?.tools, JSON.stringify(list));
+      const tools = list.result.tools;
+      const redis = tools.find(
+        (tool) => tool.name === "redis_database_run_redis_commands",
+      );
+      assert.ok(redis);
+      assert.equal(redis.inputSchema.properties.commands.type, "array");
+      assert.ok(redis.inputSchema.required.includes("commands"));
+      assert.ok(
+        tools.some((tool) => tool.name === "redis_database_list_databases"),
+      );
+      const writeTool = tools.find(
+        (tool) => tool.name === "redis_database_create_new",
+      );
+      assert.equal(Boolean(writeTool), !readonly);
+      const valid = await rpc("tools/call", {
+        name: redis.name,
+        arguments: {
+          database_id: "fixture-db",
+          commands: [["GET", "fixture-key"]],
+        },
+      });
+      assert.ok(!valid.error && !valid.result?.isError, JSON.stringify(valid));
+      assert.match(JSON.stringify(valid.result.content), /fixture-value/);
+      const requestsAfterValid = await requests();
+      assert.ok(requestsAfterValid > 0);
+      const invalid = await rpc("tools/call", {
+        name: redis.name,
+        arguments: { database_id: "fixture-db", commands: [42] },
+      });
+      assert.ok(
+        invalid.error || invalid.result?.isError,
+        JSON.stringify(invalid),
+      );
+      assert.match(
+        JSON.stringify(invalid),
+        /input validation|invalid arguments/i,
+      );
+      assert.doesNotMatch(
+        JSON.stringify(invalid),
+        /TypeError|Unexpected fixture request|AssertionError/,
+      );
+      assert.equal(
+        await requests(),
+        requestsAfterValid,
+        "invalid commands must not reach fetch",
+      );
+      const missing = await rpc("tools/call", {
+        name: redis.name,
+        arguments: { database_id: "fixture-db" },
+      });
+      assert.ok(
+        missing.error || missing.result?.isError,
+        JSON.stringify(missing),
+      );
+      assert.match(
+        JSON.stringify(missing),
+        /input validation|invalid arguments/i,
+      );
+      assert.doesNotMatch(
+        JSON.stringify(missing),
+        /TypeError|Unexpected fixture request|AssertionError/,
+      );
+      assert.equal(
+        await requests(),
+        requestsAfterValid,
+        "missing commands must not reach fetch",
+      );
+      if (readonly) {
+        const denied = await rpc("tools/call", {
+          name: "redis_database_create_new",
+          arguments: { name: "fixture", primary_region: "us-east-1" },
+        });
+        assert.match(JSON.stringify(denied), /not found|unknown tool/i);
+      }
+    },
+  );
+}
+
+test("selected native parser rejects an oversized constrained array before visiting elements", async () => {
+  const packageRequire = createRequire(
+    await realpath(
+      resolve(ROOT, "node_modules/@upstash/mcp-server/package.json"),
+    ),
+  );
+  const { z } = await import(pathToFileURL(packageRequire.resolve("zod")));
+  let parsed = 0;
+  const member = z.string().refine(() => {
+    parsed++;
+    return true;
+  });
+  const result = z.array(member).max(2).safeParse(Array(1000).fill("fixture"));
+  assert.equal(result.success, false);
+  assert.equal(parsed, 0);
+  assert.equal(result.error.issues.length, 1);
+  assert.equal(result.error.issues[0].code, "too_big");
 });
