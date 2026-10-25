@@ -3,7 +3,7 @@ title: Transpile to ES2017; pin the browser floor and block named API hazards
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-26
+last_verified: 2026-10-25
 scope: ui-dashboard
 date: 2026-05
 doc_type: adr

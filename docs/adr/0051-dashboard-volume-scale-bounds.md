@@ -3,7 +3,7 @@ title: Dashboard volume composition has per-chain and total re-review bounds
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-26
+last_verified: 2026-10-25
 scope: ui-dashboard
 date: 2026-07
 doc_type: adr
@@ -68,6 +68,9 @@ Rework the current-day path before it reaches its 1,000-row Hasura cap.
   waives Hasura row caps, truncation handling, or deploy-window schema safety.
 
 ## Evidence
+
+The dated production and CPU measurements below are historical baselines,
+not a fresh measurement of the current deployment.
 
 - Polling defaults are in
   [`ui-dashboard/src/lib/graphql.ts`](../../ui-dashboard/src/lib/graphql.ts);

@@ -22,6 +22,10 @@ minimumReleaseAgeExclude:
   - vite
 
 overrides:
+  # GHSA-27r3-jxmh-p828: retain the framework's 2.x parser line.
+  "body-parser@>=2.0.0 <2.4.0": 2.4.0
+  # GHSA-mrhx-c7xc-m3w5: patch existing 4.x consumers without forcing 3.x.
+  "zod@>=4.0.0 <4.6.6": 4.6.6
   # Keep all framework and Express declarations on the deployed Node 24 runtime.
   "@types/node": 24.13.2
   # Nodemon watches literal directories; chokidar 4 removes unpatched braces.
