@@ -3,7 +3,7 @@ title: Indexer observability contract requires structured logs and a verified er
 status: archived
 owner: eng
 canonical: true
-last_verified: 2026-07-26
+last_verified: 2026-10-25
 superseded_by: ADR-0052
 scope: indexer-envio
 date: 2026-04
