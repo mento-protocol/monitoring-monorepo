@@ -38,7 +38,7 @@
     "@stryker-mutator/core": "10.0.0",
     "@stryker-mutator/vitest-runner": "10.0.0",
     "@types/node": "^26.4.0",
-    "@vitest/coverage-v8": "^4.1.11",
+    "@vitest/coverage-v8": "^4.1.12",
     "eslint": "10.12.0",
     "eslint-plugin-sonarjs": "4.2.2",
     "eslint-plugin-unused-imports": "^4.2.0",
@@ -47,7 +47,7 @@
     "knip": "6.41.0",
     "typescript": "^5.9.3",
     "typescript-eslint": "8.71.1",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.12"
   },
   "dependencies": {
     "@mento-protocol/contracts": "0.9.0",
