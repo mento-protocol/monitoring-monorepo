@@ -27,11 +27,10 @@ can reach is declared in the `platform` stack; nothing is granted by hand
 | 4   | Grafana service account `hardin-sre-reader`, role `Viewer`                | Token `hardin-sre-reader-<counter>` stored as the `latest` secret version; datasource queries and alert rule/instance reads only                                                   |
 
 Hardin never receives `secretAccessor` directly and never receives a Grafana
-token out of band. Deleting hop 1's Token Creator resource cuts the whole chain;
-flipping `is_disabled` on `hardin_reader` cuts Grafana alone. Hop 1 is a
-dedicated resource rather than an entry in `var.agent_readonly_impersonators`
-because a `terraform.tfvars` override replaces that list, which would silently
-drop the grant while the rest of the chain still gets created.
+token out of band. Hop 1 is a dedicated resource rather than an entry in
+`var.agent_readonly_impersonators` because a `terraform.tfvars` override
+replaces that list, which would silently drop the grant while the rest of the
+chain still gets created. Revocation is two steps, not one; see [Revoke](#revoke).
 
 Accepted boundary: every other impersonator of `agent-readonly` (today the
 `eng@mentolabs.xyz` group) can also read this secret, as it can read everything
@@ -96,6 +95,25 @@ argument.
    revoked token, so re-enabling it recovers nothing.
 3. Nothing to redeploy: Hardin reads `latest` on every use. A mistaken bump is
    harmless once the apply completes; there is no rollback step.
+
+## Revoke
+
+Deleting hop 1's Token Creator resource only stops future credential retrieval.
+A Grafana token that Hardin, or whoever holds its key or gateway, has already
+fetched keeps authenticating directly to Grafana: that hop makes no GCP
+permission check and the token deliberately has no expiry. Full revocation is
+both steps in one reviewed change:
+
+1. Delete `google_service_account_iam_member.hardin_agent_readonly_token_creator`
+   from `terraform/agent-readonly.tf`. This cuts every future secret read.
+2. Set `is_disabled = true` on `grafana_service_account.hardin_reader` in
+   `terraform/grafana-read-access.tf`. Grafana then rejects the already-issued
+   token. If Hardin should keep its access and only the token is suspected
+   leaked, bump the rotation counter instead (see [Rotate](#rotate)).
+3. Run the ordinary approved `pnpm infra:plan` → `pnpm infra:apply` path.
+
+Flipping `is_disabled` alone cuts Grafana and leaves Hardin's GCP read surface
+intact; removing the grant alone leaves a live Grafana token behind.
 
 ## Boundaries
 

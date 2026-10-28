@@ -152,7 +152,10 @@ resource "google_service_account_iam_member" "agent_readonly_token_creators" {
 # the Grafana token and secret in `grafana-read-access.tf` still get created,
 # leaving a chain that fails only at verification time. A dedicated resource
 # keeps the grant independent of operator input, and keeps revocation a
-# reviewed code change: delete this block to cut Hardin's whole chain.
+# reviewed code change. Deleting this block stops Hardin fetching new
+# credentials; a Grafana token it already holds stays valid until
+# `grafana_service_account.hardin_reader` in `grafana-read-access.tf` is
+# disabled too (runbook section "Revoke").
 resource "google_service_account_iam_member" "hardin_agent_readonly_token_creator" {
   service_account_id = google_service_account.agent_readonly.name
   role               = "roles/iam.serviceAccountTokenCreator"
