@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { validateContract } from './contract.mjs';
+import { BUILDER_PROJECT_ROLES, validateContract } from './contract.mjs';
 
 const SECRET_IDS = [
   'grafana-agent-endpoint',
@@ -9,13 +9,6 @@ const SECRET_IDS = [
   'grafana-agent-password',
 ];
 const EXPECTED_PROJECT = 'mento-monitoring';
-const BUILDER_PROJECT_ROLES = [
-  'roles/appengine.deployer',
-  'roles/artifactregistry.writer',
-  'roles/cloudbuild.builds.editor',
-  'roles/logging.logWriter',
-  'roles/storage.objectAdmin',
-];
 const RUNTIME_PROJECT_ROLES = ['roles/logging.logWriter'];
 const IMAGE_REPOSITORY = 'us.gcr.io';
 const IMAGE_REPOSITORY_LOCATION = 'us';

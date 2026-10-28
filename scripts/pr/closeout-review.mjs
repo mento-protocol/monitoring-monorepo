@@ -9,14 +9,14 @@
  * the reviewing model cannot write the tree it reviews.
  *
  * Exit codes carry the verdict, because `codex exec review` always exits 0:
- *   0  the review ran and reported no findings
+ *   0  reserved for a qualified positive-completion protocol (currently unused)
  *   1  the review ran and reported findings
- *   2  the tool did not run, or ran and produced nothing usable, or it threw
+ *   2  the review is incomplete or requires manual inspection, or the tool failed
  *
- * Exit 0 is the absence of a findings heading, not a positive clean verdict:
- * `codex exec review` prints no marker a clean run can be recognized by, so an
- * unrecognized body — a refusal, a truncated answer — reads as clean. Read the
- * report, never only the exit code; operating-card step 4 says so too.
+ * No qualified positive-completion protocol is available. A successful process
+ * with no recognized findings returns 2 and keeps the report for manual
+ * inspection. A clean-looking body, refusal, or partial answer cannot clear
+ * closeout. This mitigation disables automatic clean output.
  *
  * The report is unscanned model output. It can quote credential-shaped diff
  * content, so it must stay out of Git; `--out` is refused unless the path is
@@ -56,7 +56,7 @@ const EFFORT = "high";
 const SANDBOX = "read-only";
 // `codex exec review` heads its findings with either spelling, and every
 // finding is a `- [P<n>] <title> — <path>:<start>-<end>` bullet. Match both, so
-// a single-finding report cannot read as clean. The six frozen finder reports
+// a single-finding report retains its findings verdict. The six frozen reports
 // in docs/evals/review-skill-finder-reports/ are the shapes under test.
 const FINDINGS_HEADING = /^(?:Full review comments|Review comments?):\s*$/m;
 const FINDING_BULLET = /^- \[P\d+\] /m;
@@ -338,8 +338,8 @@ async function main() {
     verdict = "findings";
     exitCode = 1;
   } else {
-    verdict = "clean";
-    exitCode = 0;
+    reason =
+      "positive completion evidence unavailable; manual report inspection required";
   }
 
   const header = renderHeader({
