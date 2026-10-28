@@ -3,7 +3,7 @@ title: SWR and Hasura Polling Checklist
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-27
+last_verified: 2026-10-28
 doc_type: checklist
 scope: ui-dashboard
 review_interval_days: 90
