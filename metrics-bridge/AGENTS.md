@@ -3,7 +3,7 @@ title: Metrics Bridge Instructions
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-29
+last_verified: 2026-10-28
 doc_type: agent-instructions
 scope: metrics-bridge
 review_interval_days: 90
