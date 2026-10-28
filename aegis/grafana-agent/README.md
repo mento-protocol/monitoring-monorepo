@@ -65,10 +65,10 @@ it has no Secret Manager access. The preflight role contains the exact App
 Engine get, Artifact Registry repository IAM get, IAM policy/role get, project
 policy get, secret list/IAM get, and secret-version get permissions; it does
 not include `secretmanager.versions.access`. Terraform grants Secret Accessor
-only to the pinned runtime account. This source state becomes effective only
-after an approved platform apply. Until that apply and the live preflight
-succeed, production may still retain legacy Secret Accessor bindings for Cloud
-Build, the Compute default account, and AppSpot.
+only to the pinned runtime account, and the live preflight fails closed when
+any other member holds it on those secrets or at project level, so a legacy
+Cloud Build, Compute default, or AppSpot binding blocks a deploy instead of
+being accepted as rollout state.
 
 Terraform requires two operator-held inputs for this path:
 
