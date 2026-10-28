@@ -1,4 +1,4 @@
-<!-- agent-context: title="Grafana Alloy" status=active owner=eng canonical=true last_verified=2026-07-27 doc_type=runbook scope=aegis/grafana-agent review_interval_days=90 garden_lane=operator-runbooks -->
+<!-- agent-context: title="Grafana Alloy" status=active owner=eng canonical=true last_verified=2026-10-28 doc_type=runbook scope=aegis/grafana-agent review_interval_days=90 garden_lane=operator-runbooks -->
 
 # Grafana Alloy
 
@@ -55,8 +55,13 @@ repository so Flex can pull the version image. The custom role contains only
 `appengine.services.get` and `appengine.versions.list`, which the supervisor
 needs to prove a single active collector. Cloud Build pins
 `grafana-agent-builder@mento-monitoring.iam.gserviceaccount.com`, which has only
-the five project roles needed to submit logs/artifacts and deploy App Engine
-versions. Terraform grants `gcp_dev_members` permission to submit as that
+the four project roles needed to submit logs/artifacts and deploy App Engine
+versions; its source-object access is bucket-scoped to the Terraform-managed
+staging buckets in [`terraform/deploy-staging.tf`](../../terraform/deploy-staging.tf).
+[`preflight.mjs`](preflight.mjs) still asserts a fifth project role,
+`roles/storage.objectAdmin`, that Terraform no longer grants, so a deploy fails
+its preflight whenever live IAM matches Terraform; issue #2628 tracks aligning
+the preflight. Terraform grants `gcp_dev_members` permission to submit as that
 builder and the metadata-only `grafanaAgentPreflightReader` role. The live
 preflight requires both policies to match Terraform's member-set fingerprint
 in that role's description. Only the builder can act as the runtime account;
@@ -64,10 +69,10 @@ it has no Secret Manager access. The preflight role contains the exact App
 Engine get, Artifact Registry repository IAM get, IAM policy/role get, project
 policy get, secret list/IAM get, and secret-version get permissions; it does
 not include `secretmanager.versions.access`. Terraform grants Secret Accessor
-only to the pinned runtime account. This source state becomes effective only
-after an approved platform apply. Until that apply and the live preflight
-succeed, production may still retain legacy Secret Accessor bindings for Cloud
-Build, the Compute default account, and AppSpot.
+only to the pinned runtime account, and the live preflight fails closed when
+any other member holds it on those secrets or at project level, so a legacy
+Cloud Build, Compute default, or AppSpot binding blocks a deploy instead of
+being accepted as rollout state.
 
 Terraform requires two operator-held inputs for this path:
 
