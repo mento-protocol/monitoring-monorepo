@@ -47,16 +47,16 @@
   },
   "dependencies": {
     "@google-cloud/functions-framework": "5.0.5",
-    "@google-cloud/secret-manager": "7.1.1",
+    "@google-cloud/secret-manager": "7.2.0",
     "@discordjs/builders": "1.14.1",
     "env-schema": "8.0.1",
-    "viem": "2.57.4"
+    "viem": "2.57.7"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "24.13.2",
     "@typescript/native": "npm:typescript@^7.0.2",
-    "@vitest/coverage-v8": "^5.0.3",
+    "@vitest/coverage-v8": "^5.0.5",
     "eslint": "^10.12.0",
     "knip": "^6.41.0",
     "nodemon": "^3.1.9",
@@ -65,6 +65,6 @@
     "tsx": "^4.23.15",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
     "typescript-eslint": "^8.71.1",
-    "vitest": "^5.0.3"
+    "vitest": "^5.0.5"
   }
 }

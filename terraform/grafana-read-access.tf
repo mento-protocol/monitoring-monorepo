@@ -23,6 +23,12 @@
 # credential and never widen it. This service account is a separate identity
 # with its own lifecycle, so revoking dashboard access is one `is_disabled` flip
 # and never touches alert provisioning.
+#
+# This file holds every Viewer identity the platform stack mints. The second
+# one, `hardin_reader` at the bottom, follows the same shape for the Hardin SRE
+# agent and is delivered through Secret Manager instead of Vercel
+# (`docs/notes/hardin-read-access.md`). Both stay on `Viewer`; neither is ever
+# the Admin provisioning token.
 
 resource "grafana_service_account" "dashboard_reader" {
   name = "monitoring-dashboard-reader"
@@ -80,4 +86,115 @@ resource "grafana_service_account_token" "dashboard_reader" {
       terraform_data.grafana_dashboard_reader_token_rotation.output,
     ]
   }
+}
+
+# ── Grafana Cloud read access for Hardin (read-only SRE agent) ───────────────
+#
+# Hardin is the in-house SRE agent on Philip's macOS gateway. It investigates
+# incidents read-only and needs the same two Grafana capabilities the dashboard
+# needs — datasource queries and alert rule/instance reads — and nothing more.
+#
+# WHY A SEPARATE IDENTITY FROM THE DASHBOARD. Reusing `dashboard_reader` would
+# put one token in two places (a Vercel environment and Secret Manager) with two
+# unrelated consumers, so a rotation forced by either side would break the
+# other, and access review could not tell the dashboard's reads from the
+# agent's. A second Viewer service account keeps revocation to one
+# `is_disabled` flip that touches neither the dashboard nor alert provisioning.
+#
+# WHY SECRET MANAGER. No human has to handle this token. The dashboard's
+# token travels resource → Vercel environment inside one apply; Hardin has no
+# Vercel project, so its equivalent sink is a Secret Manager secret in the
+# monitoring project that only `agent_readonly` may access. Hardin reaches it
+# by impersonating `agent_readonly` (Token Creator grant in `agent-readonly.tf`),
+# which is the identity chain every other Hardin read already uses. The secret
+# payload terminates at the provider's write-only argument, so this resource
+# adds no second copy of the token to Terraform state; the Grafana token
+# resource itself remains the single sensitive state entry, exactly as for
+# `dashboard_reader`. [ADR 0030](../docs/adr/0030-iac-before-cli-secrets.md)
+# rules out `gcloud secrets versions add` or a Grafana-console token here.
+#
+# ACCEPTED BOUNDARY. Every principal holding Token Creator on `agent_readonly`
+# (today the eng group via `var.agent_readonly_impersonators`, and Hardin via
+# its dedicated grant in `agent-readonly.tf`) can impersonate it and therefore
+# read this token, exactly as they can read everything else that SA sees.
+# Engineers already hold their own Grafana logins, so this widens no Grafana
+# surface for them, but Grafana access logs cannot tell a human who used this
+# token from Hardin. Tightening that to a Hardin-only principal
+# would mean granting `secretAccessor` to Hardin's key-bearing SA directly,
+# which the documented chain deliberately avoids; revisit if the impersonator
+# list grows beyond the eng group.
+
+resource "grafana_service_account" "hardin_reader" {
+  name = "hardin-sre-reader"
+
+  # Viewer for the same reason as `dashboard_reader` above: it is the least
+  # basic role that grants datasource queries and alert rule/instance reads.
+  # Grafana attaches no scope to the token, so this role IS the boundary.
+  role = "Viewer"
+
+  is_disabled = false
+}
+
+# No `seconds_to_live`, for the same reason as the dashboard token: a silent
+# expiry would look like a Grafana outage to the agent. Rotation is a reviewed
+# bump of `var.grafana_hardin_reader_token_rotation_counter`; the platform
+# argument allowlist rejects `-replace`, so that counter is the only way to
+# roll this credential.
+#
+# ROTATION ORDER. Unlike `dashboard_reader`, this token does NOT use a
+# `terraform_data` trigger with a fixed name. The Secret Manager version below
+# carries `create_before_destroy`, and Terraform propagates that behaviour to
+# every resource it depends on, so a fixed-name token would be asked to create
+# its replacement while the old token still holds the name, and Grafana would
+# reject the collision. Putting the counter in the name makes each replacement
+# unique: one apply creates `hardin-sre-reader-<n+1>`, writes it as the new
+# secret version, then disables the old version and destroys
+# `hardin-sre-reader-<n>`. The old token stays valid only for those seconds.
+# Hardin reads `latest` on every use and needs no redeploy.
+resource "grafana_service_account_token" "hardin_reader" {
+  name               = "hardin-sre-reader-${var.grafana_hardin_reader_token_rotation_counter}"
+  service_account_id = grafana_service_account.hardin_reader.id
+}
+
+resource "google_secret_manager_secret" "hardin_grafana_reader_token" {
+  project   = google_project.monitoring.project_id
+  secret_id = "hardin-grafana-reader-token"
+
+  replication {
+    auto {}
+  }
+
+  depends_on = [google_project_service.secretmanager]
+}
+
+# The token enters this resource through the write-only argument and is never
+# persisted by it; `secret_data_wo_version` tracks the reviewed rotation counter
+# so the version is rewritten exactly when the token above is replaced. The
+# previous version is disabled rather than destroyed only to keep the audit
+# trail: it holds a Grafana token that the rotation already revoked, so
+# re-enabling it recovers nothing. Recovery from a mistaken counter bump is to
+# let the rotation complete (Hardin reads `latest`) or bump the counter again.
+resource "google_secret_manager_secret_version" "hardin_grafana_reader_token" {
+  secret                 = google_secret_manager_secret.hardin_grafana_reader_token.id
+  secret_data_wo         = grafana_service_account_token.hardin_reader.key
+  secret_data_wo_version = var.grafana_hardin_reader_token_rotation_counter
+  deletion_policy        = "DISABLE"
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+# Secret-scoped, single-member accessor grant. `agent_readonly` holds only
+# `roles/secretmanager.viewer` (metadata) at the org level by design; this is
+# the one secret whose payload it may read. Hardin never receives
+# `secretAccessor` directly: it must go through the Token Creator chain in
+# `agent-readonly.tf`, so deleting
+# `google_service_account_iam_member.hardin_agent_readonly_token_creator` there
+# also cuts its path to this token.
+resource "google_secret_manager_secret_iam_member" "hardin_grafana_reader_token_accessor" {
+  project   = google_project.monitoring.project_id
+  secret_id = google_secret_manager_secret.hardin_grafana_reader_token.secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.agent_readonly.email}"
 }

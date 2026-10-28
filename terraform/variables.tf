@@ -305,11 +305,13 @@ variable "grafana_url" {
 variable "grafana_provisioning_token" {
   description = <<-EOT
     Admin-role Grafana Cloud service account token (glsa_...) used ONLY to
-    configure this stack's Grafana provider, which mints the read-only
-    dashboard identity in `grafana-read-access.tf`. Same organization
-    credential the `alerts/rules` and `aegis` stacks take as
+    configure this stack's Grafana provider, which mints the read-only Viewer
+    identities in `grafana-read-access.tf`: the dashboard's and the Hardin SRE
+    agent's, including every counter-driven rotation of their tokens. Same
+    organization credential the `alerts/rules` and `aegis` stacks take as
     `grafana_service_account_token`; the name differs here so it cannot be
-    confused with the Viewer token this stack creates and ships to Vercel.
+    confused with the Viewer tokens this stack creates and ships to Vercel and
+    to Secret Manager.
     Set in the gitignored terraform.tfvars. It is never written to a Vercel
     environment variable, a GitHub secret, or Secret Manager.
     Rotate from Grafana Cloud → Administration → Service accounts.
@@ -336,6 +338,28 @@ variable "grafana_dashboard_reader_token_rotation_counter" {
   validation {
     condition     = var.grafana_dashboard_reader_token_rotation_counter >= 1 && var.grafana_dashboard_reader_token_rotation_counter == floor(var.grafana_dashboard_reader_token_rotation_counter)
     error_message = "grafana_dashboard_reader_token_rotation_counter must be a positive integer."
+  }
+}
+
+variable "grafana_hardin_reader_token_rotation_counter" {
+  description = <<-EOT
+    Reviewed non-secret rotation counter for
+    `grafana_service_account_token.hardin_reader`, the Hardin SRE agent's
+    Grafana Viewer token. Start at 1; increment it through an approved
+    current-main plan/apply to mint a replacement token named
+    `hardin-sre-reader-<counter>` and write it as a new version of the
+    `hardin-grafana-reader-token` Secret Manager secret in the same apply,
+    before the old token is destroyed. Unlike the dashboard token there is no
+    redeploy step: Hardin reads the `latest` version on every use. `-replace`
+    is unavailable on the platform stack, so this counter is the only rotation
+    path.
+  EOT
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = var.grafana_hardin_reader_token_rotation_counter >= 1 && var.grafana_hardin_reader_token_rotation_counter == floor(var.grafana_hardin_reader_token_rotation_counter)
+    error_message = "grafana_hardin_reader_token_rotation_counter must be a positive integer."
   }
 }
 

@@ -185,27 +185,27 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 
 ### terraform / infra
 
-| ADR                                                           | Decision                                                                                                          |
-| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| [0028](0028-terraform-stack-registry.md)                      | Terraform ownership is a registry (`terraform.stacks.json`) with roots split by cadence                           |
-| [0029](0029-ci-apply-production-infra-gate.md)                | Infra applies on merge to `main` behind the `production-infra` environment gate                                   |
-| [0030](0030-iac-before-cli-secrets.md)                        | All secrets are managed by IaC; agents never touch them with CLI commands                                         |
-| [0044](0044-peg-thresholds-gated-rules-plane.md)              | Peg alert thresholds stay in the gated alerts-rules plane, read from one JSON                                     |
-| [0045](0045-peg-paging-semantics.md)                          | Peg paging measures executable sell price; the deep venue pages alone                                             |
-| [0047](0047-separated-terraform-ci-identities.md)             | Routine deploy, PR plan, trusted-main refresh, Peg publication plan, and production apply use separate identities |
-| [0048](0048-private-gcs-peg-policy-artifact.md)               | Archived: private GCS artifact with superseded dedicated-project hosting                                          |
-| [0050](0050-environment-scoped-pipeline-secrets.md)           | Pipeline secrets are gated by a Terraform-managed, main-only GitHub Environment                                   |
-| [0053](0053-explicit-deployment-source-staging.md)            | Routine Cloud Build and App Engine deploys use explicit, bucket-scoped source staging                             |
-| [0054](0054-same-project-peg-policy-artifact.md)              | Peg policy stays private and generation-pinned in the monitoring project                                          |
-| [0055](0055-peg-policy-bucket-controller-recovery.md)         | Peg bucket IAM reconciliation uses a narrow controller and bounded recovery                                       |
-| [0057](0057-peg-observation-advancement.md)                   | Repeated provider observations retain bounded health, never sample authority                                      |
-| [0058](0058-metrics-bridge-dedicated-cloud-build-executor.md) | Metrics Bridge uses a dedicated Cloud Build executor                                                              |
-| [0060](0060-upstash-management-key-bootstrap.md)              | Upstash management API keys use a human-owned bootstrap integration                                               |
-| [0061](0061-exact-plan-guard-for-manual-platform-applies.md)  | Manual platform applies check and consume one private exact plan                                                  |
-| [0063](0063-dashboard-grafana-history-read-access.md)         | The platform stack mints the dashboard's read-only Grafana identity and token                                     |
-| [0067](0067-depletion-alerts.md)                              | Archived: depletion paging                                                                                        |
-| [0097](0097-recovery.md)                                      | Bounded pool-page recovery                                                                                        |
-| [0109](0109-pool-liquidity-event-delivery.md)                 | Pool LP withdrawals use receipt proof and event-keyed at-least-once delivery                                      |
+| ADR                                                           | Decision                                                                                                           |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| [0028](0028-terraform-stack-registry.md)                      | Terraform ownership is a registry (`terraform.stacks.json`) with roots split by cadence                            |
+| [0029](0029-ci-apply-production-infra-gate.md)                | Infra applies on merge to `main` behind the `production-infra` environment gate                                    |
+| [0030](0030-iac-before-cli-secrets.md)                        | All secrets are managed by IaC; agents never touch them with CLI commands                                          |
+| [0044](0044-peg-thresholds-gated-rules-plane.md)              | Peg alert thresholds stay in the gated alerts-rules plane, read from one JSON                                      |
+| [0045](0045-peg-paging-semantics.md)                          | Peg paging measures executable sell price; the deep venue pages alone                                              |
+| [0047](0047-separated-terraform-ci-identities.md)             | Routine deploy, PR plan, trusted-main refresh, Peg publication plan, and production apply use separate identities  |
+| [0048](0048-private-gcs-peg-policy-artifact.md)               | Archived: private GCS artifact with superseded dedicated-project hosting                                           |
+| [0050](0050-environment-scoped-pipeline-secrets.md)           | Pipeline secrets are gated by a Terraform-managed, main-only GitHub Environment                                    |
+| [0053](0053-explicit-deployment-source-staging.md)            | Routine Cloud Build and App Engine deploys use explicit, bucket-scoped source staging                              |
+| [0054](0054-same-project-peg-policy-artifact.md)              | Peg policy stays private and generation-pinned in the monitoring project                                           |
+| [0055](0055-peg-policy-bucket-controller-recovery.md)         | Peg bucket IAM reconciliation uses a narrow controller and bounded recovery                                        |
+| [0057](0057-peg-observation-advancement.md)                   | Repeated provider observations retain bounded health, never sample authority                                       |
+| [0058](0058-metrics-bridge-dedicated-cloud-build-executor.md) | Metrics Bridge uses a dedicated Cloud Build executor                                                               |
+| [0060](0060-upstash-management-key-bootstrap.md)              | Upstash management API keys use a human-owned bootstrap integration                                                |
+| [0061](0061-exact-plan-guard-for-manual-platform-applies.md)  | Manual platform applies check and consume one private exact plan                                                   |
+| [0063](0063-dashboard-grafana-history-read-access.md)         | The platform stack mints read-only Grafana identities and tokens: the dashboard's, and Hardin's via Secret Manager |
+| [0067](0067-depletion-alerts.md)                              | Archived: depletion paging                                                                                         |
+| [0097](0097-recovery.md)                                      | Bounded pool-page recovery                                                                                         |
+| [0109](0109-pool-liquidity-event-delivery.md)                 | Pool LP withdrawals use receipt proof and event-keyed at-least-once delivery                                       |
 
 ### governance-watchdog
 

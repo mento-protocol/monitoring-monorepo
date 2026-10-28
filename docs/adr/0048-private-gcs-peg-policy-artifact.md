@@ -3,7 +3,7 @@ title: Peg policy is a generation-pinned private GCS artifact
 status: archived
 owner: eng
 canonical: true
-last_verified: 2026-07-28
+last_verified: 2026-10-28
 superseded_by: ADR-0054
 scope: metrics-bridge / alerts / terraform/infra
 date: 2026-07

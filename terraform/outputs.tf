@@ -87,3 +87,13 @@ output "agent_readonly_email" {
   description = "Read-only AI agent SA — impersonate with `gcloud --impersonate-service-account=<this>` to drive MCP/Claude/Codex read paths."
   value       = google_service_account.agent_readonly.email
 }
+
+# The Hardin Grafana Viewer token itself is deliberately NOT an output: it is
+# delivered only as a Secret Manager version that `agent_readonly` can access
+# (`grafana-read-access.tf`). This output names the secret so the verification
+# command in `docs/notes/hardin-read-access.md` can be checked against state.
+output "hardin_grafana_reader_token_secret" {
+  description = "Secret Manager resource name holding the Hardin Grafana Viewer token. Read it only by impersonating agent-readonly; never print the payload."
+  value       = google_secret_manager_secret.hardin_grafana_reader_token.name
+  sensitive   = true
+}
