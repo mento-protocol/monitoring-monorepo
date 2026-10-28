@@ -379,6 +379,20 @@ test('a block-commented builder project grant in Terraform fails closed', () => 
   );
 });
 
+test('a block-commented builder project grant resource in Terraform fails closed', () => {
+  const files = sourceFiles();
+  const header =
+    'resource "google_project_iam_member" "grafana_agent_cloudbuild_deployer" {';
+  const start = files.bootstrap.indexOf(header);
+  const end = files.bootstrap.indexOf('\n}\n', start) + 3;
+  assert.ok(start !== -1 && end > start);
+  files.bootstrap = `${files.bootstrap.slice(0, start)}/*\n${files.bootstrap.slice(start, end)}*/\n${files.bootstrap.slice(end)}`;
+  expectFailure(
+    files,
+    /missing resource "google_project_iam_member" "grafana_agent_cloudbuild_deployer" block/u,
+  );
+});
+
 test('a commented-out builder project grant in Terraform fails closed', () => {
   const files = sourceFiles();
   files.bootstrap = files.bootstrap.replace(

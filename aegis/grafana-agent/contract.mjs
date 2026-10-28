@@ -354,9 +354,12 @@ export function validateContract(files = readContractFiles()) {
     `${CONTRACT_FILES.bootstrap}: keyed secret IDs must derive exactly from grafana_agent_secret_ids`,
   );
 
-  const builderRolesMatch = stripHclComments(secretLocals).match(
-    /grafana_agent_builder_project_roles\s*=\s*toset\(\[([^\]]*)\]\)/u,
-  );
+  // Strip comments before locating blocks, so a declaration wrapped in
+  // `/* ... */` is neither found nor counted.
+  const activeBootstrap = stripHclComments(bootstrap);
+  const builderRolesMatch = (
+    extractHclBlock(activeBootstrap, 'locals') ?? ''
+  ).match(/grafana_agent_builder_project_roles\s*=\s*toset\(\[([^\]]*)\]\)/u);
   if (!builderRolesMatch) {
     errors.push(
       `${CONTRACT_FILES.bootstrap}: grafana_agent_builder_project_roles must stay a literal toset of project roles`,
@@ -394,13 +397,11 @@ export function validateContract(files = readContractFiles()) {
       );
     }
   }
-  const builderProjectGrant = stripHclComments(
-    requireBlock(
-      errors,
-      bootstrap,
-      'resource "google_project_iam_member" "grafana_agent_cloudbuild_deployer"',
-      CONTRACT_FILES.bootstrap,
-    ),
+  const builderProjectGrant = requireBlock(
+    errors,
+    activeBootstrap,
+    'resource "google_project_iam_member" "grafana_agent_cloudbuild_deployer"',
+    CONTRACT_FILES.bootstrap,
   );
   requirePattern(
     errors,
