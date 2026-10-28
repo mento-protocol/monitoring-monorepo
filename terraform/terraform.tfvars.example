@@ -127,11 +127,13 @@ upstash_api_key = "..."
 # organization credential `alerts/rules` and `aegis` take as
 # `grafana_service_account_token`. Create / rotate at:
 #   Grafana Cloud → Administration → Service accounts → Add token.
-# Required: this stack's Grafana provider mints the dashboard's read-only Viewer
-# identity (`grafana-read-access.tf`) with it. It configures the provider and
-# nothing else — it is never written to a Vercel env var, a GitHub secret, or
-# Secret Manager. The Viewer token Terraform creates is what reaches the
-# dashboard; never paste this Admin token there.
+# Required: this stack's Grafana provider mints the read-only Viewer identities
+# in `grafana-read-access.tf` with it — the dashboard's and the Hardin SRE
+# agent's — and rotates their tokens when a counter is bumped. It configures the
+# provider and nothing else — it is never written to a Vercel env var, a GitHub
+# secret, or Secret Manager. The Viewer tokens Terraform creates are what reach
+# the dashboard and Hardin's secret; never paste this Admin token in either
+# place.
 grafana_provisioning_token = "glsa_REPLACE_ME"
 
 # Stack URL — default is already set in variables.tf; override only if it moves.
@@ -143,6 +145,13 @@ grafana_provisioning_token = "glsa_REPLACE_ME"
 # to Vercel in the same apply — the platform argument allowlist rejects
 # `-replace`, so this counter is the only rotation path.
 # grafana_dashboard_reader_token_rotation_counter = 1
+
+# Non-secret rotation counter for the Hardin SRE agent's Viewer token. Start at
+# 1 for the first approved apply. Increment it to mint a replacement token and
+# write it as a new version of the `hardin-grafana-reader-token` Secret Manager
+# secret in the same apply; no redeploy is involved. See
+# docs/notes/hardin-read-access.md.
+# grafana_hardin_reader_token_rotation_counter = 1
 
 # ── Google Cloud (metrics-bridge) ─────────────────────────────────────────────
 # Find with: gcloud organizations list
@@ -200,7 +209,9 @@ grafana_agent_secret_rotation_counters = {
 # IAM members allowed to impersonate `agent-readonly@mento-monitoring.iam`
 # (Token Creator). Defaults to `group:eng@mentolabs.xyz` so any engineer
 # inherits access; override here to add incident responders or external
-# auditors. If the SA already exists in the live IAM policy (it does, in
+# auditors. The Hardin SRE agent's Token Creator grant is a dedicated resource
+# in `terraform/agent-readonly.tf`, not a list entry, so an override here never
+# affects it. If the SA already exists in the live IAM policy (it does, in
 # production), follow the one-time `terraform import` recipe at the bottom of
 # `terraform/agent-readonly.tf` (section "One-time state adoption (manual
 # `terraform import`)") BEFORE the first `terraform apply` that includes that
