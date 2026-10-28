@@ -26,7 +26,7 @@
   },
   "dependencies": {
     "@google-cloud/functions-framework": "5.0.5",
-    "@google-cloud/logging": "^12.2.0",
+    "@google-cloud/logging": "^12.3.0",
     "env-schema": "^8.0.1"
   },
   "devDependencies": {
