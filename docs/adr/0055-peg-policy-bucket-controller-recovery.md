@@ -3,7 +3,7 @@ title: Peg policy bucket controller recovers authoritative IAM reconciliation
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-28
+last_verified: 2026-10-28
 scope: terraform/infra
 date: 2026-07
 doc_type: adr
