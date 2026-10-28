@@ -127,11 +127,13 @@ upstash_api_key = "..."
 # organization credential `alerts/rules` and `aegis` take as
 # `grafana_service_account_token`. Create / rotate at:
 #   Grafana Cloud → Administration → Service accounts → Add token.
-# Required: this stack's Grafana provider mints the dashboard's read-only Viewer
-# identity (`grafana-read-access.tf`) with it. It configures the provider and
-# nothing else — it is never written to a Vercel env var, a GitHub secret, or
-# Secret Manager. The Viewer token Terraform creates is what reaches the
-# dashboard; never paste this Admin token there.
+# Required: this stack's Grafana provider mints the read-only Viewer identities
+# in `grafana-read-access.tf` with it — the dashboard's and the Hardin SRE
+# agent's — and rotates their tokens when a counter is bumped. It configures the
+# provider and nothing else — it is never written to a Vercel env var, a GitHub
+# secret, or Secret Manager. The Viewer tokens Terraform creates are what reach
+# the dashboard and Hardin's secret; never paste this Admin token in either
+# place.
 grafana_provisioning_token = "glsa_REPLACE_ME"
 
 # Stack URL — default is already set in variables.tf; override only if it moves.
@@ -206,18 +208,16 @@ grafana_agent_secret_rotation_counters = {
 # ── Read-only AI agent investigator ──────────────────────────────────────────
 # IAM members allowed to impersonate `agent-readonly@mento-monitoring.iam`
 # (Token Creator). Defaults to `group:eng@mentolabs.xyz` so any engineer
-# inherits access, plus the Hardin SRE agent's service account
-# (`serviceAccount:giskard-readonly@governance-watchdog-b2a6.iam.gserviceaccount.com`,
-# see docs/notes/hardin-read-access.md). An override here REPLACES the default
-# list, so repeat both entries when adding incident responders or external
-# auditors. If the SA already exists in the live IAM policy (it does, in
+# inherits access; override here to add incident responders or external
+# auditors. The Hardin SRE agent's Token Creator grant is a dedicated resource
+# in `terraform/agent-readonly.tf`, not a list entry, so an override here never
+# affects it. If the SA already exists in the live IAM policy (it does, in
 # production), follow the one-time `terraform import` recipe at the bottom of
 # `terraform/agent-readonly.tf` (section "One-time state adoption (manual
 # `terraform import`)") BEFORE the first `terraform apply` that includes that
 # file. Fresh org / DR bootstraps can skip the import recipe entirely.
 # agent_readonly_impersonators = [
 #   "group:eng@mentolabs.xyz",
-#   "serviceAccount:giskard-readonly@governance-watchdog-b2a6.iam.gserviceaccount.com",
 #   "user:incident-responder@mentolabs.xyz",
 # ]
 

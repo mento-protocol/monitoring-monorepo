@@ -19,16 +19,19 @@ can reach is declared in the `platform` stack; nothing is granted by hand
 
 ## Identity chain
 
-| Hop | Identity                                                                  | Grant (Terraform)                                                                                                                    |
-| --- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| 1   | `giskard-readonly@governance-watchdog-b2a6.iam.gserviceaccount.com`       | Hardin's own key-bearing SA. Listed in `var.agent_readonly_impersonators` (`terraform/agent-readonly.tf`), so it holds Token Creator |
-| 2   | `agent-readonly@mento-monitoring.iam.gserviceaccount.com`                 | Keyless investigator SA with the curated org-level read-only roles; impersonated by hop 1 for every GCP read                         |
-| 3   | Secret Manager `hardin-grafana-reader-token` (project `mento-monitoring`) | `roles/secretmanager.secretAccessor` on this one secret for hop 2 only (`terraform/grafana-read-access.tf`)                          |
-| 4   | Grafana service account `hardin-sre-reader`, role `Viewer`                | Token `hardin-sre-reader-<counter>` stored as the `latest` secret version; datasource queries and alert rule/instance reads only     |
+| Hop | Identity                                                                  | Grant (Terraform)                                                                                                                                                                  |
+| --- | ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | `giskard-readonly@governance-watchdog-b2a6.iam.gserviceaccount.com`       | Hardin's own key-bearing SA. Holds Token Creator through its own resource, `google_service_account_iam_member.hardin_agent_readonly_token_creator` (`terraform/agent-readonly.tf`) |
+| 2   | `agent-readonly@mento-monitoring.iam.gserviceaccount.com`                 | Keyless investigator SA with the curated org-level read-only roles; impersonated by hop 1 for every GCP read                                                                       |
+| 3   | Secret Manager `hardin-grafana-reader-token` (project `mento-monitoring`) | `roles/secretmanager.secretAccessor` on this one secret for hop 2 only (`terraform/grafana-read-access.tf`)                                                                        |
+| 4   | Grafana service account `hardin-sre-reader`, role `Viewer`                | Token `hardin-sre-reader-<counter>` stored as the `latest` secret version; datasource queries and alert rule/instance reads only                                                   |
 
 Hardin never receives `secretAccessor` directly and never receives a Grafana
-token out of band. Removing hop 1 from `var.agent_readonly_impersonators` cuts
-the whole chain; flipping `is_disabled` on `hardin_reader` cuts Grafana alone.
+token out of band. Deleting hop 1's Token Creator resource cuts the whole chain;
+flipping `is_disabled` on `hardin_reader` cuts Grafana alone. Hop 1 is a
+dedicated resource rather than an entry in `var.agent_readonly_impersonators`
+because a `terraform.tfvars` override replaces that list, which would silently
+drop the grant while the rest of the chain still gets created.
 
 Accepted boundary: every other impersonator of `agent-readonly` (today the
 `eng@mentolabs.xyz` group) can also read this secret, as it can read everything
@@ -48,8 +51,9 @@ pnpm infra:apply -- -auto-approve # only after explicit approval of that plan
 ```
 
 No import is needed: none of these resources exist live yet. `terraform.tfvars`
-needs no new values; `grafana_hardin_reader_token_rotation_counter` defaults
-to `1`.
+needs no new values, and an existing `agent_readonly_impersonators` override
+there does not need Hardin added; `grafana_hardin_reader_token_rotation_counter`
+defaults to `1`.
 
 ## Verify (never prints the token)
 

@@ -70,6 +70,17 @@ const IAM_MEMBER_EXPRESSION_GROUPS = [
     ],
   },
   {
+    // Hardin, the read-only SRE agent on Philip's macOS gateway: a dedicated
+    // Token Creator grant on `agent_readonly`, kept out of the operator
+    // override list `var.agent_readonly_impersonators` on purpose
+    // (`docs/notes/hardin-read-access.md`).
+    expression:
+      '"serviceAccount:giskard-readonly@governance-watchdog-b2a6.iam.gserviceaccount.com"',
+    blocks: [
+      "terraform/agent-readonly.tf:google_service_account_iam_member.hardin_agent_readonly_token_creator",
+    ],
+  },
+  {
     expression:
       '"serviceAccount:${google_service_account.agent_readonly.email}"',
     blocks: [
@@ -321,6 +332,7 @@ const IAM_BLOCK_SHAPE_SPECIFICATIONS = [
   "terraform/agent-readonly.tf:google_organization_iam_member.agent_readonly_org_roles|7c3104c85aed42208922ae49b7bcf3ccad1a92fd0550d512da1cc2e98c54803c",
   "terraform/agent-readonly.tf:google_project_iam_member.agent_readonly_storage_object_viewer|711050d13fd79a3a8824657145fe93b3453c1d7b6ffbe31ebdf7e658c3a3398f",
   "terraform/agent-readonly.tf:google_service_account_iam_member.agent_readonly_token_creators|70839f6d974946314e5657a18e65df3afff646801c915595ed125f619557f188",
+  "terraform/agent-readonly.tf:google_service_account_iam_member.hardin_agent_readonly_token_creator|34101653ec5541a49d06c2232662d13eb08e9b2cc32c24cd09480dbaf4c92188",
   "terraform/ci-wif.tf:google_project_iam_member.ci_deployer|baeabc756e63cb7199f2e4cbb227eb457e10e5239e95cb0232ee8591a9b34f9b",
   "terraform/ci-wif.tf:google_service_account_iam_member.ci_appengine_default_service_account_user|5abbcb1b4d14a91e5cba70cf7a81af90be95754f83f2d8d15581e68794b3ee0b",
   "terraform/ci-wif.tf:google_service_account_iam_member.ci_plan_readonly_org_terraform_plan_readonly_token_creator|12f23643afcc9349e76c1c0c2972acb6145adf62388c784b6f3602c530474541",

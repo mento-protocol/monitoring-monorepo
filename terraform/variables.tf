@@ -305,11 +305,13 @@ variable "grafana_url" {
 variable "grafana_provisioning_token" {
   description = <<-EOT
     Admin-role Grafana Cloud service account token (glsa_...) used ONLY to
-    configure this stack's Grafana provider, which mints the read-only
-    dashboard identity in `grafana-read-access.tf`. Same organization
-    credential the `alerts/rules` and `aegis` stacks take as
+    configure this stack's Grafana provider, which mints the read-only Viewer
+    identities in `grafana-read-access.tf`: the dashboard's and the Hardin SRE
+    agent's, including every counter-driven rotation of their tokens. Same
+    organization credential the `alerts/rules` and `aegis` stacks take as
     `grafana_service_account_token`; the name differs here so it cannot be
-    confused with the Viewer token this stack creates and ships to Vercel.
+    confused with the Viewer tokens this stack creates and ships to Vercel and
+    to Secret Manager.
     Set in the gitignored terraform.tfvars. It is never written to a Vercel
     environment variable, a GitHub secret, or Secret Manager.
     Rotate from Grafana Cloud → Administration → Service accounts.

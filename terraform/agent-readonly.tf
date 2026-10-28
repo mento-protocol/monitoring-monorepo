@@ -55,22 +55,11 @@ variable "agent_readonly_impersonators" {
     `gcloud --impersonate-service-account` to drive read-only AI agent
     investigations (MCP, Claude Code, Codex). Format: `user:...`, `group:...`,
     or `serviceAccount:...`. Defaults to the eng@mentolabs.xyz Google Group so
-    any engineer inherits access without per-user IAM churn, plus the Hardin
-    SRE agent's own service account (see below); override in
+    any engineer inherits access without per-user IAM churn; override in
     `terraform.tfvars` to add incident responders or external auditors.
   EOT
   type        = list(string)
-  default = [
-    "group:eng@mentolabs.xyz",
-    # Hardin: the in-house read-only SRE agent that runs on Philip's macOS
-    # gateway. It authenticates as this key-bearing service account in the
-    # governance-watchdog project and impersonates `agent-readonly` for every
-    # investigation, so the org-wide read surface stays on the keyless SA and
-    # is revocable here by removing one list entry. Hardin's own Grafana
-    # Viewer token is delivered through Secret Manager in
-    # `grafana-read-access.tf`; see `docs/notes/hardin-read-access.md`.
-    "serviceAccount:giskard-readonly@governance-watchdog-b2a6.iam.gserviceaccount.com",
-  ]
+  default     = ["group:eng@mentolabs.xyz"]
 }
 
 # Opt-in, project-scoped GCS object payload read access. Org-wide
@@ -147,6 +136,27 @@ resource "google_service_account_iam_member" "agent_readonly_token_creators" {
   service_account_id = google_service_account.agent_readonly.name
   role               = "roles/iam.serviceAccountTokenCreator"
   member             = each.value
+}
+
+# Hardin: the in-house read-only SRE agent that runs on Philip's macOS gateway.
+# It authenticates as this key-bearing service account in the
+# governance-watchdog project and impersonates `agent-readonly` for every
+# investigation, so the org-wide read surface stays on the keyless SA. Its
+# Grafana Viewer token is delivered through Secret Manager in
+# `grafana-read-access.tf`; `docs/notes/hardin-read-access.md` owns the chain.
+#
+# Deliberately NOT an entry in `var.agent_readonly_impersonators`: that list is
+# the operator override surface for humans and groups, and a `terraform.tfvars`
+# override REPLACES the default rather than extending it. Folding Hardin into
+# the default would let any existing override silently drop this grant while
+# the Grafana token and secret in `grafana-read-access.tf` still get created,
+# leaving a chain that fails only at verification time. A dedicated resource
+# keeps the grant independent of operator input, and keeps revocation a
+# reviewed code change: delete this block to cut Hardin's whole chain.
+resource "google_service_account_iam_member" "hardin_agent_readonly_token_creator" {
+  service_account_id = google_service_account.agent_readonly.name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = "serviceAccount:giskard-readonly@governance-watchdog-b2a6.iam.gserviceaccount.com"
 }
 
 # ── Org-level read-only roles ────────────────────────────────────────────────

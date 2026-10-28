@@ -113,12 +113,13 @@ resource "grafana_service_account_token" "dashboard_reader" {
 # `dashboard_reader`. [ADR 0030](../docs/adr/0030-iac-before-cli-secrets.md)
 # rules out `gcloud secrets versions add` or a Grafana-console token here.
 #
-# ACCEPTED BOUNDARY. Every principal in `var.agent_readonly_impersonators`
-# (today the eng group and Hardin) can impersonate `agent_readonly` and
-# therefore read this token, exactly as they can read everything else that SA
-# sees. Engineers already hold their own Grafana logins, so this widens no
-# Grafana surface for them, but Grafana access logs cannot tell a human who
-# used this token from Hardin. Tightening that to a Hardin-only principal
+# ACCEPTED BOUNDARY. Every principal holding Token Creator on `agent_readonly`
+# (today the eng group via `var.agent_readonly_impersonators`, and Hardin via
+# its dedicated grant in `agent-readonly.tf`) can impersonate it and therefore
+# read this token, exactly as they can read everything else that SA sees.
+# Engineers already hold their own Grafana logins, so this widens no Grafana
+# surface for them, but Grafana access logs cannot tell a human who used this
+# token from Hardin. Tightening that to a Hardin-only principal
 # would mean granting `secretAccessor` to Hardin's key-bearing SA directly,
 # which the documented chain deliberately avoids; revisit if the impersonator
 # list grows beyond the eng group.
@@ -188,7 +189,8 @@ resource "google_secret_manager_secret_version" "hardin_grafana_reader_token" {
 # `roles/secretmanager.viewer` (metadata) at the org level by design; this is
 # the one secret whose payload it may read. Hardin never receives
 # `secretAccessor` directly: it must go through the Token Creator chain in
-# `agent-readonly.tf`, so removing it from `var.agent_readonly_impersonators`
+# `agent-readonly.tf`, so deleting
+# `google_service_account_iam_member.hardin_agent_readonly_token_creator` there
 # also cuts its path to this token.
 resource "google_secret_manager_secret_iam_member" "hardin_grafana_reader_token_accessor" {
   project   = google_project.monitoring.project_id
