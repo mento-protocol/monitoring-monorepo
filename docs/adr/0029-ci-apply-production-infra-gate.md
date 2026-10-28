@@ -3,7 +3,7 @@ title: Infra applies on merge to main behind the production-infra environment ga
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-27
+last_verified: 2026-10-28
 scope: terraform/infra
 date: 2026-05
 doc_type: adr
