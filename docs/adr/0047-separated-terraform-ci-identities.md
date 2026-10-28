@@ -3,7 +3,7 @@ title: Terraform CI separates routine deploy, PR plan, trusted-main refresh, Peg
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-27
+last_verified: 2026-10-28
 scope: terraform/infra
 date: 2026-07
 doc_type: adr
@@ -170,12 +170,13 @@ queued. This display-only wrapper carries no cloud credentials or deployment
 state.
 
 The cutover boundary originally barred the Peg-policy foundation while the
-legacy path remained. ADR 0054 now requires #1659's additive staging foundation
-to merge and its five deployment paths to pass canaries. The same-project
-foundation then removes broad Storage Admin, Storage Object Admin, and Service
-Account User grants and requires an effective-IAM audit after apply. A later
-reviewed change may create that foundation only through its own full plan and
-explicit human-approved apply.
+legacy path remained. After #1659's additive staging foundation merged,
+[ADR 0054](0054-same-project-peg-policy-artifact.md) placed that foundation in
+the same project through its own reviewed plan and human-approved apply. Its
+bucket controller recovery
+([ADR 0055](0055-peg-policy-bucket-controller-recovery.md)), protected policy
+publication, and generation-pinned runtime attachment are complete; the Peg
+policy publication plan lane in the table above is the resulting chain.
 
 ### Final apply-plan contract
 
