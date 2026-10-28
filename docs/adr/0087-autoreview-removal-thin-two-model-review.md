@@ -14,7 +14,7 @@ garden_lane: adrs-architecture
 
 # ADR 0087 — Remove the autoreview machinery; keep a thin two-model closeout review
 
-**Status:** Accepted (Sep 2026), amended 2026-09-16, in force.
+**Status:** Accepted (Sep 2026), amended 2026-09-16 and 2026-10-28, in force.
 **Scope:** ci/process
 
 Amended 2026-09-16: [ADR 0106](0106-sentry-triage-moves-to-operator-skills.md)
@@ -55,6 +55,25 @@ Delete the autoreview machinery. Its replacement is
 (`pnpm agent:closeout-review`, added by the preceding PR), invoked from step 4
 of [`pr-operating-card.md`](../notes/pr-operating-card.md) before the `review`
 skill runs on the same diff.
+
+### Completion evidence amendment (2026-10-28)
+
+The closeout no longer treats the absence of recognized findings as a clean
+verdict. A successful provider process can return a refusal, partial text, or
+an unrelated body. Without a qualified positive-completion protocol, the tool
+retains that output and returns failed/2 with a manual-inspection reason.
+Automatic clean output is disabled. Recognized findings retain findings/1.
+Provider failures, timeouts, empty output, and changed review targets retain
+their existing refusal checks. Manual inspection does not convert failed/2
+into completed automatic closeout.
+
+A future automatic-clean protocol must qualify its exact CLI invocation,
+terminal event, final-output binding, and reviewed scope before use. This
+amendment does not change the review model, sandbox, or nested-session guard.
+It addresses [#2632](https://github.com/mento-protocol/monitoring-monorepo/issues/2632).
+The broader off-target scope requirements in
+[#2550](https://github.com/mento-protocol/monitoring-monorepo/issues/2550) remain
+open.
 
 ### What is deleted
 

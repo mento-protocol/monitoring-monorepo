@@ -117,22 +117,48 @@ function runScript({ repo, bin }, args = [], extraEnv = {}, pathValue = null) {
   };
 }
 
-test("a clean report exits 0 and prints the report path last", (t) => {
+test("a clean-looking report requires manual inspection and prints the path last", (t) => {
   const repo = makeRepo(t);
   fakeCodex(repo.bin, 'echo "No issues found in this patch."');
-
   const run = runScript(repo, ["--base", "base", "--no-fetch"]);
-
-  assert.equal(run.status, 0);
+  assert.equal(run.status, 2);
+  assert.match(
+    run.stderr,
+    /positive completion evidence unavailable; manual report inspection required/,
+  );
   assert.match(
     run.stdout,
     /^diff: .* against base \(merge base [0-9a-f]{7}\)$/m,
   );
   assert.ok(run.reportPath, `no report path in: ${run.stdout}`);
   const report = fs.readFileSync(run.reportPath, "utf8");
-  assert.match(report, /^verdict: clean$/m);
+  assert.match(report, /^verdict: failed$/m);
   assert.match(report, /No issues found in this patch\./);
 });
+
+for (const [label, body] of [
+  ["refusal", "I cannot access this repository and did not review the diff."],
+  ["partial", "I inspected the first file. Remaining files:"],
+  ["unrecognized", "Review completed successfully."],
+  ["claimed clean JSON", '{"verdict":"clean"}'],
+  ["cancelled JSON", '{"verdict":"clean"}\n{"type":"turn.cancelled"}'],
+  ["conflicting JSON", '{"verdict":"clean","findings":["[P1] broken API"]}'],
+  ["duplicate JSON", '{"verdict":"clean"}\n{"verdict":"findings"}'],
+  ["malformed JSON", '{"verdict":"clean"'],
+]) {
+  test(`${label} output cannot establish a clean closeout`, (t) => {
+    const repo = makeRepo(t);
+    const output = path.join(repo.root, "provider-body.txt");
+    fs.writeFileSync(output, body);
+    fakeCodex(repo.bin, `cat ${JSON.stringify(output)}`);
+    const run = runScript(repo, ["--base", "base", "--no-fetch"]);
+    assert.equal(run.status, 2);
+    assert.match(run.stderr, /positive completion evidence unavailable/);
+    const report = fs.readFileSync(run.reportPath, "utf8");
+    assert.match(report, /^verdict: failed$/m);
+    assert.ok(report.endsWith(body), "the original body must remain available");
+  });
+}
 
 test("a report naming findings exits 1", (t) => {
   const repo = makeRepo(t);
@@ -157,7 +183,7 @@ test("a report naming findings exits 1", (t) => {
 
 test("the header records the run's provenance", (t) => {
   const repo = makeRepo(t);
-  fakeCodex(repo.bin, 'echo "clean"');
+  fakeCodex(repo.bin, 'echo "- [P2] Fixture finding — math.js:1-1"');
 
   const run = runScript(repo, ["--base", "base", "--no-fetch"]);
   const report = fs.readFileSync(run.reportPath, "utf8");
@@ -192,7 +218,7 @@ test("a commit landing during the run voids the report", (t) => {
       'echo "moved" > moved.txt',
       "git add -A",
       "git commit --quiet -m during-run",
-      'echo "clean"',
+      'echo "- [P2] Fixture finding — math.js:1-1"',
     ].join("\n"),
   );
 
@@ -220,7 +246,7 @@ test("an edit to an already-modified file during the run voids the report", (t) 
     repo.bin,
     [
       `printf 'export const sum = () => 3;\\n' > ${JSON.stringify(tracked)}`,
-      'echo "clean"',
+      'echo "- [P2] Fixture finding — math.js:1-1"',
     ].join("\n"),
   );
 
@@ -241,7 +267,7 @@ test("a base ref moving during the run voids the report", (t) => {
     [
       `cd ${JSON.stringify(repo.repo)}`,
       "git branch -f base HEAD",
-      'echo "clean"',
+      'echo "- [P2] Fixture finding — math.js:1-1"',
     ].join("\n"),
   );
   const baseShaBefore = git(repo.repo, "rev-parse", "base");
@@ -261,7 +287,7 @@ test("a base ref moving during the run voids the report", (t) => {
 
 test("the report and its transcript are readable only by their owner", (t) => {
   const repo = makeRepo(t);
-  fakeCodex(repo.bin, 'echo "clean"');
+  fakeCodex(repo.bin, 'echo "- [P2] Fixture finding — math.js:1-1"');
 
   const run = runScript(repo, ["--base", "base", "--no-fetch"]);
 
@@ -276,7 +302,7 @@ test("the report and its transcript are readable only by their owner", (t) => {
 
 test("a dirty working tree is recorded in the header", (t) => {
   const repo = makeRepo(t);
-  fakeCodex(repo.bin, 'echo "clean"');
+  fakeCodex(repo.bin, 'echo "- [P2] Fixture finding — math.js:1-1"');
   fs.writeFileSync(path.join(repo.repo, "math.js"), "export const sum = 2;\n");
 
   const run = runScript(repo, ["--base", "base", "--no-fetch"]);
@@ -293,12 +319,12 @@ test("codex receives the pinned argv and an allowlisted environment", (t) => {
     [
       `for arg in "$@"; do echo "$arg" >> ${JSON.stringify(argvDump)}; done`,
       `env > ${JSON.stringify(envDump)}`,
-      'echo "clean"',
+      'echo "- [P2] Fixture finding — math.js:1-1"',
     ].join("\n"),
   );
 
   const run = runScript(repo, ["--base", "base", "--no-fetch"]);
-  assert.equal(run.status, 0);
+  assert.equal(run.status, 1);
 
   assert.deepEqual(fs.readFileSync(argvDump, "utf8").trim().split("\n"), [
     "exec",
@@ -334,7 +360,7 @@ test("codex receives the pinned argv and an allowlisted environment", (t) => {
 
 test("every frozen finder report shape is read as findings", (t) => {
   // Some reports use the singular `Review comment:` heading. A detector that
-  // only knows `Full review comments:` reports those as clean, so the frozen
+  // only knows `Full review comments:` loses singular findings, so the frozen
   // set must keep both shapes.
   const dir = fileURLToPath(
     new URL("../../docs/evals/review-skill-finder-reports/", import.meta.url),
@@ -361,7 +387,7 @@ test("every frozen finder report shape is read as findings", (t) => {
 
 test("the printed diff size counts uncommitted work, as codex does", (t) => {
   const repo = makeRepo(t);
-  fakeCodex(repo.bin, 'echo "clean"');
+  fakeCodex(repo.bin, 'echo "- [P2] Fixture finding — math.js:1-1"');
   // Tracked and modified but not committed: `base...HEAD` would miss it.
   fs.appendFileSync(path.join(repo.repo, ".gitignore"), "extra/\n");
 
@@ -372,7 +398,7 @@ test("the printed diff size counts uncommitted work, as codex does", (t) => {
 
 test("the printed diff size ignores commits only the base carries", (t) => {
   const repo = makeRepo(t);
-  fakeCodex(repo.bin, 'echo "clean"');
+  fakeCodex(repo.bin, 'echo "- [P2] Fixture finding — math.js:1-1"');
   // Advance `base` past the merge base with a file HEAD never saw. The two-dot
   // form against the branch tip would count that file as a reversed deletion.
   const headSha = git(repo.repo, "rev-parse", "HEAD");
@@ -403,7 +429,7 @@ test("the printed diff size ignores commits only the base carries", (t) => {
 
 test("the header carries a fingerprint of the reviewed tree", (t) => {
   const repo = makeRepo(t);
-  fakeCodex(repo.bin, 'echo "clean"');
+  fakeCodex(repo.bin, 'echo "- [P2] Fixture finding — math.js:1-1"');
   fs.writeFileSync(path.join(repo.repo, "math.js"), "export const sum = 9;\n");
 
   const run = runScript(repo, ["--base", "base", "--no-fetch"]);
@@ -416,7 +442,7 @@ test("the header carries a fingerprint of the reviewed tree", (t) => {
 
 test("an unwritable report path is a tool failure, not a finding", (t) => {
   const repo = makeRepo(t);
-  fakeCodex(repo.bin, 'echo "clean"');
+  fakeCodex(repo.bin, 'echo "- [P2] Fixture finding — math.js:1-1"');
   // A directory where the report file belongs: the open throws. Exit 1 is
   // reserved for a review that ran and found things.
   const out = path.join(repo.repo, ".reviews", "taken.md");
@@ -430,7 +456,7 @@ test("an unwritable report path is a tool failure, not a finding", (t) => {
 
 test("a failed base fetch is fatal rather than silently stale", (t) => {
   const repo = makeRepo(t);
-  fakeCodex(repo.bin, 'echo "clean"');
+  fakeCodex(repo.bin, 'echo "- [P2] Fixture finding — math.js:1-1"');
   git(repo.repo, "remote", "add", "gone", path.join(repo.root, "missing.git"));
 
   const run = runScript(repo, ["--base", "gone/main"]);
@@ -453,7 +479,14 @@ test("an empty report exits 2", (t) => {
 
 test("a non-zero codex exit is a tool failure, not a finding", (t) => {
   const repo = makeRepo(t);
-  fakeCodex(repo.bin, ['echo "boom" >&2', "exit 7"].join("\n"));
+  fakeCodex(
+    repo.bin,
+    [
+      'echo "- [P1] Partial finding — math.js:1-1"',
+      'echo "boom" >&2',
+      "exit 7",
+    ].join("\n"),
+  );
 
   const run = runScript(repo, ["--base", "base", "--no-fetch"]);
 
@@ -473,7 +506,10 @@ test("a non-zero codex exit is a tool failure, not a finding", (t) => {
 
 test("a timeout keeps the partial report and exits 2", (t) => {
   const repo = makeRepo(t);
-  fakeCodex(repo.bin, ['echo "partial finding text"', "sleep 30"].join("\n"));
+  fakeCodex(
+    repo.bin,
+    ['echo "- [P1] partial finding text — math.js:1-1"', "sleep 30"].join("\n"),
+  );
 
   const run = runScript(repo, [
     "--base",
@@ -492,7 +528,7 @@ test("a timeout keeps the partial report and exits 2", (t) => {
 
 test("an unresolvable base exits 2 before codex runs", (t) => {
   const repo = makeRepo(t);
-  fakeCodex(repo.bin, 'echo "clean"');
+  fakeCodex(repo.bin, 'echo "- [P2] Fixture finding — math.js:1-1"');
 
   const run = runScript(repo, ["--base", "no-such-ref", "--no-fetch"]);
 
@@ -503,7 +539,7 @@ test("an unresolvable base exits 2 before codex runs", (t) => {
 
 test("an --out path Git would track is refused", (t) => {
   const repo = makeRepo(t);
-  fakeCodex(repo.bin, 'echo "clean"');
+  fakeCodex(repo.bin, 'echo "- [P2] Fixture finding — math.js:1-1"');
 
   const tracked = runScript(repo, [
     "--base",
@@ -535,7 +571,7 @@ test("an --out path Git would track is refused", (t) => {
     "--out",
     ".reviews/chosen.md",
   ]);
-  assert.equal(ignored.status, 0);
+  assert.equal(ignored.status, 1);
   assert.equal(
     fs.realpathSync(ignored.reportPath),
     fs.realpathSync(path.join(repo.repo, ".reviews/chosen.md")),
@@ -544,7 +580,7 @@ test("an --out path Git would track is refused", (t) => {
 
 test("an active Codex session is refused", (t) => {
   const repo = makeRepo(t);
-  fakeCodex(repo.bin, 'echo "clean"');
+  fakeCodex(repo.bin, 'echo "- [P2] Fixture finding — math.js:1-1"');
 
   for (const marker of ["CODEX_THREAD_ID", "CODEX_SANDBOX"]) {
     const run = runScript(repo, ["--base", "base", "--no-fetch"], {
@@ -574,7 +610,7 @@ test("a codex inside the tree under review is refused", (t) => {
   // Where `pnpm run` puts the repository's own bin directory: first on PATH.
   const shimDir = path.join(repo.repo, "node_modules", ".bin");
   fs.mkdirSync(shimDir, { recursive: true });
-  fakeCodex(shimDir, 'echo "clean"');
+  fakeCodex(shimDir, 'echo "- [P2] Fixture finding — math.js:1-1"');
 
   const run = runScript(
     repo,
@@ -603,14 +639,14 @@ test("the version probe runs under the same environment allowlist", (t) => {
       '  echo "codex-cli 9.9.9-fake"',
       "  exit 0",
       "fi",
-      'echo "clean"',
+      'echo "- [P2] Fixture finding — math.js:1-1"',
     ].join("\n") + "\n",
   );
   fs.chmodSync(file, 0o755);
 
   const run = runScript(repo, ["--base", "base", "--no-fetch"]);
 
-  assert.equal(run.status, 0);
+  assert.equal(run.status, 1);
   const dumped = fs.readFileSync(envDump, "utf8");
   assert.doesNotMatch(dumped, /^GH_TOKEN=/m, "GH_TOKEN reached the probe");
   assert.match(dumped, /^OPENAI_API_KEY=secret-openai-key$/m);
@@ -619,7 +655,7 @@ test("the version probe runs under the same environment allowlist", (t) => {
 
 test("an unknown argument is refused with the usage line", (t) => {
   const repo = makeRepo(t);
-  fakeCodex(repo.bin, 'echo "clean"');
+  fakeCodex(repo.bin, 'echo "- [P2] Fixture finding — math.js:1-1"');
 
   const run = runScript(repo, ["--engine", "claude"]);
 
@@ -673,7 +709,7 @@ function addOrigin(repo, branch) {
 
 test("with no open PR the base falls back to the repository default branch", (t) => {
   const repo = makeRepo(t);
-  fakeCodex(repo.bin, 'echo "clean"');
+  fakeCodex(repo.bin, 'echo "- [P2] Fixture finding — math.js:1-1"');
   // A default branch that is deliberately not `main`: a hardcoded fallback
   // would review against the wrong ref here and say nothing.
   fakeGh(repo.bin, { defaultBranch: "trunk", pulls: [] });
@@ -681,7 +717,7 @@ test("with no open PR the base falls back to the repository default branch", (t)
 
   const run = runScript(repo, ["--no-fetch"]);
 
-  assert.equal(run.status, 0);
+  assert.equal(run.status, 1);
   assert.match(run.stdout, /against origin\/trunk /);
   assert.match(
     fs.readFileSync(run.reportPath, "utf8"),
@@ -691,7 +727,7 @@ test("with no open PR the base falls back to the repository default branch", (t)
 
 test("with one open PR the base is that PR own base branch", (t) => {
   const repo = makeRepo(t);
-  fakeCodex(repo.bin, 'echo "clean"');
+  fakeCodex(repo.bin, 'echo "- [P2] Fixture finding — math.js:1-1"');
   fakeGh(repo.bin, {
     defaultBranch: "trunk",
     pulls: [
@@ -705,7 +741,7 @@ test("with one open PR the base is that PR own base branch", (t) => {
 
   const run = runScript(repo, ["--no-fetch"]);
 
-  assert.equal(run.status, 0);
+  assert.equal(run.status, 1);
   assert.match(
     fs.readFileSync(run.reportPath, "utf8"),
     /^base_ref: origin\/release$/m,
@@ -714,7 +750,7 @@ test("with one open PR the base is that PR own base branch", (t) => {
 
 test("a repository naming no default branch refuses instead of guessing", (t) => {
   const repo = makeRepo(t);
-  fakeCodex(repo.bin, 'echo "clean"');
+  fakeCodex(repo.bin, 'echo "- [P2] Fixture finding — math.js:1-1"');
   fakeGh(repo.bin, { defaultBranch: null, pulls: [] });
   addOrigin(repo.repo, "trunk");
 
@@ -726,7 +762,7 @@ test("a repository naming no default branch refuses instead of guessing", (t) =>
 
 test("a repository-controlled git shim never runs at all", (t) => {
   const repo = makeRepo(t);
-  fakeCodex(repo.bin, 'echo "clean"');
+  fakeCodex(repo.bin, 'echo "- [P2] Fixture finding — math.js:1-1"');
   // What `pnpm run` puts first on PATH. The shim records every call it gets,
   // so the marker proves whether it was consulted — including on the first
   // call, before the script knows where the repository root is.
@@ -750,23 +786,23 @@ test("a repository-controlled git shim never runs at all", (t) => {
     `${shimDir}:${repo.bin}:${process.env.PATH}`,
   );
 
-  assert.equal(run.status, 0);
+  assert.equal(run.status, 1);
   assert.equal(fs.existsSync(marker), false, "the shim was executed");
 });
 
 test("a default report path is unique per process", (t) => {
   const repo = makeRepo(t);
-  fakeCodex(repo.bin, 'echo "clean"');
+  fakeCodex(repo.bin, 'echo "- [P2] Fixture finding — math.js:1-1"');
 
   const run = runScript(repo, ["--base", "base", "--no-fetch"]);
 
-  assert.equal(run.status, 0);
+  assert.equal(run.status, 1);
   assert.match(path.basename(run.reportPath), /-[0-9a-f]{7}-\d+\.md$/);
 });
 
 test("ambient Git redirection does not reach the fingerprint", (t) => {
   const repo = makeRepo(t);
-  fakeCodex(repo.bin, 'echo "clean"');
+  fakeCodex(repo.bin, 'echo "- [P2] Fixture finding — math.js:1-1"');
   // An alternate index the reviewer would never see. Left in place, Git would
   // read and write it here, and the header would describe a tree codex did
   // not read.
@@ -776,13 +812,13 @@ test("ambient Git redirection does not reach the fingerprint", (t) => {
     GIT_INDEX_FILE: index,
   });
 
-  assert.equal(run.status, 0);
+  assert.equal(run.status, 1);
   assert.equal(fs.existsSync(index), false, "Git used the alternate index");
 });
 
 test("a mirror remote is not read as the GitHub base repository", (t) => {
   const repo = makeRepo(t);
-  fakeCodex(repo.bin, 'echo "clean"');
+  fakeCodex(repo.bin, 'echo "- [P2] Fixture finding — math.js:1-1"');
   fakeGh(repo.bin, { defaultBranch: "trunk", pulls: [] });
   // Same owner and name, different host: accepting it would let a mirror
   // supply the base the review diffs against.
@@ -802,7 +838,7 @@ test("a mirror remote is not read as the GitHub base repository", (t) => {
 
 test("no merge base is a stop rather than a base-ref merge base", (t) => {
   const repo = makeRepo(t);
-  fakeCodex(repo.bin, 'echo "clean"');
+  fakeCodex(repo.bin, 'echo "- [P2] Fixture finding — math.js:1-1"');
   // An orphan branch shares no history with HEAD, so `git merge-base` fails
   // exactly as it does in a shallow checkout.
   git(repo.repo, "checkout", "--quiet", "--orphan", "unrelated");
@@ -817,7 +853,7 @@ test("no merge base is a stop rather than a base-ref merge base", (t) => {
 
 test("an --out symlink is refused before anything is written", (t) => {
   const repo = makeRepo(t);
-  fakeCodex(repo.bin, 'echo "clean"');
+  fakeCodex(repo.bin, 'echo "- [P2] Fixture finding — math.js:1-1"');
   // Ignored by Git, so the lexical check passes; the link lands in a tracked
   // directory, which is where the report would actually be written.
   const reviews = path.join(repo.repo, ".reviews");
@@ -839,7 +875,7 @@ test("a codex symlinked into the tree under review is refused", (t) => {
   // resolved target says the branch supplies its own reviewer.
   const inTree = path.join(repo.repo, "tools");
   fs.mkdirSync(inTree, { recursive: true });
-  fakeCodex(inTree, 'echo "clean"');
+  fakeCodex(inTree, 'echo "- [P2] Fixture finding — math.js:1-1"');
   const linkDir = path.join(repo.root, "link-bin");
   fs.mkdirSync(linkDir, { recursive: true });
   fs.symlinkSync(path.join(inTree, "codex"), path.join(linkDir, "codex"));
@@ -858,7 +894,7 @@ test("a codex symlinked into the tree under review is refused", (t) => {
 
 test("environment-injected Git configuration does not reach the fingerprint", (t) => {
   const repo = makeRepo(t);
-  fakeCodex(repo.bin, 'echo "clean"');
+  fakeCodex(repo.bin, 'echo "- [P2] Fixture finding — math.js:1-1"');
   // A dirty tracked file, so the diff behind the fingerprint has output the
   // injected `diff.noprefix` would reshape.
   fs.writeFileSync(
@@ -873,8 +909,8 @@ test("environment-injected Git configuration does not reach the fingerprint", (t
     GIT_CONFIG_VALUE_0: "true",
   });
 
-  assert.equal(plain.status, 0);
-  assert.equal(injected.status, 0);
+  assert.equal(plain.status, 1);
+  assert.equal(injected.status, 1);
   const fingerprint = (run) =>
     fs
       .readFileSync(run.reportPath, "utf8")
@@ -888,7 +924,7 @@ test("environment-injected Git configuration does not reach the fingerprint", (t
 
 test("a HEAD that moves during base resolution is a stop", (t) => {
   const repo = makeRepo(t);
-  fakeCodex(repo.bin, 'echo "clean"');
+  fakeCodex(repo.bin, 'echo "- [P2] Fixture finding — math.js:1-1"');
   fakeGh(repo.bin, { defaultBranch: "trunk", pulls: [] });
   addOrigin(repo.repo, "trunk");
   // `gh` runs after HEAD is read and before the fingerprint is taken, so a
@@ -923,7 +959,7 @@ test("a HEAD that moves during base resolution is a stop", (t) => {
   const report = fs.readFileSync(run.reportPath, "utf8");
   assert.match(report, /^target_moved: yes$/m);
   // The header names the commit the run started on and the report names the
-  // one it ended on. Without the saved-HEAD check this run reads as clean.
+  // one it ended on. The saved-HEAD check must reject even a finding report.
   const headSha = report.match(/^head_sha: ([0-9a-f]{40})$/m)[1];
   const atFinish = report.match(/^head_sha_at_finish: ([0-9a-f]{40})$/m)[1];
   assert.notEqual(headSha, atFinish);
@@ -963,7 +999,7 @@ test("the sanitized PATH hands children absolute directories only", (t) => {
       '  echo "codex-cli 9.9.9-fake"',
       "  exit 0",
       "fi",
-      'echo "clean"',
+      'echo "- [P2] Fixture finding — math.js:1-1"',
     ].join("\n") + "\n",
   );
   fs.chmodSync(file, 0o755);
@@ -978,7 +1014,7 @@ test("the sanitized PATH hands children absolute directories only", (t) => {
     `../outside-bin:${repo.bin}:${process.env.PATH}`,
   );
 
-  assert.equal(run_.status, 0);
+  assert.equal(run_.status, 1);
   const entries = fs
     .readFileSync(envDump, "utf8")
     .match(/^PATH=(.*)$/m)[1]
@@ -1004,7 +1040,7 @@ test("a codex hard-linked to a file inside the tree under review is refused", (t
   // rewrite the reviewer's own bytes.
   const inTree = path.join(repo.repo, "tools");
   fs.mkdirSync(inTree, { recursive: true });
-  fakeCodex(inTree, 'echo "clean"');
+  fakeCodex(inTree, 'echo "- [P2] Fixture finding — math.js:1-1"');
   const linkDir = path.join(repo.root, "hardlink-bin");
   fs.mkdirSync(linkDir, { recursive: true });
   fs.linkSync(path.join(inTree, "codex"), path.join(linkDir, "codex"));
@@ -1027,7 +1063,10 @@ test("a codex replaced after it was resolved never runs", (t) => {
   // which makes the window between resolution and execution observable.
   const file = path.join(repo.bin, "codex");
   const replacement = path.join(repo.root, "replacement");
-  fs.writeFileSync(replacement, '#!/bin/sh\necho "clean"\n');
+  fs.writeFileSync(
+    replacement,
+    '#!/bin/sh\necho "- [P2] Fixture finding — math.js:1-1"\n',
+  );
   fs.chmodSync(replacement, 0o755);
   fs.writeFileSync(
     file,
@@ -1038,7 +1077,7 @@ test("a codex replaced after it was resolved never runs", (t) => {
       '  echo "codex-cli 9.9.9-fake"',
       "  exit 0",
       "fi",
-      'echo "clean"',
+      'echo "- [P2] Fixture finding — math.js:1-1"',
     ].join("\n") + "\n",
   );
   fs.chmodSync(file, 0o755);
@@ -1058,25 +1097,25 @@ test("a descendant outliving codex cannot rewrite the accepted report", (t) => {
     repo.bin,
     [
       "( sleep 1; echo 'INJECTED AFTER EXIT' ) &",
-      "echo 'No issues found in this patch.'",
+      "echo '- [P2] Fixture finding — math.js:1-1'",
     ].join("\n"),
   );
 
   const run_ = runScript(repo, ["--base", "base", "--no-fetch"]);
 
-  assert.equal(run_.status, 0);
+  assert.equal(run_.status, 1);
   // Past the descendant's own sleep, so a surviving one has had its chance.
   spawnSync("sh", ["-c", "sleep 2"]);
   const report = fs.readFileSync(run_.reportPath, "utf8");
   assert.doesNotMatch(report, /INJECTED AFTER EXIT/);
-  assert.match(report, /^verdict: clean$/m);
+  assert.match(report, /^verdict: findings$/m);
 });
 
 test("an edit inside an already-dirty submodule voids the report", (t) => {
   const repo = makeRepo(t);
   // To the parent repository every edit under a checked-out submodule is the
   // same ` M <path>` status line and the same `-dirty` subproject marker, so
-  // without the nested diff both fingerprints match and this run reads clean.
+  // without the nested diff both fingerprints match despite the changed target.
   const upstream = path.join(repo.root, "upstream");
   fs.mkdirSync(upstream);
   git(upstream, "init", "--quiet", "--initial-branch=main");
@@ -1101,7 +1140,10 @@ test("an edit inside an already-dirty submodule voids the report", (t) => {
   fs.writeFileSync(nested, "two\n");
   fakeCodex(
     repo.bin,
-    [`echo 'three' > ${JSON.stringify(nested)}`, "echo 'clean'"].join("\n"),
+    [
+      `echo 'three' > ${JSON.stringify(nested)}`,
+      "echo '- [P2] Fixture finding — math.js:1-1'",
+    ].join("\n"),
   );
 
   const run_ = runScript(repo, ["--base", "base", "--no-fetch"]);
