@@ -3,7 +3,7 @@ title: Envio Local Performance Triage
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-29
+last_verified: 2026-10-28
 doc_type: skill
 scope: repo-wide
 review_interval_days: 90

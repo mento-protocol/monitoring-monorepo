@@ -3,7 +3,7 @@ title: Documentation gardening
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-07-29
+last_verified: 2026-10-28
 doc_type: runbook
 scope: ci/process
 review_interval_days: 90
