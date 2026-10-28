@@ -13,12 +13,14 @@ const legacySecretMembers = [
   'serviceAccount:80554359692@cloudbuild.gserviceaccount.com',
   'serviceAccount:80554359692-compute@developer.gserviceaccount.com',
 ];
+// The project roles Terraform grants the builder in
+// terraform/aegis-bootstrap.tf. Source access is bucket-scoped in
+// terraform/deploy-staging.tf, so roles/storage.objectAdmin is absent.
 const builderRoles = [
   'roles/appengine.deployer',
   'roles/artifactregistry.writer',
   'roles/cloudbuild.builds.editor',
   'roles/logging.logWriter',
-  'roles/storage.objectAdmin',
 ];
 const submitters = ['group:eng@mentolabs.xyz'];
 const activationRole =
@@ -704,7 +706,20 @@ for (const legacyMember of legacySecretMembers) {
   });
 }
 
-test('builder project roles must match the least-privilege set', () => {
+test('builder project roles accept exactly the Terraform-granted four-role set', () => {
+  const output = [];
+  assert.equal(builderRoles.length, 4);
+  assert.ok(!builderRoles.includes('roles/storage.objectAdmin'));
+  runPreflight({
+    project,
+    runGcloud: successfulRunner(),
+    validateStatic: staticPass,
+    write: (message) => output.push(message),
+  });
+  assert.match(output.at(-1), /live preflight passed/u);
+});
+
+test('a legacy project-wide storage.objectAdmin grant on the builder fails closed', () => {
   const key = `projects get-iam-policy ${project}`;
   assert.throws(
     () =>
@@ -712,9 +727,31 @@ test('builder project roles must match the least-privilege set', () => {
         project,
         runGcloud: successfulRunner({
           [key]: successfulProjectPolicy([
-            { role: 'roles/storage.admin', members: [builderMember] },
+            { role: 'roles/storage.objectAdmin', members: [builderMember] },
           ]),
         }),
+        validateStatic: staticPass,
+        write: () => {},
+      }),
+    /builder project roles must match the least-privilege contract/u,
+  );
+});
+
+test('a missing builder project role fails closed', () => {
+  const key = `projects get-iam-policy ${project}`;
+  const policy = successfulProjectPolicy();
+  policy.bindings = policy.bindings.filter(
+    (binding) =>
+      !(
+        binding.role === 'roles/appengine.deployer' &&
+        binding.members.includes(builderMember)
+      ),
+  );
+  assert.throws(
+    () =>
+      runPreflight({
+        project,
+        runGcloud: successfulRunner({ [key]: policy }),
         validateStatic: staticPass,
         write: () => {},
       }),

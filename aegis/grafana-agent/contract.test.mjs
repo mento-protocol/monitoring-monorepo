@@ -307,6 +307,128 @@ test('operator preflight reader must stay scoped to gcp_dev_members', () => {
   );
 });
 
+test('builder project roles cannot regain storage.objectAdmin in Terraform', () => {
+  const files = sourceFiles();
+  files.bootstrap = files.bootstrap.replace(
+    '    "roles/cloudbuild.builds.editor",\n',
+    '    "roles/cloudbuild.builds.editor",\n    "roles/storage.objectAdmin",\n',
+  );
+  expectFailure(
+    files,
+    /grafana_agent_builder_project_roles must match the preflight builder role contract exactly; found .*roles\/storage\.objectAdmin/u,
+  );
+});
+
+test('builder project roles cannot silently shrink in Terraform', () => {
+  const files = sourceFiles();
+  files.bootstrap = files.bootstrap.replace(
+    '    "roles/appengine.deployer",\n',
+    '',
+  );
+  expectFailure(
+    files,
+    /grafana_agent_builder_project_roles must match the preflight builder role contract exactly/u,
+  );
+});
+
+test('a commented-out builder project role in Terraform fails closed', () => {
+  const files = sourceFiles();
+  files.bootstrap = files.bootstrap.replace(
+    '    "roles/appengine.deployer",\n',
+    '    # "roles/appengine.deployer",\n',
+  );
+  expectFailure(
+    files,
+    /grafana_agent_builder_project_roles must match the preflight builder role contract exactly/u,
+  );
+});
+
+test('a block-commented builder project role in Terraform fails closed', () => {
+  const files = sourceFiles();
+  files.bootstrap = files.bootstrap.replace(
+    '    "roles/appengine.deployer",\n',
+    '    /*\n    "roles/appengine.deployer",\n    */\n',
+  );
+  expectFailure(
+    files,
+    /grafana_agent_builder_project_roles must match the preflight builder role contract exactly/u,
+  );
+});
+
+test('a non-literal builder project role entry in Terraform fails closed', () => {
+  const files = sourceFiles();
+  files.bootstrap = files.bootstrap.replace(
+    '    "roles/cloudbuild.builds.editor",\n',
+    '    "roles/cloudbuild.builds.editor",\n    var.extra_builder_role,\n',
+  );
+  expectFailure(
+    files,
+    /must contain only literal role strings; found var\.extra_builder_role/u,
+  );
+});
+
+test('a block-commented builder project grant in Terraform fails closed', () => {
+  const files = sourceFiles();
+  files.bootstrap = files.bootstrap.replace(
+    '  for_each = local.grafana_agent_builder_project_roles\n',
+    '  /*\n  for_each = local.grafana_agent_builder_project_roles\n  */\n  for_each = toset(["roles/editor"])\n',
+  );
+  expectFailure(
+    files,
+    /builder project roles must be granted from grafana_agent_builder_project_roles/u,
+  );
+});
+
+test('a block-commented builder project grant resource in Terraform fails closed', () => {
+  const files = sourceFiles();
+  const header =
+    'resource "google_project_iam_member" "grafana_agent_cloudbuild_deployer" {';
+  const start = files.bootstrap.indexOf(header);
+  const end = files.bootstrap.indexOf('\n}\n', start) + 3;
+  assert.ok(start !== -1 && end > start);
+  files.bootstrap = `${files.bootstrap.slice(0, start)}/*\n${files.bootstrap.slice(start, end)}*/\n${files.bootstrap.slice(end)}`;
+  expectFailure(
+    files,
+    /missing resource "google_project_iam_member" "grafana_agent_cloudbuild_deployer" block/u,
+  );
+});
+
+test('a commented-out builder project grant in Terraform fails closed', () => {
+  const files = sourceFiles();
+  files.bootstrap = files.bootstrap.replace(
+    '  for_each = local.grafana_agent_builder_project_roles\n',
+    '  # for_each = local.grafana_agent_builder_project_roles\n  for_each = toset(["roles/editor"])\n',
+  );
+  expectFailure(
+    files,
+    /builder project roles must be granted from grafana_agent_builder_project_roles/u,
+  );
+});
+
+test('builder project grants must come from the shared Terraform role set', () => {
+  const files = sourceFiles();
+  files.bootstrap = files.bootstrap.replace(
+    'for_each = local.grafana_agent_builder_project_roles',
+    'for_each = toset(["roles/editor"])',
+  );
+  expectFailure(
+    files,
+    /builder project roles must be granted from grafana_agent_builder_project_roles/u,
+  );
+});
+
+test('live preflight derives builder project roles from the shared contract set', () => {
+  const files = sourceFiles();
+  files.preflight = files.preflight.replace(
+    "    BUILDER_PROJECT_ROLES,\n    'builder',",
+    "    ['roles/editor'],\n    'builder',",
+  );
+  expectFailure(
+    files,
+    /builder project roles must derive from the shared contract set/u,
+  );
+});
+
 test('live preflight derives submitters from the Terraform-managed operator set', () => {
   const files = sourceFiles();
   files.preflight = files.preflight.replace(

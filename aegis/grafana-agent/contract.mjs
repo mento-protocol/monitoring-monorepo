@@ -30,6 +30,19 @@ const EXPECTED_RUNTIME_EMAIL =
   'grafana-agent-runtime@mento-monitoring.iam.gserviceaccount.com';
 const EXPECTED_BUILDER_EMAIL =
   'grafana-agent-builder@mento-monitoring.iam.gserviceaccount.com';
+// The builder's project roles. Terraform owns this set as local
+// `grafana_agent_builder_project_roles` in `terraform/aegis-bootstrap.tf`,
+// granted by `google_project_iam_member.grafana_agent_cloudbuild_deployer`.
+// Source-object access is bucket-scoped in `terraform/deploy-staging.tf`, so
+// `roles/storage.objectAdmin` is intentionally absent. validateContract fails
+// closed when the Terraform set differs, and the live preflight asserts this
+// exact set, so the two sources cannot drift apart (#2628).
+export const BUILDER_PROJECT_ROLES = Object.freeze([
+  'roles/appengine.deployer',
+  'roles/artifactregistry.writer',
+  'roles/cloudbuild.builds.editor',
+  'roles/logging.logWriter',
+]);
 
 function readContractFiles(root = REPO_ROOT) {
   return {
@@ -108,6 +121,49 @@ function extractHclBlock(source, header) {
   }
 
   return null;
+}
+
+// Remove `#`, `//`, and `/* */` comments outside string literals so a
+// commented-out declaration is never read as active configuration.
+function stripHclComments(source) {
+  let output = '';
+  let inString = false;
+  let escaped = false;
+
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    const next = source[index + 1];
+
+    if (inString) {
+      output += character;
+      if (escaped) {
+        escaped = false;
+      } else if (character === '\\') {
+        escaped = true;
+      } else if (character === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (character === '"') {
+      inString = true;
+      output += character;
+      continue;
+    }
+    if (character === '#' || (character === '/' && next === '/')) {
+      const lineEnd = source.indexOf('\n', index);
+      index = (lineEnd === -1 ? source.length : lineEnd) - 1;
+      continue;
+    }
+    if (character === '/' && next === '*') {
+      const blockEnd = source.indexOf('*/', index + 2);
+      index = blockEnd === -1 ? source.length : blockEnd + 1;
+      continue;
+    }
+    output += character;
+  }
+
+  return output;
 }
 
 function requireBlock(errors, source, header, label) {
@@ -296,6 +352,68 @@ export function validateContract(files = readContractFiles()) {
     secretLocals,
     /grafana_agent_secret_ids_by_key\s*=\s*\{\s*for secret_id in local\.grafana_agent_secret_ids\s*:\s*trimprefix\(secret_id, "grafana-agent-"\) => secret_id\s*\}/su,
     `${CONTRACT_FILES.bootstrap}: keyed secret IDs must derive exactly from grafana_agent_secret_ids`,
+  );
+
+  // Strip comments before locating blocks, so a declaration wrapped in
+  // `/* ... */` is neither found nor counted.
+  const activeBootstrap = stripHclComments(bootstrap);
+  const builderRolesMatch = (
+    extractHclBlock(activeBootstrap, 'locals') ?? ''
+  ).match(/grafana_agent_builder_project_roles\s*=\s*toset\(\[([^\]]*)\]\)/u);
+  if (!builderRolesMatch) {
+    errors.push(
+      `${CONTRACT_FILES.bootstrap}: grafana_agent_builder_project_roles must stay a literal toset of project roles`,
+    );
+  } else {
+    // Every entry must be a string literal: a reference such as
+    // `var.extra_role` could grant a role this contract cannot see.
+    const entries = builderRolesMatch[1]
+      .split(',')
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+    const nonLiteralEntries = entries.filter(
+      (entry) => !/^"[^"]*"$/u.test(entry),
+    );
+    if (nonLiteralEntries.length > 0) {
+      errors.push(
+        `${CONTRACT_FILES.bootstrap}: grafana_agent_builder_project_roles must contain only literal role strings; found ${nonLiteralEntries.join(', ')}`,
+      );
+    }
+    const terraformBuilderRoles = [
+      ...new Set(
+        entries
+          .filter((entry) => !nonLiteralEntries.includes(entry))
+          .map((entry) => entry.slice(1, -1)),
+      ),
+    ].sort();
+    if (
+      terraformBuilderRoles.length !== BUILDER_PROJECT_ROLES.length ||
+      !BUILDER_PROJECT_ROLES.every(
+        (role, index) => terraformBuilderRoles[index] === role,
+      )
+    ) {
+      errors.push(
+        `${CONTRACT_FILES.bootstrap}: grafana_agent_builder_project_roles must match the preflight builder role contract exactly; found ${terraformBuilderRoles.join(', ') || 'none'}`,
+      );
+    }
+  }
+  const builderProjectGrant = requireBlock(
+    errors,
+    activeBootstrap,
+    'resource "google_project_iam_member" "grafana_agent_cloudbuild_deployer"',
+    CONTRACT_FILES.bootstrap,
+  );
+  requirePattern(
+    errors,
+    builderProjectGrant,
+    /^\s*for_each\s*=\s*local\.grafana_agent_builder_project_roles\s*$/mu,
+    `${CONTRACT_FILES.bootstrap}: builder project roles must be granted from grafana_agent_builder_project_roles`,
+  );
+  requirePattern(
+    errors,
+    builderProjectGrant,
+    /^\s*role\s*=\s*each\.value\s*\n\s*member\s*=\s*"serviceAccount:\$\{google_service_account\.grafana_agent_builder\.email\}"\s*$/mu,
+    `${CONTRACT_FILES.bootstrap}: builder project roles must bind only the dedicated builder`,
   );
 
   const runtimeAccount = requireBlock(
@@ -803,6 +921,12 @@ export function validateContract(files = readContractFiles()) {
     preflight,
     /const expectedBuildSubmitters = membersForRole\(\s*projectPolicy,\s*preflightRoleName,\s*\)[\s\S]*assertExactRolePolicy\(\s*builderPolicy,\s*'roles\/iam\.serviceAccountUser',\s*expectedBuildSubmitters,[\s\S]*assertOperatorSetFingerprint\(preflightRole, expectedBuildSubmitters\)/u,
     `${CONTRACT_FILES.preflight}: both submitter policies must derive from and match the Terraform member-set fingerprint`,
+  );
+  requirePattern(
+    errors,
+    preflight,
+    /import \{[^}]*\bBUILDER_PROJECT_ROLES\b[^}]*\} from '\.\/contract\.mjs';[\s\S]*assertExactProjectRoles\(\s*projectPolicy,\s*builderMember,\s*BUILDER_PROJECT_ROLES,\s*'builder',\s*\)/u,
+    `${CONTRACT_FILES.preflight}: builder project roles must derive from the shared contract set`,
   );
   requirePattern(
     errors,
