@@ -144,6 +144,13 @@ grafana_provisioning_token = "glsa_REPLACE_ME"
 # `-replace`, so this counter is the only rotation path.
 # grafana_dashboard_reader_token_rotation_counter = 1
 
+# Non-secret rotation counter for the Hardin SRE agent's Viewer token. Start at
+# 1 for the first approved apply. Increment it to mint a replacement token and
+# write it as a new version of the `hardin-grafana-reader-token` Secret Manager
+# secret in the same apply; no redeploy is involved. See
+# docs/notes/hardin-read-access.md.
+# grafana_hardin_reader_token_rotation_counter = 1
+
 # ── Google Cloud (metrics-bridge) ─────────────────────────────────────────────
 # Find with: gcloud organizations list
 gcp_org_id = "..."
@@ -199,7 +206,10 @@ grafana_agent_secret_rotation_counters = {
 # ── Read-only AI agent investigator ──────────────────────────────────────────
 # IAM members allowed to impersonate `agent-readonly@mento-monitoring.iam`
 # (Token Creator). Defaults to `group:eng@mentolabs.xyz` so any engineer
-# inherits access; override here to add incident responders or external
+# inherits access, plus the Hardin SRE agent's service account
+# (`serviceAccount:giskard-readonly@governance-watchdog-b2a6.iam.gserviceaccount.com`,
+# see docs/notes/hardin-read-access.md). An override here REPLACES the default
+# list, so repeat both entries when adding incident responders or external
 # auditors. If the SA already exists in the live IAM policy (it does, in
 # production), follow the one-time `terraform import` recipe at the bottom of
 # `terraform/agent-readonly.tf` (section "One-time state adoption (manual
@@ -207,6 +217,7 @@ grafana_agent_secret_rotation_counters = {
 # file. Fresh org / DR bootstraps can skip the import recipe entirely.
 # agent_readonly_impersonators = [
 #   "group:eng@mentolabs.xyz",
+#   "serviceAccount:giskard-readonly@governance-watchdog-b2a6.iam.gserviceaccount.com",
 #   "user:incident-responder@mentolabs.xyz",
 # ]
 

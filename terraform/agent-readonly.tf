@@ -55,11 +55,22 @@ variable "agent_readonly_impersonators" {
     `gcloud --impersonate-service-account` to drive read-only AI agent
     investigations (MCP, Claude Code, Codex). Format: `user:...`, `group:...`,
     or `serviceAccount:...`. Defaults to the eng@mentolabs.xyz Google Group so
-    any engineer inherits access without per-user IAM churn; override in
+    any engineer inherits access without per-user IAM churn, plus the Hardin
+    SRE agent's own service account (see below); override in
     `terraform.tfvars` to add incident responders or external auditors.
   EOT
   type        = list(string)
-  default     = ["group:eng@mentolabs.xyz"]
+  default = [
+    "group:eng@mentolabs.xyz",
+    # Hardin: the in-house read-only SRE agent that runs on Philip's macOS
+    # gateway. It authenticates as this key-bearing service account in the
+    # governance-watchdog project and impersonates `agent-readonly` for every
+    # investigation, so the org-wide read surface stays on the keyless SA and
+    # is revocable here by removing one list entry. Hardin's own Grafana
+    # Viewer token is delivered through Secret Manager in
+    # `grafana-read-access.tf`; see `docs/notes/hardin-read-access.md`.
+    "serviceAccount:giskard-readonly@governance-watchdog-b2a6.iam.gserviceaccount.com",
+  ]
 }
 
 # Opt-in, project-scoped GCS object payload read access. Org-wide

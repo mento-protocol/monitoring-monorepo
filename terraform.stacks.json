@@ -22,7 +22,7 @@
       "id": "platform",
       "name": "Platform",
       "path": "terraform",
-      "description": "Dashboard Vercel project, the dashboard's read-only Grafana service account and token, Upstash Redis, GCP project/APIs, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Alloy bootstrap, explicit routine-deploy source buckets, separated CI Workload Identity Federation identities, project IAM, repo-level GitHub Actions secrets and variables, and a dormant unapplied Peg-policy GCS source foundation. It owns no Grafana alert rules, folders, or dashboards.",
+      "description": "Dashboard Vercel project, the read-only Grafana service accounts and tokens for the dashboard and the Hardin SRE agent (the latter delivered via Secret Manager), Upstash Redis, GCP project/APIs, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana Alloy bootstrap, explicit routine-deploy source buckets, separated CI Workload Identity Federation identities, project IAM, repo-level GitHub Actions secrets and variables, and a dormant unapplied Peg-policy GCS source foundation. It owns no Grafana alert rules, folders, or dashboards.",
       "state": {
         "backend": "gcs",
         "bucket": "mento-terraform-tfstate-6ed6",

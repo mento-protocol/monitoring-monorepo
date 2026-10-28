@@ -75,6 +75,7 @@ const IAM_MEMBER_EXPRESSION_GROUPS = [
     blocks: [
       "terraform/agent-readonly.tf:google_organization_iam_member.agent_readonly_org_roles",
       "terraform/agent-readonly.tf:google_project_iam_member.agent_readonly_storage_object_viewer",
+      "terraform/grafana-read-access.tf:google_secret_manager_secret_iam_member.hardin_grafana_reader_token_accessor",
     ],
   },
   {
@@ -350,6 +351,7 @@ const IAM_BLOCK_SHAPE_SPECIFICATIONS = [
   "terraform/deploy-staging.tf:google_storage_bucket_iam_member.cloud_build_source_caller_object_creator|099993e1b824b00ce5c88941033c1b4be5152d93dd5734a98791c329d702f19a",
   "terraform/deploy-staging.tf:google_storage_bucket_iam_member.cloud_build_source_executor_object_viewer|60cbb3346e381a7823e4d6db82626f2b7e543992c99064450ac6e86d6513e6ba",
   "terraform/gcp-project.tf:google_project_iam_member.terraform_owner|3280f80f6f5a6293d453a3d550eeeab7a818dbb8d313160fac41df4753012d4a",
+  "terraform/grafana-read-access.tf:google_secret_manager_secret_iam_member.hardin_grafana_reader_token_accessor|6f7308b39a7ff24e1a15103a5e9cd17d4cc9f86b7688cd1878677361906b2075",
   "terraform/metrics-bridge.tf:google_cloud_run_v2_service_iam_member.metrics_bridge_public|9bd48a6d3612b82847564ed91fdcd3199dfe565bde34d18eb5df2c4d635a8a4a",
   "terraform/metrics-bridge.tf:google_artifact_registry_repository_iam_member.metrics_bridge_builder_writer|ff100ccdc63bb50c8ac4d9bec72e8ac8f9566ad557f85bde1e7ea9a916ff7e82",
   "terraform/metrics-bridge.tf:google_project_iam_member.metrics_bridge_builder|1e0fe7c90eda6475df4daf6739b3ca4628a1bf49ad84c2dae86f1ecaaa6e386a",
