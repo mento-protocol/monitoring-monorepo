@@ -319,9 +319,11 @@ export function validateContract(files = readContractFiles()) {
       `${CONTRACT_FILES.bootstrap}: grafana_agent_builder_project_roles must stay a literal toset of project roles`,
     );
   } else {
+    // Anchor each role to its own line so a commented-out entry such as
+    // `# "roles/appengine.deployer",` is not counted as granted.
     const terraformBuilderRoles = [
       ...new Set(
-        [...builderRolesMatch[1].matchAll(/"([^"]+)"/gu)].map(
+        [...builderRolesMatch[1].matchAll(/^\s*"([^"]+)",?\s*$/gmu)].map(
           (match) => match[1],
         ),
       ),
@@ -346,13 +348,13 @@ export function validateContract(files = readContractFiles()) {
   requirePattern(
     errors,
     builderProjectGrant,
-    /for_each\s*=\s*local\.grafana_agent_builder_project_roles/u,
+    /^\s*for_each\s*=\s*local\.grafana_agent_builder_project_roles\s*$/mu,
     `${CONTRACT_FILES.bootstrap}: builder project roles must be granted from grafana_agent_builder_project_roles`,
   );
   requirePattern(
     errors,
     builderProjectGrant,
-    /role\s*=\s*each\.value\s+member\s*=\s*"serviceAccount:\$\{google_service_account\.grafana_agent_builder\.email\}"/u,
+    /^\s*role\s*=\s*each\.value\s*\n\s*member\s*=\s*"serviceAccount:\$\{google_service_account\.grafana_agent_builder\.email\}"\s*$/mu,
     `${CONTRACT_FILES.bootstrap}: builder project roles must bind only the dedicated builder`,
   );
 

@@ -331,6 +331,30 @@ test('builder project roles cannot silently shrink in Terraform', () => {
   );
 });
 
+test('a commented-out builder project role in Terraform fails closed', () => {
+  const files = sourceFiles();
+  files.bootstrap = files.bootstrap.replace(
+    '    "roles/appengine.deployer",\n',
+    '    # "roles/appengine.deployer",\n',
+  );
+  expectFailure(
+    files,
+    /grafana_agent_builder_project_roles must match the preflight builder role contract exactly/u,
+  );
+});
+
+test('a commented-out builder project grant in Terraform fails closed', () => {
+  const files = sourceFiles();
+  files.bootstrap = files.bootstrap.replace(
+    '  for_each = local.grafana_agent_builder_project_roles\n',
+    '  # for_each = local.grafana_agent_builder_project_roles\n  for_each = toset(["roles/editor"])\n',
+  );
+  expectFailure(
+    files,
+    /builder project roles must be granted from grafana_agent_builder_project_roles/u,
+  );
+});
+
 test('builder project grants must come from the shared Terraform role set', () => {
   const files = sourceFiles();
   files.bootstrap = files.bootstrap.replace(
