@@ -123,6 +123,49 @@ function extractHclBlock(source, header) {
   return null;
 }
 
+// Remove `#`, `//`, and `/* */` comments outside string literals so a
+// commented-out declaration is never read as active configuration.
+function stripHclComments(source) {
+  let output = '';
+  let inString = false;
+  let escaped = false;
+
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    const next = source[index + 1];
+
+    if (inString) {
+      output += character;
+      if (escaped) {
+        escaped = false;
+      } else if (character === '\\') {
+        escaped = true;
+      } else if (character === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (character === '"') {
+      inString = true;
+      output += character;
+      continue;
+    }
+    if (character === '#' || (character === '/' && next === '/')) {
+      const lineEnd = source.indexOf('\n', index);
+      index = (lineEnd === -1 ? source.length : lineEnd) - 1;
+      continue;
+    }
+    if (character === '/' && next === '*') {
+      const blockEnd = source.indexOf('*/', index + 2);
+      index = blockEnd === -1 ? source.length : blockEnd + 1;
+      continue;
+    }
+    output += character;
+  }
+
+  return output;
+}
+
 function requireBlock(errors, source, header, label) {
   const block = extractHclBlock(source, header);
   if (!block) errors.push(`${label}: missing ${header} block`);
@@ -311,7 +354,7 @@ export function validateContract(files = readContractFiles()) {
     `${CONTRACT_FILES.bootstrap}: keyed secret IDs must derive exactly from grafana_agent_secret_ids`,
   );
 
-  const builderRolesMatch = secretLocals.match(
+  const builderRolesMatch = stripHclComments(secretLocals).match(
     /grafana_agent_builder_project_roles\s*=\s*toset\(\[([^\]]*)\]\)/u,
   );
   if (!builderRolesMatch) {
@@ -319,13 +362,25 @@ export function validateContract(files = readContractFiles()) {
       `${CONTRACT_FILES.bootstrap}: grafana_agent_builder_project_roles must stay a literal toset of project roles`,
     );
   } else {
-    // Anchor each role to its own line so a commented-out entry such as
-    // `# "roles/appengine.deployer",` is not counted as granted.
+    // Every entry must be a string literal: a reference such as
+    // `var.extra_role` could grant a role this contract cannot see.
+    const entries = builderRolesMatch[1]
+      .split(',')
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+    const nonLiteralEntries = entries.filter(
+      (entry) => !/^"[^"]*"$/u.test(entry),
+    );
+    if (nonLiteralEntries.length > 0) {
+      errors.push(
+        `${CONTRACT_FILES.bootstrap}: grafana_agent_builder_project_roles must contain only literal role strings; found ${nonLiteralEntries.join(', ')}`,
+      );
+    }
     const terraformBuilderRoles = [
       ...new Set(
-        [...builderRolesMatch[1].matchAll(/^\s*"([^"]+)",?\s*$/gmu)].map(
-          (match) => match[1],
-        ),
+        entries
+          .filter((entry) => !nonLiteralEntries.includes(entry))
+          .map((entry) => entry.slice(1, -1)),
       ),
     ].sort();
     if (
@@ -339,11 +394,13 @@ export function validateContract(files = readContractFiles()) {
       );
     }
   }
-  const builderProjectGrant = requireBlock(
-    errors,
-    bootstrap,
-    'resource "google_project_iam_member" "grafana_agent_cloudbuild_deployer"',
-    CONTRACT_FILES.bootstrap,
+  const builderProjectGrant = stripHclComments(
+    requireBlock(
+      errors,
+      bootstrap,
+      'resource "google_project_iam_member" "grafana_agent_cloudbuild_deployer"',
+      CONTRACT_FILES.bootstrap,
+    ),
   );
   requirePattern(
     errors,

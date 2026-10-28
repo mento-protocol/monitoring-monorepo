@@ -343,6 +343,42 @@ test('a commented-out builder project role in Terraform fails closed', () => {
   );
 });
 
+test('a block-commented builder project role in Terraform fails closed', () => {
+  const files = sourceFiles();
+  files.bootstrap = files.bootstrap.replace(
+    '    "roles/appengine.deployer",\n',
+    '    /*\n    "roles/appengine.deployer",\n    */\n',
+  );
+  expectFailure(
+    files,
+    /grafana_agent_builder_project_roles must match the preflight builder role contract exactly/u,
+  );
+});
+
+test('a non-literal builder project role entry in Terraform fails closed', () => {
+  const files = sourceFiles();
+  files.bootstrap = files.bootstrap.replace(
+    '    "roles/cloudbuild.builds.editor",\n',
+    '    "roles/cloudbuild.builds.editor",\n    var.extra_builder_role,\n',
+  );
+  expectFailure(
+    files,
+    /must contain only literal role strings; found var\.extra_builder_role/u,
+  );
+});
+
+test('a block-commented builder project grant in Terraform fails closed', () => {
+  const files = sourceFiles();
+  files.bootstrap = files.bootstrap.replace(
+    '  for_each = local.grafana_agent_builder_project_roles\n',
+    '  /*\n  for_each = local.grafana_agent_builder_project_roles\n  */\n  for_each = toset(["roles/editor"])\n',
+  );
+  expectFailure(
+    files,
+    /builder project roles must be granted from grafana_agent_builder_project_roles/u,
+  );
+});
+
 test('a commented-out builder project grant in Terraform fails closed', () => {
   const files = sourceFiles();
   files.bootstrap = files.bootstrap.replace(
