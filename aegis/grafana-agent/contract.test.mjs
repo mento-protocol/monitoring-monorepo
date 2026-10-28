@@ -307,6 +307,54 @@ test('operator preflight reader must stay scoped to gcp_dev_members', () => {
   );
 });
 
+test('builder project roles cannot regain storage.objectAdmin in Terraform', () => {
+  const files = sourceFiles();
+  files.bootstrap = files.bootstrap.replace(
+    '    "roles/cloudbuild.builds.editor",\n',
+    '    "roles/cloudbuild.builds.editor",\n    "roles/storage.objectAdmin",\n',
+  );
+  expectFailure(
+    files,
+    /grafana_agent_builder_project_roles must match the preflight builder role contract exactly; found .*roles\/storage\.objectAdmin/u,
+  );
+});
+
+test('builder project roles cannot silently shrink in Terraform', () => {
+  const files = sourceFiles();
+  files.bootstrap = files.bootstrap.replace(
+    '    "roles/appengine.deployer",\n',
+    '',
+  );
+  expectFailure(
+    files,
+    /grafana_agent_builder_project_roles must match the preflight builder role contract exactly/u,
+  );
+});
+
+test('builder project grants must come from the shared Terraform role set', () => {
+  const files = sourceFiles();
+  files.bootstrap = files.bootstrap.replace(
+    'for_each = local.grafana_agent_builder_project_roles',
+    'for_each = toset(["roles/editor"])',
+  );
+  expectFailure(
+    files,
+    /builder project roles must be granted from grafana_agent_builder_project_roles/u,
+  );
+});
+
+test('live preflight derives builder project roles from the shared contract set', () => {
+  const files = sourceFiles();
+  files.preflight = files.preflight.replace(
+    "    BUILDER_PROJECT_ROLES,\n    'builder',",
+    "    ['roles/editor'],\n    'builder',",
+  );
+  expectFailure(
+    files,
+    /builder project roles must derive from the shared contract set/u,
+  );
+});
+
 test('live preflight derives submitters from the Terraform-managed operator set', () => {
   const files = sourceFiles();
   files.preflight = files.preflight.replace(

@@ -30,6 +30,19 @@ const EXPECTED_RUNTIME_EMAIL =
   'grafana-agent-runtime@mento-monitoring.iam.gserviceaccount.com';
 const EXPECTED_BUILDER_EMAIL =
   'grafana-agent-builder@mento-monitoring.iam.gserviceaccount.com';
+// The builder's project roles. Terraform owns this set as local
+// `grafana_agent_builder_project_roles` in `terraform/aegis-bootstrap.tf`,
+// granted by `google_project_iam_member.grafana_agent_cloudbuild_deployer`.
+// Source-object access is bucket-scoped in `terraform/deploy-staging.tf`, so
+// `roles/storage.objectAdmin` is intentionally absent. validateContract fails
+// closed when the Terraform set differs, and the live preflight asserts this
+// exact set, so the two sources cannot drift apart (#2628).
+export const BUILDER_PROJECT_ROLES = Object.freeze([
+  'roles/appengine.deployer',
+  'roles/artifactregistry.writer',
+  'roles/cloudbuild.builds.editor',
+  'roles/logging.logWriter',
+]);
 
 function readContractFiles(root = REPO_ROOT) {
   return {
@@ -296,6 +309,51 @@ export function validateContract(files = readContractFiles()) {
     secretLocals,
     /grafana_agent_secret_ids_by_key\s*=\s*\{\s*for secret_id in local\.grafana_agent_secret_ids\s*:\s*trimprefix\(secret_id, "grafana-agent-"\) => secret_id\s*\}/su,
     `${CONTRACT_FILES.bootstrap}: keyed secret IDs must derive exactly from grafana_agent_secret_ids`,
+  );
+
+  const builderRolesMatch = secretLocals.match(
+    /grafana_agent_builder_project_roles\s*=\s*toset\(\[([^\]]*)\]\)/u,
+  );
+  if (!builderRolesMatch) {
+    errors.push(
+      `${CONTRACT_FILES.bootstrap}: grafana_agent_builder_project_roles must stay a literal toset of project roles`,
+    );
+  } else {
+    const terraformBuilderRoles = [
+      ...new Set(
+        [...builderRolesMatch[1].matchAll(/"([^"]+)"/gu)].map(
+          (match) => match[1],
+        ),
+      ),
+    ].sort();
+    if (
+      terraformBuilderRoles.length !== BUILDER_PROJECT_ROLES.length ||
+      !BUILDER_PROJECT_ROLES.every(
+        (role, index) => terraformBuilderRoles[index] === role,
+      )
+    ) {
+      errors.push(
+        `${CONTRACT_FILES.bootstrap}: grafana_agent_builder_project_roles must match the preflight builder role contract exactly; found ${terraformBuilderRoles.join(', ') || 'none'}`,
+      );
+    }
+  }
+  const builderProjectGrant = requireBlock(
+    errors,
+    bootstrap,
+    'resource "google_project_iam_member" "grafana_agent_cloudbuild_deployer"',
+    CONTRACT_FILES.bootstrap,
+  );
+  requirePattern(
+    errors,
+    builderProjectGrant,
+    /for_each\s*=\s*local\.grafana_agent_builder_project_roles/u,
+    `${CONTRACT_FILES.bootstrap}: builder project roles must be granted from grafana_agent_builder_project_roles`,
+  );
+  requirePattern(
+    errors,
+    builderProjectGrant,
+    /role\s*=\s*each\.value\s+member\s*=\s*"serviceAccount:\$\{google_service_account\.grafana_agent_builder\.email\}"/u,
+    `${CONTRACT_FILES.bootstrap}: builder project roles must bind only the dedicated builder`,
   );
 
   const runtimeAccount = requireBlock(
@@ -803,6 +861,12 @@ export function validateContract(files = readContractFiles()) {
     preflight,
     /const expectedBuildSubmitters = membersForRole\(\s*projectPolicy,\s*preflightRoleName,\s*\)[\s\S]*assertExactRolePolicy\(\s*builderPolicy,\s*'roles\/iam\.serviceAccountUser',\s*expectedBuildSubmitters,[\s\S]*assertOperatorSetFingerprint\(preflightRole, expectedBuildSubmitters\)/u,
     `${CONTRACT_FILES.preflight}: both submitter policies must derive from and match the Terraform member-set fingerprint`,
+  );
+  requirePattern(
+    errors,
+    preflight,
+    /import \{[^}]*\bBUILDER_PROJECT_ROLES\b[^}]*\} from '\.\/contract\.mjs';[\s\S]*assertExactProjectRoles\(\s*projectPolicy,\s*builderMember,\s*BUILDER_PROJECT_ROLES,\s*'builder',\s*\)/u,
+    `${CONTRACT_FILES.preflight}: builder project roles must derive from the shared contract set`,
   );
   requirePattern(
     errors,
