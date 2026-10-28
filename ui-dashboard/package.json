@@ -28,8 +28,8 @@
     "react-doctor": "react-doctor .",
     "react-doctor:diff": "bash ./scripts/check-react-doctor-diff.sh \"${REACT_DOCTOR_BASE_REF:-origin/main}\"",
     "react-doctor:score": "bash ./scripts/check-react-doctor-score.sh",
-    "knip": "knip --config knip.json --no-progress",
-    "knip:report": "knip --config knip.json --no-exit-code --no-progress",
+    "knip": "PLAYWRIGHT_FIXTURE_SERVER_IDENTITY=knip-static-analysis knip --config knip.json --no-progress",
+    "knip:report": "PLAYWRIGHT_FIXTURE_SERVER_IDENTITY=knip-static-analysis knip --config knip.json --no-exit-code --no-progress",
     "size-limit": "size-limit"
   },
   "dependencies": {
@@ -81,7 +81,7 @@
     "globals": "^17.12.0",
     "jsdom": "^30.1.3",
     "knip": "6.42.1",
-    "react-doctor": "0.9.18",
+    "react-doctor": "0.1.6",
     "size-limit": "^13.0.3",
     "tailwindcss": "^4.3.3",
     "typescript": "^5.9.3",
