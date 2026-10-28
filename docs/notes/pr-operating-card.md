@@ -212,7 +212,10 @@ If root `package.json` changed, first run
    Read the retained report and report the printed reason. Manual inspection
    does not turn exit 2 into completed automatic closeout. Only the two causes
    named below — no `codex` on PATH and a nested Codex session — fall back to
-   single-source coverage. The review diffs
+   single-source coverage. Outside those two exceptions, exit 2 blocks the
+   required closeout and shipping until a qualified completion protocol is
+   available. Reading a clean-looking report does not waive that blocker.
+   The review diffs
    the **working tree** against the base, so uncommitted edits to tracked files
    are covered but a file you have never added is not: `git add` new files
    before you run it. Leave the tree alone while it runs: a commit, an edit, or
