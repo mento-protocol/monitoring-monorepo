@@ -57,7 +57,11 @@ needs to prove a single active collector. Cloud Build pins
 `grafana-agent-builder@mento-monitoring.iam.gserviceaccount.com`, which has only
 the four project roles needed to submit logs/artifacts and deploy App Engine
 versions; its source-object access is bucket-scoped to the Terraform-managed
-staging buckets in [`terraform/deploy-staging.tf`](../../terraform/deploy-staging.tf). Terraform grants `gcp_dev_members` permission to submit as that
+staging buckets in [`terraform/deploy-staging.tf`](../../terraform/deploy-staging.tf).
+[`preflight.mjs`](preflight.mjs) still asserts a fifth project role,
+`roles/storage.objectAdmin`, that Terraform no longer grants, so a deploy fails
+its preflight whenever live IAM matches Terraform; issue #2628 tracks aligning
+the preflight. Terraform grants `gcp_dev_members` permission to submit as that
 builder and the metadata-only `grafanaAgentPreflightReader` role. The live
 preflight requires both policies to match Terraform's member-set fingerprint
 in that role's description. Only the builder can act as the runtime account;
