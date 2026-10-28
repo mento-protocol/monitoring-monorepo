@@ -443,7 +443,7 @@ Terraform stack ownership is registered in [`terraform.stacks.json`](../terrafor
 
 - Vercel project creation and configuration (`root_directory`, Git integration)
 - All Terraform-managed environment variables (Hasura URLs, Upstash Redis credentials, Grafana history read access)
-- The dashboard's read-only Grafana service account and token (`grafana-read-access.tf`); alert rules, folders, and Grafana dashboards stay in `alerts/rules` and `aegis/terraform`
+- The read-only Grafana service accounts and tokens for the dashboard and for the Hardin SRE agent (`grafana-read-access.tf`; Hardin's token lands in Secret Manager, see [`notes/hardin-read-access.md`](notes/hardin-read-access.md)); alert rules, folders, and Grafana dashboards stay in `alerts/rules` and `aegis/terraform`
 - Custom domain (`monitoring.mento.org`)
 - Upstash Redis database (dashboard-managed labels, reports, intelligence, and
   integration state)

@@ -154,9 +154,23 @@ underlying Grafana rule instances remain separate.
   [#1832](https://github.com/mento-protocol/monitoring-monorepo/issues/1832)).
   Checked-in Terraform alone activates nothing.
 
+## Amendment — Hardin read access (2026-10)
+
+The platform stack's Grafana provider now mints a second Viewer identity,
+`hardin-sre-reader`, for the in-house read-only SRE agent. It follows this
+ADR's shape exactly — separate service account, `Viewer` only, counter-driven
+rotation, never the Admin token — and differs only in its sink: Hardin has no
+Vercel project, so the token lands in a Secret Manager secret readable solely by
+`agent-readonly`, which Hardin impersonates. The "for that purpose alone"
+boundary above therefore reads: read-only Viewer identities only, never rules,
+folders, or dashboards.
+[`docs/notes/hardin-read-access.md`](../notes/hardin-read-access.md) owns the
+identity chain and verification.
+
 ## Evidence
 
-- `terraform/grafana-read-access.tf` — service account, rotation trigger, token
+- `terraform/grafana-read-access.tf` — service accounts, rotation triggers,
+  tokens, and the Hardin Secret Manager handoff
 - `terraform/dashboard.tf` — `GRAFANA_QUERY_URL`, `GRAFANA_QUERY_TOKEN`
 - `terraform/providers.tf`, `terraform/variables.tf`,
   `terraform/terraform.tfvars.example`

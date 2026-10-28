@@ -17,8 +17,8 @@ garden_lane: agent-entry-points
 ## Scope
 
 `terraform/` is the `platform` stack registered in `terraform.stacks.json`. It
-manages the monitoring dashboard, the dashboard's read-only Grafana service
-account and token, Upstash, the monitoring GCP project and APIs, private
+manages the monitoring dashboard, read-only Grafana Viewer identities
+(dashboard, Hardin), Upstash, the monitoring GCP project and APIs, private
 Peg-policy storage, Metrics Bridge Cloud Run shape, Aegis App Engine/Grafana
 Alloy bootstrap, deploy source buckets, the separated Terraform/service-deploy
 Workload Identity Federation chains, and repo-level GitHub Actions secrets and
@@ -133,12 +133,13 @@ image pull depend on the exact boundaries.
   [`docs/terraform.md`](../docs/terraform.md),
   [ADR 0054](../docs/adr/0054-same-project-peg-policy-artifact.md), and
   [ADR 0055](../docs/adr/0055-peg-policy-bucket-controller-recovery.md).
-- The Grafana provider here mints only the dashboard's read-only identity in
-  `grafana-read-access.tf`. Keep it on `Viewer`, add no Grafana rules or
+- The Grafana provider here mints only `Viewer` identities in
+  `grafana-read-access.tf` (dashboard, Hardin). Add no Grafana rules or
   dashboards, keep the Admin `grafana_provisioning_token` out of every secret
-  sink, and rotate the minted token by counter plus redeploy — never
-  `-replace`, never the console, and never apply without the redeploy.
-  [ADR 0063](../docs/adr/0063-dashboard-grafana-history-read-access.md).
+  sink, and rotate each token by its counter — never `-replace`, never the
+  console; the dashboard token also needs the redeploy.
+  [ADR 0063](../docs/adr/0063-dashboard-grafana-history-read-access.md),
+  [Hardin note](../docs/notes/hardin-read-access.md).
 - Access logs are audit telemetry, never an authorization control.
 
 ## Verification
