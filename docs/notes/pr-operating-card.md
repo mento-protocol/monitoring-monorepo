@@ -204,17 +204,15 @@ If root `package.json` changed, first run
    blocks the handoff. After a review fix, rerun the author-check union and both
    closeout axes against the new final head.
 
-   It prints `report: <path>` as its last line and exits 0 for a clean report,
-   1 when the report carries findings, and 2 when the closeout failed — the
-   target moved, codex failed or timed out, the report came back empty, or the
-   tool never started. A 2 means there is no review and the report is not
-   evidence: block, and report the reason the script printed. Only the two
-   causes named below — no `codex` on PATH and a nested Codex session — fall
-   back to single-source coverage instead. Exit 0 is the
-   absence of a findings heading rather than a positive clean verdict: the
-   finder prints no marker a clean run can be recognized by, so a refusal or a
-   truncated answer reads as clean too. Read the report, never the exit code
-   alone. The review diffs
+   It prints `report: <path>` as its last line. Exit 1 means the report
+   carries findings. Exit 2 means the closeout failed or requires manual
+   inspection. This includes a moved target, a provider failure or timeout,
+   empty output, and output without recognized findings. No qualified positive
+   completion protocol is available, so automatic clean output is disabled.
+   Read the retained report and report the printed reason. Manual inspection
+   does not turn exit 2 into completed automatic closeout. Only the two causes
+   named below — no `codex` on PATH and a nested Codex session — fall back to
+   single-source coverage. The review diffs
    the **working tree** against the base, so uncommitted edits to tracked files
    are covered but a file you have never added is not: `git add` new files
    before you run it. Leave the tree alone while it runs: a commit, an edit, or
