@@ -35,6 +35,7 @@
     "nsExports": "warn",
     "nsTypes": "warn",
     "enumMembers": "warn",
-    "duplicates": "warn"
+    "duplicates": "warn",
+    "catalogReferences": "off"
   }
 }
