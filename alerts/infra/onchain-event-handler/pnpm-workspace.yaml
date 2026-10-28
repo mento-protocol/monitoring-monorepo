@@ -41,8 +41,11 @@ overrides:
   # GHSA-qhr7-859c-m2p7 and GHSA-q2hr-2g5m-vwhr: patched 5.x floor.
   "brace-expansion@^1.0.0": 5.0.12
   "brace-expansion@>=5.0.0 <6": 5.0.12
-  # GHSA-hrr3-gc8f-f4qj: patched 3.x floor; ajv 8 needs fast-uri ^3.
-  fast-uri@<3.1.8: 3.1.8
+  # GHSA-hrr3-gc8f-f4qj, GHSA-333x-w4r6-6crp, GHSA-xhq7-xmqj-769h,
+  # GHSA-w74x-v6f9-j3xg, GHSA-wjr9-j795-jxcr: patched 3.x floor 3.1.9;
+  # ajv 8 needs fast-uri ^3. Caret target so Dependabot can move the lockfile
+  # to the next 3.x patch on a new advisory; an exact target blocks it.
+  fast-uri@<3.1.9: ^3.1.9
   form-data@<2.5.6: 2.5.6
   "form-data@>=4.0.0 <4.0.6": 4.0.6
   # GHSA-2883-xcg3-v3hh hits 4.3.1, the floor the superseded
@@ -53,8 +56,9 @@ overrides:
   # GHSA-fxqj-rqcc-2cmp: all releases through 8.5.22 are vulnerable.
   postcss@<8.5.23: 8.5.23
   protobufjs@>=7.0.0 <7.6.5: 7.6.5
-  # GHSA-x5fp-wj9c-mxmx / GHSA-4mjr-xmp4-gh2g: patched floor 6.16.0.
-  qs@<6.16.0: 6.16.0
+  # GHSA-x5fp-wj9c-mxmx / GHSA-4mjr-xmp4-gh2g / GHSA-6pq8-jhm2-2vcw:
+  # patched floor 6.16.1. Caret target so Dependabot can raise it in place.
+  qs@<6.16.1: ^6.16.1
   # GHSA-w5hq-g745-h8pq: use each affected release line's patched backport.
   uuid@<11.1.1: 11.1.1
   "uuid@>=12.0.0 <12.0.1": 12.0.1

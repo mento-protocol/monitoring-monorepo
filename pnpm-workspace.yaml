@@ -108,8 +108,9 @@ overrides:
   "@humanfs/node@<0.16.8": 0.16.8
   "fast-copy@<4.1.0": 4.1.0
   "fflate@<0.8.3": 0.8.3
-  # GHSA-hxh3-vqpv-xpqv: patched 4.x floor.
-  "hono@<4.13.7": 4.13.7
+  # GHSA-hxh3-vqpv-xpqv / GHSA-5r4p-p66f-jhc7: patched 4.x floor 4.13.11.
+  # Caret target so Dependabot can raise it in place.
+  "hono@<4.13.11": ^4.13.11
   # extract-zip has no patched release. Puppeteer 25 removes it; retain
   # Lighthouse 12 audits and use a release older than the three-day floor.
   "lighthouse>puppeteer-core": 25.13.0
@@ -131,6 +132,8 @@ overrides:
   # react-doctor 0.1.6 scores the dashboard with Knip 6.12.2. Newer Knip
   # releases change its dead-code result and lower the required score to 99.
   "react-doctor>knip": 6.12.2
+  # GHSA-r4xh-jqrq-34v2: Knip 6.12.2 still resolves smol-toml 1.8.0.
+  "smol-toml@<1.9.0": ^1.9.0
   # The Envio CLI renders its terminal UI with Ink. Its react-dom arrives as a
   # peer of @rescript/react and resolves from the hoisted copy, so this pin must
   # track the dashboard's react version or react-dom's own `react: ^x` peer
@@ -156,8 +159,11 @@ overrides:
   # GHSA-27r3-jxmh-p828: retain the supported 1.x parser line.
   "body-parser@<1.20.9": 1.20.9
   "path-to-regexp@<0.1.13": 0.1.13
-  # GHSA-hrr3-gc8f-f4qj: patched 3.x floor; ajv 8 needs fast-uri ^3.
-  "fast-uri@<3.1.8": 3.1.8
+  # GHSA-hrr3-gc8f-f4qj, GHSA-333x-w4r6-6crp, GHSA-xhq7-xmqj-769h,
+  # GHSA-w74x-v6f9-j3xg, GHSA-wjr9-j795-jxcr: patched 3.x floor 3.1.9;
+  # ajv 8 needs fast-uri ^3. Caret target so Dependabot can move the lockfile
+  # to the next 3.x patch on a new advisory; an exact target blocks it.
+  "fast-uri@<3.1.9": ^3.1.9
   "express@<4.20.0": 4.22.1
   "form-data@<2.5.6": 2.5.6
   "form-data@>=4.0.0 <4.0.6": 4.0.6
@@ -171,8 +177,9 @@ overrides:
   # GHSA-2v37-7h3g-55p8: 3.3.18 is the patched floor for the 3.x line.
   "nanoid@<3.3.18": 3.3.18
   "protobufjs@>=7.0.0 <7.6.5": 7.6.5
-  # GHSA-x5fp-wj9c-mxmx / GHSA-4mjr-xmp4-gh2g: patched floor 6.16.0.
-  "qs@<6.16.0": 6.16.0
+  # GHSA-x5fp-wj9c-mxmx / GHSA-4mjr-xmp4-gh2g / GHSA-6pq8-jhm2-2vcw:
+  # patched floor 6.16.1. Caret target so Dependabot can raise it in place.
+  "qs@<6.16.1": ^6.16.1
   "cookie@<0.7.0": 0.7.2
   "send@<0.19.0": 0.19.2
   "serve-static@<1.16.0": 1.16.3
@@ -212,8 +219,10 @@ overrides:
   # GHSA-8xcm-r25x-g524, GHSA-m8rv-5g2x-5cg5, GHSA-v3r7-h72x-cjcm.
   # GHSA-rfgv-xxqx-mfg5 / GHSA-xjj6-f33q-929c: patched 6.x floor.
   "undici@<6.29.1": 6.29.1
-  # GHSA-xjj6-f33q-929c: retain jsdom's supported 8.x line.
-  "undici@>=8.0.0 <8.12.2": 8.12.2
+  # GHSA-xjj6-f33q-929c: retain jsdom's supported 8.x line. Caret target,
+  # bounded to 8.x by the selector: an exact target re-resolves jsdom's
+  # undici down to 8.12.2 whenever the override set changes.
+  "undici@>=8.0.0 <8.12.2": ^8.12.2
   "yaml@^2.0.0": ^2.8.3
 
 patchedDependencies:
