@@ -137,6 +137,10 @@ cat >"$deploy_dir/.gcloudignore" <<'EOF'
 node_modules/
 EOF
 
+# App Engine caps the app at 210 versions and every deploy adds one. Delete old
+# zero-traffic versions first, keeping the newest for rollback.
+node "$app_root/bin/prune-versions.mjs"
+
 # Deploy aegis through the explicit App Engine source-staging bucket.
 gcloud app deploy "$deploy_dir/app.yaml" \
   --project=mento-monitoring \

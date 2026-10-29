@@ -23,7 +23,7 @@
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/main",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --watchman=false",
-    "test:cov": "node --experimental-vm-modules node_modules/jest/bin/jest.js --coverage --watchman=false && node --test \"grafana-agent/*.test.mjs\"",
+    "test:cov": "node --experimental-vm-modules node_modules/jest/bin/jest.js --coverage --watchman=false && node --test \"grafana-agent/*.test.mjs\" \"bin/*.test.mjs\"",
     "test:debug": "node --inspect-brk --experimental-vm-modules -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:watch": "node --experimental-vm-modules node_modules/jest/bin/jest.js --watch",
     "tf:apply": "terraform -chdir=terraform apply",
