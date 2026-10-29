@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 const PROJECT = 'mento-monitoring';
 const SERVICE = 'default';
 
-function positiveInt(value, fallback, name) {
+function nonNegativeInt(value, fallback, name) {
   if (value === undefined || value === '') return fallback;
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < 0) {
@@ -74,12 +74,12 @@ function gcloud(args) {
 
 function main() {
   const dryRun = process.argv.includes('--dry-run');
-  const keep = positiveInt(
+  const keep = nonNegativeInt(
     process.env.AEGIS_KEEP_VERSIONS,
     20,
     'AEGIS_KEEP_VERSIONS',
   );
-  const maxDelete = positiveInt(
+  const maxDelete = nonNegativeInt(
     process.env.AEGIS_MAX_DELETE,
     60,
     'AEGIS_MAX_DELETE',

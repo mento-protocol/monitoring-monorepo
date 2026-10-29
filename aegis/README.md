@@ -94,6 +94,16 @@ From inside `aegis/`, `pnpm deploy` is equivalent. The deploy script rebuilds
 `dist/`, creates a temporary App Engine app root with the root pnpm lockfile's
 Aegis importer, and uploads that staged service to `mento-monitoring`.
 
+Before uploading, every deploy (CI or manual) runs `aegis/bin/prune-versions.mjs`,
+which permanently deletes old `default`-service versions. App Engine allows at
+most 210 versions per app, and each deploy adds one. The prune keeps the newest
+20 zero-traffic versions as rollback targets, never deletes a version with
+traffic, and deletes at most 60 versions per run, oldest first. Deletion happens
+even if the upload that follows fails. A prune failure stops the deploy before
+upload, so the serving version is unaffected. Override the limits with
+`AEGIS_KEEP_VERSIONS` and `AEGIS_MAX_DELETE`; preview a run without deleting
+anything with `node aegis/bin/prune-versions.mjs --dry-run`.
+
 Deploy the Alloy collector only in an already provisioned environment and
 follow [grafana-agent/README.md](./grafana-agent/README.md). Platform Terraform
 owns its write-only secret versions and dedicated runtime identity. The deploy
