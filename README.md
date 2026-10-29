@@ -359,7 +359,7 @@ babysitting a new deploy.
 ```bash
 pnpm aegis:build
 pnpm aegis:typecheck
-pnpm aegis:deploy   # builds, stages a locked App Engine app, then deploys to mento-monitoring
+pnpm aegis:deploy   # builds, prunes old versions, stages a locked App Engine app, then deploys to mento-monitoring
 pnpm aegis:logs
 ```
 
