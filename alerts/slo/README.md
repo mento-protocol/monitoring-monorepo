@@ -46,7 +46,7 @@ not show that the data is current; that is `indexer-freshness`.
 
 ## Review
 
-Next review: 2027-01-29. Confirm or change every provisional target against the
+Next review: 2027-01-28. Confirm or change every provisional target against the
 last 90 days, then set the next date here.
 
 ## Changing an SLO

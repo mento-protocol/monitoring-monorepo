@@ -22,6 +22,8 @@ garden_lane: agent-entry-points
 - **`alerts/infra/`** — event-driven alert delivery: QuickNode webhooks → Cloud Function (TS) → Slack channels (on-chain multisig events and pool LP withdrawals) + Sentry → Slack bridge (app errors) + Splunk On-Call rotation announcer → Slack #eng / @support-engineer + GCP project. Multi-provider. Changes monthly.
 - **`alerts/peg-policy-publication/`** — publishes `rules/peg-thresholds.json` as one immutable, private GCS generation through a manual `production-infra`-gated workflow. It owns no Cloud Run configuration or Grafana resources.
 
+`alerts/slo/` holds OpenSLO definitions that no stack reads; Hardin evaluates them from `main`. See [`alerts/slo/README.md`](slo/README.md).
+
 Separate GCS state (`prefix=alerts-rules` for rules, `prefix=alerts-infra` for infra, and `prefix=peg-policy-publication` for policy publication). Keep them separate roots — cadence + blast-radius asymmetry. Stack ownership is registered in `terraform.stacks.json` and summarized in `docs/terraform.md`.
 
 Operator runbooks: [`alerts/infra/README.md`](infra/README.md) for event-driven

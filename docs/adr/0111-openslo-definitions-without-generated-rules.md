@@ -37,7 +37,7 @@ SLOs whose data source does not exist stay in the file with
 `mento.org/sli-status: pending`, so the gap stays visible. Guessed targets carry
 `mento.org/provisional: "true"` until a quarterly review confirms them.
 
-## Alternatives
+## Alternatives considered
 
 - **Generate Grafana recording and alert rules from the definitions.** Rejected:
   it covers only the Prometheus SLIs and doubles the paging surface while targets
@@ -53,3 +53,11 @@ SLOs whose data source does not exist stay in the file with
 - An SLO breach never pages. Fast outages stay the job of the existing rules.
 - A burn signal depends on Hardin running. A stopped daily check loses that
   signal, and the monthly review reports no result instead of zeros.
+
+## Evidence
+
+- [`alerts/slo/slos.yaml`](../../alerts/slo/slos.yaml) holds the definitions and
+  [`alerts/slo/README.md`](../../alerts/slo/README.md) the targets, annotations and
+  review date.
+- `git log --diff-filter=A -- alerts/slo/slos.yaml` names the commit that added
+  them with this record.

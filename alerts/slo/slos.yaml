@@ -51,13 +51,15 @@ spec:
         metricSource:
           type: envio-meta
           spec:
-            query: _meta progressBlock vs sourceBlock
+            query: _meta (sourceBlock - progressBlock) / chain lag threshold
   timeWindow:
     - duration: 28d
       isRolling: true
   budgetingMethod: Timeslices
   objectives:
     - displayName: within-chain-lag-threshold
+      op: lte
+      value: 1
       target: 0.995
       timeSliceTarget: 1
       timeSliceWindow: 1m
@@ -82,12 +84,15 @@ spec:
           type: synthetic-probe
           spec:
             target: ui-dashboard production
+            result: 1 on success, else 0
   timeWindow:
     - duration: 28d
       isRolling: true
   budgetingMethod: Timeslices
   objectives:
     - displayName: page-load-succeeds
+      op: gte
+      value: 1
       target: 0.995
       timeSliceTarget: 1
       timeSliceWindow: 1m
@@ -107,11 +112,18 @@ spec:
     metadata:
       name: alert-canary-round-trip
     spec:
-      thresholdMetric:
-        metricSource:
-          type: alert-canary
-          spec:
-            deadline: 5m
+      ratioMetric:
+        counter: true
+        good:
+          metricSource:
+            type: alert-canary
+            spec:
+              result: delivered within 5m
+        total:
+          metricSource:
+            type: alert-canary
+            spec:
+              result: sent
   timeWindow:
     - duration: 28d
       isRolling: true
@@ -135,11 +147,20 @@ spec:
     metadata:
       name: judged-incident-precision
     spec:
-      thresholdMetric:
-        metricSource:
-          type: hardin-ledger
-          spec:
-            metric: alert_precision
+      ratioMetric:
+        counter: true
+        good:
+          metricSource:
+            type: hardin-ledger
+            spec:
+              metric: alert_precision
+              count: real
+        total:
+          metricSource:
+            type: hardin-ledger
+            spec:
+              metric: alert_precision
+              count: judged
   timeWindow:
     - duration: 28d
       isRolling: true
@@ -163,11 +184,18 @@ spec:
     metadata:
       name: automation-run-success
     spec:
-      thresholdMetric:
-        metricSource:
-          type: openclaw-automation-runs
-          spec:
-            statuses: all
+      ratioMetric:
+        counter: true
+        good:
+          metricSource:
+            type: openclaw-automation-runs
+            spec:
+              status: ok
+        total:
+          metricSource:
+            type: openclaw-automation-runs
+            spec:
+              status: all
   timeWindow:
     - duration: 28d
       isRolling: true
@@ -196,12 +224,15 @@ spec:
           type: healthchecks
           spec:
             check: Gateway Ready
+            result: 1 while the check is up, else 0
   timeWindow:
     - duration: 28d
       isRolling: true
   budgetingMethod: Timeslices
   objectives:
     - displayName: heartbeat-up
+      op: gte
+      value: 1
       target: 0.95
       timeSliceTarget: 1
       timeSliceWindow: 1m
@@ -221,11 +252,20 @@ spec:
     metadata:
       name: change-caused-incidents
     spec:
-      thresholdMetric:
-        metricSource:
-          type: hardin-ledger
-          spec:
-            metric: change_failure_rate
+      ratioMetric:
+        counter: true
+        good:
+          metricSource:
+            type: hardin-ledger
+            spec:
+              metric: change_failure_rate
+              count: merged PRs with no change-caused incident
+        total:
+          metricSource:
+            type: hardin-ledger
+            spec:
+              metric: change_failure_rate
+              count: merged PRs
   timeWindow:
     - duration: 28d
       isRolling: true
