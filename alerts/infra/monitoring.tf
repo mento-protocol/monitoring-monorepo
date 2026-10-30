@@ -336,3 +336,89 @@ resource "google_monitoring_alert_policy" "oncall_announcer_scheduler_errors_pol
 
   depends_on = [module.project_factory]
 }
+
+# Sentry only sees errors that reach the app, so a service that stops serving
+# would otherwise be silent. The check needs a 2xx only: a degraded third-party
+# API answers 200 with status "error" in the body and must not page.
+resource "google_monitoring_uptime_check_config" "analytics_api_health" {
+  project      = local.project_id
+  display_name = "mento-analytics-api-health"
+  timeout      = "10s"
+  period       = "300s"
+
+  http_check {
+    path         = "/api/v1/health"
+    port         = 443
+    use_ssl      = true
+    validate_ssl = true
+
+    accepted_response_status_codes {
+      status_class = "STATUS_CLASS_2XX"
+    }
+  }
+
+  monitored_resource {
+    type = "uptime_url"
+    labels = {
+      project_id = local.project_id
+      # The stable Cloud Run URL of the service in project mento-prod.
+      host = "mento-analytics-api-12390052758.us-central1.run.app"
+    }
+  }
+
+  depends_on = [module.project_factory]
+}
+
+resource "google_monitoring_alert_policy" "analytics_api_health_policy" {
+  project      = local.project_id
+  display_name = "mento-analytics-api-unavailable"
+  combiner     = "OR"
+  enabled      = true
+  severity     = "CRITICAL"
+
+  documentation {
+    content   = <<-EOT
+      ## Analytics API unavailable
+
+      `/api/v1/health` failed from more than one region for 10 minutes. The API
+      backs reserve.mento.org. Check the serving revision and its logs in
+      project `mento-prod`, then the newest Deploy to Production run.
+    EOT
+    mime_type = "text/markdown"
+  }
+
+  conditions {
+    display_name = "Health check failing from more than one region"
+
+    condition_threshold {
+      filter = <<EOF
+        resource.type = "uptime_url" AND
+        metric.type   = "monitoring.googleapis.com/uptime_check/check_passed" AND
+        metric.labels.check_id = "${google_monitoring_uptime_check_config.analytics_api_health.uptime_check_id}"
+      EOF
+
+      duration        = "600s"
+      comparison      = "COMPARISON_GT"
+      threshold_value = 1
+
+      aggregations {
+        alignment_period     = "600s"
+        per_series_aligner   = "ALIGN_NEXT_OLDER"
+        cross_series_reducer = "REDUCE_COUNT_FALSE"
+        group_by_fields      = ["resource.label.host"]
+      }
+
+      trigger {
+        count = 1
+      }
+    }
+  }
+
+  notification_channels = [local.alerts_infra_notification_channel]
+
+  alert_strategy {
+    auto_close = "1800s"
+  }
+
+  depends_on = [module.project_factory]
+}

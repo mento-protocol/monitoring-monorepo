@@ -198,6 +198,9 @@ chain key.
   and auto-close after 30 minutes without another matching failure
 - On-chain handler drop and processing-budget policies share the same
   `#alerts-infra` destination
+- The Analytics API has a 5-minute uptime check on `/api/v1/health`. It alerts
+  `#alerts-infra` when more than one region fails for 10 minutes. A 200 with a
+  degraded third-party API in the body counts as up
 - No policy in this stack alerts on an absent series. The one that did
   (`sentry-triage-ingest-stale`) was deleted with the Sentry pipeline
   ([ADR 0106](../../docs/adr/0106-sentry-triage-moves-to-operator-skills.md)).
