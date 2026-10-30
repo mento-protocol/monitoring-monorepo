@@ -19,7 +19,7 @@ spec:
         metricSource:
           type: prometheus
           spec:
-            query: (time() - mento_pool_bridge_last_poll) or on() vector(1e+12)
+            query: max(time() - mento_pool_bridge_last_poll) or vector(1e+12)
   timeWindow:
     - duration: 28d
       isRolling: true

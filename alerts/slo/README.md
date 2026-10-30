@@ -56,4 +56,5 @@ queries longer than 32 days here, so a Prometheus SLI stays inside the 28-day
 window. A Prometheus indicator must return one series, or the worst series is
 what counts. End its query with a fallback that fails the threshold, as
 `indexer-availability` does, so a series that disappears uses up budget instead
-of dropping out of the calculation.
+of dropping out of the calculation. Aggregate the left side too: a labelled
+series and an unlabelled fallback are two series, and the sparse one wins.
