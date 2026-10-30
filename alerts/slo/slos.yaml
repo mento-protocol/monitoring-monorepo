@@ -246,7 +246,7 @@ metadata:
     mento.org/provisional: "true"
     mento.org/sli-status: measured
 spec:
-  description: Share of merged PRs that caused no incident, so a target of 0.85 means a failure rate of at most 15%.
+  description: Change-caused incidents per merged PR, inverted, so a target of 0.85 means a rate of at most 15%. Ledgers name no causal PR, so one PR behind two incidents counts twice.
   service: delivery
   indicator:
     metadata:
@@ -259,7 +259,7 @@ spec:
             type: hardin-ledger
             spec:
               metric: change_failure_rate
-              count: merged PRs with no change-caused incident
+              count: merged PRs minus change-caused incidents
         total:
           metricSource:
             type: hardin-ledger

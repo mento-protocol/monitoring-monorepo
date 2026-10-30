@@ -36,6 +36,10 @@ Its monthly service review shows attainment against target.
 `indexer-availability` shows that metrics-bridge can read the indexer. It does
 not show that the data is current; that is `indexer-freshness`.
 
+`change-failure-rate` approximates DORA's measure. It counts incidents tagged as
+change-caused against PRs merged in the same window, because ledgers do not name
+the causal PR.
+
 ## Error budget policy
 
 - Budget gone: ship only reliability work and security fixes for that service
