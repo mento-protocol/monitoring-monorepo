@@ -225,6 +225,7 @@ Authority: canonical
 - [`adr/0108-sealed-orchestrator-source-set.md`](adr/0108-sealed-orchestrator-source-set.md) — Every run-eval shell module joins the sealed orchestrator source set
 - [`adr/0109-pool-liquidity-event-delivery.md`](adr/0109-pool-liquidity-event-delivery.md) — Pool liquidity watches use event-keyed durable alert delivery
 - [`adr/0110-paired-review-evaluation-v2.md`](adr/0110-paired-review-evaluation-v2.md) — Paired review evaluation v2 separates execution from grading
+- [`adr/0111-openslo-definitions-without-generated-rules.md`](adr/0111-openslo-definitions-without-generated-rules.md) — SLOs are OpenSLO definitions with no generated alert rules
 
 Authority: non-canonical
 
@@ -253,6 +254,7 @@ Authority: canonical
 - [`aegis/README.md`](../aegis/README.md)
 - [`alerts/infra/channels/slack-channels/README.md`](../alerts/infra/channels/slack-channels/README.md)
 - [`alerts/infra/oncall-announcer/README.md`](../alerts/infra/oncall-announcer/README.md)
+- [`alerts/slo/README.md`](../alerts/slo/README.md)
 - [`docs/context-standards.md`](context-standards.md)
 - [`docs/mutation-testing.md`](mutation-testing.md)
 - [`docs/notes/liquity-monitoring-invariants.md`](notes/liquity-monitoring-invariants.md)
