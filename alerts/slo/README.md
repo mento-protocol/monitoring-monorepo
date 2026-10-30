@@ -38,7 +38,9 @@ not show that the data is current; that is `indexer-freshness`.
 
 `change-failure-rate` approximates DORA's measure. It counts incidents tagged as
 change-caused against PRs merged in the same window, because ledgers do not name
-the causal PR.
+the causal PR. Hardin reports that rate directly, as incidents per merged PR.
+Two incidents on one merged PR read as 200%, a missed target; no report computes
+the inverted ratio in `slos.yaml`, so it cannot go negative.
 
 ## Error budget policy
 
@@ -54,6 +56,9 @@ Next review: 2027-01-28. Confirm or change every provisional target against the
 last 90 days, then set the next date here.
 
 ## Changing an SLO
+
+Keep the file one YAML sequence of SLO objects: the deploy-staging contract
+parses each tracked YAML file as one document, so a `---` separator fails CI.
 
 Keep `metadata.name` stable: reports and history key on it. Mimir rejects
 queries longer than 32 days here, so a Prometheus SLI stays inside the 28-day

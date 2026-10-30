@@ -1,275 +1,268 @@
-# Mento monitoring SLOs in OpenSLO v1. README.md explains how they are measured
-# and what the two mento.org annotations mean.
-apiVersion: openslo/v1
-kind: SLO
-metadata:
-  name: indexer-availability
-  displayName: Indexer availability
-  annotations:
-    mento.org/provisional: "false"
-    mento.org/sli-status: measured
-spec:
-  description: Metrics-bridge last read the pools from Hasura and published them within 120 s.
-  service: indexer
-  indicator:
-    metadata:
-      name: metrics-bridge-poll-age
-    spec:
-      thresholdMetric:
-        metricSource:
-          type: prometheus
-          spec:
-            query: max(time() - mento_pool_bridge_last_poll) or vector(1e+12)
-  timeWindow:
-    - duration: 28d
-      isRolling: true
-  budgetingMethod: Timeslices
-  objectives:
-    - displayName: polled-within-120s
-      op: lte
-      value: 120
-      target: 0.995
-      timeSliceTarget: 1
-      timeSliceWindow: 1m
----
-apiVersion: openslo/v1
-kind: SLO
-metadata:
-  name: indexer-freshness
-  displayName: Indexer freshness
-  annotations:
-    mento.org/provisional: "true"
-    mento.org/sli-status: pending
-spec:
-  description: Every chain stays within its lag threshold. No lag history is stored yet, so this has no SLI.
-  service: indexer
-  indicator:
-    metadata:
-      name: envio-chain-lag
-    spec:
-      thresholdMetric:
-        metricSource:
-          type: envio-meta
-          spec:
-            query: _meta (sourceBlock - progressBlock) / chain lag threshold
-  timeWindow:
-    - duration: 28d
-      isRolling: true
-  budgetingMethod: Timeslices
-  objectives:
-    - displayName: within-chain-lag-threshold
-      op: lte
-      value: 1
-      target: 0.995
-      timeSliceTarget: 1
-      timeSliceWindow: 1m
----
-apiVersion: openslo/v1
-kind: SLO
-metadata:
-  name: dashboard-availability
-  displayName: Dashboard availability
-  annotations:
-    mento.org/provisional: "true"
-    mento.org/sli-status: pending
-spec:
-  description: The public dashboard answers a synthetic page load. No uptime check exists yet, so this has no SLI.
-  service: ui-dashboard
-  indicator:
-    metadata:
-      name: dashboard-synthetic-probe
-    spec:
-      thresholdMetric:
-        metricSource:
-          type: synthetic-probe
-          spec:
-            target: ui-dashboard production
-            result: 1 on success, else 0
-  timeWindow:
-    - duration: 28d
-      isRolling: true
-  budgetingMethod: Timeslices
-  objectives:
-    - displayName: page-load-succeeds
-      op: gte
-      value: 1
-      target: 0.995
-      timeSliceTarget: 1
-      timeSliceWindow: 1m
----
-apiVersion: openslo/v1
-kind: SLO
-metadata:
-  name: alert-delivery
-  displayName: Alert pipeline delivery
-  annotations:
-    mento.org/provisional: "true"
-    mento.org/sli-status: pending
-spec:
-  description: A scheduled canary alert reaches Slack within 5 minutes. No canary exists yet, so this has no SLI.
-  service: alerts
-  indicator:
-    metadata:
-      name: alert-canary-round-trip
-    spec:
-      ratioMetric:
-        counter: true
-        good:
+# Mento monitoring SLOs in OpenSLO v1, as one YAML sequence. README.md explains
+# how they are measured and what the two mento.org annotations mean.
+- apiVersion: openslo/v1
+  kind: SLO
+  metadata:
+    name: indexer-availability
+    displayName: Indexer availability
+    annotations:
+      mento.org/provisional: "false"
+      mento.org/sli-status: measured
+  spec:
+    description: Metrics-bridge last read the pools from Hasura and published them within 120 s.
+    service: indexer
+    indicator:
+      metadata:
+        name: metrics-bridge-poll-age
+      spec:
+        thresholdMetric:
           metricSource:
-            type: alert-canary
+            type: prometheus
             spec:
-              result: delivered within 5m
-        total:
+              query: max(time() - mento_pool_bridge_last_poll) or vector(1e+12)
+    timeWindow:
+      - duration: 28d
+        isRolling: true
+    budgetingMethod: Timeslices
+    objectives:
+      - displayName: polled-within-120s
+        op: lte
+        value: 120
+        target: 0.995
+        timeSliceTarget: 1
+        timeSliceWindow: 1m
+- apiVersion: openslo/v1
+  kind: SLO
+  metadata:
+    name: indexer-freshness
+    displayName: Indexer freshness
+    annotations:
+      mento.org/provisional: "true"
+      mento.org/sli-status: pending
+  spec:
+    description: Every chain stays within its lag threshold. No lag history is stored yet, so this has no SLI.
+    service: indexer
+    indicator:
+      metadata:
+        name: envio-chain-lag
+      spec:
+        thresholdMetric:
           metricSource:
-            type: alert-canary
+            type: envio-meta
             spec:
-              result: sent
-  timeWindow:
-    - duration: 28d
-      isRolling: true
-  budgetingMethod: Occurrences
-  objectives:
-    - displayName: canary-delivered
-      target: 0.999
----
-apiVersion: openslo/v1
-kind: SLO
-metadata:
-  name: alert-precision
-  displayName: Alert precision
-  annotations:
-    mento.org/provisional: "true"
-    mento.org/sli-status: measured
-spec:
-  description: Share of judged alert incidents that were a real condition, neither noisy nor by design.
-  service: alerts
-  indicator:
-    metadata:
-      name: judged-incident-precision
-    spec:
-      ratioMetric:
-        counter: true
-        good:
+              query: _meta (sourceBlock - progressBlock) / chain lag threshold
+    timeWindow:
+      - duration: 28d
+        isRolling: true
+    budgetingMethod: Timeslices
+    objectives:
+      - displayName: within-chain-lag-threshold
+        op: lte
+        value: 1
+        target: 0.995
+        timeSliceTarget: 1
+        timeSliceWindow: 1m
+- apiVersion: openslo/v1
+  kind: SLO
+  metadata:
+    name: dashboard-availability
+    displayName: Dashboard availability
+    annotations:
+      mento.org/provisional: "true"
+      mento.org/sli-status: pending
+  spec:
+    description: The public dashboard answers a synthetic page load. No uptime check exists yet, so this has no SLI.
+    service: ui-dashboard
+    indicator:
+      metadata:
+        name: dashboard-synthetic-probe
+      spec:
+        thresholdMetric:
           metricSource:
-            type: hardin-ledger
+            type: synthetic-probe
             spec:
-              metric: alert_precision
-              count: real
-        total:
+              target: ui-dashboard production
+              result: 1 on success, else 0
+    timeWindow:
+      - duration: 28d
+        isRolling: true
+    budgetingMethod: Timeslices
+    objectives:
+      - displayName: page-load-succeeds
+        op: gte
+        value: 1
+        target: 0.995
+        timeSliceTarget: 1
+        timeSliceWindow: 1m
+- apiVersion: openslo/v1
+  kind: SLO
+  metadata:
+    name: alert-delivery
+    displayName: Alert pipeline delivery
+    annotations:
+      mento.org/provisional: "true"
+      mento.org/sli-status: pending
+  spec:
+    description: A scheduled canary alert reaches Slack within 5 minutes. No canary exists yet, so this has no SLI.
+    service: alerts
+    indicator:
+      metadata:
+        name: alert-canary-round-trip
+      spec:
+        ratioMetric:
+          counter: true
+          good:
+            metricSource:
+              type: alert-canary
+              spec:
+                result: delivered within 5m
+          total:
+            metricSource:
+              type: alert-canary
+              spec:
+                result: sent
+    timeWindow:
+      - duration: 28d
+        isRolling: true
+    budgetingMethod: Occurrences
+    objectives:
+      - displayName: canary-delivered
+        target: 0.999
+- apiVersion: openslo/v1
+  kind: SLO
+  metadata:
+    name: alert-precision
+    displayName: Alert precision
+    annotations:
+      mento.org/provisional: "true"
+      mento.org/sli-status: measured
+  spec:
+    description: Share of judged alert incidents that were a real condition, neither noisy nor by design.
+    service: alerts
+    indicator:
+      metadata:
+        name: judged-incident-precision
+      spec:
+        ratioMetric:
+          counter: true
+          good:
+            metricSource:
+              type: hardin-ledger
+              spec:
+                metric: alert_precision
+                count: real
+          total:
+            metricSource:
+              type: hardin-ledger
+              spec:
+                metric: alert_precision
+                count: judged
+    timeWindow:
+      - duration: 28d
+        isRolling: true
+    budgetingMethod: Occurrences
+    objectives:
+      - displayName: alert-was-real
+        target: 0.9
+- apiVersion: openslo/v1
+  kind: SLO
+  metadata:
+    name: cron-automations
+    displayName: Cron automations
+    annotations:
+      mento.org/provisional: "true"
+      mento.org/sli-status: measured
+  spec:
+    description: Share of scheduled agent automation runs on the Gateway that finish without an error.
+    service: gateway
+    indicator:
+      metadata:
+        name: automation-run-success
+      spec:
+        ratioMetric:
+          counter: true
+          good:
+            metricSource:
+              type: openclaw-automation-runs
+              spec:
+                status: ok
+          total:
+            metricSource:
+              type: openclaw-automation-runs
+              spec:
+                status: all
+    timeWindow:
+      - duration: 28d
+        isRolling: true
+    budgetingMethod: Occurrences
+    objectives:
+      - displayName: run-succeeded
+        target: 0.97
+- apiVersion: openslo/v1
+  kind: SLO
+  metadata:
+    name: gateway-liveness
+    displayName: Gateway liveness
+    annotations:
+      mento.org/provisional: "true"
+      mento.org/sli-status: measured
+  spec:
+    description: The healthchecks.io check for the Gateway readiness heartbeat is up.
+    service: gateway
+    indicator:
+      metadata:
+        name: gateway-ready-heartbeat
+      spec:
+        thresholdMetric:
           metricSource:
-            type: hardin-ledger
+            type: healthchecks
             spec:
-              metric: alert_precision
-              count: judged
-  timeWindow:
-    - duration: 28d
-      isRolling: true
-  budgetingMethod: Occurrences
-  objectives:
-    - displayName: alert-was-real
-      target: 0.9
----
-apiVersion: openslo/v1
-kind: SLO
-metadata:
-  name: cron-automations
-  displayName: Cron automations
-  annotations:
-    mento.org/provisional: "true"
-    mento.org/sli-status: measured
-spec:
-  description: Share of scheduled agent automation runs on the Gateway that finish without an error.
-  service: gateway
-  indicator:
-    metadata:
-      name: automation-run-success
-    spec:
-      ratioMetric:
-        counter: true
-        good:
-          metricSource:
-            type: openclaw-automation-runs
-            spec:
-              status: ok
-        total:
-          metricSource:
-            type: openclaw-automation-runs
-            spec:
-              status: all
-  timeWindow:
-    - duration: 28d
-      isRolling: true
-  budgetingMethod: Occurrences
-  objectives:
-    - displayName: run-succeeded
-      target: 0.97
----
-apiVersion: openslo/v1
-kind: SLO
-metadata:
-  name: gateway-liveness
-  displayName: Gateway liveness
-  annotations:
-    mento.org/provisional: "true"
-    mento.org/sli-status: measured
-spec:
-  description: The healthchecks.io check for the Gateway readiness heartbeat is up.
-  service: gateway
-  indicator:
-    metadata:
-      name: gateway-ready-heartbeat
-    spec:
-      thresholdMetric:
-        metricSource:
-          type: healthchecks
-          spec:
-            check: Gateway Ready
-            result: 1 while the check is up, else 0
-  timeWindow:
-    - duration: 28d
-      isRolling: true
-  budgetingMethod: Timeslices
-  objectives:
-    - displayName: heartbeat-up
-      op: gte
-      value: 1
-      target: 0.95
-      timeSliceTarget: 1
-      timeSliceWindow: 1m
----
-apiVersion: openslo/v1
-kind: SLO
-metadata:
-  name: change-failure-rate
-  displayName: Change failure rate
-  annotations:
-    mento.org/provisional: "true"
-    mento.org/sli-status: measured
-spec:
-  description: Change-caused incidents per merged PR, inverted, so a target of 0.85 means a rate of at most 15%. Ledgers name no causal PR, so one PR behind two incidents counts twice.
-  service: delivery
-  indicator:
-    metadata:
-      name: change-caused-incidents
-    spec:
-      ratioMetric:
-        counter: true
-        good:
-          metricSource:
-            type: hardin-ledger
-            spec:
-              metric: change_failure_rate
-              count: merged PRs minus change-caused incidents
-        total:
-          metricSource:
-            type: hardin-ledger
-            spec:
-              metric: change_failure_rate
-              count: merged PRs
-  timeWindow:
-    - duration: 28d
-      isRolling: true
-  budgetingMethod: Occurrences
-  objectives:
-    - displayName: change-held
-      target: 0.85
+              check: Gateway Ready
+              result: 1 while the check is up, else 0
+    timeWindow:
+      - duration: 28d
+        isRolling: true
+    budgetingMethod: Timeslices
+    objectives:
+      - displayName: heartbeat-up
+        op: gte
+        value: 1
+        target: 0.95
+        timeSliceTarget: 1
+        timeSliceWindow: 1m
+- apiVersion: openslo/v1
+  kind: SLO
+  metadata:
+    name: change-failure-rate
+    displayName: Change failure rate
+    annotations:
+      mento.org/provisional: "true"
+      mento.org/sli-status: measured
+  spec:
+    description: Change-caused incidents per merged PR, inverted, so a target of 0.85 means a rate of at most 15%. Ledgers name no causal PR, so one PR behind two incidents counts twice.
+    service: delivery
+    indicator:
+      metadata:
+        name: change-caused-incidents
+      spec:
+        ratioMetric:
+          counter: true
+          good:
+            metricSource:
+              type: hardin-ledger
+              spec:
+                metric: change_failure_rate
+                count: merged PRs minus change-caused incidents
+          total:
+            metricSource:
+              type: hardin-ledger
+              spec:
+                metric: change_failure_rate
+                count: merged PRs
+    timeWindow:
+      - duration: 28d
+        isRolling: true
+    budgetingMethod: Occurrences
+    objectives:
+      - displayName: change-held
+        target: 0.85

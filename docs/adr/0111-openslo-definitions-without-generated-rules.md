@@ -29,9 +29,10 @@ rules already page on.
 
 ## Decision
 
-Keep SLOs as OpenSLO v1 documents in `alerts/slo/slos.yaml`. Hardin evaluates
-them daily from `main` and reports burn as a ticket-level message. No Terraform
-stack reads the file and no Grafana rule is generated from it.
+Keep SLOs as OpenSLO v1 objects in one YAML sequence in `alerts/slo/slos.yaml`.
+Hardin evaluates them daily from `main` and reports burn as a ticket-level
+message. No Terraform stack reads the file and no Grafana rule is generated from
+it.
 
 SLOs whose data source does not exist stay in the file with
 `mento.org/sli-status: pending`, so the gap stays visible. Guessed targets carry
