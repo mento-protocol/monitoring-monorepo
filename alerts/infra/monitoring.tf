@@ -361,7 +361,8 @@ resource "google_monitoring_uptime_check_config" "analytics_api_health" {
     type = "uptime_url"
     labels = {
       project_id = local.project_id
-      host       = "mento-analytics-api-12390052758.us-central1.run.app"
+      # The stable Cloud Run URL of the service in project mento-prod.
+      host = "mento-analytics-api-12390052758.us-central1.run.app"
     }
   }
 
