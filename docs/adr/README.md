@@ -206,6 +206,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0067](0067-depletion-alerts.md)                              | Archived: depletion paging                                                                                         |
 | [0097](0097-recovery.md)                                      | Bounded pool-page recovery                                                                                         |
 | [0109](0109-pool-liquidity-event-delivery.md)                 | Pool LP withdrawals use receipt proof and event-keyed at-least-once delivery                                       |
+| [0111](0111-openslo-definitions-without-generated-rules.md)   | SLOs are OpenSLO definitions with no generated alert rules                                                         |
 
 ### governance-watchdog
 
