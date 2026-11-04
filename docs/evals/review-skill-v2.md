@@ -17,8 +17,11 @@ It scores complete final reviews against audited root causes and checks repaired
 counterparts. It preserves reviewer outputs when only the grading changes.
 [ADR 0110](../adr/0110-paired-review-evaluation-v2.md) records the decision.
 
-The [v1 evaluation](review-skill.md) retains its ledger, scheduler, and historical
-scores. A v2 run cannot update that ledger, its baseline, or its freshness clock.
+The [v1 evaluation](review-skill.md) retains its ledger, its local launchd
+scheduler, and historical scores. A v2 run cannot update that ledger, its
+baseline, or its freshness clock. No CI workflow alarms when that clock goes
+stale: [ADR 0112](../adr/0112-retire-review-eval-freshness-workflow.md) retired
+the scheduled freshness workflow.
 
 The [October 2026 expansion report](review-skill-v2-expansion-2026-10.md)
 records a separate 32-cell internal-reviewer comparison and its limits. Its
