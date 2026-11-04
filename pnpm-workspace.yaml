@@ -94,8 +94,8 @@ overrides:
   "glob@13.0.6>minimatch": 10.2.5
   # GHSA-mrhx-c7xc-m3w5: patch existing 4.x consumers without forcing 3.x.
   "zod@>=4.0.0 <4.6.6": 4.6.6
-  # GHSA-q3jh-wrc6-jgq8 / GHSA-8r9p-f939-6h3c: patched redirect handling.
-  "follow-redirects@<1.16.1": 1.16.1
+  # GHSA-q3jh-wrc6-jgq8 / GHSA-8r9p-f939-6h3c / GHSA-mrwp-f3q8-3g9p: patched redirect handling.
+  "follow-redirects@<1.16.2": 1.16.2
   # Framework declaration edges must match the deployed Node 24 applications.
   # Keep other tooling contexts (Jest, Lighthouse, ts-node) independent.
   "@types/body-parser>@types/node": 24.13.2
