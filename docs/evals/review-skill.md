@@ -611,9 +611,10 @@ fenced answer — an awk snippet, say — swallowed the JSON. The logged stderr
 tail is the only record of it, because `run-eval.sh` deletes the score stderr
 file as soon as it prints that tail.
 
-No CI workflow tracks ledger staleness. The scheduled freshness workflow was
-retired once [evaluation v2](review-skill-v2.md) replaced this ledger for new
-experiments: a weekly red run for an evaluation nobody runs carried no signal.
+No CI workflow tracks ledger staleness.
+[ADR 0112](../adr/0112-retire-review-eval-freshness-workflow.md) retired the
+scheduled freshness workflow once [evaluation v2](review-skill-v2.md) became
+the path for new experiments.
 `pnpm review:eval -- --schedule-issue --dry-run` still prints the staleness
 plan locally.
 
