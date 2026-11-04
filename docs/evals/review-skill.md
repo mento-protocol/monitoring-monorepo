@@ -616,7 +616,12 @@ No CI workflow tracks ledger staleness.
 scheduled freshness workflow once [evaluation v2](review-skill-v2.md) became
 the path for new experiments.
 `pnpm review:eval -- --schedule-issue --dry-run` still prints the staleness
-plan locally.
+plan locally. `--help` still describes `--schedule-issue` as creating the
+issue. Without `--dry-run`, a run that would create one now stops at the
+freshness guard, which names `--dry-run` in its error. The help text lives in
+`review-eval.mjs` and the guard in `review-eval-freshness-guard.mjs`. Both are
+in `SCORING_MODULES`, so editing either moves `matcher_digest` and refuses
+comparison with every existing ledger row.
 
 ### Install the scheduler
 
