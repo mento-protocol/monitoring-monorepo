@@ -7937,45 +7937,13 @@ test("the cell reader emits nothing when the plan carries a forged field", () =>
   }
 });
 
-test("the freshness workflow runs on schedule and dispatch only, and its aliases stay real", () => {
-  const workflow = readFileSync(
-    path.join(repoRoot, ".github/workflows/review-eval-freshness.yml"),
-    "utf8",
-  );
-  // The contract job's three commands are byte-identical to steps of ci.yml's
-  // required `scripts` job, run there on a strict superset of this file's old
-  // PR paths (rootScripts), so a `pull_request` trigger here is pure
-  // duplicate coverage. This workflow stays schedule/dispatch-only.
-  assert.doesNotMatch(workflow, /^\s*pull_request:/m);
-  assert.match(workflow, /^\s*workflow_dispatch:/m);
-  // Every contract-job command runs a `review:eval*` alias, so a rename or
-  // removal must still red this workflow (weekly) even with no PR trigger.
-  const aliases = [
-    ...new Set(
-      [...workflow.matchAll(/pnpm (review:eval[\w:]*)/g)].map((m) => m[1]),
-    ),
-  ];
-  const scripts = JSON.parse(
-    readFileSync(path.join(repoRoot, "package.json"), "utf8"),
-  ).scripts;
-  for (const alias of aliases) {
-    assert.ok(scripts[alias], `package.json has no ${alias} script`);
-  }
-  assert.match(
-    workflow,
-    /node scripts\/review\/review-eval-freshness-publication\.mjs --json/,
-  );
-  assert.doesNotMatch(workflow, /pnpm review:eval -- --schedule-issue --json/);
-});
-
 test("required CI routes the nested frozen inputs to the scripts job", () => {
   const workflow = readFileSync(
     path.join(repoRoot, ".github/workflows/ci.yml"),
     "utf8",
   );
-  // The freshness workflow above is advisory by design, so the only required
-  // check over the frozen inputs is the `scripts` job, reached through the
-  // `rootScripts` path filter. dorny/paths-filter matches with picomatch,
+  // The only CI check over the frozen inputs is the required `scripts` job,
+  // reached through the `rootScripts` path filter. dorny/paths-filter matches with picomatch,
   // where `docs/evals/review-skill*` stops at the path separator and a `**`
   // glued to that prefix is no better: a PR editing only
   // docs/evals/review-skill-truth/pr-1990.json left the filter false and the
@@ -7989,10 +7957,6 @@ test("required CI routes the nested frozen inputs to the scripts job", () => {
 });
 
 test("the ledger PR workflow recomputes the rows it appends", () => {
-  const advisory = readFileSync(
-    path.join(repoRoot, ".github/workflows/review-eval-freshness.yml"),
-    "utf8",
-  );
   const required = readFileSync(
     path.join(repoRoot, ".github/workflows/ci.yml"),
     "utf8",
@@ -8002,14 +7966,7 @@ test("the ledger PR workflow recomputes the rows it appends", () => {
   // the local `--validate --append`. The only PR workflow there is has to
   // recompute the row from the detail the same branch commits, or the committed
   // report is backed by nothing a reader can check.
-  for (const workflow of [advisory, required]) {
-    assert.match(
-      workflow,
-      /--check-ledger --require-base --revalidate-appended/,
-    );
-  }
-  // The recompute reads committed JSON. This job must stay credential-free.
-  assert.doesNotMatch(advisory, /ANTHROPIC|OPENAI|api[_-]?key/i);
+  assert.match(required, /--check-ledger --require-base --revalidate-appended/);
 });
 
 test("the Claude review exemption verifies scorecard-only paths", () => {

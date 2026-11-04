@@ -209,12 +209,11 @@ pnpm review:eval:test
 ```
 
 The append-only comparison runs against `git merge-base origin/main HEAD`, and
-falls back to the `origin/main` tip when no merge base resolves. CI and the
-advisory freshness workflow add `--require-base`, which fails the check when the base ref does not
+falls back to the `origin/main` tip when no merge base resolves. Required CI
+adds `--require-base`, which fails the check when the base ref does not
 resolve at all, so the guard can never turn itself into a silent no-op.
 
-Required CI and the advisory freshness workflow add
-`--revalidate-appended`.
+Required CI also adds `--revalidate-appended`.
 It recomputes every row the branch adds from the detail the same branch commits.
 This check verifies consistency, not authenticity. It rejects missing evidence
 and mismatches between the row, plan, scored results, and calibration. It does
@@ -596,7 +595,7 @@ no auto-merge. A human reads the report and approves.
 A run that fails publishes the same way. Its `status: failed` row is already in
 the checkout's ledger, and a run that leaves it there uncommitted wedges the
 schedule: the next run refuses to start against a ledger with uncommitted
-changes, and nothing reaches the freshness workflow. A scored row wedges it the
+changes, and nothing reaches the ledger. A scored row wedges it the
 same way. The installed job uses the non-publishing mode, so both endings follow
 one rule: the run prints recovery commands and exits non-zero until an operator
 finishes the helper and `ship` workflow. launchd therefore records that a human
@@ -612,11 +611,17 @@ fenced answer — an awk snippet, say — swallowed the JSON. The logged stderr
 tail is the only record of it, because `run-eval.sh` deletes the score stderr
 file as soon as it prints that tail.
 
-The freshness workflow also routes a new staleness issue through
-`review-eval-freshness-publication.mjs`. The wrapper keeps the hash-covered
-issue planner unchanged, replaces its legacy PR instruction at the GitHub
-boundary, and fails closed if that template drifts. The issue requires
-`review-eval-publication.mjs` and `$PR_BODY`; it never starts a model.
+No CI workflow tracks ledger staleness.
+[ADR 0112](../adr/0112-retire-review-eval-freshness-workflow.md) retired the
+scheduled freshness workflow once [evaluation v2](review-skill-v2.md) became
+the path for new experiments.
+`pnpm review:eval -- --schedule-issue --dry-run` still prints the staleness
+plan locally. `--help` still describes `--schedule-issue` as creating the
+issue. Without `--dry-run`, a run that would create one now stops at the
+freshness guard, which names `--dry-run` in its error. The help text lives in
+`review-eval.mjs` and the guard in `review-eval-freshness-guard.mjs`. Both are
+in `SCORING_MODULES`, so editing either moves `matcher_digest` and refuses
+comparison with every existing ledger row.
 
 ### Install the scheduler
 
@@ -1252,7 +1257,7 @@ path must exist on `main` before the first run after the moving commit.
 | `scripts/review/review-eval-run-execution.mjs`              | judge execution, environment scrub, and fixture reset    |
 | `scripts/review/review-eval-run-cell.mjs`                   | cell identity, cache reuse, and leak signals             |
 | `scripts/review/review-eval-run-score.mjs`                  | cell scoring, condition folds, and row construction      |
-| `scripts/review/review-eval-freshness-guard.mjs`            | staleness plans and the authorized freshness workflow    |
+| `scripts/review/review-eval-freshness-guard.mjs`            | staleness plans; refuses live issue creation             |
 | `scripts/review/review-eval-finder-override.mjs`            | finder argv digest, `--finder` substitution, run naming  |
 | `scripts/review/review-eval-finder-compare.mjs`             | offline pipeline draw-1 comparison of two runs           |
 | `scripts/review/review-eval-score.mjs`                      | scorer logic and scoring-module digest ownership         |
@@ -1264,8 +1269,6 @@ path must exist on `main` before the first run after the moving commit.
 | `scripts/review/review-eval-harvest-truth.mjs`              | answer-key harvester: first head, findings, frozen bytes |
 | `scripts/review/review-eval-publication.mjs`                | current-key-safe local publication preparation           |
 | `scripts/review/review-eval-publication.test.mjs`           | publication confinement and PR-body shape tests          |
-| `scripts/review/review-eval-freshness-publication.mjs`      | publication-safe staleness issue synchronization         |
-| `scripts/review/review-eval-freshness-publication.test.mjs` | staleness issue boundary tests                           |
 | `scripts/review/review-eval-split-equivalence-fixtures.mjs` | generated Node and shell equivalence harnesses           |
 | `scripts/review/testdata/review-eval-split-equivalence/`    | frozen split inputs and observable-behavior snapshot     |
 | `scripts/review/review-eval-split-equivalence.test.mjs`     | frozen pre-split entry-point equivalence                 |
@@ -1279,5 +1282,4 @@ path must exist on `main` before the first run after the moving commit.
 | `scripts/review/run-eval-cell.sh`                           | one cell, phase by phase                                 |
 | `scripts/review/build-fixture.sh`                           | leak-proof fixture materialization                       |
 | `scripts/review/launchd/`                                   | the monthly scheduler                                    |
-| `.github/workflows/review-eval-freshness.yml`               | the LLM-free contract and freshness guard                |
 | `.gitignore`                                                | local-only raw `cells/` transcript boundary              |

@@ -226,6 +226,7 @@ Authority: canonical
 - [`adr/0109-pool-liquidity-event-delivery.md`](adr/0109-pool-liquidity-event-delivery.md) — Pool liquidity watches use event-keyed durable alert delivery
 - [`adr/0110-paired-review-evaluation-v2.md`](adr/0110-paired-review-evaluation-v2.md) — Paired review evaluation v2 separates execution from grading
 - [`adr/0111-openslo-definitions-without-generated-rules.md`](adr/0111-openslo-definitions-without-generated-rules.md) — SLOs are OpenSLO definitions with no generated alert rules
+- [`adr/0112-retire-review-eval-freshness-workflow.md`](adr/0112-retire-review-eval-freshness-workflow.md) — The v1 review-skill evaluation has no scheduled freshness alarm
 
 Authority: non-canonical
 

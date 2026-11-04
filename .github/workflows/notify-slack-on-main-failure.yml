@@ -50,7 +50,6 @@ on:
       - Terraform Deploy Queue Watch
       - Documentation Garden
       - File-size Watchlist
-      - Review Skill Eval Freshness
       - CI Reliability Report
     types: [completed]
     # Redundant with the job `if:` below (head_branch == 'main'), and kept

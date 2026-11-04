@@ -114,6 +114,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0107](0107-enforced-shell-size-limits.md)                  | Shell files and functions are enforced at 500/50 lines with a closed, shrinking baseline                                                     |
 | [0108](0108-sealed-orchestrator-source-set.md)              | Every run-eval shell module joins the sealed orchestrator source set                                                                         |
 | [0110](0110-paired-review-evaluation-v2.md)                 | Paired review evaluation separates reviewer execution from grading                                                                           |
+| [0112](0112-retire-review-eval-freshness-workflow.md)       | The v1 review-skill evaluation has no scheduled freshness alarm                                                                              |
 
 ### shared-config
 

@@ -18,6 +18,8 @@ garden_lane: adrs-architecture
 Accepted for the opt-in diagnostic path. Narrows
 [ADR 0083](0083-non-ledger-review-eval-experiments.md) to allow the v2 direct-review
 comparison described here. Existing v1 lanes and ledger rules remain in force.
+[ADR 0112](0112-retire-review-eval-freshness-workflow.md) later removed the v1
+freshness workflow.
 
 ## Context
 
