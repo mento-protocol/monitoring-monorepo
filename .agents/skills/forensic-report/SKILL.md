@@ -5,7 +5,7 @@ title: Forensic Report Skill
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-10
+last_verified: 2026-11-09
 doc_type: skill
 scope: repo-wide
 review_interval_days: 90
@@ -123,7 +123,7 @@ The production Envio endpoint is the **primary on-chain-behaviour source** for t
 - shared-config `chainAddressLabels(chainId)` / `tokenSymbol()` (from `@mento-protocol/contracts`) → labels broker / reserve / pools / stables / fee recipients, and gives correct explorer links via `explorerAddressUrl`.
 - `indexer-envio/config/oracle-reporters.json` + `protocolActors.json` + active `PoolLiquidityStrategy` rows → flags Chainlink feeds / reporters / listed rebalancers as infra. An active strategy row means an authorised protocol strategy contract, not an independent bot.
 
-Then attribution, via the `arkham` skill (project-scoped) for the identity leg:
+Then attribution, via the `arkham` skill (user-level; not shipped in this repo) for the identity leg:
 
 1. **Branch on target type before any cross-chain enrichment** — see the contract-target identity rule above. EOA target → run `address_enriched/all` on it. Contract target → identify the deployer/operator EOA first, then run the identity leg on that EOA.
 2. Walk inbound funders on the target chain. Three pitfalls, all of which permanently mis-attribute a report:

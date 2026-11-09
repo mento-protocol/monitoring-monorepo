@@ -3,7 +3,7 @@ title: Forensic Report — Production Upload Procedure
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-10
+last_verified: 2026-11-09
 doc_type: skill
 scope: repo-wide
 review_interval_days: 90
