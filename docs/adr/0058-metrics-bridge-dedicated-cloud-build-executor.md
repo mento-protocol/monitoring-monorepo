@@ -3,7 +3,7 @@ title: Metrics Bridge uses a dedicated Cloud Build executor
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-10
+last_verified: 2026-11-09
 scope: terraform/infra / metrics-bridge
 date: 2026-08
 doc_type: adr
