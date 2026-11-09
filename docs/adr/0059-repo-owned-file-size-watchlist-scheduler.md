@@ -3,7 +3,7 @@ title: File-size watchlist scheduling is repository-owned and issue-only
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-10
+last_verified: 2026-11-09
 scope: ci/process
 date: 2026-08
 doc_type: adr
