@@ -36,7 +36,7 @@
     "@google-cloud/logging": "^12.3.0",
     "axios": "^1.21.0",
     "env-schema": "^8.0.1",
-    "viem": "2.57.7"
+    "viem": "2.57.14"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
