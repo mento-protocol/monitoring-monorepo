@@ -133,6 +133,9 @@ lint:
 actions:
   disabled:
     - trunk-announce
+    - trunk-upgrade-available
+    - trunk-cache-prune
+    - trunk-share-with-everyone
+    - trunk-whoami
   enabled:
     - trunk-fmt-pre-commit
-    - trunk-upgrade-available
