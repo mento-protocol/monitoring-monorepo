@@ -3,7 +3,7 @@ title: Dashboard deploys on Vercel Git integration with a path-aware skip script
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-10
+last_verified: 2026-11-09
 scope: ui-dashboard
 date: 2026-03
 doc_type: adr

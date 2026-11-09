@@ -3,7 +3,7 @@ title: Peg policy stays private in the monitoring project
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-10
+last_verified: 2026-11-09
 scope: metrics-bridge / alerts / terraform/infra
 date: 2026-07
 doc_type: adr
@@ -49,7 +49,9 @@ before production use.
   direct Token Creator grant on the publisher; inherited and effective IAM
   remains audited.
 - Give the routine deployer and `gcp_dev_members` Service Account User only on
-  the dedicated runtime identity. Do not retain a default-Compute or
+  the dedicated runtime identity
+  ([ADR 0058](0058-metrics-bridge-dedicated-cloud-build-executor.md) adds the
+  same grant on the dedicated builder). Do not retain a default-Compute or
   project-wide Service Account User fallback.
 - Use authoritative bucket IAM policies. This ADR originally decided that the
   protected org-Terraform project Owner made an additional controller
@@ -120,8 +122,11 @@ records the drift and the correction.
   `alerts/peg-policy-publication` root creates a policy object only through its
   manual protected workflow. The first publication created
   `mento-monitoring-peg-policy/peg-policy/current.json` generation
-  `1785276001213660`; the reviewed runtime attachment pins it and mints
-  `metrics-bridge-r-47264e8-30405040839`. Future rollovers replace the current
+  `1785276001213660`; its runtime attachment minted
+  `metrics-bridge-r-47264e8-30405040839`. The later protected publication
+  created active-only generation `1786443055965590`; the reviewed runtime
+  rollout attached it to revision `metrics-bridge-00196-6hg`, and
+  `terraform/peg-policy.tf` still pins it. Future rollovers replace the current
   quoted generation in a reviewed template-rollout phase with revision-name
   management enabled, then return to the steady-state ignore in a separate
   stabilization phase after apply and runtime proof. Publication and runtime
