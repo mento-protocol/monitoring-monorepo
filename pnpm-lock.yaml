@@ -326,8 +326,8 @@ importers:
         specifier: ^12.3.0
         version: 12.3.0
       axios:
-        specifier: ^1.20.0
-        version: 1.20.0(supports-color@5.5.0)
+        specifier: ^1.21.0
+        version: 1.21.0
       env-schema:
         specifier: ^8.0.1
         version: 8.0.1
@@ -375,8 +375,8 @@ importers:
   governance-watchdog:
     dependencies:
       '@discordjs/builders':
-        specifier: 1.14.1
-        version: 1.14.1
+        specifier: 1.15.0
+        version: 1.15.0
       '@google-cloud/functions-framework':
         specifier: 5.0.5
         version: 5.0.5
@@ -659,8 +659,8 @@ importers:
         specifier: ^11.0.0
         version: 11.0.0(patch_hash=4a4b68514a1a640429365d455f4763a941e9f4ab8962c789d72cbb646095951e)(next@16.4.2(@babel/core@7.29.6)(@opentelemetry/api@1.9.1)(@playwright/test@1.64.1)(@types/node@26.4.0)(babel-plugin-react-compiler@1.0.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(react@19.3.1)(webpack@5.106.2(esbuild@0.28.1))
       '@upstash/redis':
-        specifier: ^1.39.0
-        version: 1.39.0
+        specifier: ^1.40.0
+        version: 1.40.0
       '@vercel/analytics':
         specifier: ^2.0.1
         version: 2.0.1(next@16.4.2(@babel/core@7.29.6)(@opentelemetry/api@1.9.1)(@playwright/test@1.64.1)(@types/node@26.4.0)(babel-plugin-react-compiler@1.0.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(react@19.3.1)
@@ -680,11 +680,11 @@ importers:
         specifier: 5.0.0-beta.32
         version: 5.0.0-beta.32(next@16.4.2(@babel/core@7.29.6)(@opentelemetry/api@1.9.1)(@playwright/test@1.64.1)(@types/node@26.4.0)(babel-plugin-react-compiler@1.0.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(react@19.3.1)
       plotly.js:
-        specifier: npm:plotly.js-basic-dist-min@4.1.2
-        version: plotly.js-basic-dist-min@4.1.2
+        specifier: npm:plotly.js-basic-dist-min@4.2.0
+        version: plotly.js-basic-dist-min@4.2.0
       plotly.js-basic-dist-min:
-        specifier: 4.1.2
-        version: 4.1.2
+        specifier: 4.2.0
+        version: 4.2.0
       react:
         specifier: 19.3.1
         version: 19.3.1
@@ -696,7 +696,7 @@ importers:
         version: 10.1.0(@types/react@19.3.0)(react@19.3.1)
       react-plotly.js:
         specifier: 4.1.0
-        version: 4.1.0(plotly.js-basic-dist-min@4.1.2)(react@19.3.1)
+        version: 4.1.0(plotly.js-basic-dist-min@4.2.0)(react@19.3.1)
       rehype-sanitize:
         specifier: ^6.0.0
         version: 6.0.0
@@ -1312,8 +1312,8 @@ packages:
   '@date-fns/tz@1.5.0':
     resolution: {integrity: sha512-lwYN/vDPeNRULcepoE/LO2Pgx+7/RV+S9ARfbc9lr2DtGkOD7pAiruHvbR1RX3Qyf6ja47EWJDMsNK5vK08DJg==}
 
-  '@discordjs/builders@1.14.1':
-    resolution: {integrity: sha512-gSKkhXLqs96TCzk66VZuHHl8z2bQMJFGwrXC0f33ngK+FLNau4hU1PYny3DNJfNdSH+gVMzE85/d5FQ2BpcNwQ==}
+  '@discordjs/builders@1.15.0':
+    resolution: {integrity: sha512-AifaDWTw6WUDhKBn8E6mwwoyjDAcfsYq+ZE0nKSu1dMH1NLR22D3hGkNx+ctEv8NqHEHdAZnP5REteHDmn1lkA==}
     engines: {node: '>=16.11.0'}
 
   '@discordjs/formatters@0.6.2':
@@ -5139,8 +5139,8 @@ packages:
     engines: {node: '>=20'}
     hasBin: true
 
-  '@upstash/redis@1.39.0':
-    resolution: {integrity: sha512-VwkpYTdxSfjSulQS5h16NHtg/1UEheBfvez2AeGKinAujOoGXhXCcohQRzsQ/d2g/XzbjzTVGhG8Ds8uOI0Mxg==}
+  '@upstash/redis@1.40.0':
+    resolution: {integrity: sha512-F6+V7Kof2McJtGWclusZLt7hBRmIMZg+albS32/5TuNRg/92FM2nkyKPY9wWEieMj9hjyUi4iURsN1djsHNbwA==}
 
   '@vercel/analytics@2.0.1':
     resolution: {integrity: sha512-MTQG6V9qQrt1tsDeF+2Uoo5aPjqbVPys1xvnIftXSJYG2SrwXRHnqEvVoYID7BTruDz4lCd2Z7rM1BdkUehk2g==}
@@ -5593,8 +5593,8 @@ packages:
     resolution: {integrity: sha512-9WTZxEjsZ7b13TH8JPmbV2z8CHbl80/2hm3XPEG4JgNdQLK81IBRXmSxHfMAOkSqQeRxT/0dwNDz2GOm3zzpcQ==}
     engines: {node: '>=4'}
 
-  axios@1.20.0:
-    resolution: {integrity: sha512-r8aOh8j9cGKpgQAqpzrUHnSIc6a59Y3Xf/cv8sy1DrHCkZHzQGEuoq1tARk6qSyDdtQGSDgpb9kFlruzPvrgwg==}
+  axios@1.21.0:
+    resolution: {integrity: sha512-YCzXMB53Q9PZBsh7yN7wtapit4WepwcHS2fP8QhGsBxSz5YtgYobV7GGlWlAJi+RxfU77GQTQi2DSLUma42EYA==}
 
   axobject-query@4.1.0:
     resolution: {integrity: sha512-qIj0G9wZbMGNLjLmg1PT6v2mE9AH2zlnADJD/2tC6E00hgmhUOfEB6greHPAfLRSufHqROIUTkw6E+M3lH0PTQ==}
@@ -6210,6 +6210,9 @@ packages:
 
   discord-api-types@0.38.48:
     resolution: {integrity: sha512-WFUE/2o0lBlLeCQonQ+Pu2RqHAqbytBJ2RlXR91gzk05InSS6k9ShzzLYoymrA4c2oRgRKGE7/VqQJNNdGWSxQ==}
+
+  discord-api-types@0.38.57:
+    resolution: {integrity: sha512-R1CTSSt4RshqCq23j2Xq2ZscvzB4LzG9OB1CYQdKUGdw8Ti/oF/72EEtK2mNpagG/Vj9NcBT7dw9lKLf+Dacfg==}
 
   dot-prop@5.3.0:
     resolution: {integrity: sha512-QM8q3zDe58hqUqjraQOmzZ1LIH9SWQJTlEKCH4kJ2oQvLZk7RbQXvtDM2XEq3fwkV9CCvvH4LA0AV+ogFsBM2Q==}
@@ -8724,8 +8727,8 @@ packages:
     engines: {node: '>=20'}
     hasBin: true
 
-  plotly.js-basic-dist-min@4.1.2:
-    resolution: {integrity: sha512-LvfKTeVYIKzEyMj9TuH+8ot0I7IMG1fET2YxgUtbpZVHd2fBrOlBFsk26wKgnAckHyNhKG7vDk4tEyqGCYs2Aw==}
+  plotly.js-basic-dist-min@4.2.0:
+    resolution: {integrity: sha512-Pfit+rvHeWjJDkFd28oNLJI4RPzJ1uS0RgxmTluvi9KmfiCsi3tu7igh2ld21Eu1wDdsys7604iRp0K1Ouc5Lw==}
 
   pluralize@8.0.0:
     resolution: {integrity: sha512-Nc3IT5yHzflTfbjgqWcCPpo7DaKy4FnpB0l/zCAW0Tc7jxAiuqSxHasntB3D7887LSrA93kDJ9IXovxJYxyLCA==}
@@ -11199,12 +11202,12 @@ snapshots:
 
   '@date-fns/tz@1.5.0': {}
 
-  '@discordjs/builders@1.14.1':
+  '@discordjs/builders@1.15.0':
     dependencies:
       '@discordjs/formatters': 0.6.2
       '@discordjs/util': 1.2.0
       '@sapphire/shapeshift': 4.0.0
-      discord-api-types: 0.38.48
+      discord-api-types: 0.38.57
       fast-deep-equal: 3.1.3
       ts-mixer: 6.0.4
       tslib: 2.8.1
@@ -14872,7 +14875,7 @@ snapshots:
       dotenv: 16.6.1
       zod: 4.6.6
 
-  '@upstash/redis@1.39.0':
+  '@upstash/redis@1.40.0':
     dependencies:
       uncrypto: 0.1.3
 
@@ -15191,9 +15194,9 @@ snapshots:
 
   acorn@8.19.0: {}
 
-  agent-base@6.0.2(supports-color@5.5.0):
+  agent-base@6.0.2:
     dependencies:
-      debug: 4.4.3(supports-color@5.5.0)
+      debug: 4.4.3
     transitivePeerDependencies:
       - supports-color
 
@@ -15380,11 +15383,11 @@ snapshots:
 
   axe-core@4.14.0: {}
 
-  axios@1.20.0(supports-color@5.5.0):
+  axios@1.21.0:
     dependencies:
       follow-redirects: 1.16.2
       form-data: 4.0.6
-      https-proxy-agent: 5.0.1(supports-color@5.5.0)
+      https-proxy-agent: 5.0.1
       proxy-from-env: 2.1.0
     transitivePeerDependencies:
       - debug
@@ -16025,6 +16028,8 @@ snapshots:
   diff@4.0.4: {}
 
   discord-api-types@0.38.48: {}
+
+  discord-api-types@0.38.57: {}
 
   dot-prop@5.3.0:
     dependencies:
@@ -17270,10 +17275,10 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  https-proxy-agent@5.0.1(supports-color@5.5.0):
+  https-proxy-agent@5.0.1:
     dependencies:
-      agent-base: 6.0.2(supports-color@5.5.0)
-      debug: 4.4.3(supports-color@5.5.0)
+      agent-base: 6.0.2
+      debug: 4.4.3
     transitivePeerDependencies:
       - supports-color
 
@@ -19435,7 +19440,7 @@ snapshots:
     dependencies:
       playwright-core: 1.64.1
 
-  plotly.js-basic-dist-min@4.1.2: {}
+  plotly.js-basic-dist-min@4.2.0: {}
 
   pluralize@8.0.0: {}
 
@@ -19732,9 +19737,9 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  react-plotly.js@4.1.0(plotly.js-basic-dist-min@4.1.2)(react@19.3.1):
+  react-plotly.js@4.1.0(plotly.js-basic-dist-min@4.2.0)(react@19.3.1):
     dependencies:
-      plotly.js: plotly.js-basic-dist-min@4.1.2
+      plotly.js: plotly.js-basic-dist-min@4.2.0
       react: 19.3.1
 
   react-redux@9.3.0(@types/react@19.3.0)(react@19.3.1)(redux@5.0.1):
