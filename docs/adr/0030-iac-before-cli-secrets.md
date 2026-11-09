@@ -3,7 +3,7 @@ title: All secrets are managed by IaC; agents never touch them with CLI commands
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-08-10
+last_verified: 2026-11-09
 scope: terraform/infra
 date: 2026-05
 doc_type: adr
