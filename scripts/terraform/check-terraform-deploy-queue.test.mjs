@@ -7,6 +7,7 @@ import {
   buildSlackPayload,
   classifyStalledRuns,
   formatDuration,
+  githubJson,
   isDeployQueueCandidate,
   main,
   summarizeJobs,
@@ -242,6 +243,73 @@ const mainEnv = {
     main(mainEnv, [], fetchImpl),
     /Slack chat\.postMessage failed: channel_not_found/,
   );
+}
+
+// githubJson(): a transient 5xx is retried and the later success is returned.
+{
+  const statuses = [502, 200];
+  const sleeps = [];
+  let calls = 0;
+  const fetchImpl = async () => {
+    const status = statuses[calls];
+    calls += 1;
+    return {
+      ok: status === 200,
+      status,
+      text: async () => "Server Error",
+      json: async () => ({ workflow_runs: [] }),
+    };
+  };
+  const payload = await githubJson({
+    fetchImpl,
+    apiUrl: "https://api.github.test",
+    githubToken: "gh-test-token",
+    path: "repos/o/r/actions/workflows/x.yml/runs",
+    sleep: async (ms) => sleeps.push(ms),
+  });
+  assert.deepEqual(payload, { workflow_runs: [] });
+  assert.equal(calls, 2);
+  assert.deepEqual(sleeps, [2000]);
+}
+
+// githubJson(): a persistent 5xx still fails after the last attempt.
+{
+  let calls = 0;
+  const fetchImpl = async () => {
+    calls += 1;
+    return { ok: false, status: 503, text: async () => "Unavailable" };
+  };
+  await assert.rejects(
+    githubJson({
+      fetchImpl,
+      apiUrl: "https://api.github.test",
+      githubToken: "gh-test-token",
+      path: "repos/o/r/actions/runs/1/jobs",
+      sleep: async () => {},
+    }),
+    /failed: 503 Unavailable/,
+  );
+  assert.equal(calls, 3);
+}
+
+// githubJson(): a 4xx other than 429 fails at once, without a retry.
+{
+  let calls = 0;
+  const fetchImpl = async () => {
+    calls += 1;
+    return { ok: false, status: 404, text: async () => "Not Found" };
+  };
+  await assert.rejects(
+    githubJson({
+      fetchImpl,
+      apiUrl: "https://api.github.test",
+      githubToken: "gh-test-token",
+      path: "repos/o/r/actions/runs/1/jobs",
+      sleep: async () => {},
+    }),
+    /failed: 404 Not Found/,
+  );
+  assert.equal(calls, 1);
 }
 
 console.log("check-terraform-deploy-queue tests passed");

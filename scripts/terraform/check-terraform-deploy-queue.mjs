@@ -7,6 +7,18 @@ const DEFAULT_SLACK_CHANNEL = "#deploys";
 const DEFAULT_STALE_MINUTES = 60;
 const USER_AGENT = "mento-monitoring-terraform-deploy-queue-watch";
 const MAX_SLACK_RUNS = 8;
+// GitHub's REST API occasionally answers 5xx/429 for a single request. One
+// such response must not fail the watch, so retry those with a short backoff.
+const GITHUB_MAX_ATTEMPTS = 3;
+const GITHUB_RETRY_BASE_MS = 2000;
+
+function isRetryableStatus(status) {
+  return status === 429 || status >= 500;
+}
+
+function defaultSleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 const DEPLOY_WORKFLOWS = [
   {
@@ -133,29 +145,41 @@ async function githubJson({
   githubToken,
   path,
   searchParams,
+  sleep = defaultSleep,
+  maxAttempts = GITHUB_MAX_ATTEMPTS,
 }) {
   const url = new URL(path, `${apiUrl.replace(/\/$/, "")}/`);
   for (const [key, value] of Object.entries(searchParams ?? {})) {
     url.searchParams.set(key, String(value));
   }
 
-  const response = await fetchImpl(url, {
-    headers: {
-      Accept: "application/vnd.github+json",
-      Authorization: `Bearer ${githubToken}`,
-      "User-Agent": USER_AGENT,
-      "X-GitHub-Api-Version": "2022-11-28",
-    },
-  });
+  for (let attempt = 1; ; attempt += 1) {
+    const response = await fetchImpl(url, {
+      headers: {
+        Accept: "application/vnd.github+json",
+        Authorization: `Bearer ${githubToken}`,
+        "User-Agent": USER_AGENT,
+        "X-GitHub-Api-Version": "2022-11-28",
+      },
+    });
 
-  if (!response.ok) {
+    if (response.ok) {
+      return response.json();
+    }
+
     const body = await response.text();
+    if (attempt < maxAttempts && isRetryableStatus(response.status)) {
+      console.warn(
+        `GitHub API ${url.pathname} returned ${response.status}; retrying (attempt ${attempt + 1}/${maxAttempts})`,
+      );
+      await sleep(GITHUB_RETRY_BASE_MS * attempt);
+      continue;
+    }
+
     throw new Error(
       `GitHub API ${url.pathname} failed: ${response.status} ${body}`,
     );
   }
-
-  return response.json();
 }
 
 async function fetchWorkflowRuns({
@@ -423,6 +447,7 @@ export {
   classifyStalledRuns,
   findStalledDeployRuns,
   formatDuration,
+  githubJson,
   isDeployQueueCandidate,
   main,
   summarizeJobs,
