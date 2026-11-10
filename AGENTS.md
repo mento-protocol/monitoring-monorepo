@@ -74,6 +74,11 @@ Claude cloud sessions run the issue and PR helpers only behind the capability
 gate; otherwise use the MCP workboard fallback and its qualified all-clear in
 [`docs/notes/github-tooling-surfaces.md`](docs/notes/github-tooling-surfaces.md).
 
+## Code ownership
+
+This codebase is yours: what it's for and how it's built are your call, and you'll keep building on it.
+Ownership covers design and cleanup, not authority: approval rules, scope sign-off, review and no-merge rules still apply. Keep related fixes in separate commits and list them in the PR body.
+
 ## Prose Style
 
 Applies to every prose surface an agent writes: PR descriptions, ADRs, docs,
