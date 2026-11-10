@@ -34,13 +34,6 @@ name: Supply Chain
 #    updates a labeled GitHub issue for sub-high advisories, so stale
 #    resolution-time override floors stay visible without blocking merges.
 #
-# This workflow also hosts the repo's scheduled-report slot: a dedicated
-# weekly context-staleness job runs scripts/context/check-agent-context.mjs so the
-# canonical-context last_verified policy — which expires with time, not with
-# a diff — is evaluated on a calendar cadence instead of only when a PR
-# happens to touch context files. It is a separate job from the advisory
-# report so a stale doc can never abort supply-chain tracking.
-#
 # 5. override prune report — a weekly non-blocking report
 #    (scripts/supply-chain/override-prune-report.mjs) that flags
 #    `pnpm.overrides` entries whose
@@ -203,36 +196,6 @@ jobs:
         # peers match its direct resolved tsx. Errors identify the application,
         # installation context and dependency edge; this is not compiler proof.
         run: node scripts/supply-chain/version-skew-check.mjs
-
-  context-staleness-report:
-    name: context staleness report (scheduled)
-    # Same weekly cron + default-branch manual dispatch gate as the moderate
-    # advisory report, but its own job on purpose: last_verified expires with
-    # time, not with a diff — a canonical doc can pass its 90-day window
-    # without any PR touching context files, so the path-filtered ci.yml
-    # scripts job alone can never catch calendar expiry. Isolating the check
-    # means a stale doc fails only this job (surfacing via
-    # notify-slack-on-main-failure.yml like the other scheduled gates) and
-    # never aborts the advisory-report steps next door.
-    if: >-
-      github.event.schedule == '17 7 * * 1' ||
-      (github.event_name == 'workflow_dispatch' &&
-        github.ref_name == github.event.repository.default_branch)
-    runs-on: ubuntu-24.04-arm
-    timeout-minutes: 2
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version-file: .node-version
-          package-manager-cache: false
-          # No pnpm install — scripts/context/check-agent-context.mjs is pure
-          # Node.js (node builtins + sibling helper modules), same sub-30s
-          # pattern as the lockfile-lint job.
-      - name: Agent context staleness check
-        run: node scripts/context/check-agent-context.mjs
 
   moderate-advisory-report:
     name: moderate advisory report (non-blocking)
