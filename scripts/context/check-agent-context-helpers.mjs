@@ -7,12 +7,6 @@
  */
 
 /**
- * Number of days a canonical file's `last_verified` may age before
- * check-agent-context.mjs treats it as stale.
- */
-export const STALE_AFTER_DAYS = 90;
-
-/**
  * Tolerance, in days, for a `last_verified` date that resolves to appearing
  * one UTC day in the future. `daysSince` compares a UTC-midnight date
  * against the check's UTC clock, so a contributor in a timezone ahead of
@@ -24,24 +18,18 @@ export const STALE_AFTER_DAYS = 90;
 export const FUTURE_SKEW_TOLERANCE_DAYS = 1;
 
 /**
- * Classify a `last_verified` age (in days, as returned by `daysSince`)
- * against the staleness policy window. This is the pure decision logic
- * behind check-agent-context.mjs's `requireMetadata` future/stale checks,
- * extracted so the comparisons themselves get direct regression coverage.
+ * Classify a `last_verified` age (in days, as returned by `daysSince`).
+ * There is deliberately no upper age limit: old dates are valid metadata.
+ * Only a date further in the future than the skew tolerance is rejected.
  * @param {number} age
- * @param {{staleAfterDays?: number, toleranceDays?: number}} [options]
- * @returns {"ok" | "stale" | "future"}
+ * @param {{toleranceDays?: number}} [options]
+ * @returns {"ok" | "future"}
  */
-export function assessStaleness(
+export function assessVerifiedDate(
   age,
-  {
-    staleAfterDays = STALE_AFTER_DAYS,
-    toleranceDays = FUTURE_SKEW_TOLERANCE_DAYS,
-  } = {},
+  { toleranceDays = FUTURE_SKEW_TOLERANCE_DAYS } = {},
 ) {
-  if (age < -toleranceDays) return "future";
-  if (age > staleAfterDays) return "stale";
-  return "ok";
+  return age < -toleranceDays ? "future" : "ok";
 }
 
 /**
@@ -87,7 +75,7 @@ export function isCanonicalDiscoveryPath(filePath) {
  * Discover the canonical (frontmatter-managed) context files: every path in
  * `filePaths` that sits in a discovery root and whose frontmatter declares
  * `canonical: true`. This derives the enforced set from the repo itself so
- * new canonical files can't silently escape the staleness policy.
+ * new canonical files can't silently escape the metadata policy.
  * @param {string[]} filePaths
  * @param {(filePath: string) => string} readFile
  * @returns {string[]}
