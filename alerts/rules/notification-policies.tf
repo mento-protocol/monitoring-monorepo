@@ -537,8 +537,13 @@ resource "grafana_notification_policy" "all" {
     }
 
     # Trading-limits page alerts → #alerts-critical (parallel to existing Splunk policy)
+    # Trading-limit hits post to Slack once per alert and do not repeat. A hit
+    # limit can stay hit for days (LG on Celo fired continuously from
+    # 2026-09-24), and the 4h tree default re-posted it six times a day.
+    # monitoring.mento.org shows which limits are currently hit where.
     policy {
-      contact_point = grafana_contact_point.slack_alerts_critical.name
+      contact_point   = grafana_contact_point.slack_alerts_critical.name
+      repeat_interval = local.trading_limits_slack_repeat_interval
 
       matcher {
         label = "severity"
@@ -554,9 +559,10 @@ resource "grafana_notification_policy" "all" {
 
     }
 
-    # Trading-limits warning alerts → #alerts-pools
+    # Trading-limits warning alerts → #alerts-pools (posted once, see above)
     policy {
-      contact_point = grafana_contact_point.slack_alerts_pools.name
+      contact_point   = grafana_contact_point.slack_alerts_pools.name
+      repeat_interval = local.trading_limits_slack_repeat_interval
 
       matcher {
         label = "service"
@@ -572,4 +578,10 @@ resource "grafana_notification_policy" "all" {
 
     }
   }
+}
+
+locals {
+  # Grafana has no "never repeat"; one year is longer than any limit stays hit,
+  # so in practice each trading-limit alert posts to Slack once.
+  trading_limits_slack_repeat_interval = "8760h"
 }
