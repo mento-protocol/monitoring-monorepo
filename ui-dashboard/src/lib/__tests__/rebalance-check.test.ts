@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { keccak256, toBytes } from "viem";
+import { BaseError, keccak256, toBytes } from "viem";
 
 // Mock viem before importing the module under test
 const mockCall = vi.fn();
@@ -159,6 +159,41 @@ describe("checkRebalanceStatus", () => {
     expect(result.strategyType).toBe("unknown");
     expect(result.message).toContain("Unable to identify");
     expect(mockCall).not.toHaveBeenCalled();
+  });
+
+  it("treats ABI decode failures as a probe miss, not a transport failure", async () => {
+    // Shape viem throws when the target answers with data that does not fit
+    // the probed ABI, e.g. the SHA-256 precompile at 0x…02 returning 32 bytes
+    // for getCDPConfig (ANALYTICS-MENTO-ORG-3H). This used to escape as a 502
+    // and a Sentry error.
+    // viem's PositionOutOfBoundsError is not re-exported from the package
+    // root, so reproduce its shape: a BaseError whose cause carries the name.
+    const decodeError = () => {
+      const cause = new Error(
+        "Position `63` is out of bounds (`0 < position < 32`).",
+      );
+      cause.name = "PositionOutOfBoundsError";
+      return new BaseError("Position `63` is out of bounds.", { cause });
+    };
+    mockReadContract
+      .mockRejectedValueOnce(decodeError())
+      .mockRejectedValueOnce(decodeError())
+      .mockRejectedValueOnce(decodeError());
+
+    const result = await checkRebalanceStatus(POOL, STRATEGY, RPC_URL);
+
+    expect(result.canRebalance).toBe(false);
+    expect(result.strategyType).toBe("unknown");
+    expect(result.message).toContain("Unable to identify");
+    expect(mockCall).not.toHaveBeenCalled();
+  });
+
+  it("still propagates transport errors from strategy detection", async () => {
+    mockReadContract.mockRejectedValueOnce(new Error("fetch failed"));
+
+    await expect(checkRebalanceStatus(POOL, STRATEGY, RPC_URL)).rejects.toThrow(
+      "fetch failed",
+    );
   });
 
   it("detects OLS strategy type when getCDPConfig and reserve() fail but getPools() succeeds", async () => {
