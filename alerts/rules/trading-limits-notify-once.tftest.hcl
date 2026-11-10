@@ -1,6 +1,6 @@
 mock_provider "grafana" {}
 
-run "trading_limit_slack_routes_post_once" {
+run "trading_limit_slack_routes_repeat_at_most_every_five_days" {
   command = plan
 
   variables {
@@ -15,8 +15,8 @@ run "trading_limit_slack_routes_post_once" {
       for p in grafana_notification_policy.all.policy[0].policy : p
       if p.contact_point != grafana_contact_point.splunk_on_call.name &&
       length([for m in p.matcher : m if m.label == "service" && m.match == "=" && m.value == "trading-limits"]) == 1 &&
-      p.repeat_interval == "8760h"
+      p.repeat_interval == "120h"
     ]) == 2
-    error_message = "Both Slack trading-limit routes (#alerts-critical and #alerts-pools) must post once: repeat_interval 8760h."
+    error_message = "Both Slack trading-limit routes (#alerts-critical and #alerts-pools) must repeat at most every 5 days: repeat_interval 120h."
   }
 }
