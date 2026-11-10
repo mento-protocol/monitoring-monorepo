@@ -666,8 +666,8 @@ test("applies date validation to a hidden root README marker", () => {
 // The permission-allowlist and SessionEnd-hook rules moved to
 // check-settings-contract.mjs, and check-settings-contract.test.mjs owns their
 // coverage. What stays here is the wiring: this entrypoint must still run that
-// module and surface its failures, because `pnpm agent:context-check`, the four
-// bootstrap scripts, and the weekly staleness job all reach the contract only
+// module and surface its failures, because `pnpm agent:context-check` and the
+// four bootstrap scripts reach the contract only
 // through this script.
 
 console.log("\nsettings-contract wiring");
