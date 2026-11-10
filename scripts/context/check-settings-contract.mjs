@@ -18,9 +18,9 @@
  * `check-agent-context.mjs` runs this module and folds the returned failures
  * into its own, so `pnpm agent:context-check` and the direct
  * `node scripts/context/check-agent-context.mjs` invocations in
- * `.github/workflows/supply-chain.yml` and the four bootstrap scripts keep
+ * the four bootstrap scripts keep
  * covering both halves. Like its caller this module stays on node builtins and
- * siblings only, so the weekly staleness job still runs with no `pnpm install`.
+ * siblings only, so those invocations run with no `pnpm install`.
  *
  * Tests: scripts/context/check-settings-contract.test.mjs
  */

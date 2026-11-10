@@ -631,7 +631,7 @@ test("invalid canonical note classification metadata fails closed", () => {
 });
 
 test("invalid canonical note verification dates fail presence closed", () => {
-  for (const lastVerified of ["not-a-date", "2000-01-01", "2999-01-01"]) {
+  for (const lastVerified of ["not-a-date", "2999-01-01"]) {
     const content = contextNote("true").replace(
       /^last_verified:.*$/m,
       `last_verified: ${lastVerified}`,
@@ -646,6 +646,21 @@ test("invalid canonical note verification dates fail presence closed", () => {
     assertEqual(report.contextUpdateMissing, true);
     assertEqual(report.tier, "full");
   }
+});
+
+test("an old canonical note verification date still counts as present", () => {
+  const content = contextNote("true").replace(
+    /^last_verified:.*$/m,
+    "last_verified: 2000-01-01",
+  );
+  const report = analyzeMateriality({
+    paths: [".github/workflows/ci.yml", "docs/notes/runbook.md"],
+    readBaseContextFile: () => content,
+    readHeadContextFile: () => content,
+  });
+
+  assertEqual(report.contextUpdatesPresent, true);
+  assertEqual(report.contextUpdateMissing, false);
 });
 
 test("incomplete canonical metadata at base retains full materiality", () => {

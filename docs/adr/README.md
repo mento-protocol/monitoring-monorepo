@@ -33,8 +33,9 @@ altitude.
 Frontmatter `status` follows the repo metadata contract (`draft` = proposed and
 not in force; `active` = in force; `archived` = superseded/deprecated). The ADR's
 own lifecycle (Proposed / Accepted / Superseded by ADR-NNNN) lives in the body's
-**Status** line. In-force ADRs are `canonical: true` and enrolled in the 90-day
-re-verification check — that is the enforcement behind "is this still true?".
+**Status** line. In-force ADRs are `canonical: true` and covered by the
+context metadata check (there is no age-based re-verification check since
+2026-11-10).
 Supersede an ADR by adding a new one and flipping the old one to
 `status: archived` with a `superseded_by:` pointer; do not silently rewrite
 history.
