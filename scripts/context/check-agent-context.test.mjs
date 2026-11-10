@@ -5,7 +5,7 @@
  * The script itself scans live repo state (git ls-files, real settings/hook
  * files) and exits the process on failure, so it isn't a good target for a
  * synthetic-fixture end-to-end harness. Instead this tests the pure parsing,
- * staleness, and canonical-discovery helpers from
+ * date-validation, and canonical-discovery helpers from
  * check-agent-context-helpers.mjs directly, plus a small fixture harness for
  * README-specific metadata discovery that lives in the main script.
  *
@@ -32,13 +32,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
-  assessStaleness,
+  assessVerifiedDate,
   daysSince,
   discoverCanonicalFiles,
   FUTURE_SKEW_TOLERANCE_DAYS,
   missingCoreContextFiles,
   parseFrontmatter,
-  STALE_AFTER_DAYS,
 } from "./check-agent-context-helpers.mjs";
 import {
   CLAUDE_RUNTIME_DOCUMENT_PATHS,
@@ -328,63 +327,22 @@ test("returns null for a calendar date that doesn't exist", () => {
   assert(age === null, `expected null, got ${age}`);
 });
 
-// ── staleness policy window ───────────────────────────────────────────────────
-
-console.log("\nstaleness policy window");
-
-test("STALE_AFTER_DAYS is a positive number of days", () => {
-  assert(
-    Number.isInteger(STALE_AFTER_DAYS) && STALE_AFTER_DAYS > 0,
-    `expected a positive integer, got ${STALE_AFTER_DAYS}`,
-  );
-});
-
-test("a last_verified within the window is not stale", () => {
-  const now = new Date("2026-07-05T00:00:00Z");
-  const age = daysSince("2026-07-03", now);
-  assert(
-    age <= STALE_AFTER_DAYS,
-    `expected a fresh last_verified to stay within the window, got age ${age}`,
-  );
-});
-
-test("a last_verified past the window is flagged stale", () => {
-  const now = new Date("2026-07-05T00:00:00Z");
-  const staleDate = new Date(now);
-  staleDate.setUTCDate(staleDate.getUTCDate() - (STALE_AFTER_DAYS + 1));
-  const isoDate = staleDate.toISOString().slice(0, 10);
-  const age = daysSince(isoDate, now);
-  assert(
-    age > STALE_AFTER_DAYS,
-    `expected last_verified ${isoDate} to exceed the ${STALE_AFTER_DAYS}-day window, got age ${age}`,
-  );
-});
-
-// ── assessStaleness (requireMetadata's enforcement branch) ────────────────────
+// ── assessVerifiedDate (requireMetadata's date check) ─────────────────────────
 //
-// check-agent-context.mjs's requireMetadata calls assessStaleness(age) with
-// no options, so it always enforces the real STALE_AFTER_DAYS /
-// FUTURE_SKEW_TOLERANCE_DAYS window. These tests exercise assessStaleness at
-// exactly the same boundaries requireMetadata does, so a `<` → `<=` flip (or
-// a dropped negation) on either comparison fails a test here.
+// There is no upper age limit on last_verified; only dates further in the
+// future than FUTURE_SKEW_TOLERANCE_DAYS are rejected.
 
-console.log("\nassessStaleness");
+console.log("\nassessVerifiedDate");
 
-test("a last_verified within the stale window passes (age === STALE_AFTER_DAYS)", () => {
-  const status = assessStaleness(STALE_AFTER_DAYS);
-  assert(status === "ok", `expected 'ok' at the boundary, got ${status}`);
-});
-
-test("a last_verified beyond the stale window fails (age === STALE_AFTER_DAYS + 1)", () => {
-  const status = assessStaleness(STALE_AFTER_DAYS + 1);
-  assert(
-    status === "stale",
-    `expected 'stale' one day past the window, got ${status}`,
-  );
+test("an old last_verified is never flagged (no staleness window)", () => {
+  for (const age of [0, 90, 91, 365, 3650]) {
+    const status = assessVerifiedDate(age);
+    assert(status === "ok", `expected 'ok' for age ${age}, got ${status}`);
+  }
 });
 
 test("a last_verified within the future-skew tolerance passes (age === -FUTURE_SKEW_TOLERANCE_DAYS)", () => {
-  const status = assessStaleness(-FUTURE_SKEW_TOLERANCE_DAYS);
+  const status = assessVerifiedDate(-FUTURE_SKEW_TOLERANCE_DAYS);
   assert(
     status === "ok",
     `expected 'ok' at the future-tolerance boundary, got ${status}`,
@@ -392,7 +350,7 @@ test("a last_verified within the future-skew tolerance passes (age === -FUTURE_S
 });
 
 test("a last_verified beyond the future-skew tolerance fails (age === -FUTURE_SKEW_TOLERANCE_DAYS - 1)", () => {
-  const status = assessStaleness(-FUTURE_SKEW_TOLERANCE_DAYS - 1);
+  const status = assessVerifiedDate(-FUTURE_SKEW_TOLERANCE_DAYS - 1);
   assert(
     status === "future",
     `expected 'future' beyond the tolerance, got ${status}`,
@@ -679,13 +637,15 @@ test("ignores a tracked canonical README deleted in the working tree", () => {
   }
 });
 
-test("applies staleness checks to a hidden root README marker", () => {
-  const staleDate = isoDateWithOffset(-(STALE_AFTER_DAYS + 1));
+test("applies date validation to a hidden root README marker", () => {
+  const staleDate = isoDateWithOffset(30);
   try {
     runContextCheckFixture(
       `# Root README\n\n<!-- agent-context: title="Root README" status=active owner=eng canonical=true last_verified=${staleDate} -->\n`,
     );
-    throw new Error("expected context check to fail for stale README metadata");
+    throw new Error(
+      "expected context check to fail for future-dated README metadata",
+    );
   } catch (/** @type {unknown} */ err) {
     const maybeError =
       err && typeof err === "object"
@@ -695,8 +655,8 @@ test("applies staleness checks to a hidden root README marker", () => {
         : {};
     const output = `${maybeError.stdout ?? ""}${maybeError.stderr ?? ""}`;
     assert(
-      output.includes(`README.md: last_verified ${staleDate} is`),
-      `expected stale README marker failure, got ${JSON.stringify(output || maybeError.message)}`,
+      output.includes(`README.md: last_verified ${staleDate} is in the future`),
+      `expected future-dated README marker failure, got ${JSON.stringify(output || maybeError.message)}`,
     );
   }
 });
@@ -706,8 +666,8 @@ test("applies staleness checks to a hidden root README marker", () => {
 // The permission-allowlist and SessionEnd-hook rules moved to
 // check-settings-contract.mjs, and check-settings-contract.test.mjs owns their
 // coverage. What stays here is the wiring: this entrypoint must still run that
-// module and surface its failures, because `pnpm agent:context-check`, the four
-// bootstrap scripts, and the weekly staleness job all reach the contract only
+// module and surface its failures, because `pnpm agent:context-check` and the
+// four bootstrap scripts reach the contract only
 // through this script.
 
 console.log("\nsettings-contract wiring");
