@@ -74,6 +74,13 @@ upstash_api_key = "..."
 # hasura_celo_sepolia_url = "https://indexer.hyperindex.xyz/<celo-sepolia-deployment>/v1/graphql"
 # show_testnet_networks = true
 
+# ── Grafana Synthetic Monitoring ──────────────────────────────────────────────
+# Access token from Grafana Cloud → Testing & synthetics → Synthetics → Config →
+# Access tokens. Mirrors into the Actions secret TF_VAR_SM_ACCESS_TOKEN that the
+# alerts-rules stack reads. Leave empty until provisioned; the mirror is
+# `count`-gated and alerts-rules then manages no synthetic checks.
+# grafana_sm_access_token = "..."
+
 # ── Integration Probes ────────────────────────────────────────────────────────
 # LI.FI API key for the scheduled integration-probes workflow.
 # Leave empty until provisioned; the GitHub Actions secret resource is

@@ -39,7 +39,11 @@ It stays `pending` until that check has run for the full 28-day window: the
 fallback counts every minute without a sample as failed, so evaluating it
 earlier reports budget burned by minutes before the check existed. Flip it to
 `measured` in a reviewed PR once `sm_check_info{job="ui-dashboard"}` is 28 days
-old.
+old. Its `or vector(0)` fallback is deliberate: a minute with no
+`probe_success` sample counts as down, as for `indexer-availability`. That
+includes monitoring failures, such as a revoked Synthetic Monitoring token or
+disabled checks, so a burn on this SLO first needs `sm_check_info` to confirm
+the checks were running.
 
 `indexer-availability` shows that metrics-bridge can read the indexer. It does
 not show that the data is current; that is `indexer-freshness`.

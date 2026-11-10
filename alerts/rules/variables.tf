@@ -100,7 +100,7 @@ variable "sm_url" {
 
 variable "sm_access_token" {
   type        = string
-  description = "Synthetic Monitoring access token. Generate in Grafana Cloud -> Testing & synthetics -> Synthetics -> Config -> Access tokens. Empty disables the synthetic checks."
+  description = "Synthetic Monitoring access token, delivered by the platform stack as the TF_VAR_SM_ACCESS_TOKEN Actions secret (see README). Empty disables the synthetic checks."
   sensitive   = true
   default     = ""
 }

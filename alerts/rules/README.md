@@ -85,9 +85,12 @@ while `SENTRY_DSN` is unset in production.
 
 The provider needs a Synthetic Monitoring access token, separate from the
 service account token. Generate it in Grafana Cloud → Testing & synthetics →
-Synthetics → Config → Access tokens and store it as the `TF_VAR_SM_ACCESS_TOKEN`
-Actions secret that `alerts-rules.yml` and `terraform-drift.yml` read. While
-the secret is missing the variable is empty and the file manages nothing.
+Synthetics → Config → Access tokens, set it as `grafana_sm_access_token` in the
+platform stack's gitignored `terraform/terraform.tfvars`, and run the
+human-approved platform plan/apply. The platform stack mirrors it into the
+`TF_VAR_SM_ACCESS_TOKEN` Actions secret that `alerts-rules.yml` and
+`terraform-drift.yml` read; then dispatch the alerts-rules apply from `main`.
+While the secret is missing the variable is empty and the file manages nothing.
 5 checks × 2 locations × 12 runs an hour is about 86,400 executions a month;
 check the Grafana Cloud plan before adding targets, locations or frequency.
 
