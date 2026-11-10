@@ -91,3 +91,16 @@ variable "slack_channel_testnet" {
   description = "Slack channel for all non-prod alerts (celo-sepolia, monad-testnet)."
   default     = "#alerts-testnet"
 }
+
+variable "sm_url" {
+  type        = string
+  description = "Synthetic Monitoring API URL for the clabsmento stack (Synthetics app settings, apiHost)."
+  default     = "https://synthetic-monitoring-api.grafana.net"
+}
+
+variable "sm_access_token" {
+  type        = string
+  description = "Synthetic Monitoring access token. Generate in Grafana Cloud -> Testing & synthetics -> Synthetics -> Config -> Access tokens. Empty disables the synthetic checks."
+  sensitive   = true
+  default     = ""
+}

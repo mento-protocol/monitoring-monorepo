@@ -25,7 +25,7 @@ const PROVIDER_BLOCK_SHAPE_SPECIFICATIONS = [
   "alerts/infra/providers.tf:provider.restapi.slack|8b4bc87d91939de3aab9a7286ca993d5bf86856916c5452737b1ef97483853ee",
   "alerts/infra/providers.tf:provider.sentry.default|b2aa881260c48ac077bcf602c8402af90fa21ca827774ed3910cee4d533553ef",
   "alerts/peg-policy-publication/providers.tf:provider.google.default|d504d67989f8b1036909142aadb75aee86e1311b498dcae0f4a6d201138f6c32",
-  "alerts/rules/main.tf:provider.grafana.default|8ce3e748c35b50a9d27fe5118e60c999e3012842147da9588e6502622a401111",
+  "alerts/rules/main.tf:provider.grafana.default|0c8e161bd315240fa639d515d5c5d5fdf76b4ca73a9a7d7fb633e2a42db6a65d",
   "governance-watchdog/infra/versions.tf:provider.github.default|6175691b02d1184daf09c0c985de6c3ca3569547cf4caf36e5f35bb98c72ef27",
   "governance-watchdog/infra/versions.tf:provider.google.default|810621661fa6842f458292353eb5361b08f74662ce43a63aced8828e0a16b6ca",
   "governance-watchdog/infra/versions.tf:provider.restapi.default|769263b893b2f9d0cff6851abda5a3c600668cbe032d3c38375b24ed50b1e9b7",
@@ -137,6 +137,7 @@ const DECLASSIFICATION_BLOCK_SHAPE_SPECIFICATIONS = [
   "alerts/infra/main.tf:locals|e056cd34b0819c3feabb316f57a0244959ad31a4d41c344f1abbb2d482110b4f",
   "alerts/infra/onchain-event-handler/locals.tf:locals|493c2a836b7dbc7ddf863b526f914d71744b9c0950907c50805c664d6e0494fe,773318493d26d5a20499e7bbddb0de147d48d66db80c53184a6e14f58fd5dd14,461ed8991287c1a6f1150800d73f66e8a5bb53948e97d57f8c9d467b88501982",
   "alerts/rules/pr-plan-guard.tf:terraform_data.pr_plan_secretless_guard|ce1b82ec35dd8671bbec19ec8e44b37a3eeb4ded7ecf93d4ca3447021fac8a55",
+  "alerts/rules/synthetic-monitoring.tf:locals|52416a6599085eea1b690550bf4449eacfa85238e7e5a7d37229cc701a881964",
 ];
 
 const SENSITIVE_VARIABLE_BLOCK_SHAPE_SPECIFICATIONS = [
@@ -267,6 +268,7 @@ const RESOURCE_DATA_BLOCK_KEY_GROUPS = [
   "alerts/rules/rules-trading-limits.tf|grafana_rule_group.trading_limits",
   "alerts/rules/rules-trading-modes.tf|grafana_rule_group.trading_modes",
   "alerts/rules/rules-vp-oracles.tf|grafana_rule_group.vp_oracle_staleness",
+  "alerts/rules/synthetic-monitoring.tf|data.grafana_synthetic_monitoring_probes.public,grafana_synthetic_monitoring_check.http",
   "governance-watchdog/infra/artifact-registry.tf|google_artifact_registry_repository.gcf_artifacts",
   "governance-watchdog/infra/cloud_function.tf|google_cloud_run_v2_service_iam_member.cloud_function_invoker,google_cloudfunctions2_function.watchdog_notifications,google_project_iam_member.secret_accessor",
   "governance-watchdog/infra/cloudbuild.tf|google_project_iam_member.cloudbuild_builder,google_storage_bucket_iam_member.cloud_build_storage_access",

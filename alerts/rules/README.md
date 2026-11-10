@@ -8,6 +8,7 @@ templates for Mento monitoring.
 ## Scope
 
 - **In this module:** protocol `grafana_rule_group` resources for FPMM pool health, VirtualPool oracle freshness, oracle report quality, oracle relayers, reserve balances, trading modes, trading limits, indexer health, CDP (Liquity v2) markets, metrics-bridge liveness, and policy-versioned peg monitoring, plus Aegis service-health and Aegis testnet-health rule groups. This stack also owns the singleton `grafana_notification_policy`, protocol/Aegis/peg contact points, message templates, mute timings, and protocol folders.
+- **Also in this module:** record-only Grafana Synthetic Monitoring HTTP checks for the production web apps and the analytics API ([`synthetic-monitoring.tf`](synthetic-monitoring.tf)). See [Synthetic checks](#synthetic-checks).
 - **Not in this module:** the Aegis dashboard and the Aegis Grafana folder. Those stay in [`aegis/terraform`](../../aegis/terraform); the relocated rule group references the externally owned Aegis folder UID from `main.tf`.
 - **Folder convention:** one folder per `service` label (`FPMMs`, `Oracles`, `Indexer`, `Metrics Bridge`, `Peg Monitoring`, `Oracle Relayers`, `Reserve`, `Trading Modes`, `Trading Limits`, `CDPs`).
 
@@ -65,6 +66,30 @@ against `metrics-bridge/src/peg/metrics.ts`.
 
 CI runs this in the `CI / Lint + test root scripts` job, along with
 `pnpm alerts:rules:lint:test` for extractor and failure-case coverage.
+
+## Synthetic checks
+
+[`synthetic-monitoring.tf`](synthetic-monitoring.tf) runs a Grafana Synthetic
+Monitoring HTTP check every 5 minutes from Frankfurt and NorthVirginia against
+`app.mento.org`, `reserve.mento.org`, `governance.mento.org`,
+`monitoring.mento.org` and the analytics API health endpoint. Each passes on
+HTTP 200 over TLS within 10 s. Results land in `grafanacloud-prom` as
+`probe_success{job, instance, probe}` and `sm_check_info`; the
+`dashboard-availability` SLO in [`alerts/slo/slos.yaml`](../slo/slos.yaml)
+reads the `ui-dashboard` job. The checks page nobody: no rule in this stack
+reads them and Synthetic Monitoring alerting stays off.
+
+The analytics API check tests liveness only. `/api/v1/health` answers 200 with
+`"status":"error"` whenever one dependency check fails, and one always fails
+while `SENTRY_DSN` is unset in production.
+
+The provider needs a Synthetic Monitoring access token, separate from the
+service account token. Generate it in Grafana Cloud → Testing & synthetics →
+Synthetics → Config → Access tokens and store it as the `TF_VAR_SM_ACCESS_TOKEN`
+Actions secret that `alerts-rules.yml` and `terraform-drift.yml` read. While
+the secret is missing the variable is empty and the file manages nothing.
+5 checks × 2 locations × 12 runs an hour is about 86,400 executions a month;
+check the Grafana Cloud plan before adding targets, locations or frequency.
 
 ## Peg alert ladder
 

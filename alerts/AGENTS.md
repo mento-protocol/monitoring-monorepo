@@ -18,7 +18,7 @@ garden_lane: agent-entry-points
 
 `alerts/` is the domain folder for all alert plumbing. Three independent Terraform stacks live here:
 
-- **`alerts/rules/`** — protocol Grafana metric alert rules + global Grafana notification policy/contact points/templates/mute timings. Grafana provider only. Changes daily (threshold tuning).
+- **`alerts/rules/`** — protocol Grafana metric alert rules + global Grafana notification policy/contact points/templates/mute timings, plus record-only Grafana Synthetic Monitoring HTTP checks. Grafana provider only. Changes daily (threshold tuning).
 - **`alerts/infra/`** — event-driven alert delivery: QuickNode webhooks → Cloud Function (TS) → Slack channels (on-chain multisig events and pool LP withdrawals) + Sentry → Slack bridge (app errors) + Splunk On-Call rotation announcer → Slack #eng / @support-engineer + GCP project. Multi-provider. Changes monthly.
 - **`alerts/peg-policy-publication/`** — publishes `rules/peg-thresholds.json` as one immutable, private GCS generation through a manual `production-infra`-gated workflow. It owns no Cloud Run configuration or Grafana resources.
 

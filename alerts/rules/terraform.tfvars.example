@@ -18,6 +18,11 @@ oncall_support_usergroup_id = "S012345678"
 # Needs at least Admin role to create folders + alert rules.
 grafana_service_account_token = "glsa_REPLACE_ME"
 
+# Synthetic Monitoring access token (optional). Generate at:
+#   Grafana Cloud → Testing & synthetics → Synthetics → Config → Access tokens.
+# Empty or unset: synthetic-monitoring.tf manages no checks.
+# sm_access_token = "REPLACE_ME"
+
 # Override the stack URL or channels only if they change:
 # grafana_url            = "https://clabsmento.grafana.net"
 # slack_channel_bridges  = "#alerts-bridges"

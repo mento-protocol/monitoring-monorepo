@@ -1,6 +1,10 @@
 provider "grafana" {
   url  = var.grafana_url
   auth = var.grafana_service_account_token
+
+  # Synthetic Monitoring has its own API and token; see synthetic-monitoring.tf.
+  sm_url          = var.sm_url
+  sm_access_token = var.sm_access_token
 }
 
 # One folder per `service` label. Protocol-wide folders live in this stack

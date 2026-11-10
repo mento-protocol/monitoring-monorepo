@@ -26,12 +26,20 @@ Its monthly service review shows attainment against target.
 | ------------------------ | ------ | ----------------------------------------------------------------- |
 | `indexer-availability`   | 99.5%  | Measured: 28 days of Prometheus history at the 120 s threshold    |
 | `indexer-freshness`      | 99.5%  | Provisional: no stored lag series                                 |
-| `dashboard-availability` | 99.5%  | Provisional: no uptime check exists                               |
+| `dashboard-availability` | 99.5%  | Provisional: synthetic checks are new, no history yet             |
 | `alert-delivery`         | 99.9%  | Provisional: no canary exists                                     |
 | `alert-precision`        | 90%    | Provisional: industry guidance, 3 days of incident ledgers so far |
 | `cron-automations`       | 97%    | Provisional: just under the 7 days of run history available       |
 | `gateway-liveness`       | 95%    | Provisional: just under the 24 days of heartbeat flips available  |
 | `change-failure-rate`    | ≤ 15%  | Provisional: industry guidance, 3 days of incident ledgers so far |
+
+`dashboard-availability` reads `probe_success` from the Grafana Synthetic
+Monitoring HTTP check in [`alerts/rules/synthetic-monitoring.tf`](../rules/synthetic-monitoring.tf).
+It stays `pending` until that check has run for the full 28-day window: the
+fallback counts every minute without a sample as failed, so evaluating it
+earlier reports budget burned by minutes before the check existed. Flip it to
+`measured` in a reviewed PR once `sm_check_info{job="ui-dashboard"}` is 28 days
+old.
 
 `indexer-availability` shows that metrics-bridge can read the indexer. It does
 not show that the data is current; that is `indexer-freshness`.
