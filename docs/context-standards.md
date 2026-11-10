@@ -95,14 +95,14 @@ Rules:
 - `canonical: false` means the file is history, intent, or notes.
 - `owner` is the accountable reviewer for future cleanup.
 - `last_verified` is required for every canonical file and records the last semantic verification against its owning source.
-- `pnpm agent:context-check` fails once a `canonical: true` file's `last_verified` is more than 90 days old. Re-verify the content and bump the date; don't extend the window to make the check pass.
+- `pnpm agent:context-check` requires `last_verified` on canonical files and rejects malformed or future dates. It does not enforce an age limit; bump the date when you re-verify content against its owning source, not to satisfy a check.
 
 The catalog also classifies every document with `doc_type`, `scope`,
 `review_interval_days`, and `garden_lane`. Canonical documents must declare all
 four fields explicitly. Non-canonical and unmanaged documents may rely on the
 path defaults tested in `scripts/context/docs-index-helpers.mjs`; explicit metadata can
-override those defaults. Canonical context normally uses a 90-day semantic
-review interval. Classification controls routing and gardening only; it never
+override those defaults. `review_interval_days` is advisory routing
+metadata for gardening (canonical context normally uses 90); no check enforces it. Classification controls routing and gardening only; it never
 overrides `canonical` authority.
 
 ### Claude runtime registry
@@ -161,8 +161,8 @@ router is not permission to leave a detailed owner stale.
 
 ## Maintenance Checks
 
-Run `pnpm agent:context-check` to verify managed metadata (including the
-`last_verified` staleness window), scoped AGENTS coverage, skill mirrors, and
+Run `pnpm agent:context-check` to verify managed metadata (including `last_verified`
+presence and date validity), scoped AGENTS coverage, skill mirrors, and
 Cloud Run revision suffix guardrails. Run `pnpm docs:index --check` for catalog
 drift and broken internal links. Run `pnpm agent:context-budget --strict` to
 enforce a 10 KiB root-file cap, 9 KiB per scoped file, and 18.5 KiB per combined
