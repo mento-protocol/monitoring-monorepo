@@ -33,8 +33,10 @@ operating truth; **non-canonical** context (PLANs, ordinary notes without
 `canonical: true`, archived docs, backlog) is history that must be re-verified
 before acting. Managed
 files carry metadata (`title`, `status`, `owner`, `canonical`, `last_verified`),
-and `pnpm agent:context-check` enforces the contract, including a 90-day
-staleness window on canonical files.
+and `pnpm agent:context-check` enforces the contract. (Amended 2026-11-10: the
+original 90-day staleness window on canonical files was removed; the monitoring
+stack is stable enough that age alone no longer signals drift. `last_verified`
+stays required metadata.)
 
 ## Alternatives considered
 
@@ -45,8 +47,9 @@ staleness window on canonical files.
 
 ## Consequences
 
-- These ADRs are canonical context and are enrolled in the staleness check — that
-  enrollment is the "is this still true?" enforcement.
+- These ADRs are canonical context and are covered by the metadata check. The
+  age-based "is this still true?" enforcement was removed on 2026-11-10;
+  re-verification now happens when a change touches the subject.
 - New canonical files are auto-discovered by `canonical: true` frontmatter in the
   discovery roots (root/nested `AGENTS.md`, `SPEC.md`, `docs/**`, `.agents/**`).
   Root `README.md` uses the same metadata keys in a hidden `agent-context`
