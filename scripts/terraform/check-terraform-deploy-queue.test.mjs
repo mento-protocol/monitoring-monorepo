@@ -319,13 +319,13 @@ const mainEnv = {
     const sleeps = [];
     let calls = 0;
     const fetchImpl = async () => {
-      const { status, headers = {} } = responses[calls];
+      const { status, headers = {}, body = "Rate limited" } = responses[calls];
       calls += 1;
       return {
         ok: status === 200,
         status,
         headers: { get: (name) => headers[name.toLowerCase()] ?? null },
-        text: async () => "Rate limited",
+        text: async () => body,
         json: async () => ({ workflow_runs: [] }),
       };
     };
@@ -377,11 +377,32 @@ const mainEnv = {
   assert.equal(run.calls(), 1);
   assert.deepEqual(run.sleeps, []);
 
-  // A 403 without rate-limit headers is a permission error: no retry.
+  // A secondary limit with no rate-limit headers is known by its message:
+  // the one-minute floor.
   run = await rateLimitCase({
-    responses: [{ status: 403, headers: { "x-ratelimit-remaining": "42" } }],
+    responses: [
+      {
+        status: 403,
+        headers: { "x-ratelimit-remaining": "4999" },
+        body: '{"message":"You have exceeded a secondary rate limit. Please wait a few minutes before you try again."}',
+      },
+      { status: 200 },
+    ],
   });
-  await assert.rejects(run.result, /failed: 403 Rate limited/);
+  assert.deepEqual(await run.result, { workflow_runs: [] });
+  assert.deepEqual(run.sleeps, [60000]);
+
+  // A 403 without rate-limit headers or message is a permission error: no retry.
+  run = await rateLimitCase({
+    responses: [
+      {
+        status: 403,
+        headers: { "x-ratelimit-remaining": "42" },
+        body: '{"message":"Resource not accessible by integration"}',
+      },
+    ],
+  });
+  await assert.rejects(run.result, /failed: 403 .*Resource not accessible/);
   assert.equal(run.calls(), 1);
 }
 

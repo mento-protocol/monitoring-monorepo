@@ -23,10 +23,12 @@ function responseHeader(response, name) {
   return value === null || value === undefined ? null : String(value);
 }
 
-// GitHub returns a rate limit as 429 or as 403. A 403 is a rate limit only
-// when it carries Retry-After or an exhausted X-RateLimit-Remaining; any other
-// 403 is a permission error and is not retried.
-function isRateLimited(response) {
+// GitHub returns a rate limit as 429 or as 403. A 403 is a rate limit when it
+// carries Retry-After or an exhausted X-RateLimit-Remaining, or when its
+// message says so: a secondary limit can arrive with neither header, and
+// GitHub identifies it by the message alone. Any other 403 is a permission
+// error and is not retried.
+function isRateLimited(response, body) {
   if (response.status === 429) {
     return true;
   }
@@ -35,18 +37,19 @@ function isRateLimited(response) {
   }
   return (
     responseHeader(response, "retry-after") !== null ||
-    responseHeader(response, "x-ratelimit-remaining") === "0"
+    responseHeader(response, "x-ratelimit-remaining") === "0" ||
+    /rate limit/i.test(body ?? "")
   );
 }
 
 // How long to wait before retrying this response, in ms, or null when it must
 // not be retried. Rate limits honour Retry-After, then X-RateLimit-Reset, then
 // the one-minute secondary-limit floor.
-function retryDelayMs(response, attempt, nowMs) {
+function retryDelayMs(response, body, attempt, nowMs) {
   if (response.status >= 500) {
     return GITHUB_RETRY_BASE_MS * attempt;
   }
-  if (!isRateLimited(response)) {
+  if (!isRateLimited(response, body)) {
     return null;
   }
 
@@ -221,7 +224,9 @@ async function githubJson({
 
     const body = await response.text();
     const delayMs =
-      attempt < maxAttempts ? retryDelayMs(response, attempt, nowMs()) : null;
+      attempt < maxAttempts
+        ? retryDelayMs(response, body, attempt, nowMs())
+        : null;
     if (delayMs !== null) {
       console.warn(
         `GitHub API ${url.pathname} returned ${response.status}; retrying in ${delayMs} ms (attempt ${attempt + 1}/${maxAttempts})`,
