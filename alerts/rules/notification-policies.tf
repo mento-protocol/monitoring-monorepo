@@ -584,6 +584,8 @@ resource "grafana_notification_policy" "all" {
 locals {
   # Grafana has no "never repeat". Its notification log keeps entries for 5
   # days, and Grafana Cloud caps repeat_interval there: a longer value would
-  # still re-post at log expiry. 120h is the effective maximum.
-  trading_limits_slack_repeat_interval = "120h"
+  # still re-post at log expiry. 5 days is the effective maximum. "5d", not
+  # "120h": Grafana normalises the duration to its largest unit and returns
+  # "5d", so "120h" would show as a change on every plan.
+  trading_limits_slack_repeat_interval = "5d"
 }
