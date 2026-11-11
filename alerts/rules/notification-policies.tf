@@ -537,8 +537,14 @@ resource "grafana_notification_policy" "all" {
     }
 
     # Trading-limits page alerts → #alerts-critical (parallel to existing Splunk policy)
+    # Trading-limit hits post to Slack when they fire and then repeat only at
+    # the longest interval Grafana honours. A limit can stay hit for weeks (LG
+    # on Celo fired continuously from 2026-09-24), and the 4h tree default
+    # re-posted it six times a day. monitoring.mento.org shows which limits are
+    # currently hit where.
     policy {
-      contact_point = grafana_contact_point.slack_alerts_critical.name
+      contact_point   = grafana_contact_point.slack_alerts_critical.name
+      repeat_interval = local.trading_limits_slack_repeat_interval
 
       matcher {
         label = "severity"
@@ -554,9 +560,10 @@ resource "grafana_notification_policy" "all" {
 
     }
 
-    # Trading-limits warning alerts → #alerts-pools
+    # Trading-limits warning alerts → #alerts-pools (same repeat, see above)
     policy {
-      contact_point = grafana_contact_point.slack_alerts_pools.name
+      contact_point   = grafana_contact_point.slack_alerts_pools.name
+      repeat_interval = local.trading_limits_slack_repeat_interval
 
       matcher {
         label = "service"
@@ -572,4 +579,13 @@ resource "grafana_notification_policy" "all" {
 
     }
   }
+}
+
+locals {
+  # Grafana has no "never repeat". Its notification log keeps entries for 5
+  # days, and Grafana Cloud caps repeat_interval there: a longer value would
+  # still re-post at log expiry. 5 days is the effective maximum. "5d", not
+  # "120h": Grafana normalises the duration to its largest unit and returns
+  # "5d", so "120h" would show as a change on every plan.
+  trading_limits_slack_repeat_interval = "5d"
 }
