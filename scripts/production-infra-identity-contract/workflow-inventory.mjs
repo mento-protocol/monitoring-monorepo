@@ -45,6 +45,8 @@ const APPLY_CONFIG_BY_WORKFLOW = {
         "${{ secrets.TF_VAR_ONCALL_SUPPORT_USERGROUP_ID }}",
       TF_VAR_splunk_on_call_alerts_webhook_url:
         "${{ secrets.TF_VAR_SPLUNK_ON_CALL_ALERTS_WEBHOOK_URL }}",
+      TF_VAR_synthetic_monitoring_access_token:
+        "${{ secrets.TF_VAR_SYNTHETIC_MONITORING_ACCESS_TOKEN }}",
     },
   },
   ".github/workflows/alerts-infra.yml": {
@@ -277,7 +279,7 @@ function postAuthApplySteps(config) {
         run: "terraform apply -auto-approve -input=false -lock-timeout=10m",
       },
       {
-        uses: "Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad",
+        uses: "Kesin11/actions-timeline@460b1f8a750077029ad3589824d371b200e91dcf",
         if: "always()",
       },
     ];
@@ -304,7 +306,7 @@ function postAuthApplySteps(config) {
       run: applySummaryCommand(config.summaryRoot),
     },
     {
-      uses: "Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad",
+      uses: "Kesin11/actions-timeline@460b1f8a750077029ad3589824d371b200e91dcf",
       if: "always()",
     },
   ];

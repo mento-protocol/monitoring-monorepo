@@ -11,7 +11,7 @@ import {
   parseDocumentationMetadata,
 } from "../context/docs-index-helpers.mjs";
 import {
-  assessStaleness,
+  assessVerifiedDate,
   daysSince,
 } from "../context/check-agent-context-helpers.mjs";
 
@@ -362,7 +362,7 @@ function hasValidCanonicalNoteMetadata(filePath, state) {
     REQUIRED_CANONICAL_NOTE_METADATA.every((key) => metadata[key]?.trim()) &&
     classifyDocumentation(filePath, metadata).errors.length === 0 &&
     verifiedAge !== null &&
-    assessStaleness(verifiedAge) === "ok"
+    assessVerifiedDate(verifiedAge) === "ok"
   );
 }
 

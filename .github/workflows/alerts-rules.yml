@@ -217,12 +217,15 @@ jobs:
           INPUT_SLACK_BOT_TOKEN: ${{ secrets.TF_VAR_SLACK_BOT_TOKEN }}
           INPUT_ONCALL_SUPPORT_USERGROUP_ID: ${{ secrets.TF_VAR_ONCALL_SUPPORT_USERGROUP_ID }}
           INPUT_SPLUNK_ON_CALL_ALERTS_WEBHOOK_URL: ${{ secrets.TF_VAR_SPLUNK_ON_CALL_ALERTS_WEBHOOK_URL }}
+          # Optional: empty until a stack admin creates it; synthetic-monitoring.tf then manages nothing.
+          INPUT_SYNTHETIC_MONITORING_ACCESS_TOKEN: ${{ secrets.TF_VAR_SYNTHETIC_MONITORING_ACCESS_TOKEN }}
         run: |
           {
             printf '%s\n' "TF_VAR_grafana_service_account_token=${INPUT_GRAFANA_SERVICE_ACCOUNT_TOKEN}"
             printf '%s\n' "TF_VAR_slack_bot_token=${INPUT_SLACK_BOT_TOKEN}"
             printf '%s\n' "TF_VAR_oncall_support_usergroup_id=${INPUT_ONCALL_SUPPORT_USERGROUP_ID}"
             printf '%s\n' "TF_VAR_splunk_on_call_alerts_webhook_url=${INPUT_SPLUNK_ON_CALL_ALERTS_WEBHOOK_URL}"
+            printf '%s\n' "TF_VAR_synthetic_monitoring_access_token=${INPUT_SYNTHETIC_MONITORING_ACCESS_TOKEN}"
           } >> "$GITHUB_ENV"
 
       - name: Format check
@@ -404,7 +407,7 @@ jobs:
           TERRAFORM_TARGET_ENVIRONMENT: production-infra
         run: node "$GITHUB_WORKSPACE/scripts/terraform/notify-terraform-apply.mjs"
 
-      - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
+      - uses: Kesin11/actions-timeline@460b1f8a750077029ad3589824d371b200e91dcf # v3.2.1
         if: always()
 
   apply:
@@ -446,6 +449,7 @@ jobs:
       TF_VAR_slack_bot_token: ${{ secrets.TF_VAR_SLACK_BOT_TOKEN }}
       TF_VAR_oncall_support_usergroup_id: ${{ secrets.TF_VAR_ONCALL_SUPPORT_USERGROUP_ID }}
       TF_VAR_splunk_on_call_alerts_webhook_url: ${{ secrets.TF_VAR_SPLUNK_ON_CALL_ALERTS_WEBHOOK_URL }}
+      TF_VAR_synthetic_monitoring_access_token: ${{ secrets.TF_VAR_SYNTHETIC_MONITORING_ACCESS_TOKEN }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -537,5 +541,5 @@ jobs:
             echo '</details>'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
+      - uses: Kesin11/actions-timeline@460b1f8a750077029ad3589824d371b200e91dcf # v3.2.1
         if: always()

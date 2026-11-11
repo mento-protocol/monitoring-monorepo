@@ -36,7 +36,7 @@ const ALLS_GREEN_PIN =
 // prettier-ignore
 const ORDINARY_GATE_IF = "${{ !inputs.no_skip_audit }}", AUDIT_GATE_IF = "${{ inputs.no_skip_audit }}";
 // prettier-ignore
-const CHECKOUT_STEP = Object.freeze({ uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", if: "${{ !inputs.no_skip_audit }}", with: { "persist-credentials": false } }), TIMELINE_STEP = Object.freeze({ uses: "Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad", if: "always() && !inputs.no_skip_audit" });
+const CHECKOUT_STEP = Object.freeze({ uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", if: "${{ !inputs.no_skip_audit }}", with: { "persist-credentials": false } }), TIMELINE_STEP = Object.freeze({ uses: "Kesin11/actions-timeline@460b1f8a750077029ad3589824d371b200e91dcf", if: "always() && !inputs.no_skip_audit" });
 // prettier-ignore
 const ORDINARY = "*.md|aegis/**|alerts/**|docs/**|governance-watchdog/**|indexer-envio/**|integration-probes/**|metrics-bridge/**|terraform/**|ui-dashboard/**|.agents/**|.claude/**|.codex/**|.github/**|patches/**|scripts/**|shared-config/**|.coderabbit.yaml|.dependency-cruiser.cjs|.gcloudignore|.gitignore|.gitmodules|.lighthouserc.cjs|.node-version|cloudbuild.yaml|eslint.config.mjs|package.json|pnpm-lock.yaml|pnpm-workspace.yaml|terraform.stacks.json".split("|");
 // prettier-ignore

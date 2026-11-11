@@ -3,6 +3,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { spawnSync } from "node:child_process";
+import { renameCollidingEvmBlockAlias } from "./envio-types-patch.mjs";
 
 const projectRoot = process.cwd();
 const envPath = resolve(projectRoot, ".env");
@@ -110,6 +111,22 @@ const patchDockerComposeHealthcheck = () => {
   }
 };
 
+const patchEnvioTypesEvmBlockAlias = () => {
+  const typesPath = resolve(projectRoot, ".envio", "types.d.ts");
+  if (!existsSync(typesPath)) {
+    return;
+  }
+
+  const content = readFileSync(typesPath, "utf8");
+  const patched = renameCollidingEvmBlockAlias(content);
+  if (patched !== content) {
+    writeFileSync(typesPath, patched, "utf8");
+    console.log(
+      "[run-envio-with-env] Patched .envio/types.d.ts: renamed local EvmBlock alias (enviodev/hyperindex#1808)",
+    );
+  }
+};
+
 const main = () => {
   const [command, ...args] = process.argv.slice(2);
   if (!command) {
@@ -137,6 +154,7 @@ const main = () => {
 
   if (command === "codegen") {
     patchDockerComposeHealthcheck();
+    patchEnvioTypesEvmBlockAlias();
   }
 
   process.exit(result.status ?? 1);

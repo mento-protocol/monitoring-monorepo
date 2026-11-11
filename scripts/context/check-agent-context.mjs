@@ -5,12 +5,11 @@ import path from "node:path";
 import process from "node:process";
 
 import {
-  assessStaleness,
+  assessVerifiedDate,
   daysSince,
   discoverCanonicalFiles,
   missingCoreContextFiles,
   parseFrontmatter,
-  STALE_AFTER_DAYS,
 } from "./check-agent-context-helpers.mjs";
 import {
   DOCUMENT_TYPES,
@@ -167,14 +166,9 @@ function requireMetadata(filePath) {
         `${filePath}: last_verified '${data.last_verified}' is not a valid YYYY-MM-DD date`,
       );
     } else {
-      const staleness = assessStaleness(age);
-      if (staleness === "future") {
+      if (assessVerifiedDate(age) === "future") {
         fail(
           `${filePath}: last_verified ${data.last_verified} is in the future`,
-        );
-      } else if (staleness === "stale") {
-        fail(
-          `${filePath}: last_verified ${data.last_verified} is ${age} days old, exceeds the ${STALE_AFTER_DAYS}-day policy window`,
         );
       }
     }
@@ -221,7 +215,7 @@ const claudeSkillFiles = trackedFiles(
 
 // The enforced set is discovered, not hardcoded: every tracked markdown file
 // in the discovery roots (see isCanonicalDiscoveryPath) whose frontmatter
-// declares `canonical: true` gets full metadata + staleness enforcement, so
+// declares `canonical: true` gets full metadata enforcement, so
 // new canonical files are picked up automatically. README files may use a
 // hidden metadata marker instead of visible frontmatter, so they are enrolled
 // with the same metadata parser used by requireMetadata.

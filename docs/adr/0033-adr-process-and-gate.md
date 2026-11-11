@@ -67,8 +67,9 @@ for a trigger without an accompanying ADR.
 - Adding a new package, Terraform stack, or workflow without an ADR triggers a
   visible reminder; when no ADR is needed, record a one-line reason on the PR's
   **Architecture decision?** checklist item.
-- ADRs are canonical context (ADR 0005), so each is enrolled in the 90-day
-  re-verification check — the log stays honest over time.
+- ADRs are canonical context (ADR 0005), so each is covered by the context
+  metadata check. (The 90-day re-verification window was removed on
+  2026-11-10.)
 - `pnpm adr:check` is a repo command; `scripts/pr/check-adr-reminder.test.mjs`
   covers its trigger logic.
 
