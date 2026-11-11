@@ -485,7 +485,7 @@ jobs:
               - "**/react-doctor.config.json"
             all:
               - "**"
-      - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
+      - uses: Kesin11/actions-timeline@460b1f8a750077029ad3589824d371b200e91dcf # v3.2.1
         if: always() && !inputs.no_skip_audit
 
   shared:
@@ -534,7 +534,7 @@ jobs:
           flags: config
           directory: shared-config/coverage
           token: ${{ secrets.CODECOV_TOKEN }}
-      - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
+      - uses: Kesin11/actions-timeline@460b1f8a750077029ad3589824d371b200e91dcf # v3.2.1
         if: always() && !inputs.no_skip_audit
 
   ui-static:
@@ -622,7 +622,7 @@ jobs:
         env:
           TURBO_CACHE_POLICY: ${{ inputs.no_skip_audit && 'local:,remote:' || 'local:rw' }}
         run: VERCEL_DEPLOYMENT_ID=ci pnpm exec turbo run size-limit --filter=@mento-protocol/ui-dashboard --cache="$TURBO_CACHE_POLICY"
-      - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
+      - uses: Kesin11/actions-timeline@460b1f8a750077029ad3589824d371b200e91dcf # v3.2.1
         if: always() && !inputs.no_skip_audit
 
   ui:
@@ -714,7 +714,7 @@ jobs:
           flags: ui-dashboard
           directory: ui-dashboard/coverage
           token: ${{ secrets.CODECOV_TOKEN }}
-      - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
+      - uses: Kesin11/actions-timeline@460b1f8a750077029ad3589824d371b200e91dcf # v3.2.1
         if: always() && !inputs.no_skip_audit
 
   indexer-test:
@@ -757,7 +757,7 @@ jobs:
           flags: indexer-envio
           directory: indexer-envio/coverage
           token: ${{ secrets.CODECOV_TOKEN }}
-      - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
+      - uses: Kesin11/actions-timeline@460b1f8a750077029ad3589824d371b200e91dcf # v3.2.1
         if: always() && !inputs.no_skip_audit
 
   indexer-checks:
@@ -827,7 +827,7 @@ jobs:
         # Retained owner inventory and fail-closed schema checks. Keep this
         # independent of the retired local routing table.
         run: node --test scripts/indexer-handler-invariant-contract.test.mjs
-      - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
+      - uses: Kesin11/actions-timeline@460b1f8a750077029ad3589824d371b200e91dcf # v3.2.1
         if: always() && !inputs.no_skip_audit
 
   bridge:
@@ -884,7 +884,7 @@ jobs:
           flags: metrics-bridge
           directory: metrics-bridge/coverage
           token: ${{ secrets.CODECOV_TOKEN }}
-      - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
+      - uses: Kesin11/actions-timeline@460b1f8a750077029ad3589824d371b200e91dcf # v3.2.1
         if: always() && !inputs.no_skip_audit
 
   integration-probes:
@@ -931,7 +931,7 @@ jobs:
           flags: integration-probes
           directory: integration-probes/coverage
           token: ${{ secrets.CODECOV_TOKEN }}
-      - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
+      - uses: Kesin11/actions-timeline@460b1f8a750077029ad3589824d371b200e91dcf # v3.2.1
         if: always() && !inputs.no_skip_audit
 
   alerts:
@@ -1026,7 +1026,7 @@ jobs:
           flags: alerts-oncall-announcer
           directory: alerts/infra/oncall-announcer/coverage
           token: ${{ secrets.CODECOV_TOKEN }}
-      - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
+      - uses: Kesin11/actions-timeline@460b1f8a750077029ad3589824d371b200e91dcf # v3.2.1
         if: always() && !inputs.no_skip_audit
 
   gov-watchdog:
@@ -1091,7 +1091,7 @@ jobs:
           flags: governance-watchdog
           directory: governance-watchdog/coverage
           token: ${{ secrets.CODECOV_TOKEN }}
-      - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
+      - uses: Kesin11/actions-timeline@460b1f8a750077029ad3589824d371b200e91dcf # v3.2.1
         if: always() && !inputs.no_skip_audit
 
   # Registry-backed Terraform validation inside the required `ci` sentinel.
@@ -1203,7 +1203,7 @@ jobs:
           done <<< "$rows"
 
           exit "$failed"
-      - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
+      - uses: Kesin11/actions-timeline@460b1f8a750077029ad3589824d371b200e91dcf # v3.2.1
         if: always() && !inputs.no_skip_audit
 
   aegis:
@@ -1251,7 +1251,7 @@ jobs:
       - name: Test with coverage
         run: pnpm --filter @mento-protocol/aegis test:cov
       - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1
+        uses: foundry-rs/foundry-toolchain@dba66c27052e63476d886f22216e119ba7e615bf # v1
         with:
           version: stable
           cache: ${{ !inputs.no_skip_audit && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
@@ -1265,7 +1265,7 @@ jobs:
           flags: aegis
           directory: aegis/coverage
           token: ${{ secrets.CODECOV_TOKEN }}
-      - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
+      - uses: Kesin11/actions-timeline@460b1f8a750077029ad3589824d371b200e91dcf # v3.2.1
         if: always() && !inputs.no_skip_audit
 
   scripts:
@@ -1508,7 +1508,7 @@ jobs:
         # shared module, so they belong in a required job rather than only in
         # the advisory supply-chain workflow.
         run: node --test scripts/lib/pnpm-override-selector.test.mjs
-      - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
+      - uses: Kesin11/actions-timeline@460b1f8a750077029ad3589824d371b200e91dcf # v3.2.1
         if: always() && !inputs.no_skip_audit
 
   docs-checks:
@@ -1606,7 +1606,7 @@ jobs:
           pnpm docs:navigation-eval -- --validate
           docs/evals/documentation-navigation-baseline.json
           --fixtures docs/evals/documentation-navigation-baseline-fixtures.json
-      - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
+      - uses: Kesin11/actions-timeline@460b1f8a750077029ad3589824d371b200e91dcf # v3.2.1
         if: always() && !inputs.no_skip_audit
 
   production-infra-contract:
@@ -1685,7 +1685,7 @@ jobs:
       - name: Version skew checker tests
         if: ${{ !cancelled() }}
         run: pnpm skew:check:test
-      - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
+      - uses: Kesin11/actions-timeline@460b1f8a750077029ad3589824d371b200e91dcf # v3.2.1
         if: always() && !inputs.no_skip_audit
 
   ci:
@@ -1725,5 +1725,5 @@ jobs:
         uses: re-actors/alls-green@b5b5b37504aa4183270bd3d855c52a67f212be35 # v1.3.0
         with:
           jobs: ${{ toJSON(needs) }}
-      - uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
+      - uses: Kesin11/actions-timeline@460b1f8a750077029ad3589824d371b200e91dcf # v3.2.1
         if: always() && !inputs.no_skip_audit
