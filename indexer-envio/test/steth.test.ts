@@ -636,17 +636,41 @@ describeReserveYield("stETH reserve-yield ledger", () => {
   });
 
   it("ignores transfers that do not touch tracked wallets", async () => {
-    const mockDb = await transfer(
-      MockDb.createMockDb(),
-      100,
-      1,
-      EXTERNAL,
-      "0x0000000000000000000000000000000000000def",
-      steth(1),
-    );
+    const untracked = "0x0000000000000000000000000000000000000def";
+    const mockDb = MockDb.createMockDb();
 
+    // The registration's `where` filter drops the transfer before the handler
+    // runs. Envio's simulate rejects any input that reaches no handler, which
+    // proves the filter excluded it.
+    await assert.rejects(
+      transfer(mockDb, 100, 1, EXTERNAL, untracked, steth(1)),
+      /never reached a handler/,
+    );
     assert.equal(mockDb.entities.StethYieldMovement.getAll().length, 0);
     assert.equal(mockDb.entities.StethYieldSummary.get("1-steth"), undefined);
+
+    // The handler's own guard returns before it touches the context, so an
+    // untracked transfer that bypassed the filter still writes nothing.
+    const untouchedContext = new Proxy(
+      {},
+      {
+        get(_target, property) {
+          throw new Error(
+            `untracked transfer read context.${String(property)}`,
+          );
+        },
+      },
+    ) as Parameters<typeof handleStethTransfer>[0]["context"];
+    await handleStethTransfer({
+      event: {
+        chainId: ETHEREUM_CHAIN_ID,
+        params: { from: EXTERNAL, to: untracked, value: steth(1) },
+        block: { number: 100, timestamp: 1 },
+        logIndex: 1,
+        transaction: { hash: txHash(1) },
+      },
+      context: untouchedContext,
+    });
   });
 
   it("baselines pre-launch rebases as principal before daily actuals accrue", async () => {
