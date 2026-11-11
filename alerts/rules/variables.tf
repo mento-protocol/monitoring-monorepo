@@ -91,3 +91,16 @@ variable "slack_channel_testnet" {
   description = "Slack channel for all non-prod alerts (celo-sepolia, monad-testnet)."
   default     = "#alerts-testnet"
 }
+
+variable "synthetic_monitoring_url" {
+  type        = string
+  description = "Synthetic Monitoring API URL for the clabsmento stack (Synthetics app settings, apiHost)."
+  default     = "https://synthetic-monitoring-api.grafana.net"
+}
+
+variable "synthetic_monitoring_access_token" {
+  type        = string
+  description = "Synthetic Monitoring access token, delivered by the platform stack as the TF_VAR_SYNTHETIC_MONITORING_ACCESS_TOKEN Actions secret (see README). Empty disables the synthetic checks."
+  sensitive   = true
+  default     = ""
+}

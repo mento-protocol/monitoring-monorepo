@@ -127,6 +127,28 @@ resource "github_actions_secret" "integration_probe_squid_integrator_id" {
   value       = var.squid_integrator_id
 }
 
+# Synthetic Monitoring token for alerts-rules
+# ─────────────────────────────────────────────
+#
+# `alerts/rules/synthetic-monitoring.tf` needs a Synthetic Monitoring access
+# token. Only a stack admin can generate one in the Grafana UI, so it is an
+# operator-held tfvar here, mirrored to the repo-level secret that the
+# alerts-rules plan/apply and drift jobs read. Repo scope matches the
+# `TF_VAR_GRAFANA_SERVICE_ACCOUNT_TOKEN` it sits beside: the trusted-main plan
+# and drift jobs run outside the `production-infra` Environment. `count`-gated
+# like the aggregator keys, so platform plan/apply succeeds while it is unset,
+# and alerts-rules then manages no checks.
+
+resource "github_actions_secret" "alerts_rules_synthetic_monitoring_access_token" {
+  # checkov:skip=CKV_GIT_4: Same state-backed plaintext trade-off as
+  # `vercel_automation_bypass`; see the comment above for the threat model.
+  count = var.grafana_synthetic_monitoring_access_token == "" ? 0 : 1
+
+  repository  = "monitoring-monorepo"
+  secret_name = "TF_VAR_SYNTHETIC_MONITORING_ACCESS_TOKEN"
+  value       = var.grafana_synthetic_monitoring_access_token
+}
+
 # Claude Code secret
 # ───────────────────
 #

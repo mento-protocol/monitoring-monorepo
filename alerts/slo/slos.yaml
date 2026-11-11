@@ -71,7 +71,7 @@
       mento.org/provisional: "true"
       mento.org/sli-status: pending
   spec:
-    description: The public dashboard answers a synthetic page load. No uptime check exists yet, so this has no SLI.
+    description: At least one Grafana Synthetic Monitoring probe location loaded https://monitoring.mento.org with HTTP 200 in its latest 5-minute run. Pending until the checks in alerts/rules/synthetic-monitoring.tf have 28 days of history.
     service: ui-dashboard
     indicator:
       metadata:
@@ -79,10 +79,9 @@
       spec:
         thresholdMetric:
           metricSource:
-            type: synthetic-probe
+            type: prometheus
             spec:
-              target: ui-dashboard production
-              result: 1 on success, else 0
+              query: max(last_over_time(probe_success{job="ui-dashboard", instance="https://monitoring.mento.org"}[6m])) or vector(0)
     timeWindow:
       - duration: 28d
         isRolling: true
