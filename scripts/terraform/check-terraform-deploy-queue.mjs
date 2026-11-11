@@ -7,6 +7,72 @@ const DEFAULT_SLACK_CHANNEL = "#deploys";
 const DEFAULT_STALE_MINUTES = 60;
 const USER_AGENT = "mento-monitoring-terraform-deploy-queue-watch";
 const MAX_SLACK_RUNS = 8;
+// GitHub's REST API occasionally answers 5xx or a rate limit for a single
+// request. One such response must not fail the watch, so retry those.
+const GITHUB_MAX_ATTEMPTS = 3;
+const GITHUB_RETRY_BASE_MS = 2000;
+// GitHub asks clients to wait at least a minute after a secondary rate limit
+// that names no reset time.
+const GITHUB_SECONDARY_RATE_LIMIT_WAIT_MS = 60_000;
+// The job has a 5-minute timeout. A rate limit that asks for a longer wait
+// fails at once instead of sleeping into that timeout.
+const GITHUB_MAX_RATE_LIMIT_WAIT_MS = 60_000;
+
+function responseHeader(response, name) {
+  const value = response.headers?.get?.(name);
+  return value === null || value === undefined ? null : String(value);
+}
+
+// GitHub returns a rate limit as 429 or as 403. A 403 is a rate limit when it
+// carries Retry-After or an exhausted X-RateLimit-Remaining, or when its
+// message says so: a secondary limit can arrive with neither header, and
+// GitHub identifies it by the message alone. Any other 403 is a permission
+// error and is not retried.
+function isRateLimited(response, body) {
+  if (response.status === 429) {
+    return true;
+  }
+  if (response.status !== 403) {
+    return false;
+  }
+  return (
+    responseHeader(response, "retry-after") !== null ||
+    responseHeader(response, "x-ratelimit-remaining") === "0" ||
+    /rate limit/i.test(body ?? "")
+  );
+}
+
+// How long to wait before retrying this response, in ms, or null when it must
+// not be retried. Rate limits honour Retry-After, then X-RateLimit-Reset, then
+// the one-minute secondary-limit floor.
+function retryDelayMs(response, body, attempt, nowMs) {
+  if (response.status >= 500) {
+    return GITHUB_RETRY_BASE_MS * attempt;
+  }
+  if (!isRateLimited(response, body)) {
+    return null;
+  }
+
+  let delayMs = GITHUB_SECONDARY_RATE_LIMIT_WAIT_MS;
+  const retryAfter = responseHeader(response, "retry-after");
+  const remaining = responseHeader(response, "x-ratelimit-remaining");
+  const reset = responseHeader(response, "x-ratelimit-reset");
+  if (retryAfter !== null && /^\d+$/.test(retryAfter.trim())) {
+    delayMs = Number(retryAfter.trim()) * 1000;
+  } else if (
+    remaining === "0" &&
+    reset !== null &&
+    /^\d+$/.test(reset.trim())
+  ) {
+    delayMs = Math.max(0, Number(reset.trim()) * 1000 - nowMs);
+  }
+
+  return delayMs > GITHUB_MAX_RATE_LIMIT_WAIT_MS ? null : delayMs;
+}
+
+function defaultSleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 const DEPLOY_WORKFLOWS = [
   {
@@ -133,29 +199,46 @@ async function githubJson({
   githubToken,
   path,
   searchParams,
+  sleep = defaultSleep,
+  maxAttempts = GITHUB_MAX_ATTEMPTS,
+  nowMs = () => Date.now(),
 }) {
   const url = new URL(path, `${apiUrl.replace(/\/$/, "")}/`);
   for (const [key, value] of Object.entries(searchParams ?? {})) {
     url.searchParams.set(key, String(value));
   }
 
-  const response = await fetchImpl(url, {
-    headers: {
-      Accept: "application/vnd.github+json",
-      Authorization: `Bearer ${githubToken}`,
-      "User-Agent": USER_AGENT,
-      "X-GitHub-Api-Version": "2022-11-28",
-    },
-  });
+  for (let attempt = 1; ; attempt += 1) {
+    const response = await fetchImpl(url, {
+      headers: {
+        Accept: "application/vnd.github+json",
+        Authorization: `Bearer ${githubToken}`,
+        "User-Agent": USER_AGENT,
+        "X-GitHub-Api-Version": "2022-11-28",
+      },
+    });
 
-  if (!response.ok) {
+    if (response.ok) {
+      return response.json();
+    }
+
     const body = await response.text();
+    const delayMs =
+      attempt < maxAttempts
+        ? retryDelayMs(response, body, attempt, nowMs())
+        : null;
+    if (delayMs !== null) {
+      console.warn(
+        `GitHub API ${url.pathname} returned ${response.status}; retrying in ${delayMs} ms (attempt ${attempt + 1}/${maxAttempts})`,
+      );
+      await sleep(delayMs);
+      continue;
+    }
+
     throw new Error(
       `GitHub API ${url.pathname} failed: ${response.status} ${body}`,
     );
   }
-
-  return response.json();
 }
 
 async function fetchWorkflowRuns({
@@ -423,6 +506,7 @@ export {
   classifyStalledRuns,
   findStalledDeployRuns,
   formatDuration,
+  githubJson,
   isDeployQueueCandidate,
   main,
   summarizeJobs,

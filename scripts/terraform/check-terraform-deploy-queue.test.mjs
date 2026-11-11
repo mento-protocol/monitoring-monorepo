@@ -7,6 +7,7 @@ import {
   buildSlackPayload,
   classifyStalledRuns,
   formatDuration,
+  githubJson,
   isDeployQueueCandidate,
   main,
   summarizeJobs,
@@ -242,6 +243,167 @@ const mainEnv = {
     main(mainEnv, [], fetchImpl),
     /Slack chat\.postMessage failed: channel_not_found/,
   );
+}
+
+// githubJson(): a transient 5xx is retried and the later success is returned.
+{
+  const statuses = [502, 200];
+  const sleeps = [];
+  let calls = 0;
+  const fetchImpl = async () => {
+    const status = statuses[calls];
+    calls += 1;
+    return {
+      ok: status === 200,
+      status,
+      text: async () => "Server Error",
+      json: async () => ({ workflow_runs: [] }),
+    };
+  };
+  const payload = await githubJson({
+    fetchImpl,
+    apiUrl: "https://api.github.test",
+    githubToken: "gh-test-token",
+    path: "repos/o/r/actions/workflows/x.yml/runs",
+    sleep: async (ms) => sleeps.push(ms),
+  });
+  assert.deepEqual(payload, { workflow_runs: [] });
+  assert.equal(calls, 2);
+  assert.deepEqual(sleeps, [2000]);
+}
+
+// githubJson(): a persistent 5xx still fails after the last attempt.
+{
+  let calls = 0;
+  const fetchImpl = async () => {
+    calls += 1;
+    return { ok: false, status: 503, text: async () => "Unavailable" };
+  };
+  await assert.rejects(
+    githubJson({
+      fetchImpl,
+      apiUrl: "https://api.github.test",
+      githubToken: "gh-test-token",
+      path: "repos/o/r/actions/runs/1/jobs",
+      sleep: async () => {},
+    }),
+    /failed: 503 Unavailable/,
+  );
+  assert.equal(calls, 3);
+}
+
+// githubJson(): a 4xx other than 429 fails at once, without a retry.
+{
+  let calls = 0;
+  const fetchImpl = async () => {
+    calls += 1;
+    return { ok: false, status: 404, text: async () => "Not Found" };
+  };
+  await assert.rejects(
+    githubJson({
+      fetchImpl,
+      apiUrl: "https://api.github.test",
+      githubToken: "gh-test-token",
+      path: "repos/o/r/actions/runs/1/jobs",
+      sleep: async () => {},
+    }),
+    /failed: 404 Not Found/,
+  );
+  assert.equal(calls, 1);
+}
+
+// githubJson(): rate limits (429, or 403 with rate-limit headers) wait for
+// what GitHub asks; longer waits and plain 403s fail at once.
+{
+  const rateLimitCase = async ({ responses, nowMs = 1_000_000 }) => {
+    const sleeps = [];
+    let calls = 0;
+    const fetchImpl = async () => {
+      const { status, headers = {}, body = "Rate limited" } = responses[calls];
+      calls += 1;
+      return {
+        ok: status === 200,
+        status,
+        headers: { get: (name) => headers[name.toLowerCase()] ?? null },
+        text: async () => body,
+        json: async () => ({ workflow_runs: [] }),
+      };
+    };
+    const result = githubJson({
+      fetchImpl,
+      apiUrl: "https://api.github.test",
+      githubToken: "gh-test-token",
+      path: "repos/o/r/actions/workflows/x.yml/runs",
+      sleep: async (ms) => sleeps.push(ms),
+      nowMs: () => nowMs,
+    });
+    return { result, sleeps, calls: () => calls };
+  };
+
+  // 403 secondary limit with Retry-After: wait exactly that long.
+  let run = await rateLimitCase({
+    responses: [
+      { status: 403, headers: { "retry-after": "5" } },
+      { status: 200 },
+    ],
+  });
+  assert.deepEqual(await run.result, { workflow_runs: [] });
+  assert.deepEqual(run.sleeps, [5000]);
+
+  // Exhausted primary limit: wait until X-RateLimit-Reset.
+  run = await rateLimitCase({
+    nowMs: 1_000_000,
+    responses: [
+      {
+        status: 403,
+        headers: { "x-ratelimit-remaining": "0", "x-ratelimit-reset": "1030" },
+      },
+      { status: 200 },
+    ],
+  });
+  assert.deepEqual(await run.result, { workflow_runs: [] });
+  assert.deepEqual(run.sleeps, [30000]);
+
+  // 429 naming no wait: the one-minute secondary-limit floor.
+  run = await rateLimitCase({ responses: [{ status: 429 }, { status: 200 }] });
+  assert.deepEqual(await run.result, { workflow_runs: [] });
+  assert.deepEqual(run.sleeps, [60000]);
+
+  // A rate limit asking for longer than the job can wait fails at once.
+  run = await rateLimitCase({
+    responses: [{ status: 429, headers: { "retry-after": "3600" } }],
+  });
+  await assert.rejects(run.result, /failed: 429 Rate limited/);
+  assert.equal(run.calls(), 1);
+  assert.deepEqual(run.sleeps, []);
+
+  // A secondary limit with no rate-limit headers is known by its message:
+  // the one-minute floor.
+  run = await rateLimitCase({
+    responses: [
+      {
+        status: 403,
+        headers: { "x-ratelimit-remaining": "4999" },
+        body: '{"message":"You have exceeded a secondary rate limit. Please wait a few minutes before you try again."}',
+      },
+      { status: 200 },
+    ],
+  });
+  assert.deepEqual(await run.result, { workflow_runs: [] });
+  assert.deepEqual(run.sleeps, [60000]);
+
+  // A 403 without rate-limit headers or message is a permission error: no retry.
+  run = await rateLimitCase({
+    responses: [
+      {
+        status: 403,
+        headers: { "x-ratelimit-remaining": "42" },
+        body: '{"message":"Resource not accessible by integration"}',
+      },
+    ],
+  });
+  await assert.rejects(run.result, /failed: 403 .*Resource not accessible/);
+  assert.equal(run.calls(), 1);
 }
 
 console.log("check-terraform-deploy-queue tests passed");
