@@ -6,11 +6,6 @@ const LIQUITY_CHAIN_IDS = new Set(
   LIQUITY_MARKETS.map((market) => market.chainId),
 );
 
-type BlockWithTimestamp = {
-  readonly number: number;
-  readonly timestamp?: number;
-};
-
 indexer.onBlock(
   {
     name: "LiquityBootstrapCollaterals",
@@ -22,13 +17,16 @@ indexer.onBlock(
             },
           }
         : false,
+    // Envio passes onBlock handlers only `number` plus the fields selected
+    // here. Before 3.15 there was no selection, so `timestamp` was absent and
+    // `createdAtTimestamp` was written as 0.
+    fields: { block: ["timestamp"] },
   },
   async ({ block, context }) => {
-    const blockWithTimestamp = block as BlockWithTimestamp;
     await bootstrapCollaterals(
       context,
       BigInt(block.number),
-      BigInt(blockWithTimestamp.timestamp ?? 0),
+      BigInt(block.timestamp),
     );
   },
 );

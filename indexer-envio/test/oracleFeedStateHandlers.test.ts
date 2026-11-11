@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import type { Pool } from "envio";
 // @ts-expect-error -- ReScript output ships no type declarations, and envio
-// publishes no `exports` map, so the logger singleton is importable directly.
-import * as Logging from "envio/src/Logging.res.mjs";
+// publishes no `exports` map, so the logger module is importable directly.
+import * as EnvioLogger from "envio/src/Logger.res.mjs";
+// @ts-expect-error -- as above; `createTestIndexer` from "envio" re-exports
+// this module's function, so both share its lazily built root logger.
+import * as EnvioTestIndexer from "envio/src/TestIndexer.res.mjs";
 import {
   indexerTestHelpers,
   processMockEvents,
@@ -76,40 +79,56 @@ function createTrackedPoolDb(address: string, overrides: Partial<Pool> = {}) {
   return { mockDb, poolId };
 }
 
-type PinoLike = {
-  child: (...args: unknown[]) => Record<string, unknown>;
+/** Envio's logger record: child loggers copy `output` and `minLevel` from
+ * their parent when they are created (`Logger.withFieldsJson`). */
+type EnvioLoggerRecord = {
+  output: unknown;
+  minLevel: number;
+  boundFieldsJson: string[];
 };
 
+type InMemoryLine = { level: string; msg: string };
+
+/** The test indexer's root logger. `createTestIndexer` builds it lazily on its
+ * first call and reuses it for every later indexer in this process. */
+function testIndexerRootLogger(): EnvioLoggerRecord {
+  const lazy = EnvioTestIndexer.logger as {
+    LAZY_DONE: boolean;
+    VAL: unknown;
+  };
+  if (!lazy.LAZY_DONE) EnvioTestIndexer.createTestIndexer();
+  return lazy.VAL as EnvioLoggerRecord;
+}
+
 /** Run one event and return every `context.log.warn` message it emitted.
- * Envio builds the per-event user logger as a child of the pino instance the
- * ecosystem captured at config load (`Evm.toEventLogger`), so the spy patches
- * `child` on that instance in place rather than swapping the singleton. The
- * runtime hands the preload pass `Logging.noopLogger`
+ * Envio 3.15 builds the per-event user logger as a child of the test
+ * indexer's root logger when the indexer processes the event
+ * (`RunScope.handlerLogger`), so the root's output is pointed at an in-memory
+ * logger (`Logger.makeInMemory`) for the duration of the run and restored
+ * afterwards. The root otherwise runs at level `silent`, which would drop the
+ * warnings. The runtime hands the preload pass `Logger.silentContextLog`
  * (`envio/src/UserContext.res`), so a token counted exactly once here also
  * proves the preload pass stayed silent. */
 async function captureWarnings<T>(
   run: () => Promise<T>,
 ): Promise<{ result: T; warnings: string[] }> {
-  const logger = Logging.getLogger() as PinoLike;
-  const originalChild = logger.child;
-  const warnings: string[] = [];
-  logger.child = function spyChild(...args: unknown[]) {
-    const child = originalChild.apply(this, args);
-    const originalWarn = child["uwarn"] as (
-      params: unknown,
-      message: string,
-    ) => void;
-    child["uwarn"] = (params: unknown, message: string) => {
-      warnings.push(message);
-      originalWarn.call(child, params, message);
-    };
-    return child;
-  };
+  const root = testIndexerRootLogger();
+  const memory = EnvioLogger.makeInMemory() as EnvioLoggerRecord;
+  const original = { output: root.output, minLevel: root.minLevel };
+  root.output = memory.output;
+  root.minLevel = memory.minLevel;
+  let result: T;
   try {
-    return { result: await run(), warnings };
+    result = await run();
   } finally {
-    logger.child = originalChild;
+    root.output = original.output;
+    root.minLevel = original.minLevel;
   }
+  const lines = EnvioLogger.inMemoryLines(memory) as InMemoryLine[];
+  const warnings = lines
+    .filter((line) => line.level === "uwarn")
+    .map((line) => line.msg);
+  return { result, warnings };
 }
 
 function replayTokens(warnings: readonly string[]): string[] {
