@@ -192,12 +192,12 @@ variable "squid_integrator_id" {
   default     = ""
 }
 
-variable "grafana_sm_access_token" {
+variable "grafana_synthetic_monitoring_access_token" {
   description = <<-EOT
     Grafana Synthetic Monitoring access token for the alerts-rules stack.
     Generate in Grafana Cloud -> Testing & synthetics -> Synthetics -> Config
     -> Access tokens. Mirrors into the repo-level Actions secret
-    `TF_VAR_SM_ACCESS_TOKEN`, which alerts-rules plan/apply and drift read.
+    `TF_VAR_SYNTHETIC_MONITORING_ACCESS_TOKEN`, which alerts-rules plan/apply and drift read.
   EOT
   type        = string
   sensitive   = true

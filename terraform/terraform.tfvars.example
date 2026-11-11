@@ -76,10 +76,10 @@ upstash_api_key = "..."
 
 # ── Grafana Synthetic Monitoring ──────────────────────────────────────────────
 # Access token from Grafana Cloud → Testing & synthetics → Synthetics → Config →
-# Access tokens. Mirrors into the Actions secret TF_VAR_SM_ACCESS_TOKEN that the
+# Access tokens. Mirrors into the Actions secret TF_VAR_SYNTHETIC_MONITORING_ACCESS_TOKEN that the
 # alerts-rules stack reads. Leave empty until provisioned; the mirror is
 # `count`-gated and alerts-rules then manages no synthetic checks.
-# grafana_sm_access_token = "..."
+# grafana_synthetic_monitoring_access_token = "..."
 
 # ── Integration Probes ────────────────────────────────────────────────────────
 # LI.FI API key for the scheduled integration-probes workflow.

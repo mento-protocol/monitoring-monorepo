@@ -45,7 +45,8 @@ const APPLY_CONFIG_BY_WORKFLOW = {
         "${{ secrets.TF_VAR_ONCALL_SUPPORT_USERGROUP_ID }}",
       TF_VAR_splunk_on_call_alerts_webhook_url:
         "${{ secrets.TF_VAR_SPLUNK_ON_CALL_ALERTS_WEBHOOK_URL }}",
-      TF_VAR_sm_access_token: "${{ secrets.TF_VAR_SM_ACCESS_TOKEN }}",
+      TF_VAR_synthetic_monitoring_access_token:
+        "${{ secrets.TF_VAR_SYNTHETIC_MONITORING_ACCESS_TOKEN }}",
     },
   },
   ".github/workflows/alerts-infra.yml": {

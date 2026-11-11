@@ -92,15 +92,15 @@ variable "slack_channel_testnet" {
   default     = "#alerts-testnet"
 }
 
-variable "sm_url" {
+variable "synthetic_monitoring_url" {
   type        = string
   description = "Synthetic Monitoring API URL for the clabsmento stack (Synthetics app settings, apiHost)."
   default     = "https://synthetic-monitoring-api.grafana.net"
 }
 
-variable "sm_access_token" {
+variable "synthetic_monitoring_access_token" {
   type        = string
-  description = "Synthetic Monitoring access token, delivered by the platform stack as the TF_VAR_SM_ACCESS_TOKEN Actions secret (see README). Empty disables the synthetic checks."
+  description = "Synthetic Monitoring access token, delivered by the platform stack as the TF_VAR_SYNTHETIC_MONITORING_ACCESS_TOKEN Actions secret (see README). Empty disables the synthetic checks."
   sensitive   = true
   default     = ""
 }
