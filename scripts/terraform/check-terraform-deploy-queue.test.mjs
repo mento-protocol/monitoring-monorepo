@@ -312,4 +312,77 @@ const mainEnv = {
   assert.equal(calls, 1);
 }
 
+// githubJson(): rate limits (429, or 403 with rate-limit headers) wait for
+// what GitHub asks; longer waits and plain 403s fail at once.
+{
+  const rateLimitCase = async ({ responses, nowMs = 1_000_000 }) => {
+    const sleeps = [];
+    let calls = 0;
+    const fetchImpl = async () => {
+      const { status, headers = {} } = responses[calls];
+      calls += 1;
+      return {
+        ok: status === 200,
+        status,
+        headers: { get: (name) => headers[name.toLowerCase()] ?? null },
+        text: async () => "Rate limited",
+        json: async () => ({ workflow_runs: [] }),
+      };
+    };
+    const result = githubJson({
+      fetchImpl,
+      apiUrl: "https://api.github.test",
+      githubToken: "gh-test-token",
+      path: "repos/o/r/actions/workflows/x.yml/runs",
+      sleep: async (ms) => sleeps.push(ms),
+      nowMs: () => nowMs,
+    });
+    return { result, sleeps, calls: () => calls };
+  };
+
+  // 403 secondary limit with Retry-After: wait exactly that long.
+  let run = await rateLimitCase({
+    responses: [
+      { status: 403, headers: { "retry-after": "5" } },
+      { status: 200 },
+    ],
+  });
+  assert.deepEqual(await run.result, { workflow_runs: [] });
+  assert.deepEqual(run.sleeps, [5000]);
+
+  // Exhausted primary limit: wait until X-RateLimit-Reset.
+  run = await rateLimitCase({
+    nowMs: 1_000_000,
+    responses: [
+      {
+        status: 403,
+        headers: { "x-ratelimit-remaining": "0", "x-ratelimit-reset": "1030" },
+      },
+      { status: 200 },
+    ],
+  });
+  assert.deepEqual(await run.result, { workflow_runs: [] });
+  assert.deepEqual(run.sleeps, [30000]);
+
+  // 429 naming no wait: the one-minute secondary-limit floor.
+  run = await rateLimitCase({ responses: [{ status: 429 }, { status: 200 }] });
+  assert.deepEqual(await run.result, { workflow_runs: [] });
+  assert.deepEqual(run.sleeps, [60000]);
+
+  // A rate limit asking for longer than the job can wait fails at once.
+  run = await rateLimitCase({
+    responses: [{ status: 429, headers: { "retry-after": "3600" } }],
+  });
+  await assert.rejects(run.result, /failed: 429 Rate limited/);
+  assert.equal(run.calls(), 1);
+  assert.deepEqual(run.sleeps, []);
+
+  // A 403 without rate-limit headers is a permission error: no retry.
+  run = await rateLimitCase({
+    responses: [{ status: 403, headers: { "x-ratelimit-remaining": "42" } }],
+  });
+  await assert.rejects(run.result, /failed: 403 Rate limited/);
+  assert.equal(run.calls(), 1);
+}
+
 console.log("check-terraform-deploy-queue tests passed");
