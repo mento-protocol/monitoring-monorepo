@@ -206,7 +206,7 @@ export async function detectStrategyType(
     });
     return "cdp";
   } catch (err) {
-    if (!isContractRevert(err)) throw err;
+    if (!isProbeMiss(err)) throw err;
   }
 
   try {
@@ -217,7 +217,7 @@ export async function detectStrategyType(
     });
     return "reserve";
   } catch (err) {
-    if (!isContractRevert(err)) throw err;
+    if (!isProbeMiss(err)) throw err;
   }
 
   // OLS probe — getPools() is OLS-exclusive and zero-arg, so the selector alone
@@ -230,7 +230,7 @@ export async function detectStrategyType(
     });
     return "ols";
   } catch (err) {
-    if (!isContractRevert(err)) throw err;
+    if (!isProbeMiss(err)) throw err;
   }
 
   return "unknown";
@@ -503,4 +503,35 @@ async function fetchReserveEnrichment(
   } catch {
     return null;
   }
+}
+
+// viem errors raised when a call succeeded but its return data does not fit
+// the expected ABI (e.g. a precompile or unrelated contract answering with
+// 32 bytes where getCDPConfig expects a 128-byte tuple).
+const ABI_DECODE_ERROR_NAMES = new Set([
+  "AbiDecodingDataSizeTooSmallError",
+  "AbiDecodingZeroDataError",
+  "PositionOutOfBoundsError",
+  "InvalidAbiDecodingTypeError",
+]);
+
+function isAbiDecodeError(err: unknown): boolean {
+  let current: unknown = err;
+  for (let i = 0; i < 5 && current && typeof current === "object"; i++) {
+    const name = (current as { name?: unknown }).name;
+    if (typeof name === "string" && ABI_DECODE_ERROR_NAMES.has(name)) {
+      return true;
+    }
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
+/**
+ * Strategy-detection probe miss: the address does not implement the probed
+ * function. Covers explicit reverts, empty return data, and return data that
+ * does not decode against the probed ABI. Transport errors are not misses.
+ */
+function isProbeMiss(err: unknown): boolean {
+  return isContractRevert(err) || isAbiDecodeError(err);
 }
