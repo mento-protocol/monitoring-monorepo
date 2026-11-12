@@ -1,5 +1,12 @@
 mock_provider "grafana" {}
 
+# Pin Synthetic Monitoring off so CI's TF_VAR_synthetic_monitoring_access_token
+# cannot change what this file plans. synthetic-monitoring.tftest.hcl covers
+# the enabled path with mocked probes.
+variables {
+  synthetic_monitoring_access_token = ""
+}
+
 run "trading_limit_slack_routes_repeat_at_most_every_five_days" {
   command = plan
 

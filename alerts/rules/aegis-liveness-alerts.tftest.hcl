@@ -1,5 +1,12 @@
 mock_provider "grafana" {}
 
+# Pin Synthetic Monitoring off so CI's TF_VAR_synthetic_monitoring_access_token
+# cannot change what this file plans. synthetic-monitoring.tftest.hcl covers
+# the enabled path with mocked probes.
+variables {
+  synthetic_monitoring_access_token = ""
+}
+
 run "aegis_per_chain_liveness_defers_to_global_scrape_liveness" {
   command = plan
 
