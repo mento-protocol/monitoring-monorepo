@@ -26,11 +26,11 @@ insufficient for its added value. Claude and Codex remain the PR reviewers.
 Do not request CodeRabbit reviews or wait for its sign-off. Existing actionable
 findings still require disposition.
 
-The retirement change disables repository auto-review and chat replies. It
-removes CodeRabbit requests from active agent workflows. GitHub app removal and
-subscription cancellation need separate live confirmation; repository changes
-do not prove either action. Organization Global overrides can supersede YAML.
-Retain feedback parsers and historical records for existing PRs.
+The retirement change deletes repository configuration, CodeRabbit review gates,
+feedback parsers, output fields and dedicated checks. It removes CodeRabbit
+requests from active agent workflows. The Mento and personal GitHub app
+installations were removed and verified on 2026-11-13. Subscription cancellation
+is unverified.
 The earlier decision and measurements below remain as historical evidence.
 
 ## Context

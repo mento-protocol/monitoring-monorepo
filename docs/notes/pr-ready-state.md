@@ -175,17 +175,6 @@ in the fallback path that runs when those contexts are unavailable. That
 fallback path already reports a `branch-protection` required blocker of its
 own, so the reclassification cannot make a PR fail on its own.
 
-CodeRabbit is retired as of 2026-11-13. Do not request or wait for its reviews.
-The repository configuration disables automatic reviews and chat replies.
-Remove the GitHub app installation to disable it across all organization repositories;
-organization Global overrides can take precedence over repository configuration.
-Existing actionable feedback still requires disposition. Claude and Codex review
-requirements remain in effect.
-
-The `codeRabbitReviewSignal` output remains available for compatibility with
-existing consumers and old PR records. Its advisory fallback is not an instruction
-to request a retired reviewer.
-
 Some non-required workflows still post feedback that becomes a repo-policy
 blocker after the required status surface is green. Their workflow status stays
 optional, but inline threads, unreplied review comments, and actionable
@@ -353,17 +342,6 @@ Expected top-level fields:
       "state": "in_flight",
       "fallbackAction": "wait"
     },
-    "codeRabbitReviewSignal": {
-      "ready": true,
-      "required": false,
-      "state": "not_applicable",
-      "fallbackAction": "wait",
-      "requestCount": 0,
-      "requestBudget": 2,
-      "reason": "path_filters",
-      "sourceUrl": "https://github.com/...",
-      "ignoredPaths": ["docs/evals/example.jsonl"]
-    },
     "reviewCommentReplies": {
       "ready": true,
       "required": true,
@@ -382,7 +360,6 @@ Expected top-level fields:
     }
   ],
   "codexReviewSignal": "in_flight",
-  "codeRabbitReviewSignal": "not_applicable",
   "requiredStatusChecksStrict": false,
   "summary": "1 required blocker(s) remain."
 }
@@ -448,11 +425,6 @@ BEHIND`. Never treat a `notes[]` entry as a blocker.
   `eyes` reaction, a current-head Codex review, or a current-head Codex
   top-level result. `approved` means the final PR-description `+1` gate is
   present. `stale` means only older-head Codex signals exist.
-- `codeRabbitReviewSignal`: legacy advisory state retained for existing consumers.
-  The state can be `missing`, `requested`, `refused`, `stale`, `reviewed`, or
-  `not_applicable`. Request counts and fallback fields describe the retired
-  protocol. Never act on these fields to request or wait for a CodeRabbit review.
-  Existing actionable findings still belong in the feedback ledger.
 - `requiredStatusContexts[]`: required check contexts from classic branch
   protection or branch rulesets. Ruleset-derived entries include status-check
   rules and required-workflow rules when their check names are present in the
@@ -550,7 +522,7 @@ requests and returns `PENDING` when reached.
 7. If ready-state `ready` is false, fix or wait only on `required.blockers` and
    required `gates`.
 8. After a batched fix push, follow the existing Claude and Codex review
-   requirements. Do not request or wait for CodeRabbit.
+   requirements.
 9. Report visibly in-progress review-producing workflows as optional lag. If
    you are still watching the PR when one finishes, rerun `pr:feedback-state`
    to catch late feedback; do not treat the optional workflow status itself as

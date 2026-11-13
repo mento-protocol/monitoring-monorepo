@@ -204,21 +204,6 @@ test("excludes the template checklist from the word count", () => {
   );
 });
 
-test("excludes a bot-appended Summary by section from the word count", () => {
-  assertPass(
-    sizedBody({
-      tldrWords: 20,
-      problemWords: 100,
-      solutionWords: 275,
-      extra: `
-## Summary by CodeRabbit
-
-- ${filler(60)}
-`,
-    }),
-  );
-});
-
 test("counts prose parked under a Checklist heading", () => {
   assertFail(
     sizedBody({

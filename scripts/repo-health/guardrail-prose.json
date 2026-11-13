@@ -36,7 +36,6 @@
     "| Mirrored agent skill content or mirror checker | Run `node scripts/repo-health/check-skills-mirror.mjs` and `node scripts/repo-health/check-skills-mirror.test.mjs`. |",
     "| Guardrail prose pin list or pinned normative text | Run `node scripts/repo-health/check-guardrail-prose.mjs` and `node scripts/repo-health/check-guardrail-prose.test.mjs`. |",
     "| GitHub Actions workflow or action, or protected PR admission boundary | Run `pnpm ci:contract:test`, `node scripts/workflows/check-github-action-pins.mjs`, and `node scripts/workflows/check-ci-contract.mjs`. |",
-    "| `.coderabbit.yaml` | Run `pnpm coderabbit:config:test`. |",
     "| `.lighthouserc.cjs` | Run `node scripts/lighthouse-config.test.mjs`. |",
     "| `.gitignore` | Run `pnpm review:eval:test`. |",
     "| Upstash MCP configuration, runtime, pin, operator contract, or forensic-report skill mirror, including its package, lockfile, and Terraform inputs | Run `node --test scripts/mcp/upstash-mcp-config.test.mjs`. |",

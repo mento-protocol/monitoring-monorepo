@@ -82,7 +82,6 @@ the weekly usage window, and every push to it triggers another Codex review,
 whose findings then cost replies and often another push. Claude is not a
 per-push cost: `.github/workflows/claude.yml` fires on `opened` and
 `ready_for_review` only, so a Claude re-review is opt-in via `@claude review`.
-CodeRabbit is retired. Do not request or wait for CodeRabbit reviews.
 Two issues is
 the default because the cost is dominated by review rounds, not by the first
 implementation. **Refuse a batch size above 4.** Say that plainly and stop

@@ -168,8 +168,7 @@ test("any other difference in a forensic-report file still fails", () => {
 
 test("a swapped forensic-report provenance literal fails even when both sides match", () => {
   // Byte-identical files pass the content comparison, so a mirror that copied
-  // the canonical literal (or the reverse) needs its own check: nothing else
-  // reviews `.claude/skills` once CodeRabbit's path filter excludes it.
+  // the canonical literal (or the reverse) needs its own check for each side as well.
   const { rootA, rootB } = newFixture();
   mkdirSync(path.join(rootA, "forensic-report"));
   mkdirSync(path.join(rootB, "forensic-report"));

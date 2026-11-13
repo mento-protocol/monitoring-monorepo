@@ -8,9 +8,6 @@
  * base-health read can reuse the same classification the PR's own checks get.
  */
 export const OPTIONAL_CHECK_NAMES = new Set([
-  // CodeRabbit is advisory and reports SUCCESS when a rate-limited review never
-  // ran. Report its lag, but read review evidence instead of its conclusion.
-  "CodeRabbit",
   "Core Web Vitals + accessibility (ui-dashboard)",
   "GraphQL schema diff",
   "jscpd",

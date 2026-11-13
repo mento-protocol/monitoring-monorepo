@@ -1,14 +1,10 @@
 import {
   BOT_APPROVER,
-  classifyCodeRabbitReviewSignal,
   classifyCodexReviewSignal,
-  codeRabbitRateLimitRefusalTime,
-  countTrustedCodeRabbitReviewRequests,
   hasCodexApprovalReaction,
   hasCodexInFlightReaction,
   parseTimestamp,
 } from "./pr-ready-state-review-signals.mjs";
-import { summarizeCodeRabbitReviewGate } from "./pr-ready-state-closeout.mjs";
 import {
   CODEX_DESCRIPTION_APPROVAL_OVERRIDE_GATE,
   HUMAN_OVERRIDE_ASSOCIATIONS,
@@ -24,13 +20,9 @@ import {
 
 export {
   BOT_APPROVER,
-  classifyCodeRabbitReviewSignal,
   classifyCodexReviewSignal,
-  codeRabbitRateLimitRefusalTime,
-  countTrustedCodeRabbitReviewRequests,
   hasCodexApprovalReaction,
   hasCodexInFlightReaction,
-  isCodeRabbitFinalHeadReviewRequestBody,
   isCodexReviewRequestBody,
 } from "./pr-ready-state-review-signals.mjs";
 export {
@@ -361,9 +353,6 @@ function terminalGates({ merged }) {
       state: merged ? "approved" : "not_applicable",
       fallbackAction: "wait",
     },
-    // Same shape as the live gate, counters included, so consumers see one
-    // schema across the terminal transition.
-    codeRabbitReviewSignal: summarizeCodeRabbitReviewGate("not_applicable"),
     reviewCommentReplies: {
       ready: true,
       required: merged,
@@ -415,7 +404,6 @@ export function summarizeTerminalReadyState(pr) {
     topLevelBotComments: [],
     codexApprovalReaction: merged,
     codexReviewSignal: merged ? "approved" : "missing",
-    codeRabbitReviewSignal: "not_applicable",
     requiredStatusChecksStrict: null,
   };
 }
@@ -441,10 +429,6 @@ export function summarizeReadyState({
   baseHealthOid = null,
   baseHealthError = null,
   includeFeedbackDetails = false,
-  codeRabbitPathFilterSkip = null,
-  // Wall-clock "now" for the closeout waits. Not the caller's `observedAt`
-  // floor from the status reads, which is the oldest check timestamp.
-  now = Date.now(),
 }) {
   const statusChecks = groupStatusChecks(pr.statusCheckRollup ?? []);
   const splitChecks = splitRequiredAndOptionalChecks(
@@ -486,18 +470,6 @@ export function summarizeReadyState({
     currentHeadOid,
     codexApprovalReaction,
     codexInFlightReaction,
-  });
-  const codeRabbitRefusedAt = codeRabbitRateLimitRefusalTime({
-    issueComments,
-    currentHeadOid,
-  });
-  const codeRabbitReviewSignal = classifyCodeRabbitReviewSignal({
-    issueComments,
-    reviews: pr.reviews ?? [],
-    headUpdatedAt,
-    currentHeadOid,
-    pathFilterSkip: codeRabbitPathFilterSkip,
-    refusedAt: codeRabbitRefusedAt,
   });
   const activeReadinessOverrides = findActiveReadinessOverrides(
     issueComments,
@@ -691,23 +663,6 @@ export function summarizeReadyState({
           ? "request_review_once_after_grace"
           : "wait",
     },
-    codeRabbitReviewSignal: summarizeCodeRabbitReviewGate(
-      codeRabbitReviewSignal,
-      codeRabbitPathFilterSkip,
-      {
-        mergeStateStatus: pr.mergeStateStatus ?? null,
-        requiredStatusChecksStrict,
-        // CodeRabbit registers a check run while it reviews; the pending group
-        // already classifies status-only runs as pending.
-        reviewRunning: statusChecks.pending.some(
-          (check) => String(check.name).toLowerCase() === "coderabbit",
-        ),
-        requestCount: countTrustedCodeRabbitReviewRequests(issueComments),
-        headUpdatedAt,
-        observedAt: now,
-        refusedAt: codeRabbitRefusedAt,
-      },
-    ),
     reviewCommentReplies: {
       ready: unrepliedRootReviewComments.length === 0,
       required: true,
@@ -767,7 +722,6 @@ export function summarizeReadyState({
     ),
     codexApprovalReaction,
     codexReviewSignal,
-    codeRabbitReviewSignal,
     requiredStatusChecksStrict,
   };
 

@@ -12,10 +12,6 @@ const SOLUTION_HEADING_RE = /^##\s+The Solution\s*$/;
 const H2_HEADING_RE = /^ {0,3}##(?:[\t ]+|$)/;
 const CHECKLIST_HEADING_RE = /^ {0,3}##[\t ]+Checklist\s*$/;
 const TASK_LIST_ITEM_RE = /^ {0,3}[-*+][\t ]+\[[ xX]\][\t ]/;
-// Only the review bot's own appended section is exempt. A prefix match would
-// also exempt an authored heading such as '## Summary by network', and with it
-// every word under that heading.
-const BOT_SUMMARY_HEADING_RE = /^ {0,3}##[\t ]+Summary by CodeRabbit\s*$/i;
 // Tag matching steps over quoted attribute values, so a '>' inside one does not
 // end the tag early and leave the rest of the attribute counted as prose.
 const HTML_COMMENT_RE = /<!--[\s\S]*?-->/g;
@@ -37,8 +33,8 @@ const ISSUE_RE = /#[0-9]+|github\.com\/[^\s]+\/issues\/[0-9]+/;
 // above that so a slightly long summary is a nudge, not a build break.
 const TLDR_MAX_WORDS = 80;
 // A reviewer reads the authored body in about two minutes. 250 words is typical;
-// 400 is the ceiling. The template's own checklist, HTML comments, code blocks,
-// and the review bot's appended summary section are not authored body.
+// 400 is the ceiling. The template's own checklist, HTML comments and code
+// blocks are not authored body.
 const BODY_MAX_WORDS = 400;
 
 function linesOf(body) {
@@ -342,8 +338,8 @@ function sectionLines(body, headingPattern) {
 }
 
 /**
- * Words the author wrote. The template's ticked boxes and the review bot's
- * appended summary section do not count; prose parked under `## Checklist` does,
+ * Words the author wrote. The template's ticked boxes do not count; prose
+ * parked under `## Checklist` does,
  * because only the task-list items themselves are template content. HTML
  * comments and fenced code are already gone from the body this receives.
  */
@@ -357,13 +353,8 @@ function authoredWordCount(body) {
         section = "checklist";
         continue;
       }
-      if (BOT_SUMMARY_HEADING_RE.test(line)) {
-        section = "bot";
-        continue;
-      }
       section = "body";
     }
-    if (section === "bot") continue;
     if (section === "checklist" && TASK_LIST_ITEM_RE.test(line)) continue;
     kept.push(line);
   }
@@ -476,7 +467,7 @@ export function validatePrDescription(body) {
   if (bodyWords > BODY_MAX_WORDS) {
     return {
       ok: false,
-      message: `The authored PR description is ${bodyWords} words; the ceiling is ${BODY_MAX_WORDS} and about 250 is typical. The template checklist, HTML comments, code blocks, and the '## Summary by CodeRabbit' section do not count. Cut until it fits — move long reasoning to the commit message, an ADR, the linked issue, or a review comment.`,
+      message: `The authored PR description is ${bodyWords} words; the ceiling is ${BODY_MAX_WORDS} and about 250 is typical. The template checklist, HTML comments and code blocks do not count. Cut until it fits — move long reasoning to the commit message, an ADR, the linked issue, or a review comment.`,
     };
   }
 

@@ -246,7 +246,7 @@ polled. Do not foreground-poll and never sleep-poll.
 
 1. Subscribe to PR events (`subscribe_pr_activity`) so comments, reviews, and CI
    failures arrive as webhook activity. An edit to an existing bot comment (for
-   example CodeRabbit or Codex updating its own summary in place) re-fires a
+   example Codex updating its own summary in place) re-fires a
    PR-activity wake the same as a new comment. Dedupe by comment id plus its
    updated content, not by event count, or an edited-in-place summary reads as
    new findings every time it changes.
@@ -269,8 +269,6 @@ polled. Do not foreground-poll and never sleep-poll.
    - The Codex current-head signal from Codex's visible reviews and comments.
      The reaction-backed PR-description approval gate is not readable over MCP;
      report it as unverified rather than assumed.
-   - CodeRabbit is retired. Do not request or wait for its review. Address
-     existing actionable feedback through the normal feedback ledger.
 
 4. **A fork head stops the run on this surface too.** The repo gate that refuses
    fork heads (`.claude/babysit-pr.sh`) cannot run here, so establish

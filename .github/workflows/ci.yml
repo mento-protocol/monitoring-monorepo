@@ -276,11 +276,6 @@ jobs:
               - scripts/**/*.cjs
               - scripts/**/*.js
               - scripts/**/*.sh
-              # CodeRabbit reads .coderabbit.yaml from the PR's own source
-              # branch and its findings feed the pr:feedback-state ledger, so a
-              # config-only PR must still run the allowlist pin below. Without
-              # this entry the whole scripts job skips and the pin never runs.
-              - .coderabbit.yaml
               - docs/evals/documentation-navigation-*.json
               # Two lines, because the frozen review-skill inputs are both flat
               # files and directories. dorny/paths-filter matches with
@@ -448,7 +443,6 @@ jobs:
               - patches/**
               - scripts/**
               - shared-config/**
-              - .coderabbit.yaml
               - .dependency-cruiser.cjs
               - .gcloudignore
               - .gitignore
@@ -1352,15 +1346,6 @@ jobs:
         # Preserve the independent architecture-root equality that was embedded
         # in the legacy gate suite.
         run: node --test scripts/repo-health/dependency-cruiser-root-contract.test.mjs
-      - name: CodeRabbit config allowlist pin
-        # ADR 0066. CodeRabbit resolves .coderabbit.yaml from the PR's SOURCE
-        # branch, so a PR can weaken the reviewer that reviews it — and its
-        # findings now feed the pr:feedback-state ledger. The pin asserts the
-        # committed config exactly equals the canonical object in the suite, so
-        # weakening it fails required CI until the pin is edited in the same PR.
-        # Required CI is authoritative because any local author procedure can
-        # be skipped.
-        run: pnpm coderabbit:config:test
       - name: Terraform source-format target regression suite
         # Proves ignored operator tfvars stay outside the explicit format target
         # list while tracked and non-ignored source paths remain covered.
