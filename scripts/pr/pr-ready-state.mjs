@@ -18,10 +18,6 @@ import {
   fetchHeadUpdatedAt,
   headUpdatedAtFromTimeline,
 } from "./pr-ready-state-closeout.mjs";
-import {
-  findCodeRabbitPathFilterSkipCandidate,
-  validateCodeRabbitPathFilterSkip,
-} from "./pr-ready-state-review-signals.mjs";
 import { formatCompact, formatHuman } from "./pr-ready-state-format.mjs";
 import {
   fetchStackContext,
@@ -351,31 +347,6 @@ export async function fetchReadyState({
     timelineItems: timelineResult.ok ? timelineResult.value : [],
     observedAt,
   });
-  const pathFilterCandidate = findCodeRabbitPathFilterSkipCandidate({
-    issueComments,
-    headUpdatedAt,
-  });
-  let codeRabbitPathFilterSkip = null;
-  if (pathFilterCandidate) {
-    const filesResult = await ghApiJsonPagesResult(repo, [
-      `repos/${path}/pulls/${number}/files?per_page=100`,
-    ]);
-    const currentPrResult = filesResult.ok
-      ? await ghApiJsonResult(repo, [`repos/${path}/pulls/${number}`])
-      : { ok: false, value: null };
-    const currentPr = currentPrResult.ok ? currentPrResult.value : null;
-    codeRabbitPathFilterSkip = validateCodeRabbitPathFilterSkip({
-      candidate: pathFilterCandidate,
-      currentFiles: filesResult.ok
-        ? filesResult.value.map((file) => file?.filename ?? null)
-        : null,
-      expectedChangedFileCount: pr.changedFiles,
-      filesComplete:
-        filesResult.ok &&
-        currentPr?.head?.sha === pr.headRefOid &&
-        currentPr?.changed_files === pr.changedFiles,
-    });
-  }
   await verifyReadinessSnapshot({
     repo,
     pr,
@@ -407,7 +378,6 @@ export async function fetchReadyState({
     baseHealthOid: baseHealth?.oid ?? null,
     baseHealthError: baseHealth?.error ?? null,
     includeFeedbackDetails,
-    codeRabbitPathFilterSkip,
   });
   return stack
     ? {

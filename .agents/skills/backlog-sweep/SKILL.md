@@ -82,12 +82,7 @@ the weekly usage window, and every push to it triggers another Codex review,
 whose findings then cost replies and often another push. Claude is not a
 per-push cost: `.github/workflows/claude.yml` fires on `opened` and
 `ready_for_review` only, so a Claude re-review is opt-in via `@claude review`.
-CodeRabbit is not a per-push cost either: `auto_incremental_review: false`
-works, and the ADR 0066 amendment of 2026-09-14 records the measurement. It
-reviews the opening push and the closeout head only. Budget at most two trusted
-`@coderabbitai review` or `full review` requests per PR, marked or bare, and
-merge the base before a request rather than after it when the gate asks for a
-base merge at all. Two issues is
+Two issues is
 the default because the cost is dominated by review rounds, not by the first
 implementation. **Refuse a batch size above 4.** Say that plainly and stop
 rather than clamping silently — an operator who asked for 6 needs to know they
@@ -588,13 +583,11 @@ Then spawn one worker subagent per issue. Give each a brief containing:
   step 4. That step owns exit handling, fallback, findings, and validation
   claims.
 - **The ship:** full repo PR template, every section with `## tl;dr` first,
-  **ready for review, never a draft**. A draft disables CodeRabbit auto-review
-  and the PR description check, so it is skipping review rather than staging it.
+  **ready for review, never a draft**. A draft disables the PR description check, so it is skipping review rather than staging it.
   Then `pnpm issue:review --pr <pr> --issue <n>`.
 - **The babysit:** sweep every feedback surface — top-level comments, review
   bodies, inline threads, annotations, failing logs. **Batch fixes into single
-  pushes**, because every push costs another Codex review round, and batch them
-  before the CodeRabbit closeout request so the PR spends at most two. Reply before
+  pushes**, because every push costs another Codex review round, and obtain required reviews for the final head. Reply before
   resolving, in the two canonical forms: `Fixed in <commit> — <what changed>`
   and `Won't fix: <technical reason why>`. Drive to READY on both projections,
   `pr:feedback-state` clean first, then `pr:ready-state`.

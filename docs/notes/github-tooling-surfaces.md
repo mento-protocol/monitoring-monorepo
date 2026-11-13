@@ -246,7 +246,7 @@ polled. Do not foreground-poll and never sleep-poll.
 
 1. Subscribe to PR events (`subscribe_pr_activity`) so comments, reviews, and CI
    failures arrive as webhook activity. An edit to an existing bot comment (for
-   example CodeRabbit or Codex updating its own summary in place) re-fires a
+   example Codex updating its own summary in place) re-fires a
    PR-activity wake the same as a new comment. Dedupe by comment id plus its
    updated content, not by event count, or an edited-in-place summary reads as
    new findings every time it changes.
@@ -269,78 +269,7 @@ polled. Do not foreground-poll and never sleep-poll.
    - The Codex current-head signal from Codex's visible reviews and comments.
      The reaction-backed PR-description approval gate is not readable over MCP;
      report it as unverified rather than assumed.
-   - The CodeRabbit current-head signal from `get_reviews` and top-level
-     comments — the MCP reading of the closeout contract
-     [`pr-ready-state.md`](pr-ready-state.md) owns. Count a CodeRabbit review
-     whose body contains `**Run ID**` and whose review commit equals the
-     current full head. Also count a trusted top-level clean-run block when
-     `<!-- recent_review_start -->` and `<!-- recent_review_end -->` enclose
-     it, it contains a Run ID, its full reviewed commit range ends at the
-     current head, and its comment update time is at or after the current head
-     update time. Ignore empty reply-only reviews and rate-limit notices. A
-     path-filter skip is `not_applicable` only when the trusted comment carries
-     the canonical summary and skip markers, exact path-filter text, one Run
-     ID, and one non-empty counted ignored-file block. Page `get_files` to the
-     end and require the unique ignored paths, reported count, complete current
-     filenames, and PR changed-file count to agree exactly. Re-read the head
-     after paging. If MCP cannot prove complete pagination, the current file
-     count, or an unchanged head, fail closed and treat the skip as no current
-     review signal. Generic no-file, incremental no-change, rate-limit, and
-     free-tier replies never count. Before deciding whether to wait, read
-     `reviews.auto_review.auto_incremental_review` from the PR head's
-     `.coderabbit.yaml` — CodeRabbit reads that file from the source branch, so
-     a branch predating the 2026-09-03 change still has it `true`. When it is
-     `true`, or the key or file is absent — which falls back to the provider
-     default of enabled, so never read a missing value as `false` — **and** the
-     org-level Global override does not set the key, wait for the automatic
-     attempt to become terminal as before. When it is `false`, or
-     when the Global override sets `auto_incremental_review: false` — which
-     outranks the head's file and makes the head value ineffective — a push onto
-     an already-open PR starts no automatic review, only the opening push does,
-     so refresh once the head is stable and send the closeout request instead of
-     waiting for a run that cannot start. The key works: the ADR 0066 amendment
-     of 2026-09-14 records the measurement. ADR 0066 also records which keys
-     that override pins and when the operator applied it. One exception to that
-     second branch: when this PR's opening review never completed, coming back
-     as a rate-limit or cap notice rather than a review, a later push can still
-     draw a full run, so wait the bounded time as in the `true` branch before
-     posting. Then apply the closeout order
-     [`pr-ready-state.md`](pr-ready-state.md) states in full, which governs
-     this surface too: on `merge_base_first` only, merge the base before the
-     request and never after, as a local merge of the fetched base — never
-     merely because the PR is behind, and never through GitHub's "Update branch"
-     button or a web-UI edit, because each costs a review event, and a base
-     merge or rebase after the request can draw an unprompted full re-review of
-     the whole PR; batch every fix commit into one push; post at most one
-     marked request per accepted head and at most two per PR, the opening
-     closeout and one after review fixes (a refused request may be retried once,
-     per that note); and never post while a CodeRabbit check is running
-     on the current head, because the request supersedes that review and the
-     vendor charges the one it discards. The local probe publishes that
-     decision as `gates.codeRabbitReviewSignal.fallbackAction`; its precedence
-     is stated once, in [`pr-ready-state.md`](pr-ready-state.md). When the
-     probe cannot run here, derive the same answer by hand from that list —
-     do not restate or re-derive it on this surface — and post only when it
-     says `request_review_once_for_head`, which now covers the refused-request
-     retry too (a `requested` signal waits): use `add_issue_comment` to post
-     `@coderabbitai review`, a blank line, and
-     `<!-- coderabbit-final-head-review:<full-head-sha> -->`, after
-     re-resolving the full head immediately before the write. The stack rule
-     and the head-config rule still apply on top of it: a native stack layer
-     brings its base in through the stacked PR workflow, and a head that still
-     enables incremental review waits for the automatic attempt first. A
-     request comment counts only when its author association is `OWNER`,
-     `MEMBER`, or `COLLABORATOR`, or its author login is `claude`,
-     `claude[bot]`, `chatgpt-codex-connector`, or
-     `chatgpt-codex-connector[bot]`; that trust rule bounds the two-per-PR
-     budget as well as the exact-head marker. The marker detects completed
-     requests and provides best-effort duplicate suppression; the issue-comment
-     API has no atomic claim. After posting, wait for that closeout attempt to
-     become terminal before the final feedback sweep, bounded by the babysit
-     deadline, and handle any findings it posts. That wait is procedural: the
-     readiness contract still never blocks on the CodeRabbit signal, and a
-     review that never starts or is still pending at the deadline is optional
-     lag.
+
 4. **A fork head stops the run on this surface too.** The repo gate that refuses
    fork heads (`.claude/babysit-pr.sh`) cannot run here, so establish
    `isCrossRepository` from the PR payload before the first repo command and

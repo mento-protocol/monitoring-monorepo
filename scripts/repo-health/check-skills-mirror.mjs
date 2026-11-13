@@ -142,7 +142,7 @@ function sameContents(fileA, fileB, relativePath) {
  * swap. The canonical tree writes `source: "Codex"` and the Claude mirror
  * writes `source: "claude"`. A mirror refresh that copies the canonical file
  * over the mirror leaves both sides byte-identical, which the content
- * comparison accepts, and CodeRabbit no longer reviews the mirror — so pin
+ * comparison accepts, so pin
  * the side here, for the two documented literals only.
  */
 export function provenanceSideDrift(contentsA, contentsB, relativePath) {

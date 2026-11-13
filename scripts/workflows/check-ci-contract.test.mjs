@@ -384,7 +384,7 @@ test("unknown, control-plane, and mixed diffs select every conditional job", asy
 test("ordinary package and documentation diffs keep affected selection", async () => {
   // Tooling namespaces route like product ones: they must not force all.
   // prettier-ignore
-  for (const path of "ui-dashboard/src/app/page.tsx|docs/notes/example.md|README.md|scripts/pr/pr-ready-state.mjs|.github/workflows/claude.yml|.claude/skills/ship/SKILL.md|.agents/skills/ship/SKILL.md|.codex/config.toml|shared-config/chains.json|.coderabbit.yaml|terraform.stacks.json|.gitignore|cloudbuild.yaml".split("|")) assert.equal((await forceAllForChanges(LIVE.filters, [changed(path)])).forceAll, false, path);
+  for (const path of "ui-dashboard/src/app/page.tsx|docs/notes/example.md|README.md|scripts/pr/pr-ready-state.mjs|.github/workflows/claude.yml|.claude/skills/ship/SKILL.md|.agents/skills/ship/SKILL.md|.codex/config.toml|shared-config/chains.json|terraform.stacks.json|.gitignore|cloudbuild.yaml".split("|")) assert.equal((await forceAllForChanges(LIVE.filters, [changed(path)])).forceAll, false, path);
   // An unrouted path still forces, whether or not `ordinary` names it.
   // prettier-ignore
   for (const path of "docs/notes/example.json|turbo.json|.github/dependabot.yml".split("|")) { const unrouted = await forceAllForChanges(LIVE.filters, [changed(path)]); assert.equal(unrouted.forceAll, true, path); assert.deepEqual(unrouted.unknown, [path]); }

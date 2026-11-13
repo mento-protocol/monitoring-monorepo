@@ -105,7 +105,6 @@ If root `package.json` changed, first run
    | Mirrored agent skill content or mirror checker                                                                                                                                                                                                                                                           | Run `node scripts/repo-health/check-skills-mirror.mjs` and `node scripts/repo-health/check-skills-mirror.test.mjs`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
    | Guardrail prose pin list or pinned normative text                                                                                                                                                                                                                                                        | Run `node scripts/repo-health/check-guardrail-prose.mjs` and `node scripts/repo-health/check-guardrail-prose.test.mjs`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
    | GitHub Actions workflow or action, or protected PR admission boundary                                                                                                                                                                                                                                    | Run `pnpm ci:contract:test`, `node scripts/workflows/check-github-action-pins.mjs`, and `node scripts/workflows/check-ci-contract.mjs`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-   | `.coderabbit.yaml`                                                                                                                                                                                                                                                                                       | Run `pnpm coderabbit:config:test`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
    | `.lighthouserc.cjs`                                                                                                                                                                                                                                                                                      | Run `node scripts/lighthouse-config.test.mjs`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
    | `.gitignore`                                                                                                                                                                                                                                                                                             | Run `pnpm review:eval:test`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
    | Upstash MCP configuration, runtime, pin, operator contract, or forensic-report skill mirror, including its package, lockfile, and Terraform inputs                                                                                                                                                       | Run `node --test scripts/mcp/upstash-mcp-config.test.mjs`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
@@ -291,9 +290,7 @@ If root `package.json` changed, first run
    enforces those three sections, their order, and the ceiling in CI; raw HTML
    other than comments and code blocks does not satisfy its opening-content
    check. PRs open **ready for
-   review, never as drafts** — a draft silently disables CodeRabbit
-   auto-review (`.coderabbit.yaml` keeps `reviews.auto_review.drafts` false)
-   and the `pr-description.yml` CI check, which skips draft PRs. A ship that
+   review, never as drafts** — the `pr-description.yml` CI check skips draft PRs. A ship that
    updates an **existing draft** converts it to ready once
    the author checks and closeout review pass — `pr:ready-state` holds draft state as a required blocker,
    so an unconverted draft never reaches all-clear. Use or keep draft only
@@ -360,10 +357,8 @@ If root `package.json` changed, first run
      `merge_base_first`, or a real conflict — never merely for being behind,
      and never to clear `base-red`, which only a green base or the operator
      override clears; rebase is only acceptable before first publication. Merge it locally, never through
-     GitHub's "Update branch" button or a web-UI edit, because each costs a
-     CodeRabbit review event; and merge it before the CodeRabbit closeout
-     request rather than after, because a base merge after the request can draw
-     an unprompted full re-review of the whole PR. For native stacks, use the
+     GitHub's "Update branch" button or a web-UI edit, so the local checks
+     cover the integration. For native stacks, use the
      history-change procedure in
      [the stacked PR workflow](stacked-pull-requests.md).
    - **No PR yet**: a fork checkout stops here rather than first-publishing —
@@ -491,16 +486,7 @@ If root `package.json` changed, first run
    ```
 
    Run them in that order and preserve the two-projection contract. The
-   feedback ledger must be clean **first**. Before the final pair, apply the
-   CodeRabbit exact-head closeout in
-   [`pr-ready-state.md`](pr-ready-state.md), in its order: merge the base
-   first when the gate asks, batch every fix commit into one push, never post
-   while a CodeRabbit
-   check is running on the current head, and post at most one marked request
-   per accepted head and at most two per PR (a refused request may be retried
-   once, per that note), following the gate's `fallbackAction`
-   rather than re-deriving the decision (that note states the precedence),
-   after the stack and head-config rules it cannot read. The subsequent
+   feedback ledger must be clean **first**. The subsequent
    current-head `pr:ready-state` must report ready, including the current-head
    `chatgpt-codex-connector[bot]` PR-description approval, unless a documented
    human break-glass comment applies:

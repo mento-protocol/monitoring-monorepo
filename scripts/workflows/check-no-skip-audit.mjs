@@ -30,7 +30,7 @@ const READ_SCOPES = Object.freeze({ actions: "read", contents: "read", "pull-req
 // prettier-ignore
 const ADMISSION_STEP_HASH = "18f1c3741064363a488462c96fd34772c3b66eeee4a3f4bd2fb2a86275c3a203", CHECKOUT_STEP_HASH = "2d39e2e5293845e1c63f0f2e95ab8eb7e3d65360955c5b2c54ea1bddff57c22d", PROTECTED_DRIFT_STEP_HASH = "019ce295d3b3b50fe6684a65a93a2387a8a29d7c6c62db83cdc00bf1e8cf7a04", SUMMARY_STEP_HASH = "b6def63e8f5ccb7e13a6460f546cb391bf0e86350876470a787f038ea7cebb10";
 const CI_GRAPH_HASH =
-    "b8812e4793efe29ade1ec0e6e06bf7496cba6d40f118d69d8cf2d951aaaf1d8c",
+    "540c709c4be1c75fd001768dd4870edc27248491ec9c21ed2fa4edbba2f265dc",
   BASELINE_HASH =
     "467641beda8b2b45d49d0c62429d8e95f62b05c1db96f6665b106012a09cef12";
 // prettier-ignore
