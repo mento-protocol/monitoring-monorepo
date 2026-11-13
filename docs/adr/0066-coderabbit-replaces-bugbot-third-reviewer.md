@@ -19,6 +19,20 @@ enabled, incremental reviews off) and 2026-09-14 (census, closeout budget, path
 filters).
 **Scope:** ci/process
 
+## Retirement decision (2026-11-13)
+
+CodeRabbit is retired. The owner judged its cost and frequent rate limits
+insufficient for its added value. Claude and Codex remain the PR reviewers.
+Do not request CodeRabbit reviews or wait for its sign-off. Existing actionable
+findings still require disposition.
+
+The retirement change disables repository auto-review and chat replies. It
+removes CodeRabbit requests from active agent workflows. GitHub app removal and
+subscription cancellation need separate live confirmation; repository changes
+do not prove either action. Organization Global overrides can supersede YAML.
+Retain feedback parsers and historical records for existing PRs.
+The earlier decision and measurements below remain as historical evidence.
+
 ## Context
 
 Before this decision, every PR got three AI reviewers: Cursor BugBot

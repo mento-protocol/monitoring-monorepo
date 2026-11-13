@@ -402,11 +402,10 @@ Field expectations:
   protection so post-merge babysitting exits quickly and does not mistake
   GitHub's post-merge `mergeable: UNKNOWN` for a blocker.
 - `pr.mergeStateStatus`: GitHub's aggregate merge status. `DIRTY` is a
-  required blocker and also sends the CodeRabbit closeout to
-  `merge_base_first`. `BEHIND` alone is a required blocker too, unless the
+  required blocker. `BEHIND` alone is a required blocker too, unless the
   probe's fetched `requiredStatusChecksStrict` confirms `false` for the base
   (see below), in which case it is reported in `notes[]` instead and does
-  not send the closeout to `merge_base_first`. Other aggregate states do not
+  not require a base integration. Other aggregate states do not
   replace the required-check and feedback projections.
 - `requiredStatusChecksStrict`: tri-state read straight off the
   already-fetched classic branch protection (`strict`) or ruleset
@@ -416,8 +415,7 @@ Field expectations:
   result is `false` only when every matching rule explicitly disables strict
   mode. Only a confirmed `false` demotes `mergeStateStatus: BEHIND`; `true`
   and `null` both fail closed, matching every other branch-protection lookup
-  gap in this probe, and both keep `fallbackAction: merge_base_first` for a
-  BEHIND PR too.
+  gap in this probe.
 - `pr.autoMergeEnabledAt`: the observed pending auto-merge enable timestamp,
   or null. It records intent and never proves merge completion.
 - `pr.mergedAt` / `pr.closedAt`: terminal timestamps when GitHub provides them.
@@ -450,25 +448,11 @@ BEHIND`. Never treat a `notes[]` entry as a blocker.
   `eyes` reaction, a current-head Codex review, or a current-head Codex
   top-level result. `approved` means the final PR-description `+1` gate is
   present. `stale` means only older-head Codex signals exist.
-- `codeRabbitReviewSignal`: current-head CodeRabbit review state. Values are
-  `missing`, `requested`, `refused`, `stale`, `reviewed`, and `not_applicable`.
-  A CodeRabbit review with a run marker and review commit equal to the current
-  head is `reviewed`. A trusted top-level clean-run block also counts when
-  `<!-- recent_review_start -->` and `<!-- recent_review_end -->` enclose it, it
-  contains a Run ID, its full commit range ends at the current head, and its
-  comment update time is at or after the current head update time. Empty
-  reply-only reviews, skipped runs, and rate-limit notices do not count. A
-  head-bound request is `requested` until a real run lands, and `refused` once
-  CodeRabbit answers it with a rate-limit refusal. A validated
-  path-filter skip is `not_applicable`; its gate includes `reason`, `sourceUrl`,
-  and `ignoredPaths` as described above. The gate also carries `requestCount`,
-  `requestBudget` (2), and `fallbackAction`. For a missing, stale, or refused
-  signal, `fallbackAction` is `merge_base_first`, `wait_for_running_review`,
-  `wait_for_head_grace`, `request_budget_exhausted`, `wait_for_refusal_window`,
-  or `request_review_once_for_head`, in that
-  precedence; act on it instead of re-deriving the decision. Human output
-  prints `CodeRabbit review signal: <state> (fallback: <action>)`, and the
-  compact line adds `coderabbit_fallback=<value>`.
+- `codeRabbitReviewSignal`: legacy advisory state retained for existing consumers.
+  The state can be `missing`, `requested`, `refused`, `stale`, `reviewed`, or
+  `not_applicable`. Request counts and fallback fields describe the retired
+  protocol. Never act on these fields to request or wait for a CodeRabbit review.
+  Existing actionable findings still belong in the feedback ledger.
 - `requiredStatusContexts[]`: required check contexts from classic branch
   protection or branch rulesets. Ruleset-derived entries include status-check
   rules and required-workflow rules when their check names are present in the
@@ -565,8 +549,8 @@ requests and returns `PENDING` when reached.
    context; deployment/status bot comments may be informational.
 7. If ready-state `ready` is false, fix or wait only on `required.blockers` and
    required `gates`.
-8. After a batched fix push, obtain the required Claude and Codex reviews for
-   the current head. Do not request or wait for CodeRabbit.
+8. After a batched fix push, follow the existing Claude and Codex review
+   requirements. Do not request or wait for CodeRabbit.
 9. Report visibly in-progress review-producing workflows as optional lag. If
    you are still watching the PR when one finishes, rerun `pr:feedback-state`
    to catch late feedback; do not treat the optional workflow status itself as

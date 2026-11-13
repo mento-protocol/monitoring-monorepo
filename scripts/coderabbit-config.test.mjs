@@ -1,26 +1,8 @@
 #!/usr/bin/env node
 /**
- * Allowlist pin for `.coderabbit.yaml` (ADR 0066, ADR 0062 pin style).
- *
- * CodeRabbit resolves `.coderabbit.yaml` from the SOURCE branch of the pull
- * request it reviews, so a PR can weaken or replace the profile that reviews
- * it for every key the org-level Global overrides do not pin. Since
- * 2026-09-02 those overrides pin `reviews.profile`,
- * `request_changes_workflow`, and three `auto_review` keys (`enabled`,
- * `drafts`, `auto_pause_after_reviewed_commits`) above the repository file
- * (ADR 0066). Those overrides do not pin `auto_incremental_review`, so the
- * repository file governs it — and this test pins it; `path_filters` and `path_instructions` stay
- * repository-owned. This pin is the only guard for those three
- * repository-owned keys: `auto_incremental_review`, `path_filters`, and
- * `path_instructions`. Now that CodeRabbit findings feed the
- * `pr:feedback-state` ledger — the repo's merge oracle — that is a trust
- * boundary, not a preference.
- *
- * The committed config must parse and be EXACTLY equal to EXPECTED_CONFIG
- * below. Spot checks would let an added key (`early_access`, a `tools` block,
- * an extra `path_filters` entry that excludes the file under review) slip
- * through, so this is exact equality: any edit to the config fails until the
- * pin is edited in the same PR, which puts the change in front of a reviewer.
+ * Pin the disabled CodeRabbit configuration. Organization overrides can
+ * supersede this file, so app removal needs separate live verification.
+ * Keep exact equality to detect added settings and accidental reactivation.
  */
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -42,6 +24,7 @@ const CONFIG_PATH = path.join(REPO_ROOT, ".coderabbit.yaml");
 const EXPECTED_CONFIG = {
   chat: { auto_reply: false },
   reviews: {
+    review_status: false,
     profile: "chill",
     request_changes_workflow: false,
     poem: false,
@@ -126,10 +109,8 @@ test("the committed .coderabbit.yaml exactly equals the pinned config", () => {
   assert.deepEqual(loadConfig(), EXPECTED_CONFIG);
 });
 
-test("the pin rejects a weakened config (negative control)", () => {
-  // The attack this pin exists to stop: a PR that excludes its own changed
-  // paths from review, or flips the review profile down, on the source branch
-  // CodeRabbit reads the config from.
+test("the pin rejects configuration drift and reactivation (negative control)", () => {
+  // Existing profile and path settings remain pinned during retirement.
   const weakened = structuredClone(EXPECTED_CONFIG);
   weakened.reviews.path_filters.push("!scripts/**");
   assert.throws(() => assert.deepEqual(weakened, EXPECTED_CONFIG));
@@ -139,7 +120,7 @@ test("the pin rejects a weakened config (negative control)", () => {
   assert.throws(() => assert.deepEqual(quieted, EXPECTED_CONFIG));
 
   const unreviewed = structuredClone(EXPECTED_CONFIG);
-  unreviewed.reviews.auto_review.enabled = false;
+  unreviewed.reviews.auto_review.enabled = true;
   assert.throws(() => assert.deepEqual(unreviewed, EXPECTED_CONFIG));
 
   // An ADDED key must fail too — exact equality, not a spot check.
@@ -151,13 +132,7 @@ test("the pin rejects a weakened config (negative control)", () => {
 test("pins auto-review off, incremental off, and the burst guard at five", () => {
   const { auto_review: autoReview } = EXPECTED_CONFIG.reviews;
   assert.equal(autoReview.enabled, false);
-  // This asserts the committed configuration, not the provider's runtime
-  // behaviour. Off since 2026-09-02 because CodeRabbit bills per push delta,
-  // so incremental reviews re-bill the same files on every agent fix round.
-  // The head-bound closeout request covers the final head instead. The
-  // 2026-09-14 census confirmed the key works (264 automatic incremental
-  // reviews -> 0); ADR 0066 holds the measurement and the one residual, a
-  // full re-review after a base merge or rebase.
+  // This verifies repository configuration, not provider runtime state.
   assert.equal(autoReview.auto_incremental_review, false);
   assert.equal(autoReview.auto_pause_after_reviewed_commits, 5);
 });
