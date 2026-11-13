@@ -3382,6 +3382,27 @@ function feedbackStateWithComments(topLevelBotComments, overrides = {}) {
   };
 }
 
+test("keeps clean Codex and stale Claude summaries out of feedback blockers", () => {
+  const summary = summarizeFeedbackState(
+    feedbackStateWithComments([
+      {
+        id: 457,
+        author: "claude[bot]",
+        updatedAt: "2026-06-05T16:15:00Z",
+        body: "Findings: stale review summary",
+      },
+      {
+        id: 458,
+        author: "chatgpt-codex-connector[bot]",
+        updatedAt: "2026-06-05T16:31:00Z",
+        body: "Codex Review: didn't find any major issues.",
+      },
+    ]),
+  );
+  assertEqual(summary.ready, true);
+  assertEqual(summary.counts.blockingTopLevelBotComments, 0);
+});
+
 test("ignores a retired cursor[bot] comment carrying BUGBOT_BUG_ID", () => {
   // ADR 0066 step 4: the live Cursor compatibility path retired on
   // 2026-09-02. `cursor[bot]` left the review-bot roster and
@@ -3427,6 +3448,10 @@ test("feedback preserves layer scope without claiming stack readiness or clearin
   assertEqual(summary.ready, false);
   assertEqual(summary.readinessScope, "layer");
   assertDeepEqual(summary.stack, stack);
+  assertEqual(
+    summarizeFeedbackState(feedbackStateWithComments([])).stack,
+    undefined,
+  );
 });
 
 if (failed > 0) {
