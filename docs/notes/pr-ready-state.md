@@ -175,199 +175,16 @@ in the fallback path that runs when those contexts are unavailable. That
 fallback path already reports a `branch-protection` required blocker of its
 own, so the reclassification cannot make a PR fail on its own.
 
-CodeRabbit's `CodeRabbit` check context (ADR 0066) is advisory the same way,
-with one added trap: it reports `SUCCESS` even when no review ran. A
-rate-limited push gets a PR comment carrying
-`<!-- This is an auto-generated comment: rate limited by coderabbit.ai -->`
-and the check still passes. A passing `CodeRabbit` check alongside a
-current-head rate-limit comment means "no review ran," not "reviewed and
-clean" — read the comment, not the check conclusion, and rerun
-`pr:feedback-state` once a later push clears the rate limit.
-`.coderabbit.yaml` leaves `request_changes_workflow` at its `false` default,
-so CodeRabbit does not submit a GitHub `CHANGES_REQUESTED` review today. If
-that setting is ever turned on, a `CHANGES_REQUESTED` review does not clear
-itself on a later clean push and needs the same manual fix as any other
-stuck bot review verdict: dismiss it with
-`gh api repos/<owner>/<repo>/pulls/<pr>/reviews/<review_id>/dismissals -X PUT -f message='<why>' -f event=DISMISS`.
+CodeRabbit is retired as of 2026-11-13. Do not request or wait for its reviews.
+The repository configuration disables automatic reviews and chat replies.
+Remove the GitHub app installation to disable it across all organization repositories;
+organization Global overrides can take precedence over repository configuration.
+Existing actionable feedback still requires disposition. Claude and Codex review
+requirements remain in effect.
 
-The JSON projections expose `gates.codeRabbitReviewSignal` with `missing`,
-`requested`, `refused`, `stale`, `reviewed`, or `not_applicable`. A `reviewed`
-signal requires either a CodeRabbit review body with its `**Run ID**` marker
-and a review commit equal to the full current head, or a trusted CodeRabbit
-top-level clean-run block enclosed by `<!-- recent_review_start -->` and
-`<!-- recent_review_end -->`. The clean-run block must contain the Run ID and a
-reviewed commit range that ends at the full current head. Its comment update
-time must be at or after the head update time. Empty review records, skipped
-runs, and rate-limit notices do not count.
-
-A trusted path-filter skip is `not_applicable` only when the CodeRabbit comment
-contains exactly one summary marker followed by one skip-start marker and one
-skip-end marker. The exact `Review was skipped due to path filters` text, one
-non-empty counted ignored-file block, and one Run ID must appear in that order
-between the skip markers. The comment update time must be at or after the
-current-head update time. The probe then fetches every page of the current PR
-file list and re-reads the PR head. The ignored paths must be unique and equal
-the complete current file set, and all declared and API file counts must agree.
-The gate returns `reason: path_filters`, `sourceUrl`, and `ignoredPaths` with
-state `not_applicable`, readiness `true`, and `fallbackAction: wait`. A generic
-`No files to review` reply, incremental no-change reply, rate-limit notice,
-free-tier notice, malformed count, incomplete page set, file-set mismatch,
-stale comment, or changed head fails closed and does not suppress a review
-request.
-
-A head-bound closeout request uses this exact body:
-
-```text
-@coderabbitai review
-
-<!-- coderabbit-final-head-review:<full-head-sha> -->
-```
-
-Only a request from an `OWNER`, `MEMBER`, or `COLLABORATOR`, or from a
-recognized repository agent bot, counts as `requested`. A marker quoted by an
-outside commenter does not suppress the real closeout request.
-
-**Read the head's own config before deciding whether to wait.** CodeRabbit
-resolves `.coderabbit.yaml` from the PR's source branch, so the setting that
-governs this PR is the one at its head, not the one on `main`. Read
-`reviews.auto_review.auto_incremental_review` there:
-
-- **`true` or absent, and the org-level Global override does not set the key**
-  — the branch predates the 2026-09-03 change, and a push does start an
-  automatic review. Wait for that attempt to become terminal before requesting
-  anything, exactly as before. Posting early duplicates the review and the
-  bill. A head with no `.coderabbit.yaml`, or one whose file omits the key,
-  reads as `true` here: CodeRabbit falls back to its provider default, which
-  enables incremental review. Do not read a missing value as `false`.
-- **`true`, but the Global override sets `auto_incremental_review: false`** —
-  the head value is no longer effective. CodeRabbit ranks organization-level
-  Global overrides above a repository's `.coderabbit.yaml`, so no automatic
-  review follows the push and waiting for one burns the babysit deadline and
-  can miss the only closeout review. Treat this exactly like the `false` branch
-  and send the closeout request once the head is stable.
-  [ADR 0066](../adr/0066-coderabbit-replaces-bugbot-third-reviewer.md) records
-  which keys that override pins and when the operator applied it; check there
-  before assuming the head value governs.
-- **`false`** — a push onto an already-open PR starts no automatic review, so
-  there is nothing to wait for. Only the PR's opening push still draws one.
-  The key works; the
-  [ADR 0066](../adr/0066-coderabbit-replaces-bugbot-third-reviewer.md)
-  amendment of 2026-09-14 records the measurement behind that statement. One
-  leak remains: a base merge or rebase can draw an unprompted full re-review of
-  the whole PR, which is why the base merge comes before the closeout request.
-  Refresh once the head is stable and go straight to the closeout request.
-  **Unless the opening review never finished.** `false` says what should
-  happen; it does not establish what did. When this PR's opening review came
-  back as a rate-limit or cap notice rather than a review, a later push can
-  still draw a full run, and a request posted into the middle of it recreates
-  the duplicate review and the bill. So when no opening review completed, wait
-  the bounded time for an automatic attempt first, exactly as in the `true`
-  branch.
-
-The closeout request follows one order, on every surface:
-
-1. **When the gate says `merge_base_first`, merge the base before the request,
-   never after it.** A confirmed non-strict BEHIND head is not a reason to
-   merge; leave it alone. Integrate it as a local merge of the fetched base.
-   Never use GitHub's "Update branch" button or a web-UI edit: each costs a
-   review event.
-2. **Batch every fix commit into one push** before requesting.
-3. **Post at most one marked request per accepted head, and at most two per
-   PR** — the opening closeout and one after review fixes. A request CodeRabbit
-   refused does not use up the head, but it does use up one of the two. Follow
-   `gates.codeRabbitReviewSignal.fallbackAction` rather than re-deriving the
-   decision, after the two rules the gate cannot read: the stack rule and the
-   head-config rule named in the list below. Whenever the gate asks for a
-   request, re-resolve `headRefOid`
-   immediately before posting and require it to equal the marker head. A
-   `requested`, `reviewed`, or `not_applicable` signal suppresses another post.
-4. **Never post while a CodeRabbit check is running on the current head.** The
-   request supersedes that review, and the vendor charges the review it then
-   discards.
-
-For a missing, stale, or refused signal the gate reports `fallbackAction` in
-this precedence:
-
-- `merge_base_first` — the PR is DIRTY (merge conflicts), or BEHIND while
-  `requiredStatusChecksStrict` is not confirmed `false` (unknown or `true`).
-  Merge the base before any request. Once strict is confirmed off (operator
-  decision 2026-09-15, ADR 0104), a merely BEHIND PR stops triggering this:
-  forcing a base merge for a non-conflicting, non-blocked PR would
-  reintroduce the re-integration churn the policy change removes. For a
-  native stack layer, bring the base in through the history-change procedure
-  in [`stacked-pull-requests.md`](stacked-pull-requests.md), never as a local
-  merge commit.
-- `wait_for_running_review` — the current head's CodeRabbit check is still
-  running. A request now supersedes it and bills the discarded review.
-- `wait_for_head_grace` — the head is less than 5 minutes old and no CodeRabbit
-  run or check has appeared for it. An automatic run may still start, including
-  the full re-review a base merge or rebase can draw. The gate reports this wait
-  as well when the probe cannot establish the head update time — a failed or
-  empty timeline or status read — because it cannot prove the automatic run has
-  had its chance; if the time stays unknown across two polls at least five
-  minutes apart, the head-time read is failing, so report that instead of
-  posting.
-- `request_budget_exhausted` — the PR already carries two trusted
-  `@coderabbitai review` or `full review` requests. Post no more; the gate
-  stays advisory.
-- `wait_for_refusal_window` — CodeRabbit refused this head's own request over
-  the rate limit less than 30 minutes ago, or the probe cannot read when it
-  refused. The shared quota refills on a rolling window, so an earlier retry
-  is refused again and spends the last request for nothing.
-- `request_review_once_for_head` — none of the above applies. Post the one
-  marked request for this head. The head-config rule above still governs: on a
-  head whose `.coderabbit.yaml` still enables incremental review, wait for the
-  automatic attempt to become terminal first, because the gate does not read
-  that file.
-
-The gate also reports `requestCount` and `requestBudget`, which is 2. The grace
-wait reads the observation time and the head update time, so a probe run
-immediately after a push reports a wait rather than a request. A bare trusted
-request counts against the budget like a marked one.
-
-A request the vendor refuses is spent, not queued. When CodeRabbit answers the
-request comment with "Action not completed — Review rate limited", no review
-runs and the marker still counts against `requestBudget`, so the signal reads
-`refused` and the gate offers the one remaining request 30 minutes later. The
-cooldown runs from the refusal because that reply names no window: the notice
-that does name one belongs to the automatic review and is often absent. Only
-CodeRabbit's own reply to a trusted head-marked request counts — the same
-refusal text from any other author changes nothing. The budget of 2 is
-unchanged, and a second refusal is optional lag, not a reason to keep posting.
-
-**Then wait for the closeout attempt before the final sweep.** Once the request
-is posted, the signal sits at `requested` and readiness will not hold it —
-`summarizeCodeRabbitReviewGate` returns `required: false`. Wait for that
-closeout review to become terminal before the final `pr:feedback-state` sweep,
-bounded by the babysit deadline, and handle any findings it posts. A review
-that never starts, or is still pending at the deadline, is optional lag and not
-a reason to keep waiting. This is a procedural wait: the machine contract still
-never blocks readiness on the CodeRabbit signal, and
-[ADR 0066](../adr/0066-coderabbit-replaces-bugbot-third-reviewer.md) records
-that residual.
-GitHub's issue-comment API has no conditional-create operation, so the marker is
-a detection and best-effort suppression mechanism rather than an atomic claim.
-The CodeRabbit check and review remain advisory: report a pending or
-rate-limited result as optional lag. The rate limit is a shared quota, not a
-per-PR allowance.
-[ADR 0066](../adr/0066-coderabbit-replaces-bugbot-third-reviewer.md) records
-the two tiers: the free OSS tier meters per repository on a star-scaled 1–10
-reviews/hour, and a paid seat meters per developer identity across every PR
-that identity opened. That metering runs on a rolling window, and outside
-Enterprise there is no billing-period reset, so a new billing cycle does not
-restore the refill rate. At this repo's volume the seat has been observed
-between 1 and 3 included reviews/hour, metered on the PR-opening identity's
-attempts over the rolling 7-day window, and the schedule is not stable enough
-to predict: read the allowance from the current rate-limit notice. Every
-review past the refill bills $0.25 per reviewed file
-through the usage add-on. Past the add-on's monthly spending cap, the included
-refill is the whole allowance and every other attempt is refused outright,
-which is the state observed on 2026-09-02.
-Either way, watching several PRs at once draws down one allowance, so a
-re-request inside the window queues or no-ops on whichever PR reaches the
-limit first — do not tight-loop `@coderabbitai review` posts waiting for a
-faster turnaround. If a requested review finishes while the PR is still under
-watch, rerun `pr:feedback-state` and handle its findings before all-clear.
+The `codeRabbitReviewSignal` output remains available for compatibility with
+existing consumers and old PR records. Its advisory fallback is not an instruction
+to request a retired reviewer.
 
 Some non-required workflows still post feedback that becomes a repo-policy
 blocker after the required status surface is green. Their workflow status stays
@@ -748,36 +565,13 @@ requests and returns `PENDING` when reached.
    context; deployment/status bot comments may be informational.
 7. If ready-state `ready` is false, fix or wait only on `required.blockers` and
    required `gates`.
-8. After a batched fix push, read
-   `reviews.auto_review.auto_incremental_review` from the PR head's
-   `.coderabbit.yaml`, and check whether the org-level Global override sets the
-   same key (ADR 0066 records it). Wait for the automatic attempt to become
-   terminal only when the head says `true` — or omits the key or the file
-   entirely, which falls back to the provider default of enabled — **and** the
-   override leaves the key unset. If the head says `false`, or the override sets it `false` — the
-   override outranks the head's file, so the head value stops being effective —
-   no automatic run follows the push: refresh once the head is stable instead of
-   waiting for one that cannot start. The one exception is an opening review
-   that never completed, where a later push can still draw a full run, so wait
-   the bounded time anyway. On `merge_base_first` only, merge the base before
-   the request, never after: an ordinary PR by local merge of the fetched base,
-   a native stack layer by the history-change procedure in
-   [`stacked-pull-requests.md`](stacked-pull-requests.md). Then, if
-   `gates.codeRabbitReviewSignal.state` is `missing`, `stale`, or `refused`,
-   recheck the head and follow the gate's `fallbackAction`: post the one marked
-   closeout request for that head only on `request_review_once_for_head`. Do
-   not post when the state is `requested`, `reviewed`, or `not_applicable`,
-   when a CodeRabbit check is still
-   running on the current head, or when the PR already carries two requests. After
-   posting, wait for that closeout attempt to become terminal before step 10's
-   sweep, bounded by the babysit deadline. A CodeRabbit check that never starts
-   or is still pending at the deadline is advisory optional lag and never gates
-   readiness.
+8. After a batched fix push, obtain the required Claude and Codex reviews for
+   the current head. Do not request or wait for CodeRabbit.
 9. Report visibly in-progress review-producing workflows as optional lag. If
    you are still watching the PR when one finishes, rerun `pr:feedback-state`
    to catch late feedback; do not treat the optional workflow status itself as
    a blocker.
-10. After the CodeRabbit closeout step and any final optional-review refresh,
+10. After the required reviews and any final optional-review refresh,
     rerun `pr:feedback-state` and then `pr:ready-state`. Signal all-clear only
     when feedback-state has no required blocker and ready-state `ready` is true
     for the current head.

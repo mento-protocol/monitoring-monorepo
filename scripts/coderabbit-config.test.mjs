@@ -40,6 +40,7 @@ const CONFIG_PATH = path.join(REPO_ROOT, ".coderabbit.yaml");
 
 // The canonical config. Keep this and `.coderabbit.yaml` edited together.
 const EXPECTED_CONFIG = {
+  chat: { auto_reply: false },
   reviews: {
     profile: "chill",
     request_changes_workflow: false,
@@ -83,7 +84,7 @@ const EXPECTED_CONFIG = {
       "!scripts/repo-health/**",
     ],
     auto_review: {
-      enabled: true,
+      enabled: false,
       base_branches: [],
       drafts: false,
       auto_incremental_review: false,
@@ -147,9 +148,9 @@ test("the pin rejects a weakened config (negative control)", () => {
   assert.throws(() => assert.deepEqual(extended, EXPECTED_CONFIG));
 });
 
-test("pins auto-review on, incremental off, and the burst guard at five", () => {
+test("pins auto-review off, incremental off, and the burst guard at five", () => {
   const { auto_review: autoReview } = EXPECTED_CONFIG.reviews;
-  assert.equal(autoReview.enabled, true);
+  assert.equal(autoReview.enabled, false);
   // This asserts the committed configuration, not the provider's runtime
   // behaviour. Off since 2026-09-02 because CodeRabbit bills per push delta,
   // so incremental reviews re-bill the same files on every agent fix round.
