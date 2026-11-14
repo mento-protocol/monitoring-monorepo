@@ -2267,6 +2267,30 @@ test("depletion state ignores empty optional rebalance context", () => {
   );
 });
 
+// Rules that still carry the rebalance-reason query B (Deviation Breach,
+// Rebalancer Stale, Rebalance Ineffective) need B to return a series for every
+// pool, or Grafana marks the whole rule NoData while no pool is blocked and the
+// page silently resolves or never fires.
+test("rebalance-reason query B always returns a series per pool", () => {
+  const stripped = stripComments(
+    readFileSync(path.resolve(repoRoot, "alerts/rules/main.tf"), "utf8"),
+  );
+  const [, expression] = stripped.match(
+    /\bref_id\s*=\s*"B"\s*expr\s*=\s*"([^"]+)"/,
+  ) ?? [null, null];
+  assert(expression !== null, "deviation_annotation_queries must define B");
+  assert(
+    expression.includes("mento_pool_rebalance_blocked > 0"),
+    "B must keep the blocked series and their reason labels",
+  );
+  assert(
+    /\bor\s+on\s*\(\s*chain_id\s*,\s*pool_id\s*,\s*pair\s*\)\s*\(\s*mento_pool_deviation_ratio\s*\*\s*0\s*\)/.test(
+      expression,
+    ),
+    "B must fall back to one zero series per pool so it is never empty",
+  );
+});
+
 // The depletion bands read gauges the bridge withholds whenever a pool has no
 // live median or an unread `invertRateFeed`, and `no_data_state = "OK"` turns
 // that withholding into no notification at all. A funded pool can therefore
