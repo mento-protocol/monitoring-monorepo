@@ -2284,7 +2284,7 @@ test("rebalance-reason query B always returns a series per pool", () => {
     "B must keep the blocked series and their reason labels",
   );
   assert(
-    /\bor\s+on\s*\(\s*chain_id\s*,\s*pool_id\s*,\s*pair\s*\)\s*\(\s*mento_pool_deviation_ratio\s*\*\s*0\s*\)/.test(
+    /\bor\s+on\s*\(\s*chain_id\s*,\s*pool_id\s*,\s*pair\s*\)\s*\(\s*mento_pool_deviation_breach_start\s*\*\s*0\s*\)/.test(
       expression,
     ),
     "B must fall back to one zero series per pool so it is never empty",
