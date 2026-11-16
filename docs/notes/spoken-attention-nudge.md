@@ -97,7 +97,7 @@ CLI and socket of the cmux app that hosts this session, and target both IDs expl
 
 ```bash
 cmux notify --workspace "$CMUX_WORKSPACE_ID" --surface "$CMUX_SURFACE_ID" \
-  --title "Monitoring, backlog sweep" \
+  --title "Monitoring, rank backlog" \
   --body "The report is ready and needs your attention."
 ```
 

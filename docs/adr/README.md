@@ -87,7 +87,7 @@ workflow without an ADR (see [ADR 0033](0033-adr-process-and-gate.md)).
 | [0073](0073-guardrail-prose-pinned-in-ci.md)                | Normative guardrail sentences are pinned in CI; script digests deliberately are not                                                          |
 | [0075](0075-pr-merge.md)                                    | Archived: local operator merge wrapper                                                                                                       |
 | [0076](0076-fair-quality-gate-coordinator.md)               | Fair weighted coordination replaces machine-wide full-run gate exclusion                                                                     |
-| [0077](0077-operator-triggered-backlog-sweep.md)            | Backlog sweeps start from an operator, run isolated workers, and stop at READY                                                               |
+| [0077](0077-operator-triggered-backlog-sweep.md)            | Archived: operator-started backlog sweeps with isolated workers; retired 2026-11-16                                                          |
 | [0078](0078-staged-verification-redesign.md)                | Staged existing-CI replacement of the mandatory local gate                                                                                   |
 | [0079](0079-sealed-exact-file-patch-secret-suppression.md)  | Archived: sealed exact-file-patch secret suppression for autoreview                                                                          |
 | [0080](0080-merge-base-freshness-stamp.md)                  | The gate's freshness stamp binds the merge-base, with tip binding kept where read                                                            |

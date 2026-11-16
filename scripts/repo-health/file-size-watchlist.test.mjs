@@ -332,7 +332,7 @@ test("the live scan writes agent-ready, risk:medium, and complete pkg routing", 
   }
   const labels = actionableLabels(actionable);
   // This job writes `agent-ready` and never the `risk:low` a row's path cannot
-  // prove. docs/notes/backlog-sweep.md reserves `risk:low` for a human.
+  // prove. A human decides `risk:low` under the Low-risk rule.
   assert.ok(labels.includes("agent-ready"));
   assert.deepEqual(
     labels.filter((label) => label.startsWith("risk:")),
