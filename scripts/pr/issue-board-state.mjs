@@ -6,8 +6,6 @@
  * offline suite (`pnpm issue:board:test`) exercises end to end.
  */
 
-import { createHash } from "node:crypto";
-
 import {
   AGENT_ACTIVE_LABEL_DEFINITION,
   IN_PR_LABEL_DEFINITION,
@@ -35,7 +33,6 @@ export const GITHUB_CLI_HOST = "github.com";
 export const PROSPECTIVE_PROJECT_ITEM_ID = "dry-run:prospective-project-item";
 
 const CLAIM_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/;
-const BODY_SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const UNSAFE_SINGLE_LINE_CHARACTER_PATTERN = /[\p{Cc}\p{Zl}\p{Zp}]/u;
 export const MAX_CLAIM_AGENT_LENGTH = 120;
 export const MAX_CLAIM_BRANCH_LENGTH = 256;
@@ -146,21 +143,6 @@ export function isValidClaimBranch(value) {
   }
 }
 
-export function issueBodySha256(body) {
-  return createHash("sha256")
-    .update(String(body ?? ""), "utf8")
-    .digest("hex");
-}
-
-export function validateIssueBodySha256(value) {
-  if (typeof value !== "string" || !BODY_SHA256_PATTERN.test(value)) {
-    throw new Error(
-      "Body SHA-256 must be exactly 64 lowercase hexadecimal characters",
-    );
-  }
-  return value;
-}
-
 const STATE_TRANSITIONS = {
   ready: {
     addLabels: ["agent-ready"],
@@ -244,58 +226,8 @@ export function isClaimable(issue) {
   );
 }
 
-function hasExactUnblockedProjectStatus(issue, project) {
-  if (!project?.id || !project.statusField?.id) return false;
-  const selectedItems = (issue.projectItems ?? []).filter(
-    (item) => item?.project?.id === project.id,
-  );
-  if (selectedItems.length !== 1) return false;
-  const status = selectedItems[0]?.status;
-  return (
-    status?.fieldId === project.statusField.id &&
-    typeof status.name === "string" &&
-    status.name.length > 0 &&
-    typeof status.optionId === "string" &&
-    status.optionId.length > 0 &&
-    status.name !== "Blocked"
-  );
-}
-
-function hasNativeBlocker(issue) {
-  const blockedBy = issue.blockedBy;
-  if (
-    !blockedBy ||
-    !Number.isInteger(blockedBy.totalCount) ||
-    !Array.isArray(blockedBy.nodes)
-  ) {
-    return true;
-  }
-  return blockedBy.totalCount > 0 || blockedBy.nodes.filter(Boolean).length > 0;
-}
-
 function labelsWithPrefix(issue, prefix) {
   return [...labelNames(issue)].filter((label) => label.startsWith(prefix));
-}
-
-function namesWithPrefix(labels, prefix) {
-  return [...labels].filter((label) => label.startsWith(prefix));
-}
-
-// risk:high stays out: an unattended batch never works secrets, IAM, a
-// production apply, or deploy identity.
-const SWEEP_RISK_LABELS = new Set(["risk:low", "risk:medium"]);
-
-function hasSweepRoutingNames(labels) {
-  const riskLabels = namesWithPrefix(labels, "risk:");
-  return (
-    riskLabels.length === 1 &&
-    SWEEP_RISK_LABELS.has(riskLabels[0]) &&
-    namesWithPrefix(labels, "pkg:").length === 1
-  );
-}
-
-function hasSweepRouting(issue) {
-  return hasSweepRoutingNames(labelNames(issue));
 }
 
 /**
@@ -304,8 +236,7 @@ function hasSweepRouting(issue) {
  * `agent-ready` promises an agent can implement the issue without further
  * grooming. Consumers route on exactly one `risk:*` and at least one `pkg:*`,
  * so an issue missing either is not yet ready however complete its body reads.
- * Multiple `pkg:*` labels are correct for cross-package work; the backlog sweep
- * narrows further to exactly one, and that narrowing is the sweep's own rule.
+ * Multiple `pkg:*` labels are correct for cross-package work.
  */
 export function agentReadyRoutingGaps(issue) {
   const riskLabels = labelsWithPrefix(issue, "risk:").sort();
@@ -332,23 +263,6 @@ export function incompleteGroomingFinding(issue) {
   const gaps = agentReadyRoutingGaps(issue);
   if (gaps.length === 0) return null;
   return `Issue #${issue.number} is agent-ready but incompletely groomed: ${gaps.join("; ")}`;
-}
-
-export function hasSweepClaimAttributes(issue, project) {
-  return (
-    String(issue.state ?? "").toUpperCase() === "OPEN" &&
-    hasSweepRouting(issue) &&
-    !hasNativeBlocker(issue) &&
-    hasExactUnblockedProjectStatus(issue, project)
-  );
-}
-
-export function isSweepClaimable(issue, project) {
-  return isClaimable(issue) && hasSweepClaimAttributes(issue, project);
-}
-
-export function isActiveSweepClaim(issue, project) {
-  return isReviewable(issue) && hasSweepClaimAttributes(issue, project);
 }
 
 export function isBackfillable(issue) {

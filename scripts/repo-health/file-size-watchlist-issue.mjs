@@ -46,11 +46,7 @@ const ACTIONABLE_BASE_LABELS = [
  * The risk label this job may write, and the order it ranks them in.
  *
  * The floor is `risk:medium` and this job never writes `risk:low`, because a
- * row's path cannot prove the Low-risk rule's clauses. Since 2026-09-24 the
- * sweep predicate (`hasSweepRouting`, scripts/pr/issue-board-state.mjs) admits
- * `risk:medium`, so a single-package issue from this job is sweep-eligible; the
- * operator accepted that in ADR 0077's 2026-09-24 amendment. Every sweep PR
- * still stops at READY for a human merge.
+ * row's path cannot prove the Low-risk rule's clauses.
  *
  * Deciding the floor per row was the alternative, and it needs a list of the
  * control surfaces a row can reach. Such a list under-scans: it missed the
@@ -141,8 +137,7 @@ function labelsForIssue(issue) {
  * Every `risk:*` drops, because the write appends exactly one and
  * `riskLabelForIssue` has already folded the existing ones into it. A `pkg:*`
  * outside `SCOPE_PACKAGE_LABELS` stays: an extra package area is legal on an
- * `agent-ready` issue and only narrows sweep eligibility, so a job that did not
- * apply it should not remove it.
+ * `agent-ready` issue, so a job that did not apply it should not remove it.
  */
 function preserveUnmanagedLabels(labels) {
   return labels.filter(

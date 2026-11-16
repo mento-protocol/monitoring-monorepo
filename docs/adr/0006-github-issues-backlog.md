@@ -29,7 +29,7 @@ with server-serialized helper claims and queryable state.
 `agent-ready`. `pnpm issue:claim` transitions one claimable issue to
 `agent-active`, records and verifies its full Project ownership snapshot, and
 preserves the human-owned Project Status. `pnpm issue:review` moves represented
-work to `in-pr`. Claim ID ownership, the backlog-sweep eligibility recheck,
+work to `in-pr`. Claim ID ownership,
 branch rebind, owner-checked release paths, #2071 multi-stage compatibility,
 transaction compensation, and the shared claim/review/release/sync/backfill
 mutex are specified in

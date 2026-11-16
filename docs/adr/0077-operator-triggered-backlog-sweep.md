@@ -19,8 +19,8 @@ admission of 2026-09-24. Historical decision retained.
 **Scope:** process
 
 **Retirement (2026-11-16):** The repository no longer offers the ship-top-N
-sweep. The `backlog-sweep` skill, its runbook, and the `issue:groom` helper
-were removed. A skill of the same name in
+sweep. The `backlog-sweep` skill, its runbook, the `issue:groom` helper, and the
+`issue:claim --sweep-eligible` path were removed. A skill of the same name in
 the operator's personal skill library reviews the backlog and fixes nothing. It
 is not a replacement for this decision. The
 [skill](https://github.com/mento-protocol/monitoring-monorepo/blob/20afa04b/.agents/skills/backlog-sweep/SKILL.md)

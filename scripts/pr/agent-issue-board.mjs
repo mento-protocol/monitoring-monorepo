@@ -64,18 +64,14 @@ export {
   DEFAULT_PROJECT_NUMBER,
   DEFAULT_PROJECT_OWNER,
   DEFAULT_REPO,
-  hasSweepClaimAttributes,
   incompleteGroomingFinding,
-  issueBodySha256,
   IssueClaimCandidateLossError,
   IssueOwnershipConflictError,
-  isActiveSweepClaim,
   isClaimable,
   isBackfillable,
   isRecoverableClaimRaceError,
   isReleasable,
   isReviewable,
-  isSweepClaimable,
   ISSUE_OWNED_STATE_LABELS,
   ISSUE_STATE_LABELS,
   labelsForState,
@@ -85,7 +81,6 @@ export {
   stateFromLabels,
   validateOpenPr,
   validateClaimId,
-  validateIssueBodySha256,
 } from "./issue-board-state.mjs";
 
 async function main() {

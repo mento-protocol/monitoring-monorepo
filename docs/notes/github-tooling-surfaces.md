@@ -169,8 +169,7 @@ Each helper rejects a non-`github.com` `GH_HOST` and a host-qualified `GH_REPO`.
 The transport also sets `GH_HOST=github.com` and removes `GH_REPO` before every
 gh call. Explicit repository and Project flags cannot authorize another host.
 These commands cannot run in Claude cloud sessions absent the capability-gate
-exception. On a gh-capable surface, a claim can accept a stable `--claim-id`;
-the sweep path requires it. Release requires that token and uses the stored
+exception. On a gh-capable surface, a claim can accept a stable `--claim-id`. Release requires that token and uses the stored
 branch. An explicit review rebind uses the same token, proves the selected open
 same-repository PR, and refuses an open PR on the old stored Branch. A merged-PR
 continuation proves the stored merged PR and moves the open issue only to
