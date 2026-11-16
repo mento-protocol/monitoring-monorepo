@@ -506,15 +506,9 @@ async function recoverOwnedClaim(
     metadata,
     dependencies,
   );
-  const finalIssue = verified;
-  if (!isReviewable(finalIssue)) {
-    throw new Error(
-      `Issue #${issue.number} did not retain an eligible agent-active claim during final recovery check`,
-    );
-  }
   return {
-    number: finalIssue.number,
-    title: finalIssue.title,
+    number: verified.number,
+    title: verified.title,
     state: "active",
     claimId: metadata.claimId,
     recovered: true,
@@ -626,15 +620,9 @@ async function claimIssue(
       metadata,
       dependencies,
     );
-    const finalIssue = verified;
-    if (!isReviewable(finalIssue)) {
-      throw new Error(
-        `Issue #${issue.number} did not retain an eligible agent-active claim during final check`,
-      );
-    }
     return {
-      number: finalIssue.number,
-      title: finalIssue.title,
+      number: verified.number,
+      title: verified.title,
       state: "active",
       claimId: metadata.claimId,
     };
