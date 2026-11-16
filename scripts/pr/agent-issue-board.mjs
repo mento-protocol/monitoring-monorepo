@@ -4,7 +4,7 @@
  * Project Status field remains human-owned.
  *
  * This file is the entry point and the public surface. The implementation
- * lives in thirteen layers it composes:
+ * lives in twelve layers it composes:
  *   - `issue-board-state.mjs`     pure transitions and predicates
  *   - `issue-board-cli.mjs`       argv parsing and usage text
  *   - `issue-board-transport.mjs` the bounded `gh` runner and issue readers
@@ -14,7 +14,6 @@
  *   - `issue-board-lock.mjs`      persistent per-issue mutation mutex
  *   - `issue-board-transactions.mjs` owner-aware claim transactions
  *   - `issue-board-release.mjs`   owner-aware release transactions
- *   - `issue-board-groom.mjs`     mutex-owning grooming routing-label writes
  *   - `issue-board-commands.mjs`  review, backfill, and result rendering
  *   - `issue-board-sync-lock.mjs` mutex metadata and write-attempt tracking
  *   - `issue-board-sync.mjs`      reconciliation and closeout
@@ -30,7 +29,6 @@ import {
   renderResults,
   review,
 } from "./issue-board-commands.mjs";
-import { groom, issueBoardExitCode } from "./issue-board-groom.mjs";
 import { sync } from "./issue-board-sync.mjs";
 
 export { parseArgs, parseIssueNumbers } from "./issue-board-cli.mjs";
@@ -43,34 +41,11 @@ export {
 } from "./issue-board-commands.mjs";
 export { IssueBoardSyncError, sync } from "./issue-board-sync.mjs";
 export {
-  groom,
-  GROOM_COMPENSATED_EXIT_CODE,
-  GROOM_COMPENSATION_FAILED_EXIT_CODE,
-  GROOM_CONCURRENT_ELIGIBILITY_EXIT_CODE,
-  GROOM_ELIGIBILITY_REFUSED_EXIT_CODE,
-  GROOM_LABEL_REFUSED_EXIT_CODE,
-  GROOM_OWNED_REFUSED_EXIT_CODE,
-  GROOM_ROUTING_LABEL_PREFIXES,
-  GROOM_WRITE_UNCONFIRMED_EXIT_CODE,
-  issueBoardExitCode,
-  IssueGroomCompensatedError,
-  IssueGroomCompensationFailedError,
-  IssueGroomConcurrentEligibilityError,
-  IssueGroomEligibilityRefusedError,
-  IssueGroomLabelRefusedError,
-  IssueGroomOwnedRefusedError,
-  IssueGroomWriteUnconfirmedError,
-  validateGroomLabels,
-} from "./issue-board-groom.mjs";
-export {
   buildBackfillPlan,
   parseClaimComment,
   selectNewestTrustedClaim,
 } from "./issue-board-backfill.mjs";
-export {
-  githubProjectScopeHint,
-  listRepoLabelNames,
-} from "./issue-board-transport.mjs";
+export { githubProjectScopeHint } from "./issue-board-transport.mjs";
 export {
   readClaimOwnership,
   requireOwnershipFields,
@@ -89,21 +64,15 @@ export {
   DEFAULT_PROJECT_NUMBER,
   DEFAULT_PROJECT_OWNER,
   DEFAULT_REPO,
-  hasSweepClaimAttributes,
   incompleteGroomingFinding,
-  issueBodySha256,
   IssueClaimCandidateLossError,
   IssueOwnershipConflictError,
-  isActiveSweepClaim,
   isClaimable,
   isBackfillable,
   isRecoverableClaimRaceError,
   isReleasable,
   isReviewable,
-  isSweepClaimable,
-  ISSUE_OWNED_STATE_LABELS,
   ISSUE_STATE_LABELS,
-  satisfiesSweepLabelEligibility,
   labelsForState,
   projectDateFieldValue,
   projectPrFieldValue,
@@ -111,7 +80,6 @@ export {
   stateFromLabels,
   validateOpenPr,
   validateClaimId,
-  validateIssueBodySha256,
 } from "./issue-board-state.mjs";
 
 async function main() {
@@ -135,9 +103,6 @@ async function main() {
     case "release":
       results = await release(options);
       break;
-    case "groom":
-      results = await groom(options);
-      break;
     case "sync":
       results = await sync(options);
       break;
@@ -156,6 +121,6 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   main().catch((err) => {
     const message = err instanceof Error ? err.message : String(err);
     process.stderr.write(`${message}\n`);
-    process.exitCode = issueBoardExitCode(err);
+    process.exitCode = 1;
   });
 }

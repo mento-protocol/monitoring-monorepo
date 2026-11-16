@@ -69,8 +69,9 @@ Delete the CI pipeline. Replace it with two portable skills in
   verdict in the owning repository. The projected-issue format is ported byte
   for byte, so nothing downstream changes shape.
 - **`sentry-fix N [in <repo>]`** sweeps those GitHub issues and drives N of them
-  to ready-for-review PRs, in the shape `backlog-sweep` already uses for ranked
-  backlog issues.
+  to ready-for-review PRs, in the shape the `backlog-sweep` skill then used for
+  ranked backlog issues. That skill was retired on 2026-11-16
+  ([ADR 0077](0077-operator-triggered-backlog-sweep.md)).
 
 Sentry becomes the queue. The neutralization contract for untrusted Sentry text
 (`neutralizeUntrusted`, `neutralizeBlock`, `normalizeFixScope`, the list and

@@ -23,12 +23,6 @@ import ts from "typescript";
 import {
   acquireIssueMutationLock,
   agentReadyRoutingGaps,
-  groom,
-  issueBoardExitCode,
-  ISSUE_OWNED_STATE_LABELS,
-  listRepoLabelNames,
-  satisfiesSweepLabelEligibility,
-  validateGroomLabels,
   buildClaimComment,
   buildBackfillPlan,
   backfill,
@@ -36,9 +30,7 @@ import {
   chooseUntriedCandidate,
   githubProjectScopeHint,
   incompleteGroomingFinding,
-  issueBodySha256,
   isClaimable,
-  isSweepClaimable,
   isBackfillable,
   isReleasable,
   isRecoverableClaimRaceError,
@@ -77,7 +69,6 @@ import {
   getProject,
   PROSPECTIVE_PROJECT_ITEM_ID,
   readBackfillProjectFields,
-  readProjectItemStatus,
   readProjectTextField,
   updateProjectMetadata,
   updateTextField,
@@ -99,7 +90,6 @@ import {
   pullRequestHeadRepositoryNameWithOwner,
 } from "./issue-board-transport.mjs";
 
-const EMPTY_BODY_SHA256 = issueBodySha256("");
 const UNSAFE_SINGLE_LINE_TEST_CHARACTERS = [
   ["U+2028 line separator", "\u2028"],
   ["U+2029 paragraph separator", "\u2029"],
@@ -2535,7 +2525,6 @@ test("--pr is accepted only by review before any claim mutation", async () => {
           issues: [901],
           branch: "fix/901",
           claimId: "claim-901",
-          sweepEligible: false,
           comment: false,
           pr: 77,
         },
@@ -2551,7 +2540,7 @@ test("--pr is accepted only by review before any claim mutation", async () => {
   assertEqual(projectReads, 0);
 });
 
-test("parses stable sweep ownership and requires release ownership", () => {
+test("parses stable claim ownership and requires release ownership", () => {
   const claimOptions = parseArgs([
     "claim",
     "--issue",
@@ -2560,13 +2549,8 @@ test("parses stable sweep ownership and requires release ownership", () => {
     "sweep-901-token",
     "--branch",
     "fix/901",
-    "--sweep-eligible",
-    "--body-sha256",
-    EMPTY_BODY_SHA256,
   ]);
   assertEqual(claimOptions.claimId, "sweep-901-token");
-  assertEqual(claimOptions.sweepEligible, true);
-  assertEqual(claimOptions.bodySha256, EMPTY_BODY_SHA256);
   const releaseOptions = parseArgs([
     "release",
     "--issue",
@@ -2591,21 +2575,6 @@ test("parses stable sweep ownership and requires release ownership", () => {
         "shared",
       ]),
     /exactly one explicit issue/,
-  );
-  assertThrows(
-    () =>
-      parseArgs(
-        [
-          "claim",
-          "--issue",
-          "901",
-          "--claim-id",
-          "sweep-901-token",
-          "--sweep-eligible",
-        ],
-        { AGENT_BRANCH: "fix/from-ambient-env" },
-      ),
-    /requires an explicit --branch/,
   );
 
   const rebind = parseArgs([
@@ -3803,7 +3772,6 @@ test("sync leaves human-owned Status untouched for a stable open issue", async (
   };
   let membershipReads = 0;
   let membershipAdds = 0;
-  let statusReads = 0;
   let metadataWrites = 0;
 
   const results = await syncWithTestLock(
@@ -3820,10 +3788,6 @@ test("sync leaves human-owned Status untouched for a stable open issue", async (
         membershipAdds += 1;
         return "item-900";
       },
-      readProjectItemStatus: async () => {
-        statusReads += 1;
-        return status;
-      },
       updateProjectMetadata: async () => {
         metadataWrites += 1;
       },
@@ -3835,7 +3799,6 @@ test("sync leaves human-owned Status untouched for a stable open issue", async (
   ]);
   assertEqual(membershipReads, 1);
   assertEqual(membershipAdds, 0);
-  assertEqual(statusReads, 0);
   assertEqual(metadataWrites, 0);
   assertDeepEqual(issue.projectItems[0].status, status);
 });
@@ -3855,7 +3818,6 @@ test("sync adds a missing open item without writing Project Status", async () =>
   };
   let membershipReads = 0;
   let membershipAdds = 0;
-  let statusReads = 0;
   let metadataWrites = 0;
 
   const results = await syncWithTestLock(
@@ -3872,10 +3834,6 @@ test("sync adds a missing open item without writing Project Status", async () =>
         membershipAdds += 1;
         return "item-1900";
       },
-      readProjectItemStatus: async () => {
-        statusReads += 1;
-        return { name: "Ready", optionId: "ready" };
-      },
       updateProjectMetadata: async () => {
         metadataWrites += 1;
       },
@@ -3887,7 +3845,6 @@ test("sync adds a missing open item without writing Project Status", async () =>
   ]);
   assertEqual(membershipReads, 1);
   assertEqual(membershipAdds, 1);
-  assertEqual(statusReads, 0);
   assertEqual(metadataWrites, 0);
 });
 
@@ -4305,71 +4262,6 @@ test("claim guard only accepts open agent-ready issues", () => {
   );
 });
 
-test("sweep claim guard requires low risk, one package, and no blocker", () => {
-  const project = ownershipProject();
-  const eligible = {
-    state: "OPEN",
-    labels: [
-      { name: "agent-ready" },
-      { name: "risk:low" },
-      { name: "pkg:tooling" },
-    ],
-    projectItems: [projectItemSnapshot(project)],
-    blockedBy: { totalCount: 0, nodes: [] },
-  };
-  assertEqual(isSweepClaimable(eligible, project), true);
-  assertEqual(isSweepClaimable(eligible), false);
-  assertEqual(
-    isSweepClaimable(
-      {
-        ...eligible,
-        labels: [...eligible.labels, { name: "risk:high" }],
-      },
-      project,
-    ),
-    false,
-  );
-  assertEqual(
-    isSweepClaimable(
-      {
-        ...eligible,
-        labels: [...eligible.labels, { name: "pkg:dashboard" }],
-      },
-      project,
-    ),
-    false,
-  );
-  assertEqual(
-    isSweepClaimable(
-      {
-        ...eligible,
-        blockedBy: { totalCount: 1, nodes: [{ number: 1 }] },
-      },
-      project,
-    ),
-    false,
-  );
-  assertEqual(
-    isSweepClaimable(
-      {
-        ...eligible,
-        projectItems: [
-          projectItemSnapshot(project, {
-            name: "Blocked",
-            optionId: "blocked",
-          }),
-        ],
-      },
-      project,
-    ),
-    false,
-  );
-  assertEqual(
-    isSweepClaimable({ ...eligible, blockedBy: undefined }, project),
-    false,
-  );
-});
-
 test("incomplete grooming finding names every missing routing label", () => {
   const groomed = {
     number: 910,
@@ -4465,81 +4357,6 @@ test("an incompletely groomed issue stays claimable by hand", () => {
     "fixture must trip the finding",
   );
   assertEqual(isClaimable(thin), true);
-  assertEqual(isSweepClaimable(thin, ownershipProject()), false);
-});
-
-test("sweep claim guard scopes Blocked status to the selected Project", () => {
-  const selectedProject = {
-    id: "selected-project",
-    title: "Monitoring Agent Workboard",
-    statusField: { id: "selected-status" },
-  };
-  const otherProject = {
-    id: "other-project",
-    title: selectedProject.title,
-    statusField: { id: "other-status" },
-  };
-  const eligible = {
-    state: "OPEN",
-    labels: [
-      { name: "agent-ready" },
-      { name: "risk:low" },
-      { name: "pkg:tooling" },
-    ],
-    projectItems: [
-      projectItemSnapshot(otherProject, {
-        name: "Blocked",
-        optionId: "blocked",
-      }),
-      projectItemSnapshot(selectedProject),
-    ],
-    blockedBy: { totalCount: 0, nodes: [] },
-  };
-  assertEqual(isSweepClaimable(eligible, selectedProject), true);
-  assertEqual(
-    isSweepClaimable(
-      {
-        ...eligible,
-        projectItems: [
-          projectItemSnapshot(otherProject),
-          projectItemSnapshot(selectedProject, {
-            name: "Blocked",
-            optionId: "blocked",
-          }),
-        ],
-      },
-      selectedProject,
-    ),
-    false,
-  );
-  assertEqual(
-    isSweepClaimable(
-      {
-        ...eligible,
-        projectItems: [
-          {
-            title: selectedProject.title,
-            status: { name: "Ready" },
-          },
-        ],
-      },
-      selectedProject,
-    ),
-    false,
-  );
-  assertEqual(
-    isSweepClaimable(
-      {
-        ...eligible,
-        projectItems: [
-          projectItemSnapshot(selectedProject),
-          projectItemSnapshot(selectedProject),
-        ],
-      },
-      selectedProject,
-    ),
-    false,
-  );
 });
 
 test("review guard only accepts open agent-active issues", () => {
@@ -4643,394 +4460,6 @@ test("failed claims never roll back to ready", () => {
   assertEqual(shouldRollbackFailedTransition("ready", null), false);
 });
 
-test("a blocker added before a sweep claim quarantines the owned partial claim", async () => {
-  const state = {
-    ownership: null,
-    issue: {
-      id: "issue-901",
-      number: 901,
-      title: "race claim",
-      state: "OPEN",
-      labels: [
-        { name: "agent-ready" },
-        { name: "risk:low" },
-        { name: "pkg:tooling" },
-      ],
-      projectItems: [projectItemSnapshot()],
-      blockedBy: { totalCount: 0, nodes: [] },
-    },
-  };
-  const project = ownershipProject();
-  const metadataStates = [];
-  let projectStatus = { name: "Ready", optionId: "ready" };
-  await assertRejects(
-    () =>
-      claimWithTestLock(
-        {
-          repo: "mento-protocol/monitoring-monorepo",
-          issues: [901],
-          agent: "codex",
-          branch: "fix/901",
-          claimId: "sweep-901-token",
-          sweepEligible: true,
-          bodySha256: EMPTY_BODY_SHA256,
-          dryRun: false,
-          comment: true,
-          pr: null,
-        },
-        {
-          getProject: async () => project,
-          getIssue: async () => state.issue,
-          ensureProjectItem: async () => "item-901",
-          reserveClaimOwnership: async (
-            _options,
-            _project,
-            _item,
-            _issue,
-            reservationMetadata,
-          ) => {
-            state.ownership = {
-              claimId: reservationMetadata.claimId,
-              agent: "codex",
-              branch: "fix/901",
-              claimedAt: projectDateFieldValue(reservationMetadata.claimedAt),
-              pr: null,
-            };
-            state.issue = {
-              ...state.issue,
-              blockedBy: { totalCount: 1, nodes: [{ number: 900 }] },
-            };
-            return { missingMetadata: {} };
-          },
-          readClaimOwnership: async () => state.ownership,
-          readProjectItemStatus: async () => projectStatus,
-          editIssueLabels: async (_options, issue, target) => {
-            assertEqual(target, "grooming");
-            state.issue = {
-              ...issue,
-              labels: [
-                { name: "needs-grooming" },
-                { name: "risk:low" },
-                { name: "pkg:tooling" },
-              ],
-            };
-          },
-          updateProjectMetadata: async (
-            _options,
-            _project,
-            _item,
-            target,
-            metadata,
-          ) => {
-            metadataStates.push(target);
-            state.ownership = { ...state.ownership, ...metadata };
-          },
-        },
-      ),
-    /not sweep-eligible[\s\S]*Claim ID: sweep-901-token[\s\S]*quarantined in needs-grooming/,
-  );
-  assert(
-    state.issue.labels.some((label) => label.name === "needs-grooming"),
-    "ineligible partial claim must move to grooming",
-  );
-  assert(
-    !state.issue.labels.some((label) => label.name === "agent-ready"),
-    "partial claim must leave the ready queue",
-  );
-  assertEqual(state.ownership.claimId, "sweep-901-token");
-  assertDeepEqual(metadataStates, []);
-  assertDeepEqual(projectStatus, { name: "Ready", optionId: "ready" });
-});
-
-test("a stale body digest rejects a sweep claim before board mutation", async () => {
-  let boardMutations = 0;
-  const issue = {
-    id: "issue-1899",
-    number: 1899,
-    title: "stale body snapshot",
-    body: "Waiting on an external dependency.",
-    state: "OPEN",
-    labels: [
-      { name: "agent-ready" },
-      { name: "risk:low" },
-      { name: "pkg:tooling" },
-    ],
-    projectItems: [projectItemSnapshot()],
-    blockedBy: { totalCount: 0, nodes: [] },
-  };
-  await assertRejects(
-    () =>
-      claimWithTestLock(
-        {
-          ...LOCK_TEST_OPTIONS,
-          issues: [1899],
-          branch: "fix/1899",
-          claimId: "sweep-1899-token",
-          sweepEligible: true,
-          bodySha256: issueBodySha256("No external dependency."),
-          comment: false,
-          pr: null,
-        },
-        {
-          getProject: async () => ownershipProject(),
-          getIssue: async () => issue,
-          ensureProjectItem: async () => {
-            boardMutations += 1;
-            return "item-1899";
-          },
-        },
-      ),
-    /body changed[\s\S]*initial locked check[\s\S]*Claim ID: sweep-1899-token/,
-  );
-  assertEqual(boardMutations, 0);
-});
-
-test("a body change after the label transition cannot complete a sweep claim", async () => {
-  let issue = {
-    id: "issue-1900",
-    number: 1900,
-    title: "body race claim",
-    body: "No external dependency.",
-    state: "OPEN",
-    labels: [
-      { name: "agent-ready" },
-      { name: "risk:low" },
-      { name: "pkg:tooling" },
-    ],
-    projectItems: [projectItemSnapshot()],
-    blockedBy: { totalCount: 0, nodes: [] },
-  };
-  let ownership = null;
-  const project = ownershipProject();
-  const error = await assertRejects(
-    () =>
-      claimWithTestLock(
-        {
-          ...LOCK_TEST_OPTIONS,
-          issues: [1900],
-          branch: "fix/1900",
-          claimId: "sweep-1900-token",
-          sweepEligible: true,
-          bodySha256: issueBodySha256(issue.body),
-          comment: false,
-          pr: null,
-        },
-        {
-          getProject: async () => project,
-          getIssue: async () => issue,
-          ensureProjectItem: async () => "item-1900",
-          reserveClaimOwnership: async (
-            _options,
-            _project,
-            _item,
-            _issue,
-            metadata,
-          ) => {
-            ownership = {
-              claimId: metadata.claimId,
-              agent: metadata.agent,
-              branch: metadata.branch,
-              claimedAt: projectDateFieldValue(metadata.claimedAt),
-              pr: null,
-            };
-            return { ownership, missingMetadata: {} };
-          },
-          readClaimOwnership: async () => ownership,
-          readProjectItemStatus: async () => ({
-            name: "Ready",
-            optionId: "ready",
-          }),
-          editIssueLabels: async (_options, current, target) => {
-            assertEqual(target, "active");
-            issue = {
-              ...current,
-              body: "Waiting on an external dependency.",
-              labels: [
-                { name: "agent-active" },
-                { name: "risk:low" },
-                { name: "pkg:tooling" },
-              ],
-            };
-          },
-          updateProjectMetadata: async () => {},
-          verifyClaimOwnership: async () => {},
-        },
-      ),
-    /body changed[\s\S]*post-label check[\s\S]*Claim ID: sweep-1900-token/,
-  );
-  assertEqual(error.partialClaim, true);
-  assertEqual(isClaimable(issue), false);
-  assert(
-    issue.labels.some((label) => label.name === "agent-active"),
-    "a detected body race must retain the partial claim outside ready",
-  );
-});
-
-test("a Project Blocked change after the pre-metadata check fails the metadata-only claim", async () => {
-  let issue = {
-    id: "issue-901b",
-    number: 1901,
-    title: "Project blocker race",
-    state: "OPEN",
-    labels: [
-      { name: "agent-ready" },
-      { name: "risk:low" },
-      { name: "pkg:tooling" },
-    ],
-    projectItems: [
-      projectItemSnapshot(ownershipProject(), { id: "item-1901" }),
-    ],
-    blockedBy: { totalCount: 0, nodes: [] },
-  };
-  const ownership = {
-    claimId: "sweep-1901-token",
-    agent: "codex",
-    branch: "fix/1901",
-    claimedAt: "2026-08-28",
-    pr: null,
-  };
-  const statuses = [
-    { name: "Ready", optionId: "ready" },
-    { name: "Ready", optionId: "ready" },
-    { name: "Ready", optionId: "ready" },
-    { name: "Blocked", optionId: "blocked" },
-    { name: "Blocked", optionId: "blocked" },
-  ];
-  let metadataWrites = 0;
-  const error = await assertRejects(
-    () =>
-      claimWithTestLock(
-        {
-          ...LOCK_TEST_OPTIONS,
-          issues: [1901],
-          branch: "fix/1901",
-          claimId: "sweep-1901-token",
-          sweepEligible: true,
-          bodySha256: EMPTY_BODY_SHA256,
-          comment: false,
-          pr: null,
-        },
-        {
-          getProject: async () => ownershipProject(),
-          getIssue: async () => issue,
-          ensureProjectItem: async () => "item-1901",
-          reserveClaimOwnership: async (
-            _options,
-            _project,
-            _item,
-            _issue,
-            reservationMetadata,
-          ) => {
-            ownership.claimedAt = projectDateFieldValue(
-              reservationMetadata.claimedAt,
-            );
-            return { missingMetadata: {} };
-          },
-          readClaimOwnership: async () => ownership,
-          readProjectItemStatus: async () => statuses.shift(),
-          editIssueLabels: async (_options, current, target) => {
-            assertEqual(target, "active");
-            issue = {
-              ...current,
-              labels: [
-                { name: "agent-active" },
-                { name: "risk:low" },
-                { name: "pkg:tooling" },
-              ],
-            };
-          },
-          updateProjectMetadata: async () => {
-            metadataWrites += 1;
-          },
-        },
-      ),
-    /became Project Blocked during post-metadata check[\s\S]*Claim ID: sweep-1901-token/,
-  );
-  assertEqual(metadataWrites, 0);
-  assert(
-    error.message.includes("remains non-ready in active"),
-    "the observed blocker race must retain a non-ready owned state",
-  );
-  assertEqual(statuses.length, 0);
-  assertEqual(isClaimable(issue), false);
-});
-
-test("partial sweep compensation stops when Project Status changes after its label transition", async () => {
-  let issue = {
-    id: "issue-1902",
-    number: 1902,
-    title: "compensation Status race",
-    state: "OPEN",
-    labels: [
-      { name: "agent-ready" },
-      { name: "risk:low" },
-      { name: "pkg:tooling" },
-    ],
-    projectItems: [projectItemSnapshot()],
-    blockedBy: { totalCount: 0, nodes: [] },
-  };
-  const ownership = {
-    claimId: "sweep-1902-token",
-    agent: "codex",
-    branch: "fix/1902",
-    claimedAt: null,
-    pr: null,
-  };
-  const statuses = [
-    { name: "Ready", optionId: "ready" },
-    { name: "Ready", optionId: "ready" },
-    { name: "Blocked", optionId: "blocked" },
-  ];
-  let reservations = 0;
-  let metadataWrites = 0;
-
-  await assertRejects(
-    () =>
-      claimWithTestLock(
-        {
-          ...LOCK_TEST_OPTIONS,
-          issues: [1902],
-          branch: "fix/1902",
-          claimId: "sweep-1902-token",
-          sweepEligible: true,
-          bodySha256: EMPTY_BODY_SHA256,
-          comment: false,
-          pr: null,
-        },
-        {
-          getProject: async () => ownershipProject(),
-          getIssue: async () => issue,
-          ensureProjectItem: async () => "item-1902",
-          reserveClaimOwnership: async () => {
-            reservations += 1;
-            throw new Error("ownership reservation response was lost");
-          },
-          readClaimOwnership: async () => ownership,
-          readProjectItemStatus: async () => statuses.shift(),
-          editIssueLabels: async (_options, current, target) => {
-            assertEqual(target, "active");
-            issue = {
-              ...current,
-              labels: [
-                { name: "agent-active" },
-                { name: "risk:low" },
-                { name: "pkg:tooling" },
-              ],
-            };
-          },
-          updateProjectMetadata: async () => {
-            metadataWrites += 1;
-          },
-        },
-      ),
-    /ownership reservation response was lost[\s\S]*Claim ID: sweep-1902-token/,
-  );
-  assertEqual(reservations, 1);
-  assertEqual(metadataWrites, 0);
-  assertEqual(statuses.length, 0);
-  assertEqual(isClaimable(issue), false);
-});
-
 test("retrying an owned partial claim repairs project metadata", async () => {
   const issue = {
     id: "issue-902",
@@ -5070,8 +4499,6 @@ test("retrying an owned partial claim repairs project metadata", async () => {
       agent: "codex",
       branch: "fix/902",
       claimId: "sweep-902-token",
-      sweepEligible: true,
-      bodySha256: EMPTY_BODY_SHA256,
       dryRun: false,
       comment: true,
       pr: null,
@@ -5082,10 +4509,6 @@ test("retrying an owned partial claim repairs project metadata", async () => {
       getIssue: async () => issue,
       findIssueProjectItem: async () => "item-902",
       readClaimOwnership: async () => ownership,
-      readProjectItemStatus: async () => ({
-        name: "In Progress",
-        optionId: "active",
-      }),
       reserveClaimOwnership: async (
         _options,
         _project,
@@ -5181,7 +4604,6 @@ test("same-token recovery creates a missing trusted claim comment once", async (
       issues: [9021],
       branch: "fix/9021",
       claimId: "claim-9021",
-      sweepEligible: false,
       comment: true,
       pr: null,
     },
@@ -5263,7 +4685,6 @@ test("fresh claim comment failure rejects and same-token retry posts a trusted c
     issues: [9025],
     branch: "fix/9025",
     claimId: "claim-9025",
-    sweepEligible: false,
     comment: true,
     pr: null,
   };
@@ -5437,7 +4858,6 @@ test("fresh claim rejects absent, untrusted, or malformed claim comment proof", 
             issues: [number],
             branch,
             claimId,
-            sweepEligible: false,
             comment: true,
             pr: null,
           },
@@ -5551,7 +4971,6 @@ test("same-token recovery rejects unsafe metadata before comment recovery", asyn
               ...metadata,
               issues: [9026],
               claimId: "claim-9026",
-              sweepEligible: false,
               comment: true,
               pr: null,
             },
@@ -5628,7 +5047,6 @@ test("same-token recovery refuses an untrusted or malformed post-write claim com
             issues: [9024],
             branch: "fix/9024",
             claimId: "claim-9024",
-            sweepEligible: false,
             comment: true,
             pr: null,
           },
@@ -5690,7 +5108,6 @@ test("same-token recovery preserves no-comment and dry-run behavior", async () =
         issues: [number],
         branch: `fix/${number}`,
         claimId: `claim-${number}`,
-        sweepEligible: false,
         comment,
         dryRun,
         pr: null,
@@ -5738,7 +5155,6 @@ test("same-token recovery refuses every non-empty ownership mismatch", async () 
           agent: "codex",
           branch: "fix/new-903",
           claimId: "claim-903",
-          sweepEligible: false,
           comment: false,
           pr: null,
         },
@@ -5804,7 +5220,6 @@ test("same-token retries preserve stored Claimed At in next-day LOCK payloads", 
         issues: [number],
         branch: `fix/${number}`,
         claimId: `claim-${number}`,
-        sweepEligible: false,
         comment: false,
         pr: null,
       },
@@ -5887,7 +5302,6 @@ test("fresh claim does not overwrite an owner that changes after labels", async 
           issues: [9041],
           branch: "fix/9041",
           claimId: "claim-owner-a",
-          sweepEligible: false,
           comment: false,
           pr: null,
         },
@@ -5960,7 +5374,6 @@ test("same-token recovery re-plans when another owner appears before write", asy
           issues: [9042],
           branch: "fix/9042",
           claimId: "claim-owner-a",
-          sweepEligible: false,
           comment: false,
           pr: null,
         },
@@ -6021,7 +5434,6 @@ test("partial-claim recovery does not overwrite an owner added after labels", as
           issues: [9043],
           branch: "fix/9043",
           claimId: "claim-owner-a",
-          sweepEligible: false,
           comment: false,
           pr: null,
         },
@@ -6072,7 +5484,6 @@ test("claim dry-run plans ownership for a prospective Project item without readi
       issues: [905],
       branch: "fix/905",
       claimId: "claim-905",
-      sweepEligible: false,
       comment: true,
       pr: null,
       dryRun: true,
@@ -7698,20 +7109,6 @@ test("Project readers reject incomplete connections instead of empty values", as
   for (const fieldValues of incompleteConnections) {
     await assertRejects(
       () =>
-        readProjectItemStatus(
-          LOCK_TEST_OPTIONS,
-          { statusField: { id: "status" } },
-          "item-incomplete-status",
-          {
-            graphql: async () => ({
-              data: { node: { fieldValues } },
-            }),
-          },
-        ),
-      /Status lookup was incomplete/,
-    );
-    await assertRejects(
-      () =>
         readProjectTextField(
           LOCK_TEST_OPTIONS,
           "item-incomplete-text",
@@ -9097,7 +8494,6 @@ test("claim repository refresh mismatch skips cleanup and retains LOCK", async (
           issues: [number],
           branch: `fix/${number}`,
           claimId: `claim-${number}`,
-          sweepEligible: false,
           comment: false,
           pr: null,
         },
@@ -9200,7 +8596,6 @@ test("claim target refresh transport failure skips cleanup and retains LOCK", as
           issues: [number],
           branch: `fix/${number}`,
           claimId: `claim-${number}`,
-          sweepEligible: false,
           comment: false,
           pr: null,
         },
@@ -9312,7 +8707,6 @@ test("claim rejects a same-type stale getProject field map before any mutation",
           issues: [number],
           branch: `fix/${number}`,
           claimId: `claim-${number}`,
-          sweepEligible: false,
           comment: false,
           pr: null,
         },
@@ -9417,7 +8811,6 @@ test("partial claim capability failure skips the label-only fallback", async () 
           issues: [number],
           branch: `fix/${number}`,
           claimId: `claim-${number}`,
-          sweepEligible: false,
           comment: false,
           pr: null,
         },
@@ -11079,7 +10472,6 @@ test("generated claim IDs use the fixed UUID prefix", async () => {
       agent: "codex",
       branch: "fix/2201",
       claimId: null,
-      sweepEligible: false,
       dryRun: false,
       comment: false,
       pr: null,
@@ -11142,47 +10534,6 @@ test("generated claim IDs use the fixed UUID prefix", async () => {
   assertEqual(metadata.claimedAt, "2026-08-29T10:15:00.000Z");
 });
 
-test("sweep claims require one explicit stable Claim ID", () => {
-  assertThrows(
-    () =>
-      parseArgs([
-        "claim",
-        "--issue",
-        "2111",
-        "--branch",
-        "fix/2111",
-        "--sweep-eligible",
-      ]),
-    /--sweep-eligible requires an explicit --claim-id/,
-  );
-  assertThrows(
-    () =>
-      parseArgs([
-        "claim",
-        "--issue",
-        "2111",
-        "--claim-id",
-        "claim-2111",
-        "--sweep-eligible",
-      ]),
-    /--sweep-eligible requires an explicit --branch/,
-  );
-  assertThrows(
-    () =>
-      parseArgs([
-        "claim",
-        "--issue",
-        "2111",
-        "--claim-id",
-        "claim-2111",
-        "--branch",
-        "fix/2111",
-        "--sweep-eligible",
-      ]),
-    /requires --body-sha256/,
-  );
-});
-
 test("claim branch resolution fails before a lock or board mutation", async () => {
   let projectReads = 0;
   let lockCalls = 0;
@@ -11193,7 +10544,6 @@ test("claim branch resolution fails before a lock or board mutation", async () =
     issues: [2111],
     agent: "codex",
     claimId: "claim-2111",
-    bodySha256: EMPTY_BODY_SHA256,
     dryRun: false,
     comment: false,
     pr: null,
@@ -11210,46 +10560,7 @@ test("claim branch resolution fails before a lock or board mutation", async () =
   await assertRejects(
     () =>
       claim(
-        {
-          ...base,
-          issues: [],
-          branch: "fix/2111",
-          sweepEligible: true,
-        },
-        dependencies,
-      ),
-    /--sweep-eligible requires exactly one explicit issue/,
-  );
-  await assertRejects(
-    () =>
-      claim(
-        {
-          ...base,
-          branch: "fix/2111",
-          claimId: null,
-          sweepEligible: true,
-        },
-        dependencies,
-      ),
-    /--sweep-eligible requires an explicit --claim-id/,
-  );
-  await assertRejects(
-    () =>
-      claim(
-        { ...base, branch: null, sweepEligible: true },
-        {
-          ...dependencies,
-          getGitBranch: async () => {
-            throw new Error("sweep must not inspect the ambient branch");
-          },
-        },
-      ),
-    /--sweep-eligible requires an explicit --branch/,
-  );
-  await assertRejects(
-    () =>
-      claim(
-        { ...base, branch: null, sweepEligible: false },
+        { ...base, branch: null },
         { ...dependencies, getGitBranch: async () => "" },
       ),
     /claim requires --branch or a checked-out branch/,
@@ -11305,7 +10616,6 @@ test("claim preflight read failure releases an unmutated mutex", async () => {
           issues: [2119],
           branch: "fix/2119",
           claimId: "claim-2119",
-          sweepEligible: false,
           comment: false,
           pr: null,
         },
@@ -11343,7 +10653,6 @@ test("claim handling preserves the stale mutex code and lease", async () => {
           issues: [2123],
           branch: "fix/2123",
           claimId: "claim-2123",
-          sweepEligible: false,
           comment: false,
           pr: null,
         },
@@ -11395,7 +10704,6 @@ test("owned lock quarantines empty or foreign partial claims without overwrite",
             agent: "codex",
             branch: "fix/2202",
             claimId: "claim-ours",
-            sweepEligible: false,
             dryRun: false,
             comment: false,
             pr: null,
@@ -11456,7 +10764,6 @@ test("owned lock quarantines a ready claim when Project item creation is ambiguo
           agent: "codex",
           branch: "fix/2202",
           claimId: "claim-ours",
-          sweepEligible: false,
           dryRun: false,
           comment: false,
           pr: null,
@@ -11519,7 +10826,6 @@ test("owned ready failure reports the exact quarantine cleanup path", async () =
           agent: "codex",
           branch: "fix/2202",
           claimId: "claim-ours",
-          sweepEligible: false,
           dryRun: false,
           comment: false,
           pr: null,
@@ -11572,7 +10878,6 @@ test("partial compensation never overwrites a same-token ownership mismatch", as
           issues: [2202],
           branch: "fix/2202",
           claimId: "claim-ours",
-          sweepEligible: false,
           comment: false,
           pr: null,
         },
@@ -11630,7 +10935,6 @@ test("partial claim recovery preserves a newer external non-ready state", async 
           agent: "codex",
           branch: "fix/2202",
           claimId: "claim-ours",
-          sweepEligible: false,
           dryRun: false,
           comment: false,
           pr: null,
@@ -11688,7 +10992,6 @@ test("partial claim recovery removes only stale ready from a mixed review snapsh
           agent: "codex",
           branch: "fix/2202",
           claimId: "claim-ours",
-          sweepEligible: false,
           dryRun: false,
           comment: false,
           pr: null,
@@ -11755,7 +11058,6 @@ test("partial claim recovery keeps LOCK for a conflicting non-ready snapshot", a
           agent: "codex",
           branch: "fix/2202",
           claimId: "claim-ours",
-          sweepEligible: false,
           dryRun: false,
           comment: false,
           pr: null,
@@ -11840,7 +11142,6 @@ test("fatal queue claims report every completed Claim ID", async () => {
           agent: "codex",
           branch: "fix/queue",
           claimId: null,
-          sweepEligible: false,
           dryRun: false,
           comment: false,
           pr: null,
@@ -12578,7 +11879,6 @@ test("lifecycle owner writers run only inside their executed mutex callbacks", a
       ...common,
       issues: [2301],
       claimId: "claim-2301",
-      sweepEligible: false,
       pr: null,
     },
     {
@@ -14173,7 +13473,6 @@ test("sync skips the mutex for exact open queue labels with exact Project member
   let lockCalls = 0;
   let ownershipReads = 0;
   let exactItemReads = 0;
-  let exactStatusReads = 0;
   const results = await sync(LOCK_TEST_OPTIONS, {
     getProject: async () => ({
       id: "project",
@@ -14186,10 +13485,6 @@ test("sync skips the mutex for exact open queue labels with exact Project member
     findIssueProjectItem: async () => {
       exactItemReads += 1;
       return "selected-project-item";
-    },
-    readProjectItemStatus: async () => {
-      exactStatusReads += 1;
-      return { name: "Ready", optionId: "ready" };
     },
     readIssueLockOwnership: async () => {
       ownershipReads += 1;
@@ -14205,7 +13500,6 @@ test("sync skips the mutex for exact open queue labels with exact Project member
   assertEqual(lockCalls, 0);
   assertEqual(ownershipReads, 0);
   assertEqual(exactItemReads, 1);
-  assertEqual(exactStatusReads, 0);
 });
 
 test("sync preflight trusts a complete enumeration snapshot without a per-issue read", async () => {
@@ -14441,41 +13735,6 @@ test("Project item lookup rejects duplicate selected Project memberships", async
   );
 });
 
-test("Project Status reads match the selected field ID", async () => {
-  const status = await readProjectItemStatus(
-    LOCK_TEST_OPTIONS,
-    { statusField: { id: "selected-status-field" } },
-    "selected-item",
-    {
-      graphql: async () => ({
-        data: {
-          node: {
-            fieldValues: {
-              nodes: [
-                {
-                  name: "Ready",
-                  optionId: "wrong-ready",
-                  field: { id: "other-status-field" },
-                },
-                {
-                  name: "In Progress",
-                  optionId: "selected-progress",
-                  field: { id: "selected-status-field" },
-                },
-              ],
-              pageInfo: { hasNextPage: false },
-            },
-          },
-        },
-      }),
-    },
-  );
-  assertDeepEqual(status, {
-    name: "In Progress",
-    optionId: "selected-progress",
-  });
-});
-
 test("sync binds stable membership by selected Project ID and ignores Status", async () => {
   const issue = {
     id: "issue-2406",
@@ -14508,9 +13767,6 @@ test("sync binds stable membership by selected Project ID and ignores Status", a
     findIssueProjectItem: async () => {
       itemReads += 1;
       return "selected-project-item";
-    },
-    readProjectItemStatus: async () => {
-      throw new Error("stable open sync must not inspect Project Status");
     },
     readIssueLockOwnership: async () => null,
     withIssueMutationLock: async (_options, number, metadata) => {
@@ -14628,750 +13884,6 @@ test("Project metadata writes never target the Status field", async () => {
     writes.every((write) => write.fieldId !== project.statusField.id),
     "metadata writes must not target Status",
   );
-});
-
-// ---------------------------------------------------------------------------
-// Grooming routing-label writes (pnpm issue:groom)
-// ---------------------------------------------------------------------------
-
-const GROOM_ISSUE_NUMBER = 2600;
-
-// The labels the fixture repository defines. `groom` reads this set before it
-// writes, so a label absent from it is the "repository does not define that
-// label" case rather than a fixture gap.
-const GROOM_REPO_LABELS = Object.freeze([
-  "agent-active",
-  "agent-ready",
-  "in-pr",
-  "kind:workflow",
-  "needs-grooming",
-  "pkg:indexer",
-  "pkg:tooling",
-  "risk:low",
-  "risk:medium",
-]);
-
-function createGroomBoard({
-  labels = [],
-  title = "Groom target",
-  state = "OPEN",
-  afterWrite = null,
-  removeFails = null,
-  readFails = null,
-  afterRemove = null,
-  repoLabels = GROOM_REPO_LABELS,
-  stalePostWriteRead = false,
-  failUnlock = false,
-} = {}) {
-  const current = new Set(labels);
-  const calls = [];
-  const server = createFakeLockServer();
-  let reads = 0;
-  let preWriteSnapshot = null;
-  let wrote = false;
-  const operations = failUnlock
-    ? server.withOperations({
-        compareAndSwapLockRef: async (...args) => {
-          const commit = server.commits.get(args[4]);
-          if (wrote && commit.payload.state === "UNLOCK") {
-            throw new Error("unlock ref update rejected");
-          }
-          return server.compareAndSwapLockRef(...args);
-        },
-      })
-    : server.operations;
-  return {
-    server,
-    calls,
-    get labels() {
-      return [...current].sort();
-    },
-    get reads() {
-      return reads;
-    },
-    dependencies: {
-      getProject: async () => ownershipProject(),
-      listRepoLabelNames: async () => new Set(repoLabels),
-      getIssue: async (_options, issueNumber) => {
-        assertEqual(issueNumber, GROOM_ISSUE_NUMBER, "groom issue number");
-        reads += 1;
-        if (readFails && reads === 1) throw new Error(readFails);
-        const names =
-          stalePostWriteRead && reads > 1 ? preWriteSnapshot : [...current];
-        if (reads === 1) preWriteSnapshot = [...current];
-        return {
-          number: GROOM_ISSUE_NUMBER,
-          title,
-          state,
-          labels: names.map((name) => ({ name })),
-        };
-      },
-      addIssueLabels: async (addOptions, _issue, add) => {
-        calls.push({ op: "add", labels: [...add] });
-        if (addOptions?.dryRun) return;
-        wrote = true;
-        for (const label of add) current.add(label);
-        if (afterWrite) afterWrite(current);
-      },
-      removeIssueLabels: async (_options, _issue, remove) => {
-        calls.push({ op: "remove", labels: [...remove] });
-        if (removeFails) throw new Error(removeFails);
-        for (const label of remove) current.delete(label);
-        if (afterRemove) afterRemove(current);
-      },
-      withIssueMutationLock: (options, issueNumber, metadata, mutation) =>
-        withIssueMutationLock(
-          options,
-          issueNumber,
-          metadata,
-          mutation,
-          operations,
-        ),
-    },
-  };
-}
-
-function groomOptions(addLabels) {
-  return {
-    ...LOCK_TEST_OPTIONS,
-    issues: [GROOM_ISSUE_NUMBER],
-    addLabels,
-  };
-}
-
-function lockCommitStates(server) {
-  const states = [];
-  let oid = server.refOid;
-  while (oid && server.commits.has(oid)) {
-    const commit = server.commits.get(oid);
-    states.unshift({
-      state: commit.payload.state,
-      operation: commit.payload.operation,
-    });
-    oid = commit.parentOid;
-  }
-  return states;
-}
-
-test("groom applies routing labels under the per-issue mutex", async () => {
-  const board = createGroomBoard({ labels: ["agent-ready", "risk:high"] });
-  const results = await groom(
-    groomOptions(["pkg:tooling", "kind:workflow"]),
-    board.dependencies,
-  );
-
-  assertDeepEqual(board.calls, [
-    { op: "add", labels: ["pkg:tooling", "kind:workflow"] },
-  ]);
-  assertDeepEqual(board.labels, [
-    "agent-ready",
-    "kind:workflow",
-    "pkg:tooling",
-    "risk:high",
-  ]);
-  assertEqual(results.length, 1, "groom result count");
-  assertEqual(results[0].state, "groomed", "groom result state");
-  assertDeepEqual(results[0].writes, [
-    { field: "label", value: "pkg:tooling" },
-    { field: "label", value: "kind:workflow" },
-  ]);
-
-  const states = lockCommitStates(board.server);
-  assert(
-    states.some(
-      (entry) => entry.state === "LOCK" && entry.operation === "groom",
-    ),
-    "groom must take the per-issue mutex",
-  );
-  assertEqual(
-    states.at(-1).state,
-    "UNLOCK",
-    "groom must release the per-issue mutex",
-  );
-});
-
-test("groom refuses an issue a claim won after the roster snapshot", async () => {
-  assertDeepEqual(
-    [...ISSUE_OWNED_STATE_LABELS],
-    ["agent-active", "in-pr"],
-    "the owned-state pair is the one the sweep never touches",
-  );
-
-  for (const ownedLabel of ISSUE_OWNED_STATE_LABELS) {
-    const board = createGroomBoard({ labels: [ownedLabel, "risk:low"] });
-    const err = await assertRejects(
-      () => groom(groomOptions(["pkg:tooling"]), board.dependencies),
-      new RegExp(`${ownedLabel} means a live claim owns the issue`),
-    );
-
-    assertEqual(err.code, "ISSUE_GROOM_OWNED_REFUSED", "owned refusal code");
-    assertEqual(issueBoardExitCode(err), 8, "owned refusal exit code");
-    assertDeepEqual(board.calls, [], "an owned issue must not be written to");
-    assertEqual(
-      lockCommitStates(board.server).at(-1).state,
-      "UNLOCK",
-      "a refusal before mutation must release the mutex",
-    );
-  }
-});
-
-test("groom refuses a write that would complete sweep eligibility", async () => {
-  const board = createGroomBoard({ labels: ["agent-ready", "risk:low"] });
-  const err = await assertRejects(
-    () => groom(groomOptions(["pkg:tooling"]), board.dependencies),
-    /would leave .*satisfies the sweep predicate/,
-  );
-
-  assertEqual(err.code, "ISSUE_GROOM_ELIGIBILITY_REFUSED", "refusal code");
-  assertEqual(issueBoardExitCode(err), 4, "eligibility refusal exit code");
-  assertDeepEqual(board.calls, []);
-  assertDeepEqual(board.labels, ["agent-ready", "risk:low"]);
-  assertEqual(
-    lockCommitStates(board.server).at(-1).state,
-    "UNLOCK",
-    "a refusal before mutation must release the mutex",
-  );
-});
-
-test("groom refuses queue-state and non-routing labels", async () => {
-  for (const label of ISSUE_STATE_LABELS) {
-    const board = createGroomBoard({ labels: ["risk:medium"] });
-    const err = await assertRejects(
-      () => groom(groomOptions([label]), board.dependencies),
-      /refuses the queue-state label/,
-    );
-    assertEqual(err.code, "ISSUE_GROOM_LABEL_REFUSED", "state label code");
-    assertEqual(issueBoardExitCode(err), 3, "state label exit code");
-    assertDeepEqual(board.calls, []);
-  }
-
-  const board = createGroomBoard({ labels: ["risk:medium"] });
-  const err = await assertRejects(
-    () => groom(groomOptions(["source:backlog"]), board.dependencies),
-    /writes only pkg:, risk:, kind: routing labels/,
-  );
-  assertEqual(issueBoardExitCode(err), 3, "non-routing label exit code");
-  assertDeepEqual(board.calls, []);
-  assertDeepEqual(validateGroomLabels(["pkg:tooling", "pkg:tooling"]), [
-    "pkg:tooling",
-  ]);
-
-  // gh issue edit takes one comma-separated list, so a comma inside a label
-  // writes two labels. The module is the enforcement point, not the CLI's
-  // splitter: a caller importing validateGroomLabels must get the same answer.
-  const commaError = assertThrows(
-    () => validateGroomLabels(["pkg:tooling,agent-ready"]),
-    /gh issue edit takes one comma-separated list/,
-  );
-  assertEqual(commaError.code, "ISSUE_GROOM_LABEL_REFUSED", "comma code");
-  assertEqual(issueBoardExitCode(commaError), 3, "comma label exit code");
-});
-
-// The interleaving ADR 0082 cannot serialize: a person adds a state label
-// through the GitHub UI after the in-mutex read and before the label write.
-function interleavedAgentReady() {
-  let written = false;
-  return (labels) => {
-    if (written) return;
-    written = true;
-    labels.add("agent-ready");
-  };
-}
-
-test("groom compensates a write that completes eligibility after landing", async () => {
-  const board = createGroomBoard({
-    labels: ["risk:low"],
-    afterWrite: interleavedAgentReady(),
-  });
-  const err = await assertRejects(
-    () => groom(groomOptions(["pkg:tooling"]), board.dependencies),
-    /Compensated by removing pkg:tooling/,
-  );
-
-  assertEqual(err.code, "ISSUE_GROOM_COMPENSATED", "compensation code");
-  assertEqual(issueBoardExitCode(err), 5, "compensation exit code");
-  assertDeepEqual(board.calls, [
-    { op: "add", labels: ["pkg:tooling"] },
-    { op: "remove", labels: ["pkg:tooling"] },
-  ]);
-  assertDeepEqual(board.labels, ["agent-ready", "risk:low"]);
-  assert(
-    !satisfiesSweepLabelEligibility(board.labels),
-    "compensation must leave the issue sweep-ineligible",
-  );
-  assertEqual(
-    lockCommitStates(board.server).at(-1).state,
-    "UNLOCK",
-    "a compensated write must release the mutex",
-  );
-});
-
-test("groom compensation removes only the labels it added", async () => {
-  const board = createGroomBoard({
-    labels: ["risk:low", "kind:workflow"],
-    afterWrite: interleavedAgentReady(),
-  });
-  await assertRejects(
-    () =>
-      groom(groomOptions(["pkg:tooling", "kind:workflow"]), board.dependencies),
-    /ISSUE_GROOM_COMPENSATED|Compensated by removing/,
-  );
-
-  assertDeepEqual(board.calls, [
-    { op: "add", labels: ["pkg:tooling"] },
-    { op: "remove", labels: ["pkg:tooling"] },
-  ]);
-  assertDeepEqual(board.labels, ["agent-ready", "kind:workflow", "risk:low"]);
-});
-
-// The post-write read is what catches the interleave, so the control drives the
-// real module with that read made stale: the fixture's concurrent `agent-ready`
-// still lands, but a stale read also cannot see this call's own addition, and
-// the missing-addition check refuses to trust it — an ambiguous outcome, not a
-// false "groomed" success, and the mutex stays held for an operator. Restore
-// the read to a live one and the same fixture reaches compensation instead,
-// which is the test above.
-test("a stale post-write read is refused as ambiguous, not reported as success", async () => {
-  const board = createGroomBoard({
-    labels: ["risk:low"],
-    afterWrite: interleavedAgentReady(),
-    stalePostWriteRead: true,
-  });
-  const err = await assertRejects(
-    () => groom(groomOptions(["pkg:tooling"]), board.dependencies),
-    /the confirming read does not show pkg:tooling/,
-  );
-
-  assert(
-    err instanceof IssueMutationLockStaleError,
-    "an unproven write keeps the mutex, so the lock layer reports it as stale",
-  );
-  assertEqual(issueBoardExitCode(err), 9, "unconfirmed write exit code");
-  assertDeepEqual(board.calls, [{ op: "add", labels: ["pkg:tooling"] }]);
-  assertDeepEqual(board.labels, ["agent-ready", "pkg:tooling", "risk:low"]);
-  assert(
-    satisfiesSweepLabelEligibility(board.labels),
-    "the control must prove the interleaved state write lands: the real board is eligible even though the stale read could not see it",
-  );
-  assertEqual(
-    lockCommitStates(board.server).at(-1).state,
-    "LOCK",
-    "an ambiguous post-write read must not release the mutex",
-  );
-});
-
-// A live (not stale) post-write read can still miss this call's own addition:
-// a human, or the monthly file-size watchlist job, can remove it in the window
-// between the write and this read. The success branch must not report every
-// addition as applied when the live board disagrees.
-test("groom refuses success when a concurrent actor removes its own addition", async () => {
-  const board = createGroomBoard({
-    labels: ["risk:low"],
-    afterWrite: (labels) => labels.delete("pkg:tooling"),
-  });
-  const err = await assertRejects(
-    () => groom(groomOptions(["pkg:tooling"]), board.dependencies),
-    /the confirming read does not show pkg:tooling/,
-  );
-
-  assert(
-    err instanceof IssueMutationLockStaleError,
-    "an unproven write keeps the mutex, so the lock layer reports it as stale",
-  );
-  assertEqual(issueBoardExitCode(err), 9, "unconfirmed write exit code");
-  assert(
-    /it read risk:low/.test(err.message),
-    "the refusal must name what the confirming read actually saw",
-  );
-  assertEqual(
-    lockCommitStates(board.server).at(-1).state,
-    "LOCK",
-    "an ambiguous outcome must not release the mutex",
-  );
-});
-
-test("groom keeps the mutex when compensation fails", async () => {
-  const board = createGroomBoard({
-    labels: ["risk:low"],
-    afterWrite: interleavedAgentReady(),
-    removeFails: "label removal rejected",
-  });
-  const err = await assertRejects(
-    () => groom(groomOptions(["pkg:tooling"]), board.dependencies),
-    /Compensation failed: label removal rejected/,
-  );
-
-  assert(
-    err instanceof IssueMutationLockStaleError,
-    "a failed compensation must keep the mutex and report it as stale",
-  );
-  assertEqual(issueBoardExitCode(err), 6, "compensation failure exit code");
-  assert(
-    /Remove pkg:tooling by hand/.test(err.message),
-    "the failure must name the labels to remove by hand",
-  );
-  assert(
-    satisfiesSweepLabelEligibility(board.labels),
-    "the failure case is the one that leaves the issue eligible",
-  );
-  assertEqual(
-    lockCommitStates(board.server).at(-1).state,
-    "LOCK",
-    "a failed compensation must retain LOCK",
-  );
-});
-
-test("a removal that reports success but leaves the label names it by hand", async () => {
-  const board = createGroomBoard({
-    labels: ["risk:low"],
-    afterWrite: interleavedAgentReady(),
-    afterRemove: (labels) => labels.add("pkg:tooling"),
-  });
-  const err = await assertRejects(
-    () => groom(groomOptions(["pkg:tooling"]), board.dependencies),
-    /the removal call returned success but pkg:tooling is still on the issue/,
-  );
-
-  assertEqual(issueBoardExitCode(err), 6, "compensation failure exit code");
-  assert(
-    /Remove pkg:tooling by hand/.test(err.message),
-    "a label the removal call could not clear is still the one to name",
-  );
-  assert(
-    !/is already off the issue/.test(err.message),
-    "pkg:tooling is not off the issue in this case; the message must not say it is",
-  );
-});
-
-test("a failed in-mutex read releases the per-issue mutex", async () => {
-  const board = createGroomBoard({
-    labels: ["risk:low"],
-    readFails: "gh issue view failed with exit 1: HTTP 502",
-  });
-  await assertRejects(
-    () => groom(groomOptions(["pkg:tooling"]), board.dependencies),
-    /HTTP 502/,
-  );
-
-  assertDeepEqual(board.calls, [], "a failed read must write nothing");
-  assertEqual(
-    lockCommitStates(board.server).at(-1).state,
-    "UNLOCK",
-    "a failure before the write must not strand the per-issue mutex",
-  );
-});
-
-test("groom keeps a write a concurrent label made eligible without it", async () => {
-  const board = createGroomBoard({
-    labels: ["risk:low", "pkg:tooling"],
-    afterWrite: interleavedAgentReady(),
-  });
-  const err = await assertRejects(
-    () => groom(groomOptions(["kind:workflow"]), board.dependencies),
-    /This call did not cause it/,
-  );
-
-  assertEqual(err.code, "ISSUE_GROOM_CONCURRENT_ELIGIBILITY", "outcome code");
-  assertEqual(issueBoardExitCode(err), 7, "concurrent eligibility exit code");
-  assertDeepEqual(
-    board.calls,
-    [{ op: "add", labels: ["kind:workflow"] }],
-    "a write this call did not cause must not be undone",
-  );
-  assertDeepEqual(board.labels, [
-    "agent-ready",
-    "kind:workflow",
-    "pkg:tooling",
-    "risk:low",
-  ]);
-  assert(
-    satisfiesSweepLabelEligibility(board.labels),
-    "the reported outcome is an issue left eligible by the concurrent write",
-  );
-  assertEqual(
-    lockCommitStates(board.server).at(-1).state,
-    "UNLOCK",
-    "a write this call did not cause is not a stale-lock case",
-  );
-});
-
-test("compensation that leaves the issue eligible keeps the mutex", async () => {
-  const board = createGroomBoard({
-    labels: ["risk:low"],
-    afterWrite: interleavedAgentReady(),
-    afterRemove: (labels) => labels.add("pkg:indexer"),
-  });
-  const err = await assertRejects(
-    () => groom(groomOptions(["pkg:tooling"]), board.dependencies),
-    /still satisfies the sweep predicate/,
-  );
-
-  assertEqual(issueBoardExitCode(err), 6, "compensation failure exit code");
-  assert(
-    err instanceof IssueMutationLockStaleError,
-    "an issue still eligible after compensation must keep the mutex",
-  );
-  assert(
-    satisfiesSweepLabelEligibility(board.labels),
-    "the removal cleared this call's labels and the issue is still eligible",
-  );
-  assertEqual(
-    lockCommitStates(board.server).at(-1).state,
-    "LOCK",
-    "a compensation that did not clear the predicate must retain LOCK",
-  );
-  // pkg:tooling is already off the issue (the removal call succeeded); a
-  // different label, pkg:indexer, is what still satisfies the predicate.
-  // Telling the operator to remove pkg:tooling again would be wrong.
-  assert(
-    /pkg:tooling is already off the issue/.test(err.message),
-    "the recovery text must not tell the operator to remove a label already gone",
-  );
-  assert(
-    !/Remove pkg:tooling by hand/.test(err.message),
-    "the recovery text must not repeat the generic 'remove additions' instruction here",
-  );
-  assert(
-    /agent-ready, pkg:indexer, risk:low is what satisfies the sweep predicate now/.test(
-      err.message,
-    ),
-    "the recovery text must name the label set that still satisfies the predicate",
-  );
-});
-
-// Every groom exit code promises what the mutex did, so a refusal whose release
-// then failed must not report as that refusal. ADR 0082 states the same rule for
-// the stale-lock code: the walk stops at `cause` and never enters
-// `AggregateError.errors`, so this run exits 1 and the runbook's exit table
-// routes it to the operator.
-test("a compensated write whose mutex release fails exits 1, not 5", async () => {
-  const board = createGroomBoard({
-    labels: ["risk:low"],
-    afterWrite: interleavedAgentReady(),
-    failUnlock: true,
-  });
-  const err = await assertRejects(
-    () => groom(groomOptions(["pkg:tooling"]), board.dependencies),
-    /Compensated by removing pkg:tooling/,
-  );
-
-  assert(
-    err instanceof IssueMutationLockStaleError,
-    "a failed release must report the mutex as stale",
-  );
-  assert(
-    err.cause instanceof AggregateError,
-    "the lock layer wraps the refusal and the release failure together",
-  );
-  assertEqual(
-    issueBoardExitCode(err),
-    1,
-    "a retained mutex must not report as the refusal's own exit code",
-  );
-  assert(
-    /Failed to release the restored mutex/.test(err.message),
-    "the message must name the release failure",
-  );
-});
-
-test("groom refuses a routing label the repository does not define", async () => {
-  const board = createGroomBoard({ labels: ["risk:medium"] });
-  const err = await assertRejects(
-    () =>
-      groom(
-        groomOptions(["pkg:tooling", "pkg:not-a-real-area"]),
-        board.dependencies,
-      ),
-    /pkg:not-a-real-area is not a label .* defines/,
-  );
-
-  assertEqual(err.code, "ISSUE_GROOM_LABEL_REFUSED", "absent label code");
-  assertEqual(issueBoardExitCode(err), 3, "absent label exit code");
-  assertDeepEqual(
-    board.calls,
-    [],
-    "gh issue edit fails on an unknown label, so the write must not be tried",
-  );
-  assertDeepEqual(
-    lockCommitStates(board.server),
-    [],
-    "the label check runs before the mutex, so no lock is taken at all",
-  );
-});
-
-test("the repository label listing pages and refuses an unbounded run", async () => {
-  const pages = [
-    Array.from({ length: 100 }, (_, index) => ({ name: `pkg:p${index}` })),
-    [{ name: "risk:low" }, { name: "" }, {}],
-  ];
-  const requested = [];
-  const names = await listRepoLabelNames(
-    { repo: "owner/repo" },
-    {
-      json: async (args) => {
-        requested.push(String(args.at(-1)));
-        return pages.shift() ?? [];
-      },
-    },
-  );
-
-  assertEqual(names.size, 101, "every page's names are collected");
-  assert(
-    names.has("pkg:p0") && names.has("risk:low"),
-    "both pages contribute names",
-  );
-  assertEqual(requested.length, 2, "a short page ends the listing");
-  assert(
-    requested[0].includes("page=1") && requested[1].includes("page=2"),
-    "the listing pages in order",
-  );
-
-  await assertRejects(
-    () =>
-      listRepoLabelNames(
-        { repo: "owner/repo" },
-        { json: async () => ({ message: "Not Found" }) },
-      ),
-    /unexpected non-array label listing/,
-  );
-
-  await assertRejects(
-    () =>
-      listRepoLabelNames(
-        { repo: "owner/repo" },
-        {
-          json: async () =>
-            Array.from({ length: 100 }, (_, index) => ({
-              name: `pkg:full${index}`,
-            })),
-        },
-      ),
-    /exceeded 20 pages/,
-  );
-});
-
-test("a groom dry run reports the write it would make", async () => {
-  const board = createGroomBoard({ labels: ["risk:medium"] });
-  const results = await groom(
-    { ...groomOptions(["pkg:tooling"]), dryRun: true },
-    board.dependencies,
-  );
-
-  assertDeepEqual(results[0].writes, [
-    { field: "label", value: "pkg:tooling" },
-  ]);
-  assertDeepEqual(board.calls, [{ op: "add", labels: ["pkg:tooling"] }]);
-  assertDeepEqual(
-    board.labels,
-    ["risk:medium"],
-    "a dry run must leave the labels alone",
-  );
-  assertEqual(
-    board.reads,
-    1,
-    "a dry run has no write to confirm, so it makes no post-write read",
-  );
-});
-
-test("groom skips labels the issue already carries", async () => {
-  const board = createGroomBoard({ labels: ["agent-ready", "pkg:tooling"] });
-  const results = await groom(
-    groomOptions(["pkg:tooling"]),
-    board.dependencies,
-  );
-  assertDeepEqual(board.calls, []);
-  assertDeepEqual(results[0].writes, []);
-});
-
-test("groom parses one issue and its routing labels", () => {
-  const help = usage();
-  assert(
-    help.includes("pnpm issue:groom --issue 901 --add-label"),
-    "usage must name the grooming routing-label helper",
-  );
-
-  const options = parseArgs([
-    "groom",
-    "--issue",
-    "901",
-    "--add-label",
-    "pkg:tooling,kind:workflow",
-    "--add-label",
-    "risk:medium",
-  ]);
-  assertEqual(options.command, "groom");
-  assertDeepEqual(options.issues, [901]);
-  assertDeepEqual(options.addLabels, [
-    "pkg:tooling",
-    "kind:workflow",
-    "risk:medium",
-  ]);
-
-  assertThrows(
-    () => parseArgs(["groom", "--issue", "901"]),
-    /at least one --add-label/,
-  );
-  assertThrows(
-    () => parseArgs(["groom", "--add-label", "pkg:tooling"]),
-    /exactly one explicit --issue/,
-  );
-  assertThrows(
-    () =>
-      parseArgs([
-        "groom",
-        "--issue",
-        "901",
-        "--issue",
-        "902",
-        "--add-label",
-        "pkg:tooling",
-      ]),
-    /exactly one explicit --issue/,
-  );
-  assertThrows(
-    () => parseArgs(["claim", "--issue", "901", "--add-label", "pkg:tooling"]),
-    /--add-label is valid only for groom/,
-  );
-});
-
-test("sweep label eligibility is the conjunction the grooming rule names", () => {
-  for (const risk of ["risk:low", "risk:medium"]) {
-    assert(
-      satisfiesSweepLabelEligibility(["agent-ready", risk, "pkg:tooling"]),
-      `agent-ready with one ${risk} and one pkg:* is eligible`,
-    );
-  }
-  for (const labels of [
-    ["risk:low", "pkg:tooling"],
-    ["agent-ready", "risk:high", "pkg:tooling"],
-    ["agent-ready", "risk:low", "risk:medium", "pkg:tooling"],
-    ["agent-ready", "risk:low", "pkg:tooling", "pkg:alerts"],
-    ["agent-ready", "risk:low"],
-  ]) {
-    assert(
-      !satisfiesSweepLabelEligibility(labels),
-      "expected ineligible: " + labels.join(", "),
-    );
-  }
-});
-
-// The entry point routes every failure through issueBoardExitCode, so the exit
-// code of a command that asks for none must still be the 1 it was before.
-test("issueBoardExitCode leaves every other failure at exit 1", () => {
-  assertEqual(issueBoardExitCode(new Error("plain")), 1, "a plain error");
-  assertEqual(issueBoardExitCode("not an error"), 1, "a non-error rejection");
-  const zero = new Error("zero code");
-  zero.exitCode = 0;
-  assertEqual(
-    issueBoardExitCode(zero),
-    1,
-    "a zero exitCode is not a failure code",
-  );
-  const wrapped = new Error("outer", { cause: new Error("inner") });
-  assertEqual(issueBoardExitCode(wrapped), 1, "an ordinary cause chain");
-  const cyclic = new Error("cyclic");
-  cyclic.cause = cyclic;
-  assertEqual(issueBoardExitCode(cyclic), 1, "a cyclic cause chain terminates");
 });
 
 await Promise.all(pending);

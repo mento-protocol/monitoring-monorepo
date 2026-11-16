@@ -10,16 +10,12 @@ import { randomUUID } from "node:crypto";
 import {
   chooseUntriedCandidate,
   exactQueueState,
-  hasSweepClaimAttributes,
-  issueBodySha256,
   ISSUE_STATE_LABELS,
   IssueClaimCandidateLossError,
   IssueOwnershipConflictError,
-  isActiveSweepClaim,
   isClaimable,
   isRecoverableClaimRaceError,
   isReviewable,
-  isSweepClaimable,
   labelNames,
   OPTIONAL_PROJECT_FIELDS,
   projectDateFieldValue,
@@ -27,13 +23,11 @@ import {
   validateClaimBranch,
   stateFromLabels,
   validateClaimId,
-  validateIssueBodySha256,
 } from "./issue-board-state.mjs";
 import {
   ensureProjectItem,
   findIssueProjectItem,
   getProject,
-  readProjectItemStatus,
   updateProjectMetadata as writeProjectMetadata,
 } from "./issue-board-projects.mjs";
 import {
@@ -157,8 +151,6 @@ function commandDependencies(overrides = {}) {
     listReadyIssues: overrides.listReadyIssues ?? listReadyIssues,
     now: overrides.now ?? (() => new Date()),
     readClaimOwnership: overrides.readClaimOwnership ?? readClaimOwnership,
-    readProjectItemStatus:
-      overrides.readProjectItemStatus ?? readProjectItemStatus,
     removeIssueLabels: overrides.removeIssueLabels ?? removeIssueLabels,
     reserveClaimOwnership:
       overrides.reserveClaimOwnership ??
@@ -196,106 +188,10 @@ function commandDependencies(overrides = {}) {
   };
 }
 
-function sameProjectStatus(left, right) {
-  return (
-    left?.name === right?.name &&
-    left?.optionId === right?.optionId &&
-    left?.name != null &&
-    left?.optionId != null
-  );
-}
-
-function assertUnblockedSweepStatus(issue, status, phase) {
-  if (!status?.name || !status?.optionId) {
-    throw new IssueClaimCandidateLossError(
-      `Issue #${issue.number} sweep claim cannot prove the selected Project Status during ${phase}`,
-    );
-  }
-  if (status.name === "Blocked") {
-    throw new IssueClaimCandidateLossError(
-      `Issue #${issue.number} became Project Blocked during ${phase}`,
-    );
-  }
-  return status;
-}
-
-async function readSweepStatus(
-  options,
-  project,
-  itemId,
-  issue,
-  dependencies,
-  phase,
-) {
-  if (!project.id || !project.statusField?.id) {
-    throw new IssueClaimCandidateLossError(
-      `Issue #${issue.number} sweep claim cannot bind the selected Project and Status field during ${phase}`,
-    );
-  }
-  return assertUnblockedSweepStatus(
-    issue,
-    await dependencies.readProjectItemStatus(options, project, itemId),
-    phase,
-  );
-}
-
-async function assertSweepStatusUnchanged(
-  options,
-  project,
-  itemId,
-  issue,
-  expected,
-  dependencies,
-  phase,
-) {
-  const actual = await readSweepStatus(
-    options,
-    project,
-    itemId,
-    issue,
-    dependencies,
-    phase,
-  );
-  if (!sameProjectStatus(actual, expected)) {
-    throw new IssueClaimCandidateLossError(
-      `Issue #${issue.number} selected Project Status changed during ${phase}; expected ${expected.name}/${expected.optionId}, observed ${actual.name}/${actual.optionId}`,
-    );
-  }
-  return actual;
-}
-
-function claimabilityError(options, issue) {
-  if (options.sweepEligible) {
-    return new IssueClaimCandidateLossError(
-      `Issue #${issue.number} is not sweep-eligible; expected open agent-ready, exactly one risk:* equal to risk:low or risk:medium, exactly one pkg:* label, no native blocker, and an exact non-Blocked selected Project Status`,
-    );
-  }
+function claimabilityError(issue) {
   return new IssueClaimCandidateLossError(
     `Issue #${issue.number} is not claimable; expected open agent-ready without agent-active/in-pr/needs-grooming`,
   );
-}
-
-function isEligibleClaim(options, issue, project) {
-  return options.sweepEligible
-    ? isSweepClaimable(issue, project)
-    : isClaimable(issue);
-}
-
-function isHeldClaim(options, issue, project) {
-  return options.sweepEligible
-    ? isActiveSweepClaim(issue, project)
-    : isReviewable(issue);
-}
-
-function assertSweepBodyUnchanged(options, issue, phase) {
-  if (!options.sweepEligible) return;
-  const expected = validateIssueBodySha256(options.bodySha256);
-  const actual = issueBodySha256(issue.body);
-  if (actual !== expected) {
-    throw new IssueClaimCandidateLossError(
-      `Issue #${issue.number} body changed after the orchestrator's eligibility read during ${phase}; expected SHA-256 ${expected}, observed ${actual}`,
-    );
-  }
 }
 
 function withClaimId(err, claimId) {
@@ -374,36 +270,8 @@ async function ensurePartialClaimIsNotReady(
         if (queueState !== "ready" && queueState !== "active") {
           throw new Error("partial claim has a newer non-ready state");
         }
-        if (
-          options.sweepEligible &&
-          queueState === "ready" &&
-          !isEligibleClaim(options, current, project)
-        ) {
-          throw claimabilityError(options, current);
-        }
-        const sweepStatus = options.sweepEligible
-          ? await readSweepStatus(
-              options,
-              project,
-              ownedItemId,
-              issue,
-              dependencies,
-              "partial-claim pre-transition check",
-            )
-          : null;
         if (queueState === "ready") {
           await dependencies.editIssueLabels(options, current, "active");
-        }
-        if (options.sweepEligible) {
-          await assertSweepStatusUnchanged(
-            options,
-            project,
-            ownedItemId,
-            issue,
-            sweepStatus,
-            dependencies,
-            "partial-claim post-label check",
-          );
         }
         const reservation = await dependencies.reserveClaimOwnership(
           options,
@@ -413,17 +281,6 @@ async function ensurePartialClaimIsNotReady(
           metadata,
           capability,
         );
-        if (options.sweepEligible) {
-          await assertSweepStatusUnchanged(
-            options,
-            project,
-            ownedItemId,
-            issue,
-            sweepStatus,
-            dependencies,
-            "partial-claim post-reservation check",
-          );
-        }
         const writePlan = options.dryRun
           ? (reservation ?? plannedOwnership)
           : await planClaimOwnershipMetadataWrite(
@@ -449,17 +306,6 @@ async function ensurePartialClaimIsNotReady(
           capability,
           "claim",
         );
-        if (options.sweepEligible) {
-          await assertSweepStatusUnchanged(
-            options,
-            project,
-            ownedItemId,
-            issue,
-            sweepStatus,
-            dependencies,
-            "partial-claim post-metadata check",
-          );
-        }
         await dependencies.verifyClaimOwnership(
           options,
           project,
@@ -475,7 +321,7 @@ async function ensurePartialClaimIsNotReady(
         const verified = await dependencies.getIssue(options, issue.number);
         if (
           verifiedOwnership.claimId === metadata.claimId &&
-          isHeldClaim(options, verified, project)
+          isReviewable(verified)
         ) {
           return { safe: true, state: "active", ownership: "ours" };
         }
@@ -581,25 +427,12 @@ async function recoverOwnedClaim(
     itemId,
   );
   if (ownership.claimId !== metadata.claimId) return null;
-  if (options.sweepEligible && !hasSweepClaimAttributes(issue, project)) {
-    throw claimabilityError(options, issue);
-  }
   const plannedOwnership = planClaimOwnershipReservation(
     issue,
     ownership,
     metadata,
   );
   markMutationAttempted();
-  const sweepStatus = options.sweepEligible
-    ? await readSweepStatus(
-        options,
-        project,
-        itemId,
-        issue,
-        dependencies,
-        "same-token recovery",
-      )
-    : null;
   const reservation = await dependencies.reserveClaimOwnership(
     options,
     project,
@@ -627,28 +460,6 @@ async function recoverOwnedClaim(
   const recoveryCurrent = options.dryRun
     ? issue
     : await dependencies.getIssue(options, issue.number);
-  assertSweepBodyUnchanged(
-    options,
-    recoveryCurrent,
-    "same-token recovery post-reservation check",
-  );
-  if (
-    options.sweepEligible &&
-    !hasSweepClaimAttributes(recoveryCurrent, project)
-  ) {
-    throw claimabilityError(options, recoveryCurrent);
-  }
-  if (options.sweepEligible) {
-    await assertSweepStatusUnchanged(
-      options,
-      project,
-      itemId,
-      recoveryCurrent,
-      sweepStatus,
-      dependencies,
-      "same-token recovery pre-write check",
-    );
-  }
   const writePlan = options.dryRun
     ? (reservation ?? plannedOwnership)
     : await planClaimOwnershipMetadataWrite(
@@ -674,25 +485,6 @@ async function recoverOwnedClaim(
     capability,
     "claim",
   );
-  if (options.sweepEligible) {
-    const recoveryPostMetadata = options.dryRun
-      ? recoveryCurrent
-      : await dependencies.getIssue(options, issue.number);
-    assertSweepBodyUnchanged(
-      options,
-      recoveryPostMetadata,
-      "same-token recovery post-metadata check",
-    );
-    await assertSweepStatusUnchanged(
-      options,
-      project,
-      itemId,
-      recoveryPostMetadata,
-      sweepStatus,
-      dependencies,
-      "same-token recovery post-metadata check",
-    );
-  }
   await dependencies.verifyClaimOwnership(
     options,
     project,
@@ -700,26 +492,10 @@ async function recoverOwnedClaim(
     issue,
     metadata,
   );
-  if (options.sweepEligible && !options.dryRun) {
-    await assertSweepStatusUnchanged(
-      options,
-      project,
-      itemId,
-      issue,
-      sweepStatus,
-      dependencies,
-      "same-token recovery final check",
-    );
-  }
   const verified = options.dryRun
     ? issue
     : await dependencies.getIssue(options, issue.number);
-  assertSweepBodyUnchanged(
-    options,
-    verified,
-    "same-token recovery final check",
-  );
-  if (!isHeldClaim(options, verified, project)) {
+  if (!isReviewable(verified)) {
     throw new Error(
       `Issue #${issue.number} did not retain an eligible agent-active claim`,
     );
@@ -730,33 +506,9 @@ async function recoverOwnedClaim(
     metadata,
     dependencies,
   );
-  const finalIssue = options.sweepEligible
-    ? await dependencies.getIssue(options, issue.number)
-    : verified;
-  assertSweepBodyUnchanged(
-    options,
-    finalIssue,
-    "same-token recovery final post-comment check",
-  );
-  if (options.sweepEligible && !options.dryRun) {
-    await assertSweepStatusUnchanged(
-      options,
-      project,
-      itemId,
-      finalIssue,
-      sweepStatus,
-      dependencies,
-      "same-token recovery final post-comment check",
-    );
-  }
-  if (!isHeldClaim(options, finalIssue, project)) {
-    throw new Error(
-      `Issue #${issue.number} did not retain an eligible agent-active claim during final recovery check`,
-    );
-  }
   return {
-    number: finalIssue.number,
-    title: finalIssue.title,
+    number: verified.number,
+    title: verified.title,
     state: "active",
     claimId: metadata.claimId,
     recovered: true,
@@ -777,7 +529,6 @@ async function claimIssue(
   let issue = { number };
   try {
     issue = await dependencies.getIssue(options, number);
-    assertSweepBodyUnchanged(options, issue, "initial locked check");
     const recovered = await recoverOwnedClaim(
       options,
       project,
@@ -790,22 +541,11 @@ async function claimIssue(
       capability,
     );
     if (recovered) return recovered;
-    if (!isEligibleClaim(options, issue, project)) {
-      throw claimabilityError(options, issue);
+    if (!isClaimable(issue)) {
+      throw claimabilityError(issue);
     }
     mutationAttempted = true;
     itemId = await dependencies.ensureProjectItem(options, project, issue);
-    const sweepStatus =
-      options.sweepEligible && !options.dryRun
-        ? await readSweepStatus(
-            options,
-            project,
-            itemId,
-            issue,
-            dependencies,
-            "pre-ownership check",
-          )
-        : null;
     const reservation = await dependencies.reserveClaimOwnership(
       options,
       project,
@@ -815,37 +555,13 @@ async function claimIssue(
       capability,
     );
     const current = await dependencies.getIssue(options, issue.number);
-    assertSweepBodyUnchanged(options, current, "post-reservation check");
-    if (!isEligibleClaim(options, current, project)) {
-      throw claimabilityError(options, current);
-    }
-    if (options.sweepEligible && !options.dryRun) {
-      await assertSweepStatusUnchanged(
-        options,
-        project,
-        itemId,
-        current,
-        sweepStatus,
-        dependencies,
-        "post-reservation check",
-      );
+    if (!isClaimable(current)) {
+      throw claimabilityError(current);
     }
     await dependencies.editIssueLabels(options, current, "active");
     const postLabel = options.dryRun
       ? current
       : await dependencies.getIssue(options, issue.number);
-    assertSweepBodyUnchanged(options, postLabel, "post-label check");
-    if (options.sweepEligible && !options.dryRun) {
-      await assertSweepStatusUnchanged(
-        options,
-        project,
-        itemId,
-        postLabel,
-        sweepStatus,
-        dependencies,
-        "pre-metadata check",
-      );
-    }
     const writePlan = options.dryRun
       ? reservation
       : await planClaimOwnershipMetadataWrite(
@@ -884,19 +600,6 @@ async function claimIssue(
         claimId: metadata.claimId,
       };
     }
-    if (options.sweepEligible) {
-      const postMetadata = await dependencies.getIssue(options, issue.number);
-      assertSweepBodyUnchanged(options, postMetadata, "post-metadata check");
-      await assertSweepStatusUnchanged(
-        options,
-        project,
-        itemId,
-        postMetadata,
-        sweepStatus,
-        dependencies,
-        "post-metadata check",
-      );
-    }
     await dependencies.sleep(CLAIM_SETTLE_MS);
     await dependencies.verifyClaimOwnership(
       options,
@@ -906,19 +609,7 @@ async function claimIssue(
       metadata,
     );
     const verified = await dependencies.getIssue(options, issue.number);
-    assertSweepBodyUnchanged(options, verified, "post-settle check");
-    if (options.sweepEligible) {
-      await assertSweepStatusUnchanged(
-        options,
-        project,
-        itemId,
-        verified,
-        sweepStatus,
-        dependencies,
-        "post-settle check",
-      );
-    }
-    if (!isHeldClaim(options, verified, project)) {
+    if (!isReviewable(verified)) {
       throw new Error(
         `Issue #${issue.number} did not retain an eligible agent-active claim`,
       );
@@ -929,29 +620,9 @@ async function claimIssue(
       metadata,
       dependencies,
     );
-    const finalIssue = options.sweepEligible
-      ? await dependencies.getIssue(options, issue.number)
-      : verified;
-    assertSweepBodyUnchanged(options, finalIssue, "final check");
-    if (options.sweepEligible) {
-      await assertSweepStatusUnchanged(
-        options,
-        project,
-        itemId,
-        finalIssue,
-        sweepStatus,
-        dependencies,
-        "final check",
-      );
-    }
-    if (!isHeldClaim(options, finalIssue, project)) {
-      throw new Error(
-        `Issue #${issue.number} did not retain an eligible agent-active claim during final check`,
-      );
-    }
     return {
-      number: finalIssue.number,
-      title: finalIssue.title,
+      number: verified.number,
+      title: verified.title,
       state: "active",
       claimId: metadata.claimId,
     };
@@ -1085,21 +756,6 @@ export async function claim(options, overrides = {}) {
   }
   const dependencies = commandDependencies(overrides);
   const explicitBranch = String(options.branch ?? "");
-  if (options.sweepEligible && options.issues.length !== 1) {
-    throw new Error("--sweep-eligible requires exactly one explicit issue");
-  }
-  if (options.sweepEligible && !options.claimId) {
-    throw new Error("--sweep-eligible requires an explicit --claim-id");
-  }
-  if (options.sweepEligible && !explicitBranch) {
-    throw new Error("--sweep-eligible requires an explicit --branch");
-  }
-  if (options.sweepEligible && !options.bodySha256) {
-    throw new Error(
-      "--sweep-eligible requires --body-sha256 from the inspected issue body",
-    );
-  }
-  if (options.bodySha256) validateIssueBodySha256(options.bodySha256);
   const branch =
     explicitBranch || String((await dependencies.getGitBranch()) ?? "");
   if (!branch) {

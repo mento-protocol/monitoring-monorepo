@@ -1,9 +1,9 @@
 ---
 title: Operator-triggered backlog sweep with isolated workers
-status: active
+status: archived
 owner: eng
-canonical: true
-last_verified: 2026-09-24
+canonical: false
+last_verified: 2026-11-16
 scope: process
 date: 2026-08
 doc_type: adr
@@ -13,9 +13,20 @@ garden_lane: adrs-architecture
 
 # ADR 0077 — Operator-triggered backlog sweep with isolated workers
 
-**Status:** Accepted (Aug 2026), amended by M5 and retirement in 2026-09, and
-by the `risk:medium` admission of 2026-09-24.
+**Status:** Retired on 2026-11-16 by the owner's decision. Accepted (Aug
+2026), amended by M5 and retirement in 2026-09, and by the `risk:medium`
+admission of 2026-09-24. Historical decision retained.
 **Scope:** process
+
+**Retirement (2026-11-16):** The repository no longer offers the ship-top-N
+sweep. The `backlog-sweep` skill, its runbook, the `issue:groom` helper, and the
+`issue:claim --sweep-eligible` path were removed. A skill of the same name in
+the operator's personal skill library reviews the backlog and fixes nothing. It
+is not a replacement for this decision. The
+[skill](https://github.com/mento-protocol/monitoring-monorepo/blob/20afa04b/.agents/skills/backlog-sweep/SKILL.md)
+and its
+[runbook](https://github.com/mento-protocol/monitoring-monorepo/blob/20afa04b/docs/notes/backlog-sweep.md)
+remain available at the pre-retirement revision.
 
 ## Context
 
@@ -275,10 +286,10 @@ PR it opens.
   shipped this decision and closes issue
   [#2071](https://github.com/mento-protocol/monitoring-monorepo/issues/2071),
   whose grooming decisions chose the operator-triggered form.
-- [`.agents/skills/backlog-sweep/SKILL.md`](../../.agents/skills/backlog-sweep/SKILL.md)
+- [`.agents/skills/backlog-sweep/SKILL.md`](https://github.com/mento-protocol/monitoring-monorepo/blob/20afa04b/.agents/skills/backlog-sweep/SKILL.md)
   and its byte-identical `.claude` mirror implement the decision. Operating-card
   step 3 and required CI run the mirror checker and its tests.
-- [`docs/notes/backlog-sweep.md`](../notes/backlog-sweep.md) is the canonical
+- [`docs/notes/backlog-sweep.md`](https://github.com/mento-protocol/monitoring-monorepo/blob/20afa04b/docs/notes/backlog-sweep.md) is the canonical
   contract the skill produces against — eligibility, boundaries, resilience
   duties, and the report.
 - Issue
@@ -295,7 +306,7 @@ PR it opens.
 
 ## References
 
-- [`docs/notes/backlog-sweep.md`](../notes/backlog-sweep.md) — the canonical
+- [`docs/notes/backlog-sweep.md`](https://github.com/mento-protocol/monitoring-monorepo/blob/20afa04b/docs/notes/backlog-sweep.md) — the canonical
   loop, boundaries, resilience duties, and report contract.
 - [`docs/notes/backlog-ranking.md`](../notes/backlog-ranking.md) — stage 1, the
   receipt, and the exclusion ledger.

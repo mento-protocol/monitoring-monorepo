@@ -14,20 +14,17 @@ import {
   validateClaimAgent,
   validateClaimBranch,
   validateClaimId,
-  validateIssueBodySha256,
 } from "./issue-board-state.mjs";
 
 export function usage() {
   return `Usage:
   pnpm issue:claim --count 3 [--agent codex] [--branch <name>] [--dry-run]
   pnpm issue:claim --issue 901 --issue 902 [--agent claude]
-  pnpm issue:claim --issue 901 --branch <name> --claim-id <token> --sweep-eligible --body-sha256 <digest>
   pnpm issue:review --pr 123 --issue 901 [--issue 902]
   pnpm issue:review --pr 123 --issue 901 --claim-id <token> --rebind-branch
   pnpm issue:release --issue 901 --claim-id <token> [--needs-grooming]
   pnpm issue:release --issue 901 --claim-id <token> --closed-unmerged-pr
   pnpm issue:release --issue 901 --claim-id <token> --merged-pr --needs-grooming
-  pnpm issue:groom --issue 901 --add-label pkg:tooling,kind:workflow
   pnpm issue:board sync --dry-run       # preview repository-wide changes
   pnpm issue:board sync                 # apply; requires explicit repository-wide authority
   pnpm issue:board backfill --issue 901 [--dry-run]
@@ -39,11 +36,8 @@ Options:
   --issue, --issues <numbers>      Issue number(s), comma-separated or repeated; not valid for sync
   --count <number>                 Number of ready issues to claim (default: 1)
   --agent <name>                   Agent/session label for comments and project fields
-  --branch <name>                  Durable owner branch; required for sweep claims
+  --branch <name>                  Durable owner branch
   --claim-id <token>               Stable ownership token for one explicit claim or release
-  --sweep-eligible                 Require the backlog-sweep claim predicate
-  --body-sha256 <digest>           Pin the body inspected for a sweep claim
-  --add-label <labels>             Routing label(s) to add for groom, comma-separated or repeated
   --pr <number-or-url>             Pull request number or URL for review moves
   --needs-grooming                 Release issues to needs-grooming instead of agent-ready
   --closed-unmerged-pr             Release a stored PR after proving it closed unmerged
@@ -135,12 +129,9 @@ export function parseArgs(argv, env = process.env) {
     backfillIssueFlags: 0,
     positionalIssueValues: [],
     issues: [],
-    addLabels: [],
     agent: defaultAgent(env),
     branch: env.AGENT_BRANCH ?? "",
     claimId: null,
-    sweepEligible: false,
-    bodySha256: null,
     pr: null,
     prValue: null,
     dryRun: false,
@@ -191,12 +182,6 @@ export function parseArgs(argv, env = process.env) {
       case "--issues":
         options.issueValues.push(readValue());
         break;
-      case "--add-label":
-        for (const part of readValue().split(",")) {
-          const label = part.trim();
-          if (label) options.addLabels.push(label);
-        }
-        break;
       case "--agent":
         options.agent = readValue();
         break;
@@ -206,12 +191,6 @@ export function parseArgs(argv, env = process.env) {
         break;
       case "--claim-id":
         options.claimId = readValue();
-        break;
-      case "--sweep-eligible":
-        options.sweepEligible = true;
-        break;
-      case "--body-sha256":
-        options.bodySha256 = readValue();
         break;
       case "--pr":
         options.prValue = readValue();
@@ -274,7 +253,6 @@ export function parseArgs(argv, env = process.env) {
     "release",
     "sync",
     "backfill",
-    "groom",
   ].includes(options.command);
   if (lifecycleMutation) {
     assertCanonicalGithubCliEnvironment(env);
@@ -314,7 +292,6 @@ export function parseArgs(argv, env = process.env) {
     );
   }
   if (options.claimId != null) validateClaimId(options.claimId);
-  if (options.bodySha256 != null) validateIssueBodySha256(options.bodySha256);
   if (
     options.claimId != null &&
     !["claim", "release"].includes(options.command) &&
@@ -331,26 +308,6 @@ export function parseArgs(argv, env = process.env) {
     throw new Error(
       "release requires --claim-id from the claim output or comment",
     );
-  }
-  if (options.sweepEligible && options.command !== "claim") {
-    throw new Error("--sweep-eligible is valid only for claim");
-  }
-  if (options.sweepEligible && options.issues.length !== 1) {
-    throw new Error("--sweep-eligible requires exactly one explicit issue");
-  }
-  if (options.sweepEligible && options.claimId == null) {
-    throw new Error("--sweep-eligible requires an explicit --claim-id");
-  }
-  if (options.sweepEligible && (!branchExplicit || !options.branch?.trim())) {
-    throw new Error("--sweep-eligible requires an explicit --branch");
-  }
-  if (options.sweepEligible && options.bodySha256 == null) {
-    throw new Error(
-      "--sweep-eligible requires --body-sha256 from the inspected issue body",
-    );
-  }
-  if (options.bodySha256 != null && !options.sweepEligible) {
-    throw new Error("--body-sha256 is valid only with --sweep-eligible");
   }
   if (branchExplicit && options.command !== "claim") {
     throw new Error(
@@ -382,17 +339,6 @@ export function parseArgs(argv, env = process.env) {
   }
   if (options.rebindBranch && options.claimId == null) {
     throw new Error("--rebind-branch requires --claim-id");
-  }
-  if (options.addLabels.length > 0 && options.command !== "groom") {
-    throw new Error("--add-label is valid only for groom");
-  }
-  if (options.command === "groom") {
-    if (options.issues.length !== 1) {
-      throw new Error("groom requires exactly one explicit --issue");
-    }
-    if (options.addLabels.length === 0) {
-      throw new Error("groom requires at least one --add-label routing label");
-    }
   }
   if (options.command === "backfill") {
     const explicitIssue = options.issueValues[0]?.trim();

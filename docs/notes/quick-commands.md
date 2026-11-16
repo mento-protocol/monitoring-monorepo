@@ -126,7 +126,7 @@ pnpm integrations:probe --write-upstash  # Publish latest snapshot for /integrat
 pnpm integrations:probe:test   # Unit tests for probe adapters/parsers
 
 # Agent issue workboard
-# Issue lifecycle commands (claim, groom, review, release, board) and the
+# Issue lifecycle commands (claim, review, release, board) and the
 # Claude cloud MCP fallback: docs/notes/agent-issue-workflow.md
 
 # Public config package

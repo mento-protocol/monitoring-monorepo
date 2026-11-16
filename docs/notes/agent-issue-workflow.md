@@ -28,8 +28,7 @@ https://github.com/orgs/mento-protocol/projects/12
 Labels authorize lifecycle state. Project Agent, Branch, Claim ID, Claimed At,
 and PR fields record ownership. These five fields are mutex-tool-owned. Every
 repo-owned write to them uses the per-issue mutex. Project Status is human-owned
-and unchanged by the helpers. A sweep claim reads it as a separate blocker
-check. Use `Needs Grooming` for unclear work and `Blocked` for an external
+and unchanged by the helpers. Use `Needs Grooming` for unclear work and `Blocked` for an external
 dependency or human decision.
 
 Do not edit an owner field while a helper can run for that issue. Project V2 has
@@ -57,26 +56,17 @@ Routing labels:
 - `kind:*` — work type.
 - `risk:*` — implementation risk: low, medium, or high.
 
-`pnpm issue:groom` is the only issue-board helper that writes `pkg:*`, `risk:*`,
-and `kind:*`. It takes the same per-issue mutex, revalidates the resulting label
-set inside it, and refuses a write that would leave the issue backlog-sweep
-eligible. It also refuses an issue a live claim owns, and a label the repository
-does not define. It never writes a state label. The monthly file-size watchlist job
-(`scripts/repo-health/file-size-watchlist-issue.mjs`) is the other unattended
-writer of these labels: it replaces the whole label set of the issues it owns
-outside the mutex, and holds itself to a `risk:medium` floor. It never writes
-`risk:low`, but since the sweep also admits `risk:medium`
-([ADR 0077](../adr/0077-operator-triggered-backlog-sweep.md)), its
-single-package issues at `risk:medium` satisfy the sweep label predicate. An
-issue that kept a stricter `risk:high` does not.
+No issue-board helper writes `pkg:*`, `risk:*`, or `kind:*`. The monthly
+file-size watchlist job (`scripts/repo-health/file-size-watchlist-issue.mjs`) is
+the unattended writer of these labels: it replaces the whole label set of the
+issues it owns outside the mutex, and holds itself to a `risk:medium` floor. It
+never writes `risk:low`.
 
 An issue may carry `agent-ready` only with exactly one `risk:*` and at least one
 `pkg:*`. An `agent-ready` issue missing either is **incompletely groomed**:
 consumers treat it as `needs-grooming` until it is repaired, and
 `pnpm issue:board sync` reports it as a per-issue failure. `pnpm issue:claim`
-still claims it, so manual work stays possible. The backlog sweep narrows
-further to exactly one `pkg:*`, so a correctly labeled multi-package issue is
-never sweep-eligible and stays manual.
+still claims it, so manual work stays possible.
 
 Every issue an agent files, a PR deferral included, carries a state label,
 exactly one `risk:*`, at least one `pkg:*`, and a `kind:*` at creation. The sync
@@ -189,8 +179,6 @@ Issue #2071 compatibility details for these commands.
 ```bash
 pnpm issue:claim --count 3 --agent codex
 pnpm issue:claim --issue 901 --agent claude
-pnpm issue:claim --issue 901 --agent codex --branch fix/901 --claim-id sweep-901 --sweep-eligible --body-sha256 <digest>
-pnpm issue:groom --issue 901 --add-label pkg:tooling,kind:workflow
 pnpm issue:review --pr 123 --issue 901
 pnpm issue:review --pr 123 --issue 901 --claim-id <claim-id> --rebind-branch
 pnpm issue:release --issue 901 --claim-id <claim-id>
@@ -212,14 +200,7 @@ same-repository `closingIssuesReferences` only when the first 100-reference page
 is complete. Pass `--issue` or `--issues` for larger PRs, `Refs`, or mixed
 complete and partial scope.
 
-`--sweep-eligible` requires an explicit issue, Claim ID, `--branch`, and
-`--body-sha256`. The backlog sweep computes the digest from the body in the same
-JSON snapshot that it classified. The helper rechecks machine-readable
-eligibility and the expected body digest while it holds the issue mutex. It
-checks the body before and after the transition. It does not classify body
-text. A direct GitHub body edit does not acquire the mutex. An edit after the
-final check remains visible because the helper never writes the body. A manual
-claim can use the checked-out branch.
+A claim can use the checked-out branch.
 Retry one ordinary nonzero claim only with the same token and branch.
 When comments are enabled, this retry verifies a matching trusted claim comment
 and creates it when it is missing. It does not duplicate an existing match.

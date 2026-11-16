@@ -182,65 +182,6 @@ export async function findIssueProjectItem(
   return findIssueProjectItemInNodes(projectItems.nodes, project);
 }
 
-export async function readProjectItemStatus(
-  options,
-  project,
-  itemId,
-  { graphql = ghGraphql } = {},
-) {
-  if (!project.statusField?.id) {
-    throw new Error("Project must have a Status field ID");
-  }
-  const response = await graphql(
-    `
-      query ($item: ID!) {
-        node(id: $item) {
-          ... on ProjectV2Item {
-            fieldValues(first: 100) {
-              nodes {
-                ... on ProjectV2ItemFieldSingleSelectValue {
-                  name
-                  optionId
-                  field {
-                    ... on ProjectV2FieldCommon {
-                      id
-                    }
-                  }
-                }
-              }
-              pageInfo {
-                hasNextPage
-              }
-            }
-          }
-        }
-      }
-    `,
-    { item: itemId },
-  );
-  const values = response?.data?.node?.fieldValues;
-  if (!values) throw new Error(`Project item ${itemId} was not found`);
-  if (
-    !Array.isArray(values.nodes) ||
-    typeof values.pageInfo?.hasNextPage !== "boolean"
-  ) {
-    throw new Error(
-      `Project item ${itemId} Status lookup was incomplete; refusing to treat Status as empty`,
-    );
-  }
-  if (values.pageInfo.hasNextPage) {
-    throw new Error(
-      `Project item ${itemId} has more than 100 field values; refusing an inconsistent Status snapshot`,
-    );
-  }
-  const status = values.nodes.find(
-    (value) => value?.field?.id === project.statusField.id,
-  );
-  return status
-    ? { name: status.name ?? null, optionId: status.optionId ?? null }
-    : null;
-}
-
 export async function readProjectTextField(
   options,
   itemId,

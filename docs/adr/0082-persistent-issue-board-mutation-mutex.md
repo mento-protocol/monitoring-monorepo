@@ -3,7 +3,7 @@ title: Persistent Issue-Board Mutation Mutex
 status: active
 owner: eng
 canonical: true
-last_verified: 2026-09-25
+last_verified: 2026-11-16
 scope: ci/process
 date: 2026-08
 doc_type: adr
@@ -15,7 +15,9 @@ garden_lane: adrs-architecture
 
 ## Status
 
-Accepted.
+Accepted. Amended 2026-11-16: the `issue:groom` helper and the
+`issue:claim --sweep-eligible` path were removed with the backlog sweep
+([ADR 0077](0077-operator-triggered-backlog-sweep.md)).
 
 ## Context
 
@@ -193,8 +195,7 @@ Claim, recovery, compensation, review, release, and backfill pass the capability
 through every owner-field write. Sync receives a capability with an empty field
 allowlist. It does not pass the capability to Project membership writes.
 Project membership writes therefore remain outside this owner-field capability.
-Project Status remains read-only. Grooming receives a capability with an empty
-field allowlist and writes no Project field.
+Project Status remains read-only.
 
 A repository-wide text inventory scans every tracked and nonignored untracked
 file for each complete protected operation name. Each occurrence must be in the
@@ -290,7 +291,7 @@ target flag cannot authorize another GitHub host.
 The Project must provide `Agent`, `Branch`, `Claim ID`, and `PR` text fields and
 a `Claimed At` date field. A normal claim generates and prints a
 `claim-<UUID>` owner token. A caller can instead supply `--claim-id` with one
-explicit issue. A manual non-sweep claim can omit `--branch`; the helper reads
+explicit issue. A claim can omit `--branch`; the helper reads
 the checked-out branch before it reads the Project or acquires the mutex and
 stops before mutation if the checkout is detached or has no branch.
 Agent and Branch metadata use the same bounded single-line contract in the CLI,
@@ -301,15 +302,10 @@ A claim adds a missing Project item, changes `agent-ready` to `agent-active`,
 writes and verifies the complete ownership snapshot, and posts the claim
 comment. Success and partial errors include the Claim ID.
 
-`--sweep-eligible` requires one explicit issue, Claim ID, `--branch` value, and
-`--body-sha256`; an ambient `AGENT_BRANCH` does not satisfy the branch
-requirement. The digest binds the exact body snapshot that the orchestrator
-classified for external dependencies. The helper checks that digest while it
-holds the issue mutex. It also checks that the issue is open and `agent-ready`,
-has exactly one `risk:*` label equal to `risk:low` or `risk:medium` (since
-2026-09-24) and exactly one `pkg:*` label, has no native blocker, and has a
-present non-`Blocked` Project Status. It repeats the body and ID-bound Status
-checks at the points described below.
+Until 2026-11-16, a `--sweep-eligible` claim also pinned the issue body digest
+and checked the backlog-sweep label, blocker, and Project Status predicate
+under the mutex. That path was removed with the backlog sweep that called it
+([ADR 0077](0077-operator-triggered-backlog-sweep.md)).
 
 The explicit review branch rebind runs under the same mutex. It records the old
 and new Branch and PR values in the lock payload. It preserves the Claim ID,
@@ -433,33 +429,10 @@ Status. It does not roll back a direct external write because that could erase
 external state. It reads at most 100 comment pages or 10,000 comments and fails
 closed on incomplete history.
 
-Grooming routing writes take the same mutex. `issue:groom` writes `pkg:*`,
-`risk:*`, and `kind:*` labels on one explicit issue. It refuses a queue-state
-label and every other label class, and refuses an issue the in-mutex read
-finds already owned (`agent-active` or `in-pr`) — a claim can win the mutex
-between the sweep's roster snapshot and this call, and the read is the first
-point this command can see that. It refuses a label the repository does not
-define earlier still, before it takes the mutex: `gh issue edit` fails on an
-unknown label only after the write is attempted, where this module keeps
-`LOCK`, so one bounded read of the repository's labels keeps that failure away
-from the mutex entirely. It re-reads the issue's labels inside the
-serialized section and refuses the write when the resulting set would satisfy
-the backlog-sweep label predicate: `agent-ready`, exactly one `risk:*` equal to
-`risk:low` or `risk:medium` (since 2026-09-24), and exactly one `pkg:*`. The mutex serializes helpers, not people,
-so the helper re-reads the labels after the write, and treats any addition
-missing from that read as an ambiguous outcome rather than a success — a
-concurrent actor can remove this call's own addition in the same window. When a
-label landed in between and the issue is now sweep-eligible, the helper asks
-whether its own write caused that. When removing exactly the labels it added
-would clear the predicate, it removes them and exits nonzero. When the
-predicate holds without them the write was not the cause: the helper keeps the
-labels and exits with a distinct code, because undoing a correct label would
-leave the issue eligible anyway and report the opposite. A removal that fails,
-or that leaves the issue eligible, retains `LOCK`; the message names the labels
-to remove by hand only when they are still on the issue, and points at the
-current label set instead when the predicate holds through a different label.
-Every path before the write releases the mutex, so a failed read cannot strand
-a `LOCK` that only ref surgery clears.
+Until 2026-11-16, the `issue:groom` helper also wrote `pkg:*`, `risk:*`, and
+`kind:*` labels under this mutex. It was removed with the backlog sweep that
+called it ([ADR 0077](0077-operator-triggered-backlog-sweep.md)). No helper
+writes routing labels now.
 
 An operator recovers a stale lock only after proving that the original helper
 cannot resume. The operator terminates its session or process, or revokes its
@@ -518,31 +491,13 @@ settle within those attempts.
 A per-issue failure does not stop later issues. Sync lists the successful and
 failed issue numbers and exits nonzero after it processes the list.
 
-A sweep claim binds the selected Project item and Status field by their GraphQL
-IDs. It reads the exact Status before the ownership reservation. It confirms the
-same value after the reservation, label change, ownership-field write, settle
-interval, and final verification. It applies the same before-and-after checks
-to same-token recovery and partial-claim compensation. A missing value,
-`Blocked`, or any changed option fails the claim. The helper never writes Status.
-An observed blocker or drift cannot produce a successful claim. The helper
-keeps any partial issue state outside `agent-ready`.
-The claim also verifies `--body-sha256` after it acquires the mutex, after the
-ownership reservation, after the label and ownership transitions, after the
-settle interval, and at final verification. A changed body fails the claim. If
-the transition started, the normal recovery path keeps the partial claim out of
-`agent-ready`. Same-token recovery performs the same initial and final body
-checks.
-Before partial-claim recovery changes `agent-ready` to `agent-active`, it also
-rechecks the low-risk label, package label, native blocker, and selected Project
-Status requirements. An ineligible owned partial claim moves to
-`needs-grooming`.
-
 The issue reader gets native blocker relationships and exact Project item IDs
 and Status values through one `gh api graphql` snapshot. It does not pass the
 `blockedBy` JSON field to `gh issue view`, because that field requires GitHub
 CLI 2.94.0. The GraphQL response keeps the same `totalCount` and `nodes` blocker
-contract. Sweep eligibility matches the selected Project and Status field by
-ID. Both Project-item readers require an explicit complete first page before
+contract. No claim path has read the blocker relationship or the Status value
+since the sweep claim path was removed on 2026-11-16; the reader still fetches
+them. Both Project-item readers require an explicit complete first page before
 they use any item node. A truncated page, missing pagination state, title-only
 Project snapshot, missing Status, or duplicate selected Project items fails
 closed.
@@ -554,21 +509,8 @@ reader requires `hasNextPage: false`. A paginated reader applies the same check
 to every page.
 
 The Project API has no Status compare-and-swap. The human-owned boundary removes
-the overwrite race from the helper contract. A direct Status write before a
-sweep observation is checked. A direct write between observations causes a
-mismatch or `Blocked` failure. A write after the final observation remains
-visible and linearizes after the completed claim because no helper Status write
-can erase it. The mutex does not serialize the human writer and does not claim
-to do so.
-
-GitHub does not provide a conditional issue-body read that can share one
-transaction with label or Project writes. A direct body edit does not acquire
-the custom-ref mutex. The expected digest closes the long interval between the
-orchestrator's semantic read and the helper's locked read. Repeated checks can
-detect an edit during the helper transition and keep partial state outside the
-ready queue. An edit after the final body check remains visible and linearizes
-after the claim because the helper never writes the body. The helper does not
-claim atomic compare-and-swap for body text.
+the overwrite race from the helper contract: no helper writes Status. The mutex
+does not serialize the human writer and does not claim to do so.
 
 ## Compatibility evidence
 
@@ -634,7 +576,5 @@ alternative still holds for this repository.
 - Direct GitHub mutations remain outside the mutex. A direct external same-field
   owner write can be overwritten in the unconditional Project update gap. Stop
   helpers before manual owner-field repair.
-- Sweep body digests detect observed drift. They do not serialize direct GitHub
-  body edits or provide a body compare-and-swap.
 - Project Status remains human-owned and is never overwritten by a lifecycle
   helper.
