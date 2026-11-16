@@ -36,7 +36,6 @@ const expectedScripts = {
   "issue:board": "node scripts/pr/agent-issue-board.mjs",
   "issue:board:test": "node scripts/pr/agent-issue-board.test.mjs",
   "issue:claim": "node scripts/pr/agent-issue-board.mjs claim",
-  "issue:groom": "node scripts/pr/agent-issue-board.mjs groom",
   "issue:review": "node scripts/pr/agent-issue-board.mjs review",
   "issue:release": "node scripts/pr/agent-issue-board.mjs release",
   "pr:feedback-state": "node scripts/pr/pr-feedback-state.mjs",

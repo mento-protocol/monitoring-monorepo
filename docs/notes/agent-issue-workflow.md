@@ -57,14 +57,10 @@ Routing labels:
 - `kind:*` — work type.
 - `risk:*` — implementation risk: low, medium, or high.
 
-`pnpm issue:groom` is the only issue-board helper that writes `pkg:*`, `risk:*`,
-and `kind:*`. It takes the same per-issue mutex, revalidates the resulting label
-set inside it, and refuses a write that would leave the issue backlog-sweep
-eligible. It also refuses an issue a live claim owns, and a label the repository
-does not define. It never writes a state label. The monthly file-size watchlist job
-(`scripts/repo-health/file-size-watchlist-issue.mjs`) is the other unattended
-writer of these labels: it replaces the whole label set of the issues it owns
-outside the mutex, and holds itself to a `risk:medium` floor. It never writes
+No issue-board helper writes `pkg:*`, `risk:*`, or `kind:*`. The monthly
+file-size watchlist job (`scripts/repo-health/file-size-watchlist-issue.mjs`) is
+the unattended writer of these labels: it replaces the whole label set of the
+issues it owns outside the mutex, and holds itself to a `risk:medium` floor. It never writes
 `risk:low`, but since the sweep also admits `risk:medium`
 ([ADR 0077](../adr/0077-operator-triggered-backlog-sweep.md)), its
 single-package issues at `risk:medium` satisfy the sweep label predicate. An
@@ -190,7 +186,6 @@ Issue #2071 compatibility details for these commands.
 pnpm issue:claim --count 3 --agent codex
 pnpm issue:claim --issue 901 --agent claude
 pnpm issue:claim --issue 901 --agent codex --branch fix/901 --claim-id sweep-901 --sweep-eligible --body-sha256 <digest>
-pnpm issue:groom --issue 901 --add-label pkg:tooling,kind:workflow
 pnpm issue:review --pr 123 --issue 901
 pnpm issue:review --pr 123 --issue 901 --claim-id <claim-id> --rebind-branch
 pnpm issue:release --issue 901 --claim-id <claim-id>

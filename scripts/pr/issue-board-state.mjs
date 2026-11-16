@@ -299,21 +299,6 @@ function hasSweepRouting(issue) {
 }
 
 /**
- * The backlog-sweep label predicate over label names alone.
- *
- * `hasSweepClaimAttributes` adds the Project and blocker conditions a claim
- * also needs. This is the label half on its own, so a caller holding a
- * prospective set — the labels a write is about to produce — can ask whether
- * that write would leave the issue sweep-eligible. `agent-ready` belongs to the
- * predicate because eligibility is the conjunction: which label completes it
- * depends on what the issue already carries.
- */
-export function satisfiesSweepLabelEligibility(labels) {
-  const names = labels instanceof Set ? labels : new Set(labels);
-  return names.has("agent-ready") && hasSweepRoutingNames(names);
-}
-
-/**
  * Routing-label gaps that make an `agent-ready` issue incompletely groomed.
  *
  * `agent-ready` promises an agent can implement the issue without further

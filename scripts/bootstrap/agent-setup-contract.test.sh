@@ -295,6 +295,6 @@ JSON
 )
 rm -rf "$validator_repo"
 validator_repo=""
-assert_contains 'package.json scripts.issue:groom must be "node scripts/pr/agent-issue-board.mjs groom"'
+assert_contains 'package.json scripts.agent:closeout-review must be "node scripts/pr/closeout-review.mjs"'
 
 echo "agent setup contract tests passed"
