@@ -72,7 +72,6 @@ export {
   isRecoverableClaimRaceError,
   isReleasable,
   isReviewable,
-  ISSUE_OWNED_STATE_LABELS,
   ISSUE_STATE_LABELS,
   labelsForState,
   projectDateFieldValue,

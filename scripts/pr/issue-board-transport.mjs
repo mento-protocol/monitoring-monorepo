@@ -357,7 +357,7 @@ export async function getIssue(
     "-R",
     options.repo,
     "--json",
-    "id,number,title,url,labels,state,body,projectItems",
+    "id,number,title,url,labels,state,projectItems",
   ]);
   if (!issue?.id) {
     throw new Error(`Issue #${number} lookup returned no node ID`);
