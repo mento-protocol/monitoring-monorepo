@@ -210,7 +210,7 @@ If root `package.json` changed, first run
    without recognized findings also exits 2. Read the retained report and
    report the printed reason.
 
-   **An exit 2 with no finding can ship.** All of these must hold:
+   **An exit 2 with no finding does not block.** All of these must hold:
    - The printed reason is exactly
      `positive completion evidence unavailable; manual report inspection required`.
    - The report header has `codex_exit_code: 0` and no `target_moved`,
@@ -218,16 +218,24 @@ If root `package.json` changed, first run
      `TIMED OUT` footer. The header's `verdict: failed` is expected here.
    - The header's `merge_base_sha`, `head_sha`, and, on a dirty tree,
      `target_fingerprint` name the pinned target.
+   - The run ended on its own. A run that you, the harness, or a signal
+     interrupted blocks: the tool does not record an interruption, so run it
+     again.
    - You read the whole body below the header's `---` line. It is a complete
      review of this diff, and it states no finding.
 
    Then record in `## Validation` the exit code, the reason, the header's
    `model`, the `head_sha` the report covers, and that you read the report by
-   hand and it has no finding. When the header has `dirty: yes`, also record
-   `dirty` and `target_fingerprint`, because the fingerprint names the bytes
-   you read. Then you may ship. The tool prints the same
-   reason for a refusal, a partial answer, or text that does not review the
-   diff. Such a body blocks.
+   hand and it has no finding. Quote the report's closing summary sentence, so
+   that a reviewer can check the read. When the header has `dirty: yes`, also
+   record `dirty` and `target_fingerprint`, because the fingerprint names the
+   bytes you read. This clears the exit 2 only. Continue with the `review`
+   skill hand-off below; ship after that pass.
+
+   The tool prints the same reason for a refusal, a partial answer, text that
+   does not review the diff, and a finding in a form its patterns do not
+   recognize. Each such body blocks. The unrecognized finding is the main case
+   the manual read guards against.
 
    Every other exit 2 blocks the required closeout and shipping. The causes
    are a moved target (`target_moved: yes`), a provider failure or timeout
