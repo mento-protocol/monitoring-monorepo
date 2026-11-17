@@ -15,8 +15,10 @@
  *
  * No qualified positive-completion protocol is available. A successful process
  * with no recognized findings returns 2 and keeps the report for manual
- * inspection. A clean-looking body, refusal, or partial answer cannot clear
- * closeout. This mitigation disables automatic clean output.
+ * inspection. This script never clears closeout on its own: a clean-looking
+ * body, refusal, or partial answer gets the same exit 2. Operating-card step 4
+ * owns the manual read that can clear a no-finding report for shipping. This
+ * mitigation disables automatic clean output.
  *
  * The report is unscanned model output. It can quote credential-shaped diff
  * content, so it must stay out of Git; `--out` is refused unless the path is

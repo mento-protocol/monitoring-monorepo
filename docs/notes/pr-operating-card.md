@@ -199,21 +199,52 @@ If root `package.json` changed, first run
    The current-base axis shows what the branch adds to the integrated base. The
    prior-head axis shows what the integration changed about the branch and
    catches a conflict resolution that drops branch behavior. Hand both complete
-   reports to the `review` skill. A finding or failed closeout on either axis
-   blocks the handoff. After a review fix, rerun the author-check union and both
-   closeout axes against the new final head.
+   reports to the `review` skill. On either axis, a finding blocks the handoff,
+   and so does an exit 2 that the no-finding rule below does not clear. After a
+   review fix, rerun the author-check union and both closeout axes against the
+   new final head.
 
    It prints `report: <path>` as its last line. Exit 1 means the report
-   carries findings. Exit 2 means the closeout failed or requires manual
-   inspection. This includes a moved target, a provider failure or timeout,
-   empty output, and output without recognized findings. No qualified positive
-   completion protocol is available, so automatic clean output is disabled.
-   Read the retained report and report the printed reason. Manual inspection
-   does not turn exit 2 into completed automatic closeout. Only the two causes
-   named below — no `codex` on PATH and a nested Codex session — fall back to
-   single-source coverage. Outside those two exceptions, exit 2 blocks the
-   required closeout and shipping until a qualified completion protocol is
-   available. Reading a clean-looking report does not waive that blocker.
+   carries findings. Exit 2 means the closeout failed or needs a manual read.
+   The tool cannot confirm a clean result, so it never exits 0: a report
+   without recognized findings also exits 2. Read the retained report and
+   report the printed reason.
+
+   **An exit 2 with no finding does not block.** All of these must hold:
+   - The printed reason is exactly
+     `positive completion evidence unavailable; manual report inspection required`.
+   - The report header has `codex_exit_code: 0` and no `target_moved`,
+     `head_sha_at_finish`, or `base_sha_at_finish` line. The report has no
+     `TIMED OUT` footer. The header's `verdict: failed` is expected here.
+   - The header's `merge_base_sha`, `head_sha`, and, on a dirty tree,
+     `target_fingerprint` name the pinned target.
+   - The run ended on its own. A run that you, the harness, or a signal
+     interrupted blocks: the tool does not record an interruption, so run it
+     again.
+   - You read the whole body below the header's `---` line. It is a complete
+     review of this diff, and it states no finding.
+
+   Then record in `## Validation` the exit code, the reason, the header's
+   `model`, the `head_sha` the report covers, and that you read the report by
+   hand and it has no finding. Say in your own words what the report states it
+   reviewed, so that a reviewer can check the read. Never copy report text
+   into the PR: the report is unscanned model output. When the header has
+   `dirty: yes`, also record `dirty` and `target_fingerprint`, because the
+   fingerprint names the bytes you read. This clears the exit 2 only. Continue
+   with the `review` skill hand-off below; ship after that pass.
+
+   The tool prints the same reason for a refusal, a partial answer, text that
+   does not review the diff, and a finding in a form its patterns do not
+   recognize. Each such body blocks. The unrecognized finding is the main case
+   the manual read guards against.
+
+   Every other exit 2 blocks the required closeout and shipping. The causes
+   are a moved target (`target_moved: yes`), a provider failure or timeout
+   (`codex did not start`, `codex exited <n>`, `codex timed out`), empty output
+   (`codex produced an empty report`), and output that is not a report. A
+   preflight refusal also exits 2, before `codex` runs, and prints no
+   `report:` line. Only the two causes named below — no `codex` on PATH and a
+   nested Codex session — fall back to single-source coverage.
    The review diffs
    the **working tree** against the base, so uncommitted edits to tracked files
    are covered but a file you have never added is not: `git add` new files
