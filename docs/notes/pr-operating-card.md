@@ -226,11 +226,12 @@ If root `package.json` changed, first run
 
    Then record in `## Validation` the exit code, the reason, the header's
    `model`, the `head_sha` the report covers, and that you read the report by
-   hand and it has no finding. Quote the report's closing summary sentence, so
-   that a reviewer can check the read. When the header has `dirty: yes`, also
-   record `dirty` and `target_fingerprint`, because the fingerprint names the
-   bytes you read. This clears the exit 2 only. Continue with the `review`
-   skill hand-off below; ship after that pass.
+   hand and it has no finding. Say in your own words what the report states it
+   reviewed, so that a reviewer can check the read. Never copy report text
+   into the PR: the report is unscanned model output. When the header has
+   `dirty: yes`, also record `dirty` and `target_fingerprint`, because the
+   fingerprint names the bytes you read. This clears the exit 2 only. Continue
+   with the `review` skill hand-off below; ship after that pass.
 
    The tool prints the same reason for a refusal, a partial answer, text that
    does not review the diff, and a finding in a form its patterns do not

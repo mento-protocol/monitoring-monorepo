@@ -89,7 +89,8 @@ An exit 2 for that reason only, from a provider run that exited 0 over a target
 that did not move and that nothing interrupted, no longer blocks. The agent
 reads the whole report, confirms that it is a complete review of the diff with
 no finding, and records the exit code, the reason, the model, the covered head,
-the report's closing summary and the manual read in `## Validation`. The
+the manual read, and its own summary of what the report reviewed in
+`## Validation`. It copies no report text, because the report is unscanned. The
 `review` skill pass of step 4 still follows before shipping. Every other exit 2
 still blocks: a moved target, a provider failure or timeout, an interrupted
 run, empty output, and output that is not a review of the diff.
