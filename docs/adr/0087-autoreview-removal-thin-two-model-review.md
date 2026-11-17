@@ -14,7 +14,8 @@ garden_lane: adrs-architecture
 
 # ADR 0087 — Remove the autoreview machinery; keep a thin two-model closeout review
 
-**Status:** Accepted (Sep 2026), amended 2026-09-16 and 2026-10-28, in force.
+**Status:** Accepted (Sep 2026), amended 2026-09-16, 2026-10-28 and
+2026-11-17, in force.
 **Scope:** ci/process
 
 Amended 2026-09-16: [ADR 0106](0106-sentry-triage-moves-to-operator-skills.md)
@@ -74,6 +75,29 @@ It addresses [#2632](https://github.com/mento-protocol/monitoring-monorepo/issue
 The broader off-target scope requirements in
 [#2550](https://github.com/mento-protocol/monitoring-monorepo/issues/2550) remain
 open.
+
+### Manual-read amendment (2026-11-17)
+
+The tool still cannot confirm a clean result. Every report without recognized
+findings exits 2 with the reason `positive completion evidence unavailable;
+manual report inspection required`. The 2026-10-28 rule made that exit block
+shipping, but practice did not follow it: merged PRs #2652, #2659 and #2664
+recorded the exit 2 and a manual read of a report with no finding, and shipped.
+The repository owner decided on 2026-11-17 that the practice becomes the rule.
+
+An exit 2 for that reason only, from a provider run that exited 0 over a target
+that did not move, no longer blocks shipping. The agent reads the whole report,
+confirms that it is a complete review of the diff with no finding, and records
+the exit code, the reason, the model, the covered head and the manual read in
+`## Validation`. Every other exit 2 still blocks: a moved target, a provider
+failure or timeout, empty output, and output that is not a review of the diff.
+The tool's exit codes and verdicts do not change, and the manual read is not an
+automatic clean verdict. Card step 4 names the report fields that separate the
+causes.
+
+The alternative was to keep the blocker until a qualified automatic-clean
+protocol exists. It was rejected: no such protocol exists, and until one does,
+every PR whose review finds nothing would stop at closeout.
 
 ### What is deleted
 
