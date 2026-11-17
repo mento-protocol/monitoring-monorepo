@@ -215,7 +215,7 @@ If root `package.json` changed, first run
      `positive completion evidence unavailable; manual report inspection required`.
    - The report header has `codex_exit_code: 0` and no `target_moved`,
      `head_sha_at_finish`, or `base_sha_at_finish` line. The report has no
-     `TIMED OUT` footer.
+     `TIMED OUT` footer. The header's `verdict: failed` is expected here.
    - The header's `merge_base_sha`, `head_sha`, and, on a dirty tree,
      `target_fingerprint` name the pinned target.
    - You read the whole body below the header's `---` line. It is a complete
