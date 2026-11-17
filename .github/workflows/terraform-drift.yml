@@ -165,7 +165,22 @@ jobs:
 
       - name: Init trusted-main refresh backend
         # The CLI value overrides each stack's write-capable backend identity.
-        run: terraform init -input=false -backend-config="impersonate_service_account=org-terraform-refresh-readonly@mento-terraform-seed-ffac.iam.gserviceaccount.com"
+        # Retry init up to 3 times: provider/module downloads from
+        # registry.terraform.io and github.com time out now and then
+        # (2026-11-08, 2026-11-16) and turned a daily drift run red without
+        # any drift. init is idempotent and read-only here; plan never retries.
+        run: |
+          for attempt in 1 2 3; do
+            if terraform init -input=false -backend-config="impersonate_service_account=org-terraform-refresh-readonly@mento-terraform-seed-ffac.iam.gserviceaccount.com"; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "::warning::terraform init failed (attempt ${attempt}/3); retrying in $((attempt * 30))s"
+              sleep $((attempt * 30))
+            fi
+          done
+          echo "::error::terraform init failed after 3 attempts"
+          exit 1
 
       - name: Plan
         id: plan
