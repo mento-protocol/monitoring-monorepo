@@ -223,7 +223,9 @@ If root `package.json` changed, first run
 
    Then record in `## Validation` the exit code, the reason, the header's
    `model`, the `head_sha` the report covers, and that you read the report by
-   hand and it has no finding. Then you may ship. The tool prints the same
+   hand and it has no finding. When the header has `dirty: yes`, also record
+   `dirty` and `target_fingerprint`, because the fingerprint names the bytes
+   you read. Then you may ship. The tool prints the same
    reason for a refusal, a partial answer, or text that does not review the
    diff. Such a body blocks.
 
