@@ -667,9 +667,20 @@ locals {
       ref_id = "R1"
       expr   = "mento_pool_reserve_share_token1 * 100"
     },
+    # B must return one series per pool on every evaluation. Grafana treats any
+    # data query that comes back empty as NoData for the whole rule, and with
+    # `no_data_state = "OK"` that silently resolves (or never fires) the rules
+    # that carry B: Deviation Breach, Rebalancer Stale, Rebalance Ineffective.
+    # A bare `mento_pool_rebalance_blocked > 0` is empty whenever no pool is
+    # blocked, i.e. most of the time. The `or on(...)` arm fills unblocked pools
+    # with 0 and no reason labels, so the reason template renders nothing for
+    # them; a blocked pool keeps its own series and reason labels. The fallback
+    # reads deviation_breach_start because the bridge sets it for every pool on
+    # every poll; deviation_ratio is withheld on the -1 no-data sentinel, which
+    # would empty B in exactly the data-gap case Rebalancer Stale must page on.
     {
       ref_id = "B"
-      expr   = "mento_pool_rebalance_blocked > 0"
+      expr   = "(mento_pool_rebalance_blocked > 0) or on(chain_id, pool_id, pair) (mento_pool_deviation_breach_start * 0)"
     },
     # ResUSDC is chain-AGNOSTIC: USDC/USDm pools exist on Celo, Monad, and Polygon.
     # Both operands omit a chain pin so `label_replace(...) * on(chain_name)
