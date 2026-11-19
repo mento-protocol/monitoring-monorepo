@@ -340,11 +340,17 @@ locals {
   # 10% lands in the page band. Recovery stays immediate: one sample above the
   # ceiling lifts the 24h maximum over it.
   #
-  # The coverage guard needs at least 20h of samples (240 of the 288 5-minute
-  # steps) before either band can fire, so a pool whose value share only just
-  # appeared (new pool, feed back from dark, bridge outage) cannot page on a
-  # few hours of data dressed up as a day.
-  pool_min_reserve_value_share_24h_max_promql = "(max_over_time((${local.pool_min_reserve_value_share_promql})[24h:5m]) and (count_over_time((${local.pool_min_reserve_value_share_promql})[24h:5m]) >= 240))"
+  # Two coverage guards, so a pool whose value share only just appeared (new
+  # pool, feed back from dark, bridge outage) cannot page before a full day:
+  #   - `last_over_time(...[5m:5m] offset 24h)`: the series must already have
+  #     existed 24h ago, so the earliest sample in the window really is a day
+  #     old. A subquery, because PromQL allows `offset` only on a selector or
+  #     subquery, not on an aggregation.
+  #   - `count_over_time >= 276`: at least 23h of the 288 5-minute steps
+  #     carry a sample, so a gap inside the day cannot hide more than an hour
+  #     of possible recovery. Not 288: one missed scrape would then hold the
+  #     page back for another full day.
+  pool_min_reserve_value_share_24h_max_promql = "(max_over_time((${local.pool_min_reserve_value_share_promql})[24h:5m]) and (count_over_time((${local.pool_min_reserve_value_share_promql})[24h:5m]) >= 276) and last_over_time((${local.pool_min_reserve_value_share_promql})[5m:5m] offset 24h))"
   pool_depletion_page_active_promql           = local.pool_min_reserve_value_share_24h_max_promql
   pool_depletion_critical_active_promql       = "((${local.pool_min_reserve_value_share_24h_max_promql}) >= 0.1) or (((${local.pool_min_reserve_value_share_24h_max_promql}) < 0.1) * 0 + 1)"
 

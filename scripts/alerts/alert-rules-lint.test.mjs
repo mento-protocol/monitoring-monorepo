@@ -2177,6 +2177,12 @@ test("pool depletion tiers measure value share, not token-count share", () => {
     ),
     `the 24h-maximum local must require sample coverage over the day: ${dayMaxExpression}`,
   );
+  assert(
+    dayMaxExpression.includes(
+      "last_over_time((${local.pool_min_reserve_value_share_promql})[5m:5m] offset 24h)",
+    ),
+    `the 24h-maximum local must require the series to have existed 24h ago, so a new or returning series cannot page early: ${dayMaxExpression}`,
+  );
   for (const expression of depletionExpressions) {
     assert(
       expression.includes("pool_min_reserve_value_share_24h_max_promql"),
