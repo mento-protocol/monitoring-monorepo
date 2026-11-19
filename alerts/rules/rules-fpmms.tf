@@ -497,14 +497,18 @@ resource "grafana_rule_group" "fpmms_deviation" {
   # ratio series. Without it a gap of a few minutes resolved the alert ("Alert
   # Stopped") and the next sample opened a fresh one 15 minutes later, so one
   # breach posted as several. A pool that genuinely recovers still resolves,
-  # 30 minutes late.
+  # 30 minutes late. A labelled series that vanishes entirely is resolved by
+  # Grafana's separate missing-series counter, which bypasses
+  # `keep_firing_for` (ADR 0097), so pin that counter to 30 evaluations of the
+  # 60s group interval: the same 30-minute hold.
   rule {
-    name            = "Deviation Breach"
-    condition       = "threshold"
-    for             = "15m"
-    keep_firing_for = "30m"
-    exec_err_state  = "Error"
-    no_data_state   = "OK"
+    name                            = "Deviation Breach"
+    condition                       = "threshold"
+    for                             = "15m"
+    keep_firing_for                 = "30m"
+    missing_series_evals_to_resolve = 30
+    exec_err_state                  = "Error"
+    no_data_state                   = "OK"
 
     annotations = {
       summary          = local.deviation_warning_summary_annotation

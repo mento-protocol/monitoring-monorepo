@@ -2887,13 +2887,6 @@ test("the committed alert rules stack stays within the message template budget",
   );
 });
 
-if (failed > 0) {
-  process.stderr.write(`${failed} failed, ${passed} passed.\n`);
-  process.exit(1);
-}
-
-process.stdout.write(`${passed} tests passed.\n`);
-
 test("an open deviation breach posts once a day and survives short data gaps", () => {
   const fpmmRules = readFileSync(
     path.resolve(repoRoot, "alerts/rules/rules-fpmms.tf"),
@@ -2944,9 +2937,20 @@ test("an open deviation breach posts once a day and survives short data gaps", (
     "Deviation Breach should hold an open breach across a short gap in the ratio series",
   );
   assert(
+    /\bmissing_series_evals_to_resolve\s*=\s*30\b/.test(ratioRule),
+    "a vanished ratio series bypasses keep_firing_for, so the missing-series counter must hold the same 30m",
+  );
+  assert(
     /\bresolved_summary\s*=\s*local\.deviation_warning_resolved_summary_annotation\b/.test(
       ratioRule,
     ),
     "Deviation Breach should explain a drop under the alert line on resolve",
   );
 });
+
+if (failed > 0) {
+  process.stderr.write(`${failed} failed, ${passed} passed.\n`);
+  process.exit(1);
+}
+
+process.stdout.write(`${passed} tests passed.\n`);
