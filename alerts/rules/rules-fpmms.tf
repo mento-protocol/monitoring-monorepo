@@ -700,11 +700,17 @@ resource "grafana_rule_group" "fpmms_deviation" {
 # behaviour when a feed is dark, the deliberate absence of FX-weekend gating,
 # and why the two bands are mutually exclusive.
 #
-#   critical — min value share in [10%, 20%), sustained 15m. Bandwidth on the
-#              thin side is thin enough that ordinary size starts failing, but
-#              the pool still serves both directions.
-#   page     — min value share < 10%. The pool is effectively one-sided;
-#              swappers lose one direction outright once it empties.
+#   critical — min value share below 20% for the whole last 24h, and at or
+#              above 10% at least once in it. Bandwidth on the thin side is
+#              thin enough that ordinary size starts failing, but the pool
+#              still serves both directions.
+#   page     — min value share below 10% for the whole last 24h. The pool is
+#              effectively one-sided; swappers lose one direction outright
+#              once it empties.
+#
+# Both bands need a full day in band before they notify (24h lookback in
+# main.tf, `pool_min_reserve_value_share_24h_max_promql`): a pool that thins
+# out for hours and recovers on its own is not worth a critical page.
 #   warning  — the pool holds reserves but publishes no value share at all, so
 #              neither tier above can see it. Coverage visibility, not a band.
 #
@@ -1189,7 +1195,7 @@ resource "grafana_rule_group" "fpmms_rebalancer" {
     }
 
     # A = seconds since last rebalance, filtered to only the pools where all
-    # four fire conditions hold (breach active, breach > 1h, idle > 30m).
+    # four fire conditions hold (breach active, breach > 24h, idle > 24h).
     # This is the threshold driver — `gt 0` means "any series returned".
     #
     # No `last_rebalanced_at > 0` guard on purpose: a pool that has NEVER
@@ -1212,8 +1218,10 @@ resource "grafana_rule_group" "fpmms_rebalancer" {
           join(" and ", [
             "(time() - mento_pool_last_rebalanced_at)",
             "(mento_pool_deviation_breach_start > 0)",
-            "((time() - mento_pool_deviation_breach_start) > 3600)",
-            "((time() - mento_pool_last_rebalanced_at) > 1800)",
+            # 24h breach and 24h idle (Philip, 2026-11-19): a rebalancer
+            # only pages once it has left a breached pool alone for a day.
+            "((time() - mento_pool_deviation_breach_start) > 86400)",
+            "((time() - mento_pool_last_rebalanced_at) > 86400)",
           ]),
           local.fx_rebalancer_stale_suppressed_breach_start_promql,
         )

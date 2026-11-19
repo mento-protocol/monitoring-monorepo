@@ -327,8 +327,26 @@ locals {
   # pool never produces two notifications. The page band is open-ended
   # downward (a fully drained 0% side still pages); known below-floor samples
   # become non-breaching 1s so they reset critical Pending immediately.
-  pool_depletion_page_active_promql     = local.pool_min_reserve_value_share_promql
-  pool_depletion_critical_active_promql = "((${local.pool_min_reserve_value_share_promql}) >= 0.1) or (((${local.pool_min_reserve_value_share_promql}) < 0.1) * 0 + 1)"
+  #
+  # 24h dwell (Philip, 2026-11-19): neither band pages until the pool has sat
+  # in it for a full day. Both bands read the HIGHEST min side share over the
+  # last 24h instead of the current one, so a band fires only when every
+  # 5-minute sample of the day stayed below its ceiling. This is a lookback,
+  # not a `for = "24h"` pending period, on purpose: a pending period resets on
+  # any single non-breaching evaluation and on every rule update, and a pool
+  # hovering around the 10% boundary would keep resetting both bands' pending
+  # state and never page at all. With the 24h maximum a pool that spent the day
+  # between 8% and 15% lands in the critical band, and one that spent it under
+  # 10% lands in the page band. Recovery stays immediate: one sample above the
+  # ceiling lifts the 24h maximum over it.
+  #
+  # The coverage guard needs at least 20h of samples (240 of the 288 5-minute
+  # steps) before either band can fire, so a pool whose value share only just
+  # appeared (new pool, feed back from dark, bridge outage) cannot page on a
+  # few hours of data dressed up as a day.
+  pool_min_reserve_value_share_24h_max_promql = "(max_over_time((${local.pool_min_reserve_value_share_promql})[24h:5m]) and (count_over_time((${local.pool_min_reserve_value_share_promql})[24h:5m]) >= 240))"
+  pool_depletion_page_active_promql           = local.pool_min_reserve_value_share_24h_max_promql
+  pool_depletion_critical_active_promql       = "((${local.pool_min_reserve_value_share_24h_max_promql}) >= 0.1) or (((${local.pool_min_reserve_value_share_24h_max_promql}) < 0.1) * 0 + 1)"
 
   # ── Value-share coverage gap ─────────────────────────────────────────────
   # Both bands above read the VALUE-share gauges, which the bridge publishes
