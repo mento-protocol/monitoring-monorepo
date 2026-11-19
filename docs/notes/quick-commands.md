@@ -55,7 +55,7 @@ node scripts/check-agent-quality-gate-package-scripts.mjs  # Validate root scrip
 CI=true pnpm install --frozen-lockfile  # After that review and validation
 pnpm agent:context-check           # Validate repo-visible agent instructions, links, and routing
 pnpm agent:review-materiality      # Classify review depth + context-update signals for current diff
-pnpm agent:closeout-review --base "$BASE_REMOTE/$baseRefName"  # Requires the preflight-bound variables; prints `report: <path>`; exit 1 = findings, 2 = closeout failed
+pnpm agent:closeout-review --base "$BASE_REMOTE/$baseRefName"  # Requires the preflight-bound variables; prints `report: <path>`; exit 1 = findings, 2 = failed or needs a manual read (card step 4)
 pnpm agent:closeout-review:test    # Suite for the closeout review tool
 pnpm review:eval:v2 --help  # Paired direct-review diagnostics; complete final reviews and repaired-root controls
 pnpm review:eval:experiment -- --help  # Non-ledger paired screen; qualification reruns every canonical cell
