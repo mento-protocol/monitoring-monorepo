@@ -2893,3 +2893,60 @@ if (failed > 0) {
 }
 
 process.stdout.write(`${passed} tests passed.\n`);
+
+test("an open deviation breach posts once a day and survives short data gaps", () => {
+  const fpmmRules = readFileSync(
+    path.resolve(repoRoot, "alerts/rules/rules-fpmms.tf"),
+    "utf8",
+  );
+  const contactPoints = stripComments(
+    readFileSync(
+      path.resolve(repoRoot, "alerts/rules/contact-points.tf"),
+      "utf8",
+    ),
+  );
+
+  const [deviationRoute] = blocksFor(
+    contactPoints,
+    "notify_warning_pools_deviation = ",
+  );
+  const [poolsRoute] = blocksFor(contactPoints, "notify_warning_pools_pool = ");
+  assert(deviationRoute, "notify_warning_pools_deviation local should exist");
+  assert(poolsRoute, "notify_warning_pools_pool local should exist");
+  assert(
+    /\brepeat_interval\s*=\s*"24h"/.test(deviationRoute),
+    "an open deviation breach should re-post once a day, not every 4h",
+  );
+  assert(
+    /\brepeat_interval\s*=\s*"4h"/.test(poolsRoute),
+    "the shared pools route keeps its 4h repeat for rebalancer and trading-limit warnings",
+  );
+
+  for (const name of ["Deviation Breach", "Deviation Breach (anchored)"]) {
+    const rule = ruleBlockNamed(
+      fpmmRules,
+      new RegExp(`\\bname\\s*=\\s*"${name.replace(/[()]/g, "\\$&")}"`),
+    );
+    assert(rule, `rules-fpmms.tf should carry ${name}`);
+    assert(
+      /\blocal\.notify_warning_pools_deviation\.repeat_interval\b/.test(rule) &&
+        !/\blocal\.notify_warning_pools_pool\b/.test(rule),
+      `${name} should route through the daily deviation notifier`,
+    );
+  }
+
+  const ratioRule = ruleBlockNamed(
+    fpmmRules,
+    /\bname\s*=\s*"Deviation Breach"/,
+  );
+  assert(
+    /^(?![ \t]*#).*\bkeep_firing_for\s*=\s*"30m"/m.test(ratioRule),
+    "Deviation Breach should hold an open breach across a short gap in the ratio series",
+  );
+  assert(
+    /\bresolved_summary\s*=\s*local\.deviation_warning_resolved_summary_annotation\b/.test(
+      ratioRule,
+    ),
+    "Deviation Breach should explain a drop under the alert line on resolve",
+  );
+});

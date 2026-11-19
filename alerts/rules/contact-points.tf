@@ -436,7 +436,8 @@ locals {
   # Each v3 warning rule's `notification_settings` references the
   # notifier matching its service rollup:
   #   - Oracle health (oracle liveness, oracle jump)         → notify_warning_oracles_pool
-  #   - Pool mechanics (deviation, rebalancer, trading lim.) → notify_warning_pools_pool
+  #   - Pool mechanics (rebalancer, trading lim.)            → notify_warning_pools_pool
+  #   - Deviation breach (open breaches, repeated daily)     → notify_warning_pools_deviation
   #   - Pool transitions (deviation breach state changes)    → notify_warning_pools_transition
   #   - Service infrastructure (indexer, metrics-bridge)     → notify_warning_infra
   #   - Testnet service health                               → notify_warning_testnet
@@ -455,6 +456,19 @@ locals {
     group_wait      = "1m"
     group_interval  = "10m"
     repeat_interval = "4h"
+  }
+
+  # Deviation breaches are long-lived by nature: a pool that stops rebalancing
+  # stays past its boundary for days, and a 4h repeat turned one open breach
+  # into six identical posts a day. The breach is already in the channel; once
+  # a day is enough to keep it visible. Same routing as
+  # `notify_warning_pools_pool` otherwise.
+  notify_warning_pools_deviation = {
+    contact_point   = grafana_contact_point.slack_pools.name
+    group_by        = ["grafana_folder", "chain_id", "pool_id"]
+    group_wait      = "1m"
+    group_interval  = "10m"
+    repeat_interval = "24h"
   }
 
   notify_warning_pools_transition = {
