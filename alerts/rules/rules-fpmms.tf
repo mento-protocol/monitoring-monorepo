@@ -625,10 +625,16 @@ resource "grafana_rule_group" "fpmms_deviation" {
   # indexer-envio/src/deviationBreach.ts comment at L98-107), so this rule
   # exists to keep warning coverage continuous while deviation-ratio data is
   # unavailable.
+  #
+  # `for = "45m"`, not 15m: when an open `Deviation Breach` loses its ratio
+  # series it keeps firing for its 30m hold. Starting this fallback's pending
+  # period at the same moment with 15m would post a second alert for the same
+  # breach into the same notification group. 45m = the 30m hold + the usual 15m
+  # dwell, so the fallback only fires once the held instance has resolved.
   rule {
     name           = "Deviation Breach (anchored)"
     condition      = "threshold"
-    for            = "15m"
+    for            = "45m"
     exec_err_state = "Error"
     no_data_state  = "OK"
 

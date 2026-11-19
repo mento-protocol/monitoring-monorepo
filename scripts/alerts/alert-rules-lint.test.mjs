@@ -2940,6 +2940,15 @@ test("an open deviation breach posts once a day and survives short data gaps", (
     /\bmissing_series_evals_to_resolve\s*=\s*30\b/.test(ratioRule),
     "a vanished ratio series bypasses keep_firing_for, so the missing-series counter must hold the same 30m",
   );
+
+  const anchoredRule = ruleBlockNamed(
+    fpmmRules,
+    /\bname\s*=\s*"Deviation Breach \(anchored\)"/,
+  );
+  assert(
+    /^(?![ \t]*#).*\bfor\s*=\s*"45m"/m.test(anchoredRule),
+    "the anchored fallback must wait out the 30m hold plus its 15m dwell, or a held breach that loses its ratio series posts twice",
+  );
   assert(
     /\bresolved_summary\s*=\s*local\.deviation_warning_resolved_summary_annotation\b/.test(
       ratioRule,
