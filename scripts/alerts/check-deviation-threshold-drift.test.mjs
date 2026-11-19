@@ -26,6 +26,7 @@ function sources({
   depletionPage = "0.1",
   annotationAlertPercent = "5",
   resolvedAlertLine = alertLine,
+  anchoredAlertLine = alertLine,
   evaluatorAlertLine = alertLine,
   evaluatorDepletionCritical = depletionCritical,
   evaluatorDepletionPage = depletionPage,
@@ -45,6 +46,7 @@ export const POOL_DEPLETION_PAGE_SHARE = ${depletionPage};
     [ALERTS_MAIN_PATH]: `
 pool_min_reserve_value_share_promql = "min without(token_symbol) (mento_pool_reserve_value_share_token0 or mento_pool_reserve_value_share_token1)"
 pool_depletion_critical_active_promql = "(\${local.pool_min_reserve_value_share_promql}) >= ${bandFloor}"
+deviation_warning_unavailable_active_promql = "((time() - mento_pool_deviation_breach_start) and on(chain_id, pool_id, pair) (mento_pool_deviation_open_breach_peak_ratio > ${anchoredAlertLine}))"
 deviation_warning_resolved_summary_annotation = <<-EOT
 {{- if and (not $reason) $values.A (le $values.A.Value ${resolvedAlertLine}) -}}
 Pool is back under the ${annotationAlertPercent}% alert line.
@@ -115,13 +117,15 @@ test("fails when the shared-config alert line changes without Terraform updates"
       alertLine: "1.06",
       annotationAlertPercent: "5",
       resolvedAlertLine: "1.05",
+      anchoredAlertLine: "1.05",
       evaluatorAlertLine: "1.05",
       bannerAlertLine: "1.05",
     }),
   );
 
-  assert.equal(result.failures.length, 4);
+  assert.equal(result.failures.length, 5);
   assert.match(result.failures.join("\n"), /warning Grafana threshold/);
+  assert.match(result.failures.join("\n"), /anchored fallback/);
   assert.match(result.failures.join("\n"), /alert line ratio/);
   assert.match(result.failures.join("\n"), /alert line percent/);
   assert.match(result.failures.join("\n"), /threshold banner/);
@@ -197,6 +201,7 @@ test("does not accept partial numeric literal matches", () => {
     sources({
       evaluatorAlertLine: "1.050",
       resolvedAlertLine: "1.050",
+      anchoredAlertLine: "1.050",
       evaluatorDepletionCritical: "0.20",
       evaluatorDepletionPage: "0.10",
       bandFloor: "0.10",
@@ -206,7 +211,7 @@ test("does not accept partial numeric literal matches", () => {
     }),
   );
 
-  assert.equal(result.failures.length, 6);
+  assert.equal(result.failures.length, 7);
 });
 
 test("does not accept exponent-suffixed numeric literal matches", () => {
@@ -214,6 +219,7 @@ test("does not accept exponent-suffixed numeric literal matches", () => {
     sources({
       evaluatorAlertLine: "1.05e0",
       resolvedAlertLine: "1.05e0",
+      anchoredAlertLine: "1.05e0",
       evaluatorDepletionCritical: "0.2e0",
       evaluatorDepletionPage: "0.1e0",
       bandFloor: "0.1e0",
@@ -223,7 +229,7 @@ test("does not accept exponent-suffixed numeric literal matches", () => {
     }),
   );
 
-  assert.equal(result.failures.length, 6);
+  assert.equal(result.failures.length, 7);
 });
 
 test("scopes each evaluator check to its own named rule", () => {
@@ -299,7 +305,7 @@ test("fails when a Terraform consumer source is missing", () => {
 
   const result = validateDeviationThresholdDrift(incomplete);
 
-  assert.equal(result.failures.length, 3);
+  assert.equal(result.failures.length, 4);
   assert.match(
     result.failures.join("\n"),
     /alerts\/rules\/main\.tf: missing source/,

@@ -184,6 +184,20 @@ function requiredChecks(thresholds) {
       pattern: evaluatorPattern(thresholds.alertLine, "gt"),
     },
     {
+      // The anchored fallback has no current ratio, so it gates on the open
+      // breach's peak ratio against the same alert line.
+      file: ALERTS_MAIN_PATH,
+      description: "anchored fallback gates its peak ratio on the alert line",
+      extract: (source) =>
+        extractQuotedLocal(
+          source,
+          "deviation_warning_unavailable_active_promql",
+        ),
+      pattern: new RegExp(
+        `mento_pool_deviation_open_breach_peak_ratio\\s*>\\s*${numberLiteral(thresholds.alertLine)}`,
+      ),
+    },
+    {
       // The resolved copy compares the ratio against the alert line to tell
       // "fell back under the alert line" apart from a real recovery.
       file: ALERTS_MAIN_PATH,
