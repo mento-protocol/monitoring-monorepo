@@ -262,11 +262,16 @@ locals {
   # for as long as its breach is open (the 5% evaluator lives in
   # rules-fpmms.tf).
   # The anchored fallback cannot see the current ratio (that is why it exists),
-  # so it gates on the open breach's peak ratio instead: only a breach that
-  # went past the same 1.05 alert line posts while the ratio is unavailable.
-  # The peak gauge is published regardless of the `-1` ratio sentinel.
+  # so it gates on evidence that the breach went past the same 1.05 alert line:
+  # either the open breach's peak ratio (published regardless of the `-1` ratio
+  # sentinel), or the last day of the current ratio. The peak divides by the
+  # entry-time threshold while `Deviation Breach` evaluates the current one, so
+  # after governance lowers a threshold mid-breach the primary rule can fire
+  # with the peak still at or below 1.05; the `max_over_time` arm keeps that
+  # breach covered when its ratio then goes dark. Past a day of missing ratio
+  # only the peak arm remains.
   deviation_warning_active_promql             = "(mento_pool_deviation_ratio unless (${local.fx_weekend_suppressed_deviation_ratio_promql}))"
-  deviation_warning_unavailable_active_promql = "((time() - mento_pool_deviation_breach_start) and on(chain_id, pool_id, pair) (mento_pool_deviation_breach_start > 0) and on(chain_id, pool_id, pair) (mento_pool_deviation_open_breach_peak_ratio > 1.05) unless on(chain_id, pool_id, pair) mento_pool_deviation_ratio) unless (${local.fx_weekend_suppressed_breach_start_promql})"
+  deviation_warning_unavailable_active_promql = "((time() - mento_pool_deviation_breach_start) and on(chain_id, pool_id, pair) (mento_pool_deviation_breach_start > 0) and on(chain_id, pool_id, pair) ((mento_pool_deviation_open_breach_peak_ratio > 1.05) or on(chain_id, pool_id, pair) (max_over_time(mento_pool_deviation_ratio[1d]) > 1.05)) unless on(chain_id, pool_id, pair) mento_pool_deviation_ratio) unless (${local.fx_weekend_suppressed_breach_start_promql})"
 
   # ── Pool depletion risk ───────────────────────────────────────────────────
   # What makes a pool critical is user impact, not deviation magnitude. An

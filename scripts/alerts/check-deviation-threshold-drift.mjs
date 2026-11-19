@@ -198,6 +198,20 @@ function requiredChecks(thresholds) {
       ),
     },
     {
+      // Its second arm reads the current ratio's last day, for breaches whose
+      // peak sits under the line after a mid-breach threshold change.
+      file: ALERTS_MAIN_PATH,
+      description: "anchored fallback gates its recent ratio on the alert line",
+      extract: (source) =>
+        extractQuotedLocal(
+          source,
+          "deviation_warning_unavailable_active_promql",
+        ),
+      pattern: new RegExp(
+        `max_over_time\\(mento_pool_deviation_ratio\\[1d\\]\\)\\s*>\\s*${numberLiteral(thresholds.alertLine)}`,
+      ),
+    },
+    {
       // The resolved copy compares the ratio against the alert line to tell
       // "fell back under the alert line" apart from a real recovery.
       file: ALERTS_MAIN_PATH,
