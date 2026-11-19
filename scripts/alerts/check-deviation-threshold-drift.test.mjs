@@ -21,14 +21,17 @@ const relativeScriptPath = relative(
 // shared-config counterpart is how a test reproduces a real desync.
 function sources({
   tolerance = "1.01",
+  alertLine = "1.05",
   depletionCritical = "0.2",
   depletionPage = "0.1",
-  annotationTolerancePercent = "1",
-  evaluatorTolerance = tolerance,
+  annotationAlertPercent = "5",
+  resolvedAlertLine = alertLine,
+  anchoredAlertLine = alertLine,
+  evaluatorAlertLine = alertLine,
   evaluatorDepletionCritical = depletionCritical,
   evaluatorDepletionPage = depletionPage,
   bandFloor = depletionPage,
-  bannerTolerance = tolerance,
+  bannerAlertLine = alertLine,
   bannerDepletionCritical = depletionCritical,
   bannerDepletionPage = depletionPage,
   extraMainSource = "",
@@ -36,22 +39,24 @@ function sources({
 } = {}) {
   return {
     [THRESHOLDS_PATH]: `export const DEVIATION_TOLERANCE_RATIO = ${tolerance};
-export const DEVIATION_CRITICAL_RATIO = 1.05;
+export const DEVIATION_CRITICAL_RATIO = ${alertLine};
 export const POOL_DEPLETION_CRITICAL_SHARE = ${depletionCritical};
 export const POOL_DEPLETION_PAGE_SHARE = ${depletionPage};
 `,
     [ALERTS_MAIN_PATH]: `
 pool_min_reserve_value_share_promql = "min without(token_symbol) (mento_pool_reserve_value_share_token0 or mento_pool_reserve_value_share_token1)"
 pool_depletion_critical_active_promql = "(\${local.pool_min_reserve_value_share_promql}) >= ${bandFloor}"
-deviation_warning_summary_annotation = <<-EOT
-{{- printf "Pool %.0f%% above ${annotationTolerancePercent}%% tolerance." $values.Dev.Value -}}
-Pool above ${annotationTolerancePercent}% tolerance.
+deviation_warning_unavailable_active_promql = "((time() - mento_pool_deviation_breach_start) and on(chain_id, pool_id, pair) ((mento_pool_deviation_open_breach_peak_ratio > ${anchoredAlertLine}) or on(chain_id, pool_id, pair) (max_over_time(mento_pool_deviation_ratio[1d]) > ${anchoredAlertLine})))"
+deviation_warning_resolved_summary_annotation = <<-EOT
+{{- if and (not $reason) $values.A (le $values.A.Value ${resolvedAlertLine}) -}}
+Pool is back under the ${annotationAlertPercent}% alert line.
+{{- end -}}
 EOT
 	${extraMainSource}
 	`,
     [FPMM_RULES_PATH]: `
 	${extraFpmmsSource}
-	# ALERT THRESHOLD MIRRORS -- the bare \`${bannerTolerance}\` (deviation tolerance),
+	# ALERT THRESHOLD MIRRORS -- the bare \`${bannerAlertLine}\` (deviation alert line),
 	# \`${bannerDepletionCritical}\` (pool depletion critical side share) and
 	# \`${bannerDepletionPage}\` (pool depletion page side share) literals in this file
 	resource "grafana_rule_group" "fpmms_deviation" {
@@ -61,7 +66,7 @@ EOT
 	      ref_id = "threshold"
 	      model = jsonencode({
 	        conditions = [{
-	          evaluator = { params = [${evaluatorTolerance}], type = "gt" }
+	          evaluator = { params = [${evaluatorAlertLine}], type = "gt" }
 	        }]
 	      })
 	    }
@@ -100,29 +105,38 @@ test("passes when Terraform literals mirror shared-config thresholds", () => {
 
   assert.deepEqual(result.failures, []);
   assert.deepEqual(result.thresholds, {
-    tolerance: "1.01",
+    alertLine: "1.05",
     depletionCritical: "0.2",
     depletionPage: "0.1",
   });
 });
 
-test("fails when shared-config tolerance changes without Terraform updates", () => {
+test("fails when the shared-config alert line changes without Terraform updates", () => {
   const result = validateDeviationThresholdDrift(
     sources({
-      tolerance: "1.02",
-      annotationTolerancePercent: "1",
-      evaluatorTolerance: "1.01",
-      bannerTolerance: "1.01",
+      alertLine: "1.06",
+      annotationAlertPercent: "5",
+      resolvedAlertLine: "1.05",
+      anchoredAlertLine: "1.05",
+      evaluatorAlertLine: "1.05",
+      bannerAlertLine: "1.05",
     }),
   );
 
-  assert.equal(result.failures.length, 3);
+  assert.equal(result.failures.length, 6);
   assert.match(result.failures.join("\n"), /warning Grafana threshold/);
-  assert.match(
-    result.failures.join("\n"),
-    /warning annotation mirrors warning/,
-  );
+  assert.match(result.failures.join("\n"), /anchored fallback/);
+  assert.match(result.failures.join("\n"), /alert line ratio/);
+  assert.match(result.failures.join("\n"), /alert line percent/);
   assert.match(result.failures.join("\n"), /threshold banner/);
+});
+
+test("ignores the tolerance ratio, which no Grafana evaluator reads", () => {
+  const result = validateDeviationThresholdDrift(
+    sources({ tolerance: "1.02" }),
+  );
+
+  assert.deepEqual(result.failures, []);
 });
 
 test("fails when the depletion critical share is not mirrored", () => {
@@ -164,70 +178,58 @@ test("fails when the band floor drifts away from the page share", () => {
   assert.match(result.failures.join("\n"), /depletion critical band floors/);
 });
 
-test("fails when the warning annotation tolerance text remains stale", () => {
+test("fails when the resolved annotation alert-line text remains stale", () => {
   const result = validateDeviationThresholdDrift(
-    sources({
-      tolerance: "1.02",
-      annotationTolerancePercent: "1",
-      evaluatorTolerance: "1.02",
-      bannerTolerance: "1.02",
-    }),
+    sources({ alertLine: "1.06", annotationAlertPercent: "5" }),
   );
 
   assert.equal(result.failures.length, 1);
-  assert.match(
-    result.failures.join("\n"),
-    /warning annotation mirrors warning/,
-  );
+  assert.match(result.failures.join("\n"), /alert line percent/);
 });
 
 test("does not accept partial percent literal matches", () => {
   const result = validateDeviationThresholdDrift(
-    sources({
-      tolerance: "1.02",
-      annotationTolerancePercent: "12",
-      evaluatorTolerance: "1.02",
-      bannerTolerance: "1.02",
-    }),
+    sources({ alertLine: "1.06", annotationAlertPercent: "16" }),
   );
 
   assert.equal(result.failures.length, 1);
-  assert.match(
-    result.failures.join("\n"),
-    /warning annotation mirrors warning/,
-  );
+  assert.match(result.failures.join("\n"), /alert line percent/);
 });
 
 test("does not accept partial numeric literal matches", () => {
   const result = validateDeviationThresholdDrift(
     sources({
-      evaluatorTolerance: "1.010",
+      evaluatorAlertLine: "1.050",
+      resolvedAlertLine: "1.050",
+      anchoredAlertLine: "1.050",
       evaluatorDepletionCritical: "0.20",
       evaluatorDepletionPage: "0.10",
       bandFloor: "0.10",
-      bannerTolerance: "1.010",
+      bannerAlertLine: "1.050",
       bannerDepletionCritical: "0.20",
       bannerDepletionPage: "0.10",
     }),
   );
 
-  assert.equal(result.failures.length, 5);
+  assert.equal(result.failures.length, 8);
 });
 
 test("does not accept exponent-suffixed numeric literal matches", () => {
   const result = validateDeviationThresholdDrift(
     sources({
-      evaluatorTolerance: "1.01e0",
+      evaluatorAlertLine: "1.05e0",
+      resolvedAlertLine: "1.05e0",
+      anchoredAlertLine: "1.05e0",
       evaluatorDepletionCritical: "0.2e0",
       evaluatorDepletionPage: "0.1e0",
       bandFloor: "0.1e0",
-      bannerTolerance: "1.01e0",
+      bannerAlertLine: "1.05e0",
       bannerDepletionCritical: "0.2e0",
       bannerDepletionPage: "0.1e0",
     }),
   );
 
-  assert.equal(result.failures.length, 5);
+  assert.equal(result.failures.length, 8);
 });
 
 test("scopes each evaluator check to its own named rule", () => {
@@ -261,14 +263,9 @@ test("scopes the band-floor check to its own local", () => {
 });
 
 test("ignores commented threshold export statements", () => {
-  const fixture = sources({
-    tolerance: "1.02",
-    annotationTolerancePercent: "2",
-    evaluatorTolerance: "1.02",
-    bannerTolerance: "1.02",
-  });
-  fixture[THRESHOLDS_PATH] = `// export const DEVIATION_TOLERANCE_RATIO = 1.01;
-export const DEVIATION_TOLERANCE_RATIO = 1.02;
+  const fixture = sources({ alertLine: "1.06", annotationAlertPercent: "6" });
+  fixture[THRESHOLDS_PATH] = `// export const DEVIATION_CRITICAL_RATIO = 1.05;
+export const DEVIATION_CRITICAL_RATIO = 1.06;
 export const POOL_DEPLETION_CRITICAL_SHARE = 0.2;
 export const POOL_DEPLETION_PAGE_SHARE = 0.1;
 `;
@@ -276,7 +273,7 @@ export const POOL_DEPLETION_PAGE_SHARE = 0.1;
   const result = validateDeviationThresholdDrift(fixture);
 
   assert.deepEqual(result.failures, []);
-  assert.equal(result.thresholds.tolerance, "1.02");
+  assert.equal(result.thresholds.alertLine, "1.06");
 });
 
 test("fails when a mirrored threshold export is missing", () => {
@@ -284,15 +281,15 @@ test("fails when a mirrored threshold export is missing", () => {
     () =>
       validateDeviationThresholdDrift({
         ...sources(),
-        [THRESHOLDS_PATH]: "export const DEVIATION_TOLERANCE_RATIO = 1.01;",
+        [THRESHOLDS_PATH]: "export const DEVIATION_CRITICAL_RATIO = 1.05;",
       }),
     /missing numeric export POOL_DEPLETION_CRITICAL_SHARE/,
   );
 });
 
-test("does not require the analytics-only critical ratio", () => {
+test("does not require the tolerance ratio", () => {
   const fixture = sources();
-  fixture[THRESHOLDS_PATH] = `export const DEVIATION_TOLERANCE_RATIO = 1.01;
+  fixture[THRESHOLDS_PATH] = `export const DEVIATION_CRITICAL_RATIO = 1.05;
 export const POOL_DEPLETION_CRITICAL_SHARE = 0.2;
 export const POOL_DEPLETION_PAGE_SHARE = 0.1;
 `;
@@ -308,7 +305,7 @@ test("fails when a Terraform consumer source is missing", () => {
 
   const result = validateDeviationThresholdDrift(incomplete);
 
-  assert.equal(result.failures.length, 2);
+  assert.equal(result.failures.length, 5);
   assert.match(
     result.failures.join("\n"),
     /alerts\/rules\/main\.tf: missing source/,

@@ -19,12 +19,12 @@
 // analytics classification, not an alert severity.
 //
 // IMPORTANT: alerts/rules/rules-fpmms.tf and alerts/rules/main.tf hard-code
-// some of these numbers as HCL literals — `1.01` for the OK/WARN boundary and
-// both depletion shares. HCL can't import TS exports, so any change to a
-// mirrored constant must be mirrored there manually;
-// `scripts/alerts/check-deviation-threshold-drift.mjs` enforces that mirror and
-// names every site it checks. `DEVIATION_CRITICAL_RATIO` is deliberately NOT
-// mirrored into Terraform any more.
+// some of these numbers as HCL literals — `1.05` (`DEVIATION_CRITICAL_RATIO`)
+// for the `Deviation Breach` warning's alert line and both depletion shares.
+// HCL can't import TS exports, so any change to a mirrored constant must be
+// mirrored there manually; `scripts/alerts/check-deviation-threshold-drift.mjs`
+// enforces that mirror and names every site it checks.
+// `DEVIATION_TOLERANCE_RATIO` is not mirrored: no Grafana evaluator reads it.
 
 /**
  * OK/WARN boundary. A pool is considered "within tolerance" while
@@ -57,9 +57,11 @@ export const DEVIATION_TOLERANCE_RATIO = 1.01;
  *
  * Since ADR 0067 nothing pages on it: an oracle-priced pool quoting 5% past its
  * rebalance boundary costs a swapper nothing, so magnitude alone stopped being
- * pageable. The one Grafana rule still downstream of this boundary is the
- * warning-severity `Deviation Breach Critical State Changed`, which reports
- * transitions of the classification rather than firing on the ratio.
+ * pageable. Two warning-severity Grafana rules read it: `Deviation Breach`
+ * uses it as its alert line (a pool 1–5% past its boundary is shown on the
+ * dashboard but no longer posted to Slack), and
+ * `Deviation Breach Critical State Changed` reports transitions of the
+ * classification.
  * `Rebalancer Stale` covers the actionable mid-range failure and
  * `Pool Depletion Risk` covers user impact.
  *

@@ -9,21 +9,22 @@
 # `no_data_state = "OK"` on every rule: absence of data shouldn't fire here,
 # that's what the separate metrics-bridge rule group is for.
 #
-# ALERT THRESHOLD MIRRORS — the bare `1.01` (deviation tolerance), `0.2` (pool
+# ALERT THRESHOLD MIRRORS — the bare `1.05` (deviation alert line), `0.2` (pool
 # depletion critical side share) and `0.1` (pool depletion page side share)
 # literals in this file, plus the depletion literal in main.tf, mirror the TS
 # canonical source at `shared-config/src/thresholds.ts`
-# (`DEVIATION_TOLERANCE_RATIO`, `POOL_DEPLETION_CRITICAL_SHARE`,
+# (`DEVIATION_CRITICAL_RATIO`, `POOL_DEPLETION_CRITICAL_SHARE`,
 # `POOL_DEPLETION_PAGE_SHARE`). HCL can't import TS, so any threshold change is
 # a coordinated edit across packages: bump the TS constants, then mirror them in
 # Terraform. `scripts/alerts/check-deviation-threshold-drift.mjs` enforces that
 # mirror.
 #
-# `DEVIATION_CRITICAL_RATIO` (1.05) is deliberately NOT mirrored here any more.
-# It stays the analytics classification that drives dashboard badges,
-# breach-history bucketing, the indexer's persisted `criticalDurationSeconds`,
-# and metrics-bridge probe eligibility — but since ADR 0067 no Grafana rule
-# pages on it.
+# The `Deviation Breach` warning fires at `DEVIATION_CRITICAL_RATIO` (5% past
+# the rebalance boundary), not at `DEVIATION_TOLERANCE_RATIO` (1%). A pool 1–5%
+# past its boundary costs a swapper nothing on an oracle-priced FPMM, and at 1%
+# the rule kept a channel full of pools that sat just past the line for weeks.
+# The 1% tolerance stays the indexer's breach anchor and the dashboard's
+# OK/WARN boundary; no Grafana threshold evaluator reads it any more.
 
 # ── Oracle liveness ──────────────────────────────────────────────────────────
 resource "grafana_rule_group" "fpmms_oracle" {
@@ -489,20 +490,30 @@ resource "grafana_rule_group" "fpmms_deviation" {
   folder_uid       = grafana_folder.fpmms.uid
   interval_seconds = 60
 
-  # KPI 2 warn: above 1% tolerance, sustained for > 15 min. The 15m hold
-  # smooths weekend flicker on FX pools (spec §3 was originally "≥ 1 for >
-  # 15 min"; the tolerance dead zone replaces the 1.0 boundary).
+  # KPI 2 warn: more than 5% past the rebalance boundary, sustained for
+  # > 15 min. The 15m hold smooths weekend flicker on FX pools.
+  #
+  # `keep_firing_for = "30m"` holds an open breach across a short gap in the
+  # ratio series. Without it a gap of a few minutes resolved the alert ("Alert
+  # Stopped") and the next sample opened a fresh one 15 minutes later, so one
+  # breach posted as several. A pool that genuinely recovers still resolves,
+  # 30 minutes late. A labelled series that vanishes entirely is resolved by
+  # Grafana's separate missing-series counter, which bypasses
+  # `keep_firing_for` (ADR 0097), so pin that counter to 30 evaluations of the
+  # 60s group interval: the same 30-minute hold.
   rule {
-    name           = "Deviation Breach"
-    condition      = "threshold"
-    for            = "15m"
-    exec_err_state = "Error"
-    no_data_state  = "OK"
+    name                            = "Deviation Breach"
+    condition                       = "threshold"
+    for                             = "15m"
+    keep_firing_for                 = "30m"
+    missing_series_evals_to_resolve = 30
+    exec_err_state                  = "Error"
+    no_data_state                   = "OK"
 
     annotations = {
       summary          = local.deviation_warning_summary_annotation
       resolved_title   = "Deviation Breach Alert Stopped"
-      resolved_summary = local.deviation_resolved_summary_annotation
+      resolved_summary = local.deviation_warning_resolved_summary_annotation
       current_reserves = local.deviation_current_reserves_annotation
       rebalance_reason = local.deviation_rebalance_reason_annotation
     }
@@ -589,7 +600,7 @@ resource "grafana_rule_group" "fpmms_deviation" {
         type       = "threshold"
         expression = "A"
         conditions = [{
-          evaluator = { params = [1.01], type = "gt" }
+          evaluator = { params = [1.05], type = "gt" }
           operator  = { type = "and" }
           query     = { params = ["threshold"] }
         }]
@@ -598,11 +609,11 @@ resource "grafana_rule_group" "fpmms_deviation" {
     }
 
     notification_settings {
-      contact_point   = local.notify_warning_pools_pool.contact_point
-      group_by        = local.notify_warning_pools_pool.group_by
-      group_wait      = local.notify_warning_pools_pool.group_wait
-      group_interval  = local.notify_warning_pools_pool.group_interval
-      repeat_interval = local.notify_warning_pools_pool.repeat_interval
+      contact_point   = local.notify_warning_pools_deviation.contact_point
+      group_by        = local.notify_warning_pools_deviation.group_by
+      group_wait      = local.notify_warning_pools_deviation.group_wait
+      group_interval  = local.notify_warning_pools_deviation.group_interval
+      repeat_interval = local.notify_warning_pools_deviation.repeat_interval
     }
   }
 
@@ -614,10 +625,16 @@ resource "grafana_rule_group" "fpmms_deviation" {
   # indexer-envio/src/deviationBreach.ts comment at L98-107), so this rule
   # exists to keep warning coverage continuous while deviation-ratio data is
   # unavailable.
+  #
+  # `for = "45m"`, not 15m: when an open `Deviation Breach` loses its ratio
+  # series it keeps firing for its 30m hold. Starting this fallback's pending
+  # period at the same moment with 15m would post a second alert for the same
+  # breach into the same notification group. 45m = the 30m hold + the usual 15m
+  # dwell, so the fallback only fires once the held instance has resolved.
   rule {
     name           = "Deviation Breach (anchored)"
     condition      = "threshold"
-    for            = "15m"
+    for            = "45m"
     exec_err_state = "Error"
     no_data_state  = "OK"
 
@@ -681,11 +698,11 @@ resource "grafana_rule_group" "fpmms_deviation" {
     }
 
     notification_settings {
-      contact_point   = local.notify_warning_pools_pool.contact_point
-      group_by        = local.notify_warning_pools_pool.group_by
-      group_wait      = local.notify_warning_pools_pool.group_wait
-      group_interval  = local.notify_warning_pools_pool.group_interval
-      repeat_interval = local.notify_warning_pools_pool.repeat_interval
+      contact_point   = local.notify_warning_pools_deviation.contact_point
+      group_by        = local.notify_warning_pools_deviation.group_by
+      group_wait      = local.notify_warning_pools_deviation.group_wait
+      group_interval  = local.notify_warning_pools_deviation.group_interval
+      repeat_interval = local.notify_warning_pools_deviation.repeat_interval
     }
   }
 }
@@ -970,7 +987,7 @@ resource "grafana_rule_group" "fpmms_depletion" {
     exec_err_state = "Error"
     no_data_state  = "OK"
 
-    # No `keep_firing_for`: no warning rule in this file carries one.
+    # No `keep_firing_for`: a coverage gap that closes is closed.
     #
     # `description` is deliberately load-bearing only in the Grafana rule-detail
     # view — the Slack template renders `description` for critical severity

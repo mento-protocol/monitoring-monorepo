@@ -258,10 +258,20 @@ locals {
   # from deviation magnitude to depletion risk — so removing the suppression
   # branch with them is load-bearing, not cleanup: without it the pools that
   # were loudest under the old definition would get no notification at all.
-  # Every pool outside the 1% tolerance now stays covered in #alerts-pools for
-  # as long as its breach is open.
+  # Every pool more than 5% past its boundary stays covered in #alerts-pools
+  # for as long as its breach is open (the 5% evaluator lives in
+  # rules-fpmms.tf).
+  # The anchored fallback cannot see the current ratio (that is why it exists),
+  # so it gates on evidence that the breach went past the same 1.05 alert line:
+  # either the open breach's peak ratio (published regardless of the `-1` ratio
+  # sentinel), or the last day of the current ratio. The peak divides by the
+  # entry-time threshold while `Deviation Breach` evaluates the current one, so
+  # after governance lowers a threshold mid-breach the primary rule can fire
+  # with the peak still at or below 1.05; the `max_over_time` arm keeps that
+  # breach covered when its ratio then goes dark. Past a day of missing ratio
+  # only the peak arm remains.
   deviation_warning_active_promql             = "(mento_pool_deviation_ratio unless (${local.fx_weekend_suppressed_deviation_ratio_promql}))"
-  deviation_warning_unavailable_active_promql = "((time() - mento_pool_deviation_breach_start) and on(chain_id, pool_id, pair) (mento_pool_deviation_breach_start > 0) unless on(chain_id, pool_id, pair) mento_pool_deviation_ratio) unless (${local.fx_weekend_suppressed_breach_start_promql})"
+  deviation_warning_unavailable_active_promql = "((time() - mento_pool_deviation_breach_start) and on(chain_id, pool_id, pair) (mento_pool_deviation_breach_start > 0) and on(chain_id, pool_id, pair) ((mento_pool_deviation_open_breach_peak_ratio > 1.05) or on(chain_id, pool_id, pair) (max_over_time(mento_pool_deviation_ratio[1d]) > 1.05)) unless on(chain_id, pool_id, pair) mento_pool_deviation_ratio) unless (${local.fx_weekend_suppressed_breach_start_promql})"
 
   # ── Pool depletion risk ───────────────────────────────────────────────────
   # What makes a pool critical is user impact, not deviation magnitude. An
@@ -418,7 +428,7 @@ locals {
   #     query that pre-computes `(mento_pool_deviation_ratio - 1) * 100` in
   #     PromQL, and its duration from `$values.BreachAge`. Rendering branches
   #     by magnitude so summaries stay scannable across four orders of
-  #     magnitude ("Pool 5% above…" → "Pool 44M% above…"):
+  #     magnitude ("Pool 5% past…" → "Pool 44M% past…"):
   #       - < 1000:   integer percent ("44%")
   #       - 1000–9999: thousand-separated ("1,234%") — Go templates have
   #         no native %`,d formatter and Grafana's template engine doesn't
@@ -470,27 +480,27 @@ locals {
       {{- $dev := $values.Dev.Value -}}
       {{- if lt $dev 1000.0 -}}
         {{- if $values.BreachAge -}}
-          {{- printf "Pool %.0f%% above 1%% tolerance for %s." $dev (humanizeDuration $values.BreachAge.Value) -}}
+          {{- printf "Pool %.0f%% past its rebalance threshold, breach open for %s." $dev (humanizeDuration $values.BreachAge.Value) -}}
         {{- else -}}
-          {{- printf "Pool %.0f%% above 1%% tolerance." $dev -}}
+          {{- printf "Pool %.0f%% past its rebalance threshold." $dev -}}
         {{- end -}}
       {{- else if and (lt $dev 10000.0) $values.DevQ $values.DevR -}}
         {{- if $values.BreachAge -}}
-          {{- printf "Pool %.0f,%03.0f%% above 1%% tolerance for %s." $values.DevQ.Value $values.DevR.Value (humanizeDuration $values.BreachAge.Value) -}}
+          {{- printf "Pool %.0f,%03.0f%% past its rebalance threshold, breach open for %s." $values.DevQ.Value $values.DevR.Value (humanizeDuration $values.BreachAge.Value) -}}
         {{- else -}}
-          {{- printf "Pool %.0f,%03.0f%% above 1%% tolerance." $values.DevQ.Value $values.DevR.Value -}}
+          {{- printf "Pool %.0f,%03.0f%% past its rebalance threshold." $values.DevQ.Value $values.DevR.Value -}}
         {{- end -}}
       {{- else -}}
         {{- if $values.BreachAge -}}
-          {{- printf "Pool %s%% above 1%% tolerance for %s." (humanize $dev) (humanizeDuration $values.BreachAge.Value) -}}
+          {{- printf "Pool %s%% past its rebalance threshold, breach open for %s." (humanize $dev) (humanizeDuration $values.BreachAge.Value) -}}
         {{- else -}}
-          {{- printf "Pool %s%% above 1%% tolerance." (humanize $dev) -}}
+          {{- printf "Pool %s%% past its rebalance threshold." (humanize $dev) -}}
         {{- end -}}
       {{- end -}}
     {{- else if $values.BreachAge -}}
-      Pool above 1% tolerance for {{ humanizeDuration $values.BreachAge.Value }}.
+      Pool past its rebalance threshold, breach open for {{ humanizeDuration $values.BreachAge.Value }}.
     {{- else -}}
-      Pool above 1% tolerance.
+      Pool past its rebalance threshold.
     {{- end -}}
   EOT
   # One summary for both depletion tiers. The rule names ("Pool Depletion
@@ -582,6 +592,21 @@ locals {
   EOT
   deviation_transition_breach_ended_annotation    = <<-EOT
     {{- if $values.Info -}}{{ index $values.Info.Labels "breach_ended_at" }}{{- end -}}
+  EOT
+  # Resolved copy for the ratio-driven `Deviation Breach` rule. The rule fires
+  # at 5% past the boundary but the indexer only emits a transition marker when
+  # the breach itself ends at 1%, so a pool that falls back under the 5% alert
+  # line while still in breach resolves with no `reason`. Say that plainly
+  # instead of "marker unavailable"; every other case keeps the shared copy.
+  # `A` is the deviation ratio here, so the `1.05` literal is the alert line.
+  deviation_warning_resolved_summary_annotation = <<-EOT
+    {{- $reason := "" -}}
+    {{- if $values.Info -}}{{- $reason = index $values.Info.Labels "reason" -}}{{- end -}}
+    {{- if and (not $reason) $values.A (le $values.A.Value 1.05) -}}
+      Pool is back under the 5% alert line.
+    {{- else -}}
+      ${local.deviation_resolved_summary_annotation}
+    {{- end -}}
   EOT
   # HEREDOC keeps the multi-branch template legible — `{{-`/`-}}` whitespace
   # trim markers strip ALL surrounding whitespace (including newlines), so

@@ -8,11 +8,13 @@ const THRESHOLDS_PATH = "shared-config/src/thresholds.ts";
 const ALERTS_MAIN_PATH = "alerts/rules/main.tf";
 const FPMM_RULES_PATH = "alerts/rules/rules-fpmms.tf";
 
-// Only the constants Terraform actually mirrors. `DEVIATION_CRITICAL_RATIO`
-// is intentionally absent: since ADR 0067 it is an analytics classification
-// with no Grafana consumer, so there is nothing in `alerts/` to keep in sync.
+// Only the constants Terraform actually mirrors. The `Deviation Breach`
+// warning fires at `DEVIATION_CRITICAL_RATIO` (the 5% alert line);
+// `DEVIATION_TOLERANCE_RATIO` (1%) is intentionally absent: it stays the
+// indexer's breach anchor and the dashboard's OK/WARN boundary, and no Grafana
+// threshold evaluator reads it.
 const THRESHOLD_EXPORTS = {
-  tolerance: "DEVIATION_TOLERANCE_RATIO",
+  alertLine: "DEVIATION_CRITICAL_RATIO",
   depletionCritical: "POOL_DEPLETION_CRITICAL_SHARE",
   depletionPage: "POOL_DEPLETION_PAGE_SHARE",
 };
@@ -76,7 +78,7 @@ function extractHeredocLocal(source, name) {
 function contextPercentLiterals(fragment, context) {
   const literals = [];
   const pattern =
-    /(?<![0-9.])([0-9]+(?:\.[0-9]+)?)%{1,2}\s+(tolerance|threshold)(?![A-Za-z])/g;
+    /(?<![0-9.])([0-9]+(?:\.[0-9]+)?)%{1,2}\s+(tolerance|threshold|alert line)(?![A-Za-z])/g;
   for (const match of fragment.matchAll(pattern)) {
     if (match[2] === context) literals.push(match[1]);
   }
@@ -172,22 +174,71 @@ function extractThreshold(source, exportName) {
 }
 
 function requiredChecks(thresholds) {
-  const tolerancePercent = ratioToPercentLiteral(thresholds.tolerance);
+  const alertLinePercent = ratioToPercentLiteral(thresholds.alertLine);
 
   return [
     {
       file: FPMM_RULES_PATH,
-      description: "warning Grafana threshold evaluator mirrors tolerance",
+      description: "warning Grafana threshold evaluator mirrors the alert line",
       extract: thresholdBlockOf("Deviation Breach"),
-      pattern: evaluatorPattern(thresholds.tolerance, "gt"),
+      pattern: evaluatorPattern(thresholds.alertLine, "gt"),
+    },
+    {
+      // The anchored fallback has no current ratio, so it gates on the open
+      // breach's peak ratio against the same alert line.
+      file: ALERTS_MAIN_PATH,
+      description: "anchored fallback gates its peak ratio on the alert line",
+      extract: (source) =>
+        extractQuotedLocal(
+          source,
+          "deviation_warning_unavailable_active_promql",
+        ),
+      pattern: new RegExp(
+        `mento_pool_deviation_open_breach_peak_ratio\\s*>\\s*${numberLiteral(thresholds.alertLine)}`,
+      ),
+    },
+    {
+      // Its second arm reads the current ratio's last day, for breaches whose
+      // peak sits under the line after a mid-breach threshold change.
+      file: ALERTS_MAIN_PATH,
+      description: "anchored fallback gates its recent ratio on the alert line",
+      extract: (source) =>
+        extractQuotedLocal(
+          source,
+          "deviation_warning_unavailable_active_promql",
+        ),
+      pattern: new RegExp(
+        `max_over_time\\(mento_pool_deviation_ratio\\[1d\\]\\)\\s*>\\s*${numberLiteral(thresholds.alertLine)}`,
+      ),
+    },
+    {
+      // The resolved copy compares the ratio against the alert line to tell
+      // "fell back under the alert line" apart from a real recovery.
+      file: ALERTS_MAIN_PATH,
+      description: "warning resolved annotation mirrors the alert line ratio",
+      extract: (source) =>
+        extractHeredocLocal(
+          source,
+          "deviation_warning_resolved_summary_annotation",
+        ),
+      pattern: new RegExp(
+        `le\\s+\\$values\\.A\\.Value\\s+${numberLiteral(thresholds.alertLine)}\\s*\\)`,
+      ),
     },
     {
       file: ALERTS_MAIN_PATH,
-      description: "warning annotation mirrors warning tolerance percent",
+      description: "warning resolved annotation mirrors the alert line percent",
       extract: (source) =>
-        extractHeredocLocal(source, "deviation_warning_summary_annotation"),
+        extractHeredocLocal(
+          source,
+          "deviation_warning_resolved_summary_annotation",
+        ),
       validate: (fragment) =>
-        allContextPercentLiteralsMatch(fragment, "tolerance", tolerancePercent),
+        allContextPercentLiteralsMatch(
+          fragment,
+          "alert line",
+          alertLinePercent,
+        ),
     },
     {
       file: FPMM_RULES_PATH,
@@ -222,9 +273,9 @@ function requiredChecks(thresholds) {
         [
           "bare",
           GAP,
-          quotedLiteral(thresholds.tolerance),
+          quotedLiteral(thresholds.alertLine),
           GAP,
-          "\\(deviation tolerance\\),",
+          "\\(deviation alert line\\),",
           GAP,
           quotedLiteral(thresholds.depletionCritical),
           GAP,
@@ -306,7 +357,7 @@ function main() {
   }
 
   console.log(
-    `Alert threshold drift check OK: tolerance=${thresholds.tolerance}, depletion critical=${thresholds.depletionCritical}, depletion page=${thresholds.depletionPage}`,
+    `Alert threshold drift check OK: deviation alert line=${thresholds.alertLine}, depletion critical=${thresholds.depletionCritical}, depletion page=${thresholds.depletionPage}`,
   );
 }
 

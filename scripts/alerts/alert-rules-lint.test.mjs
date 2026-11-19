@@ -2914,6 +2914,76 @@ test("the committed alert rules stack stays within the message template budget",
   );
 });
 
+test("an open deviation breach posts once a day and survives short data gaps", () => {
+  const fpmmRules = readFileSync(
+    path.resolve(repoRoot, "alerts/rules/rules-fpmms.tf"),
+    "utf8",
+  );
+  const contactPoints = stripComments(
+    readFileSync(
+      path.resolve(repoRoot, "alerts/rules/contact-points.tf"),
+      "utf8",
+    ),
+  );
+
+  const [deviationRoute] = blocksFor(
+    contactPoints,
+    "notify_warning_pools_deviation = ",
+  );
+  const [poolsRoute] = blocksFor(contactPoints, "notify_warning_pools_pool = ");
+  assert(deviationRoute, "notify_warning_pools_deviation local should exist");
+  assert(poolsRoute, "notify_warning_pools_pool local should exist");
+  assert(
+    /\brepeat_interval\s*=\s*"24h"/.test(deviationRoute),
+    "an open deviation breach should re-post once a day, not every 4h",
+  );
+  assert(
+    /\brepeat_interval\s*=\s*"4h"/.test(poolsRoute),
+    "the shared pools route keeps its 4h repeat for rebalancer and trading-limit warnings",
+  );
+
+  for (const name of ["Deviation Breach", "Deviation Breach (anchored)"]) {
+    const rule = ruleBlockNamed(
+      fpmmRules,
+      new RegExp(`\\bname\\s*=\\s*"${name.replace(/[()]/g, "\\$&")}"`),
+    );
+    assert(rule, `rules-fpmms.tf should carry ${name}`);
+    assert(
+      /\blocal\.notify_warning_pools_deviation\.repeat_interval\b/.test(rule) &&
+        !/\blocal\.notify_warning_pools_pool\b/.test(rule),
+      `${name} should route through the daily deviation notifier`,
+    );
+  }
+
+  const ratioRule = ruleBlockNamed(
+    fpmmRules,
+    /\bname\s*=\s*"Deviation Breach"/,
+  );
+  assert(
+    /^(?![ \t]*#).*\bkeep_firing_for\s*=\s*"30m"/m.test(ratioRule),
+    "Deviation Breach should hold an open breach across a short gap in the ratio series",
+  );
+  assert(
+    /\bmissing_series_evals_to_resolve\s*=\s*30\b/.test(ratioRule),
+    "a vanished ratio series bypasses keep_firing_for, so the missing-series counter must hold the same 30m",
+  );
+
+  const anchoredRule = ruleBlockNamed(
+    fpmmRules,
+    /\bname\s*=\s*"Deviation Breach \(anchored\)"/,
+  );
+  assert(
+    /^(?![ \t]*#).*\bfor\s*=\s*"45m"/m.test(anchoredRule),
+    "the anchored fallback must wait out the 30m hold plus its 15m dwell, or a held breach that loses its ratio series posts twice",
+  );
+  assert(
+    /\bresolved_summary\s*=\s*local\.deviation_warning_resolved_summary_annotation\b/.test(
+      ratioRule,
+    ),
+    "Deviation Breach should explain a drop under the alert line on resolve",
+  );
+});
+
 if (failed > 0) {
   process.stderr.write(`${failed} failed, ${passed} passed.\n`);
   process.exit(1);
