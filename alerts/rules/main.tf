@@ -327,8 +327,32 @@ locals {
   # pool never produces two notifications. The page band is open-ended
   # downward (a fully drained 0% side still pages); known below-floor samples
   # become non-breaching 1s so they reset critical Pending immediately.
-  pool_depletion_page_active_promql     = local.pool_min_reserve_value_share_promql
-  pool_depletion_critical_active_promql = "((${local.pool_min_reserve_value_share_promql}) >= 0.1) or (((${local.pool_min_reserve_value_share_promql}) < 0.1) * 0 + 1)"
+  #
+  # 24h dwell (Philip, 2026-11-19): neither band pages until the pool has sat
+  # in it for a full day. Both bands read the HIGHEST min side share over the
+  # last 24h instead of the current one, so a band fires only when every
+  # 5-minute sample of the day stayed below its ceiling. This is a lookback,
+  # not a `for = "24h"` pending period, on purpose: a pending period resets on
+  # any single non-breaching evaluation and on every rule update, and a pool
+  # hovering around the 10% boundary would keep resetting both bands' pending
+  # state and never page at all. With the 24h maximum a pool that spent the day
+  # between 8% and 15% lands in the critical band, and one that spent it under
+  # 10% lands in the page band. Recovery stays immediate: one sample above the
+  # ceiling lifts the 24h maximum over it.
+  #
+  # Two coverage guards, so a pool whose value share only just appeared (new
+  # pool, feed back from dark, bridge outage) cannot page before a full day:
+  #   - `last_over_time(...[5m:5m] offset 24h)`: the series must already have
+  #     existed 24h ago, so the earliest sample in the window really is a day
+  #     old. A subquery, because PromQL allows `offset` only on a selector or
+  #     subquery, not on an aggregation.
+  #   - `count_over_time >= 276`: at least 23h of the 288 5-minute steps
+  #     carry a sample, so a gap inside the day cannot hide more than an hour
+  #     of possible recovery. Not 288: one missed scrape would then hold the
+  #     page back for another full day.
+  pool_min_reserve_value_share_24h_max_promql = "(max_over_time((${local.pool_min_reserve_value_share_promql})[24h:5m]) and (count_over_time((${local.pool_min_reserve_value_share_promql})[24h:5m]) >= 276) and last_over_time((${local.pool_min_reserve_value_share_promql})[5m:5m] offset 24h))"
+  pool_depletion_page_active_promql           = local.pool_min_reserve_value_share_24h_max_promql
+  pool_depletion_critical_active_promql       = "((${local.pool_min_reserve_value_share_24h_max_promql}) >= 0.1) or (((${local.pool_min_reserve_value_share_24h_max_promql}) < 0.1) * 0 + 1)"
 
   # ── Value-share coverage gap ─────────────────────────────────────────────
   # Both bands above read the VALUE-share gauges, which the bridge publishes

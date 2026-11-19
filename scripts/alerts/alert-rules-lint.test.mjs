@@ -2156,10 +2156,37 @@ test("pool depletion tiers measure value share, not token-count share", () => {
     !/mento_pool_reserve_share_token[01]/.test(minShareExpression),
     "depletion must not read the raw token-count share gauges — on an off-parity pair they measure the exchange rate, not depletion",
   );
+  // Both bands read the 24h maximum of the value-weighted min share, so a band
+  // only fires after a full day in it (Philip, 2026-11-19).
+  const [, dayMaxExpression] = stripped.match(
+    /\bpool_min_reserve_value_share_24h_max_promql\s*=\s*"([^"]+)"/,
+  ) ?? [null, null];
+  assert(
+    dayMaxExpression !== null,
+    "the depletion bands should read a 24h-maximum min-share local",
+  );
+  assert(
+    dayMaxExpression.includes(
+      "max_over_time((${local.pool_min_reserve_value_share_promql})[24h:5m])",
+    ),
+    `the 24h-maximum local must take max_over_time of the value-weighted min share over 24h: ${dayMaxExpression}`,
+  );
+  assert(
+    /count_over_time\(\(\$\{local\.pool_min_reserve_value_share_promql\}\)\[24h:5m\]\)\s*>=\s*\d+/.test(
+      dayMaxExpression,
+    ),
+    `the 24h-maximum local must require sample coverage over the day: ${dayMaxExpression}`,
+  );
+  assert(
+    dayMaxExpression.includes(
+      "last_over_time((${local.pool_min_reserve_value_share_promql})[5m:5m] offset 24h)",
+    ),
+    `the 24h-maximum local must require the series to have existed 24h ago, so a new or returning series cannot page early: ${dayMaxExpression}`,
+  );
   for (const expression of depletionExpressions) {
     assert(
-      expression.includes("pool_min_reserve_value_share_promql"),
-      `depletion band expression should resolve through the value-weighted local: ${expression}`,
+      expression.includes("pool_min_reserve_value_share_24h_max_promql"),
+      `depletion band expression should resolve through the 24h value-weighted local: ${expression}`,
     );
   }
 
