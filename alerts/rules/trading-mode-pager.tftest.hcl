@@ -11,7 +11,7 @@ variables {
   splunk_on_call_alerts_webhook_url = "https://example.invalid/splunk-on-call"
 }
 
-run "breaker_halts_page_at_most_once_a_day_per_feed" {
+run "breaker_halts_page_once_then_remind_every_two_days_per_feed" {
   command = plan
 
   # One pager rule per prod chain, held open for a day after the last halt.
@@ -36,18 +36,19 @@ run "breaker_halts_page_at_most_once_a_day_per_feed" {
     error_message = "\"Trading Mode Alert\" rules must not carry route=pager: they feed Slack, not the pager."
   }
 
-  # Every Splunk route for service=exchanges requires route=pager, repeats
-  # daily and is terminal.
+  # Every Splunk route for service=exchanges requires route=pager, is terminal
+  # and repeats every 2d: longer than the 24h keep_firing_for, so the recovery
+  # tail after one short halt never sends a second page.
   assert {
     condition = length([
       for p in grafana_notification_policy.all.policy[0].policy : p
       if p.contact_point == grafana_contact_point.splunk_on_call.name &&
       length([for m in p.matcher : m if m.label == "service" && m.value == "exchanges"]) == 1 &&
       length([for m in p.matcher : m if m.label == "route" && m.match == "=" && m.value == "pager"]) == 1 &&
-      p.repeat_interval == "1d" &&
+      p.repeat_interval == "2d" &&
       p.continue != true
     ]) == length(local.prod_chains)
-    error_message = "Each prod chain needs one terminal Splunk route for service=exchanges that matches route=pager and repeats every 1d."
+    error_message = "Each prod chain needs one terminal Splunk route for service=exchanges that matches route=pager and repeats every 2d (longer than the 24h keep_firing_for)."
   }
 
   assert {

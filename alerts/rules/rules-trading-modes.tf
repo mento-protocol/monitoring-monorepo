@@ -91,10 +91,11 @@ resource "grafana_rule_group" "trading_modes" {
   #
   # `keep_firing_for = "24h"` keeps this alert open for a day after the last
   # halted sample, so re-trips inside that day join the open Splunk incident
-  # instead of paging again. Together with the 1d `repeat_interval` on the
-  # Splunk route, a feed pages once when it first halts and then at most once
-  # a day. A halt on another feed still pages immediately (the route groups by
-  # rateFeed). The Splunk incident resolves 24h after the last halt; the
+  # instead of paging again. The Splunk route's `repeat_interval` is 2d, longer
+  # than this 24h hold, so a feed pages once when it first halts, the recovery
+  # tail stays quiet, and a reminder goes out at most every two days while it
+  # keeps halting. A halt on another feed still pages immediately (the route
+  # groups by rateFeed). The Splunk incident resolves 24h after the last halt; the
   # real-time "Trading resumed" post comes from the rule above in Slack.
   dynamic "rule" {
     for_each = local.prod_chains

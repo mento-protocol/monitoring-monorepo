@@ -1846,8 +1846,8 @@ test("trading-mode Splunk pages repeat slowly per rate feed", () => {
     "trading-mode pages should keep resolve and group updates prompt",
   );
   assert(
-    /\brepeat_interval\s*=\s*"1d"/.test(splunkPolicy),
-    "trading-mode pages should not repeat SMS/pager notifications more than daily",
+    /\brepeat_interval\s*=\s*"2d"/.test(splunkPolicy),
+    "trading-mode pages should repeat every 2d, longer than the 24h keep_firing_for, so the recovery tail does not page again",
   );
   assert(
     /\blabel\s*=\s*"route"[\s\S]*?\bvalue\s*=\s*"pager"/.test(splunkPolicy),

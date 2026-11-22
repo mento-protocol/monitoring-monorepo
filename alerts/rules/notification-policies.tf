@@ -418,10 +418,14 @@ resource "grafana_notification_policy" "all" {
     # Trading-modes prod page alerts → Splunk On-Call (one per prod chain).
     # Only the "Trading Mode Page" rules (route=pager) page; they stay open
     # for 24h after the last halt, so a feed that keeps re-tripping pages once
-    # and then at most once a day (see rules-trading-modes.tf). Group by
-    # rateFeed so a new breaker on another pair still gets its own immediate
-    # page. Terminal: the pager copy never reaches Slack, which gets the
-    # real-time "Trading Mode Alert" rules below.
+    # (see rules-trading-modes.tf). The 2d repeat must stay longer than that
+    # 24h hold: with 1d, a single short halt sent a second "Trading halted"
+    # page during the recovery tail with no new halt. A reminder now goes out
+    # only if the feed keeps halting for more than two days. "2d", not "48h":
+    # Grafana normalises the duration to its largest unit. Group by rateFeed
+    # so a new breaker on another pair still gets its own immediate page.
+    # Terminal: the pager copy never reaches Slack, which gets the real-time
+    # "Trading Mode Alert" rules below.
     dynamic "policy" {
       for_each = local.prod_chains
       content {
@@ -429,7 +433,7 @@ resource "grafana_notification_policy" "all" {
         group_by        = ["alertname", "chain", "rateFeed"]
         group_wait      = "30s"
         group_interval  = "5m"
-        repeat_interval = "1d"
+        repeat_interval = "2d"
 
         matcher {
           label = "severity"
