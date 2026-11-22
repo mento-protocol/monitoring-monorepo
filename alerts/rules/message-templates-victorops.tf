@@ -208,8 +208,8 @@ ${local.polygon_chainlink_slug_branches}
 {{ if and $chainlinkFeedPath $chainlinkSlug -}}{{ $chainlinkURL = printf "https://data.chain.link/feeds/%s/%s" $chainlinkFeedPath $chainlinkSlug }}{{ end -}}
 {{ if ne (index .Annotations "grafana_state_reason") "" -}}
 {{ if or $mixedState (gt $resolvedCount 1) }}{{ $rateFeedWithSlash }} [{{ $chain }}]: {{ end }}Breaker alert stopped without recovery confirmation. Grafana stopped the alert for a non-threshold state transition. This does not confirm recovery.
-{{ else if .Annotations.resolved_summary -}}
-{{ if or $mixedState (gt $resolvedCount 1) }}{{ $rateFeedWithSlash }} [{{ $chain }}]: {{ end }}{{ .Annotations.resolved_summary }}
+{{ else if .Annotations.pager_resolved_summary -}}
+{{ if or $mixedState (gt $resolvedCount 1) }}{{ $rateFeedWithSlash }} [{{ $chain }}]: {{ end }}{{ .Annotations.pager_resolved_summary }}
 {{ else -}}
 {{ if or $mixedState (gt $resolvedCount 1) -}}
 {{ $rateFeedWithSlash }} [{{ $chain }}]: Trading resumed

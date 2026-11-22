@@ -108,8 +108,8 @@ resource "grafana_rule_group" "trading_modes" {
       no_data_state   = "NoData"
 
       annotations = {
-        summary          = "Trading is halted for the {{ $labels.rateFeed }} rate feed on {{ $labels.chain | title }}. Check if a breaker tripped."
-        resolved_summary = "No breaker halt on this feed for 24 hours. The next halt pages again."
+        summary                = "Trading is halted for the {{ $labels.rateFeed }} rate feed on {{ $labels.chain | title }}. Check if a breaker tripped."
+        pager_resolved_summary = "No breaker halt on this feed for 24 hours. The next halt pages again."
       }
 
       labels = {

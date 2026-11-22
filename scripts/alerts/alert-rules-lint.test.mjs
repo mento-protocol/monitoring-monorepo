@@ -1850,8 +1850,12 @@ test("trading-mode Splunk pages repeat slowly per rate feed", () => {
     "trading-mode pages should not repeat SMS/pager notifications more than daily",
   );
   assert(
-    /\bcontinue\s*=\s*true/.test(splunkPolicy),
-    "trading-mode Splunk policy must continue so Slack alerts-critical also fires",
+    /\blabel\s*=\s*"route"[\s\S]*?\bvalue\s*=\s*"pager"/.test(splunkPolicy),
+    "trading-mode Splunk policy must page only from the route=pager rules",
+  );
+  assert(
+    !/\bcontinue\s*=\s*true/.test(splunkPolicy),
+    "trading-mode Splunk policy must be terminal so the pager copy never reaches Slack",
   );
 });
 
@@ -1867,6 +1871,10 @@ test("trading-mode alerts keep incidents open across short flaps", () => {
   assert(
     /^(?![ \t]*#).*\bkeep_firing_for\s*=\s*"1h"/m.test(tradingModeRules),
     "trading-mode alerts should keep incidents open across short breaker flaps",
+  );
+  assert(
+    /^(?![ \t]*#).*\bkeep_firing_for\s*=\s*"24h"/m.test(tradingModeRules),
+    "trading-mode pager rules should hold the Splunk incident open for a day so re-trips do not page again",
   );
 });
 
