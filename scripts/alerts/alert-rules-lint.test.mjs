@@ -1892,8 +1892,12 @@ test("trading-mode alerts keep incidents open across short flaps", () => {
   assert(
     /min_over_time\(BreakerBox_getRateFeedTradingMode\{[\s\S]*?\}\[24h\]\)/.test(
       reminder,
-    ) && /offset 24h/.test(reminder),
-    "the still-halted reminder must require every sample of the last 24h halted and a series that existed a day ago",
+    ) &&
+      /offset 24h/.test(reminder) &&
+      /last_over_time\(BreakerBox_getRateFeedTradingMode\{[\s\S]*?\}\[10m\]\)/.test(
+        reminder,
+      ),
+    "the still-halted reminder must require every sample of the last 24h halted, a series that existed a day ago, and a current sample",
   );
 });
 

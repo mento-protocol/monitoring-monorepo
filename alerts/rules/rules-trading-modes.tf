@@ -186,6 +186,9 @@ resource "grafana_rule_group" "trading_modes" {
   # and on any missed evaluation, so a long halt could go without a reminder.
   # The `offset 24h` guard requires the series to have existed a day ago, so a
   # feed that only just appeared cannot look "halted all day".
+  # The trailing `last_over_time(...[10m])` requires a current sample, so a
+  # feed that stops publishing while halted cannot keep the 24h minimum alive
+  # on old samples and page "still halted" during an exporter outage.
   #
   # exec_err_state = OK: the page rule above reads the same metric from the same
   # data source with exec_err_state = Error, so a query failure already pages
@@ -222,7 +225,7 @@ resource "grafana_rule_group" "trading_modes" {
 
         model = jsonencode({
           refId   = "minTradingMode24h"
-          expr    = "min_over_time(BreakerBox_getRateFeedTradingMode{chain=\"${rule.key}\"}[24h]) and last_over_time(BreakerBox_getRateFeedTradingMode{chain=\"${rule.key}\"}[1h] offset 24h)"
+          expr    = "min_over_time(BreakerBox_getRateFeedTradingMode{chain=\"${rule.key}\"}[24h]) and last_over_time(BreakerBox_getRateFeedTradingMode{chain=\"${rule.key}\"}[1h] offset 24h) and last_over_time(BreakerBox_getRateFeedTradingMode{chain=\"${rule.key}\"}[10m])"
           instant = true
         })
       }
