@@ -167,9 +167,9 @@ ${local.polygon_chainlink_slug_branches}
 {{ $chainlinkURL := "" -}}
 {{ if and $chainlinkFeedPath $chainlinkSlug -}}{{ $chainlinkURL = printf "https://data.chain.link/feeds/%s/%s" $chainlinkFeedPath $chainlinkSlug }}{{ end -}}
 {{ if or $mixedState (gt $firingCount 1) -}}
-{{ $rateFeedWithSlash }} [{{ $chain }}]: Trading halted by breaker
+{{ $rateFeedWithSlash }} [{{ $chain }}]: Trading halted by breaker{{ with .Annotations.pager_firing_summary }}. {{ . }}{{ end }}
 {{ else -}}
-Trading halted by breaker.
+Trading halted by breaker.{{ with .Annotations.pager_firing_summary }} {{ . }}{{ end }}
 {{ end -}}
 {{ if $chainlinkURL -}}
 Next action: verify the Chainlink data source, then ack/snooze if the move is real. Do not manually reset unless the feed is wrong or the breaker is stuck after recovery.
@@ -208,6 +208,8 @@ ${local.polygon_chainlink_slug_branches}
 {{ if and $chainlinkFeedPath $chainlinkSlug -}}{{ $chainlinkURL = printf "https://data.chain.link/feeds/%s/%s" $chainlinkFeedPath $chainlinkSlug }}{{ end -}}
 {{ if ne (index .Annotations "grafana_state_reason") "" -}}
 {{ if or $mixedState (gt $resolvedCount 1) }}{{ $rateFeedWithSlash }} [{{ $chain }}]: {{ end }}Breaker alert stopped without recovery confirmation. Grafana stopped the alert for a non-threshold state transition. This does not confirm recovery.
+{{ else if .Annotations.pager_resolved_summary -}}
+{{ if or $mixedState (gt $resolvedCount 1) }}{{ $rateFeedWithSlash }} [{{ $chain }}]: {{ end }}{{ .Annotations.pager_resolved_summary }}
 {{ else -}}
 {{ if or $mixedState (gt $resolvedCount 1) -}}
 {{ $rateFeedWithSlash }} [{{ $chain }}]: Trading resumed

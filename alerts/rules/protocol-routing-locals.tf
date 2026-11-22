@@ -435,12 +435,17 @@ locals {
       victorops_message_template = "victorops.reserve_balance_alert_message"
     },
     trading_halted = {
-      # One alert name per chain (e.g. "Trading Mode Alert [Monad]"), generated
-      # from the chains registry so the rule names always match a dispatcher
-      # branch.
-      names = [
+      # One alert name per chain (e.g. "Trading Mode Alert [Monad]"), plus the
+      # pager copy and the daily reminder per prod chain ("Trading Mode Page
+      # [Monad]", "Trading Mode Still Halted [Monad]"), generated from the chains
+      # registry so the rule names always match a dispatcher branch.
+      names = concat([
         for k, c in local.chains : "Trading Mode Alert [${c.title}]"
-      ],
+        ], [
+        for k, c in local.prod_chains : "Trading Mode Page [${c.title}]"
+        ], [
+        for k, c in local.prod_chains : "Trading Mode Still Halted [${c.title}]"
+      ]),
       slack_title_template       = "slack.trading_mode_alert_title",
       slack_message_template     = "slack.trading_mode_alert_message",
       victorops_title_template   = "victorops.trading_mode_alert_title",
