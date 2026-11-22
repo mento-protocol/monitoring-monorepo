@@ -45,7 +45,7 @@ run "breaker_halts_page_at_most_once_a_day_per_feed" {
       length([for m in p.matcher : m if m.label == "service" && m.value == "exchanges"]) == 1 &&
       length([for m in p.matcher : m if m.label == "route" && m.match == "=" && m.value == "pager"]) == 1 &&
       p.repeat_interval == "1d" &&
-      !p.continue
+      p.continue != true
     ]) == length(local.prod_chains)
     error_message = "Each prod chain needs one terminal Splunk route for service=exchanges that matches route=pager and repeats every 1d."
   }
