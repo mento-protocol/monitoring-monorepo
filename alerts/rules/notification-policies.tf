@@ -416,11 +416,12 @@ resource "grafana_notification_policy" "all" {
     }
 
     # Trading-modes prod page alerts → Splunk On-Call (one per prod chain).
-    # A prod circuit-breaker engagement is pager-grade — see the
-    # severity=page label in alert-rules-trading-modes.tf.
-    # Keep the first page quick, but avoid noisy SMS reminders for market-wide
-    # depegs where the right action is to wait for the market to repeg. Group by
-    # rateFeed so a new breaker on another pair still gets its own immediate page.
+    # Only the "Trading Mode Page" rules (route=pager) page; they stay open
+    # for 24h after the last halt, so a feed that keeps re-tripping pages once
+    # and then at most once a day (see rules-trading-modes.tf). Group by
+    # rateFeed so a new breaker on another pair still gets its own immediate
+    # page. Terminal: the pager copy never reaches Slack, which gets the
+    # real-time "Trading Mode Alert" rules below.
     dynamic "policy" {
       for_each = local.prod_chains
       content {
@@ -448,7 +449,11 @@ resource "grafana_notification_policy" "all" {
           value = policy.key
         }
 
-        continue = true
+        matcher {
+          label = "route"
+          match = "="
+          value = "pager"
+        }
       }
     }
 
