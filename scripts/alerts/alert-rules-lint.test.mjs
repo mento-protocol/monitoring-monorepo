@@ -1651,7 +1651,7 @@ test("trading-mode notification templates avoid single-alert duplicate headings"
 
   assert(
     messageTemplate.includes(
-      "{{ if or $mixedState (gt $firingCount 1) -}}\n{{ $rateFeedWithSlash }} [{{ $chain }}]: Trading halted by breaker\n{{ else -}}\nTrading halted by breaker.\n{{ end -}}\n{{ if $chainlinkURL -}}",
+      "{{ if or $mixedState (gt $firingCount 1) -}}\n{{ $rateFeedWithSlash }} [{{ $chain }}]: Trading halted by breaker{{ with .Annotations.pager_firing_summary }}. {{ . }}{{ end }}\n{{ else -}}\nTrading halted by breaker.{{ with .Annotations.pager_firing_summary }} {{ . }}{{ end }}\n{{ end -}}\n{{ if $chainlinkURL -}}",
     ),
     "VictorOps state_message should carry per-feed firing context when multi-alert or mixed",
   );
@@ -1819,43 +1819,48 @@ test("trading-mode Splunk pages repeat slowly per rate feed", () => {
       /\blabel\s*=\s*"service"[\s\S]*?\bvalue\s*=\s*"exchanges"/.test(block) &&
       /\blabel\s*=\s*"severity"[\s\S]*?\bvalue\s*=\s*"page"/.test(block),
   );
+  const routeOf = (block) =>
+    /\blabel\s*=\s*"route"\s*\n\s*match\s*=\s*"="\s*\n\s*value\s*=\s*"([a-z_]+)"/.exec(
+      block,
+    )?.[1];
   assert(
-    matchingBlocks.length === 1,
-    `expected one trading-mode Splunk page policy, got ${matchingBlocks.length}`,
+    JSON.stringify(matchingBlocks.map(routeOf).sort()) ===
+      JSON.stringify(["pager", "pager_reminder"]),
+    "trading-mode Splunk routes must be exactly the route=pager page and the route=pager_reminder daily reminder",
   );
 
-  const [splunkPolicy] = matchingBlocks;
-  assert(
-    /\bcontact_point\s*=\s*grafana_contact_point\.splunk_on_call\.name/.test(
-      splunkPolicy,
-    ),
-    "trading-mode page policy should route to Splunk On-Call",
+  for (const block of matchingBlocks) {
+    assert(
+      /\bgroup_by\s*=\s*\[\s*"alertname"\s*,\s*"chain"\s*,\s*"rateFeed"\s*\]/.test(
+        block,
+      ),
+      "trading-mode pages should group by rateFeed so new pairs page immediately",
+    );
+    assert(
+      /\bgroup_wait\s*=\s*"30s"/.test(block),
+      "trading-mode pages should keep the initial page fast",
+    );
+    assert(
+      /\bgroup_interval\s*=\s*"5m"/.test(block),
+      "trading-mode pages should keep resolve and group updates prompt",
+    );
+    assert(
+      !/\bcontinue\s*=\s*true/.test(block),
+      "trading-mode Splunk policies must be terminal so pager copies never reach Slack",
+    );
+  }
+
+  const page = matchingBlocks.find((block) => routeOf(block) === "pager");
+  const reminder = matchingBlocks.find(
+    (block) => routeOf(block) === "pager_reminder",
   );
   assert(
-    /\bgroup_by\s*=\s*\[\s*"alertname"\s*,\s*"chain"\s*,\s*"rateFeed"\s*\]/.test(
-      splunkPolicy,
-    ),
-    "trading-mode pages should group by rateFeed so new pairs page immediately",
+    /\brepeat_interval\s*=\s*"5d"/.test(page),
+    "the 24h-held page must repeat only at Grafana's 5d maximum: any shorter repeat can page during the recovery tail",
   );
   assert(
-    /\bgroup_wait\s*=\s*"30s"/.test(splunkPolicy),
-    "trading-mode pages should keep the initial page fast",
-  );
-  assert(
-    /\bgroup_interval\s*=\s*"5m"/.test(splunkPolicy),
-    "trading-mode pages should keep resolve and group updates prompt",
-  );
-  assert(
-    /\brepeat_interval\s*=\s*"2d"/.test(splunkPolicy),
-    "trading-mode pages should repeat every 2d, longer than the 24h keep_firing_for, so the recovery tail does not page again",
-  );
-  assert(
-    /\blabel\s*=\s*"route"[\s\S]*?\bvalue\s*=\s*"pager"/.test(splunkPolicy),
-    "trading-mode Splunk policy must page only from the route=pager rules",
-  );
-  assert(
-    !/\bcontinue\s*=\s*true/.test(splunkPolicy),
-    "trading-mode Splunk policy must be terminal so the pager copy never reaches Slack",
+    /\brepeat_interval\s*=\s*"1d"/.test(reminder),
+    "the still-halted reminder must repeat daily while the feed stays halted",
   );
 });
 
@@ -1875,6 +1880,20 @@ test("trading-mode alerts keep incidents open across short flaps", () => {
   assert(
     /^(?![ \t]*#).*\bkeep_firing_for\s*=\s*"24h"/m.test(tradingModeRules),
     "trading-mode pager rules should hold the Splunk incident open for a day so re-trips do not page again",
+  );
+  const reminder = ruleBlockNamed(
+    tradingModeRules,
+    /\bname\s*=\s*"Trading Mode Still Halted \[/,
+  );
+  assert(
+    !/\bkeep_firing_for\b/.test(reminder) && !/\bfor\s*=/.test(reminder),
+    "the still-halted reminder must resolve on the first resumed sample: no keep_firing_for, no pending period",
+  );
+  assert(
+    /min_over_time\(BreakerBox_getRateFeedTradingMode\{[\s\S]*?\}\[24h\]\)/.test(
+      reminder,
+    ) && /offset 24h/.test(reminder),
+    "the still-halted reminder must require every sample of the last 24h halted and a series that existed a day ago",
   );
 });
 

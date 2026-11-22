@@ -436,12 +436,15 @@ locals {
     },
     trading_halted = {
       # One alert name per chain (e.g. "Trading Mode Alert [Monad]"), plus the
-      # pager copy per prod chain ("Trading Mode Page [Monad]"), generated from
-      # the chains registry so the rule names always match a dispatcher branch.
+      # pager copy and the daily reminder per prod chain ("Trading Mode Page
+      # [Monad]", "Trading Mode Still Halted [Monad]"), generated from the chains
+      # registry so the rule names always match a dispatcher branch.
       names = concat([
         for k, c in local.chains : "Trading Mode Alert [${c.title}]"
         ], [
         for k, c in local.prod_chains : "Trading Mode Page [${c.title}]"
+        ], [
+        for k, c in local.prod_chains : "Trading Mode Still Halted [${c.title}]"
       ]),
       slack_title_template       = "slack.trading_mode_alert_title",
       slack_message_template     = "slack.trading_mode_alert_message",

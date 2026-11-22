@@ -416,16 +416,16 @@ resource "grafana_notification_policy" "all" {
     }
 
     # Trading-modes prod page alerts → Splunk On-Call (one per prod chain).
-    # Only the "Trading Mode Page" rules (route=pager) page; they stay open
-    # for 24h after the last halt, so a feed that keeps re-tripping pages once
-    # (see rules-trading-modes.tf). The 2d repeat must stay longer than that
-    # 24h hold: with 1d, a single short halt sent a second "Trading halted"
-    # page during the recovery tail with no new halt. A reminder now goes out
-    # only if the feed keeps halting for more than two days. "2d", not "48h":
-    # Grafana normalises the duration to its largest unit. Group by rateFeed
-    # so a new breaker on another pair still gets its own immediate page.
-    # Terminal: the pager copy never reaches Slack, which gets the real-time
-    # "Trading Mode Alert" rules below.
+    # Only the "Trading Mode Page" rules (route=pager) page here; they stay
+    # open for 24h after the last halt, so a feed that keeps re-tripping pages
+    # once (see rules-trading-modes.tf). No useful finite repeat exists for an
+    # alert held open 24h: any repeat can land in the recovery tail and page
+    # "halted" for a feed that already resumed. So the repeat sits at Grafana's
+    # effective 5-day maximum (see trading_limits_slack_repeat_interval) and the
+    # daily reminder has its own route below. Group by rateFeed so a new
+    # breaker on another pair still gets its own immediate page. Terminal: the
+    # pager copy never reaches Slack, which gets the real-time "Trading Mode
+    # Alert" rules below.
     dynamic "policy" {
       for_each = local.prod_chains
       content {
@@ -433,7 +433,7 @@ resource "grafana_notification_policy" "all" {
         group_by        = ["alertname", "chain", "rateFeed"]
         group_wait      = "30s"
         group_interval  = "5m"
-        repeat_interval = "2d"
+        repeat_interval = "5d"
 
         matcher {
           label = "severity"
@@ -457,6 +457,46 @@ resource "grafana_notification_policy" "all" {
           label = "route"
           match = "="
           value = "pager"
+        }
+      }
+    }
+
+    # Daily "still halted" reminder → Splunk On-Call (one per prod chain).
+    # The "Trading Mode Still Halted" rules fire only while a feed has been
+    # halted for every sample of the last 24h and resolve on the first resumed
+    # sample, so a 1d repeat reminds once a day during a continuous halt and
+    # never after trading resumed. Terminal, like the route above.
+    dynamic "policy" {
+      for_each = local.prod_chains
+      content {
+        contact_point   = grafana_contact_point.splunk_on_call.name
+        group_by        = ["alertname", "chain", "rateFeed"]
+        group_wait      = "30s"
+        group_interval  = "5m"
+        repeat_interval = "1d"
+
+        matcher {
+          label = "severity"
+          match = "="
+          value = "page"
+        }
+
+        matcher {
+          label = "service"
+          match = "="
+          value = "exchanges"
+        }
+
+        matcher {
+          label = "chain"
+          match = "="
+          value = policy.key
+        }
+
+        matcher {
+          label = "route"
+          match = "="
+          value = "pager_reminder"
         }
       }
     }
