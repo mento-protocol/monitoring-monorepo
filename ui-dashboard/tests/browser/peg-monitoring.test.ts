@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 import {
   makePegMonitoringResponse,
   PEG_FIXTURE_CHAIN_ID,
@@ -8,6 +8,19 @@ import {
 
 const now = PEG_FIXTURE_PRODUCED_AT;
 const poolId = `${PEG_FIXTURE_CHAIN_ID}-${PEG_FIXTURE_POOL_ADDRESS}`;
+
+/**
+ * Advances the fake clock in steps shorter than the dashboard's 10 s fetch
+ * timeout. Since Playwright 1.65, one long runFor yields only a MessageChannel
+ * task between timers, so a refresh that starts inside the jump can hit its
+ * faked AbortSignal.timeout before the mocked route answers.
+ */
+async function runForInSteps(page: Page, totalMs: number, stepMs = 5_000) {
+  for (let elapsed = 0; elapsed < totalMs; elapsed += stepMs) {
+    await page.clock.runFor(Math.min(stepMs, totalMs - elapsed));
+  }
+}
+
 const initialPayload = makePegMonitoringResponse();
 const initialPackage = initialPayload.packages[0]!;
 /** A healthy primary-market price, so the board's default row is a clean one. */
@@ -214,7 +227,7 @@ test("renders the status board, expands a row panel, and retains stale evidence"
     "Showing the last confirmed check",
   );
 
-  await page.clock.runFor(300_000);
+  await runForInSteps(page, 300_000);
   await expect.poll(() => historyRequests["24h"]).toBeGreaterThan(1);
   await expect(
     panel.getByTestId("peg-supporting-source-kraken_eur"),
