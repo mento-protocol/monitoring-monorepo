@@ -15,10 +15,15 @@ const poolId = `${PEG_FIXTURE_CHAIN_ID}-${PEG_FIXTURE_POOL_ADDRESS}`;
  * task between timers, so a refresh that starts inside the jump can hit its
  * faked AbortSignal.timeout before the mocked route answers.
  */
-async function runForInSteps(page: Page, totalMs: number, stepMs = 5_000) {
-  for (let elapsed = 0; elapsed < totalMs; elapsed += stepMs) {
-    await page.clock.runFor(Math.min(stepMs, totalMs - elapsed));
-  }
+async function runForInSteps(
+  page: Page,
+  totalMs: number,
+  stepMs = 5_000,
+): Promise<void> {
+  if (totalMs <= 0) return;
+  const step = Math.min(stepMs, totalMs);
+  await page.clock.runFor(step);
+  await runForInSteps(page, totalMs - step, stepMs);
 }
 
 const initialPayload = makePegMonitoringResponse();
