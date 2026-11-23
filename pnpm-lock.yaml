@@ -126,8 +126,8 @@ importers:
         specifier: 18.7.1
         version: 18.7.1
       envio-cloud:
-        specifier: 1.1.0
-        version: 1.1.0
+        specifier: 1.2.0
+        version: 1.2.0
       esbuild:
         specifier: 0.28.1
         version: 0.28.1
@@ -436,8 +436,8 @@ importers:
         specifier: 0.9.0
         version: 0.9.0
       envio:
-        specifier: 3.15.0
-        version: 3.15.0
+        specifier: 3.16.0
+        version: 3.16.0
       viem:
         specifier: 2.57.14
         version: 2.57.14(typescript@5.9.3)(zod@4.6.7)
@@ -1366,28 +1366,28 @@ packages:
   '@emnapi/wasi-threads@1.2.2':
     resolution: {integrity: sha512-c95qOXkHdydNKhscBTebqEC1CVAZpyqOfVfBzQ1qgzyl3gfeldUjIggDbIZgDKsHLgnsM+igH7TJ/eAasaVuMA==}
 
-  '@envio-dev/envio-cloud-darwin-arm64@1.1.0':
-    resolution: {integrity: sha512-qVWVI8DcPJdgRisiRS7D4YyhnHXOlglxRS3M7u3OP6EB0tWM4Uirx5j+TW+5Ng6ZWvDCI9KmYm6ScVRgJ0SH2A==}
+  '@envio-dev/envio-cloud-darwin-arm64@1.2.0':
+    resolution: {integrity: sha512-UI50yUuEu05LUgBpzEwDkfSEXKzyfzmukNoA+ARSNOB8xd1vlnQO5QHIu0bTXJs2ocsNAtmg7FR5GPOQm03mFA==}
     cpu: [arm64]
     os: [darwin]
 
-  '@envio-dev/envio-cloud-darwin-x64@1.1.0':
-    resolution: {integrity: sha512-xhjnIVVNWbXa7/ouvm05TqTi2FNMacR7xvLBuiaf79hUWM8Bkt0z+M8I/sELgdDdYwdDNMgMtZufpleDt96mwA==}
+  '@envio-dev/envio-cloud-darwin-x64@1.2.0':
+    resolution: {integrity: sha512-Q3E/YX+8tL9Ajr4YZKnmEr7YYHFQzTd+Xktupb/YLKz4tfPekulmmXaq9nXhFuXcdaH5h+XT17snQDgcP3ErGA==}
     cpu: [x64]
     os: [darwin]
 
-  '@envio-dev/envio-cloud-linux-arm64@1.1.0':
-    resolution: {integrity: sha512-jZo5VkQLMuKaYcxFIyudCwiBZCkDp1BnbTnyBAOf8ldMPHzXHrPhCxQrdvDB5G1v3u3wb7TSXkEjKLbCGiQtHg==}
+  '@envio-dev/envio-cloud-linux-arm64@1.2.0':
+    resolution: {integrity: sha512-e97eVHTl1AbBAyu5+nm4r2JgtztjIXn3t3Ya5BPN3ZG+93yrkm+qQpy+FNoB3l+8HWNOROoqpmVYTJrlz37Xag==}
     cpu: [arm64]
     os: [linux]
 
-  '@envio-dev/envio-cloud-linux-x64@1.1.0':
-    resolution: {integrity: sha512-2MbR+NdjI1DOwtZWfFOGxWLuf68Y1lUM32GjZbRMRA1sKIKfDYVCWhX6xYH6+SZr+qOX2IdvoPyfMEeFq/kpwQ==}
+  '@envio-dev/envio-cloud-linux-x64@1.2.0':
+    resolution: {integrity: sha512-hYLSOuPBS8jcvKiipCpxDZKdhPcVdmElPIjOVuqqph9r1p8cK4FzqxbMB0BuP5BEEezNgjoJRM3yDnh8Lnx9Wg==}
     cpu: [x64]
     os: [linux]
 
-  '@envio-dev/envio-cloud-win32-x64@1.1.0':
-    resolution: {integrity: sha512-bNP+7Z/iB0ws8fu80rJdwJlDHWIjnkTwa5+y+/XE1GrC+mZmAyYdhqEijY8DGDtExLqxi7NlWoaVhsoFrw1X8Q==}
+  '@envio-dev/envio-cloud-win32-x64@1.2.0':
+    resolution: {integrity: sha512-Z/BMGYGYbs9bg8dxtOzVU55CHktUxBy6BUAaxH/Hed+Sb/xqoS2s8MRyu8DOIs6Yiso41W2HEqC+1MW1DHhfrg==}
     cpu: [x64]
     os: [win32]
 
@@ -3888,8 +3888,8 @@ packages:
       react-redux:
         optional: true
 
-  '@rescript/runtime@12.2.0':
-    resolution: {integrity: sha512-NwfljDRq1rjFPHUaca1nzFz13xsa9ZGkBkLvMhvVgavJT5+A4rMcLu8XAaVTi/oAhO/tlHf9ZDoOTF1AfyAk9Q==}
+  '@rescript/runtime@12.3.1':
+    resolution: {integrity: sha512-yTM0iTl6owyA37UEtPAZR0A3G1kFffJWb+UE6+rcG/N2kxYQnuSlNDfVvsry7l8O+o/ME6QE7Zt7efjCDGM3xg==}
 
   '@rolldown/binding-android-arm64@1.1.8':
     resolution: {integrity: sha512-yBy+BGoNYRh7qdsPTT8fj9nSrwEB/2LkIY9s0s9/PCsTNbrmJi0G0jS3PKJQ5NEbjnjbzkHqT7SN1ubuAykZ9w==}
@@ -6353,40 +6353,40 @@ packages:
   env-schema@8.0.1:
     resolution: {integrity: sha512-VKqpgL3EPCnSRVsUyi+aPHbS+OJKFsqoNoT/sxSKowhyGMvqd9TgaUTZsMYFmIYTLT/tkj02HpuWXP9eCb377Q==}
 
-  envio-cloud@1.1.0:
-    resolution: {integrity: sha512-Z2bVl8Yw2Zt7OXmd8yMryniEWlMl5W3yw0CQbul8dL+a3/kQkIjgeYA4tKY9B6MNfeBDntmo5cSXWBEGkDu6oQ==}
+  envio-cloud@1.2.0:
+    resolution: {integrity: sha512-mJcxHQmLI1sT5oxvmMg3P8hx0kuOgS4SrnvU15sPGt1RxPJ3ROsrF/pL3cQC6Hl3G2jt6L+LFVUsY7TdRvSLIA==}
     hasBin: true
 
-  envio-darwin-arm64@3.15.0:
-    resolution: {integrity: sha512-4uJCzLZ/M76yH3Do+tDiBLqA2VvjqXSfV8n3h2JZxhjALjIrLXmGo+1VSNZiHHgx1MIrk/mPVwmOZqNodJE6FA==}
+  envio-darwin-arm64@3.16.0:
+    resolution: {integrity: sha512-iHIIA87AD4qoLCZJf2J6TH/Ehvfz0b82bpq4x7ssPIythvwz6ghibx97bBLxAJMsrAnclQH/voC7czt1WzWZsg==}
     cpu: [arm64]
     os: [darwin]
 
-  envio-darwin-x64@3.15.0:
-    resolution: {integrity: sha512-a5mjxZcl2/YPmG/rXzh4k1f0DU5Tdg5GEKoDVuKlEpP5pQkFaqQldQxOgMGmbhbirXykwrXrXC2EYMVww8v9fQ==}
+  envio-darwin-x64@3.16.0:
+    resolution: {integrity: sha512-j846ZxHbBr3UOLEk8cofuOUMezskq4fs17oFAG2VnTQkvWbQWPI0S/k3qFmO+/YRXKkSHUQ+gj6g0ZOLAXYXFQ==}
     cpu: [x64]
     os: [darwin]
 
-  envio-linux-arm64@3.15.0:
-    resolution: {integrity: sha512-aEqovO8U6w78JeTlPF0vLlaMyulC18Jv6ogdlgcv+4uoJLsty5GJbKM/d7vuaV94cVgMTwuWYeCOHUE3ULsk8A==}
+  envio-linux-arm64@3.16.0:
+    resolution: {integrity: sha512-rYCHBB6fryS2xiQHTQHUov58Pgs5iMNqrjV3bVwfPwitHZo5gdUrU7utCWknhm4Yxp0NqM8N3lNro41xjOCCJA==}
     cpu: [arm64]
     os: [linux]
     libc: [glibc]
 
-  envio-linux-x64-musl@3.15.0:
-    resolution: {integrity: sha512-br/lqg5ApAAlU94FrJO7H3Zbaolaqtqh625FeNUS34YPGphB5BeVflE4PGqcbb27clSyC0poJITKOcrySZ7Cug==}
+  envio-linux-x64-musl@3.16.0:
+    resolution: {integrity: sha512-6Z2cXHCSIgYFmuD94hcwWAgFUc1XxSYZFKIRLKG6h5l31Fu35cMpjEK1bKPr2myNCeKh5D1Dvvo9DIr6k8L8Aw==}
     cpu: [x64]
     os: [linux]
     libc: [musl]
 
-  envio-linux-x64@3.15.0:
-    resolution: {integrity: sha512-3LcPvLt0oX+OGdIaSmXcKT1od4Atl8Oi6XclFZ2eB6/cbxFbTDtHn1u+Te3U21zog/ktEQOz830ivR1CvgNmwA==}
+  envio-linux-x64@3.16.0:
+    resolution: {integrity: sha512-BPeHwOoQb5To9WdRa3zaN2vdQGaz7JMPrcBJUQJ7MbhLQVE4otQkXzmGRFusUNlpY8oeIv053qP1xVx1GN1AJA==}
     cpu: [x64]
     os: [linux]
     libc: [glibc]
 
-  envio@3.15.0:
-    resolution: {integrity: sha512-SqVFtwZMpvDq9NIqeYuAcUQPLnTRmgNXMUb6NogPElvda68el9pCHs71u8q1Z1dNWCXFp6L7NQRxHxl820Nn7A==}
+  envio@3.16.0:
+    resolution: {integrity: sha512-seypNAbTZiBgHn4yHbA5C3IonhtWVxVTNjNWMfGZlbSWcN4sKNwG9ZrFvPmpQgC0zO44YmJhjSevAtzHwW5DHg==}
     engines: {node: '>=22.15.0'}
     hasBin: true
 
@@ -6678,6 +6678,10 @@ packages:
 
   express@4.22.1:
     resolution: {integrity: sha512-F2X8g9P1X7uCPZMA3MVf9wcTqlyNp7IhH5qPCI0izhaOIYXaW9L535tGA3qmjRzpH+bZczqq7hVKxTR4NWnu+g==}
+    engines: {node: '>= 0.10.0'}
+
+  express@4.22.3:
+    resolution: {integrity: sha512-Bdcs4+3qlpVlx2NRn6fgX2Ue2/gGRaPeawebgclM0ERSCqDpA+owF1fdPwjJUTAJWMTuAaxjDf+hzb0/4eKvvw==}
     engines: {node: '>= 0.10.0'}
 
   express@5.1.0:
@@ -11315,19 +11319,19 @@ snapshots:
       tslib: 2.9.1
     optional: true
 
-  '@envio-dev/envio-cloud-darwin-arm64@1.1.0':
+  '@envio-dev/envio-cloud-darwin-arm64@1.2.0':
     optional: true
 
-  '@envio-dev/envio-cloud-darwin-x64@1.1.0':
+  '@envio-dev/envio-cloud-darwin-x64@1.2.0':
     optional: true
 
-  '@envio-dev/envio-cloud-linux-arm64@1.1.0':
+  '@envio-dev/envio-cloud-linux-arm64@1.2.0':
     optional: true
 
-  '@envio-dev/envio-cloud-linux-x64@1.1.0':
+  '@envio-dev/envio-cloud-linux-x64@1.2.0':
     optional: true
 
-  '@envio-dev/envio-cloud-win32-x64@1.1.0':
+  '@envio-dev/envio-cloud-win32-x64@1.2.0':
     optional: true
 
   '@esbuild/aix-ppc64@0.28.1':
@@ -13581,7 +13585,7 @@ snapshots:
       react: 19.3.1
       react-redux: 9.3.0(@types/react@19.3.0)(react@19.3.1)(redux@5.0.1)
 
-  '@rescript/runtime@12.2.0': {}
+  '@rescript/runtime@12.3.1': {}
 
   '@rolldown/binding-android-arm64@1.1.8':
     optional: true
@@ -16188,43 +16192,43 @@ snapshots:
     dependencies:
       ajv: 8.20.0
 
-  envio-cloud@1.1.0:
+  envio-cloud@1.2.0:
     optionalDependencies:
-      '@envio-dev/envio-cloud-darwin-arm64': 1.1.0
-      '@envio-dev/envio-cloud-darwin-x64': 1.1.0
-      '@envio-dev/envio-cloud-linux-arm64': 1.1.0
-      '@envio-dev/envio-cloud-linux-x64': 1.1.0
-      '@envio-dev/envio-cloud-win32-x64': 1.1.0
+      '@envio-dev/envio-cloud-darwin-arm64': 1.2.0
+      '@envio-dev/envio-cloud-darwin-x64': 1.2.0
+      '@envio-dev/envio-cloud-linux-arm64': 1.2.0
+      '@envio-dev/envio-cloud-linux-x64': 1.2.0
+      '@envio-dev/envio-cloud-win32-x64': 1.2.0
 
-  envio-darwin-arm64@3.15.0:
+  envio-darwin-arm64@3.16.0:
     optional: true
 
-  envio-darwin-x64@3.15.0:
+  envio-darwin-x64@3.16.0:
     optional: true
 
-  envio-linux-arm64@3.15.0:
+  envio-linux-arm64@3.16.0:
     optional: true
 
-  envio-linux-x64-musl@3.15.0:
+  envio-linux-x64-musl@3.16.0:
     optional: true
 
-  envio-linux-x64@3.15.0:
+  envio-linux-x64@3.16.0:
     optional: true
 
-  envio@3.15.0:
+  envio@3.16.0:
     dependencies:
-      '@rescript/runtime': 12.2.0
+      '@rescript/runtime': 12.3.1
       bignumber.js: 9.3.1
       dotenv: 16.4.5
       eventsource: 4.1.0
-      express: 4.22.1
+      express: 4.22.3
       rescript-schema: 9.5.1
     optionalDependencies:
-      envio-darwin-arm64: 3.15.0
-      envio-darwin-x64: 3.15.0
-      envio-linux-arm64: 3.15.0
-      envio-linux-x64: 3.15.0
-      envio-linux-x64-musl: 3.15.0
+      envio-darwin-arm64: 3.16.0
+      envio-darwin-x64: 3.16.0
+      envio-linux-arm64: 3.16.0
+      envio-linux-x64: 3.16.0
+      envio-linux-x64-musl: 3.16.0
     transitivePeerDependencies:
       - rescript
       - supports-color
@@ -16686,6 +16690,42 @@ snapshots:
       jest-util: 30.5.1
 
   express@4.22.1:
+    dependencies:
+      accepts: 1.3.8
+      array-flatten: 1.1.1
+      body-parser: 1.20.9
+      content-disposition: 0.5.4
+      content-type: 1.0.5
+      cookie: 0.7.2
+      cookie-signature: 1.0.6
+      debug: 2.6.9
+      depd: 2.0.0
+      encodeurl: 2.0.0
+      escape-html: 1.0.3
+      etag: 1.8.1
+      finalhandler: 1.3.2
+      fresh: 0.5.2
+      http-errors: 2.0.1
+      merge-descriptors: 1.0.3
+      methods: 1.1.2
+      on-finished: 2.4.1
+      parseurl: 1.3.3
+      path-to-regexp: 0.1.13
+      proxy-addr: 2.0.8
+      qs: 6.16.1
+      range-parser: 1.2.1
+      safe-buffer: 5.2.1
+      send: 0.19.2
+      serve-static: 1.16.3
+      setprototypeof: 1.2.0
+      statuses: 2.0.2
+      type-is: 1.6.18
+      utils-merge: 1.0.1
+      vary: 1.1.2
+    transitivePeerDependencies:
+      - supports-color
+
+  express@4.22.3:
     dependencies:
       accepts: 1.3.8
       array-flatten: 1.1.1
