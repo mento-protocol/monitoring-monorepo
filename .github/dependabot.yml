@@ -83,6 +83,13 @@ updates:
       - dependency-name: "@vitest/coverage-v8"
         update-types:
           - version-update:semver-major
+      # v7 serves the @prometheus-io/client registry; Aegis registers on
+      # prom-client, so /metrics lost every Aegis series (INC-20261125-aegis-stale-data).
+      # Remove this once Aegis migrates its metrics to @prometheus-io/client and
+      # aegis/src/metrics-endpoint.spec.ts passes on the new major.
+      - dependency-name: "@willsoto/nestjs-prometheus"
+        update-types:
+          - version-update:semver-major
 
     groups:
       # Next.js and React are coupled to the Vercel deployment contract and the
