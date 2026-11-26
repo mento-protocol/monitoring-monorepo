@@ -41,7 +41,7 @@
     "@vercel/analytics": "^2.0.1",
     "@vercel/blob": "^2.9.0",
     "@web3icons/react": "^4.1.25",
-    "graphql": "^17.0.2",
+    "graphql": "^17.1.0",
     "next": "16.4.6",
     "next-auth": "5.0.0-beta.32",
     "plotly.js": "npm:plotly.js-basic-dist-min@4.3.0",

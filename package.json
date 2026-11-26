@@ -146,7 +146,7 @@
     "eslint": "^10.15.0",
     "esbuild": "0.28.1",
     "globals": "^17.12.0",
-    "graphql": "17.0.2",
+    "graphql": "17.1.0",
     "js-yaml": "5.5.0",
     "jscpd": "5.4.3",
     "mdast-util-from-markdown": "2.0.3",
