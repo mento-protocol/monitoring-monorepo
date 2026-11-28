@@ -2965,8 +2965,8 @@ test("an open deviation breach posts once a day and survives short data gaps", (
   assert(deviationRoute, "notify_warning_pools_deviation local should exist");
   assert(poolsRoute, "notify_warning_pools_pool local should exist");
   assert(
-    /\brepeat_interval\s*=\s*"24h"/.test(deviationRoute),
-    "an open deviation breach should re-post once a day, not every 4h",
+    /\brepeat_interval\s*=\s*"1d"/.test(deviationRoute),
+    "an open deviation breach should use Grafana’s canonical daily interval (1d)",
   );
   assert(
     /\brepeat_interval\s*=\s*"4h"/.test(poolsRoute),
