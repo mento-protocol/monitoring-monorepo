@@ -468,7 +468,7 @@ locals {
     group_by        = ["grafana_folder", "chain_id", "pool_id"]
     group_wait      = "1m"
     group_interval  = "10m"
-    repeat_interval = "24h"
+    repeat_interval = "1d"
   }
 
   notify_warning_pools_transition = {
